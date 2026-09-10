@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
@@ -67,9 +68,10 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	}
 
 	readings := newMetrics()
+	readings.reportBuildInfo(version)
 	var hooks *webhook
 	var webhookListener net.Listener
-	registered := grpc.NewServer(grpc.UnaryInterceptor(logCalls(logger)))
+	registered := grpc.NewServer(grpc.ChainUnaryInterceptor(logCalls(logger), recordCalls(readings)))
 	csi.RegisterIdentityServer(registered,
 		&identity{store: cfg.store, controller: cfg.controller})
 	// One binary serves one service, because the controller holds
@@ -93,6 +95,15 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		// The mounts outlive the driver, so a driver that starts takes back
 		// the volumes its store still records.
 		answering.resume(ctx)
+		// Layer 3 reads the node's own map of what is mounted, so the
+		// registry exists only once a node does.
+		readings.registerNodeFacts(answering.volumesByRepo)
+		// A fresh pod measures the store once here, so
+		// gitcsi_store_bytes reports what the driver resumed and not a
+		// zero that waits for the first sweep. It runs off the start,
+		// the way the sweep and the demand watch do, so a large store
+		// never holds the socket back from opening.
+		go answering.measureStore(ctx)
 		// One watch on PersistentVolumes for the whole node, which is
 		// how a demand from outside the node reaches a volume.
 		go answering.demands.follow(ctx)
@@ -171,4 +182,32 @@ func logCalls(logger *slog.Logger) grpc.UnaryServerInterceptor {
 			"code", status.Code(err).String())
 		return answer, err
 	}
+}
+
+// recordCalls times every RPC and reports it under the CSI operation's
+// own name, which milestone 65 calls the reconcile loop's kind. A call
+// that changes nothing still counts as one duration reading, and a call
+// that answers any error counts once more on
+// gitcsi_reconcile_errors_total.
+func recordCalls(readings *metrics) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		request any,
+		call *grpc.UnaryServerInfo,
+		handle grpc.UnaryHandler,
+	) (any, error) {
+		start := time.Now()
+		answer, err := handle(ctx, request)
+		readings.observeCall(operationName(call.FullMethod), time.Since(start), err != nil)
+		return answer, err
+	}
+}
+
+// operationName is the CSI method's own name, the last element of the
+// gRPC method path the kubelet dials, for example NodePublishVolume.
+func operationName(fullMethod string) string {
+	if i := strings.LastIndexByte(fullMethod, '/'); i >= 0 {
+		return fullMethod[i+1:]
+	}
+	return fullMethod
 }

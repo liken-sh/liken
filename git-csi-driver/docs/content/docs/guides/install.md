@@ -52,7 +52,7 @@ a kustomize patch on the container's `args`.
 | `--endpoint` | `unix:///csi/csi.sock` | The socket the kubelet and the sidecars call. |
 | `--node-id` | none | The node's name, which the base takes from the pod's `spec.nodeName`. |
 | `--store` | `/var/lib/liken/pod-storage/git-csi` | Where the node plugin keeps its bare repositories, trees, and records. On `liken` this is the pod-storage partition. |
-| `--metrics` | `:9808` | Where the node plugin serves its Prometheus gauges. |
+| `--metrics` | `:9280` | Where the node plugin serves its Prometheus metrics. Empty serves none. |
 | `--sweep-after` | `720h` | How long a work tree nothing stages is kept, and how old an object no ref names has to be before `git gc` prunes it. |
 | `--demand-min-interval` | `10s` | How long a demanded pull waits after the last pull of the same repository on the node. A burst of demands inside it costs one pull. |
 
@@ -61,7 +61,7 @@ a kustomize patch on the container's `args`.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--endpoint` | `unix:///csi/csi.sock` | The socket the sidecars call. |
-| `--metrics` | `:9808` | Where the controller serves its Prometheus counters. |
+| `--metrics` | `:9280` | Where the controller serves its Prometheus metrics. Empty serves none. |
 | `--webhook` | `:8080` | Where the controller serves the webhook listener. Empty serves none. |
 
 `git-csi-driver --version` prints the version and exits.

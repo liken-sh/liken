@@ -42,13 +42,15 @@ spec:
             - --endpoint=unix:///csi/csi.sock
             - --node-id=$(NODE_NAME)
             - --store=/var/lib/liken/pod-storage/git-csi
-            - --metrics=:9808
+            - --metrics=:9280
           # The metrics are on the pod's own address, not a host
           # port: a hostPort cannot be held to the node's loopback, and
-          # a scrape reaches the pod through the cluster network.
+          # a scrape reaches the pod through the cluster network. 9280
+          # is this repository's port in liken's shared Prometheus
+          # contract, milestone 65 of the liken repository.
           ports:
             - name: metrics
-              containerPort: 9808
+              containerPort: 9280
           env:
             # NodeGetInfo answers with the node's name, and the manifest
             # names no machine, so the name comes from the downward API.

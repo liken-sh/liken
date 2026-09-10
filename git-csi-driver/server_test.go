@@ -226,6 +226,54 @@ func TestServeReportsASocketThatGoesAway(t *testing.T) {
 	}
 }
 
+func TestOperationNameTakesTheGRPCMethodsLastElement(t *testing.T) {
+	for _, c := range []struct{ full, want string }{
+		{"/csi.v1.Node/NodePublishVolume", "NodePublishVolume"},
+		{"NodePublishVolume", "NodePublishVolume"},
+	} {
+		if got := operationName(c.full); got != c.want {
+			t.Errorf("operationName(%q) = %q, want %q", c.full, got, c.want)
+		}
+	}
+}
+
+func TestTheServerRecordsEveryCallUnderItsOwnOperationName(t *testing.T) {
+	dir := t.TempDir()
+	server, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	go server.serve(ctx)
+	connection, err := grpc.NewClient("unix://"+filepath.Join(dir, "csi.sock"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { connection.Close() })
+
+	if _, err := csi.NewIdentityClient(connection).
+		GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
+		t.Fatalf("GetPluginInfo: %v", err)
+	}
+	if _, err := csi.NewNodeClient(connection).
+		NodeExpandVolume(t.Context(), &csi.NodeExpandVolumeRequest{}); err == nil {
+		t.Fatal("NodeExpandVolume answered no error")
+	}
+
+	if observations, _ := callCounters(t, server.readings, "GetPluginInfo"); observations != 1 {
+		t.Errorf("GetPluginInfo observed %d calls, want 1", observations)
+	}
+	if observations, errs := callCounters(t, server.readings, "NodeExpandVolume"); observations != 1 || errs != 1 {
+		t.Errorf("NodeExpandVolume observed %d calls and %v errors, want 1 and 1", observations, errs)
+	}
+}
+
 func TestServeReportsASocketThatFailsAfterTheStop(t *testing.T) {
 	dir := t.TempDir()
 	server, err := newServer(t.Context(), &config{

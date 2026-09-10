@@ -75,6 +75,11 @@ Nothing is planned. The next work comes out of
   drilled in the lab on 2026-09-06. The image is a closure on scratch
   with a stripped binary, 79.9 MB where the release before was 263 MB,
   and the release gate runs git in it before a push.
+* [13, Prometheus metrics](13-prometheus-metrics.md). In progress. The
+  driver serves Prometheus metrics on port 9280 under liken's shared
+  contract: CSI operations as the reconcile layer, volumes mounted,
+  fetch duration and failures per repository, and store size. Answers
+  the open problem "Monitoring".
 
 ## Open problems
 

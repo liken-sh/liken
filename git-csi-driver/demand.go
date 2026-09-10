@@ -20,6 +20,10 @@ import (
 // because it is what a person reads in kubectl describe.
 const demandAnnotation = "git.liken.sh/pull-requested-at"
 
+// persistentVolumeKind is what gitcsi_watch_restarts_total names the
+// one watch this driver holds.
+const persistentVolumeKind = "PersistentVolume"
+
 // defaultDemandMin is the default --demand-min-interval. It bounds a
 // burst of demands to six pulls a minute per repository per node.
 const defaultDemandMin = 10 * time.Second
@@ -50,12 +54,19 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 }
 
 // follow holds the watch for the driver's whole run. A driver outside
-// a cluster holds no client, so it reads no demand.
+// a cluster holds no client, so it reads no demand. Every pass after
+// the first is a watch the API closed, or the resync timer, reopened,
+// which is what gitcsi_watch_restarts_total counts.
 func (d *demanding) follow(ctx context.Context) {
 	if d.client == nil {
 		return
 	}
+	first := true
 	for ctx.Err() == nil {
+		if !first {
+			d.node.readings.watchRestarted(persistentVolumeKind)
+		}
+		first = false
 		d.pass(ctx)
 	}
 }

@@ -131,7 +131,9 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
-	fetchErr := repo.fetch(ctx, env, staging.attributes.ref, 0)
+	fetchErr := n.readings.timeFetch(repo.name, func() error {
+		return repo.fetch(ctx, env, staging.attributes.ref, 0)
+	})
 	side := n.fetchSide(ctx, env, repo, staging)
 	remove()
 	if fetchErr != nil {
@@ -199,7 +201,10 @@ func (n *node) fetchSide(
 	if branch == "" {
 		return ""
 	}
-	if err := repo.fetch(ctx, env, branch, 0); err != nil {
+	err := n.readings.timeFetch(repo.name, func() error {
+		return repo.fetch(ctx, env, branch, 0)
+	})
+	if err != nil {
 		n.logger.InfoContext(ctx, "the remote holds no side branch",
 			"volume", staging.id, "branch", branch, "reason", err)
 		return ""

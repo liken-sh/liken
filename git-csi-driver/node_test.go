@@ -42,6 +42,9 @@ func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 	answering.sweep = 100 * time.Millisecond
 	answering.arms.resync = 20 * time.Millisecond
 	answering.demands.resync = 20 * time.Millisecond
+	// The same wiring newServer does once a node exists, so a test
+	// reads plan 13's layer 3 the way a scrape would.
+	answering.readings.registerNodeFacts(answering.volumesByRepo)
 	return answering, calls
 }
 

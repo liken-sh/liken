@@ -240,7 +240,9 @@ func (n *node) fetchUpstream(ctx context.Context, held *volume) (string, error) 
 		return "", err
 	}
 	defer remove()
-	if err := repo.fetch(ctx, env, held.attributes.ref, 0); err != nil {
+	if err := n.readings.timeFetch(repo.name, func() error {
+		return repo.fetch(ctx, env, held.attributes.ref, 0)
+	}); err != nil {
 		return "", err
 	}
 	// The record comes in the same window as the ref. A remote

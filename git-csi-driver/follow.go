@@ -206,7 +206,9 @@ func (f *follower) refresh(ctx context.Context, held *volume) {
 		f.trouble(ctx, held, err.Error())
 		return
 	}
-	fetchErr := f.repository.fetch(ctx, env, held.attributes.ref, 0)
+	fetchErr := f.node.readings.timeFetch(f.repository.name, func() error {
+		return f.repository.fetch(ctx, env, held.attributes.ref, 0)
+	})
 	remove()
 	if fetchErr != nil {
 		f.trouble(ctx, held, fetchErr.Error())

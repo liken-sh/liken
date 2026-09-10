@@ -75,10 +75,25 @@ func (n *node) sweeping(ctx context.Context) {
 }
 
 // sweepStore is one pass: the work trees first, then the bare
-// repositories the trees that stayed no longer name.
+// repositories the trees that stayed no longer name, then a measure of
+// what is left.
 func (n *node) sweepStore(ctx context.Context) {
 	n.sweepVolumes(ctx)
 	n.sweepRepositories(ctx)
+	n.measureStore(ctx)
+}
+
+// measureStore records gitcsi_store_bytes on the sweep's own timer. A
+// walk of the whole store costs too much to repeat on every scrape, and
+// the sweep already walks it once an interval to collect what nothing
+// uses.
+func (n *node) measureStore(ctx context.Context) {
+	size, err := treeSize(n.store.root)
+	if err != nil {
+		n.logger.WarnContext(ctx, "the store was not measured", "error", err)
+		return
+	}
+	n.readings.setStoreBytes(size)
 }
 
 func (n *node) sweepVolumes(ctx context.Context) {

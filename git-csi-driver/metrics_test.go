@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
 )
 
 // gaugeOf is what one gauge reads for the claim, and false when the claim
@@ -217,6 +220,14 @@ func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 	absent.health(held, true)
 	absent.demanded(held)
 	absent.forget(held)
+	absent.watchRestarted(persistentVolumeKind)
+	ran := false
+	if err := absent.timeFetch("repo", func() error { ran = true; return nil }); err != nil {
+		t.Errorf("timeFetch on a nil registry answered %v, want no error", err)
+	}
+	if !ran {
+		t.Error("timeFetch on a nil registry did not run the fetch")
+	}
 }
 
 func TestTheListenerServesTheGauges(t *testing.T) {
@@ -306,5 +317,230 @@ func TestAVolumeWithNoClaimCountsNoPushFailure(t *testing.T) {
 	readings.pushFailed(&volume{})
 	if _, found := counterOf(t, readings, "git_csi_push_failures_total", "", ""); found {
 		t.Error("a volume with no claim is on the counter")
+	}
+}
+
+// buildInfoOf is what liken_build_info reads for the version, and false
+// when the release has not been reported.
+func buildInfoOf(t *testing.T, readings *metrics, version string) (float64, bool) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "liken_build_info" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["component"] == "git-csi-driver" && labels["version"] == version {
+				return metric.GetGauge().GetValue(), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestReportBuildInfoSetsLikenBuildInfo(t *testing.T) {
+	readings := newMetrics()
+	readings.reportBuildInfo("2026.09.10-001")
+
+	if value, found := buildInfoOf(t, readings, "2026.09.10-001"); !found || value != 1 {
+		t.Errorf("liken_build_info reads %v (found: %v), want 1", value, found)
+	}
+}
+
+// callCounters is what gitcsi_reconcile_duration_seconds and
+// gitcsi_reconcile_errors_total read for the operation, and how many
+// times duration was observed at all, which the histogram's own count
+// carries.
+func callCounters(t *testing.T, readings *metrics, kind string) (observations uint64, errs float64) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			matches := false
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "kind" && label.GetValue() == kind {
+					matches = true
+				}
+			}
+			if !matches {
+				continue
+			}
+			switch family.GetName() {
+			case "gitcsi_reconcile_duration_seconds":
+				observations = metric.GetHistogram().GetSampleCount()
+			case "gitcsi_reconcile_errors_total":
+				errs = metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return observations, errs
+}
+
+func TestObserveCallRecordsTheDurationAndCountsAnError(t *testing.T) {
+	readings := newMetrics()
+	readings.observeCall("NodePublishVolume", 10*time.Millisecond, false)
+	readings.observeCall("NodePublishVolume", 20*time.Millisecond, true)
+
+	observations, errs := callCounters(t, readings, "NodePublishVolume")
+	if observations != 2 {
+		t.Errorf("gitcsi_reconcile_duration_seconds observed %d calls, want 2", observations)
+	}
+	if errs != 1 {
+		t.Errorf("gitcsi_reconcile_errors_total reads %v, want 1", errs)
+	}
+}
+
+// gitcsiVolumesOf is what gitcsi_volumes reads for the repository, and
+// false when the repository is on no series.
+func gitcsiVolumesOf(t *testing.T, readings *metrics, repo string) (float64, bool) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "gitcsi_volumes" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "repo" && label.GetValue() == repo {
+					return metric.GetGauge().GetValue(), true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestGitcsiVolumesCountsByRepository(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	url := fileURL(source)
+	repo := answering.store.repository(url).name
+
+	first := publishRequest(t, "csi-1", url, map[string]string{"pull": "never"})
+	if _, err := answering.NodePublishVolume(t.Context(), first); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	second := publishRequest(t, "csi-2", url, map[string]string{"pull": "never"})
+	if _, err := answering.NodePublishVolume(t.Context(), second); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	if count, found := gitcsiVolumesOf(t, answering.readings, repo); !found || count != 2 {
+		t.Errorf("gitcsi_volumes reads %v (found: %v), want 2", count, found)
+	}
+
+	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId: "csi-1", TargetPath: first.TargetPath,
+	}); err != nil {
+		t.Fatalf("NodeUnpublishVolume: %v", err)
+	}
+	if count, found := gitcsiVolumesOf(t, answering.readings, repo); !found || count != 1 {
+		t.Errorf("gitcsi_volumes reads %v (found: %v) after one unpublish, want 1", count, found)
+	}
+}
+
+// fetchCounters is what gitcsi_fetch_duration_seconds and
+// gitcsi_fetch_failures_total read for the repository.
+func fetchCounters(t *testing.T, readings *metrics, repo string) (observations uint64, failures float64) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			matches := false
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "repo" && label.GetValue() == repo {
+					matches = true
+				}
+			}
+			if !matches {
+				continue
+			}
+			switch family.GetName() {
+			case "gitcsi_fetch_duration_seconds":
+				observations = metric.GetHistogram().GetSampleCount()
+			case "gitcsi_fetch_failures_total":
+				failures = metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return observations, failures
+}
+
+func TestTimeFetchObservesTheDurationAndCountsAFailure(t *testing.T) {
+	readings := newMetrics()
+	readings.registerNodeFacts(func() map[string]float64 { return nil })
+	if err := readings.timeFetch("repo-1", func() error { return nil }); err != nil {
+		t.Fatalf("timeFetch: %v", err)
+	}
+	refused := errors.New("the forge refused the fetch")
+	if err := readings.timeFetch("repo-1", func() error { return refused }); !errors.Is(err, refused) {
+		t.Errorf("timeFetch answered %v, want %v", err, refused)
+	}
+
+	observations, failures := fetchCounters(t, readings, "repo-1")
+	if observations != 2 {
+		t.Errorf("gitcsi_fetch_duration_seconds observed %d fetches, want 2", observations)
+	}
+	if failures != 1 {
+		t.Errorf("gitcsi_fetch_failures_total reads %v, want 1", failures)
+	}
+}
+
+// storeBytesOf is what gitcsi_store_bytes reads.
+func storeBytesOf(t *testing.T, readings *metrics) float64 {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "gitcsi_store_bytes" {
+			continue
+		}
+		return family.GetMetric()[0].GetGauge().GetValue()
+	}
+	t.Fatal("gitcsi_store_bytes is not on the registry")
+	return 0
+}
+
+func TestMeasureStoreSetsGitcsiStoreBytes(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one two three"})
+	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
+	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+
+	answering.measureStore(t.Context())
+
+	if got := storeBytesOf(t, answering.readings); got <= 0 {
+		t.Errorf("gitcsi_store_bytes reads %v, want more than 0 with a tree checked out", got)
+	}
+}
+
+func TestMeasureStoreReportsAWalkItCannotRead(t *testing.T) {
+	logs := &logbook{}
+	answering, _ := testNode(t, logs)
+	answering.store.root = filepath.Join(t.TempDir(), "gone")
+
+	answering.measureStore(t.Context())
+
+	if !strings.Contains(logs.String(), "the store was not measured") {
+		t.Errorf("the log is %q, want the store not measured in it", logs)
 	}
 }

@@ -1,0 +1,25 @@
+# app: git-csi-driver-node is the DaemonSet's own selector label, left
+# alone by the base's common-labels transformer because
+# includeSelectors: false keeps kustomize from rewriting a selector
+# field, so it is the label the running Pod actually carries. The pod
+# serves /metrics on the port named metrics in deploy/node.yaml. No
+# namespaceSelector is needed: the Component above places this
+# PodMonitor in the same namespace, liken-system, that the base places
+# the DaemonSet in.
+#
+# The relabeling carries the node's own name onto every series, so the
+# fleet dashboard can select this DaemonSet's pod by the node it runs
+# on, the same as every other PodMonitor in the organization.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: git-csi-driver-node
+spec:
+  selector:
+    matchLabels:
+      app: git-csi-driver-node
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

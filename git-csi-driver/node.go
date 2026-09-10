@@ -258,7 +258,9 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
-	fetchErr := repo.fetch(ctx, env, mounting.attributes.ref, depth)
+	fetchErr := n.readings.timeFetch(repo.name, func() error {
+		return repo.fetch(ctx, env, mounting.attributes.ref, depth)
+	})
 	remove()
 
 	commit, resolveErr := repo.resolve(ctx, mounting.attributes.ref)
@@ -411,6 +413,20 @@ func (n *node) stagedVolume(handle string) *volume {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.staged[handle]
+}
+
+// volumesByRepo counts the volumes this node has mounted, by the
+// repository each one follows. gitcsi_volumes reads this at every
+// scrape, so the count is never a second bookkeeping a publish or an
+// unpublish could fall out of step with.
+func (n *node) volumesByRepo() map[string]float64 {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	counts := map[string]float64{}
+	for _, held := range n.volumes {
+		counts[n.store.repository(held.attributes.url).name]++
+	}
+	return counts
 }
 
 // refused posts the refusal on the pod, so a person who describes the

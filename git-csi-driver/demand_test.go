@@ -446,3 +446,60 @@ func TestADriverOutsideAClusterWatchesNothing(t *testing.T) {
 	outside := &demanding{}
 	outside.follow(t.Context())
 }
+
+// watchRestartsOf is what gitcsi_watch_restarts_total reads for the
+// kind, and false when nothing has counted one yet.
+func watchRestartsOf(t *testing.T, readings *metrics, kind string) (float64, bool) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "gitcsi_watch_restarts_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "kind" && label.GetValue() == kind {
+					return metric.GetCounter().GetValue(), true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestARestartedWatchCountsOnGitcsiWatchRestartsTotal(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	answering.demands.resync = 10 * time.Millisecond
+	cluster(t, answering).PrependWatchReactor("persistentvolumes",
+		func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, watch.NewFake(), nil
+		})
+
+	ctx, stop := context.WithCancel(t.Context())
+	over := make(chan struct{})
+	go func() {
+		defer close(over)
+		answering.demands.follow(ctx)
+	}()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if count, found := watchRestartsOf(t, answering.readings, persistentVolumeKind); found && count > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop()
+	select {
+	case <-over:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the watch did not end with the driver")
+	}
+
+	if count, found := watchRestartsOf(t, answering.readings, persistentVolumeKind); !found || count == 0 {
+		t.Errorf("gitcsi_watch_restarts_total reads %v (found: %v), want at least one restart", count, found)
+	}
+}

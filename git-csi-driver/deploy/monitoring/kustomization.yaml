@@ -1,0 +1,18 @@
+# The monitoring component, liken's shared contract for connecting a
+# Prometheus to a process, milestone 65 in the liken repository. The
+# base in deploy/ runs both plugins with their metrics listeners open
+# and nothing scraping them. A cluster owner who runs the
+# prometheus-operator adds this component beside the base:
+#
+#   resources:
+#     - https://github.com/liken-sh/git-csi-driver//deploy?ref=<tag>
+#   components:
+#     - https://github.com/liken-sh/git-csi-driver//deploy/monitoring?ref=<tag>
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+namespace: liken-system
+
+resources:
+  - podmonitor-node.yaml
+  - podmonitor-controller.yaml
