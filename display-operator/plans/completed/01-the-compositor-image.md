@@ -33,7 +33,7 @@ directory list, and that list does not name the multiarch directory.
 
 The loads that `ldd` cannot report were added by hand, and they are the
 subject of
-[an open problem](open-problems/loads-that-ldd-cannot-see.md).
+[an open problem](../open-problems/loads-that-ldd-cannot-see.md).
 
 ## What it measured
 

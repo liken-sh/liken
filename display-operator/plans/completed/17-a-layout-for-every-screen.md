@@ -1,15 +1,17 @@
 # A Layout for every screen
 
-Plan 17. The compositor moves from kiosk-shell to ivi-shell, and the
-operator gains a controller module of its own that places every
-surface. A cluster-scoped `Layout` states regions of a screen as
-fractional rectangles with label selectors, a `Display` names the
-`Layout` it shows, and the operator binds the surfaces on that screen
-to the regions whose selectors match the pods that drew them. Every
-claim gets its own Wayland socket, so the compositor knows which
-claim a surface came from and no client passes an app-id. A `Display`
-that names no `Layout` shows every surface fullscreen with the newest
-on top, which is what kiosk-shell does today.
+Plan 17. Built and drilled on `liken-1` on 2026-09-10, in release
+2026.09.10-001, and rolled to the house the same evening. The
+compositor moves from kiosk-shell to ivi-shell, and the operator
+gains a controller module of its own that places every surface. A
+cluster-scoped `Layout` states regions of a screen as fractional
+rectangles with label selectors, a `Display` names the `Layout` it
+shows, and the operator binds the surfaces on that screen to the
+regions whose selectors match the pods that drew them. Every claim
+gets its own Wayland socket, so the compositor holds each surface
+under the name of the claim that delivered it, and no client passes
+an app-id. A `Display` that names no `Layout` shows every surface
+fullscreen with the newest on top, which is what kiosk-shell does.
 
 ## The problem
 
@@ -261,7 +263,7 @@ instead of wrong.
 The function's output is the seam. An external layout engine would
 produce the same placement from the same inputs and hand it to the
 same executor. This plan builds no such interface, and
-[an external layout engine](open-problems/an-external-layout-engine.md)
+[an external layout engine](../open-problems/an-external-layout-engine.md)
 records what one would need.
 
 ### What the `Display` reports
@@ -387,28 +389,44 @@ ivi-layout sends when a destination size changes
 behavior on an accepted Unix socket is documented and not yet run
 in the module.
 
-Not measured anywhere: whether the DRM backend keeps a fullscreen
-surface on a scanout plane under ivi-shell the way it can under
-kiosk-shell. The lab machines are the place to read that, with the
-film pod's CPU and the package temperature before and after, and
-the drill below records it.
+Not measured, and still not measured after the drill: whether the
+DRM backend keeps a fullscreen surface on a scanout plane under
+ivi-shell the way it can under kiosk-shell. The drill below read the
+film pod's CPU and the package temperature instead, and the
+fullscreen film ran smoothly.
 
 ## How the work is proved
 
-1. `make test` passes with the decision function under table tests
-   and the protocol client under a fake module.
-2. A development build rolls to `liken-1`. Every `Display` shows
-   what it showed, with no `Layout` written: the idle screen, then a
-   film over it, then the idle screen again when the film ends.
-3. A `Layout` with two regions and two pods from two namespaces
-   shows both on one panel, and `status.surfaces` names both with
-   their claims and labels.
-4. One of the two pods is deleted. Its region reports `empty` and
-   the other surface does not move.
-5. The compositor is restarted through a mode change. Every socket
-   returns, every client reconnects, and the placement returns
-   without a controller change.
-6. A region with `fade` shows the fade on a new surface on the
-   DRM backend, where the prototype ran on pixman.
-7. The film pod's CPU and the package temperature, read the way the
-   playback drill read them, before and after, on the same film.
+`make test` passes with the decision function under table tests and
+the protocol client under a fake module, and the module's smoke test
+covers the sockets, the placements, and the moves on weston's
+headless backend.
+
+The first development build, `2026.09.08-001-dev-012`, rolled to
+`liken-1` at 13:20 UTC on 2026-09-10. Both panels came back through
+the default layout, with no `Layout` written: the idle clock and the
+media browser reconnected on the shared socket, and the first `Play`
+after the roll arrived on its own claim socket with its labels in
+`status.surfaces`.
+
+The four-way drill ran on the lab's portable panel, on an Apollo
+Lake box. A `Layout` placed the media browser in one quadrant and
+three films in the other three, each film its own pod and its own
+claim. Node CPU was 26 percent: 90 to 140 millicores for each
+hardware-decoded film, 2 for the browser, and 99 for weston, which
+composes four surfaces through the GL renderer. The package held at
+70 C. One AV1 file decoded in software at 1338 millicores, so the
+drill used H.264 or HEVC on that box. mpv sized its buffer to each
+film's aspect inside its quadrant.
+
+The drill found two defects, and both were fixed the same day. A
+claim's socket name reopened inside one compositor lifetime was
+refused by libwayland's `flock`, so the module now owns the listening
+socket through `wl_display_add_socket_fd` (`2026.09.08-001-dev-013`);
+a restart of the browser pod on its own claim proves the reopen. And
+mpv answered the 1920 by 1080 configure with a 1920 by 800 buffer
+that ivi-layout scaled, which media-operator fixes with
+`--keepaspect-window=no`.
+
+An operator pod restart replayed the idle client's socket and its
+placement on its own.

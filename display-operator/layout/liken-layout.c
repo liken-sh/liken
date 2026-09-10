@@ -18,8 +18,9 @@
  * inside one compositor lifetime.
  *
  * The control protocol is lines of text on a Unix stream socket, one
- * request and one reply per line. plans/17-a-layout-for-every-screen.md
- * states it, and plans/18-a-surface-leaves-with-a-fade.md states the
+ * request and one reply per line.
+ * plans/completed/17-a-layout-for-every-screen.md states it, and
+ * plans/completed/18-a-surface-leaves-with-a-fade.md states the
  * transition a hide carries.
  */
 #define _GNU_SOURCE

@@ -23,7 +23,7 @@ unchanged from the 14.0.2 this operator ships through the current
 16.0.0, no `weston.ini` key prevents it, and the newest upstream
 hotplug commit only guards the crash in this window and leaves the
 reassignment un-done. The open problem
-[kiosk-shell loses a surface's output](open-problems/kiosk-shell-loses-a-surfaces-output.md)
+[kiosk-shell loses a surface's output](../open-problems/kiosk-shell-loses-a-surfaces-output.md)
 carries the references.
 
 The client is not the stuck party: `mpv` obeys every configure the

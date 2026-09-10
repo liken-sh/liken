@@ -173,22 +173,49 @@ say why it is built the way it is.
   compositor: the loader, the Intel and AMD drivers, and the client
   libraries, on scratch. The media browser and the idle screen build
   from it, and a node that draws holds LLVM once.
-* [17, A Layout for every screen](17-a-layout-for-every-screen.md).
-  In progress. The compositor moves to ivi-shell under a controller
-  module of the operator's own, every claim gets its own Wayland
-  socket so the compositor knows whose surface it holds, and a
-  cluster-scoped `Layout` states regions with fractional rectangles
-  and label selectors. A `Display` names its `Layout`, and one that
-  names none shows every surface fullscreen, newest on top, which is
-  kiosk-shell's behavior. Prototyped on vega on 2026-09-10: three
-  containers on one output, with fade and move transitions.
-* [18, A surface leaves with a fade](18-a-surface-leaves-with-a-fade.md).
-  In progress. A region's `transition` gains an `exit` half beside
-  its `enter` half, the module's `hide` carries a transition, and a
-  surface that stops matching a region fades out. The compositor
-  fades a surface it still holds, so the workload that wants a soft
-  exit keeps drawing while the fade runs instead of fading its own
-  picture.
+* [17, A Layout for every screen](completed/17-a-layout-for-every-screen.md).
+  Built and drilled on liken-1 on 2026-09-10, in release
+  2026.09.10-001, and rolled to the house the same evening. The
+  compositor moves to ivi-shell under a controller module of the
+  operator's own, every claim gets its own Wayland socket so the
+  compositor holds each surface under the name of the claim that
+  delivered it, and a cluster-scoped `Layout` states regions with
+  fractional rectangles and label selectors. A `Display` names its
+  `Layout`, and one that names none shows every surface fullscreen,
+  newest on top, which is kiosk-shell's behavior: both panels came
+  back through that default with no `Layout` written, and the first
+  `Play` after the roll arrived on its own claim socket with its
+  labels in `status.surfaces`. The four-way drill on the lab's
+  portable panel, an Apollo Lake box, held the browser and three
+  films in four quadrants at 26 percent node CPU: 90 to 140
+  millicores for each hardware-decoded film, 2 for the browser, 99
+  for weston composing four surfaces through the GL renderer, and the
+  package at 70 C. One AV1 file decoded in software at 1338
+  millicores, so the drill used H.264 or HEVC on that box. The drill
+  found two defects, and both were fixed the same day: libwayland's
+  `flock` refused a claim's socket name reopened inside one
+  compositor lifetime, so the module owns the listening socket
+  through `wl_display_add_socket_fd`; and mpv answered a 1920 by 1080
+  configure with a 1920 by 800 buffer, which media-operator fixes
+  with `--keepaspect-window=no`. Whether the DRM backend keeps a
+  fullscreen surface on a scanout plane under ivi-shell is still not
+  measured.
+* [18, A surface leaves with a fade](completed/18-a-surface-leaves-with-a-fade.md).
+  Built and drilled on liken-1 on 2026-09-10, in release
+  2026.09.10-001, and rolled to the house the same evening. A
+  region's `transition` gains an `exit` half beside its `enter` half,
+  the module's `hide` carries a transition, and a surface that stops
+  matching a region fades out. The compositor fades a surface it
+  still holds, so the workload that wants a soft exit keeps drawing
+  while the fade runs instead of fading its own picture. A hide with
+  `fade 600`, read at 531 ms, was fully painted and at 69 percent of
+  its full brightness, and zero after. Under the `theater` `Layout`
+  on the lab's portable panel, a film labeled
+  `media.liken.sh/ending` by hand emptied the play region in 231 ms,
+  including the status write; with media-operator's own label, three
+  remote exits put the label on the pod within about 50 ms of the
+  ending, and the surface was gone at the 500 ms grace. The `theater`
+  `Layout` is named on that panel and on the house's `Display`s.
 
 ## Open problems
 

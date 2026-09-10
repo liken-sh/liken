@@ -2,7 +2,7 @@
 
 ## The problem
 
-[Plan 11](completed/11-darkening-respects-the-attached-input.md)
+[Plan 11](11-darkening-respects-the-attached-input.md)
 guarded the darkening override with a question to the panel: which
 input do you show? The bench work of 2026-08-27 proved the question
 worthless on the one panel that ever needed it. The shared monitor

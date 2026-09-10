@@ -39,7 +39,7 @@ no channel exists to set any of it.
 
 The wire handover exists because a claim cannot carry a live
 request. A claim's spec is immutable and the kubelet never
-redelivers a changed claim, so [plan 07](completed/07-sharing-the-screen.md)
+redelivers a changed claim, so [plan 07](07-sharing-the-screen.md)
 gave the standing consumer the wire. The one-writer rule that
 protects the wire is a documented convention, not a mechanism.
 
