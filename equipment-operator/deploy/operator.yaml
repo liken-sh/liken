@@ -41,15 +41,15 @@ spec:
             # manifest states it.
             - name: EQUIPMENT_BUS_ADDRESS
               value: bus.liken-system.svc:1883
-            # liken/plans/65-prometheus-metrics.md gives this operator
-            # port 9260. The deploy/monitoring component is what a
+            # liken/plans/65-prometheus-metrics.md gives every process
+            # port 9200. The deploy/monitoring component is what a
             # cluster owner adds to scrape it; the base runs the same
             # either way.
             - name: EQUIPMENT_METRICS_ADDRESS
-              value: :9260
+              value: :9200
           ports:
             - name: metrics
-              containerPort: 9260
+              containerPort: 9200
           securityContext:
             capabilities:
               drop: ["ALL"]

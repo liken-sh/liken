@@ -15,7 +15,7 @@ stops answering.
 
 ## The design
 
-Layers 1 and 2 under the `equipment_` prefix, on port 9260.
+Layers 1 and 2 under the `equipment_` prefix, on port 9200.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |

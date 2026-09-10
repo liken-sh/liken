@@ -8,13 +8,13 @@ func TestReadSettingsTakesTheEnvironment(t *testing.T) {
 	t.Run("stated", func(t *testing.T) {
 		t.Setenv(podNamespaceVariable, "liken-system")
 		t.Setenv(busAddressVariable, "bus.liken-system.svc:1883")
-		t.Setenv(metricsAddressVariable, ":9260")
+		t.Setenv(metricsAddressVariable, ":9200")
 
 		config := readSettings()
 
 		mustMatch(t, config.namespace, "liken-system")
 		mustMatch(t, config.busAddress, "bus.liken-system.svc:1883")
-		mustMatch(t, config.metricsAddress, ":9260")
+		mustMatch(t, config.metricsAddress, ":9200")
 	})
 
 	t.Run("unset", func(t *testing.T) {

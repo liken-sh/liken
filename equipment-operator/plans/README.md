@@ -18,7 +18,7 @@ is built the way it is, and what it still owes an answer to.
   is, what a `Receiver` holds, how the level rides the media bus, and
   what the Service front is for.
 * [01, Prometheus metrics](01-prometheus-metrics.md). In progress. The
-  operator serves Prometheus metrics on port 9260 under liken's shared
+  operator serves Prometheus metrics on port 9200 under liken's shared
   contract: the receiver connected and claimed, power, volume, the
   selected input, and commands by status.
 

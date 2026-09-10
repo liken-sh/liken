@@ -4,7 +4,7 @@ weight: 30
 toc: true
 ---
 
-The operator serves Prometheus metrics on port 9260. The base needs no
+The operator serves Prometheus metrics on port 9200. The base needs no
 Prometheus at all; an owner who runs the prometheus-operator adds the
 `deploy/monitoring` component to scrape it.
 
