@@ -15,7 +15,10 @@
 #
 # The base also ships the Display CustomResourceDefinition, because
 # the operator creates a Display for every monitor it probes, and it
-# cannot do that against a cluster the kind is missing from.
+# cannot do that against a cluster the kind is missing from. The
+# Layout CustomResourceDefinition ships with it, because the operator
+# reads a Layout by the name a Display states and watches the kind for
+# changes.
 #
 # kustomize stamps the namespace below onto the DeviceClasses too,
 # because resource.k8s.io/v1 is not in its compiled OpenAPI schema
@@ -30,6 +33,7 @@ namespace: liken-system
 
 resources:
   - displays.yaml
+  - layouts.yaml
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml

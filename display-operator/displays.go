@@ -56,9 +56,11 @@ type DisplayMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// The settings the panel rests at. Every field is a pointer
+// The settings the panel rests at. Every control field is a pointer
 // because the absence of a field is what says the operator invents
-// nothing, and zero is a value a panel takes.
+// nothing, and zero is a value a panel takes. A name has no such
+// zero, so Layout is a plain string and an empty one is a screen that
+// names no Layout.
 type DisplaySpec struct {
 	Brightness  *int    `json:"brightness,omitempty"`
 	Contrast    *int    `json:"contrast,omitempty"`
@@ -72,7 +74,12 @@ type DisplaySpec struct {
 	// what a claim's own mode parameter is. The operator applies it
 	// only while no claim holds the screen, because a mode lands
 	// through the compositor and a mode change restarts it.
-	Mode     *string          `json:"mode,omitempty"`
+	Mode *string `json:"mode,omitempty"`
+	// The Layout this screen shows, by name. A screen that names
+	// none shows every surface over the whole screen with the newest
+	// on top, and a name that resolves to nothing shows the same and
+	// carries the LayoutResolved condition.
+	Layout   string           `json:"layout,omitempty"`
 	Override *DisplayOverride `json:"override,omitempty"`
 }
 
@@ -104,7 +111,49 @@ type DisplayStatus struct {
 	Capabilities map[string]panelCapability `json:"capabilities,omitempty"`
 	Observed     *DisplayValues             `json:"observed,omitempty"`
 	Captured     *DisplayValues             `json:"captured,omitempty"`
-	Conditions   []DisplayCondition         `json:"conditions,omitempty"`
+	// Every surface the compositor holds on this screen, in the order
+	// they arrived, and the layout they were drawn to.
+	Surfaces   []DisplaySurface   `json:"surfaces,omitempty"`
+	Layout     *DisplayLayout     `json:"layout,omitempty"`
+	Conditions []DisplayCondition `json:"conditions,omitempty"`
+}
+
+// One surface on this screen. The claim is the socket the surface
+// arrived on, as namespace/name, and it is empty for a surface that
+// holds no claim. The labels are the ones every holder of the claim
+// carries with the same value, which are the labels a region's
+// selector reads.
+//
+// The id lasts as long as the compositor that assigned it. A
+// compositor restart ends every surface and every id, and the clients
+// reconnect and are placed again.
+type DisplaySurface struct {
+	ID     string            `json:"id"`
+	Claim  string            `json:"claim,omitempty"`
+	Pods   []string          `json:"pods,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Size   *SurfaceSize      `json:"size,omitempty"`
+	Region string            `json:"region,omitempty"`
+}
+
+// The surface's current buffer size in pixels, as the compositor
+// reports it.
+type SurfaceSize struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// The layout this screen is drawn to. Name is the Layout in force, or
+// the word default for a screen that names none. The regions are in
+// stacking order, and each one names the surface it shows.
+type DisplayLayout struct {
+	Name    string          `json:"name,omitempty"`
+	Regions []DisplayRegion `json:"regions,omitempty"`
+}
+
+type DisplayRegion struct {
+	Name    string `json:"name"`
+	Surface string `json:"surface,omitempty"`
 }
 
 // The mode this output runs, from the two parties that each

@@ -1,0 +1,161 @@
+# A Layout divides a screen into regions, and each region shows the
+# window of one pod. A region is a rectangle in fractions of the
+# screen and a label selector, and a Display names the Layout it
+# shows. The order of spec.regions is the stacking order, last on
+# top, so a small region written after a large one is a picture in
+# the corner of it.
+#
+# The pods never learn where they are drawn. A pod claims the screen
+# and carries labels, and the Layout is the one place the arrangement
+# lives, so moving a region moves every screen that names the Layout
+# and changes no pod.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: layouts.display.liken.sh
+spec:
+  group: display.liken.sh
+  # A region is a fraction of a screen and a selector over labels, so
+  # nothing here names a namespace or a workload. The resource is
+  # cluster-scoped, and one Layout serves a screen in one building and
+  # a screen in another.
+  scope: Cluster
+  names:
+    kind: Layout
+    listKind: LayoutList
+    plural: layouts
+    singular: layout
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # No status subresource: a Layout is a declaration and nothing
+      # writes back to it. What a screen made of it is on the
+      # Display's status.layout.
+      additionalPrinterColumns:
+        # A printer column reads one value through JSONPath, and that
+        # JSONPath has no function that counts a list, so the number
+        # of regions cannot be a column. `kubectl get layout -o yaml`
+        # is where a reader counts them.
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "The regions of a screen, each a rectangle in fractions of the screen and a label selector that picks the pod whose window it shows. A Display names a Layout in spec.layout, and one Layout serves any number of screens."
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              description: "The regions, in stacking order."
+              required: [regions]
+              properties:
+                regions:
+                  type: array
+                  description: "The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one window, the first to arrive from a pod whose labels match the selector, and reports the surface it shows on the Display's status.layout."
+                  minItems: 1
+                  # maxItems bounds the uniqueness rule below. The API
+                  # server estimates a rule's worst-case cost from the
+                  # schema's own limits, and a nested loop over a list
+                  # with no maxItems estimates past the budget and the
+                  # CRD is refused.
+                  maxItems: 32
+                  # The order of this list is the stacking order, so a
+                  # list type of map would let server-side apply
+                  # reorder the regions and restack the screen.
+                  x-kubernetes-list-type: atomic
+                  x-kubernetes-validations:
+                    - rule: "self.all(region, self.exists_one(other, other.name == region.name))"
+                      message: "Every region has its own name."
+                  items:
+                    type: object
+                    required: [name, rect, selector]
+                    properties:
+                      name:
+                        type: string
+                        description: "The region's name, unique in this Layout. The Display's status.layout reports it beside the surface the region shows, and status.surfaces names it on the surface."
+                        maxLength: 63
+                        pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                      rect:
+                        type: object
+                        description: "The region's rectangle, as four fractions of the screen, so one Layout fits a 1080p panel and a 4K one. The compositor tells the window its rectangle's size in pixels, and the program redraws at that size."
+                        required: [left, top, width, height]
+                        properties:
+                          left:
+                            type: number
+                            description: "The left edge, as a fraction of the screen's width. 0 is the left edge of the screen."
+                            minimum: 0
+                            maximum: 1
+                          top:
+                            type: number
+                            description: "The top edge, as a fraction of the screen's height. 0 is the top of the screen."
+                            minimum: 0
+                            maximum: 1
+                          width:
+                            type: number
+                            description: "The width, as a fraction of the screen's width. left plus width is at most 1."
+                            minimum: 0
+                            maximum: 1
+                          height:
+                            type: number
+                            description: "The height, as a fraction of the screen's height. top plus height is at most 1."
+                            minimum: 0
+                            maximum: 1
+                        x-kubernetes-validations:
+                          - rule: "self.width > 0.0 && self.height > 0.0"
+                            message: "A region has a width and a height greater than zero."
+                          - rule: "self.left + self.width <= 1.0"
+                            message: "A region's right edge is at or inside the screen's right edge."
+                          - rule: "self.top + self.height <= 1.0"
+                            message: "A region's bottom edge is at or inside the screen's bottom edge."
+                      selector:
+                        type: object
+                        description: "Which pod's window the region shows, as a label selector over the pods that hold a claim on this screen, the way a Service selects pods. Any label counts. The candidates are only the pods with a claim on the screen, so a matching label elsewhere in the cluster matches nothing here. A window that arrived on the shared socket holds no claim and matches no selector."
+                        properties:
+                          matchLabels:
+                            type: object
+                            description: "Labels the pod carries with exactly these values. Every entry must match."
+                            additionalProperties:
+                              type: string
+                            x-kubernetes-map-type: atomic
+                          matchExpressions:
+                            type: array
+                            description: "Requirements on the pod's labels. Every requirement must hold, and they combine with matchLabels."
+                            items:
+                              type: object
+                              required: [key, operator]
+                              properties:
+                                key:
+                                  type: string
+                                  description: "The label key the requirement reads."
+                                operator:
+                                  type: string
+                                  description: "How the key is judged: In and NotIn compare its value against values, and Exists and DoesNotExist ask only whether the key is present."
+                                  enum: [In, NotIn, Exists, DoesNotExist]
+                                values:
+                                  type: array
+                                  description: "The values In and NotIn compare against. Exists and DoesNotExist take none."
+                                  items:
+                                    type: string
+                                  x-kubernetes-list-type: atomic
+                            x-kubernetes-list-type: atomic
+                        # A selector is one value, the way the
+                        # upstream LabelSelector is: a writer states
+                        # the whole of it, and two writers do not
+                        # merge halves of one selector.
+                        x-kubernetes-map-type: atomic
+                      transition:
+                        type: object
+                        description: "How a window enters the region. The compositor draws the entrance, because the program never knows where it is. The compositor cannot draw an exit: a program that ends takes its window with it, so a program that wants a soft exit fades its own picture before it ends. Absent, a window appears at once."
+                        required: [kind]
+                        properties:
+                          kind:
+                            type: string
+                            description: "none shows the window at once. fade brings it from transparent to opaque over milliseconds."
+                            enum: [none, fade]
+                          milliseconds:
+                            type: integer
+                            description: "How long the transition runs. 0 is the same as none."
+                            minimum: 0
