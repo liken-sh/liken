@@ -75,6 +75,17 @@ const (
 	writeRetryDelay = 2 * time.Second
 )
 
+// componentName is this repository's own name, the component label
+// every process in the organization carries on its liken_build_info
+// gauge, so one panel lists every release running in the cluster.
+const componentName = "display-operator"
+
+// version is this build's own release. The Dockerfile sets it with
+// -ldflags at build time, to the same version release.yaml tags the
+// image with, so a running pod's liken_build_info names the release
+// it actually runs.
+var version = "dev"
+
 // westonConfigPath is where the declare container writes the
 // compositor's config and where the compositor's container reads it.
 //
@@ -185,6 +196,18 @@ func operate() {
 	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
 	fmt.Printf("%s: operating the monitors on %s\n", DriverName, nodeName)
 
+	// The registry every /metrics scrape reads. An empty address
+	// disables the listener, which is how a workstation run and every
+	// test in this repository serve no port at all.
+	readings := newMetrics(componentName, version)
+	metricsListener, err := readings.listen(envOr("METRICS_ADDR", defaultMetricsAddr))
+	if err != nil {
+		fatal("metrics listener: %v", err)
+	}
+	if metricsListener != nil {
+		go serveMetrics(ctx, metricsListener, readings)
+	}
+
 	// Failures during setup end the process deliberately. This code
 	// has no retry logic of its own, because the kubelet already
 	// provides it: a pod that exits nonzero restarts with backoff, and
@@ -212,6 +235,7 @@ func operate() {
 	// refused with a reason, and an unregistered driver answers with
 	// nothing at all.
 	plugin := newDRAPlugin(client, card, socketDir, layout)
+	plugin.metrics = readings
 
 	// Every connection to the module starts with no socket open,
 	// because the compositor's restart took them, so the link replays
@@ -238,6 +262,7 @@ func operate() {
 	// Its own loop is what keeps an override off the slice publisher's
 	// settle window.
 	panels := newDisplayControl(client, nodeName, plugin.controls, screensOf)
+	panels.metrics = readings
 	// The mode seams are the prepare path's own, so a resting
 	// mode and a claim's mode take one road to the compositor and hold
 	// one lock between them. The heal's restart is that road with no
@@ -267,6 +292,7 @@ func operate() {
 	// The placement pass reads the surfaces the module reports and
 	// draws each screen to the Layout its Display names.
 	places := newPlacementPass(client, nodeName, layout, plugin.claims, screensOf)
+	places.metrics = readings
 
 	// The pod and the Layout watches share one channel, because a
 	// wake means read again and one pass reads every pod and every
@@ -280,12 +306,12 @@ func operate() {
 		default:
 		}
 	}
-	go watchPods(ctx, client, nodeName, resourceWake)
-	go watchLayouts(ctx, client, resourceWake)
+	go watchPods(ctx, client, nodeName, resourceWake, readings)
+	go watchLayouts(ctx, client, resourceWake, readings)
 	go watchDisplays(ctx, client, func() {
 		panels.wake()
 		resourceWake()
-	})
+	}, readings)
 
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses. The retry costs the loop no
@@ -295,7 +321,10 @@ func operate() {
 	// the grace it holds is measured across passes.
 	links := newLinkHistory()
 	publish := func() {
-		if err := reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links); err != nil {
+		err := readings.reconciled(kindResourceSlice, func() error {
+			return reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links, readings)
+		})
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
 			time.AfterFunc(writeRetryDelay, func() {
 				select {
@@ -325,7 +354,7 @@ func operate() {
 	// Every wake source the loop has reaches the same pass, and the
 	// backstop tick guarantees there is one.
 	place := func() {
-		if err := places.pass(); err != nil {
+		if err := readings.reconciled(kindLayout, places.pass); err != nil {
 			fmt.Fprintf(os.Stderr, "placing the surfaces on each screen: %v\n", err)
 		}
 	}
@@ -443,21 +472,44 @@ func eventsEnded(ctx context.Context) error {
 // same monitor taints nothing. One pass writes the history once, so no
 // other caller may pass one in.
 func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string,
-	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory) error {
+	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory,
+	readings *metrics) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
 	}
+	now := time.Now()
 	modes, err := currentModes()
+	// The card source is this ioctl: the same read that fills the
+	// slice's currentMode attribute. A failure here costs that
+	// attribute, and it is the fact display_observation_valid reports.
+	readings.recordObservation("card", err == nil, now)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the mode each output runs: %v\n", err)
 	}
+	withModes := withCurrentModes(outputs, modes)
+
+	// The claim answer is the same file read the canvas heal already
+	// makes. Reusing it here means the connected and claimed gauges
+	// come from one pass over the card and one read of the CDI specs,
+	// not a second walk of either.
+	claimed, err := preparedOutputs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the claims the kubelet prepared: %v\n", err)
+	}
+	readings.recordOutputs(withModes, claimed)
+
 	// The pass asks each panel what controls it carries. The answer
 	// is cached against the monitor's EDID, so a pass over unchanged
 	// hardware sends nothing on any i2c wire, and a panel that refuses
 	// DDC/CI publishes no control attribute and no control device.
-	devices := sliceDevices(withLinks(withControls(withCurrentModes(outputs, modes), controls), links))
-	if !compositorServing(socketPath) {
+	devices := sliceDevices(withLinks(withControls(withModes, controls), links))
+	// The compositor source is this dial: the same check that decides
+	// the NoExecute taint below. A dial that fails is the compositor
+	// socket not answering, in this operator's one word for it.
+	serving := compositorServing(socketPath)
+	readings.recordObservation("compositor", serving, now)
+	if !serving {
 		// No compositor holds the screens, so every output says it
 		// serves nobody, and the NoExecute taint is what ends the
 		// clients whose connections died with the socket.

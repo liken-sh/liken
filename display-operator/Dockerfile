@@ -28,11 +28,15 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The version reaches the binary through -ldflags, so a running
+# operator's liken_build_info names the release it was built from,
+# not the "dev" default main.go carries.
+ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. The binary
 # is the whole of the operator image, so it also has to run with no
 # loader and no libc under it.
-RUN CGO_ENABLED=0 go build -trimpath -o /display-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /display-operator .
 
 # The shim builds on the same Debian suite as the compositor, so both
 # link the same glibc. The build needs no libudev, because the shim's

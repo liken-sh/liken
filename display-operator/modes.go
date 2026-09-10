@@ -416,6 +416,7 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	if err := p.endCompositor(); err != nil {
 		return fmt.Errorf("ending the compositor: %w", err)
 	}
+	p.metrics.compositorRestarted("mode")
 	if p.restarted == nil {
 		p.restarted = map[string]string{}
 	}
@@ -529,7 +530,11 @@ func (p *draPlugin) restartCompositor() error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()
 
-	return p.endCompositor()
+	if err := p.endCompositor(); err != nil {
+		return err
+	}
+	p.metrics.compositorRestarted("heal")
+	return nil
 }
 
 func (p *draPlugin) releaseModes(devices []string) error {

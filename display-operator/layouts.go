@@ -142,8 +142,15 @@ func listLayouts(c *Client) ([]Layout, error) {
 // The watch turns a Layout a person edited into one wake. It keeps
 // the bounds the Display watch keeps, because what they bound is the
 // API server's own behavior and not anything about either resource.
-func watchLayouts(ctx context.Context, c *Client, wake func()) {
+func watchLayouts(ctx context.Context, c *Client, wake func(), readings *metrics) {
+	first := true
 	for ctx.Err() == nil {
+		if !first {
+			// The API server closed the last connection and this one
+			// opens in its place, the one restart milestone 65 counts.
+			readings.watchRestarted(kindLayout)
+		}
+		first = false
 		if err := streamLayouts(ctx, c, wake); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "watching layouts: %v\n", err)
 		}

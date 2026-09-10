@@ -123,6 +123,10 @@ type draPlugin struct {
 	// mode, and a second restart would blank every screen for the same
 	// wrong answer.
 	restarted map[string]string
+	// Metrics counts every restart this plugin orders, by why. It is
+	// nil in every test that drives a prepare with no listener behind
+	// it, and a nil metrics counts nothing.
+	metrics *metrics
 }
 
 // NewDRAPlugin builds the plugin the kubelet talks to.

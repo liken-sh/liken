@@ -119,5 +119,5 @@ func TestTheLayoutWatchEndsWithTheContext(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	watchLayouts(ctx, client, func() {})
+	watchLayouts(ctx, client, func() {}, nil)
 }

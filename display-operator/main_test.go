@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // The settle tests use short windows so that the whole file runs in
@@ -216,7 +218,7 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 
 	// The socket file is there and nothing answers on it, which is what
 	// a compositor killed uncleanly leaves.
-	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls, newLinkHistory())
+	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls, newLinkHistory(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +229,38 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 		if len(device.Taints) != 1 || device.Taints[0].Key != disconnectedTaint {
 			t.Errorf("%s: taints = %+v", device.Name, device.Taints)
 		}
+	}
+}
+
+// The pass that writes the slice is the same pass this operator's own
+// hardware-triple and observation gauges read, so a reconcile with a
+// real registry behind it proves the wiring, not only the recorder.
+func TestReconcileRecordsTheHardwareTripleAndTheObservations(t *testing.T) {
+	compositorFixture(t)
+	fixture := &slicePublishFixture{}
+	client := testClient(t, fixture.handler(t))
+	readings := newMetrics("display-operator", "dev")
+
+	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()),
+		noCurrentModes, noPanelControls, newLinkHistory(), readings)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connected := map[string]float64{"DP-1": 0, "HDMI-A-1": 1, "HDMI-A-2": 1}
+	for output, want := range connected {
+		if got := testutil.ToFloat64(readings.outputConnected.WithLabelValues(output)); got != want {
+			t.Errorf("display_output_connected{output=%q} = %v, want %v", output, got, want)
+		}
+		if got := testutil.ToFloat64(readings.outputClaimed.WithLabelValues(output)); got != 0 {
+			t.Errorf("display_output_claimed{output=%q} = %v, want 0, no claim is prepared", output, got)
+		}
+	}
+	if got := testutil.ToFloat64(readings.observationValid.WithLabelValues("card")); got != 1 {
+		t.Errorf(`display_observation_valid{source="card"} = %v, want 1`, got)
+	}
+	if got := testutil.ToFloat64(readings.observationValid.WithLabelValues("compositor")); got != 0 {
+		t.Errorf(`display_observation_valid{source="compositor"} = %v, want 0, the socket is stale`, got)
 	}
 }
 
@@ -246,7 +280,7 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, newLinkHistory()); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, newLinkHistory(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
@@ -281,7 +315,7 @@ func TestReconcileHoldsTheTaintWhileALinkIsDown(t *testing.T) {
 	pass := func() []DeviceTaint {
 		t.Helper()
 		fixture.created = nil
-		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links); err != nil {
+		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links, nil); err != nil {
 			t.Fatal(err)
 		}
 		if fixture.created == nil {
@@ -331,7 +365,7 @@ func publishedModes(t *testing.T, current func() (map[string]string, error)) map
 	client := testClient(t, fixture.handler(t))
 
 	socket := servingSocket(t, t.TempDir())
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls, newLinkHistory()); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls, newLinkHistory(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.created == nil {

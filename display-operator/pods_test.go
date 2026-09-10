@@ -104,5 +104,5 @@ func TestThePodWatchEndsWithTheContext(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	watchPods(ctx, client, "liken-1", func() {})
+	watchPods(ctx, client, "liken-1", func() {}, nil)
 }

@@ -83,6 +83,10 @@ type displayControl struct {
 	// Whether the standing debt has printed its line already.
 	// The pass is the only reader and writer, so it takes no lock.
 	deferred bool
+	// Metrics is the registry this pass reports the panel's own
+	// readings on. It is nil in every test that drives a pass with no
+	// listener behind it, and a nil metrics records nothing.
+	metrics *metrics
 }
 
 func newDisplayControl(client *Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
@@ -129,7 +133,8 @@ func (d *displayControl) run(ctx context.Context) {
 	tick := time.NewTicker(d.tick)
 	defer tick.Stop()
 	for {
-		if err := d.pass(ctx); err != nil {
+		err := d.metrics.reconciled(kindDisplay, func() error { return d.pass(ctx) })
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling the displays: %v\n", err)
 		}
 		select {
@@ -714,6 +719,9 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	if observed := observedValues(facts.Observed); observed != nil {
 		status.Observed = observed
 	}
+	// The same DDC/CI readings that just filled status.observed, on
+	// the gauges the idle screen's drive shows up on.
+	d.metrics.recordPanel(output.Connector, facts)
 	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, true,
 		"PanelAttached", output.Connector+" carries this panel"))
 	status.Conditions = setCondition(status.Conditions, d.responsive(facts))

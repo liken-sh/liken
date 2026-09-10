@@ -1,0 +1,16 @@
+# The monitoring component, liken's shared contract for connecting a
+# Prometheus to a process, milestone 65. The base in deploy/ applies on
+# a cluster with no monitoring at all. A cluster owner who runs the
+# prometheus-operator adds this component beside the base:
+#
+# resources:
+#   - https://github.com/liken-sh/display-operator//deploy?ref=<tag>
+# components:
+#   - https://github.com/liken-sh/display-operator//deploy/monitoring?ref=<tag>
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+namespace: liken-system
+
+resources:
+  - podmonitor.yaml

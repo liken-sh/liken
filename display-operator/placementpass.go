@@ -96,6 +96,10 @@ type placementPass struct {
 	// nothing at all.
 	placed  map[int]placedSurface
 	ordered map[string][]int
+	// Metrics counts the surfaces this pass places on each output. It
+	// is nil in every test that drives a pass with no listener behind
+	// it, and a nil metrics records nothing.
+	metrics *metrics
 }
 
 func newPlacementPass(client *Client, node string, link *layoutLink, claims *claimIndex,
@@ -158,7 +162,9 @@ func (p *placementPass) pass() error {
 			// must not take a program off the screen.
 			continue
 		}
-		sent, err := p.screen(state.Outputs[connector], surfacesOn(held), outputs)
+		on := surfacesOn(held)
+		p.metrics.recordSurfaces(connector, len(on))
+		sent, err := p.screen(state.Outputs[connector], on, outputs)
 		stated = stated || sent
 		if err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", connector, err))

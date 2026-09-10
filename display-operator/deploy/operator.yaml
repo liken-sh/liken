@@ -187,6 +187,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # Milestone 65 assigns display-operator this port. An
+            # owner who runs no Prometheus still gets the port: the
+            # base states it here so a scrape needs nothing from this
+            # manifest but the monitoring component beside it.
+            - name: METRICS_ADDR
+              value: ":9210"
+          ports:
+            - name: metrics
+              containerPort: 9210
           securityContext:
             # No privilege and no capability. This container reads
             # sysfs, writes CDI files, and serves a socket to the

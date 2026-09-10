@@ -1,0 +1,21 @@
+# The operator is the only pod this driver runs, so it is the only
+# PodMonitor this component holds. It selects the DaemonSet's own pod
+# label and reads the container port named metrics, which
+# operator.yaml declares whether or not this component is ever added.
+#
+# The relabeling carries the node name onto every series, because this
+# pod runs one per machine and the fleet dashboard groups by the
+# machine the reading came from, not by the pod name Kubernetes chose.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: display-operator
+spec:
+  selector:
+    matchLabels:
+      app: display-operator
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

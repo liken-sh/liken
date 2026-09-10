@@ -162,7 +162,7 @@ say why it is built the way it is.
   media layer's per-`Player` idle policy, where the screen's owner
   states it once.
 
-* [14, Prometheus metrics](14-prometheus-metrics.md). Proposed.
+* [14, Prometheus metrics](14-prometheus-metrics.md). In progress.
   Claimed output availability, control failures, and kernel/compositor
   mode agreement, with alert rules that allow intentional darkness.
 * [15, The output states its scale](15-the-output-states-its-scale.md).

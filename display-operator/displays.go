@@ -417,8 +417,15 @@ const displayWatchRetry = 5 * time.Second
 // The watch turns a spec that changed into one wake. Nothing of
 // the event is read but its arrival: the pass that follows reads every
 // Display again, the same way every other wake in this operator works.
-func watchDisplays(ctx context.Context, c *Client, wake func()) {
+func watchDisplays(ctx context.Context, c *Client, wake func(), readings *metrics) {
+	first := true
 	for ctx.Err() == nil {
+		if !first {
+			// The API server closed the last connection and this one
+			// opens in its place, the one restart milestone 65 counts.
+			readings.watchRestarted(kindDisplay)
+		}
+		first = false
 		if err := streamDisplays(ctx, c, wake); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "watching displays: %v\n", err)
 		}

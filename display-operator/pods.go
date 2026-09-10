@@ -78,8 +78,15 @@ func listPods(c *Client, node string) ([]Pod, error) {
 // because the labels a region's selector matches are the pods' own. It
 // keeps the bounds the Display watch keeps, and it carries the same
 // field selector the listing does.
-func watchPods(ctx context.Context, c *Client, node string, wake func()) {
+func watchPods(ctx context.Context, c *Client, node string, wake func(), readings *metrics) {
+	first := true
 	for ctx.Err() == nil {
+		if !first {
+			// The API server closed the last connection and this one
+			// opens in its place, the one restart milestone 65 counts.
+			readings.watchRestarted(kindPod)
+		}
+		first = false
 		if err := streamPods(ctx, c, node, wake); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "watching the pods on %s: %v\n", node, err)
 		}
