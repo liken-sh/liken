@@ -1,12 +1,14 @@
 # 30, The film leaves with the lights
 
-The playback pod carries an `ending` label from the moment the sidecar
-reports the ending, and the sidecar holds mpv alive for a short grace
+Built, and drilled on `liken-1` on 2026-09-10 in release
+2026.09.10-001. The playback pod carries an `ending` label from the
+moment the sidecar reports the ending, and the sidecar holds mpv alive for a short grace
 after that report, so the compositor has a live surface to fade out.
 This is media-operator's part of the theater transition:
 display-operator's
-[plan 18](https://github.com/liken-sh/display-operator/blob/main/plans/18-a-surface-leaves-with-a-fade.md)
-fades a surface that leaves its region, and library-operator's plan 55
+[plan 18](https://github.com/liken-sh/display-operator/blob/main/plans/completed/18-a-surface-leaves-with-a-fade.md)
+fades a surface that leaves its region, and library-operator's
+[plan 55](https://github.com/liken-sh/library-operator/blob/main/plans/completed/55-lights-down-lights-up.md)
 dims and brightens the browser under the film.
 
 ## The problem
@@ -50,7 +52,40 @@ for that half second and the film then cuts. That is the case the
 cluster ran before this plan with the cut half a second earlier, and
 the theater `Layout` is one apply away.
 
+## What the drill changed
+
+The drill found a regression in the operator's own timing. The
+`Player`'s `Idle` status followed the ending report by 0.6 to 1.4 s,
+where it followed by 40 ms before this plan. The move to `Idle` is the
+cue the browser brightens on, so the delay held the browser dim after
+the film's surface was gone. Two things made it. The pass published
+every `Player` status last, behind about fifteen API reads, and the
+`ClusterRole` held no `watch` on `players`, so the operator had
+re-listed them every two seconds since 2026-08-21.
+
+Commit `7194706` publishes the statuses first and grants the watch.
+Three presses then measured 55, 620, and 845 ms, because the two list
+reads left in the path run against a k3s API server whose list reads
+spike to 800 ms. Commit `b84e295` answers an ending from the lists the
+last pass already read, with no read in the path at all. Three presses
+then measured `Idle` 2 ms after the ending report, the label within
+about 50 ms, and the surface gone at about 580 ms.
+
+Commit `36b8501` passes `--keepaspect-window=no`, in the same release.
+A 2.4:1 film rendered stretched, because mpv answered the 1920 by 1080
+configure with a 1920 by 800 buffer. mpv now fills the window the
+compositor gives it and letterboxes the film inside it.
+
 ## How the work is proved
+
+Drilled on `liken-1` on 2026-09-10. On the `dev-003` build of commit
+`c86c44a` the ending label landed on the playback pod within 42 to
+50 ms of the ending report, and the film's surface left at the 500 ms
+grace, measured at 540 to 600 ms. With the `theater` `Layout` on the
+portable panel, an exit press ended a film and its surface faded out
+over the browser.
+
+The plan as written:
 
 1. `make test-go` with a test that a folded ending patches the pod's
    labels, and a sidecar test that the quit follows the ending by the

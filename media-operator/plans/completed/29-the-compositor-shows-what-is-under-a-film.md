@@ -1,14 +1,15 @@
 # 29, The compositor shows what is under a film
 
-The re-present retires, and so does the app-id every client passed
-back to the compositor. display-operator's
-[plan 17](https://github.com/liken-sh/display-operator/blob/main/plans/17-a-layout-for-every-screen.md)
+Built, and drilled on `liken-1` on 2026-09-10 in release
+2026.09.10-001. The re-present retires, and so does the app-id every
+client passed back to the compositor. display-operator's
+[plan 17](https://github.com/liken-sh/display-operator/blob/main/plans/completed/17-a-layout-for-every-screen.md)
 moved the compositor from kiosk-shell to ivi-shell under a module of
 its own. Under it a lower surface is visible the moment the surface
 over it goes, and the socket a client arrived on is what says which
 screen it belongs to. Two workarounds for kiosk-shell come out of this
 operator and its clients. The library-operator half is
-[library-operator plan 54](https://github.com/liken-sh/library-operator/blob/main/plans/54-the-browser-returns-on-the-status-edge.md).
+[library-operator plan 54](https://github.com/liken-sh/library-operator/blob/main/plans/completed/54-the-browser-returns-on-the-status-edge.md).
 
 ## The problem
 
@@ -66,12 +67,12 @@ its own, and the status is the cue. The bus reference and the
 
 ### The order of the rollout
 
-This plan requires display-operator plan 17 on every cluster before
-it rolls there. Under kiosk-shell a client that passes no app-id lands
-on whichever output weston enumerated first, and an idle client that
-maps no fresh surface stays hidden after a film. The testbed runs plan
-17 as of 2026-09-10. The house fleet rolls display-operator first, and
-this plan after it.
+This plan requires display-operator plan 17 on a cluster before it
+rolls there. Under kiosk-shell a client that passes no app-id lands on
+whichever output weston enumerated first, and an idle client that maps
+no fresh surface stays hidden after a film. display-operator
+2026.09.10-001 rolled to the testbed and to the house first, and this
+operator's 2026.09.10-001 followed the same evening.
 
 ## What was considered and set aside
 
@@ -82,6 +83,25 @@ this plan after it.
 - **Drop the commands topic.** `play-next` travels on it, so it stays.
 
 ## How the work is proved
+
+Drilled on `liken-1` on 2026-09-10, on the `2026.09.09-002-dev-001`
+build of commit `6cb1ecc`. A `Play` on the portable panel's `Player`
+ran under its own claim socket, with its playback label in the
+`Display`'s `status.surfaces`, and the playback argv carried no
+`--wayland-app-id`. The `Play` delete left the idle surface as the one
+the default region held, and the operator's log held no re-present
+line.
+
+Commit `3348eae` followed the same day, in the same release. The idle
+pod carries `media.liken.sh/component: idle`, so a `Layout` names the
+region the idle screen draws in, and the mark's arrival from
+`Starting` reverses the ramp from where it stands instead of starting
+it over. The plain idle screen was then drilled on the portable panel
+under the `theater` `Layout`: the clock drew in its own region, a film
+came in over it and left, and the status read `Idle` 144 ms after the
+ending report.
+
+The plan as written:
 
 1. `make test` in the operator and in `idle/` and `media-screen/`.
 2. A development build rolls to `liken-1`. A `Play` starts over the

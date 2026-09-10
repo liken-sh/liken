@@ -256,20 +256,35 @@ These plans are designed. Each keeps its number and moves to
   the work that follows it, the display offers it on the scrubber as a
   chip and then a card, a select publishes the ask on the bus, and the
   newest `Play` on a `Player` is the one that runs.
-* [29, The compositor shows what is under a film](29-the-compositor-shows-what-is-under-a-film.md).
-  In progress. display-operator's plan 17 moved the compositor to
+* [29, The compositor shows what is under a
+  film](completed/29-the-compositor-shows-what-is-under-a-film.md).
+  Built, and drilled on `liken-1` on 2026-09-10 in release
+  2026.09.10-001. display-operator's plan 17 moved the compositor to
   ivi-shell, so the re-present and the app-id retire: the idle clock
   is visible the moment a film's surface goes, and the claim's socket
-  is the identity. Requires display-operator plan 17 on the cluster
-  first.
+  is the identity. A `Play` ran under its own socket with no
+  `--wayland-app-id` in its argv, and its delete left the idle surface
+  as the one the default region held, with no re-present in the
+  operator's log. The same release labels the idle pod
+  `media.liken.sh/component: idle`, so a `Layout` names its region:
+  under the `theater` `Layout` the clock drew in that region and the
+  status read `Idle` 144 ms after the ending report.
+  display-operator 2026.09.10-001 rolls first on any cluster.
 * [30, The film leaves with the
-  lights](30-the-film-leaves-with-the-lights.md). In progress. A
+  lights](completed/30-the-film-leaves-with-the-lights.md). Built, and
+  drilled on `liken-1` on 2026-09-10 in release 2026.09.10-001. A
   playback pod carries `media.liken.sh/ending` from the moment its run
   reports the ending, and the sidecar holds `mpv` alive for 500 ms after
   that report. So a `Layout` whose film region excludes the label has a
   live surface to fade out, and the screen no longer cuts from a film to
-  the browser under it. Requires display-operator plan 18 for the fade
-  itself.
+  the browser under it. The label landed within 42 to 50 ms of the
+  report, the surface left at 540 to 600 ms, and the film faded out
+  over the browser under the `theater` `Layout`. The drill also found
+  the `Player`'s `Idle` status 0.6 to 1.4 s behind the report, from a
+  pass that published the statuses last and a `ClusterRole` with no
+  `watch` on `players`. The same release publishes the statuses first
+  and answers an ending from the last pass's lists, which puts `Idle`
+  2 ms after the report.
 
 ## Open problems
 
