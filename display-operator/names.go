@@ -88,17 +88,15 @@ func outputOfDraw(device string) (string, bool) {
 	return strings.CutSuffix(device, drawSuffix)
 }
 
-// appID is the string the compositor routes a client's surface by.
-// Version 0 uses the device name, and the operator writes it into
-// weston.ini as the output's app-ids= line, so a claim on hdmi-a-1
-// receives DISPLAY_APP_ID=hdmi-a-1 and a client that passes that to
-// its toolkit puts its surface on that monitor.
+// appID is the app-id one output's claim receives, the device name. A
+// claim on hdmi-a-1 receives DISPLAY_APP_ID=hdmi-a-1.
 //
-// The app-id only routes a surface to an output; it grants nothing.
-// The claim is what grants the output. The compositor
-// refuses nothing: two clients that present one app-id both get the
-// screen, one on top of the other. What stops that here is that the
-// second pod cannot allocate an output the first pod holds.
+// The app-id routes nothing. The socket a surface arrives on is what
+// names the claim that drew it, and the layout module reports that
+// socket, so the operator reads an identity no client can set. The
+// variable is still delivered, unchanged, so a consumer image that
+// passes it to its toolkit still starts. It retires once every
+// consumer image has been rebuilt without the flag.
 func appID(connector string) string {
 	return deviceName(connector)
 }

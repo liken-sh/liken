@@ -38,25 +38,25 @@ func swapPath(t *testing.T, target *string, value string) {
 	t.Cleanup(func() { *target = previous })
 }
 
-func TestWestonConfigNamesEachOutputAndItsAppID(t *testing.T) {
+func TestWestonConfigNamesTheShellTheModuleAndEachOutput(t *testing.T) {
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), nil)
 
-	// The kiosk shell reads app-ids= and matches it against the app-id
-	// a client sets. The app-id is the device name, so a claim on
-	// hdmi-a-1 receives DISPLAY_APP_ID=hdmi-a-1 and the client that
-	// passes it to its toolkit lands on that monitor.
+	// ivi-shell places nothing on its own, so the module on the
+	// modules= line is what shows every surface, and the operator is
+	// what tells the module where.
 	//
 	// DP-1 has nothing on it and gets a section like the others.
 	// Weston reads this file once, so the section has to be there
 	// before the monitor is.
 	for _, want := range []string{
-		"shell=kiosk",
+		"shell=ivi-shell.so",
+		"modules=liken-layout.so",
 		"renderer=gl",
 		"require-input=false",
 		"idle-time=0",
-		"name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1",
-		"name=HDMI-A-2\nmode=preferred\napp-ids=hdmi-a-2",
-		"name=DP-1\nmode=preferred\napp-ids=dp-1",
+		"name=HDMI-A-1\nmode=preferred",
+		"name=HDMI-A-2\nmode=preferred",
+		"name=DP-1\nmode=preferred",
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config does not contain %q:\n%s", want, config)
@@ -64,6 +64,11 @@ func TestWestonConfigNamesEachOutputAndItsAppID(t *testing.T) {
 	}
 	if got := strings.Count(config, "[output]"); got != 3 {
 		t.Errorf("got %d output sections, want 3:\n%s", got, config)
+	}
+	// ivi-shell reads no app-ids= key. The socket a surface arrives
+	// on is what names the claim that drew it.
+	if strings.Contains(config, "app-ids=") {
+		t.Errorf("the config routes by app-id:\n%s", config)
 	}
 }
 
@@ -74,9 +79,9 @@ func TestWestonConfigNamesTheModeTheRecordStates(t *testing.T) {
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{"HDMI-A-2": "1280x720"})
 
 	for _, want := range []string{
-		"name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1",
-		"name=HDMI-A-2\nmode=1280x720\napp-ids=hdmi-a-2",
-		"name=DP-1\nmode=preferred\napp-ids=dp-1",
+		"name=HDMI-A-1\nmode=preferred\n",
+		"name=HDMI-A-2\nmode=1280x720\n",
+		"name=DP-1\nmode=preferred\n",
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config does not contain %q:\n%s", want, config)
@@ -91,7 +96,7 @@ func TestWestonConfigScalesAWideOutputByTwo(t *testing.T) {
 	// default of 1. DP-1 is dark, has no modes, and states none either.
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), nil)
 
-	if want := "name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1\nscale=2\n"; !strings.Contains(config, want) {
+	if want := "name=HDMI-A-1\nmode=preferred\nscale=2\n"; !strings.Contains(config, want) {
 		t.Errorf("the config does not contain %q:\n%s", want, config)
 	}
 	if got := strings.Count(config, "scale="); got != 1 {
@@ -110,8 +115,8 @@ func TestWestonConfigScalesByTheModeTheRecordStates(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"name=HDMI-A-1\nmode=1920x1080\napp-ids=hdmi-a-1\n\n",
-		"name=HDMI-A-2\nmode=3840x2160@60\napp-ids=hdmi-a-2\nscale=2\n",
+		"name=HDMI-A-1\nmode=1920x1080\n\n",
+		"name=HDMI-A-2\nmode=3840x2160@60\nscale=2\n",
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config does not contain %q:\n%s", want, config)
@@ -156,7 +161,7 @@ func TestWriteWestonConfigCreatesTheDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), "app-ids=hdmi-a-1") {
+	if !strings.Contains(string(written), "name=HDMI-A-1") {
 		t.Fatalf("the file holds:\n%s", written)
 	}
 }
@@ -175,7 +180,7 @@ func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), "app-ids=hdmi-a-1") {
+	if !strings.Contains(string(written), "name=HDMI-A-1") {
 		t.Fatalf("the file holds:\n%s", written)
 	}
 	if got := strings.Count(string(written), "[output]"); got != 3 {
