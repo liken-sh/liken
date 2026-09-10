@@ -1,7 +1,7 @@
 # The monitoring component: liken/plans/65-prometheus-metrics.md's
-# shared contract, this operator's half. It adds one PodMonitor and
-# changes nothing in the base, so a cluster owner with no
-# prometheus-operator never takes this directory at all.
+# shared contract, this operator's half. It adds one PodMonitor and a
+# dashboard ConfigMap, and changes nothing in the base, so a cluster
+# owner with no prometheus-operator never takes this directory at all.
 #
 # An owner who runs the prometheus-operator adds it beside the base:
 #
@@ -9,10 +9,30 @@
 #     - https://github.com/liken-sh/equipment-operator//deploy?ref=<version>
 #   components:
 #     - https://github.com/liken-sh/equipment-operator//deploy/monitoring?ref=<version>
+#
+# This Component sets no top-level namespace: that would move the
+# dashboard ConfigMap into liken-system too, where the
+# kube-prometheus-stack sidecar that loads it never looks. The
+# PodMonitor names its own namespace instead.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
-namespace: liken-system
-
 resources:
   - podmonitor.yaml
+
+# The dashboard travels as a ConfigMap carrying the
+# grafana_dashboard: "1" label. The kube-prometheus-stack runs a
+# sidecar beside Grafana that watches for that label and loads every
+# ConfigMap that carries it, so the dashboard needs no Grafana API
+# call and no provisioning file. disableNameSuffixHash keeps the name
+# stable, so a dashboard edit replaces the ConfigMap in place instead
+# of leaving the old version loaded beside the new one.
+configMapGenerator:
+  - name: equipment-operator-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/equipment-operator.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
