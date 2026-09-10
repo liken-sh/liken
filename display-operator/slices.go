@@ -277,12 +277,12 @@ func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
 	}, true
 }
 
-// DrawDevice is the connector's shared device: the compositor socket
-// that many claims hold at once. weston already draws many clients on
-// one output and routes each by its app-id, so a second client can
-// draw between the films a single output claim runs. The output device
-// stays exclusive because one panel runs one mode, and the mode is the
-// output device's to set.
+// DrawDevice is the connector's shared device: a Wayland connection
+// on one output that many claims hold at once. The compositor draws
+// as many surfaces on an output as the layout module places there, so
+// a second client can draw between the films a single output claim
+// runs. The output device stays exclusive because one panel runs one
+// mode, and the mode is the output device's to set.
 //
 // The device exists for every connector, connected or not, the same as
 // the output device beside it, so a claim on the draw class parks until
@@ -297,7 +297,9 @@ func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
 // The draw device publishes no appId. The output class selects on
 // has(appId), so an appId here would make the draw device match that
 // class. The app-id still reaches the client at prepare, built from
-// the connector, not read from an attribute.
+// the connector, not read from an attribute, and it routes nothing:
+// the socket the claim receives is what names the claim a surface
+// came from.
 //
 // The taints are the output device's own, whatever they are, so a
 // draw device is never claimable while the screen beside it can serve

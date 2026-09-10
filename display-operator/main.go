@@ -1,16 +1,17 @@
 // display-operator publishes each of a graphics card's monitor
 // outputs as its own DRA device. A pod claims one screen by its
-// connector name or by what the monitor is, and receives the
-// Wayland socket and the app-id that put its window on that screen.
+// connector name or by what the monitor is, and receives a Wayland
+// socket of its own that puts its window on that screen.
 //
 // It is an instance of liken's device operator pattern. The operator
 // claims the card's display device through an ordinary liken.sh claim
 // and publishes what the compositor drives under its own driver name,
 // display.liken.sh.
 //
-// Weston with the kiosk shell runs in a container of its own in the
-// same pod. The kubelet starts it, restarts it when it dies, and
-// stops it, so no process in this pod supervises another.
+// Weston with ivi-shell runs in a container of its own in the same
+// pod, and the operator's own controller module runs inside it. The
+// kubelet starts the compositor, restarts it when it dies, and stops
+// it, so no process in this pod supervises another.
 //
 // The operator uses no private interface into liken. The raw claim,
 // the slices it writes, and the CDI files it leaves for the runtime
@@ -106,14 +107,19 @@ var procRoot = "/proc"
 // names one path for both ends.
 const defaultSocketDir = "/var/run/display.liken.sh"
 
-// socketName is the Wayland socket's name inside that directory, and
-// the value of WAYLAND_DISPLAY that a consumer receives.
+// socketName is the compositor's own Wayland socket inside that
+// directory, the one weston's --socket names.
 //
-// It is a constant, not a setting. The CDI spec promises this name to
-// every consumer, so an operator pod that inherited a WAYLAND_DISPLAY
-// of its own would rename the socket its own devices promise, and
-// every client would fail to connect with nothing to read that said
-// why.
+// It is a constant, not a setting. An operator pod that inherited a
+// WAYLAND_DISPLAY of its own would rename the socket the operator's
+// own watch connects to, and the watch would report a compositor that
+// serves nothing.
+//
+// A prepared claim receives a socket of its own instead, opened by the
+// layout module and named after the claim's UID. This one keeps
+// listening: a pod prepared before the per-claim sockets existed
+// holds WAYLAND_DISPLAY=wayland-0 in its environment and reconnects
+// to it, and a surface on it belongs to no claim.
 const socketName = "wayland-0"
 
 // sysRoot is the sysfs mount this operator reads. It is a variable so
@@ -195,11 +201,24 @@ func operate() {
 	card := claimedCard()
 	socketPath := socketDir + "/" + socketName
 
+	// The link to the compositor's controller module. It opens the
+	// socket each claim receives and reports every surface the
+	// compositor holds, and the store it keeps is what a placement
+	// pass reads.
+	layout := newLayoutLink(layoutSocketPath)
+
 	// The plugin registers whether or not a compositor serves. A
 	// prepare call that arrives while the socket is gone must be
 	// refused with a reason, and an unregistered driver answers with
 	// nothing at all.
-	plugin := newDRAPlugin(client, card, socketDir)
+	plugin := newDRAPlugin(client, card, socketDir, layout)
+
+	// Every connection to the module starts with no socket open,
+	// because the compositor's restart took them, so the link replays
+	// what the prepared claims hold. The hook is wired before the link
+	// dials, because the replay runs on the first connection too.
+	layout.replay = plugin.replaySockets
+	go layout.run(ctx)
 
 	uevents, err := listenForUevents(ctx)
 	if err != nil {
@@ -275,7 +294,13 @@ func operate() {
 			fatal("the DRA plugin is not serving: %v", err)
 		}
 	}()
-	settled := settle(ctx, wakes(ctx, uevents, retries, watchSocket(ctx, socketPath)), settleWindow, settleLimit)
+	// The module's own reports join the loop's other wakes. Nothing in
+	// this loop places a surface yet: the pass that reads
+	// layout.state() and states a placement is the next step of plan
+	// 17.
+	settled := settle(ctx,
+		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath), layout.reports),
+		settleWindow, settleLimit)
 
 	// The first pass runs before any event. It replaces the slice the
 	// previous pod left and states whether a compositor serves right
@@ -432,11 +457,12 @@ func watchSocket(ctx context.Context, socketPath string) <-chan struct{} {
 	return out
 }
 
-// wakes turns the kernel's drm events, the write retries, and the
-// compositor's socket into one channel of wakes, with a backstop tick
-// in it. Nothing on any of them holds state that the loop uses: each
-// wake means look again, and the look is a fresh read of sysfs.
-func wakes(ctx context.Context, uevents <-chan drmEvent, retries, sockets <-chan struct{}) <-chan struct{} {
+// wakes turns the kernel's drm events, the write retries, the
+// compositor's socket, and the layout module's reports into one
+// channel of wakes, with a backstop tick in it. Nothing on any of
+// them holds state that the loop uses: each wake means look again,
+// and the look is a fresh read of sysfs and of the module's store.
+func wakes(ctx context.Context, uevents <-chan drmEvent, retries, sockets, layouts <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -464,6 +490,11 @@ func wakes(ctx context.Context, uevents <-chan drmEvent, retries, sockets <-chan
 				}
 				wake()
 			case _, ok := <-sockets:
+				if !ok {
+					return
+				}
+				wake()
+			case _, ok := <-layouts:
 				if !ok {
 					return
 				}

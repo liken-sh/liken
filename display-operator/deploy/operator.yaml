@@ -233,6 +233,12 @@ spec:
             # record of what each claim asked for, and the weston.ini
             # regenerated from it. The compositor reads the file at its
             # next start, which the operator's SIGTERM brings on.
+            #
+            # The layout module's control socket is in this directory
+            # too. Only the three containers of this pod mount the
+            # volume, where the Wayland socket directory above is a
+            # hostPath every consumer mounts, so no consumer can reach
+            # the socket that places surfaces.
             - name: weston-config
               mountPath: /etc/weston
       resourceClaims:

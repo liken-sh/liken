@@ -76,6 +76,11 @@ type draPlugin struct {
 	// cache serves both paths and a prepare after a publish costs
 	// nothing on the wire.
 	controls *panelControls
+	// Layout is the link to the compositor's controller module, which
+	// opens the Wayland socket each claim receives. A prepare that
+	// found no module serving delivers nothing, because the socket it
+	// would name in the CDI spec is the socket the module opens.
+	layout *layoutLink
 	// CurrentModes reads what each output runs, connectorModes
 	// reads what each connector offers, and endCompositor is the
 	// restart that makes a new mode take. All three are fields
@@ -120,7 +125,7 @@ type draPlugin struct {
 // Every seam takes its real implementation here and a stand-in
 // only in a test, so this is the one place the card readback and the
 // compositor's restart are named together.
-func newDRAPlugin(client *Client, card, socketDir string) *draPlugin {
+func newDRAPlugin(client *Client, card, socketDir string, layout *layoutLink) *draPlugin {
 	return &draPlugin{
 		client:     client,
 		sysRoot:    sysRoot,
@@ -130,6 +135,7 @@ func newDRAPlugin(client *Client, card, socketDir string) *draPlugin {
 		recordPath: modeRecordPath,
 		powerPath:  powerRecordPath,
 		controls:   newPanelControls(sysRoot, card),
+		layout:     layout,
 		currentModes: func() (map[string]string, error) {
 			return readCurrentModes(filepath.Join(driRoot, card))
 		},
@@ -238,6 +244,14 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	if !compositorServing(socketPath) {
 		return fail("no compositor is serving %s right now", socketPath)
 	}
+	// The module is the other half of the delivery: it opens the
+	// claim's own socket in that same directory. A prepare that ran
+	// with no module serving would name a socket in the CDI spec that
+	// nothing listens on, and the client would fail to connect with
+	// nothing to read that said why.
+	if !p.layout.moduleServing() {
+		return fail("the layout module is not serving %s right now", layoutSocketPath)
+	}
 
 	allocated, err := GetResourceClaim(p.client, claim.Namespace, claim.Name)
 	if err != nil {
@@ -274,6 +288,10 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		live[deviceName(output.Connector)] = output
 	}
 
+	// The socket each Wayland result delivers, named before the loop
+	// so that every result on one connector delivers one name.
+	sockets := claimSocketNames(claim.Uid, allocated.Status.Allocation.Devices.Results)
+
 	var specDevices []cdiDevice
 	var devices []*drav1.Device
 	for _, result := range allocated.Status.Allocation.Devices.Results {
@@ -307,16 +325,20 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		var edits cdiEdits
 		switch {
 		case draw:
-			// A draw result delivers the compositor socket and the
-			// app-id, the same Wayland connection the output result
-			// delivers, so the client draws on the output weston routes
-			// its app-id to. It sets no mode and no panel power: the
-			// output device owns the mode, and many claims share the
-			// draw device, so a mode or a power write from one would act
-			// on a screen the others hold. The compositor gate at the
-			// top of this function is the wait for the socket to exist,
-			// which a draw client needs as much as an output client.
-			edits = outputEdits(p.socketDir, socketName, appID(output.Connector))
+			// A draw result delivers the claim's socket on the output's
+			// own connector, the same Wayland connection the output
+			// result delivers, so the client draws on the screen the
+			// module places its surfaces on. It sets no mode and no
+			// panel power: the output device owns the mode, and many
+			// claims share the draw device, so a mode or a power write
+			// from one would act on a screen the others hold. The two
+			// gates at the top of this function are the wait for the
+			// compositor and the module, which a draw client needs as
+			// much as an output client.
+			if err := p.layout.Listen(sockets[device], output.Connector); err != nil {
+				return fail("%v", err)
+			}
+			edits = outputEdits(p.socketDir, sockets[device], appID(output.Connector))
 		case control:
 			// A control result prepares nothing on the wire. The
 			// consumer holds the node and drives the panel itself, so
@@ -352,7 +374,16 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 					return fail("%v", err)
 				}
 			}
-			edits = outputEdits(p.socketDir, socketName, appID(device))
+			// The socket opens after the mode switch, because a switch
+			// restarts the compositor and a restart takes every socket
+			// the module opened. The link to the new module may not be
+			// up yet at this moment, and the kubelet's retry is the
+			// wait: the record already holds the mode, so the retry
+			// restarts nothing and opens the socket.
+			if err := p.layout.Listen(sockets[device], output.Connector); err != nil {
+				return fail("%v", err)
+			}
+			edits = outputEdits(p.socketDir, sockets[device], appID(device))
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
@@ -405,11 +436,12 @@ func controlTakesNoParameters(device, mode string, want requestedControls) error
 		strings.Join(stated, " and "), device)
 }
 
-// NodeUnprepareResources removes each claim's CDI spec and takes the
-// modes it stated out of the record. As with prepare, every claim gets
-// an answer and failures stay specific to each claim. The socket needs
-// nothing given back: the compositor keeps the screen, and the next
-// claim receives the same socket.
+// NodeUnprepareResources removes each claim's CDI spec, takes the
+// modes it stated out of the record, and asks the module to close the
+// sockets it opened for it. As with prepare, every claim gets an
+// answer and failures stay specific to each claim. The screen needs
+// nothing given back: the compositor keeps it, and the next claim
+// receives a socket of its own on it.
 //
 // Nothing restarts here, so the screen keeps the mode until the
 // next compositor start. The record is what the next start reads, so
@@ -451,6 +483,7 @@ func (p *draPlugin) unprepareClaim(claimUID string) error {
 	// and an unprepare that ran again after it was gone would have
 	// nothing left to read.
 	p.releasePower(devices)
+	p.releaseSockets(claimUID)
 	if err := removeCDISpec(claimUID); err != nil {
 		return err
 	}

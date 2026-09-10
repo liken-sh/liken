@@ -8,12 +8,18 @@ package main
 // so exactly one process may set a mode on the card, and the exclusive
 // display claim is what makes weston that process.
 //
-// The kiosk shell is the shell for a screen in a house. It makes every
-// client fullscreen on one output, with no decorations and no desktop,
-// and it routes a client to an output by the app-id the client sets.
-// weston.ini's app-ids= line is the routing table, and this operator
-// writes it: one [output] section for each connector, whose app-id is
-// the published device's name.
+// ivi-shell is the shell for a screen a controller places surfaces
+// on. The shell itself decides nothing: a surface stays invisible
+// until a controller states a rectangle and a place in the stacking
+// order for it. The controller is this operator's own module,
+// liken-layout.so, which weston.ini names in [core] modules=, and
+// layoutlink.go is the operator's side of the control socket the
+// module listens on.
+//
+// The module opens one Wayland socket for each prepared claim, so the
+// socket a surface arrives on names the claim that drew it. That is
+// an identity nothing in a consumer's container can change, where the
+// app-id is a string the client sets.
 //
 // This file holds two of the pod's three roles: declare, which
 // writes the config, and the compositor role, which execs weston so
@@ -107,16 +113,23 @@ const (
 // Every connector gets a section, dark or lit. Weston parses this
 // file once, at startup. It enables only the heads whose connector
 // reports a monitor, so a dark section does nothing at first. When a
-// monitor arrives, that section configures and routes the new output.
+// monitor arrives, that section configures the new output.
 func westonConfig(outputs []Output, modes map[string]string) string {
 	var config strings.Builder
 	config.WriteString(`# Written by display.liken.sh at startup. Every edit is lost on the
 # next restart of the operator.
 
 [core]
-# The kiosk shell makes each client fullscreen on one output, with
-# no decorations and no desktop, and routes it there by its app-id.
-shell=kiosk
+# ivi-shell shows a surface where a controller puts it, and nowhere
+# else. The controller is the module on the next line, and the
+# operator is the one program that tells it what to place.
+shell=ivi-shell.so
+
+# liken-layout.so is this operator's controller. weston 14 has no
+# ivi-module= key: a controller is an ordinary module in this list,
+# loaded after the shell, and it finds the shell through
+# ivi_layout_get_api.
+modules=liken-layout.so
 
 # The GL renderer advertises zwp_linux_dmabuf_v1 at version 4. mpv
 # refuses to bind the protocol below version 4, and the pixman
@@ -130,9 +143,8 @@ require-input=false
 
 # 0 turns the idle timeout off. Under desktop-shell the 300-second
 # default fades and sleeps the screens, and with no input device
-# nothing ever wakes them. The kiosk shell above registers no idle
-# listener, so the default would do nothing here; the 0 keeps that
-# true if the shell ever changes.
+# nothing ever wakes them. The 0 keeps every screen lit whichever
+# shell weston loads.
 idle-time=0
 `)
 	for _, output := range outputs {
@@ -140,12 +152,14 @@ idle-time=0
 		if stated := modes[output.Connector]; stated != "" {
 			mode = stated
 		}
+		// The section states the name, the mode, and the scale, and no
+		// app-ids= line: ivi-shell reads no such key, because the
+		// controller states which output every surface goes on.
 		fmt.Fprintf(&config, `
 [output]
 name=%s
 mode=%s
-app-ids=%s
-`, output.Connector, mode, appID(output.Connector))
+`, output.Connector, mode)
 		if scale := outputScale(output, mode); scale > 1 {
 			fmt.Fprintf(&config, "scale=%d\n", scale)
 		}

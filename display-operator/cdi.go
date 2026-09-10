@@ -8,24 +8,30 @@ package main
 // well-known directory names devices and the edits that grant one to
 // a container. What the edits hold depends on whether the claim
 // allocated a Wayland connection or a control channel. A Wayland
-// client needs no device node at all: it needs the compositor's socket
-// and the app-id that the compositor routes to the allocated output,
-// so the edits are a mount and three environment variables. The output
-// device and the draw device both deliver this. A control device's
-// client is the opposite case: it needs exactly one device node, the
-// connector's i2c wire, and the variable that names it.
+// client needs no device node at all: it needs the claim's own socket
+// in the compositor's socket directory, so the edits are a mount and
+// three environment variables. The output device and the draw device
+// both deliver this. A control device's client is the opposite case:
+// it needs exactly one device node, the connector's i2c wire, and the
+// variable that names it.
 //
 //   - The mount grants the socket directory, at the same path inside
 //     the container as on the host.
 //   - XDG_RUNTIME_DIR names the directory where a Wayland client
 //     looks for its socket.
-//   - WAYLAND_DISPLAY names the socket inside that directory.
+//   - WAYLAND_DISPLAY names the socket inside that directory, which
+//     the layout module opened for this claim alone.
 //   - DISPLAY_APP_ID is the app-id of the allocated output.
 //
-// The client still has to pass the app-id to its own toolkit, because
-// no Wayland client reads a variable that chromium and mpv do not
-// define. The pod spec supplies the flag and the variable is what the
-// flag reads: --class=$(DISPLAY_APP_ID) for chromium,
+// The socket is the identity the compositor reads. A surface that
+// arrives on it belongs to this claim, and nothing in the container
+// can name another claim's socket, because the mount grants the
+// directory and the claim's own socket is the one the spec names.
+//
+// DISPLAY_APP_ID routes nothing. It is still delivered, so a consumer
+// image built against the app-id keeps starting, and it retires once
+// every consumer image has been rebuilt without the flag it feeds:
+// --class=$(DISPLAY_APP_ID) for chromium,
 // --wayland-app-id=$(DISPLAY_APP_ID) for mpv.
 //
 // The file name starts with this driver's own prefix,
@@ -40,10 +46,16 @@ package main
 // with a stale one.
 //
 // Nothing refreshes these files. What they hold is the socket
-// directory, which the pod mounts at a fixed path, and the app-id,
-// which version 0 derives from the connector name. Neither changes
-// while the operator runs, so a spec written at prepare time stays
-// correct until the claim ends.
+// directory, which the pod mounts at a fixed path, the claim's own
+// socket name, which is built from the claim's UID, and the app-id,
+// which version 0 derives from the connector name. None of the three
+// changes while the operator runs, so a spec written at prepare time
+// stays correct until the claim ends.
+//
+// They are also the operator's durable record of which claims hold a
+// socket. A compositor restart takes every socket the layout module
+// opened, and the specs are what the replay reads to open them again,
+// so the record survives a restart of the operator's container too.
 
 import (
 	"encoding/json"
@@ -128,15 +140,15 @@ type cdiDeviceNode struct {
 // operator read its own mount table.
 //
 // A claim that allocates two outputs into one container delivers two
-// app-ids, and only one DISPLAY_APP_ID survives: CDI applies the edits
-// in order and the last value wins. One container drives one screen.
-// A pod that drives two screens runs two containers, each naming its
-// own request.
+// sockets and two app-ids, and only one of each survives: CDI applies
+// the edits in order and the last value wins. One container drives one
+// screen. A pod that drives two screens runs two containers, each
+// naming its own request.
 func outputEdits(socketDir, socketName, id string) cdiEdits {
 	return cdiEdits{
 		Env: []string{
 			"XDG_RUNTIME_DIR=" + socketDir,
-			"WAYLAND_DISPLAY=" + socketName,
+			waylandDisplayVariable + "=" + socketName,
 			"DISPLAY_APP_ID=" + id,
 		},
 		Mounts: []cdiMount{{
@@ -205,18 +217,8 @@ func writeCDISpec(claimUID string, devices []cdiDevice) error {
 // succeeded, so the second call finds the file gone and has nothing
 // left to release.
 func preparedDevices(claimUID string) ([]string, error) {
-	cdiWrites.Lock()
-	defer cdiWrites.Unlock()
-
-	raw, err := os.ReadFile(cdiSpecPath(claimUID))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	spec, err := readCDISpec(claimUID)
 	if err != nil {
-		return nil, err
-	}
-	var spec cdiSpec
-	if err := json.Unmarshal(raw, &spec); err != nil {
 		return nil, err
 	}
 	var devices []string
@@ -231,6 +233,66 @@ func preparedDevices(claimUID string) ([]string, error) {
 		devices = append(devices, name)
 	}
 	return devices, nil
+}
+
+// readCDISpec reads back one claim's spec. A spec that is not there
+// answers an empty one and no error, because the callers all ask
+// about a claim that may already have been given back.
+func readCDISpec(claimUID string) (cdiSpec, error) {
+	cdiWrites.Lock()
+	defer cdiWrites.Unlock()
+
+	raw, err := os.ReadFile(cdiSpecPath(claimUID))
+	if os.IsNotExist(err) {
+		return cdiSpec{}, nil
+	}
+	if err != nil {
+		return cdiSpec{}, err
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return cdiSpec{}, err
+	}
+	return spec, nil
+}
+
+// eachPreparedSpec reads every spec this driver wrote and hands each
+// one to visit with the claim it belongs to. A file whose name is not
+// this driver's prefix belongs to another driver in the same
+// directory, and a file this driver wrote that will not parse is a
+// failure to report: the caller reads these files to learn what a
+// claim holds, and a claim it cannot read is a claim it would strand.
+func eachPreparedSpec(visit func(claimUID string, spec cdiSpec)) error {
+	cdiWrites.Lock()
+	defer cdiWrites.Unlock()
+
+	entries, err := os.ReadDir(cdiDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		claim, mine := strings.CutPrefix(entry.Name(), cdiPrefix)
+		if !mine {
+			continue
+		}
+		claim, named := strings.CutSuffix(claim, ".json")
+		if !named {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(cdiDir, entry.Name()))
+		if err != nil {
+			return err
+		}
+		var spec cdiSpec
+		if err := json.Unmarshal(raw, &spec); err != nil {
+			return fmt.Errorf("reading %s: %w", entry.Name(), err)
+		}
+		visit(claim, spec)
+	}
+	return nil
 }
 
 // removeCDISpec deletes a claim's spec file. An already absent file
@@ -266,36 +328,10 @@ func cdiSpecPath(claimUID string) string {
 // to hold this answer between passes and drop it on a prepare or an
 // unprepare.
 func preparedOutputs() (map[string]bool, error) {
-	cdiWrites.Lock()
-	defer cdiWrites.Unlock()
-
-	entries, err := os.ReadDir(cdiDir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	held := map[string]bool{}
-	for _, entry := range entries {
-		claim, mine := strings.CutPrefix(entry.Name(), cdiPrefix)
-		if !mine {
-			continue
-		}
-		claim, named := strings.CutSuffix(claim, ".json")
-		if !named {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(cdiDir, entry.Name()))
-		if err != nil {
-			return nil, err
-		}
-		var spec cdiSpec
-		if err := json.Unmarshal(raw, &spec); err != nil {
-			return nil, fmt.Errorf("reading %s: %w", entry.Name(), err)
-		}
+	err := eachPreparedSpec(func(claimUID string, spec cdiSpec) {
 		for _, device := range spec.Devices {
-			name, prefixed := strings.CutPrefix(device.Name, claim+"-")
+			name, prefixed := strings.CutPrefix(device.Name, claimUID+"-")
 			if !prefixed {
 				continue
 			}
@@ -307,6 +343,9 @@ func preparedOutputs() (map[string]bool, error) {
 			}
 			held[name] = true
 		}
+	})
+	if err != nil {
+		return nil, err
 	}
 	return held, nil
 }

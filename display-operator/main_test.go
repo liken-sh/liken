@@ -104,7 +104,7 @@ func TestWakesCarriesAnEventThrough(t *testing.T) {
 	defer cancel()
 
 	events := make(chan drmEvent, 1)
-	out := wakes(ctx, events, nil, nil)
+	out := wakes(ctx, events, nil, nil, nil)
 
 	events <- drmEvent{Action: "change", DevPath: "/devices/pci0000:00/0000:00:02.0/drm/card1"}
 	waitForWake(t, out, time.Second)
@@ -115,7 +115,7 @@ func TestWakesCarriesTheCompositorsSocketThrough(t *testing.T) {
 	defer cancel()
 
 	sockets := make(chan struct{}, 1)
-	out := wakes(ctx, nil, nil, sockets)
+	out := wakes(ctx, nil, nil, sockets, nil)
 
 	// A compositor that comes back is a pass of its own, because the
 	// pass is what removes the taint and re-reads the connectors.
@@ -128,12 +128,25 @@ func TestWakesCarriesARetryThrough(t *testing.T) {
 	defer cancel()
 
 	retries := make(chan struct{}, 1)
-	out := wakes(ctx, nil, retries, nil)
+	out := wakes(ctx, nil, retries, nil, nil)
 
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses, so the retry never blocks the
 	// loop that watches the compositor.
 	retries <- struct{}{}
+	waitForWake(t, out, time.Second)
+}
+
+func TestWakesCarriesTheLayoutModulesReportsThrough(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	layouts := make(chan struct{}, 1)
+	out := wakes(ctx, nil, nil, nil, layouts)
+
+	// A surface that arrives, changes size, or goes is a pass of its
+	// own, because the pass is what places what the module reports.
+	layouts <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 

@@ -179,6 +179,15 @@ func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 // monitors come up at.
 func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string) (*draPlugin, *fakeCompositor) {
 	t.Helper()
+	plugin, compositor, _ := labPluginWithModule(t, results, config)
+	return plugin, compositor
+}
+
+// labPluginWithModule is the same driver again, with the layout
+// module the prepare path opens each claim's socket through. A test
+// that reads what the module was asked for takes it too.
+func labPluginWithModule(t *testing.T, results []AllocatedDevice, config string) (*draPlugin, *fakeCompositor, *fakeModule) {
+	t.Helper()
 	cdiDir = t.TempDir()
 	configDir := t.TempDir()
 	compositor := &fakeCompositor{
@@ -207,7 +216,9 @@ func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string)
 		switchTimeout:  200 * time.Millisecond,
 		switchInterval: time.Millisecond,
 	}
-	return plugin, compositor
+	module := newFakeModule(t, moduleScript{})
+	plugin.layout = servedLayoutLink(t, module)
+	return plugin, compositor, module
 }
 
 // LabConnectorModes is what the kernel answers for the lab
@@ -351,7 +362,7 @@ func TestPrepareDeliversTheSocketAndTheAppID(t *testing.T) {
 	edits := spec.Devices[0].ContainerEdits
 	for _, want := range []string{
 		"XDG_RUNTIME_DIR=" + plugin.socketDir,
-		"WAYLAND_DISPLAY=" + socketName,
+		"WAYLAND_DISPLAY=wayland-" + testClaimUID,
 		"DISPLAY_APP_ID=hdmi-a-1",
 	} {
 		if !containsString(edits.Env, want) {
@@ -504,8 +515,8 @@ func TestPrepareSwitchesTheModeAndWaitsForTheReadback(t *testing.T) {
 	}
 	config := westonINI(t, plugin)
 	for _, want := range []string{
-		"name=HDMI-A-2\nmode=1280x720\napp-ids=hdmi-a-2",
-		"name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1",
+		"name=HDMI-A-2\nmode=1280x720\n",
+		"name=HDMI-A-1\nmode=preferred\n",
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config does not contain %q:\n%s", want, config)
@@ -1015,11 +1026,11 @@ func drawRequest() []AllocatedDevice {
 }
 
 func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
-	// A draw device delivers the same Wayland connection the output
-	// delivers, so a second client draws on the output through the
-	// shared socket. It sets no mode and no panel power: the output
-	// device owns the mode, and a power write from one of many holders
-	// would act on a screen the others hold.
+	// A draw device delivers the claim's own socket on the output's
+	// connector, so a second client draws on the same screen. It sets
+	// no mode and no panel power: the output device owns the mode, and
+	// a power write from one of many holders would act on a screen the
+	// others hold.
 	panel := newFakeMonitor()
 	plugin, compositor := labPluginWithConfig(t, drawRequest(), "")
 	controls, bench := benchPanels(t, plugin.sysRoot, plugin.card, claimedPanel(panel))
@@ -1045,7 +1056,7 @@ func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 	edits := spec.Devices[0].ContainerEdits
 	for _, want := range []string{
 		"XDG_RUNTIME_DIR=" + plugin.socketDir,
-		"WAYLAND_DISPLAY=" + socketName,
+		"WAYLAND_DISPLAY=wayland-" + testClaimUID,
 		"DISPLAY_APP_ID=hdmi-a-2",
 	} {
 		if !containsString(edits.Env, want) {
