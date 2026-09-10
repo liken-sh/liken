@@ -38,6 +38,12 @@ const LayoutsPath = "/apis/" + DisplayGroup + "/" + DisplayVersion + "/layouts"
 const (
 	LayoutResolvedCondition = "LayoutResolved"
 	LayoutNotFoundReason    = "LayoutNotFound"
+	// The two reasons the condition carries when it is met: the screen
+	// shows the Layout it names, or it names none and shows the
+	// default. They are two states of one condition, because a reader
+	// asking why a screen is arranged as it is needs to know which.
+	LayoutFoundReason   = "LayoutFound"
+	DefaultLayoutReason = "DefaultLayout"
 )
 
 type Layout struct {

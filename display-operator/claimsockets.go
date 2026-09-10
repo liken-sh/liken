@@ -148,16 +148,24 @@ func preparedSockets(claimUID string) ([]string, error) {
 	return sockets, nil
 }
 
-// preparedSocketOutputs names the socket every prepared claim holds
-// and the output device it was opened for, keyed by socket name. The
-// replay reads it after every new connection to the layout module,
-// and resolves each output device to its connector against a fresh
-// connector walk.
+// preparedSocket is one socket a prepared claim holds: the claim that
+// holds it, and the output device the module opened it for.
+type preparedSocket struct {
+	claim  string
+	device string
+}
+
+// preparedSocketClaims names every socket the prepared claims hold,
+// keyed by socket name. The placement pass reads it to learn which
+// claim drew a surface, because the module reports the socket a
+// surface arrived on and nothing else about who owns it.
 //
-// A draw device's socket is the socket of the output it draws on, so
-// its name resolves to the same connector as the output device's.
-func preparedSocketOutputs() (map[string]string, error) {
-	sockets := map[string]string{}
+// The name is not parsed for the claim's UID. A UID carries dashes of
+// its own, so wayland-<claim UID>-<output device> cannot be split on
+// one, and the spec file that named the socket already states which
+// claim it was written for.
+func preparedSocketClaims() (map[string]preparedSocket, error) {
+	sockets := map[string]preparedSocket{}
 	err := eachPreparedSpec(func(claimUID string, spec cdiSpec) {
 		for _, device := range spec.Devices {
 			name := waylandSocket(device.ContainerEdits)
@@ -171,10 +179,30 @@ func preparedSocketOutputs() (map[string]string, error) {
 			if output, draw := outputOfDraw(held); draw {
 				held = output
 			}
-			sockets[name] = held
+			sockets[name] = preparedSocket{claim: claimUID, device: held}
 		}
 	})
 	return sockets, err
+}
+
+// preparedSocketOutputs names the socket every prepared claim holds
+// and the output device it was opened for, keyed by socket name. The
+// replay reads it after every new connection to the layout module,
+// and resolves each output device to its connector against a fresh
+// connector walk.
+//
+// A draw device's socket is the socket of the output it draws on, so
+// its name resolves to the same connector as the output device's.
+func preparedSocketOutputs() (map[string]string, error) {
+	sockets, err := preparedSocketClaims()
+	if err != nil {
+		return nil, err
+	}
+	outputs := make(map[string]string, len(sockets))
+	for name, socket := range sockets {
+		outputs[name] = socket.device
+	}
+	return outputs, nil
 }
 
 // releaseSockets asks the module to close the sockets one claim

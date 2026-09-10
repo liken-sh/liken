@@ -76,6 +76,11 @@ type draPlugin struct {
 	// cache serves both paths and a prepare after a publish costs
 	// nothing on the wire.
 	controls *panelControls
+	// Claims is the index from a claim's UID to its namespace and
+	// name. A prepare is the one place the two are known together, and
+	// the placement pass starts from a socket that carries the UID
+	// alone.
+	claims *claimIndex
 	// Layout is the link to the compositor's controller module, which
 	// opens the Wayland socket each claim receives. A prepare that
 	// found no module serving delivers nothing, because the socket it
@@ -135,6 +140,7 @@ func newDRAPlugin(client *Client, card, socketDir string, layout *layoutLink) *d
 		recordPath: modeRecordPath,
 		powerPath:  powerRecordPath,
 		controls:   newPanelControls(sysRoot, card),
+		claims:     newClaimIndex(client),
 		layout:     layout,
 		currentModes: func() (map[string]string, error) {
 			return readCurrentModes(filepath.Join(driRoot, card))
@@ -266,6 +272,10 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	if allocated.Status.Allocation == nil {
 		return fail("the claim has no allocation yet")
 	}
+	// The placement pass reads a claim's holders from a surface's
+	// socket, which names the UID and nothing else. This call is where
+	// the UID, the namespace, and the name are known together.
+	p.claims.remember(claim.Uid, claim.Namespace, claim.Name)
 
 	// The allocation's config is the resolved list: the claim's
 	// own blocks and the DeviceClass's, each marked with its source.
@@ -533,7 +543,25 @@ type ResourceClaim struct {
 				Config  []AllocatedConfig `json:"config"`
 			} `json:"devices"`
 		} `json:"allocation"`
+		// The objects that hold the claim. A region's selector matches
+		// the labels of the pods named here, so this field is the route
+		// from the socket a surface arrived on to the labels that place
+		// it.
+		ReservedFor []ClaimConsumer `json:"reservedFor,omitempty"`
 	} `json:"status"`
+}
+
+type ResourceClaimList struct {
+	Items []ResourceClaim `json:"items"`
+}
+
+// ClaimConsumer is one holder of a claim. Resource names the holding
+// kind's plural, and this operator reads the pods: a claim held by
+// anything else carries no labels a region can match.
+type ClaimConsumer struct {
+	Resource string `json:"resource"`
+	Name     string `json:"name"`
+	UID      string `json:"uid"`
 }
 
 // AllocatedDevice is one allocation result. The scheduler chose Device
