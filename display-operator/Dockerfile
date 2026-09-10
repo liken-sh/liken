@@ -45,6 +45,26 @@ COPY hotplug/udev-kernel-group.c /
 RUN gcc -Wall -Wextra -Werror -shared -fPIC \
         -o /udev-kernel-group.so /udev-kernel-group.c
 
+# The ivi-shell controller module builds on the same Debian suite for
+# the same reason: weston dlopens it, so both link the same glibc. It
+# is a separate stage from the shim because it needs the compositor's
+# development packages, which the shim does not.
+#
+# ivi-layout-export.h is not in libweston-14-dev, so layout/ carries a
+# copy from the weston 14.0 tag. The .so links nothing: weston resolves
+# every libweston and libwayland symbol in it at dlopen, which is why
+# pkg-config gives only the include paths here.
+FROM debian:trixie-slim AS layout
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc libc6-dev pkg-config \
+        libweston-14-dev libwayland-dev libpixman-1-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY layout/liken-layout.c layout/ivi-layout-export.h /
+RUN gcc -Wall -Wextra -Werror -shared -fPIC \
+        $(pkg-config --cflags libweston-14 wayland-server pixman-1) \
+        -o /liken-layout.so /liken-layout.c
+
 # The suite is pinned because the closure script names weston 14. A
 # Debian that moves weston to 15 fails this build, which is the report
 # that the module set needs reading again.
@@ -93,6 +113,9 @@ COPY --from=closure /out/weston /
 # group. The loader opens the library by absolute path, so it needs no
 # entry in the cache that the closure built.
 COPY --from=shim /udev-kernel-group.so /usr/lib/liken/udev-kernel-group.so
+# weston loads the controller module from the modules= list in
+# weston.ini, and it searches this directory for the name it is given.
+COPY --from=layout /liken-layout.so /usr/lib/x86_64-linux-gnu/weston/liken-layout.so
 # The image runs the compositor and holds no other program, so a
 # release can start it and read what it says.
 ENTRYPOINT ["/usr/bin/weston"]
