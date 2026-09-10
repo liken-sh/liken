@@ -52,7 +52,15 @@ const (
 	// travel to the operator. codecProperty and hardwareProperty
 	// together decide media_decode_info; droppedFramesProperty feeds
 	// media_dropped_frames_total; delayProperty is media_av_delay_seconds.
-	codecProperty         = "video-codec"
+	//
+	// codecProperty reads current-tracks/video/codec rather than a
+	// plain video-codec, which mpv's manual does not define: the
+	// current-tracks tree is an alias onto the selected entry of
+	// track-list, and track-list/N/codec is documented as "the codec
+	// name used by this track, for example h264", the short, bounded
+	// name the label needs. current-tracks/audio/lang and
+	// current-tracks/sub/lang above read the same tree for the report.
+	codecProperty         = "current-tracks/video/codec"
 	hardwareProperty      = "hwdec-current"
 	droppedFramesProperty = "frame-drop-count"
 	delayProperty         = "avsync"

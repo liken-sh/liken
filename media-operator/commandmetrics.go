@@ -124,8 +124,8 @@ func (m *commandMetrics) observe(change propertyChange) {
 	}
 }
 
-// noteCodec records mpv's video-codec and republishes media_decode_info
-// if the published series no longer matches.
+// noteCodec records mpv's current-tracks/video/codec and republishes
+// media_decode_info if the published series no longer matches.
 func (m *commandMetrics) noteCodec(codec string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
