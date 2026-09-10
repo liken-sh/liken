@@ -4,7 +4,7 @@ weight: 30
 ---
 
 The driver serves its metrics at `/metrics` on the port named
-`metrics`, `9280` by default, on both the node plugin and the
+`metrics`, `9200` by default, on both the node plugin and the
 controller. The base in `deploy/` needs no Prometheus and applies
 without one. A cluster owner who runs the prometheus-operator adds the
 `deploy/monitoring` component beside the base to scrape both pods:

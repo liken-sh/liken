@@ -15,7 +15,7 @@ graphs before they are fixes.
 
 ## The design
 
-Layers 1 and 2 under the `gitcsi_` prefix, on port 9280. The driver's
+Layers 1 and 2 under the `gitcsi_` prefix, on port 9200. The driver's
 CSI calls are its reconcile loop: `kind` is the CSI operation.
 
 | Component | Metric | Type | Why |

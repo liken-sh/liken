@@ -151,7 +151,7 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 		endpoint:   "unix:///csi/csi.sock",
 		nodeID:     "node-1",
 		store:      "/var/lib/liken/pod-storage/git-csi",
-		metrics:    ":9280",
+		metrics:    ":9200",
 		sweepAfter: defaultSweepAfter,
 		demandMin:  defaultDemandMin,
 	}
@@ -166,7 +166,7 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		"--endpoint", "unix:///run/csi/csi.sock",
 		"--node-id", "node-1",
 		"--store", "/srv/git-csi",
-		"--metrics", "127.0.0.1:9280",
+		"--metrics", "127.0.0.1:9200",
 		"--sweep-after", "48h",
 		"--demand-min-interval", "30s",
 	}, &bytes.Buffer{})
@@ -177,7 +177,7 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		endpoint:   "unix:///run/csi/csi.sock",
 		nodeID:     "node-1",
 		store:      "/srv/git-csi",
-		metrics:    "127.0.0.1:9280",
+		metrics:    "127.0.0.1:9200",
 		sweepAfter: 48 * time.Hour,
 		demandMin:  30 * time.Second,
 	}
@@ -224,7 +224,7 @@ func TestTheControllerSubcommandNamesNoNode(t *testing.T) {
 	want := config{
 		endpoint:   "unix:///csi/csi.sock",
 		store:      defaultStore,
-		metrics:    ":9280",
+		metrics:    ":9200",
 		webhook:    defaultWebhook,
 		controller: true,
 	}
@@ -237,7 +237,7 @@ func TestTheControllerSubcommandTakesEveryFlag(t *testing.T) {
 	cfg, err := parse([]string{
 		"controller",
 		"--endpoint", "unix:///run/csi/csi.sock",
-		"--metrics", "127.0.0.1:9280",
+		"--metrics", "127.0.0.1:9200",
 		"--webhook", "127.0.0.1:8080",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -246,7 +246,7 @@ func TestTheControllerSubcommandTakesEveryFlag(t *testing.T) {
 	want := config{
 		endpoint:   "unix:///run/csi/csi.sock",
 		store:      defaultStore,
-		metrics:    "127.0.0.1:9280",
+		metrics:    "127.0.0.1:9200",
 		webhook:    "127.0.0.1:8080",
 		controller: true,
 	}

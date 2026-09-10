@@ -153,7 +153,7 @@ func parseNode(args []string, out io.Writer) (*config, error) {
 	store := flags.String("store", defaultStore,
 		"the directory that holds the repositories and work trees")
 	// An empty --metrics serves no metrics.
-	metrics := flags.String("metrics", ":9280",
+	metrics := flags.String("metrics", ":9200",
 		"the address the metrics listener takes; empty serves none")
 	// The node plugin never learns that a PersistentVolume was
 	// deleted, so a work tree nothing stages for this long is removed.
@@ -188,7 +188,7 @@ func parseController(args []string, out io.Writer) (*config, error) {
 
 	endpoint := flags.String("endpoint", "unix:///csi/csi.sock",
 		"the address the CSI socket listens on")
-	metrics := flags.String("metrics", ":9280",
+	metrics := flags.String("metrics", ":9200",
 		"the address the metrics listener takes; empty serves none")
 	// A forge posts to this address, through an Ingress the person
 	// writes.

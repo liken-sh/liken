@@ -94,16 +94,16 @@ spec:
           args:
             - controller
             - --endpoint=unix:///csi/csi.sock
-            - --metrics=:9280
+            - --metrics=:9200
             - --webhook=:8080
           # The metrics and the webhook are on the pod's own address. A
           # forge outside the cluster reaches the webhook port through
-          # the Service above and an Ingress the person writes. 9280 is
-          # this repository's port in liken's shared Prometheus
-          # contract, milestone 65 of the liken repository.
+          # the Service above and an Ingress the person writes. 9200 is
+          # the port every process serves metrics on, in liken's shared
+          # Prometheus contract, milestone 65 of the liken repository.
           ports:
             - name: metrics
-              containerPort: 9280
+              containerPort: 9200
             - name: webhook
               containerPort: 8080
           # The controller mounts nothing and holds no store, so it
