@@ -6,10 +6,15 @@
 # The relabeling carries the node name onto every series, because this
 # pod runs one per machine and the fleet dashboard groups by the
 # machine the reading came from, not by the pod name Kubernetes chose.
+# The namespace is explicit here, not on the Component. A Component's
+# own namespace field would move the dashboard ConfigMap into
+# liken-system too, and the ConfigMap belongs in monitoring beside the
+# Prometheus that reads it.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: display-operator
+  namespace: liken-system
 spec:
   selector:
     matchLabels:
