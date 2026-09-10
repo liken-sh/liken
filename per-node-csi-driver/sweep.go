@@ -18,6 +18,11 @@ import (
 // PersistentVolume again, whatever the watch delivered in between.
 const defaultResync = 10 * time.Minute
 
+// watchedKind is the resource kind pernodecsi_watch_restarts_total
+// reports: the one watch the sweep holds, on the PersistentVolumes of
+// this driver.
+const watchedKind = "PersistentVolume"
+
 // sweeping is the watch on PersistentVolumes and the pass it wakes. One
 // watch covers every copy on the node.
 type sweeping struct {
@@ -54,6 +59,7 @@ func (s *sweeping) follow(ctx context.Context) {
 	informer := factory.Core().V1().PersistentVolumes().Informer()
 	deleted := make(chan struct{}, 1)
 	s.watchDeletes(ctx, informer, deleted)
+	s.watchErrors(informer)
 	factory.Start(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
 		s.logger.WarnContext(ctx, "no sweep", "reason", "the volumes did not sync")
@@ -95,6 +101,25 @@ func (s *sweeping) watchDeletes(
 		// refused costs latency and nothing more.
 		s.logger.WarnContext(ctx, "the deletes are not watched", "error", err)
 	}
+}
+
+// watchErrors counts a restart every time the reflector's list and
+// watch call ends and it opens the watch again, whether the API server
+// closed it or refused it. The pass on the tick still finds every
+// orphan and every deletion the resync missed, so a handler the
+// informer refuses costs a metric and nothing more.
+func (s *sweeping) watchErrors(informer cache.SharedIndexInformer) {
+	if err := informer.SetWatchErrorHandler(s.handleWatchError); err != nil {
+		s.logger.Warn("the watch restarts are not counted", "error", err)
+	}
+}
+
+// handleWatchError is the reflector's WatchErrorHandler. It is a method
+// and not a closure so a test can call it directly, with no real watch
+// failure to arrange.
+func (s *sweeping) handleWatchError(_ *cache.Reflector, err error) {
+	s.node.readings.watchRestarted(watchedKind)
+	s.logger.Info("the watch restarted", "error", err)
 }
 
 // handlesOf returns the handles that this driver's PersistentVolumes

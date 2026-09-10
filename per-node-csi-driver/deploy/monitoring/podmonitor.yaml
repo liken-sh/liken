@@ -1,0 +1,17 @@
+# The node plugin is the only pod the driver runs, so it is the only
+# PodMonitor this component holds. It selects the DaemonSet's own pod
+# label and reads the container port named metrics, which node.yaml
+# declares whether or not this component is ever added.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: per-node-csi-driver-node
+spec:
+  selector:
+    matchLabels:
+      app: per-node-csi-driver-node
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

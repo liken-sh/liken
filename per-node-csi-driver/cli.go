@@ -89,8 +89,9 @@ func parse(args []string, out io.Writer) (*config, error) {
 		"the name of the node this plugin runs on")
 	store := flags.String("store", defaultStore,
 		"the directory that holds this node's copies")
-	// An empty --metrics serves no metrics.
-	metrics := flags.String("metrics", ":9808",
+	// An empty --metrics serves no metrics. 9290 is this driver's port
+	// in liken's organization-wide port table, milestone 65.
+	metrics := flags.String("metrics", ":9290",
 		"the address the metrics listener takes, or empty to serve none")
 	sweepEvery := flags.Duration("sweep-every", defaultSweepEvery,
 		"how often the driver looks for a copy no PersistentVolume names")

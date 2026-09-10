@@ -13,5 +13,5 @@ spec:
             - --endpoint=unix:///csi/csi.sock
             - --node-id=$(NODE_NAME)
             - --store=/var/lib/liken/pod-storage/per-node
-            - --metrics=:9808
+            - --metrics=:9290
             - --sweep-every=15s

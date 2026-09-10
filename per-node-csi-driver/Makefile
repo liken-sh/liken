@@ -11,6 +11,12 @@
 .PHONY: test
 test: test-go test-docs
 
+# ci is the one target both a workstation and the CI workflow run: the
+# same gate under one name, so a person never wonders which target the
+# workflow files actually call.
+.PHONY: ci
+ci: test
+
 # The coverage gate measures on its own run, on a pinned toolchain.
 # Go 1.27 splits a basic block into one profile row per run of code
 # inside it, and repeats the whole block's statement count on every
@@ -40,9 +46,30 @@ test-go:
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
 .PHONY: test-docs
-test-docs:
+test-docs: manifest-check
 	$(MAKE) -C docs test
 	$(MAKE) -C docs build
+
+# The monitoring component carries no code and no lab drill, so a
+# kustomize build is its whole proof: the base builds alone, the way a
+# cluster with no Prometheus applies it, and the base builds again with
+# the component added, the way a fleet repository with the
+# prometheus-operator would take it.
+.PHONY: manifest-check
+manifest-check:
+	kubectl kustomize deploy/ > /dev/null
+	tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+	ln -s "$$PWD/deploy" "$$tmp/deploy" && \
+	mkdir "$$tmp/consumer" && \
+	printf '%s\n' \
+		'apiVersion: kustomize.config.k8s.io/v1beta1' \
+		'kind: Kustomization' \
+		'resources:' \
+		'  - ../deploy' \
+		'components:' \
+		'  - ../deploy/monitoring' \
+		> "$$tmp/consumer/kustomization.yaml" && \
+	kubectl kustomize "$$tmp/consumer" > /dev/null
 
 # The coverage report is the profile the gate already measured, drawn
 # as one HTML page for the site to publish. `test` does not depend on

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -80,6 +81,85 @@ func TestTheServerRegistersTheNodeServiceAndNoControllerService(t *testing.T) {
 		t.Context(), &csi.ControllerGetCapabilitiesRequest{})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("the server answered %v, want Unimplemented from the Controller service", err)
+	}
+}
+
+func TestOperationNameIsTheGRPCMethodAfterItsLastSlash(t *testing.T) {
+	for _, c := range []struct {
+		fullMethod string
+		want       string
+	}{
+		{"/csi.v1.Node/NodePublishVolume", "NodePublishVolume"},
+		{"/csi.v1.Identity/GetPluginInfo", "GetPluginInfo"},
+		{"NodeGetInfo", "NodeGetInfo"},
+	} {
+		if got := operationName(c.fullMethod); got != c.want {
+			t.Errorf("operationName(%q) = %q, want %q", c.fullMethod, got, c.want)
+		}
+	}
+}
+
+func TestMetricsInterceptorRecordsTheCallUnderItsOperationName(t *testing.T) {
+	readings := newMetrics()
+	call := &grpc.UnaryServerInfo{FullMethod: "/csi.v1.Node/NodePublishVolume"}
+	handle := func(ctx context.Context, request any) (any, error) { return "answer", nil }
+	answer, err := metricsInterceptor(readings)(t.Context(), nil, call, handle)
+	if err != nil || answer != "answer" {
+		t.Fatalf("the interceptor answered (%v, %v), want (answer, nil)", answer, err)
+	}
+	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 0 {
+		t.Errorf("pernodecsi_reconcile_errors_total reads %v, want 0 for a call with no error", got)
+	}
+}
+
+func TestMetricsInterceptorCountsAnErrorUnderItsOperationName(t *testing.T) {
+	readings := newMetrics()
+	call := &grpc.UnaryServerInfo{FullMethod: "/csi.v1.Node/NodePublishVolume"}
+	failed := errors.New("refused")
+	handle := func(ctx context.Context, request any) (any, error) { return nil, failed }
+	if _, err := metricsInterceptor(readings)(t.Context(), nil, call, handle); !errors.Is(err, failed) {
+		t.Fatalf("the interceptor answered %v, want %v", err, failed)
+	}
+	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 1 {
+		t.Errorf("pernodecsi_reconcile_errors_total reads %v, want 1", got)
+	}
+}
+
+func TestTheServerRecordsTheReconcileMetricPerCall(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config{
+		endpoint:   "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:     "node-1",
+		store:      filepath.Join(dir, "store"),
+		metrics:    "127.0.0.1:0",
+		sweepEvery: time.Hour,
+	}
+	served, err := newServer(t.Context(), cfg, quietLogger())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan error, 1)
+	go func() { stopped <- served.serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-stopped; err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	})
+
+	client, err := grpc.NewClient(cfg.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { client.Close() })
+	if _, err := csi.NewIdentityClient(client).GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
+		t.Fatalf("GetPluginInfo: %v", err)
+	}
+
+	body := fetch(t, "http://"+served.metrics.Addr().String()+"/metrics")
+	if !strings.Contains(body, `pernodecsi_reconcile_duration_seconds_count{kind="GetPluginInfo"} 1`) {
+		t.Errorf("the metrics listener answered %q, want one observation under GetPluginInfo", body)
 	}
 }
 

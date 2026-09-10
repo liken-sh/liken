@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
@@ -73,7 +74,8 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	// is how a deletion reaches the copies on this node.
 	go newSweeping(answering, posting.client, cfg.sweepEvery, logger).follow(ctx)
 
-	registered := grpc.NewServer(grpc.UnaryInterceptor(logCalls(logger)))
+	registered := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(metricsInterceptor(readings), logCalls(logger)))
 	csi.RegisterIdentityServer(registered, &identity{store: cfg.store})
 	csi.RegisterNodeServer(registered, answering)
 
@@ -114,6 +116,33 @@ func (s *server) serve(ctx context.Context) error {
 		}
 		return nil
 	}
+}
+
+// metricsInterceptor times every RPC and counts the ones that answer
+// with an error, under the kind label liken's shared dashboard reads:
+// the CSI operation the kubelet or the registrar called.
+func metricsInterceptor(readings *metrics) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		request any,
+		call *grpc.UnaryServerInfo,
+		handle grpc.UnaryHandler,
+	) (any, error) {
+		started := time.Now()
+		answer, err := handle(ctx, request)
+		readings.recordCall(operationName(call.FullMethod), time.Since(started), err)
+		return answer, err
+	}
+}
+
+// operationName is the CSI operation a gRPC method name carries, the
+// part after its last slash: NodePublishVolume out of
+// /csi.v1.Node/NodePublishVolume.
+func operationName(fullMethod string) string {
+	if i := strings.LastIndex(fullMethod, "/"); i != -1 {
+		return fullMethod[i+1:]
+	}
+	return fullMethod
 }
 
 // logCalls writes one line per RPC with its name and its status code.

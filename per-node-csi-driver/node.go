@@ -118,6 +118,7 @@ func (n *node) NodePublishVolume(
 	}
 
 	if err := n.mount(request, handle, target); err != nil {
+		n.readings.mountFailed()
 		n.events.post(ctx, pod, corev1.EventTypeWarning, reasonMountFailed,
 			status.Convert(err).Message())
 		return nil, err

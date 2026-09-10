@@ -39,6 +39,7 @@ func (n *node) keepHold(ctx context.Context, handle string, taken hold) {
 	n.mu.Lock()
 	n.holds[handle] = taken
 	n.mu.Unlock()
+	n.reportVolumes()
 
 	path := n.store.holdPath(handle)
 	content, err := json.Marshal(taken)
@@ -60,6 +61,7 @@ func (n *node) dropHold(ctx context.Context, handle string) {
 	n.mu.Lock()
 	delete(n.holds, handle)
 	n.mu.Unlock()
+	n.reportVolumes()
 
 	if err := os.Remove(n.store.holdPath(handle)); err != nil && !os.IsNotExist(err) {
 		n.logger.WarnContext(ctx, "the hold was not removed",
@@ -77,6 +79,16 @@ func (n *node) heldHandles() map[string]bool {
 		held[handle] = true
 	}
 	return held
+}
+
+// reportVolumes sets the volumes gauge to how many handles this node
+// holds right now. It runs after every change to n.holds, the one map
+// that says what is mounted.
+func (n *node) reportVolumes() {
+	n.mu.Lock()
+	count := len(n.holds)
+	n.mu.Unlock()
+	n.readings.setVolumes(count)
 }
 
 // resume rebuilds the holds from the disk after a restart. The kernel
@@ -107,6 +119,10 @@ func (n *node) resume(ctx context.Context) {
 		n.holds[handle] = taken
 		n.mu.Unlock()
 	}
+	// The two branches above already call reportVolumes through
+	// dropHold. This call covers the holds resume restores by writing
+	// n.holds directly, which do not.
+	n.reportVolumes()
 }
 
 // readHold reads one pod's claim on a copy from its file.

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -213,6 +215,49 @@ func TestACopyTheDriverCannotRemoveIsLoggedAndTheSweepGoesOn(t *testing.T) {
 	if !strings.Contains(written.String(), "the copy stayed") {
 		t.Errorf("the log reads %q, want it to say the copy stayed", written)
 	}
+}
+
+func TestHandleWatchErrorCountsARestartAndLogsIt(t *testing.T) {
+	answering := testDriver(t)
+	written := &bytes.Buffer{}
+	sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour,
+		slog.New(slog.NewTextHandler(written, nil)))
+
+	sweeper.handleWatchError(nil, io.ErrUnexpectedEOF)
+
+	if got := testutil.ToFloat64(answering.readings.watchRestarts.WithLabelValues(watchedKind)); got != 1 {
+		t.Errorf("pernodecsi_watch_restarts_total reads %v, want 1", got)
+	}
+	if !strings.Contains(written.String(), "the watch restarted") {
+		t.Errorf("the log reads %q, want it to say the watch restarted", written)
+	}
+}
+
+func TestWatchErrorsLogsAHandlerAnInformerThatHasStartedRefuses(t *testing.T) {
+	answering := testDriver(t)
+	written := &bytes.Buffer{}
+	sweeper := newSweeping(answering.node, fake.NewClientset(), time.Hour,
+		slog.New(slog.NewTextHandler(written, nil)))
+
+	informer := startedInformer(t, sweeper.client)
+	sweeper.watchErrors(informer)
+
+	if !strings.Contains(written.String(), "the watch restarts are not counted") {
+		t.Errorf("the log reads %q, want it to say the restarts are not counted", written)
+	}
+}
+
+// startedInformer returns an informer whose run has begun, which is
+// what makes SetWatchErrorHandler refuse a handler set after the fact.
+func startedInformer(t *testing.T, client kubernetes.Interface) cache.SharedIndexInformer {
+	t.Helper()
+	informer := informers.NewSharedInformerFactory(client, time.Hour).
+		Core().V1().PersistentVolumes().Informer()
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go informer.Run(stop)
+	cache.WaitForCacheSync(stop, informer.HasSynced)
+	return informer
 }
 
 func TestAnInformerThatHasStoppedWatchesNoDeletes(t *testing.T) {

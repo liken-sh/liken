@@ -37,13 +37,15 @@ spec:
             - --endpoint=unix:///csi/csi.sock
             - --node-id=$(NODE_NAME)
             - --store=/var/lib/liken/pod-storage/per-node
-            - --metrics=:9808
+            - --metrics=:9290
           # The metrics are on the pod's own address, not a host
           # port: a hostPort cannot be held to the node's loopback, and
-          # a scrape reaches the pod through the cluster network.
+          # a scrape reaches the pod through the cluster network. 9290
+          # is this driver's port in liken's organization-wide port
+          # table, milestone 65.
           ports:
             - name: metrics
-              containerPort: 9808
+              containerPort: 9290
           env:
             # NodeGetInfo answers with the node's name, and the manifest
             # names no machine, so the name comes from the downward API.

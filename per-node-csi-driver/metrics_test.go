@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +34,85 @@ func TestAVolumeTheNodeNoLongerPublishesLeavesTheGauge(t *testing.T) {
 	if count := testutil.CollectAndCount(readings.copyBytes); count != 0 {
 		t.Errorf("the gauge carries %d volumes, want none", count)
 	}
+}
+
+func TestBuildInfoNamesTheComponentAndTheVersion(t *testing.T) {
+	readings := newMetrics()
+	body := scrape(t, readings)
+	want := `liken_build_info{component="per-node-csi-driver",version="dev"} 1`
+	if !strings.Contains(body, want) {
+		t.Errorf("the registry reads %q, want %q in it", body, want)
+	}
+}
+
+func TestTheRegistryCarriesTheGoAndProcessRuntimeMetrics(t *testing.T) {
+	body := scrape(t, newMetrics())
+	for _, want := range []string{"go_goroutines", "process_start_time_seconds"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the registry reads %q, want %q in it", body, want)
+		}
+	}
+}
+
+func TestRecordCallCountsAnErrorUnderItsKind(t *testing.T) {
+	readings := newMetrics()
+	readings.recordCall("NodePublishVolume", time.Millisecond, nil)
+	readings.recordCall("NodePublishVolume", time.Millisecond, errors.New("refused"))
+	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 1 {
+		t.Errorf("pernodecsi_reconcile_errors_total reads %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodeUnpublishVolume")); got != 0 {
+		t.Errorf("pernodecsi_reconcile_errors_total under a kind with no call reads %v, want 0", got)
+	}
+}
+
+func TestRecordCallLeavesTheDurationCountAtTheNumberOfCalls(t *testing.T) {
+	readings := newMetrics()
+	readings.recordCall("NodeGetVolumeStats", time.Millisecond, nil)
+	readings.recordCall("NodeGetVolumeStats", time.Millisecond, nil)
+	body := scrape(t, readings)
+	if !strings.Contains(body, `pernodecsi_reconcile_duration_seconds_count{kind="NodeGetVolumeStats"} 2`) {
+		t.Errorf("the registry reads %q, want two observations under NodeGetVolumeStats", body)
+	}
+}
+
+func TestWatchRestartedCountsOneRestartUnderTheKind(t *testing.T) {
+	readings := newMetrics()
+	readings.watchRestarted(watchedKind)
+	readings.watchRestarted(watchedKind)
+	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(watchedKind)); got != 2 {
+		t.Errorf("pernodecsi_watch_restarts_total reads %v, want 2", got)
+	}
+}
+
+func TestSetVolumesReadsTheCountItWasLastSetTo(t *testing.T) {
+	readings := newMetrics()
+	readings.setVolumes(3)
+	if got := testutil.ToFloat64(readings.volumes); got != 3 {
+		t.Errorf("pernodecsi_volumes reads %v, want 3", got)
+	}
+	readings.setVolumes(1)
+	if got := testutil.ToFloat64(readings.volumes); got != 1 {
+		t.Errorf("pernodecsi_volumes reads %v, want 1 after the second set", got)
+	}
+}
+
+func TestMountFailedCountsOneFailure(t *testing.T) {
+	readings := newMetrics()
+	readings.mountFailed()
+	if got := testutil.ToFloat64(readings.mountFailures); got != 1 {
+		t.Errorf("pernodecsi_mount_failures_total reads %v, want 1", got)
+	}
+}
+
+// scrape serves the registry once, without a network listener, so a
+// test reads the same text a Prometheus scrape would.
+func scrape(t *testing.T, readings *metrics) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	recorded := httptest.NewRecorder()
+	readings.handler().ServeHTTP(recorded, request)
+	return recorded.Body.String()
 }
 
 func TestAnEmptyMetricsAddressServesNoMetrics(t *testing.T) {
