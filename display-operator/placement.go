@@ -26,10 +26,6 @@ const (
 	emptyRegion       = "empty"
 )
 
-// The kind a region that states no transition is placed with, so the
-// executor always reads a stated kind and never an empty string.
-const transitionNone = "none"
-
 // The whole screen, which is the default layout's one region.
 var wholeScreen = LayoutRect{Width: 1, Height: 1}
 
