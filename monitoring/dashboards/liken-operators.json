@@ -110,7 +110,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (job, kind) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|gitcsi|pernodecsi)_reconcile_duration_seconds_count\"}[5m]))",
+          "expr": "sum by (job, kind) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|git_csi|per_node_csi)_reconcile_duration_seconds_count\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{__name__}} {{job}}/{{kind}}"
         }
@@ -180,7 +180,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (job, kind) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|gitcsi|pernodecsi)_reconcile_errors_total\"}[5m]))",
+          "expr": "sum by (job, kind) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|git_csi|per_node_csi)_reconcile_errors_total\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{__name__}} {{job}}/{{kind}}"
         }
@@ -250,7 +250,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.50, sum by (job, kind, le) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|gitcsi|pernodecsi)_reconcile_duration_seconds_bucket\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (job, kind, le) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|git_csi|per_node_csi)_reconcile_duration_seconds_bucket\"}[5m])))",
           "refId": "A",
           "legendFormat": "p50 {{__name__}} {{job}}/{{kind}}"
         },
@@ -259,7 +259,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (job, kind, le) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|gitcsi|pernodecsi)_reconcile_duration_seconds_bucket\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (job, kind, le) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|git_csi|per_node_csi)_reconcile_duration_seconds_bucket\"}[5m])))",
           "refId": "B",
           "legendFormat": "p99 {{__name__}} {{job}}/{{kind}}"
         }
@@ -329,7 +329,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (job, kind) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|gitcsi|pernodecsi)_watch_restarts_total\"}[5m]))",
+          "expr": "sum by (job, kind) (rate({__name__=~\"(liken|display|media|library|audio|bluetooth|equipment|git_csi|per_node_csi)_watch_restarts_total\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{__name__}} {{job}}/{{kind}}"
         }

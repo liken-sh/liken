@@ -89,8 +89,8 @@ program, so it has no prefix and no metrics.
 | audio-operator | `audio_` |
 | bluetooth-operator | `bluetooth_` |
 | equipment-operator | `equipment_` |
-| git-csi-driver | `gitcsi_` |
-| per-node-csi-driver | `pernodecsi_` |
+| git-csi-driver | `git_csi_` |
+| per-node-csi-driver | `per_node_csi_` |
 
 Names follow the
 [Prometheus naming rules](https://prometheus.io/docs/practices/naming/):
