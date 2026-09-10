@@ -14,20 +14,23 @@ import (
 )
 
 // mustClearPlayTopics reads the two empty retained publishes one run's clear
-// makes, and reports which topics they named.
+// makes. A whole pass publishes each unit's presentable state as well, so
+// this reads past every topic that is not one of the run's two.
 func mustClearPlayTopics(t *testing.T, broker *fakeBroker, namespace, name string) {
 	t.Helper()
+	status := playStatusTopic(defaultTopicBase, namespace, name)
+	availability := playAvailabilityTopic(defaultTopicBase, namespace, name)
 	cleared := map[string]bool{}
-	for range 2 {
+	for !cleared[status] || !cleared[availability] {
 		published := waitForPublish(t, broker.pubs)
+		if published.topic != status && published.topic != availability {
+			continue
+		}
 		if len(published.payload) != 0 || !published.retained {
 			t.Errorf("the clear published %+v, want an empty retained payload", published)
+			return
 		}
 		cleared[published.topic] = true
-	}
-	if !cleared[playStatusTopic(defaultTopicBase, namespace, name)] ||
-		!cleared[playAvailabilityTopic(defaultTopicBase, namespace, name)] {
-		t.Errorf("cleared topics = %v, want the status and the availability", cleared)
 	}
 }
 

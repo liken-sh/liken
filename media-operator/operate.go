@@ -382,6 +382,30 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
 		return
 	}
+	// The endings are marked before anything else the pass does. The
+	// sidecar holds mpv alive for a short grace after its ending report,
+	// and the label is what the compositor fades the surface on, so the
+	// label has that grace to reach display-operator and no longer. The
+	// loop is its own, ahead of the read below, so the read does not
+	// delay the label. ending.go says what reads it.
+	for index := range list.Items {
+		o.labelEnding(&list.Items[index])
+	}
+	// Each unit's presentable state comes from the plays list and the
+	// report desk, and the pass holds both by now, so it publishes here.
+	// A person is waiting: the browser's return and the room's lights key
+	// on the unit reading Idle. Everything the pass reads below is a read
+	// the answer does not come from, and a dozen of them cost a few
+	// milliseconds each on a quiet API server and hundreds on a busy one.
+	// reconcilePlayers publishes the same state again at the end of the
+	// pass, once the focus mark and the controllers' links are settled,
+	// and an unchanged payload is not published twice.
+	players, playersErr := ListPlayers(o.client)
+	if playersErr != nil {
+		fmt.Fprintf(os.Stderr, "listing players: %v\n", playersErr)
+	} else {
+		o.publishPlayerStatuses(players.Items, list.Items)
+	}
 	// Read the household default once per pass. A missing default is not an error,
 	// and a read that fails skips the tier this pass.
 	defaults, err := GetMediaPreferences(o.client, mediaPreferencesName)
@@ -400,10 +424,6 @@ func (o *operator) pass() {
 		play := &list.Items[index]
 		namespace, name := play.Metadata.Namespace, play.Metadata.Name
 		live[runKey(namespace, name)] = true
-		// The ending label goes on first, ahead of every step below that
-		// deletes this Play's pod, because the compositor fades a surface
-		// that still draws. ending.go says what reads the label.
-		o.labelEnding(play)
 		// A deleting Play keeps its pod until its finalizers clear, because
 		// garbage collection waits for them, and the pod keeps the unit's claim
 		// while it waits. So releasePlay deletes the pod itself, the claim frees
@@ -471,10 +491,10 @@ func (o *operator) pass() {
 	} else {
 		remoteClaims = o.observePeripherals(remotes.Items)
 	}
-	players, err := ListPlayers(o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
-	} else {
+	// The reconcile reads the Players this pass listed before it published
+	// each unit's presentable state, so one pass lists the collection
+	// once.
+	if playersErr == nil {
 		// The idle clock reads the household zone, one setting per cluster from
 		// the default MediaPreferences alone, so the pass resolves it once and
 		// hands it to every Player's idle pod.
@@ -808,6 +828,12 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 // the same derivation. The API server holds what exists and what is
 // desired, and the bus carries the presentable now, which is why the idle
 // screen reads a topic and holds no API credentials.
+//
+// The pass published that presentable state before it read any of the
+// collections this reconcile reads. So the publish here is the corrected
+// one: it carries the focus mark this pass arbitrated and the links the
+// Peripherals reported, and it writes nothing where those changed
+// nothing.
 func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string, defaultIdle *IdlePolicy) {
 	published := make(map[string]bool, len(players))
 	live := make(map[string]bool, len(players))

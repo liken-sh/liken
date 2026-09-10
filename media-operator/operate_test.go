@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -67,6 +68,12 @@ type fakeCluster struct {
 	// The collection paths this server refuses, so a test proves what a
 	// pass does with a read it cannot make.
 	fails map[string]bool
+
+	// The requests this server answers only once the test releases them,
+	// keyed the way requests holds them. A held request is a slow API
+	// server, so a test proves what a pass did before it reached that
+	// request and not merely what the pass left behind.
+	held map[string]chan struct{}
 }
 
 // One apply the operator made: the Display it named, the block
@@ -101,12 +108,27 @@ func newFakeCluster() *fakeCluster {
 
 		peripherals: map[string]*Peripheral{},
 		fails:       map[string]bool{},
+		held:        map[string]chan struct{}{},
 	}
+}
+
+// hold makes the server answer one request only once the test calls the
+// release this answers with. The key is the request as requests records
+// it, the method and the path. The release runs at most once, so a caller
+// defers it against a failure and calls it again at the moment it means
+// to let the request through.
+func (f *fakeCluster) hold(request string) func() {
+	held := make(chan struct{})
+	f.held[request] = held
+	return sync.OnceFunc(func() { close(held) })
 }
 
 func (f *fakeCluster) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+		if release, holding := f.held[r.Method+" "+r.URL.Path]; holding {
+			<-release
+		}
 		if f.fails[r.URL.Path] {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -568,10 +590,10 @@ func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster.requests = nil
 	media.pass()
 
-	want := "GET " + playsPath +
+	want := "GET " + playsPath + ",GET " + playersPath +
 		",GET " + mediaPrefsPath + "/" + mediaPreferencesName +
 		",GET " + remotesAllPath + ",GET " + peripheralsPath +
-		",GET " + playersPath + ",GET " + keymapsPath
+		",GET " + keymapsPath
 	if strings.Join(cluster.requests, ",") != want {
 		t.Errorf("requests = %v, want the collection lists and the default MediaPreferences", cluster.requests)
 	}
@@ -1958,6 +1980,19 @@ func theaterVolumeTopic() string {
 	return playerVolumeTopic(defaultTopicBase, "house", "theater")
 }
 
+// mustPublishVolume reads publishes until the unit's level arrives, and
+// answers it. A whole pass publishes each unit's presentable state as
+// well, so a test that waits for a level reads past what is not one.
+func mustPublishVolume(t *testing.T, broker *fakeBroker) brokerPublish {
+	t.Helper()
+	for {
+		published := waitForPublish(t, broker.pubs)
+		if published.topic == theaterVolumeTopic() {
+			return published
+		}
+	}
+}
+
 // theaterVolumeOwnerTopic is the owner mark for the one unit these
 // tests write.
 func theaterVolumeOwnerTopic() string {
@@ -2050,8 +2085,7 @@ func TestAPlayWritesItsLevelThroughBeforeThePodExists(t *testing.T) {
 
 	media.pass()
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, theaterVolumeTopic())
+	published := mustPublishVolume(t, broker)
 	mustMatch(t, published.retained, true)
 	mustMatch(t, string(published.payload), `{"level":35,"muted":true}`)
 	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
@@ -2070,7 +2104,7 @@ func TestAPlayWritesItsLevelThroughOnlyOnce(t *testing.T) {
 	media, broker := volumeOperator(t, cluster)
 
 	media.pass()
-	waitForPublish(t, broker.pubs)
+	mustPublishVolume(t, broker)
 	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":60,"muted":false}`))
 
 	media.pass()
