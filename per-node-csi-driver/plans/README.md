@@ -20,7 +20,7 @@ decided yet what work they become.
 * [00, Design](00-design.md). The volume as a set of copies, one per
   node, the six invariants that hold them, the store on each node, and
   what the driver reports.
-* [01, Prometheus metrics](01-prometheus-metrics.md). In progress. The
+* [01, Prometheus metrics](completed/01-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10. The
   driver serves Prometheus metrics on port 9200 under liken's shared
   contract: CSI operations as the reconcile layer, volumes mounted, and
   mount failures.

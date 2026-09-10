@@ -21,7 +21,7 @@ components:
 ## The metrics
 
 The names follow the contract in
-[liken milestone 65](https://github.com/liken-sh/liken/blob/main/plans/65-prometheus-metrics.md):
+[liken milestone 65](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md):
 the runtime's own `go_*` and `process_*` series, `liken_build_info`, the
 CSI operations as the reconcile layer, and the driver's own gauges.
 
