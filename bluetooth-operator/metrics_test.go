@@ -75,6 +75,15 @@ func sameLabels(got []*dto.LabelPair, want map[string]string) bool {
 	return true
 }
 
+func TestTheRuntimeCollectorsAreOnTheRegistry(t *testing.T) {
+	body := scrape(t, newMetrics())
+	for _, want := range []string{"go_goroutines ", "process_start_time_seconds "} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the scrape carries no %s series", strings.TrimSpace(want))
+		}
+	}
+}
+
 func TestBuildInfoReportsTheComponentAndVersion(t *testing.T) {
 	previous := version
 	version = "2026.09.10-001"
@@ -172,12 +181,29 @@ func TestAListenerThatStopsOnItsOwnIsReported(t *testing.T) {
 // This is the whole shape of the promhttp handler, and the test
 // states the contract this operator relies on rather than trusting an
 // upstream library by assumption.
+// ownSeries keeps the lines the operator itself writes. The runtime's
+// go_* and process_* series move between two scrapes with no write in
+// between, because the collector reads the live process, so a test of
+// the operator's own registry leaves them out.
+func ownSeries(body string) string {
+	var kept []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "go_") || strings.HasPrefix(line, "process_") ||
+			strings.HasPrefix(line, "# HELP go_") || strings.HasPrefix(line, "# TYPE go_") ||
+			strings.HasPrefix(line, "# HELP process_") || strings.HasPrefix(line, "# TYPE process_") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func TestRepeatedScrapesLeaveTheRegistryUnchanged(t *testing.T) {
 	m := newMetrics()
 	m.countReconcileError(peripheralKind)
 
-	first := scrape(t, m)
-	second := scrape(t, m)
+	first := ownSeries(scrape(t, m))
+	second := ownSeries(scrape(t, m))
 	if first != second {
 		t.Errorf("two scrapes of an unchanged registry differ:\n%s\n---\n%s", first, second)
 	}

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -132,7 +133,11 @@ func newMetrics() *metrics {
 		Help: "When a read of a source last succeeded, in seconds since the epoch.",
 	}, []string{"source"})
 
-	m.registry.MustRegister(buildInfo, m.reconcileDuration, m.reconcileErrors,
+	// Layer 1 is the runtime's own numbers beside the build info.
+	m.registry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		buildInfo, m.reconcileDuration, m.reconcileErrors,
 		m.peripheralConnected, m.peripheralClaimed, m.peripheralBattery, m.disconnects,
 		m.adapterPresent, m.inputEvents, m.observationValid, m.observationSuccess)
 	return m
