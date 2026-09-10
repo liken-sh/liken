@@ -105,6 +105,13 @@ func TestUnpairRetiresTheDeviceThenRemovesTheBond(t *testing.T) {
 	if _, found := fixture.objects[testPeripheralPath()]; found {
 		t.Error("the Peripheral kept its finalizer after the bond was gone")
 	}
+	// The object is gone, so its metrics go with it. A series for a
+	// Peripheral nobody can read from the API would sit at whatever
+	// value its last pass wrote.
+	if _, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_peripheral_connected", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); found {
+		t.Error("bluetooth_peripheral_connected still carries the Peripheral after it was unpaired")
+	}
 }
 
 // A slice write that failed leaves the device published, so the bond

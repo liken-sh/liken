@@ -1,0 +1,21 @@
+# The monitoring component. liken milestone 65 gives every operator's
+# metrics wiring this shape: the base applies on a cluster with no
+# monitoring at all, and an owner who runs the prometheus-operator adds
+# this component beside the base to scrape it.
+#
+# A Component, not a second base, because it adds a PodMonitor to the
+# same namespace and labels the base already establishes, rather than
+# standing up a tree of its own. The namespace and the labels here
+# come from the parent kustomization that lists this component
+# beside ../deploy.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# The base sets this same namespace on the operator's own pod. A
+# component builds as part of the referencing kustomization's tree,
+# not inside the base's, so it states the namespace again rather than
+# inherit one the base never exports.
+namespace: liken-system
+
+resources:
+  - podmonitor.yaml

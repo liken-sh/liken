@@ -103,5 +103,9 @@ func (i *inventory) unpair(peripheral *Peripheral, address bonds.Address, device
 	}
 	delete(i.retired, address)
 	delete(i.retiring, address)
+	// The object is gone the moment the last finalizer lifts, so its
+	// series go with it. A metric that outlived the Peripheral would
+	// read as a controller nobody can see in the API.
+	i.metrics.forgetPeripheral(name)
 	fmt.Printf("unpair %s: the bond is gone and the Secret goes with the object\n", name)
 }

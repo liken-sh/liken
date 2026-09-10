@@ -19,12 +19,17 @@ COPY *.go ./
 # The bond storage the operator shares with bondfetch. A wildcard over
 # the root does not reach a directory, so this package is named.
 COPY bonds/ ./bonds/
+# VERSION names the release this binary is, for liken_build_info. A
+# build with no argument reports "dev", which is every local build and
+# every test run: nothing here reads its own version to decide what to
+# do, so the default costs nothing.
+ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. -s -w drop
 # the symbol table and the DWARF sections, which is a quarter of the
 # binary and costs nothing a reader of this program uses: Go reads
 # panic traces from its own pclntab, which stays.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /bluetooth-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /bluetooth-operator .
 
 FROM scratch
 COPY --from=build /bluetooth-operator /bluetooth-operator

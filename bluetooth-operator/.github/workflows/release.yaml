@@ -117,6 +117,9 @@ jobs:
           context: .
           file: Dockerfile
           load: true
+          # liken_build_info reports this argument, so a fleet's
+          # dashboard reads the release straight off the metric.
+          build-args: VERSION=${{ env.VERSION }}
           cache-from: type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache
           cache-to: type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache,mode=max
           tags: |

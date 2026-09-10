@@ -99,6 +99,12 @@ const (
 	requestPoll = 5 * time.Second
 )
 
+// metricsAddressVar names the address the /metrics listener binds, in
+// the form net.Listen takes: ":9250" or "127.0.0.1:9250". An empty
+// value, which is the zero value of an environment variable the pod
+// spec does not set, turns the listener off.
+const metricsAddressVar = "BLUETOOTH_METRICS_ADDRESS"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -167,14 +173,28 @@ func main() {
 	requests := watchPairingRequests(ctx, client, requestPoll, time.Now)
 	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests), settleWindow, settleLimit)
 
+	// readings is this operator's Prometheus registry. Every method on
+	// it accepts a nil receiver and records nothing, so wiring it in
+	// unconditionally costs nothing when the listener is off.
+	readings := newMetrics()
+	if address := os.Getenv(metricsAddressVar); address != "" {
+		listener, err := readings.listen(address)
+		if err != nil {
+			fatal("listening for metrics on %s: %v", address, err)
+		}
+		fmt.Printf("%s: serving metrics on %s\n", DriverName, address)
+		go serveMetrics(ctx, listener, readings)
+	}
+
 	// The first pass runs before any event, because the operator
 	// starts with controllers already paired and possibly already
 	// connected, and a restart must republish what the previous pod
 	// published.
 	held := newRelays(linuxInput{})
+	held.metrics = readings
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner, relays: held}
 	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held}
-	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace)
+	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace, readings)
 	readPairedSet := func() (map[string]controller, error) { return pairedControllers(conn) }
 	readAdapter := func() (bonds.Address, error) { return adapterAddress(conn) }
 	wake := func() {

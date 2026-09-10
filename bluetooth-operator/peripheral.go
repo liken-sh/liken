@@ -26,8 +26,10 @@ import (
 )
 
 // reconcilePeripherals makes the Peripherals under one Adapter agree
-// with the bonds bluetoothd holds.
-func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapshot, batteries map[bonds.Address]*hidBattery, pass *inventoryPass) {
+// with the bonds bluetoothd holds. claimed names the controllers a
+// prepared claim holds right now, by the Peripheral resource name
+// each one is published under.
+func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapshot, batteries map[bonds.Address]*hidBattery, claimed map[string]bool, pass *inventoryPass) {
 	adapterKey := adapter.Metadata.Name
 	list, err := get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
 	if err != nil {
@@ -76,7 +78,7 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 		if present {
 			i.reconcileDeviceSpec(peripheral, device)
 		}
-		i.writePeripheralStatus(peripheral, adapter, address, device, present, batteries[address])
+		i.writePeripheralStatus(peripheral, adapter, address, device, present, batteries[address], claimed[peripheral.Metadata.Name])
 		pass.owners[address] = OwnerReference{
 			APIVersion: pairingAPI,
 			Kind:       peripheralKind,
@@ -165,8 +167,14 @@ func (i *inventory) reconcileDeviceSpec(peripheral *Peripheral, device deviceSta
 // radio reports neither. Every other field is this pass's own reading.
 //
 // kernel is the level the kernel's power supply class reports for this
-// device, and nil when it reports none.
-func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery) {
+// device, and nil when it reports none. claimed reports whether a
+// prepared claim holds this controller right now.
+func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery, claimed bool) {
+	// first is true for a Peripheral this pass reports on before it has
+	// ever held a Connected condition, which is a creation or an
+	// adoption and never a transition this operator watched happen.
+	first := len(peripheral.Status.Conditions) == 0
+	wasConnected := connectionWas(peripheral.Status.Conditions, conditionTrue)
 	status := PeripheralStatus{
 		Address: address.Directory(),
 		Name:    attributeString(deviceReportedName(device)),
@@ -204,6 +212,20 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 			Source:     device.Battery.Source,
 		}
 	}
+
+	// The metrics report this pass's reading whether or not it changes
+	// what the object holds, because a scrape must see the current
+	// state and not only the passes that happened to write it.
+	name := peripheral.Metadata.Name
+	connected := status.Conditions[0].Status == conditionTrue
+	i.metrics.setPeripheralConnected(name, connected, wasConnected, first)
+	i.metrics.setPeripheralClaimed(name, claimed)
+	if status.Battery != nil {
+		i.metrics.setPeripheralBattery(name, &status.Battery.Percentage)
+	} else {
+		i.metrics.setPeripheralBattery(name, nil)
+	}
+
 	// The status holds a pointer and a slice, so the comparison is deep.
 	if reflect.DeepEqual(peripheral.Status, status) {
 		return
@@ -265,6 +287,19 @@ func connectedCondition(held []Condition, device deviceState, present bool, now 
 		}
 	}
 	return condition
+}
+
+// connectionWas reports whether the Connected condition a Peripheral
+// held before this pass carried the given status. A Peripheral with
+// no Connected condition yet, which is one this pass is adopting or
+// creating, answers false.
+func connectionWas(held []Condition, status string) bool {
+	for _, previous := range held {
+		if previous.Type == conditionConnected {
+			return previous.Status == status
+		}
+	}
+	return false
 }
 
 // hidOverGATT is the assigned number of the HID over GATT service.

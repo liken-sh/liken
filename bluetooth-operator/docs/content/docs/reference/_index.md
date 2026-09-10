@@ -12,4 +12,5 @@ that drives it. [Adapters](/docs/reference/adapters/),
 API, one page per resource with every field.
 [Devices](/docs/reference/devices/) describes the device classes,
 the devices with their attributes and taints, and what a prepared
-claim delivers to a container.
+claim delivers to a container. [Metrics](/docs/reference/metrics/)
+lists what the operator serves at `/metrics`.

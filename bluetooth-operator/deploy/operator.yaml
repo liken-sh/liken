@@ -225,6 +225,16 @@ spec:
             # the same socket on the same volume.
             - name: DBUS_SYSTEM_BUS_ADDRESS
               value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
+            # Milestone 65 gives bluetooth-operator port 9250, distinct
+            # from every other process in the organization because
+            # this pod runs on the host network. hostNetwork already
+            # exposes the port on the node, so the container needs no
+            # hostPort of its own.
+            - name: BLUETOOTH_METRICS_ADDRESS
+              value: ":9250"
+          ports:
+            - name: metrics
+              containerPort: 9250
           securityContext:
             # No capabilities at all. The operator reads bluetoothd
             # over D-Bus, walks sysfs, writes CDI files, relays input

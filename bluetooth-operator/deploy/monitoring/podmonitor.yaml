@@ -1,0 +1,20 @@
+# Scrapes the operator's own pod on the metrics port its container
+# names. The port is a name, not a number, so a scrape config survives
+# operator.yaml changing which number 9250 the pod template states.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: bluetooth-operator
+spec:
+  selector:
+    matchLabels:
+      app: bluetooth-operator
+  podMetricsEndpoints:
+    - port: metrics
+      # This pod runs on the host network, one per node, so a scrape
+      # is a fact about the machine, and the fleet dashboard selects
+      # by the node it ran on rather than by a pod name that changes
+      # on every restart.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

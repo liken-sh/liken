@@ -114,6 +114,32 @@ func TestEnsureCreatesOneVirtualDeviceForEachRealNode(t *testing.T) {
 	}
 }
 
+// bluetooth_input_events_total counts the records the pump moves from
+// a controller's real node to its virtual one, keyed by the
+// Peripheral resource name and not by the address form the rest of
+// this file uses.
+func TestInputEventsAreCountedByPeripheral(t *testing.T) {
+	kernel := newFakeKernel()
+	kernel.register("/dev/input/event5", "Wireless Controller")
+	relays := newRelays(kernel)
+	relays.metrics = newMetrics()
+	t.Cleanup(func() { relays.stop(testMAC) })
+	relays.ensure(testMAC, []string{"/dev/input/event5"})
+
+	if _, err := kernel.writer(t, "/dev/input/event5").Write(press(1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kernel.writer(t, "/dev/input/event5").Write(press(2)); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "both presses to be counted", func() bool {
+		count, found := metricValue(t, relays.metrics.registry,
+			"bluetooth_input_events_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12"})
+		return found && count == 2
+	})
+}
+
 // The relay is the whole delivery: what the controller sends must
 // arrive on the node the claim delivered.
 func TestEventsFromARealNodeReachTheVirtualDevice(t *testing.T) {

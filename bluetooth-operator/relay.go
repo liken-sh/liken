@@ -44,6 +44,11 @@ import (
 type relays struct {
 	kernel inputKernel
 
+	// metrics is this operator's Prometheus registry. A nil value
+	// records nothing, which is what every test that has no reason to
+	// check a metric gets by leaving the field unset.
+	metrics *metrics
+
 	mu   sync.Mutex
 	held map[string]*controllerRelay
 }
@@ -321,7 +326,7 @@ func (r *relays) read(mac string, relay *nodeRelay, path string, want delivery) 
 	relay.source, relay.sourcePath, relay.narrowed = source, path, false
 	relay.narrow(mac, want.classes)
 	relay.tune(mac, want.axes)
-	go r.pump(relay, source)
+	go r.pump(mac, relay, source)
 }
 
 // pump moves events from one real node into its virtual device until
@@ -340,7 +345,7 @@ func (r *relays) read(mac string, relay *nodeRelay, path string, want delivery) 
 // fd are the same events on the virtual device. A read error means the
 // controller disconnected and its node is gone, so the pump closes the
 // source and the relay waits for the next pass that names a node.
-func (r *relays) pump(relay *nodeRelay, source realNode) {
+func (r *relays) pump(mac string, relay *nodeRelay, source realNode) {
 	buffer := make([]byte, inputEventSize*64)
 	partial := 0
 	for {
@@ -351,6 +356,7 @@ func (r *relays) pump(relay *nodeRelay, source realNode) {
 				fmt.Fprintf(os.Stderr, "relay: writing to %s: %v\n", relay.device.node(), writeErr)
 				break
 			}
+			r.metrics.countInputEvents(deviceName(mac), whole/inputEventSize)
 			partial = copy(buffer, buffer[whole:partial])
 		}
 		if err != nil {

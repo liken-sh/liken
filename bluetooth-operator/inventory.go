@@ -76,9 +76,14 @@ type inventory struct {
 	// lags a pass, because the pass reads the tree before it opens
 	// anything, so the pass that closes a window reads this instead.
 	windowOpen bool
+
+	// metrics is this operator's Prometheus registry. A nil value
+	// records nothing, which is what every test that has no reason to
+	// check a metric gets by leaving the field unset.
+	metrics *metrics
 }
 
-func newInventory(client *Client, radio radio, held *relays, nodeName, namespace string) *inventory {
+func newInventory(client *Client, radio radio, held *relays, nodeName, namespace string, readings *metrics) *inventory {
 	i := &inventory{
 		client:    client,
 		radio:     radio,
@@ -88,6 +93,7 @@ func newInventory(client *Client, radio radio, held *relays, nodeName, namespace
 		now:       time.Now,
 		retired:   map[bonds.Address]bool{},
 		retiring:  map[bonds.Address]bool{},
+		metrics:   readings,
 	}
 	// The connector reads the clock through a closure, because the
 	// inventory's clock is a field a test replaces after construction,
@@ -132,20 +138,31 @@ func (i *inventory) reconcile() inventoryPass {
 	}
 
 	snapshot, err := i.radio.Snapshot()
+	// The read either answers or it does not, whatever it answers with.
+	// A missing adapter is still bluetoothd's own report, over a call
+	// that worked, so it is a valid observation like any other; only an
+	// error from the call itself, such as the bus going away, is not.
+	i.metrics.recordObservation(sourceBlueZ, err == nil || errors.Is(err, ErrNoAdapter), i.now())
 	if errors.Is(err, ErrNoAdapter) {
 		// bluetoothd has not published its tree yet, or the radio has
 		// departed. Either way this operator holds no radio right now,
 		// and the one thing it can still do is release an Adapter for a
 		// radio that this machine no longer has.
+		i.metrics.setAdapterPresent(false)
 		i.releaseDepartedAdapters(bonds.Address{})
 		pass.ok = false
 		return pass
 	}
 	if err != nil {
+		// The read itself failed, so nothing here says whether the
+		// adapter is still there. The gauge keeps the value the last
+		// valid read left it at, the rule the hardware triple states
+		// for every reading behind an observation_valid gauge.
 		fmt.Fprintf(os.Stderr, "reading the radio: %v\n", err)
 		pass.ok = false
 		return pass
 	}
+	i.metrics.setAdapterPresent(true)
 
 	i.releaseDepartedAdapters(snapshot.Adapter.Address)
 
@@ -166,22 +183,39 @@ func (i *inventory) reconcile() inventoryPass {
 		}
 	}
 
+	adapterStart := i.now()
 	adapter, err := i.ensureAdapter(snapshot.Adapter)
+	i.metrics.timeReconcile(adapterKind, adapterStart, i.now())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reconciling the Adapter for %s: %v\n", snapshot.Adapter.Address, err)
+		i.metrics.countReconcileError(adapterKind)
 		pass.ok = false
 		return pass
 	}
 
 	// One walk of sysfs answers the battery of every device this pass
 	// writes, before any status write, so each Peripheral reads the level
-	// the kernel reports now.
-	i.reconcilePeripherals(adapter, snapshot, kernelBatteries(draSysfsRoot, snapshot.Adapter.Address), &pass)
+	// the kernel reports now. claimedDevices answers from the same CDI
+	// read the unpair teardown already makes, so the Peripheral phase
+	// costs no second read of its own for the claimed gauge.
+	peripheralStart, wasOK := i.now(), pass.ok
+	i.reconcilePeripherals(adapter, snapshot, kernelBatteries(draSysfsRoot, snapshot.Adapter.Address), claimedDevices(), &pass)
 	// The connects run after the Peripherals, because the Peripheral pass
 	// marks the bonds a teardown works through, and a device under
-	// teardown must not be paged.
+	// teardown must not be paged. Both act on Peripherals, so both fall
+	// under one phase.
 	i.connects.reconcile(snapshot, &pass)
+	i.metrics.timeReconcile(peripheralKind, peripheralStart, i.now())
+	if wasOK && !pass.ok {
+		i.metrics.countReconcileError(peripheralKind)
+	}
+
+	requestStart, wasOK := i.now(), pass.ok
 	i.reconcileRequests(adapter, snapshot, &pass)
+	i.metrics.timeReconcile(pairingRequestKind, requestStart, i.now())
+	if wasOK && !pass.ok {
+		i.metrics.countReconcileError(pairingRequestKind)
+	}
 	return pass
 }
 

@@ -301,7 +301,7 @@ func testInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) *invento
 	t.Helper()
 	cdiTempDir(t)
 	sysfsFor(t)
-	i := newInventory(testClient(t, fixture.handler(t)), radio, relaysFor(t), "liken-1", "liken-system")
+	i := newInventory(testClient(t, fixture.handler(t)), radio, relaysFor(t), "liken-1", "liken-system", newMetrics())
 	i.now = func() time.Time { return testNow }
 	return i
 }
@@ -311,3 +311,115 @@ func testInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) *invento
 const testAdapterName = "14-b4-57-91-2f-c8"
 
 func testAdapterObjectPath() string { return adapterPath(testAdapterName) }
+
+// A pass that finishes reports one run on the duration histogram for
+// each of the three resource kinds it serves, and no error on any of
+// them.
+func TestReconcileTimesEachResourceKind(t *testing.T) {
+	fixture := newAPIFixture()
+	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
+
+	inventory.reconcile()
+
+	for _, kind := range []string{adapterKind, peripheralKind, pairingRequestKind} {
+		if runs, found := metricValue(t, inventory.metrics.registry,
+			"bluetooth_reconcile_duration_seconds", map[string]string{"kind": kind}); !found || runs != 1 {
+			t.Errorf("bluetooth_reconcile_duration_seconds{kind=%q} ran %v times (found: %v), want 1", kind, runs, found)
+		}
+		if errs, found := metricValue(t, inventory.metrics.registry,
+			"bluetooth_reconcile_errors_total", map[string]string{"kind": kind}); found && errs != 0 {
+			t.Errorf("bluetooth_reconcile_errors_total{kind=%q} = %v, want none on a pass that finished", kind, errs)
+		}
+	}
+}
+
+// The Adapter phase fails when the write that records a new radio is
+// refused, and that failure never reaches the Peripheral or
+// PairingRequest phases, because reconcile returns as soon as
+// ensureAdapter does.
+func TestReconcileCountsAnAdapterPhaseError(t *testing.T) {
+	fixture := newAPIFixture()
+	fixture.failWrites = http.StatusForbidden
+	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
+
+	if pass := inventory.reconcile(); pass.ok {
+		t.Fatal("a refused write reported a finished pass")
+	}
+
+	if errs, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_reconcile_errors_total", map[string]string{"kind": adapterKind}); !found || errs != 1 {
+		t.Errorf("bluetooth_reconcile_errors_total{kind=Adapter} = %v (found: %v), want 1", errs, found)
+	}
+	for _, kind := range []string{peripheralKind, pairingRequestKind} {
+		if _, found := metricValue(t, inventory.metrics.registry,
+			"bluetooth_reconcile_duration_seconds", map[string]string{"kind": kind}); found {
+			t.Errorf("bluetooth_reconcile_duration_seconds{kind=%q} ran, but the Adapter phase never returned", kind)
+		}
+	}
+}
+
+// bluetooth_adapter_present reports bluetoothd's own answer: one while
+// it names an adapter, zero once it reports none.
+func TestAdapterPresentGaugeFollowsTheRadio(t *testing.T) {
+	fixture := newAPIFixture()
+	radio := testRadio(t, pairedDevice(t, testDevice))
+	inventory := testInventory(t, fixture, radio)
+
+	inventory.reconcile()
+	if present, found := metricValue(t, inventory.metrics.registry, "bluetooth_adapter_present", nil); !found || present != 1 {
+		t.Errorf("bluetooth_adapter_present = %v (found: %v), want 1", present, found)
+	}
+
+	radio.err = ErrNoAdapter
+	inventory.reconcile()
+	if present, found := metricValue(t, inventory.metrics.registry, "bluetooth_adapter_present", nil); !found || present != 0 {
+		t.Errorf("bluetooth_adapter_present = %v (found: %v), want 0 once the radio departed", present, found)
+	}
+}
+
+// A read that fails for a reason other than ErrNoAdapter says nothing
+// about whether the adapter is there, so the gauge keeps whatever a
+// valid read last reported, and bluetooth_observation_valid falls
+// instead.
+func TestAdapterPresentGaugeHoldsItsValueWhileTheObservationIsInvalid(t *testing.T) {
+	fixture := newAPIFixture()
+	radio := testRadio(t, pairedDevice(t, testDevice))
+	inventory := testInventory(t, fixture, radio)
+	inventory.reconcile()
+
+	radio.err = fmt.Errorf("the bus went away")
+	inventory.reconcile()
+
+	if present, found := metricValue(t, inventory.metrics.registry, "bluetooth_adapter_present", nil); !found || present != 1 {
+		t.Errorf("bluetooth_adapter_present = %v (found: %v), want the last valid reading of 1", present, found)
+	}
+	if valid, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_observation_valid", map[string]string{"source": sourceBlueZ}); !found || valid != 0 {
+		t.Errorf("bluetooth_observation_valid{source=bluez} = %v (found: %v), want 0", valid, found)
+	}
+}
+
+// A read that answers, whatever it answers with, is a valid
+// observation, including the ordinary report of no adapter at all.
+// The success timestamp reports the observation's own clock, which is
+// the inventory's, so a test that runs the clock forward reads the
+// timestamp move with it.
+func TestObservationValidCoversAnOrdinaryNoAdapterAnswer(t *testing.T) {
+	fixture := newAPIFixture()
+	radio := testRadio(t, pairedDevice(t, testDevice))
+	radio.err = ErrNoAdapter
+	inventory := testInventory(t, fixture, radio)
+
+	inventory.reconcile()
+
+	if valid, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_observation_valid", map[string]string{"source": sourceBlueZ}); !found || valid != 1 {
+		t.Errorf("bluetooth_observation_valid{source=bluez} = %v (found: %v), want 1 for an ordinary no-adapter answer", valid, found)
+	}
+	success, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_observation_last_success_timestamp_seconds", map[string]string{"source": sourceBlueZ})
+	if !found || success != float64(testNow.Unix()) {
+		t.Errorf("bluetooth_observation_last_success_timestamp_seconds{source=bluez} = %v (found: %v), want %d",
+			success, found, testNow.Unix())
+	}
+}

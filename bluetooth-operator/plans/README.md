@@ -47,9 +47,10 @@ considered and why.
   node. Answers and replaces the open problems "BLE devices connect on
   demand" and "Battery levels are not reported".
 
-* [07, Prometheus metrics](07-prometheus-metrics.md). Proposed.
-  Peripheral battery, connection state, and observed disconnects,
-  with source validity and alert rules that allow sleeping controllers.
+* [07, Prometheus metrics](07-prometheus-metrics.md). In progress. The
+  operator serves Prometheus metrics on port 9250 under liken's shared
+  contract: peripherals connected and claimed, battery level,
+  disconnects, adapter presence, and relayed input events.
 
 ## Open problems
 
