@@ -258,16 +258,16 @@ spec:
               value: /var/run/audio.liken.sh
             - name: XDG_RUNTIME_DIR
               value: /var/run/audio.liken.sh
-            # The Prometheus listener, on liken's port for this
-            # operator. An empty value serves no metrics, which is
-            # the cluster owner's opt out; the base ships the port
-            # bound, because a scrape reads an in-memory registry and
-            # touches no card, PipeWire, or bus.
+            # The Prometheus listener, on liken's shared metrics port.
+            # An empty value serves no metrics, which is the cluster
+            # owner's opt out; the base ships the port bound, because
+            # a scrape reads an in-memory registry and touches no
+            # card, PipeWire, or bus.
             - name: METRICS_ADDRESS
-              value: ":9240"
+              value: ":9200"
           ports:
             - name: metrics
-              containerPort: 9240
+              containerPort: 9200
           securityContext:
             # No capabilities. The operator reads the cards through
             # the control interface, runs pw-dump, writes CDI files,

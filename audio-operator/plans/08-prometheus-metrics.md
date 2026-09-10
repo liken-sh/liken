@@ -15,7 +15,7 @@ connected output. Pod health describes neither.
 
 ## The design
 
-Layers 1 and 2 under the `audio_` prefix, on port 9240. The hardware
+Layers 1 and 2 under the `audio_` prefix, on port 9200. The hardware
 triple, with `ready` added beside `connected` because this operator has
 two levels of presence.
 
