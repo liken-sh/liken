@@ -13,11 +13,35 @@
 # The base alone runs the operator and the two screen clients with
 # their listeners open and nothing scraping them; this component is
 # the whole of what changes once a Prometheus is watching.
+#
+# This Component sets no top-level namespace: a Component's namespace
+# field would move every resource it lists, and the dashboard
+# ConfigMap below belongs in monitoring, not liken-system. Each
+# PodMonitor names liken-system itself instead.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
-
-namespace: liken-system
 
 resources:
   - podmonitor-operator.yaml
   - podmonitor-screens.yaml
+
+# The dashboard travels as a ConfigMap carrying the
+# grafana_dashboard: "1" label. The kube-prometheus-stack runs a
+# sidecar beside Grafana that watches for that label and loads every
+# ConfigMap that carries it, so the dashboard needs no Grafana API
+# call and no provisioning file.
+#
+# The generated name carries no content hash. A hash would make every
+# dashboard edit create a second ConfigMap, and an apply without
+# pruning would leave both loaded, so Grafana would show the old
+# dashboard beside the new one. A stable name replaces the dashboard
+# in place, and the sidecar reloads it.
+configMapGenerator:
+  - name: media-operator-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/media-operator.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

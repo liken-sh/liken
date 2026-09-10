@@ -6,11 +6,14 @@
 # A Player lives in whatever namespace a household chose, and its idle
 # pod follows it there. So this PodMonitor cannot sit beside its
 # targets the way podmonitor-operator.yaml sits beside the Deployment,
-# and namespaceSelector reaches across every namespace instead.
+# and namespaceSelector reaches across every namespace instead. The
+# PodMonitor object itself still lives in liken-system, the namespace
+# the prometheus-operator is watching.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: media-idle-screen
+  namespace: liken-system
 spec:
   namespaceSelector:
     any: true
@@ -32,11 +35,13 @@ spec:
 # that holds mpv's own IPC socket, so those facts are its to report. A
 # Play, like a Player, lives in whatever namespace a household chose,
 # so this PodMonitor reaches across every namespace the same way the
-# idle one does.
+# idle one does. The PodMonitor object itself still lives in
+# liken-system, the namespace the prometheus-operator is watching.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: media-playback
+  namespace: liken-system
 spec:
   namespaceSelector:
     any: true

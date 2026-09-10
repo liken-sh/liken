@@ -4,12 +4,15 @@
 # selector field, so it is the label the running Pod actually carries
 # and the one this PodMonitor must match. The pod serves /metrics on
 # the port named metrics in deploy/operator.yaml. No namespaceSelector
-# is needed: the Component above places this PodMonitor in the same
-# namespace, liken-system, that the base places the Deployment in.
+# is needed: the Deployment always lands in liken-system, the
+# namespace this PodMonitor names below. The Component itself sets no
+# top-level namespace, because that would also move the dashboard
+# ConfigMap into liken-system instead of monitoring.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: media-operator
+  namespace: liken-system
 spec:
   selector:
     matchLabels:
