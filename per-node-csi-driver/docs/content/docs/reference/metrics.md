@@ -6,10 +6,10 @@ weight: 30
 ## The listener
 
 The node plugin serves its metrics at `/metrics` on the port named
-`metrics`, `9290` by default. The base in `deploy/` needs no Prometheus
-and applies without one. A cluster owner who runs the prometheus-operator
-adds the `deploy/monitoring` component beside the base to scrape the
-pod:
+`metrics`, `9200` by default, the port every process serves metrics on.
+The base in `deploy/` needs no Prometheus and applies without one. A
+cluster owner who runs the prometheus-operator adds the
+`deploy/monitoring` component beside the base to scrape the pod:
 
 ```yaml
 resources:

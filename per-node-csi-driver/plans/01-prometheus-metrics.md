@@ -14,7 +14,7 @@ happen.
 
 ## The design
 
-Layers 1 and 2 under the `pernodecsi_` prefix, on port 9290, with `kind`
+Layers 1 and 2 under the `pernodecsi_` prefix, on port 9200, with `kind`
 as the CSI operation.
 
 | Component | Metric | Type | Why |

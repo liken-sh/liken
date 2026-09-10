@@ -47,6 +47,6 @@ through a kustomize patch on the container's `args`.
 | `--endpoint` | `unix:///csi/csi.sock` | The socket the kubelet and the registrar call. |
 | `--node-id` | none | The node's name, which the base takes from the pod's `spec.nodeName`. Required. |
 | `--store` | `/var/lib/liken/pod-storage/per-node` | Where the node plugin keeps its copies and its holds. On `liken` this is the pod-storage partition. |
-| `--metrics` | `:9290` | Where the node plugin serves its Prometheus metrics. Empty serves none. |
+| `--metrics` | `:9200` | Where the node plugin serves its Prometheus metrics. Empty serves none. |
 | `--sweep-every` | `10m` | How often the driver looks for a copy that no `PersistentVolume` names. A deletion is acted on at once, and this tick catches what the watch missed. |
 | `--version` | none | Print the version and exit. |

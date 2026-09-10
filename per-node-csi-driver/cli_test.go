@@ -101,8 +101,8 @@ func TestTheFlagsCarryTheDefaultsTheManualNames(t *testing.T) {
 	if cfg.store != defaultStore {
 		t.Errorf("--store defaults to %q, want %q", cfg.store, defaultStore)
 	}
-	if cfg.metrics != ":9290" {
-		t.Errorf("--metrics defaults to %q, want :9290", cfg.metrics)
+	if cfg.metrics != ":9200" {
+		t.Errorf("--metrics defaults to %q, want :9200", cfg.metrics)
 	}
 	if cfg.sweepEvery != defaultSweepEvery {
 		t.Errorf("--sweep-every defaults to %v, want %v", cfg.sweepEvery, defaultSweepEvery)

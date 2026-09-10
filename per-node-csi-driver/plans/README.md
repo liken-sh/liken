@@ -21,6 +21,6 @@ decided yet what work they become.
   node, the six invariants that hold them, the store on each node, and
   what the driver reports.
 * [01, Prometheus metrics](01-prometheus-metrics.md). In progress. The
-  driver serves Prometheus metrics on port 9290 under liken's shared
+  driver serves Prometheus metrics on port 9200 under liken's shared
   contract: CSI operations as the reconcile layer, volumes mounted, and
   mount failures.
