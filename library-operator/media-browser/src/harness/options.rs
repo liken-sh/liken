@@ -276,13 +276,19 @@ impl Options {
     }
 }
 
-/// The metrics listener's address. An empty string, or text that is not
-/// a `host:port` pair, serves no metrics rather than stopping the run:
-/// a browser that cannot be watched still has to draw its screen.
+/// The metrics listener's address. A bare `:port` listens on every
+/// address, which is the form liken's milestone 65 uses for every
+/// process, and the form the operator's pod template writes. An empty
+/// string, or text that is neither form, serves no metrics rather than
+/// stopping the run: a browser that cannot be watched still has to
+/// draw its screen.
 fn metrics_address(text: &str) -> Option<SocketAddr> {
     let text = text.trim();
     if text.is_empty() {
         return None;
+    }
+    if let Some(port) = text.strip_prefix(':') {
+        return format!("0.0.0.0:{port}").parse().ok();
     }
     text.parse().ok()
 }

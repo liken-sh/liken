@@ -254,6 +254,14 @@ fn an_empty_environment_serves_no_metrics() {
 }
 
 #[test]
+fn a_bare_port_listens_on_every_address() {
+    assert_eq!(
+        metrics_address(":9231"),
+        Some("0.0.0.0:9231".parse().unwrap())
+    );
+}
+
+#[test]
 fn anything_but_a_host_and_a_port_serves_no_metrics() {
     assert_eq!(metrics_address(""), None);
     assert_eq!(metrics_address("9231"), None);
