@@ -11,11 +11,14 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The version reaches the binary through -ldflags, so liken_build_info
+# names the release a running pod was built from.
+ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. The binary
 # runs beside a closure that holds a loader and a libc, and it needs
 # neither.
-RUN CGO_ENABLED=0 go build -trimpath -o /audio-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /audio-operator .
 
 # The suite is pinned because the closure script names pipewire 0.3,
 # spa 0.2, and wireplumber 0.5. A Debian that moves one of them fails

@@ -56,6 +56,11 @@ type endpointControl struct {
 	// sink that came back.
 	switchCodec func(ctx context.Context, address, codec string, sink bluezSink) (bluezSink, error)
 
+	// readings is the registry the metrics listener serves. A nil
+	// registry takes every call here and drops it, which is what the
+	// tests that build a controller by hand run with.
+	readings *metrics
+
 	// nodes is what this operator remembers about each endpoint's
 	// node: the PipeWire object id it had when the operator last
 	// looked, and the level last written to it. A node whose id is
@@ -77,7 +82,7 @@ type endpointControl struct {
 // newEndpointControl builds the controller. Every seam takes its real
 // implementation here and a stand-in only in a test.
 func newEndpointControl(client *Client, machine string, claims *preparedClaims,
-	graph func(context.Context) (pwGraph, error)) *endpointControl {
+	graph func(context.Context) (pwGraph, error), readings *metrics) *endpointControl {
 	return &endpointControl{
 		client:      client,
 		machine:     machine,
@@ -87,6 +92,7 @@ func newEndpointControl(client *Client, machine string, claims *preparedClaims,
 		setLevel:    setNodeLevel,
 		setRoute:    setRouteLevel,
 		switchCodec: speakerCodecSwitch(graph).choose,
+		readings:    readings,
 		nodes:       map[string]nodeRecord{},
 		refusals:    map[string]string{},
 	}
@@ -287,11 +293,19 @@ func (e *endpointControl) holder(name string) *EndpointClaim {
 // reconcile makes one endpoint's resource exist, writes the resting
 // declaration where the endpoint diverges from it, and writes the
 // status last.
+//
+// This is the reconcile loop layer 2 reports on: the duration is
+// observed and the error counted whether or not the pass changed
+// anything, because a pass that changes nothing still counts as a run.
 func (e *endpointControl) reconcile(ctx context.Context, reading endpoint) error {
+	kind, do := SinkKind, e.reconcileSink
 	if reading.facts.Direction == directionSource {
-		return e.reconcileSource(ctx, reading)
+		kind, do = SourceKind, e.reconcileSource
 	}
-	return e.reconcileSink(ctx, reading)
+	start := time.Now()
+	err := do(ctx, reading)
+	e.readings.reconciled(kind, time.Since(start), err)
+	return err
 }
 
 func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) error {
@@ -305,6 +319,7 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 	actuated := e.actuate(ctx, sink.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
 	status := reading.facts.status(sink.Status, e.now())
+	e.recordEndpoint(reading)
 	if sameStatus(sink.Status, status) {
 		return actuated
 	}
@@ -323,11 +338,22 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 	actuated := e.actuate(ctx, source.Spec.declaration(), reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
 	status := reading.facts.status(source.Status, e.now())
+	e.recordEndpoint(reading)
 	if sameStatus(source.Status, status) {
 		return actuated
 	}
 	_, err = writeSourceStatus(e.client, source, status)
 	return errors.Join(actuated, err)
+}
+
+// recordEndpoint puts what this pass read about one endpoint's
+// presence on the hardware triple's gauges, from the same Connected
+// and Ready facts sinkstatus.go composes into the resource's
+// conditions, and whether a claim holds the endpoint now.
+func (e *endpointControl) recordEndpoint(reading endpoint) {
+	connected, _, _ := reading.facts.connected()
+	ready, _, _ := reading.facts.ready()
+	e.readings.endpoint(reading.facts.Name, connected, ready, reading.facts.Claim != nil)
 }
 
 // actuate writes what the declaration and the endpoint disagree on.
@@ -401,83 +427,4 @@ func sameStatus(published, current EndpointStatus) bool {
 		return false
 	}
 	return string(was) == string(is)
-}
-
-// sweep reports the endpoints this machine held a resource for and no
-// longer publishes.
-//
-// The resource is never deleted, because it holds the declaration a
-// person wrote. A USB card that is unplugged for an hour must come
-// back to the level it rested at, and a speaker that moved to another
-// machine keeps its Sink. The conditions are what report the absence.
-func (e *endpointControl) sweep(present map[string]bool) error {
-	if !e.sweepDue(present) {
-		return nil
-	}
-	var failures []error
-	sinks, err := listSinks(e.client)
-	if err != nil {
-		failures = append(failures, err)
-	}
-	for _, sink := range sinks {
-		if sink.Status.Node != e.machine || present[sink.Metadata.Name] {
-			continue
-		}
-		status := absentStatus(sink.Status, e.now())
-		if sameStatus(sink.Status, status) {
-			continue
-		}
-		if _, err := writeSinkStatus(e.client, &sink, status); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	sources, err := listSources(e.client)
-	if err != nil {
-		failures = append(failures, err)
-	}
-	for _, source := range sources {
-		if source.Status.Node != e.machine || present[source.Metadata.Name] {
-			continue
-		}
-		status := absentStatus(source.Status, e.now())
-		if sameStatus(source.Status, status) {
-			continue
-		}
-		if _, err := writeSourceStatus(e.client, &source, status); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	return errors.Join(failures...)
-}
-
-// sweepDue answers whether this pass lists the resources. It does
-// when the endpoints this machine publishes are not the endpoints of
-// the last listing, so a card that arrives or leaves is answered on
-// the pass that finds it, and otherwise once per backstop interval.
-func (e *endpointControl) sweepDue(present map[string]bool) bool {
-	names := slices.Sorted(maps.Keys(present))
-	if !slices.Equal(names, e.swept) {
-		e.swept, e.sweptAt = names, e.now()
-		return true
-	}
-	if e.now().Before(e.sweptAt.Add(backstopInterval)) {
-		return false
-	}
-	e.sweptAt = e.now()
-	return true
-}
-
-// absentStatus is what a resource reports once its machine no longer
-// publishes the endpoint. The identity it read stays, because it says
-// which piece of hardware this resource is for.
-func absentStatus(published EndpointStatus, now time.Time) EndpointStatus {
-	status := published
-	status.NodeName = ""
-	status.Format = nil
-	status.Claim = nil
-	status.Conditions = setCondition(status.Conditions, condition(ConnectedCondition, false,
-		"EndpointAbsent", "this machine no longer publishes the endpoint", now))
-	status.Conditions = setCondition(status.Conditions, condition(ReadyCondition, false,
-		"NoNode", "PipeWire holds no node for this endpoint", now))
-	return status
 }

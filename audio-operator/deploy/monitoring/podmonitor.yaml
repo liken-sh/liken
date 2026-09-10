@@ -1,0 +1,20 @@
+# One pod runs this operator's metrics: the DaemonSet's own pod, on
+# the container port named metrics. A PodMonitor selects by pod label
+# rather than a Service, because a DaemonSet's pods have none, and the
+# prometheus-operator scrapes each one directly.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: audio-operator
+spec:
+  selector:
+    matchLabels:
+      app: audio-operator
+  podMetricsEndpoints:
+    - port: metrics
+      # A DaemonSet pod's metrics are about the machine it runs on,
+      # and the fleet dashboard selects by that machine, not by pod
+      # name.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

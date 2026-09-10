@@ -21,7 +21,7 @@ is built the way it is, and what it still owes an answer to.
 Each plan keeps its number and moves to [`completed/`](completed/)
 when it is built and drilled.
 
-* [08, Prometheus metrics](08-prometheus-metrics.md). Proposed.
+* [08, Prometheus metrics](08-prometheus-metrics.md). In progress.
   Claimed endpoint availability, failed control operations, and
   observation health, with optional Prometheus collection.
 

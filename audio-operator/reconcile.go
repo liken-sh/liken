@@ -102,6 +102,11 @@ type reconciler struct {
 	// It is nil in a test that reads the slice alone.
 	control *endpointControl
 
+	// readings is the registry the metrics listener serves. A nil
+	// registry takes every call here and drops it, which is what a
+	// test that does not scrape runs with.
+	readings *metrics
+
 	sinkFailures int
 
 	// refusalReported keeps the report of an endpoint this operator
@@ -187,6 +192,7 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	graph, err := r.graph(ctx)
 	if err != nil {
 		r.sinkFailures++
+		r.readings.observationFailed(sourcePipeWire)
 		fmt.Fprintf(os.Stderr, "reading PipeWire's graph, %d in a row: %v\n", r.sinkFailures, err)
 		if r.sinkFailures >= maxSinkFailures {
 			return fmt.Errorf("PipeWire has not answered %d graph reads in a row: %w", r.sinkFailures, err)
@@ -194,6 +200,7 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		return nil
 	}
 	r.sinkFailures = 0
+	r.readings.observationSucceeded(sourcePipeWire)
 
 	// The device name is built from the hardware's identity, so an
 	// endpoint whose identity this operator cannot read reaches no
@@ -264,6 +271,7 @@ func (r *reconciler) pairedSpeakers() map[string]speaker {
 	}
 	speakers, err := r.speakers()
 	if err != nil {
+		r.readings.observationFailed(sourceBlueZ)
 		if !r.speakerFailure {
 			r.speakerFailure = true
 			fmt.Fprintf(os.Stderr, "reading bluetoothd's paired set: %v; "+
@@ -271,6 +279,7 @@ func (r *reconciler) pairedSpeakers() map[string]speaker {
 		}
 		return r.lastSpeakers
 	}
+	r.readings.observationSucceeded(sourceBlueZ)
 	if r.speakerFailure {
 		r.speakerFailure = false
 		fmt.Fprintf(os.Stderr, "bluetoothd answers again with %d speaker(s)\n", len(speakers))

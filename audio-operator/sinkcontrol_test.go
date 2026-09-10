@@ -272,7 +272,7 @@ func TestTheCardStaysOpenForTheLengthOfAPass(t *testing.T) {
 	if _, err := os.Stat(sndDir + "/controlC0"); err != nil {
 		t.Skip("this machine has no card 0 to read")
 	}
-	control := newEndpointControl(nil, "liken-1", nil, nil)
+	control := newEndpointControl(nil, "liken-1", nil, nil, nil)
 	endpoints := []alsaEndpoint{{Card: 0, PCM: 0, DeviceName: "the local card"}}
 
 	cards := control.openCards(endpoints)

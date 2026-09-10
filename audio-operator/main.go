@@ -34,6 +34,12 @@ import (
 	"time"
 )
 
+// version is the release this binary was built from. The Dockerfile
+// sets it with -ldflags "-X main.version=...", and every other build
+// reports dev. liken_build_info carries it under this operator's
+// component name, so one panel lists every release in the cluster.
+var version = "dev"
+
 const (
 	// settleWindow is how long the loop waits for quiet after the last
 	// event before it writes. A monitor that a person plugs in
@@ -119,6 +125,21 @@ func operate() {
 	}
 	fmt.Printf("%s: operating the audio controller on %s\n", DriverName, nodeName)
 
+	// The metrics listener takes its address the same way the rest of
+	// this program takes its settings: an environment variable the
+	// DaemonSet sets. An empty value serves no metrics, which is what a
+	// pod under test runs with, and a failure here never blocks the
+	// reconcile loop this operator exists for.
+	readings := newMetrics(version)
+	metricsListener, err := readings.listen(os.Getenv("METRICS_ADDRESS"))
+	if err != nil {
+		fatal("listening for metrics: %v", err)
+	}
+	if metricsListener != nil {
+		fmt.Printf("%s: serving metrics on %s\n", DriverName, metricsListener.Addr())
+		go serveMetrics(ctx, metricsListener, readings)
+	}
+
 	// Failures during setup end the process deliberately. This code
 	// has no retry logic of its own, because the kubelet already
 	// provides it: a pod that exits nonzero restarts with backoff, and
@@ -198,11 +219,12 @@ func operate() {
 		graph:    feed.read,
 		speakers: speakers,
 		declared: declared,
+		readings: readings,
 		// The reconcile pass fills the inventory and the DRA plugin
 		// reads it, so the two hold one object between them.
 		endpoints: &endpointInventory{},
 		cards:     watchCards(ctx),
-		control:   newEndpointControl(client, nodeName, claims, feed.read),
+		control:   newEndpointControl(client, nodeName, claims, feed.read, readings),
 	}
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
@@ -249,7 +271,7 @@ func operate() {
 	// before the first pass, so that a change either one carries wakes
 	// the loop from the moment it runs.
 	go feed.follow(ctx, wake)
-	watchEndpoints(ctx, client, wake)
+	watchEndpoints(ctx, client, wake, readings)
 
 	settled := settle(ctx, wakes(ctx, jacks, bluez, operator.cards.Events(), pokes),
 		settleWindow, settleLimit)

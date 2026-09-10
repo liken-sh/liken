@@ -1,0 +1,11 @@
+# The monitoring component. A cluster owner who runs the
+# prometheus-operator adds this beside the base in deploy/, and an
+# owner with no Prometheus never takes it: the base applies and the
+# operator serves its port either way.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+namespace: liken-system
+
+resources:
+  - podmonitor.yaml

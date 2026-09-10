@@ -108,6 +108,7 @@ jobs:
           context: .
           file: Dockerfile
           load: true
+          build-args: VERSION=${{ env.VERSION }}
           cache-from: type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache
           cache-to: type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache,mode=max
           tags: |

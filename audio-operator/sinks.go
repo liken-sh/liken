@@ -356,20 +356,36 @@ const endpointWatchRetry = 5 * time.Second
 // collections. Nothing of the event is read but its arrival: the pass
 // that follows reads every endpoint again, the way every other wake in
 // this operator works.
-func watchEndpoints(ctx context.Context, c *Client, wake func()) {
-	go watchCollection(ctx, c, SinksPath, wake)
-	go watchCollection(ctx, c, SourcesPath, wake)
+func watchEndpoints(ctx context.Context, c *Client, wake func(), readings *metrics) {
+	go watchCollection(ctx, SinksPath, SinkKind, wake, readings, endpointWatchRetry,
+		func(ctx context.Context) error { return streamEvents(ctx, c, SinksPath, wake) })
+	go watchCollection(ctx, SourcesPath, SourceKind, wake, readings, endpointWatchRetry,
+		func(ctx context.Context) error { return streamEvents(ctx, c, SourcesPath, wake) })
 }
 
-func watchCollection(ctx context.Context, c *Client, path string, wake func()) {
+// watchCollection holds one watch open for as long as the context
+// lives, and counts every time it reopens: the API server closes a
+// watch on its own timeout, and a network fault closes one early, and
+// both bring the loop back here. The first open is not a reopen, so
+// the count starts at the second time open runs.
+//
+// open is the one watch connection, standing for streamEvents so a
+// test drives a reopen with no HTTP server behind it.
+func watchCollection(ctx context.Context, path, kind string, wake func(), readings *metrics,
+	retry time.Duration, open func(context.Context) error) {
+	reopened := false
 	for ctx.Err() == nil {
-		if err := streamEvents(ctx, c, path, wake); err != nil && ctx.Err() == nil {
+		if reopened {
+			readings.watchRestarted(kind)
+		}
+		if err := open(ctx); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "watching %s: %v\n", path, err)
 		}
+		reopened = true
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(endpointWatchRetry):
+		case <-time.After(retry):
 		}
 	}
 }

@@ -199,6 +199,7 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 	if level := writes.Level; level != nil {
 		if err := e.applyLevel(ctx, facts, *level); err != nil {
 			failures = append(failures, err)
+			e.readings.controlFailed(operationVolume)
 		} else {
 			fmt.Printf("%s: %s\n", facts.Name, level)
 		}
@@ -212,6 +213,7 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 		}
 		if err := reading.card.writeElement(write.Element, write.Value); err != nil {
 			failures = append(failures, err)
+			e.readings.controlFailed(operationControl)
 			continue
 		}
 		fmt.Printf("%s: %s is %s\n", facts.Name, write.Element.Name, write.Value)
@@ -219,6 +221,7 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 	if writes.Codec != "" {
 		if _, err := e.switchCodec(ctx, facts.Speaker.Address, writes.Codec, facts.Speaker.Sink); err != nil {
 			failures = append(failures, err)
+			e.readings.controlFailed(operationCodec)
 		} else {
 			fmt.Printf("%s: codec %s\n", facts.Name, writes.Codec)
 		}

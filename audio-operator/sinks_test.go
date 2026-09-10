@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // endpointAPI is an API server that holds one collection of each
@@ -206,7 +208,7 @@ func TestWatchOpensBothCollections(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	watchEndpoints(ctx, client, func() {})
+	watchEndpoints(ctx, client, func() {}, nil)
 
 	opened := map[string]bool{}
 	for range 2 {
@@ -226,6 +228,38 @@ func TestWatchOpensBothCollections(t *testing.T) {
 		if !opened[path] {
 			t.Errorf("the watch opened %v, want %s among them", requests, path)
 		}
+	}
+}
+
+// audio_watch_restarts_total counts a watch reopening, and not the
+// watch's first open: the first connection is the start of watching,
+// and only a connection the API server or a fault closed is a restart.
+func TestAWatchThatReopensCountsOneRestart(t *testing.T) {
+	readings := newMetrics("test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	attempts := 0
+	reopened := make(chan struct{})
+	go watchCollection(ctx, SinksPath, SinkKind, func() {}, readings, time.Millisecond,
+		func(ctx context.Context) error {
+			attempts++
+			if attempts == 2 {
+				close(reopened)
+				<-ctx.Done()
+			}
+			return nil
+		})
+
+	select {
+	case <-reopened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watch never reopened")
+	}
+	cancel()
+
+	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)); got != 1 {
+		t.Errorf("audio_watch_restarts_total{kind=Sink} = %v, want 1", got)
 	}
 }
 
