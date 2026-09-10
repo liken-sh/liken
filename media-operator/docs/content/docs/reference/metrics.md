@@ -8,7 +8,7 @@ toc: true
 
 The operator, the command sidecar in every Play pod, and the idle
 screen each serve Prometheus metrics on `:9200`, under
-[milestone 65](https://github.com/liken-sh/liken/blob/main/plans/65-prometheus-metrics.md)'s
+[milestone 65](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md)'s
 shared contract: every process on the cluster network uses the same
 port, since no two of these pods ever share one. The base in `deploy/`
 needs no Prometheus: every
