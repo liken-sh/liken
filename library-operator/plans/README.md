@@ -176,18 +176,28 @@ Plan 32 stands apart from the enrichment work.
   starts, from where the person started, on the `Play`; the player
   offers it on the scrubber and asks over the bus; the browser starts
   it. One episode per `Play`, with the season list gone.
-* [54, The browser returns on the status edge](54-the-browser-returns-on-the-status-edge.md).
-  In progress. Under ivi-shell the browser's window is visible again
-  the moment a film's surface goes, so the fresh window on re-present
-  and the app-id retire. Requires display-operator plan 17 on the
-  cluster first.
-* [55, Lights down, lights up](55-lights-down-lights-up.md). In
-  progress. The browser dims its whole frame to an eighth of full over
-  1.2 s from the second it asks for a film, and lifts it back to full
-  over 0.3 s on the status's move to `Idle`, so the film fades in over
-  a dimmed page and out over a page on its way back up. The curtain's
-  logo keeps its full brightness through both. Pairs with
-  display-operator plan 18 and media-operator plan 30.
+* [54, The browser returns on the status
+  edge](completed/54-the-browser-returns-on-the-status-edge.md). Built
+  and drilled on `liken-1` on 2026-09-10 in release 2026.09.10-002, and
+  on the house the same evening. Under ivi-shell the browser's window is
+  visible again the moment a film's surface goes, so the fresh window on
+  re-present and the app-id are gone. A film deleted from under the
+  browser left it on the screen with no restart, and the browser drew
+  its first frame within about 60 ms of the `Idle` status. The drill
+  widened the edge to a move from any activity to `Idle`, so a `Play`
+  that never played returns the page too.
+* [55, Lights down, lights up](completed/55-lights-down-lights-up.md).
+  Built and drilled on `liken-1` on 2026-09-10 in release
+  2026.09.10-002, and on the house the same evening. The browser dims
+  its whole frame to an eighth of full over 1.2 s from the `Player`
+  status's move off `Idle`, and lifts it back to full over 0.3 s on the
+  move to `Idle`, so the film fades in over a dimmed page and out over a
+  page on its way back up. The curtain's logo keeps its full brightness
+  through both. Captured frames read 0.77, 0.56, 0.35, and 0.18 at
+  0.2 s steps, and then the 0.127 floor. The drill put the lights on the
+  status alone, not on the select, and made the scrim a layer of the
+  whole frame, so the home page and the walls dim with a title's page.
+  Pairs with display-operator plan 18 and media-operator plan 30.
 
 Plans 16 to 19 follow the scanner plans and were built before plan 05.
 Each one finishes something plan 04 left short. All four were released in
