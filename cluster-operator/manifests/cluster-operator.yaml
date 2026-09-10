@@ -261,7 +261,7 @@ spec:
           # anyway.
           image: liken.sh/cluster-operator:installed
           imagePullPolicy: Never
-          # The Prometheus port. plans/65-prometheus-metrics.md gives
+          # The Prometheus port. plans/completed/65-prometheus-metrics.md gives
           # every process on the cluster network this port, and the
           # binary carries it as the default of its --metrics-address
           # argument. This entry names the port, so a PodMonitor

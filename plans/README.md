@@ -216,6 +216,17 @@ milestone number because their implementation scope is not settled.
   join behind the boot when the wired path already reaches the
   cluster and carries the node address. A wedged radio driver costs
   the machine its radio, not its boot.
+* **65.** [Prometheus metrics](completed/65-prometheus-metrics.md).
+  Built and drilled on liken-1 on 2026-09-10, in releases
+  2026.09.10-001 and 2026.09.10-002. Every liken process serves
+  Prometheus metrics on port 9200 under one contract the operators
+  share: the runtime, the reconcile loop, and the domain's own
+  series. The fleet's release skew, pending changes, crashes, and
+  devices per node are lines on a graph, and a kustomize Component at
+  monitoring/ carries the PodMonitors and two Grafana dashboards. Three
+  series in the plan's table wait on facts the machine does not hold:
+  an upgrade's duration, and the firmware version and update state
+  that plan 33 brings.
 
 ## Rejected
 
@@ -249,8 +260,6 @@ milestone number because their implementation scope is not settled.
   The netbooted report posts to the cluster as an `Enrollment`, and
   approval is applying the proposed `Machine`, with a CLI verb as
   sugar.
-* **65.** [Prometheus metrics](65-prometheus-metrics.md). Every liken process serves Prometheus metrics on a port of its own, under one contract the operators share. The fleet's release skew, pending changes, upgrades, crashes, and devices per node become lines on a graph, and a kustomize Component at monitoring/ carries the PodMonitors and two Grafana dashboards.
-
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 

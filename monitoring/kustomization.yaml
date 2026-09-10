@@ -23,7 +23,7 @@
 # An owner on a plain Prometheus, Grafana Alloy, or VictoriaMetrics
 # ignores this component and writes a scrape configuration against
 # the ports. The ports and the metric names are the contract;
-# plans/65-prometheus-metrics.md states it.
+# plans/completed/65-prometheus-metrics.md states it.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

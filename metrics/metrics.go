@@ -5,7 +5,7 @@
 // download failed, or what the fleet's release skew was an hour ago.
 // Prometheus keeps that history, because a scraper reads the same
 // numbers every few seconds and stores each reading with its time.
-// plans/65-prometheus-metrics.md is the contract that every liken
+// plans/completed/65-prometheus-metrics.md is the contract that every liken
 // repository follows, and this package is liken's half of it.
 //
 // The contract has three layers. Layer 1 is the runtime: the client

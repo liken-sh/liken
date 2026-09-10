@@ -301,7 +301,7 @@ spec:
           securityContext:
             privileged: true
           # The Prometheus port. The operator serves /metrics here,
-          # and plans/65-prometheus-metrics.md gives every liken
+          # and plans/completed/65-prometheus-metrics.md gives every liken
           # process a port of its own, because pods on the host
           # network share the machine's port space. The binary
           # carries the number as the default of its

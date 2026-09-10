@@ -1,6 +1,7 @@
 # Prometheus metrics
 
-Milestone 65. Every long-running process that liken or a liken operator
+Milestone 65. Built and drilled on liken-1 on 2026-09-10, in
+releases 2026.09.10-001 and 2026.09.10-002. Every long-running process that liken or a liken operator
 ships serves Prometheus metrics on a port of its own. This document is
 the contract the whole organization follows: the layers every process
 exposes, the names, the labels, the port, and how a cluster owner
@@ -202,7 +203,7 @@ sidecar loads.
 | machine-operator | `liken_upgrade_duration_seconds` | histogram | staged to booted on the new slot. Waits for a staging time that survives the reboot; the system release record carries none today |
 | machine-operator | `liken_devices{class}` | gauge | a missing GPU or adapter shows as a drop |
 | machine-operator | `liken_last_crash_timestamp_seconds` | gauge | pstore capture; a crash loop is a line |
-| machine-operator | `liken_firmware_info{version}` | gauge, info | BIOS version. Waits for [plan 33](33-firmware-updates.md); status carries no firmware version today |
+| machine-operator | `liken_firmware_info{version}` | gauge, info | BIOS version. Waits for [plan 33](../33-firmware-updates.md); status carries no firmware version today |
 | machine-operator | `liken_firmware_update_pending` | gauge | milestone 30 state. Waits for plan 33 with the row above |
 | cluster-operator | `liken_machines{phase}` | gauge | fleet by phase |
 | cluster-operator | `liken_disruption_approvals_pending` | gauge | approvals outstanding |
