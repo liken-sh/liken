@@ -2,10 +2,23 @@
 # prometheus-operator adds this beside the base in deploy/, and an
 # owner with no Prometheus never takes it: the base applies and the
 # operator serves its port either way.
+#
+# The PodMonitor names its own namespace, liken-system, because a
+# top-level namespace here would also move the dashboard ConfigMap,
+# and that ConfigMap belongs in monitoring, where the
+# kube-prometheus-stack sidecar looks for it.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
-namespace: liken-system
-
 resources:
   - podmonitor.yaml
+
+configMapGenerator:
+  - name: audio-operator-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/audio-operator.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
