@@ -1,6 +1,8 @@
 # The operator's identity in the cluster, and deliberately nothing
-# more. It writes one ResourceSlice, reads the claims the kubelet asks
-# it to prepare, and reads its own Node.
+# more. It writes one ResourceSlice, writes the status of every
+# Display it created, reads the claims on the screens it drives and
+# the pods that hold them, reads the Layouts a Display names, and
+# reads its own Node.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -34,11 +36,29 @@ rules:
   # allocation is on the claim's status, so the driver reads it
   # back. This is read-only across every namespace, because claims
   # belong to workloads and the driver serves whichever namespace
-  # claims a screen. Still no list and no watch: prepare calls arrive
-  # with exact names.
+  # claims a screen.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
-    verbs: [get]
+    # The list and the watch serve the pass that places surfaces, not
+    # the prepare call: a surface arrives on a claim's own socket, and
+    # the claim's status.reservedFor names the pods whose labels a
+    # region's selector reads.
+    verbs: [get, list, watch]
+  # The layouts a Display names (layouts.go). The get reads the one a
+  # Display states, the list serves a pass that reads several, and the
+  # watch turns an edited Layout into one wake. No write of any kind: a
+  # Layout is a declaration the cluster owner writes.
+  - apiGroups: [display.liken.sh]
+    resources: [layouts]
+    verbs: [get, list, watch]
+  # The pods that hold a claim on a screen. Their shared labels are
+  # what a region's selector matches, so a pod that gains or loses a
+  # label restacks the screen, and the watch is what makes that
+  # prompt. Read-only across every namespace, because a screen serves
+  # whichever namespace claims it.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
   # The panels' own resources (displays.go, displaycontrol.go).
   # The operator creates one Display for every monitor it probes and
   # writes the whole of its status. The list and the watch are here

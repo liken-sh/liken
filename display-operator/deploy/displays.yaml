@@ -99,6 +99,11 @@ spec:
                 mode:
                   type: string
                   description: "The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card."
+                layout:
+                  type: string
+                  description: "The Layout this screen shows, by name. A screen that names none shows every window fullscreen with the newest on top. A name that matches no Layout shows the same and reports the name under the LayoutResolved condition."
+                  maxLength: 253
+                  pattern: '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'
                 override:
                   type: object
                   description: "The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none."
@@ -192,9 +197,71 @@ spec:
                   type: object
                   description: "The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator."
                   properties: *values
+                surfaces:
+                  type: array
+                  description: "Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids."
+                  # The operator writes the whole of this list, and
+                  # the order is the order the surfaces arrived in, so
+                  # the list is one value and not a merged map.
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                        description: "The window's id, which the compositor assigned. status.layout names it beside the region that shows it."
+                      claim:
+                        type: string
+                        description: "The ResourceClaim whose socket the window arrived on, as namespace/name. Empty for a window on the shared socket, which belongs to no claim."
+                      pods:
+                        type: array
+                        description: "The pods that hold the claim, each as namespace/name."
+                        items:
+                          type: string
+                        x-kubernetes-list-type: atomic
+                      labels:
+                        type: object
+                        description: "The labels every holder of the claim carries with the same value. These are the labels a region's selector reads. When one pod holds the claim they are that pod's labels."
+                        additionalProperties:
+                          type: string
+                      size:
+                        type: object
+                        description: "The size the program last drew, in pixels. A window in a region draws at the region's size, so a size that does not match its region is a program that ignored the compositor's request and is scaled to fit."
+                        properties:
+                          width:
+                            type: integer
+                            description: "The width in pixels."
+                          height:
+                            type: integer
+                            description: "The height in pixels."
+                      region:
+                        type: string
+                        description: "The region that shows the window. Empty for a window no region took, which is not on the screen."
+                layout:
+                  type: object
+                  description: "The arrangement the screen is drawn to, and what each region shows."
+                  properties:
+                    name:
+                      type: string
+                      description: "The Layout in force, or default for a screen that names none or names one that does not exist."
+                    regions:
+                      type: array
+                      description: "Each region in stacking order, with the window it shows."
+                      x-kubernetes-list-type: atomic
+                      items:
+                        type: object
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            description: "The region's name, as the Layout states it."
+                          surface:
+                            type: string
+                            description: "The id of the window the region shows, or the word empty when no window matched it."
                 conditions:
                   type: array
-                  description: "Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not."
+                  description: "Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]

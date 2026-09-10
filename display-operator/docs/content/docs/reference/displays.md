@@ -65,6 +65,7 @@ The settings the panel rests at, and the override above them. Every field is opt
 | <span id="spec--audiovolume"></span>`audioVolume` | integer | no | The panel's own volume number. |
 | <span id="spec--audiomute"></span>`audioMute` | boolean | no | Whether the panel's own speakers are muted. |
 | <span id="spec--mode"></span>`mode` | string | no | The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card. |
+| <span id="spec--layout"></span>`layout` | string | no | The Layout this screen shows, by name. A screen that names none shows every window fullscreen with the newest on top. A name that matches no Layout shows the same and reports the name under the LayoutResolved condition. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="spec--override"></span>`override` | [object](#specoverride) | no | The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none. |
 
 ### spec.override
@@ -94,7 +95,9 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels. |
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. |
+| <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids. |
+| <span id="status--layout"></span>`layout` | [object](#statuslayout) | no | The arrangement the screen is drawn to, and what each region shows. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. |
 
 ### status.mode
 
@@ -129,9 +132,49 @@ The last value the operator read or wrote for each control. The operator reads t
 | <span id="statusobserved--audiomute"></span>`audioMute` | boolean | no |  |
 | <span id="statusobserved--power"></span>`power` | string | no |  |
 
+### status.surfaces[]
+
+Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussurfaces--id"></span>`id` | string | yes | The window's id, which the compositor assigned. status.layout names it beside the region that shows it. |
+| <span id="statussurfaces--claim"></span>`claim` | string | no | The ResourceClaim whose socket the window arrived on, as namespace/name. Empty for a window on the shared socket, which belongs to no claim. |
+| <span id="statussurfaces--pods"></span>`pods` | []string | no | The pods that hold the claim, each as namespace/name. |
+| <span id="statussurfaces--labels"></span>`labels` | map[string]string | no | The labels every holder of the claim carries with the same value. These are the labels a region's selector reads. When one pod holds the claim they are that pod's labels. |
+| <span id="statussurfaces--size"></span>`size` | [object](#statussurfacessize) | no | The size the program last drew, in pixels. A window in a region draws at the region's size, so a size that does not match its region is a program that ignored the compositor's request and is scaled to fit. |
+| <span id="statussurfaces--region"></span>`region` | string | no | The region that shows the window. Empty for a window no region took, which is not on the screen. |
+
+#### status.surfaces[].size
+
+The size the program last drew, in pixels. A window in a region draws at the region's size, so a size that does not match its region is a program that ignored the compositor's request and is scaled to fit.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussurfacessize--width"></span>`width` | integer | no | The width in pixels. |
+| <span id="statussurfacessize--height"></span>`height` | integer | no | The height in pixels. |
+
+### status.layout
+
+The arrangement the screen is drawn to, and what each region shows.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuslayout--name"></span>`name` | string | no | The Layout in force, or default for a screen that names none or names one that does not exist. |
+| <span id="statuslayout--regions"></span>`regions` | [\[\]object](#statuslayoutregions) | no | Each region in stacking order, with the window it shows. |
+
+#### status.layout.regions[]
+
+Each region in stacking order, with the window it shows.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuslayoutregions--name"></span>`name` | string | yes | The region's name, as the Layout states it. |
+| <span id="statuslayoutregions--surface"></span>`surface` | string | no | The id of the window the region shows, or the word empty when no window matched it. |
+
 ### status.conditions[]
 
-Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not.
+Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
