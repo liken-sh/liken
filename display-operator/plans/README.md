@@ -168,7 +168,7 @@ say why it is built the way it is.
 * [15, The output states its scale](15-the-output-states-its-scale.md).
   An output whose mode is 3840 wide or wider gets `scale=2` in its
   section, so every client draws a 4K panel at the 1080p size.
-* [16, The Vulkan base image](16-the-vulkan-base-image.md). Built on
+* [16, The Vulkan base image](completed/16-the-vulkan-base-image.md). Built on
   2026-09-08. A third image, `ghcr.io/liken-sh/vulkan`, under the
   compositor: the loader, the Intel and AMD drivers, and the client
   libraries, on scratch. The media browser and the idle screen build

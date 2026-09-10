@@ -1,10 +1,12 @@
 # The Vulkan base image
 
-Plan 16. The `Dockerfile` builds a third image, `ghcr.io/liken-sh/vulkan`,
-under the compositor image. It holds the Vulkan loader, the Intel and
-AMD drivers, and the libraries a Wayland client opens by name, on
-scratch. The media browser and the idle screen build `FROM` it, and the
-weston image builds on it too, so a node that draws holds LLVM once.
+Plan 16. Built on 2026-09-08 in release 2026.09.08-001, and proven on
+liken-1 and stick-1 the same day. The `Dockerfile` builds a third
+image, `ghcr.io/liken-sh/vulkan`, under the compositor image. It holds
+the Vulkan loader, the Intel and AMD drivers, and the libraries a
+Wayland client opens by name, on scratch. The media browser and the
+idle screen build `FROM` it, and the weston image builds on it too, so
+a node that draws holds LLVM once.
 
 ## The problem
 
@@ -73,7 +75,7 @@ Intel-only base would be about 22 MiB in the registry instead of about
 `radeon` so that an ordinary machine boots with a console, and a
 client image narrower than the OS that runs it is the wrong shape.
 When a machine with AMD graphics arrives, nothing changes. The
-[LLVM open problem](open-problems/llvm-is-two-thirds-of-the-image.md)
+[LLVM open problem](../open-problems/llvm-is-two-thirds-of-the-image.md)
 states the same tension for the compositor.
 
 **Debian trixie for the clients, not Ubuntu 26.04.** The clients ran
