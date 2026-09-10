@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,6 +48,17 @@ func reported(claim claimReference, armed bool, pending int) *volume {
 		held.pending = append(held.pending, change{path: "a.txt"})
 	}
 	return held
+}
+
+func TestTheRuntimeCollectorsAreOnTheRegistry(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	newMetrics().handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, want := range []string{"go_goroutines ", "process_start_time_seconds "} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the scrape carries no %s series", strings.TrimSpace(want))
+		}
+	}
 }
 
 func TestTheGaugesCarryTheClaim(t *testing.T) {
@@ -210,6 +222,12 @@ func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
 	for _, family := range families {
+		// The runtime's own series and the build info are never
+		// empty; the test is about the series a volume puts there.
+		if strings.HasPrefix(family.GetName(), "go_") || strings.HasPrefix(family.GetName(), "process_") ||
+			family.GetName() == "liken_build_info" {
+			continue
+		}
 		if len(family.GetMetric()) != 0 {
 			t.Errorf("%s carries %v, want nothing", family.GetName(), family.GetMetric())
 		}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -179,6 +180,9 @@ func newMetrics() *metrics {
 			prometheus.CounterOpts{Name: "git_csi_webhook_marked_total", Help: "PersistentVolumes a verified push marked."}),
 	}
 	readings.registry.MustRegister(
+		// Layer 1 is the runtime's own numbers beside the build info.
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		// Layers 1 and 2 answer for every CSI call either plugin
 		// serves, so both the controller and the node register them.
 		readings.buildInfo, readings.callDuration, readings.callErrors,
