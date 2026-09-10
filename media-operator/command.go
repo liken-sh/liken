@@ -200,6 +200,12 @@ type commander struct {
 	// know what the item's art is. A newer request replaces an older one,
 	// because only the latest box is still on the screen.
 	pendingAlbum *artRequest
+
+	// metrics is nil for the art server and for a test that has no use
+	// for it, so drive and runReporter guard every call through it. A
+	// deployed playback pod always sets it: runCommand builds one on
+	// every start, the way it builds a bus connection on every start.
+	metrics *commandMetrics
 }
 
 // runCommand connects to the bus, drives mpv's IPC socket, and reports
@@ -229,8 +235,18 @@ func runCommand() {
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(signals)
 
+	// The sidecar's own metrics: layer 1 alone, on the port
+	// deploy/monitoring/podmonitor-screens.yaml scrapes across every
+	// namespace a Player lives in. The operator sets both variables on
+	// the command container the way it sets every other pod setting, so
+	// an unset address here answers a workstation harness with no
+	// listener rather than a default port nothing chose.
+	metrics := newCommandMetrics(os.Getenv(mediaVersionVariable))
+	metrics.serve(os.Getenv(metricsAddressVariable))
+
 	cmd := &commander{
 		statusTopic:       playStatusTopic(base, namespace, name),
+		metrics:           metrics,
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
 		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
@@ -428,6 +444,14 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 		return
 	}
 	defer c.detach()
+	// The decode series describe this connection's mpv alone, so they
+	// clear the moment it drops, the same instant runCommand marks the
+	// Play offline. A run that reconnects starts the two series over
+	// from mpv's fresh observe, exactly as it starts the frame baseline
+	// over.
+	if c.metrics != nil {
+		defer c.metrics.clearDecode()
+	}
 	// The socket is live now, so the state the bus already delivered
 	// reaches mpv here. Every message before this point found no
 	// socket and wrote nothing.
@@ -450,7 +474,7 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 	// socket closes and the reader closes the messages channel.
 	go c.serveMessages(messages)
 
-	runReporter(ctx, changes, send, c.present, c.playlistChanged)
+	runReporter(ctx, changes, send, c.present, c.playlistChanged, c.metrics)
 	<-reading
 }
 
@@ -844,7 +868,16 @@ type playlistReceiver func(playlist json.RawMessage)
 // no more than one report per interval. A send that fails is logged and
 // the run goes on, because the loss is the operator's view of the film
 // and not a reason to stop playing.
-func runReporter(ctx context.Context, changes <-chan propertyChange, send reportSender, present itemPresenter, playlist playlistReceiver) {
+//
+// metrics is nil for the art server and for a test with no use for it;
+// every call through it is guarded. It observes the four decode
+// properties that play no part in the report at all, alongside the
+// ones that do, because mpv delivers every property change on the
+// one channel.
+func runReporter(
+	ctx context.Context, changes <-chan propertyChange, send reportSender,
+	present itemPresenter, playlist playlistReceiver, metrics *commandMetrics,
+) {
 	var state playbackState
 	var sent time.Time
 	var presented int
@@ -866,6 +899,9 @@ func runReporter(ctx context.Context, changes <-chan propertyChange, send report
 				}
 				continue
 			}
+			if metrics != nil {
+				metrics.observe(change)
+			}
 			atOnce := state.apply(change)
 			if !state.reportable() {
 				continue
@@ -873,10 +909,16 @@ func runReporter(ctx context.Context, changes <-chan propertyChange, send report
 			// Forward the block on the first item and on every advance,
 			// keyed on the item and not the throttled position, so the
 			// display swaps its presentation the moment the playlist
-			// reaches a new item.
+			// reaches a new item. The same advance ends the file mpv had
+			// open, so it clears the decode series the way a dropped
+			// connection does; the properties the new file's observe
+			// delivers next republish them.
 			if state.item != presented {
 				presented = state.item
 				present(state.item)
+				if metrics != nil {
+					metrics.clearDecode()
+				}
 			}
 			if !atOnce && time.Since(sent) < reportInterval {
 				continue

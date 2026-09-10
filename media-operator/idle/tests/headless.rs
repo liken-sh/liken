@@ -432,6 +432,11 @@ fn the_client_reads_the_bus_and_draws_what_it_says() {
             ("MEDIA_PLAYER_COMMANDS_TOPIC", COMMANDS_TOPIC.into()),
             ("IDLE_PLAYER_NAME", "The Den".into()),
             ("IDLE_PLAYER_COMPONENTS", "The screen\nThe speakers".into()),
+            // Port 0 takes whatever the kernel has free, because this run
+            // proves the client starts its listener and keeps drawing, not
+            // that a scrape reaches one particular port.
+            ("MEDIA_METRICS_ADDRESS", "127.0.0.1:0".into()),
+            ("MEDIA_VERSION", "test".into()),
         ],
     );
 

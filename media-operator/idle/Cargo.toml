@@ -90,3 +90,20 @@ jiff = { version = "=0.2.35", default-features = false, features = [
     "tz-system",
     "tzdb-zoneinfo",
 ] }
+# The facade this client reports the two gauges media-screen sets through,
+# plus this client's own build identity.
+metrics = { workspace = true }
+# The exporter that turns the facade into a `/metrics` a Prometheus scrapes.
+# Only the listener feature: this client never pushes to a gateway and needs
+# no protobuf exposition, so the build carries neither.
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false, features = [
+    "http-listener",
+] }
+# process_* under the same recorder. `Collector::describe` registers the help
+# text once, and a thread this client starts calls `collect` on the interval
+# metrics.rs states, the pattern the crate's own docs give because the
+# exporter has no scrape hook of its own to call it from.
+metrics-process = "=2.4.3"
+
+[dev-dependencies]
+metrics-util = { version = "=0.20.4", default-features = false, features = ["debugging"] }

@@ -917,9 +917,19 @@ type Container struct {
 	Command       []string             `json:"command,omitempty"`
 	Args          []string             `json:"args,omitempty"`
 	Env           []EnvVar             `json:"env,omitempty"`
+	Ports         []ContainerPort      `json:"ports,omitempty"`
 	Resources     ResourceRequirements `json:"resources"`
 	VolumeMounts  []VolumeMount        `json:"volumeMounts,omitempty"`
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
+}
+
+// ContainerPort names one port a container answers on. Milestone 65 is
+// the one caller: a PodMonitor selects a scrape target by this name, not
+// by the number, so a port moves without a second edit anywhere that
+// reads it.
+type ContainerPort struct {
+	Name          string `json:"name"`
+	ContainerPort int32  `json:"containerPort"`
 }
 
 // resources.claims is how a container holds one of the pod's

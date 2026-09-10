@@ -34,6 +34,18 @@ pub const VOLUME_TOPIC: &str = "MEDIA_PLAYER_VOLUME_TOPIC";
 /// the client draws no volume row of its own while it stands.
 pub const VOLUME_OWNER_TOPIC: &str = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC";
 
+/// The address this client's `/metrics` listener binds, written `host:port`.
+/// An empty value is milestone 65's off switch: no listener opens, and the
+/// gauges below cost a lookup that finds nowhere to go. A delegate's operator
+/// sets a port of its own choosing here, the way it sets every other address.
+pub const METRICS_ADDRESS: &str = "MEDIA_METRICS_ADDRESS";
+
+/// The version this client's image carries, for the `liken_build_info` gauge.
+/// The operator reads its own tag off the pod it already resolved this
+/// client's image from, so the client never guesses at a version no one told
+/// it.
+pub const VERSION: &str = "MEDIA_VERSION";
+
 /// The `Player`'s commands topic. It carries the playback pod's `play-next`,
 /// the ask a person makes on the up-next offer the scrubber draws. The
 /// presses reach a client on the controllers' own topics, and a client brings
@@ -90,6 +102,10 @@ pub struct Wiring {
     /// The off window, clamped to at least the fade, so the panel never goes
     /// dark behind a still-lit image. Zero leaves the desire at on forever.
     pub off_after: Duration,
+    /// Where this client's `/metrics` listener binds. Empty turns it off.
+    pub metrics_address: String,
+    /// This client's own version, for the `liken_build_info` gauge.
+    pub version: String,
 }
 
 impl Wiring {
@@ -130,6 +146,8 @@ impl Wiring {
                 true => Duration::ZERO,
                 false => off_after.max(fade_after),
             },
+            metrics_address: read(METRICS_ADDRESS),
+            version: read(VERSION),
         }
     }
 }
@@ -212,6 +230,8 @@ mod tests {
             (REMOTE_FOCUS_TOPICS, "focus/sofa\nfocus/armchair"),
             (FADE_AFTER_SECONDS, "600"),
             (OFF_AFTER_SECONDS, "1800"),
+            (METRICS_ADDRESS, "0.0.0.0:9222"),
+            (VERSION, "2026.09.10-001"),
         ]);
 
         assert_eq!(read.bus_address, "broker:1883");
@@ -226,6 +246,8 @@ mod tests {
         assert_eq!(read.panel_topic, "media/players/den/tv/panel");
         assert_eq!(read.fade_after, Duration::from_secs(600));
         assert_eq!(read.off_after, Duration::from_secs(1800));
+        assert_eq!(read.metrics_address, "0.0.0.0:9222");
+        assert_eq!(read.version, "2026.09.10-001");
     }
 
     #[test]

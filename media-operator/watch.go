@@ -31,8 +31,16 @@ var watchRetryPause = 2 * time.Second
 // one line each and make that failure window resumable, where a
 // relist costs one full read of the collection, small here, and the
 // pass the wake triggers.
-func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+//
+// onRestart runs once per reconnect, never on the first connection, so
+// media_watch_restarts_total counts what its name says: a stream the
+// API server closed and this loop opened again. A caller with nothing
+// to count passes nil.
+func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := playsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -61,8 +69,11 @@ func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}) {
 // Remote on the pass that wake triggers. The recovery is the same as
 // watchPlays: a dropped stream or a 410 Gone re-lists the collection,
 // wakes the loop, and resumes the watch from the list's version.
-func watchRemotes(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchRemotes(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := remotesAllPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -89,8 +100,11 @@ func watchRemotes(c *Client, resourceVersion string, wake chan<- struct{}) {
 // Player reshaped its pod is recreated then. A dropped stream or a 410
 // Gone recovers the same way: list the collection, wake the loop, and
 // resume the watch from the list's version.
-func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := playersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -117,8 +131,11 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 // pass that wake triggers republishes the Player status the idle screen
 // draws. The recovery is the same as the others: list the collection,
 // wake the loop, and resume from the list's version.
-func watchPeripherals(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPeripherals(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := peripheralsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -145,8 +162,11 @@ func watchPeripherals(c *Client, resourceVersion string, wake chan<- struct{}) {
 // The recovery mirrors the other watchers: a dropped stream or a 410
 // Gone lists the collection, wakes the loop, and resumes the watch from
 // the list's version.
-func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := keymapsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -170,8 +190,11 @@ func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}) {
 // watchMediaPreferences wakes the loop on a MediaPreferences edit, so the
 // resolved fields on a running Play's status refresh within one pass. Recovery
 // mirrors the other watchers.
-func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := mediaPrefsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -195,8 +218,11 @@ func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct
 // watchPods wakes the loop when k8s removes a playback pod or when one turns
 // Failed, so an eviction or a crash reaches the reconcile at once instead of
 // waiting for the backstop tick. Its recovery matches the other watchers.
-func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPods(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	for first := true; ; first = false {
+		if !first {
+			callRestart(onRestart)
+		}
 		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + playbackPodsQuery +
 			"&resourceVersion=" + resourceVersion
 		resp, err := c.Do(http.MethodGet, path, nil)
@@ -215,6 +241,16 @@ func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 		}
 		resourceVersion = list.Metadata.ResourceVersion
 		poke(wake)
+	}
+}
+
+// callRestart runs a watch's restart callback when it named one. Most
+// callers pass the operator's metrics counter; the tests in
+// watch_test.go pass nil, because they read a restart off the mock
+// server's request channel instead.
+func callRestart(onRestart func()) {
+	if onRestart != nil {
+		onRestart()
 	}
 }
 

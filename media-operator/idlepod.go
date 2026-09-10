@@ -40,6 +40,15 @@ const idleDrawRequest = "draw"
 // screen.
 const idleWindowGraceSeconds = 15
 
+// The port the idle client's own `/metrics` listener binds, milestone
+// 65's fixed assignment for this process. The container names the port
+// rather than the number, so a PodMonitor selects it with no number of
+// its own to keep in step with this one.
+const (
+	idleMetricsPort = 9222
+	metricsPortName = "metrics"
+)
+
 // idlePodName is a Player's standing idle pod, the Player's name plus its
 // job, so a person reading either object finds the other.
 func idlePodName(player string) string {
@@ -260,6 +269,19 @@ func buildIdlePod(
 		container.Env = append(container.Env,
 			EnvVar{Name: idlePlayerComponentsVariable, Value: strings.Join(components, "\n")})
 	}
+
+	// The idle client serves its own `/metrics`, milestone 65's port 9222,
+	// and reports the version its image's own tag carries: the tag
+	// resolveImages already read to name this pod's image, so the client
+	// states the release a person reads off `kubectl get pods -o
+	// wide`, and states none for a household's own image that carries no
+	// tag to read.
+	container.Env = append(container.Env,
+		EnvVar{Name: metricsAddressVariable, Value: "0.0.0.0:" + strconv.Itoa(idleMetricsPort)})
+	if _, tag, tagged := splitReference(idle.Image); tagged {
+		container.Env = append(container.Env, EnvVar{Name: mediaVersionVariable, Value: tag})
+	}
+	container.Ports = []ContainerPort{{Name: metricsPortName, ContainerPort: idleMetricsPort}}
 
 	// Every idle client reads the bus for itself, so the container
 	// carries the address and the unit's retained state topic.

@@ -1,0 +1,50 @@
+# The idle screen's standing pod. media.liken.sh/component: idle is the
+# label buildIdlePod already writes for display-operator's Layout to
+# select the surface by. This PodMonitor selects the same pod by the
+# same label.
+#
+# A Player lives in whatever namespace a household chose, and its idle
+# pod follows it there. So this PodMonitor cannot sit beside its
+# targets the way podmonitor-operator.yaml sits beside the Deployment,
+# and namespaceSelector reaches across every namespace instead.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: media-idle-screen
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      media.liken.sh/component: idle
+  podMetricsEndpoints:
+    - port: metrics
+      # The fleet dashboard selects by node, and a Pod's own labels
+      # never carry the node it landed on, so the scrape relabels it
+      # in from Prometheus's own discovery metadata.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+---
+# The playback pod. media.liken.sh/component: playback is the label
+# buildPod writes on every one, and the pod's command sidecar is what
+# serves plan 26's three mpv-derived series: it is the one process
+# that holds mpv's own IPC socket, so those facts are its to report. A
+# Play, like a Player, lives in whatever namespace a household chose,
+# so this PodMonitor reaches across every namespace the same way the
+# idle one does.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: media-playback
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      media.liken.sh/component: playback
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

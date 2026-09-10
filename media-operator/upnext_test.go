@@ -57,7 +57,7 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 
 	changes := make(chan propertyChange, 8)
 	go feedChanges(changes, changeOf("playlist-pos", "0"), changeOf("playlist-pos", "1"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {})
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
 
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","presentation","{\"title\":\"First\"}"]}`)
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","next","{\"title\":\"E05\"}"]}`)

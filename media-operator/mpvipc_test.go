@@ -22,6 +22,10 @@ func TestObservePropertiesAsksForEachPropertyOnce(t *testing.T) {
 		`{"command":["observe_property",5,"current-tracks/audio/lang"]}`,
 		`{"command":["observe_property",6,"current-tracks/sub/lang"]}`,
 		`{"command":["observe_property",7,"playlist"]}`,
+		`{"command":["observe_property",8,"video-codec"]}`,
+		`{"command":["observe_property",9,"hwdec-current"]}`,
+		`{"command":["observe_property",10,"frame-drop-count"]}`,
+		`{"command":["observe_property",11,"avsync"]}`,
 	})
 }
 

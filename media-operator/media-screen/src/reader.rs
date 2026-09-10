@@ -124,6 +124,9 @@ impl Reader {
         options.set_keep_alive(KEEPALIVE);
         options.set_max_packet_size(MAX_PACKET_SIZE, MAX_PACKET_SIZE);
         let (client, connection) = Broker::new(options, QUEUE_DEPTH);
+        // A scrape before the first session sees a broker configured but not
+        // yet reached, not the silence an unset MEDIA_BUS_ADDRESS reports.
+        crate::metrics::bus_connected(false);
 
         let (sender, moments) = mpsc::channel();
         let screen = Arc::new(Mutex::new(screen));
@@ -236,6 +239,7 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
         };
         let effects = match event {
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                crate::metrics::bus_connected(true);
                 let mut screen = screen.lock().expect("no thread panics with the lock");
                 let effects = screen.connected();
                 let filters = screen.filters().into_iter().map(|path| SubscribeFilter {
@@ -258,6 +262,7 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
                     Instant::now(),
                 ),
             Err(error) => {
+                crate::metrics::bus_connected(false);
                 // The client reconnects on its own, so the line is the record
                 // and not a request for anything.
                 eprintln!("media-screen: bus: {error}");

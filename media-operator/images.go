@@ -87,6 +87,32 @@ func resolveImages(client *Client) (companionImages, error) {
 	return stated, nil
 }
 
+// operatorVersion reads this operator's own pod and answers the tag its
+// own image names, the same fact resolveImages reads to derive the
+// companion images. liken_build_info reports this as the release the
+// process runs. A downward API the Deployment did not set, a pod the
+// API server no longer holds, or an image named by digest instead of
+// a tag all answer the empty string, because metrics are secondary to
+// the reconcile loop and never worth failing startup over.
+func operatorVersion(client *Client) string {
+	name, namespace := os.Getenv(podNameVariable), os.Getenv(podNamespaceVariable)
+	if name == "" || namespace == "" {
+		return ""
+	}
+	pod, err := GetPod(client, namespace, name)
+	if err != nil {
+		return ""
+	}
+	for _, container := range pod.Spec.Containers {
+		if container.Name == operatorContainerName {
+			if _, tag, tagged := splitReference(container.Image); tagged {
+				return tag
+			}
+		}
+	}
+	return ""
+}
+
 // deriveCompanionImages names each companion as the operator's
 // repository with a suffix, at the operator's tag. An image with no
 // tag has no version to share, and the error says what to set.

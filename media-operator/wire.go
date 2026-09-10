@@ -184,4 +184,17 @@ const (
 	// whenever the volume topic is. A retained mark means equipment holds
 	// the level, so mpv sits at unity and applies none.
 	playerVolumeOwnerTopicVariable = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC"
+
+	// metricsAddressVariable is declared in operate.go, alongside the
+	// operator's own MEDIA_METRICS_ADDRESS read: milestone 65 fixes the
+	// same name for every process, so a screen client's pod carries it
+	// under the one constant instead of a second name for the same
+	// setting.
+	//
+	// mediaVersionVariable carries a screen client's own build version,
+	// for its `liken_build_info` gauge. The client holds no API
+	// credentials, so the operator reads the tag off the image it
+	// already resolved for that pod and passes it down, the way
+	// operatorVersion reads its own for itself.
+	mediaVersionVariable = "MEDIA_VERSION"
 )

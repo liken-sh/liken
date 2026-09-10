@@ -1,0 +1,23 @@
+# The metrics component. Milestone 65 in the liken repository is the
+# contract: every process serves /metrics on its own port, whether or
+# not a cluster runs Prometheus, and this component is what a cluster
+# owner who does add PodMonitor for the pods this repository ships.
+#
+# A fleet repository takes both the base and this component:
+#
+#   resources:
+#     - https://github.com/liken-sh/media-operator//deploy?ref=<tag>
+#   components:
+#     - https://github.com/liken-sh/media-operator//deploy/monitoring?ref=<tag>
+#
+# The base alone runs the operator and the two screen clients with
+# their listeners open and nothing scraping them; this component is
+# the whole of what changes once a Prometheus is watching.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+namespace: liken-system
+
+resources:
+  - podmonitor-operator.yaml
+  - podmonitor-screens.yaml

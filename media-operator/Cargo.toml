@@ -21,6 +21,10 @@ exclude = ["docs/themes/brand/iced"]
 rumqttc = { version = "=0.25.1", default-features = false }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
+# The facade both crates report through, milestone 65's contract. media-screen
+# touches only the macros; idle installs the recorder that gives them
+# somewhere to go.
+metrics = "=0.24.6"
 
 # The measurements need optimized code with symbols the profile does not strip.
 [profile.release]

@@ -7,6 +7,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,7 +16,7 @@ import (
 // the path it lists to resume.
 type collectionWatcher struct {
 	name      string
-	watch     func(c *Client, resourceVersion string, wake chan<- struct{})
+	watch     func(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func())
 	watchPath string
 	listPath  string
 }
@@ -37,7 +38,7 @@ func startCollectionWatch(t *testing.T, each collectionWatcher, api *watchAPI, f
 	t.Helper()
 	server := httptest.NewServer(api.handler())
 	wake := make(chan struct{}, 1)
-	go each.watch(NewClient(server.URL, server.Client(), ""), from, wake)
+	go each.watch(NewClient(server.URL, server.Client(), ""), from, wake, nil)
 	return wake
 }
 
@@ -93,6 +94,35 @@ func TestEachCollectionWatchListsAndWakesAfterTheStreamEnds(t *testing.T) {
 			waitForWatchWake(t, wake)
 			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "150")
 			mustMatch(t, nextWatchPath(t, api), each.watchPath)
+		})
+	}
+}
+
+// media_watch_restarts_total counts a reconnect on every collection
+// watcher the same way, because callRestart is the one path all seven
+// watch loops take to their caller's counter.
+func TestEachCollectionWatchCountsOneRestartPerReconnect(t *testing.T) {
+	for _, each := range collectionWatchers {
+		t.Run(each.name, func(t *testing.T) {
+			useWatchRetryPause(t)
+			api := newWatchAPI()
+			api.answersWatches(watchTurn{})
+			api.answersLists(listTurn{version: "150"})
+
+			server := httptest.NewServer(api.handler())
+			wake := make(chan struct{}, 1)
+			var restarts atomic.Int32
+			go each.watch(NewClient(server.URL, server.Client(), ""), "42", wake,
+				func() { restarts.Add(1) })
+
+			nextWatchRequest(t, api)
+			nextListRequest(t, api)
+			waitForWatchWake(t, wake)
+			nextWatchRequest(t, api)
+
+			if got := restarts.Load(); got != 1 {
+				t.Errorf("restarts = %d, want 1", got)
+			}
 		})
 	}
 }

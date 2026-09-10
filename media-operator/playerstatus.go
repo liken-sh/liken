@@ -124,6 +124,29 @@ func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatu
 	return PlayerStatus{Activity: playerIdle}
 }
 
+// playerMetricState folds a unit's derived activity into the three words
+// media_players reports. A unit with nothing running or a Play still
+// starting reads as idle for the gauge, because neither has begun
+// playback yet; only a Play in the Running phase can be playing or
+// paused, and its own status.Activity already carries that fold, so
+// this reads the same field the Play's own status was built from
+// instead of re-deriving it from the report desk a second time.
+func playerMetricState(namespace string, status PlayerStatus, plays []Play) string {
+	if status.Activity != playerPlaying {
+		return playerMetricIdle
+	}
+	for index := range plays {
+		play := &plays[index]
+		if play.Metadata.Namespace == namespace && play.Metadata.Name == status.Play {
+			if play.Status.Activity == activityPaused {
+				return playerMetricPaused
+			}
+			break
+		}
+	}
+	return playerMetricPlaying
+}
+
 // publishPlayerStatuses publishes each unit's presentable state from the
 // two things that state comes from: the Plays the pass listed and the
 // report desk. The pass calls this before it reconciles anything,

@@ -208,3 +208,39 @@ func TestResolveImagesFailsWithoutTheDownwardAPI(t *testing.T) {
 	mustFail(t, err)
 	mustMatch(t, len(api.requests), 0)
 }
+
+// operatorVersion reads the same pod resolveImages derives the
+// companion images from, so liken_build_info names the release this
+// operator actually runs.
+func TestOperatorVersionReadsTheOperatorsOwnTag(t *testing.T) {
+	t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
+	t.Setenv(podNamespaceVariable, "liken-system")
+	api := operatorPodAPI("ghcr.io/liken-sh/media-operator:2026.09.03-007")
+
+	mustMatch(t, operatorVersion(testAPIClient(t, api.handler())), "2026.09.03-007")
+}
+
+// A version is a courtesy metrics carries, never a startup
+// requirement, so every way it can go missing answers the empty
+// string instead of an error: no downward API, no pod, and an image
+// named by digest with no tag to report.
+func TestOperatorVersionAnswersEmptyWhenItCannotBeRead(t *testing.T) {
+	cases := []struct {
+		name string
+		env  bool
+		api  *cannedAPI
+	}{
+		{name: "no downward API", env: false, api: &cannedAPI{}},
+		{name: "no such pod", env: true, api: &cannedAPI{}},
+		{name: "an image named by digest", env: true, api: operatorPodAPI("ghcr.io/liken-sh/media-operator@sha256:c0ffee")},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			if each.env {
+				t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
+				t.Setenv(podNamespaceVariable, "liken-system")
+			}
+			mustMatch(t, operatorVersion(testAPIClient(t, each.api.handler())), "")
+		})
+	}
+}

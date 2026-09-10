@@ -16,6 +16,7 @@
 //! a release tag. The crate opens no window, holds no keymap of its
 //! own, and names no toolkit.
 
+pub mod metrics;
 pub mod panel;
 pub mod reader;
 pub mod screen;

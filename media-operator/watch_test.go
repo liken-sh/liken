@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -143,7 +144,7 @@ func startWatch(t *testing.T, api *watchAPI, from string) chan struct{} {
 	t.Helper()
 	server := httptest.NewServer(api.handler())
 	wake := make(chan struct{}, 1)
-	go watchPlays(NewClient(server.URL, server.Client(), ""), from, wake)
+	go watchPlays(NewClient(server.URL, server.Client(), ""), from, wake, nil)
 	return wake
 }
 
@@ -203,7 +204,7 @@ func startPodWatch(t *testing.T, api *watchAPI, from string) chan struct{} {
 	t.Helper()
 	server := httptest.NewServer(api.handler())
 	wake := make(chan struct{}, 1)
-	go watchPods(NewClient(server.URL, server.Client(), ""), from, wake)
+	go watchPods(NewClient(server.URL, server.Client(), ""), from, wake, nil)
 	return wake
 }
 
@@ -348,5 +349,32 @@ func TestTheWatcherListsAndWakesAfterAWatchThatCarriedNothing(t *testing.T) {
 				t.Errorf("the second watch resumed from %q, want the list's 150", got)
 			}
 		})
+	}
+}
+
+// media_watch_restarts_total counts a stream the API server closed and
+// this loop opened again, so the callback runs once per reconnect and
+// not on the loop's first connection.
+func TestAWatchRestartCountsEachReconnectAndNotTheFirstConnect(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{}, watchTurn{})
+	api.answersLists(listTurn{version: "2"}, listTurn{version: "3"})
+
+	server := httptest.NewServer(api.handler())
+	wake := make(chan struct{}, 1)
+	var restarts atomic.Int32
+	go watchPlays(NewClient(server.URL, server.Client(), ""), "1", wake, func() { restarts.Add(1) })
+
+	nextWatchRequest(t, api)
+	nextListRequest(t, api)
+	waitForWatchWake(t, wake)
+	nextWatchRequest(t, api)
+	nextListRequest(t, api)
+	waitForWatchWake(t, wake)
+	nextWatchRequest(t, api)
+
+	if got := restarts.Load(); got != 2 {
+		t.Errorf("restarts = %d, want 2", got)
 	}
 }

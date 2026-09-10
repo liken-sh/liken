@@ -1,0 +1,25 @@
+# The operator's own pod. app: media-operator is the Deployment's
+# selector label, left alone by the base's common-labels transformer
+# because includeSelectors: false keeps kustomize from rewriting a
+# selector field, so it is the label the running Pod actually carries
+# and the one this PodMonitor must match. The pod serves /metrics on
+# the port named metrics in deploy/operator.yaml. No namespaceSelector
+# is needed: the Component above places this PodMonitor in the same
+# namespace, liken-system, that the base places the Deployment in.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: media-operator
+spec:
+  selector:
+    matchLabels:
+      app: media-operator
+  podMetricsEndpoints:
+    - port: metrics
+      # The fleet dashboard selects the operators' own reconcile
+      # series by node, and a Pod's own labels never carry the node it
+      # landed on, so the scrape relabels it in from Prometheus's own
+      # discovery metadata.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

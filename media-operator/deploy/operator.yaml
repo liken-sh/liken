@@ -5,10 +5,14 @@
 # creates claims and pods, and writes statuses, and the scheduler
 # places the playback pods wherever the claimed devices are.
 #
-# The operator serves no HTTP. It subscribes to the bus for each
-# playback pod's report instead of hearing it over an endpoint of its
-# own. The reports are the one path in this system that does not go
-# through the API server, because the pods hold no API credentials.
+# The operator serves no HTTP path a person or a pod calls. It
+# subscribes to the bus for each playback pod's report instead of
+# hearing it over an endpoint of its own; the reports are the one path
+# in this system that does not go through the API server, because the
+# pods hold no API credentials. The one HTTP surface it does carry is
+# /metrics, on the port milestone 65 fixes for every process in the
+# organization, and deploy/monitoring/ is the opt-in PodMonitor that
+# scrapes it.
 #
 # There is no volume for state. The operator re-derives everything
 # from the API server on every pass.
@@ -53,6 +57,15 @@ spec:
             # passes the address into every pod it creates.
             - name: MEDIA_BUS_ADDRESS
               value: bus.liken-system.svc:1883
+            # The metrics listener, on the port milestone 65 assigns this
+            # process. It answers with no Prometheus running anywhere in
+            # the cluster; nothing scrapes it until an owner applies
+            # deploy/monitoring beside this base.
+            - name: MEDIA_METRICS_ADDRESS
+              value: ":9220"
+          ports:
+            - name: metrics
+              containerPort: 9220
           securityContext:
             capabilities:
               drop: ["ALL"]

@@ -46,6 +46,17 @@ const (
 	// here. An unset value turns the idle screen off, so reconcileIdle
 	// creates no idle claim and no idle pod.
 	idleDisplayClassVariable = "IDLE_DISPLAY_CLASS"
+
+	// MEDIA_METRICS_ADDRESS is the listener address for /metrics, in the
+	// shape milestone 65 fixes for every process in the organization: an
+	// empty value turns the listener off. deploy/operator.yaml sets it to
+	// the operator's own port on the contract's table, so a cluster with
+	// no Prometheus still runs the operator, and one that wants metrics
+	// needs no code change to get them. The operator sets the same
+	// variable, at each client's own port, on the pods it creates for
+	// media-screen and the idle screen; wire.go's mediaVersionVariable
+	// travels beside it.
+	metricsAddressVariable = "MEDIA_METRICS_ADDRESS"
 )
 
 // backstopInterval is how often the loop reconciles with nothing to
@@ -223,6 +234,11 @@ type operator struct {
 	// re-establishes it. It is atomic because the two goroutines share it
 	// with no other lock between them.
 	busReconnected atomic.Bool
+
+	// metrics is nil in a test that has no use for it, so every write
+	// through it is guarded. operate builds one always: production
+	// metrics are never optional, only a test's need for them is.
+	metrics *mediaMetrics
 }
 
 func operate() {
@@ -246,6 +262,7 @@ func operate() {
 	// playback pod's mpv is quiet; set, it reaches the pods this operator
 	// creates from now on.
 	playerVerbose := os.Getenv(playerVerboseVariable)
+	metricsAddress := os.Getenv(metricsAddressVariable)
 
 	client, err := InClusterClient()
 	if err != nil {
@@ -258,6 +275,13 @@ func operate() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
+	// The registry and the listener come up before anything else the
+	// operator does, so a scrape answers from the moment the process is
+	// up, the same promise the runtime collectors already keep for
+	// go_* and process_*.
+	metrics := newMediaMetrics(operatorVersion(client))
+	metrics.serve(metricsAddress)
 
 	// One wake channel serves the two watches and the bus handler,
 	// because a wake carries no information beyond "read the collection
@@ -290,6 +314,7 @@ func operate() {
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
 		wake:             wake,
+		metrics:          metrics,
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
@@ -353,13 +378,14 @@ func operate() {
 	}
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays.Items), len(remotes.Items), busAddress)
-	go watchPlays(client, plays.Metadata.ResourceVersion, wake)
-	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake)
-	go watchPlayers(client, players.Metadata.ResourceVersion, wake)
-	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake)
-	go watchMediaPreferences(client, prefs.Metadata.ResourceVersion, wake)
-	go watchPods(client, pods.Metadata.ResourceVersion, wake)
-	go watchPeripherals(client, peripherals.Metadata.ResourceVersion, wake)
+	go watchPlays(client, plays.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPlay))
+	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindRemote))
+	go watchPlayers(client, players.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPlayer))
+	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindKeymap))
+	go watchMediaPreferences(client, prefs.Metadata.ResourceVersion, wake,
+		watchRestartFunc(metrics, kindMediaPreferences))
+	go watchPods(client, pods.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPod))
+	go watchPeripherals(client, peripherals.Metadata.ResourceVersion, wake, watchRestartFunc(metrics, kindPeripheral))
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -378,6 +404,9 @@ func (o *operator) pass() {
 	// The pass reads the screens and the Receivers again, so a cable moved
 	// between passes is seen on the next one.
 	o.screenCache, o.receiverCache = nil, nil
+	if o.metrics != nil {
+		o.metrics.busConnected.Set(boolToFloat(o.bus.Connected()))
+	}
 	if o.busReconnected.Swap(false) {
 		o.reestablishRetained()
 	}
@@ -468,7 +497,17 @@ func (o *operator) pass() {
 			}
 			continue
 		}
-		if err := o.reconcile(play, defaults); err != nil {
+		previousPhase := play.Status.Phase
+		start := time.Now()
+		err := o.reconcile(play, defaults)
+		if o.metrics != nil {
+			o.metrics.observeReconcile(kindPlay, time.Since(start), err)
+			// reconcile mutates play.Status in place before it returns, on
+			// every path including the ones that write no error, so the
+			// phase this reads is always the one this pass just settled on.
+			o.metrics.notePlaybackPhase(previousPhase, play.Status)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling play %s/%s: %v\n",
 				play.Metadata.Namespace, play.Metadata.Name, err)
 		}
@@ -523,13 +562,21 @@ func (o *operator) pass() {
 		// Arbitrating after would publish the previous pass's mark and
 		// leave the indicator one pass behind.
 		o.reconcileFocus(players.Items)
+		start := time.Now()
 		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
+		if o.metrics != nil {
+			o.metrics.observeReconcile(kindPlayer, time.Since(start), nil)
+		}
 	}
 	if remotesErr == nil {
 		// The Keymaps are read first, because each Remote's table is its
 		// Keymap folded over the base, and the pass compiles one table per
 		// Remote.
+		start := time.Now()
 		o.reconcileRemotes(remotes.Items, remoteClaims, o.loadKeymaps())
+		if o.metrics != nil {
+			o.metrics.observeReconcile(kindRemote, time.Since(start), nil)
+		}
 	}
 }
 
@@ -865,11 +912,17 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// the session on their equipment. The session stands idle or playing,
 	// so this set is the match and not the standing run.
 	matched := make(map[string]bool, len(players))
+	// media_players counts units by zone and state, not by identity, so
+	// the pass tallies here and sets the gauge once below rather than
+	// exporting one series per Player, which zone already bounds to the
+	// cluster's own inventory.
+	playerCounts := map[[2]string]int{}
 	for index := range players {
 		player := &players[index]
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 		live[key] = true
 		desired := derivePlayerStatus(player, plays, o.reports)
+		playerCounts[[2]string{player.Spec.Zone, playerMetricState(player.Metadata.Namespace, desired, plays)}]++
 		// The screen memory and the Screen condition are the one
 		// place outside this operator that says why an idle pod
 		// waits. The derivation builds a fresh status, so the memory
@@ -935,6 +988,14 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// with an empty publish, so a deleted Player leaves no unit on the bus
 	// for a subscriber to draw.
 	o.playerStatuses.clear(o.bus, published)
+	if o.metrics != nil {
+		// Reset before Set, so a zone or state this pass found nobody in
+		// reads zero instead of the last pass's stale count.
+		o.metrics.players.Reset()
+		for bucket, count := range playerCounts {
+			o.metrics.players.WithLabelValues(bucket[0], bucket[1]).Set(float64(count))
+		}
+	}
 }
 
 // publishPlayerStatus writes one unit's presentable state to its retained

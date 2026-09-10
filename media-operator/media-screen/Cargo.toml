@@ -21,3 +21,12 @@ path = "src/lib.rs"
 rumqttc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The facade for the two gauges this crate reports on its own: the build
+# identity and the bus connection. It names no recorder, so a client with
+# none installed pays for a lookup that finds nowhere to go.
+metrics = { workspace = true }
+
+# DebuggingRecorder is a real recorder with no socket under it, so a test
+# reads the values the crate reported instead of a mock's stand-in for them.
+[dev-dependencies]
+metrics-util = { version = "=0.20.4", default-features = false, features = ["debugging"] }

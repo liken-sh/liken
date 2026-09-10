@@ -45,12 +45,24 @@ const (
 	// display asks for any of it. It is observed rather than asked for,
 	// because the supervisor observes properties and never polls.
 	playlistProperty = "playlist"
+
+	// The four properties plan 26's decode metrics read. None of them
+	// join a report: the command sidecar is the one process that holds
+	// mpv's socket, so these are its own Prometheus series and never
+	// travel to the operator. codecProperty and hardwareProperty
+	// together decide media_decode_info; droppedFramesProperty feeds
+	// media_dropped_frames_total; delayProperty is media_av_delay_seconds.
+	codecProperty         = "video-codec"
+	hardwareProperty      = "hwdec-current"
+	droppedFramesProperty = "frame-drop-count"
+	delayProperty         = "avsync"
 )
 
 var observedProperties = []string{
 	"pause", "playlist-pos", "time-pos", "duration",
 	audioLanguageProperty, subtitleLanguageProperty,
 	playlistProperty,
+	codecProperty, hardwareProperty, droppedFramesProperty, delayProperty,
 }
 
 // propertyChangeEvent carries an observed property's new value.

@@ -6,5 +6,6 @@ pub mod clock;
 pub mod harness;
 pub mod idle;
 pub mod look;
+pub mod metrics;
 pub mod unit;
 pub mod wiring;

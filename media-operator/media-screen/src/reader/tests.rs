@@ -7,11 +7,30 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use metrics::with_local_recorder;
+use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
 use rumqttc::{ConnAck, ConnectReturnCode, Publish as Message};
 
 use super::*;
 use crate::Bus;
 use crate::wiring::Remote;
+
+/// The one gauge value a body reported, under a recorder local to this
+/// thread. The reader's own threads still hold the process-wide recorder,
+/// which every other test also leaves untouched, so a local scope is what
+/// keeps this crate's connection gauge out of every test but its own.
+fn gauge(snapshotter: &Snapshotter, name: &str) -> Option<f64> {
+    snapshotter
+        .snapshot()
+        .into_vec()
+        .into_iter()
+        .find_map(
+            |(key, _, _, value)| match (key.key().name() == name, value) {
+                (true, DebugValue::Gauge(value)) => Some(value.into_inner()),
+                _ => None,
+            },
+        )
+}
 
 const STATUS: &str = "liken/media/players/house/theater/status";
 const PANEL: &str = "liken/media/players/house/theater/panel";
@@ -161,6 +180,55 @@ fn a_session_subscribes_states_the_panel_desire_and_says_it_connected() {
     // client. The moment is what a client with retained state of its own
     // republishes on.
     assert_eq!(reader.drain(), [Moment::Connected]);
+}
+
+#[test]
+fn opening_a_reader_marks_the_bus_not_yet_connected() {
+    let recorder = DebuggingRecorder::new();
+    let snapshotter = recorder.snapshotter();
+
+    // Port 1 refuses the connection instantly, the way the crate's other
+    // no-broker-yet test uses it, so this reads the mark `Reader::open`
+    // makes before either thread starts, not a race against the retry.
+    let reader = with_local_recorder(&recorder, || {
+        Reader::open(
+            &Wiring {
+                bus_address: "127.0.0.1:1".into(),
+                ..wiring()
+            },
+            "media-screen-test",
+            &[],
+        )
+    });
+
+    assert!(reader.is_some());
+    assert_eq!(gauge(&snapshotter, "media_bus_connected"), Some(0.0));
+}
+
+#[test]
+fn a_session_marks_the_bus_connected() {
+    let (_reader, threads) = reader();
+    let recorder = DebuggingRecorder::new();
+    let snapshotter = recorder.snapshotter();
+
+    with_local_recorder(&recorder, || {
+        read(&threads, [Ok(connected())].into_iter());
+    });
+
+    assert_eq!(gauge(&snapshotter, "media_bus_connected"), Some(1.0));
+}
+
+#[test]
+fn a_failed_session_marks_the_bus_not_connected() {
+    let (_reader, threads) = reader();
+    let recorder = DebuggingRecorder::new();
+    let snapshotter = recorder.snapshotter();
+
+    with_local_recorder(&recorder, || {
+        read(&threads, [Err(ConnectionError::RequestsDone)].into_iter());
+    });
+
+    assert_eq!(gauge(&snapshotter, "media_bus_connected"), Some(0.0));
 }
 
 #[test]

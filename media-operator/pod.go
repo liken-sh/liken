@@ -305,11 +305,22 @@ func commandSidecar(
 				Value: playerVolumeOwnerTopic(topicBase, play.Metadata.Namespace, playerName(play)),
 			})
 	}
+	// The sidecar serves its own /metrics, milestone 65's port 9221,
+	// and reports the version its own image's tag carries: the same tag
+	// the operator resolved to name this container's image, so plan
+	// 26's decode series read the release a person sees the pod itself
+	// running under.
+	env = append(env,
+		EnvVar{Name: metricsAddressVariable, Value: "0.0.0.0:" + strconv.Itoa(commandMetricsPort)})
+	if _, tag, tagged := splitReference(sidecarImage); tagged {
+		env = append(env, EnvVar{Name: mediaVersionVariable, Value: tag})
+	}
 	return Container{
 		Name:    commandContainer,
 		Image:   sidecarImage,
 		Command: []string{"/media-operator", commandMode},
 		Env:     env,
+		Ports:   []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
 		// The command sidecar reads mpv's socket on the IPC volume and writes
 		// decoded art on the art volume, and mpv reads that art back through the
 		// same art volume. It also holds the player's media mounts, because the

@@ -23,7 +23,11 @@ use crate::wiring::Wiring;
 /// The name this client connects to the broker under, before the machine's
 /// own name is appended. A broker closes the older connection when two arrive
 /// under one identifier, so no two clients on one machine may share it.
-const CLIENT: &str = "idle-screen";
+///
+/// It is also this client's `component` label on `liken_build_info`: the
+/// broker and a Prometheus both read the same one word for what this
+/// process is.
+pub const CLIENT: &str = "idle-screen";
 
 #[derive(Debug)]
 pub struct Client {

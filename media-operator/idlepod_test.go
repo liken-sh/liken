@@ -160,9 +160,16 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 		playerPanelTopicVariable:     playerPanelTopic(testTopicBase, "house", "theater"),
 		idleFadeAfterSecondsVariable: "600",
 		idleOffAfterSecondsVariable:  "0",
+		metricsAddressVariable:       "0.0.0.0:9222",
+		mediaVersionVariable:         "2026.09.01-001",
 	}
 	if env := containerEnv(container); !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("env = %+v, want %+v", env, wantEnv)
+	}
+
+	wantPorts := []ContainerPort{{Name: "metrics", ContainerPort: 9222}}
+	if !reflect.DeepEqual(container.Ports, wantPorts) {
+		t.Errorf("ports = %+v, want %+v", container.Ports, wantPorts)
 	}
 
 	claims := container.Resources.Claims
@@ -183,6 +190,22 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(pod.Metadata.OwnerReferences, owners) {
 		t.Errorf("ownerReferences = %+v, want %+v", pod.Metadata.OwnerReferences, owners)
+	}
+}
+
+// A household's own idle image may carry no tag, by digest or by
+// naming a floating tag some other tool moves. The client reports no
+// version rather than a guessed one, the way operatorVersion answers
+// the empty string for its own untagged pod.
+func TestBuildIdlePodOmitsTheVersionForAnUntaggedImage(t *testing.T) {
+	player := standingIdlePlayer()
+	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testBusAddress, testTopicBase, "",
+		resolveIdle(nil, nil, "ghcr.io/liken-sh/media-operator-idle@sha256:abc"), nil)
+
+	env := containerEnv(pod.Spec.Containers[0])
+	if version, present := env[mediaVersionVariable]; present {
+		t.Errorf("%s = %q, want unset for an untagged image", mediaVersionVariable, version)
 	}
 }
 
