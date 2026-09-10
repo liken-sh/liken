@@ -262,8 +262,7 @@ func declare() {
 		if monitor == "" {
 			monitor = "a monitor with no readable EDID"
 		}
-		fmt.Printf("%s: %s has %s, app-id %s\n",
-			DriverName, output.Connector, monitor, appID(output.Connector))
+		fmt.Printf("%s: %s has %s\n", DriverName, output.Connector, monitor)
 	}
 	// The record states the modes the claims on this machine
 	// asked for. It is empty on a pod that has just started, because

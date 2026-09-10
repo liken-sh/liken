@@ -166,7 +166,7 @@ found:
 
     kubectl -n liken-system logs ds/display-operator
     display.liken.sh: operating the monitors on kitchen
-    display.liken.sh: HDMI-A-1 carries gsm-7716-lg-hdr-wqhd, app-id hdmi-a-1
+    display.liken.sh: HDMI-A-1 has gsm-7716-lg-hdr-wqhd
 
 ## 5. See the devices
 
