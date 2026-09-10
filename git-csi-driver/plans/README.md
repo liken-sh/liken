@@ -75,7 +75,7 @@ Nothing is planned. The next work comes out of
   drilled in the lab on 2026-09-06. The image is a closure on scratch
   with a stripped binary, 79.9 MB where the release before was 263 MB,
   and the release gate runs git in it before a push.
-* [13, Prometheus metrics](13-prometheus-metrics.md). In progress. The
+* [13, Prometheus metrics](completed/13-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10. The
   driver serves Prometheus metrics on port 9200 under liken's shared
   contract: CSI operations as the reconcile layer, volumes mounted,
   fetch duration and failures per repository, and store size. Answers
@@ -92,8 +92,6 @@ so the next plan can start from the facts.
 * [The store on the wrong filesystem](open-problems/the-store-on-the-wrong-filesystem.md).
   A node without the pod-storage partition puts the store on the RAM
   overlay, and nothing says so until the reboot.
-* [Monitoring](open-problems/monitoring.md). The gauges exist, and
-  nothing in `deploy/` scrapes them or alerts on them.
 * [What git the driver does not serve](open-problems/what-git-the-driver-does-not-serve.md).
   Submodules, LFS, and a shallow writeable volume.
 
