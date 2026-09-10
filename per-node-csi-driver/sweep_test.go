@@ -226,7 +226,7 @@ func TestHandleWatchErrorCountsARestartAndLogsIt(t *testing.T) {
 	sweeper.handleWatchError(nil, io.ErrUnexpectedEOF)
 
 	if got := testutil.ToFloat64(answering.readings.watchRestarts.WithLabelValues(watchedKind)); got != 1 {
-		t.Errorf("pernodecsi_watch_restarts_total reads %v, want 1", got)
+		t.Errorf("per_node_csi_watch_restarts_total reads %v, want 1", got)
 	}
 	if !strings.Contains(written.String(), "the watch restarted") {
 		t.Errorf("the log reads %q, want it to say the watch restarted", written)

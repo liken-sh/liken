@@ -18,7 +18,7 @@ import (
 // PersistentVolume again, whatever the watch delivered in between.
 const defaultResync = 10 * time.Minute
 
-// watchedKind is the resource kind pernodecsi_watch_restarts_total
+// watchedKind is the resource kind per_node_csi_watch_restarts_total
 // reports: the one watch the sweep holds, on the PersistentVolumes of
 // this driver.
 const watchedKind = "PersistentVolume"

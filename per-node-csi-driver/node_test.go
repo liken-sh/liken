@@ -504,7 +504,7 @@ func TestVolumeStatsPutTheCopysBytesOnTheGauge(t *testing.T) {
 		t.Fatalf("NodeGetVolumeStats: %v", err)
 	}
 	if got := gaugeValue(t, answering.readings, "example-store"); got != 5 {
-		t.Errorf("per_node_copy_bytes reads %v, want 5", got)
+		t.Errorf("per_node_csi_copy_bytes reads %v, want 5", got)
 	}
 }
 

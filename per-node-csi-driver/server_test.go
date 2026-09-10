@@ -108,7 +108,7 @@ func TestMetricsInterceptorRecordsTheCallUnderItsOperationName(t *testing.T) {
 		t.Fatalf("the interceptor answered (%v, %v), want (answer, nil)", answer, err)
 	}
 	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 0 {
-		t.Errorf("pernodecsi_reconcile_errors_total reads %v, want 0 for a call with no error", got)
+		t.Errorf("per_node_csi_reconcile_errors_total reads %v, want 0 for a call with no error", got)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestMetricsInterceptorCountsAnErrorUnderItsOperationName(t *testing.T) {
 		t.Fatalf("the interceptor answered %v, want %v", err, failed)
 	}
 	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 1 {
-		t.Errorf("pernodecsi_reconcile_errors_total reads %v, want 1", got)
+		t.Errorf("per_node_csi_reconcile_errors_total reads %v, want 1", got)
 	}
 }
 
@@ -158,7 +158,7 @@ func TestTheServerRecordsTheReconcileMetricPerCall(t *testing.T) {
 	}
 
 	body := fetch(t, "http://"+served.metrics.Addr().String()+"/metrics")
-	if !strings.Contains(body, `pernodecsi_reconcile_duration_seconds_count{kind="GetPluginInfo"} 1`) {
+	if !strings.Contains(body, `per_node_csi_reconcile_duration_seconds_count{kind="GetPluginInfo"} 1`) {
 		t.Errorf("the metrics listener answered %q, want one observation under GetPluginInfo", body)
 	}
 }

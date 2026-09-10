@@ -66,32 +66,32 @@ func newMetrics() *metrics {
 		registry: prometheus.NewRegistry(),
 		copyBytes: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "per_node_copy_bytes",
+				Name: "per_node_csi_copy_bytes",
 				Help: "Bytes this node's copy of the volume holds.",
 			}, copyLabels),
 		reconcileDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name: "pernodecsi_reconcile_duration_seconds",
+				Name: "per_node_csi_reconcile_duration_seconds",
 				Help: "How long a CSI operation took to answer.",
 			}, kindLabel),
 		reconcileErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "pernodecsi_reconcile_errors_total",
+				Name: "per_node_csi_reconcile_errors_total",
 				Help: "CSI operations that answered with an error.",
 			}, kindLabel),
 		watchRestarts: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "pernodecsi_watch_restarts_total",
+				Name: "per_node_csi_watch_restarts_total",
 				Help: "Times a watch dropped and opened again.",
 			}, kindLabel),
 		volumes: prometheus.NewGauge(
 			prometheus.GaugeOpts{
-				Name: "pernodecsi_volumes",
+				Name: "per_node_csi_volumes",
 				Help: "Volumes this node holds a copy of for a pod that has published them.",
 			}),
 		mountFailures: prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Name: "pernodecsi_mount_failures_total",
+				Name: "per_node_csi_mount_failures_total",
 				Help: "Mounts that failed.",
 			}),
 	}

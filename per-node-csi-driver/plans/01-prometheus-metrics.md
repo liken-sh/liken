@@ -14,14 +14,14 @@ happen.
 
 ## The design
 
-Layers 1 and 2 under the `pernodecsi_` prefix, on port 9200, with `kind`
+Layers 1 and 2 under the `per_node_csi_` prefix, on port 9200, with `kind`
 as the CSI operation.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
-| per-node-csi-driver | `pernodecsi_volumes` | gauge | what is mounted |
-| per-node-csi-driver | `pernodecsi_mount_failures_total` | counter | mounts that fail |
-| per-node-csi-driver | `per_node_copy_bytes{volume}` | gauge | the bytes each copy holds, from the walk `NodeGetVolumeStats` makes; shipped before this plan |
+| per-node-csi-driver | `per_node_csi_volumes` | gauge | what is mounted |
+| per-node-csi-driver | `per_node_csi_mount_failures_total` | counter | mounts that fail |
+| per-node-csi-driver | `per_node_csi_copy_bytes{volume}` | gauge | the bytes each copy holds, from the walk `NodeGetVolumeStats` makes |
 
 The monitoring component at `deploy/monitoring/` holds a PodMonitor for
 each pod the driver runs.

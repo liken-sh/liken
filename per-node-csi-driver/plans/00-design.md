@@ -149,7 +149,7 @@ and never from memory alone.
 
 - `NodeGetVolumeStats` answers the copy's bytes and the store's free
   bytes, so `kubelet_volume_stats_*` carries them.
-- A Prometheus gauge, `per_node_copy_bytes{volume}`, per copy on this
+- A Prometheus gauge, `per_node_csi_copy_bytes{volume}`, per copy on this
   node, on a port named `metrics`.
 - An event on the pod for every refusal: a bad handle, a held handle,
   a failed mount.

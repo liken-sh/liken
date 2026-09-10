@@ -28,12 +28,12 @@ CSI operations as the reconcile layer, and the driver's own gauges.
 | Metric | Labels | Meaning |
 |---|---|---|
 | `liken_build_info` | `component`, `version` | Always 1. The release this pod runs. |
-| `pernodecsi_reconcile_duration_seconds` | `kind` | A histogram of each CSI call, by operation name. |
-| `pernodecsi_reconcile_errors_total` | `kind` | CSI calls that returned an error, by operation name. |
-| `pernodecsi_watch_restarts_total` | `kind` | Times the sweep's `PersistentVolume` watch closed and opened again. |
-| `pernodecsi_volumes` | | The volumes this node holds a copy of. |
-| `pernodecsi_mount_failures_total` | | Publishes that failed at the mount. |
-| `per_node_copy_bytes` | `volume` | The bytes this node's copy of the volume holds, from the same walk `NodeGetVolumeStats` makes. The label is the volume handle. The gauge carries a volume from the first time the kubelet asks for its stats on that node until the pod unpublishes it or the sweep removes the copy. |
+| `per_node_csi_reconcile_duration_seconds` | `kind` | A histogram of each CSI call, by operation name. |
+| `per_node_csi_reconcile_errors_total` | `kind` | CSI calls that returned an error, by operation name. |
+| `per_node_csi_watch_restarts_total` | `kind` | Times the sweep's `PersistentVolume` watch closed and opened again. |
+| `per_node_csi_volumes` | | The volumes this node holds a copy of. |
+| `per_node_csi_mount_failures_total` | | Publishes that failed at the mount. |
+| `per_node_csi_copy_bytes` | `volume` | The bytes this node's copy of the volume holds, from the same walk `NodeGetVolumeStats` makes. The label is the volume handle. The gauge carries a volume from the first time the kubelet asks for its stats on that node until the pod unpublishes it or the sweep removes the copy. |
 
 ## The kubelet's own numbers
 

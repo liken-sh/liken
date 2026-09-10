@@ -1,7 +1,7 @@
 package main
 
-// node_metrics_test.go proves layer 3: a mount raises pernodecsi_volumes,
-// a mount that fails draws one count on pernodecsi_mount_failures_total,
+// node_metrics_test.go proves layer 3: a mount raises per_node_csi_volumes,
+// a mount that fails draws one count on per_node_csi_mount_failures_total,
 // and a scrape reads the registry without changing it.
 
 import (
@@ -22,7 +22,7 @@ func TestAPublishRaisesTheVolumesGauge(t *testing.T) {
 		t.Fatalf("NodePublishVolume: %v", err)
 	}
 	if got := testutil.ToFloat64(answering.readings.volumes); got != 1 {
-		t.Errorf("pernodecsi_volumes reads %v, want 1", got)
+		t.Errorf("per_node_csi_volumes reads %v, want 1", got)
 	}
 }
 
@@ -38,7 +38,7 @@ func TestAnUnpublishLowersTheVolumesGauge(t *testing.T) {
 		t.Fatalf("NodeUnpublishVolume: %v", err)
 	}
 	if got := testutil.ToFloat64(answering.readings.volumes); got != 0 {
-		t.Errorf("pernodecsi_volumes reads %v, want 0 once the pod has unpublished", got)
+		t.Errorf("per_node_csi_volumes reads %v, want 0 once the pod has unpublished", got)
 	}
 }
 
@@ -52,7 +52,7 @@ func TestASecondVolumeOnTheSameNodeAddsToTheGauge(t *testing.T) {
 		}
 	}
 	if got := testutil.ToFloat64(answering.readings.volumes); got != 2 {
-		t.Errorf("pernodecsi_volumes reads %v, want 2", got)
+		t.Errorf("per_node_csi_volumes reads %v, want 2", got)
 	}
 }
 
@@ -66,12 +66,12 @@ func TestAFailedMountDrawsOneMountFailureCount(t *testing.T) {
 		t.Fatalf("NodePublishVolume answered %v, want Internal", err)
 	}
 	if got := testutil.ToFloat64(answering.readings.mountFailures); got != 1 {
-		t.Errorf("pernodecsi_mount_failures_total reads %v, want 1", got)
+		t.Errorf("per_node_csi_mount_failures_total reads %v, want 1", got)
 	}
 	// The mount never took a hold, so nothing raises the volumes gauge
 	// for a publish that failed.
 	if got := testutil.ToFloat64(answering.readings.volumes); got != 0 {
-		t.Errorf("pernodecsi_volumes reads %v, want 0 for a publish that failed", got)
+		t.Errorf("per_node_csi_volumes reads %v, want 0 for a publish that failed", got)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestRepeatedScrapesLeaveTheCountersUnchanged(t *testing.T) {
 	// this driver counts. Two scrapes must find the same count.
 	for i := range 2 {
 		if got := testutil.ToFloat64(answering.readings.mountFailures); got != 1 {
-			t.Errorf("pernodecsi_mount_failures_total reads %v on scrape %d, want 1", got, i+1)
+			t.Errorf("per_node_csi_mount_failures_total reads %v on scrape %d, want 1", got, i+1)
 		}
 		scrape(t, answering.readings)
 	}
