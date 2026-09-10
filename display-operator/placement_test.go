@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// What a region that states no transition is placed with.
-var noTransition = LayoutTransition{Kind: transitionNone}
-
 // A surface that arrived on a claim's own socket, with the labels the
 // pods holding that claim share.
 func claimedSurface(id, claim string, arrival int, labels map[string]string) surface {
@@ -49,7 +46,7 @@ func TestPlaceSurfaces(t *testing.T) {
 			surfaces: []surface{claimedSurface("a-1", "media/idle", 0, nil)},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "default", rect: LayoutRect{Width: 1, Height: 1}, transition: noTransition},
+					{surface: "a-1", region: "default", rect: LayoutRect{Width: 1, Height: 1}},
 				},
 				regions: []placedRegion{{name: "default", surface: "a-1"}},
 			},
@@ -63,9 +60,9 @@ func TestPlaceSurfaces(t *testing.T) {
 			},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "default", rect: LayoutRect{Width: 1, Height: 1}, stack: 0, transition: noTransition},
-					{surface: "b-2", region: "default", rect: LayoutRect{Width: 1, Height: 1}, stack: 1, transition: noTransition},
-					{surface: "c-3", region: "default", rect: LayoutRect{Width: 1, Height: 1}, stack: 2, transition: noTransition},
+					{surface: "a-1", region: "default", rect: LayoutRect{Width: 1, Height: 1}, stack: 0},
+					{surface: "b-2", region: "default", rect: LayoutRect{Width: 1, Height: 1}, stack: 1},
+					{surface: "c-3", region: "default", rect: LayoutRect{Width: 1, Height: 1}, stack: 2},
 				},
 				regions: []placedRegion{{name: "default", surface: "c-3"}},
 			},
@@ -79,17 +76,23 @@ func TestPlaceSurfaces(t *testing.T) {
 			layout: &LayoutSpec{Regions: []LayoutRegion{
 				labelRegion("notices", noticesRect, map[string]string{"panel": "notices"}),
 				{
-					Name:       "lot",
-					Rect:       lotRect,
-					Selector:   LabelSelector{MatchLabels: map[string]string{"panel": "parking-lot"}},
-					Transition: &LayoutTransition{Kind: "fade", Milliseconds: 300},
+					Name:     "lot",
+					Rect:     lotRect,
+					Selector: LabelSelector{MatchLabels: map[string]string{"panel": "parking-lot"}},
+					Transition: &LayoutTransition{
+						Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 300},
+						Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
+					},
 				},
 			}},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0, transition: noTransition},
+					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0},
 					{surface: "b-2", region: "lot", rect: lotRect, stack: 1,
-						transition: LayoutTransition{Kind: "fade", Milliseconds: 300}},
+						transition: LayoutTransition{
+							Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 300},
+							Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
+						}},
 				},
 				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "lot", surface: "b-2"}},
 			},
@@ -106,8 +109,8 @@ func TestPlaceSurfaces(t *testing.T) {
 			}},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "notices", rect: LayoutRect{Width: 1, Height: 1}, stack: 0, transition: noTransition},
-					{surface: "b-2", region: "lot", rect: lotRect, stack: 1, transition: noTransition},
+					{surface: "a-1", region: "notices", rect: LayoutRect{Width: 1, Height: 1}, stack: 0},
+					{surface: "b-2", region: "lot", rect: lotRect, stack: 1},
 				},
 				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "lot", surface: "b-2"}},
 			},
@@ -123,7 +126,7 @@ func TestPlaceSurfaces(t *testing.T) {
 			}},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0, transition: noTransition},
+					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0},
 				},
 				unplaced: []string{"b-2"},
 				regions:  []placedRegion{{name: "notices", surface: "a-1"}},
@@ -138,7 +141,7 @@ func TestPlaceSurfaces(t *testing.T) {
 			}},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0, transition: noTransition},
+					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0},
 				},
 				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "lot", surface: "empty"}},
 			},
@@ -163,8 +166,8 @@ func TestPlaceSurfaces(t *testing.T) {
 			}},
 			want: screenPlacement{
 				placed: []placement{
-					{surface: "a-1", region: "focus", rect: LayoutRect{Width: 1, Height: 1}, stack: 0, transition: noTransition},
-					{surface: "b-2", region: "corner", rect: lotRect, stack: 1, transition: noTransition},
+					{surface: "a-1", region: "focus", rect: LayoutRect{Width: 1, Height: 1}, stack: 0},
+					{surface: "b-2", region: "corner", rect: lotRect, stack: 1},
 				},
 				regions: []placedRegion{{name: "focus", surface: "a-1"}, {name: "corner", surface: "b-2"}},
 			},

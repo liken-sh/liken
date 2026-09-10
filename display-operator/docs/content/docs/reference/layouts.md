@@ -38,7 +38,7 @@ The regions of the screen, in stacking order: a region written after another dra
 | <span id="specregions--name"></span>`name` | string | yes | The region's name, unique in this Layout. The Display's status.layout reports it beside the surface the region shows, and status.surfaces names it on the surface. Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. |
 | <span id="specregions--rect"></span>`rect` | [object](#specregionsrect) | yes | The region's rectangle, as four fractions of the screen, so one Layout fits a 1080p panel and a 4K one. The compositor tells the window its rectangle's size in pixels, and the program redraws at that size. |
 | <span id="specregions--selector"></span>`selector` | [object](#specregionsselector) | yes | Which pod's window the region shows, as a label selector over the pods that hold a claim on this screen, the way a Service selects pods. Any label counts. The candidates are only the pods with a claim on the screen, so a matching label elsewhere in the cluster matches nothing here. A window that arrived on the shared socket holds no claim and matches no selector. |
-| <span id="specregions--transition"></span>`transition` | [object](#specregionstransition) | no | How a window enters the region. The compositor draws the entrance, because the program never knows where it is. The compositor cannot draw an exit: a program that ends takes its window with it, so a program that wants a soft exit fades its own picture before it ends. Absent, a window appears at once. |
+| <span id="specregions--transition"></span>`transition` | [object](#specregionstransition) | no | How a window enters the region and how it leaves. The compositor draws both, because the program never knows where it is. Both halves are optional, and where a half is absent the window enters or leaves at once. |
 
 #### spec.regions[].rect
 
@@ -72,9 +72,27 @@ Requirements on the pod's labels. Every requirement must hold, and they combine 
 
 #### spec.regions[].transition
 
-How a window enters the region. The compositor draws the entrance, because the program never knows where it is. The compositor cannot draw an exit: a program that ends takes its window with it, so a program that wants a soft exit fades its own picture before it ends. Absent, a window appears at once.
+How a window enters the region and how it leaves. The compositor draws both, because the program never knows where it is. Both halves are optional, and where a half is absent the window enters or leaves at once.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specregionstransition--kind"></span>`kind` | string | yes | none shows the window at once. fade brings it from transparent to opaque over milliseconds. One of: `none`, `fade`. |
-| <span id="specregionstransition--milliseconds"></span>`milliseconds` | integer | no | How long the transition runs. 0 is the same as none. |
+| <span id="specregionstransition--enter"></span>`enter` | [object](#specregionstransitionenter) | no | How a window enters the region. It runs when a window arrives in the region, whether the pod is new or its labels started matching. |
+| <span id="specregionstransition--exit"></span>`exit` | [object](#specregionstransitionexit) | no | How a window leaves the region. It runs when a window that is still drawing stops matching the region, which is what a label a controller removes does. A program that ends takes its window with it, and a window the compositor no longer holds leaves at once whatever this states. |
+
+#### spec.regions[].transition.enter
+
+How a window enters the region. It runs when a window arrives in the region, whether the pod is new or its labels started matching.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specregionstransitionenter--kind"></span>`kind` | string | yes | none shows the window at once. fade brings it from transparent to opaque over milliseconds. One of: `none`, `fade`. |
+| <span id="specregionstransitionenter--milliseconds"></span>`milliseconds` | integer | no | How long the entrance runs. 0 is the same as none. |
+
+#### spec.regions[].transition.exit
+
+How a window leaves the region. It runs when a window that is still drawing stops matching the region, which is what a label a controller removes does. A program that ends takes its window with it, and a window the compositor no longer holds leaves at once whatever this states.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specregionstransitionexit--kind"></span>`kind` | string | yes | none takes the window off at once. fade brings it from opaque to transparent over milliseconds, and the program keeps drawing until the fade ends. One of: `none`, `fade`. |
+| <span id="specregionstransitionexit--milliseconds"></span>`milliseconds` | integer | no | How long the exit runs. 0 is the same as none. |

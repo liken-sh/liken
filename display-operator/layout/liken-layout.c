@@ -19,7 +19,8 @@
  *
  * The control protocol is lines of text on a Unix stream socket, one
  * request and one reply per line. plans/17-a-layout-for-every-screen.md
- * states it in full.
+ * states it, and plans/18-a-surface-leaves-with-a-fade.md states the
+ * transition a hide carries.
  */
 #define _GNU_SOURCE
 
@@ -894,11 +895,22 @@ do_place(uint32_t seq, char **save)
 static void
 do_hide(uint32_t seq, char **save)
 {
-	uint32_t id;
+	uint32_t id, ms;
+	const char *word;
+	enum ivi_layout_transition_type transition;
 	struct layout_surface *s;
 
 	if (!parse_u32(strtok_r(NULL, " ", save), &id)) {
 		reply_error(seq, "hide takes a surface id");
+		return;
+	}
+	word = strtok_r(NULL, " ", save);
+	/* A hide takes no move: the surface is leaving the screen, and
+	 * there is no rectangle to glide it to. */
+	if (!parse_u32(strtok_r(NULL, " ", save), &ms) ||
+	    !parse_transition(word, ms, &transition) ||
+	    transition == IVI_LAYOUT_TRANSITION_VIEW_DEST_RECT_ONLY) {
+		reply_error(seq, "hide takes none or fade and a duration");
 		return;
 	}
 	s = surface_with_id(id);
@@ -906,6 +918,13 @@ do_hide(uint32_t seq, char **save)
 		reply_error(seq, "no such surface");
 		return;
 	}
+	/* ivi-layout reads the transition type on the commit that changes
+	 * the visibility, and runs ivi_layout_transition_visibility_off
+	 * for a fade, so the type is set before the change. The client
+	 * keeps drawing through the fade: the compositor animates a
+	 * surface it still holds, and a client that exits takes its
+	 * surface with it. */
+	ivi->surface_set_transition(s->ivisurf, transition, ms);
 	ivi->surface_set_visibility(s->ivisurf, false);
 	reply_ok(seq);
 }

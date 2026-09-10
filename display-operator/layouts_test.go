@@ -27,7 +27,8 @@ const frontDeskJSON = `{
      "rect": {"left": 0.7, "top": 0, "width": 0.3, "height": 0.6},
      "selector": {"matchExpressions": [
        {"key": "panel", "operator": "In", "values": ["parking-lot"]}]},
-     "transition": {"kind": "fade", "milliseconds": 300}}
+     "transition": {"enter": {"kind": "fade", "milliseconds": 600},
+                    "exit": {"kind": "fade", "milliseconds": 250}}}
   ]}
 }`
 
@@ -57,8 +58,12 @@ func TestGetLayoutReadsTheLayoutADisplayNames(t *testing.T) {
 		t.Errorf("notices selects %v, want panel=notices", notices.Selector.MatchLabels)
 	}
 	lot := layout.Spec.Regions[1]
-	if transitionOf(lot) != (LayoutTransition{Kind: "fade", Milliseconds: 300}) {
-		t.Errorf("lot transitions with %+v, want a 300 ms fade", transitionOf(lot))
+	want := LayoutTransition{
+		Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 600},
+		Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
+	}
+	if transitionOf(lot) != want {
+		t.Errorf("lot transitions with %+v, want %+v", transitionOf(lot), want)
 	}
 	if len(lot.Selector.MatchExpressions) != 1 || lot.Selector.MatchExpressions[0].Operator != selectorIn {
 		t.Errorf("lot selects %+v, want one In requirement", lot.Selector.MatchExpressions)

@@ -86,10 +86,21 @@ type LayoutRect struct {
 	Height float64 `json:"height"`
 }
 
-// How a surface enters the region. The compositor animates the
-// entrance and the moves, and no exit: a client that exits takes its
-// surface with it, and there is nothing left to fade.
+// How a surface enters the region and how it leaves. The compositor
+// animates both, because the workload never knows where it is. The
+// enter half runs when a surface arrives in the region, and the exit
+// half runs when a surface that is still drawing stops matching it.
+// A client that exits takes its surface with it, and no exit runs for
+// a surface the compositor no longer holds.
 type LayoutTransition struct {
+	Enter LayoutTransitionHalf `json:"enter"`
+	Exit  LayoutTransitionHalf `json:"exit"`
+}
+
+// One half of a transition: what it does, over how long. A half with
+// no kind does nothing, so a region may state an entrance and no
+// exit.
+type LayoutTransitionHalf struct {
 	Kind         string `json:"kind,omitempty"`
 	Milliseconds int    `json:"milliseconds,omitempty"`
 }

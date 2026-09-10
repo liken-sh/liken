@@ -244,7 +244,7 @@ func TestLayoutLinkSendsEachRequestWithItsSequence(t *testing.T) {
 		func() error {
 			return link.Place(7, "HDMI-A-1", rect{X: 0, Y: 0, W: 1344, H: 1080}, transitionFade, 300)
 		},
-		func() error { return link.Hide(8) },
+		func() error { return link.Hide(8, transitionFade, 250) },
 		func() error { return link.Order("HDMI-A-1", []int{7, 8}) },
 		func() error { return link.Commit() },
 		func() error { return link.Close("wayland-claim-1") },
@@ -258,7 +258,7 @@ func TestLayoutLinkSendsEachRequestWithItsSequence(t *testing.T) {
 		"hello liken-operator 1",
 		"listen wayland-claim-1 HDMI-A-1",
 		"place 7 HDMI-A-1 0 0 1344 1080 fade 300",
-		"hide 8",
+		"hide 8 fade 250",
 		"order HDMI-A-1 7 8",
 		"commit",
 		"close wayland-claim-1",
@@ -475,8 +475,13 @@ func TestLayoutLinkRefusesATransitionTheModuleDoesNotRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("a placement with an unknown transition answered no error")
 	}
+	// A hide runs no move: the surface is leaving the screen, and
+	// there is no rectangle to glide it to.
+	if err := link.Hide(7, transitionMove, 300); err == nil {
+		t.Fatal("a hide with a move answered no error")
+	}
 	if requests := module.read(); len(requests) != 1 {
-		t.Errorf("the module read %q, and the unknown transition must not reach it", requests)
+		t.Errorf("the module read %q, and neither transition must reach it", requests)
 	}
 }
 

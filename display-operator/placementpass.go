@@ -54,12 +54,19 @@ type screenSurface struct {
 	labels map[string]string
 }
 
-// Where one surface was last placed. The pass compares this with what
-// it decided, and sends nothing for a surface whose rectangle and
-// screen did not move.
+// Where one surface was last placed. The pass compares the connector
+// and the rectangle with what it decided, and sends nothing for a
+// surface whose rectangle and screen did not move.
+//
+// The exit is the transition the region stated for a surface that
+// leaves it. The memo keeps it because the pass that hides a surface
+// is a later pass than the one that placed it: by then the surface
+// matches no region, and the Layout may state none, so what runs is
+// what the region stated while the surface was in it.
 type placedSurface struct {
 	connector string
 	where     rect
+	exit      LayoutTransitionHalf
 }
 
 // placementPass runs the whole placement: it reads the surfaces the
@@ -343,27 +350,39 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 		}
 		order = append(order, id)
 		where := logicalRect(place.rect, output)
+		next := placedSurface{connector: output.Connector, where: where, exit: place.transition.Exit}
 		last, before := p.placed[id]
-		if before && last.connector == output.Connector && last.where == where {
+		if before && last.connector == next.connector && last.where == next.where {
+			// A Layout a person edited may state another exit for the
+			// same rectangle, so the memo takes the new one. The
+			// screen is where the decision says, and nothing goes to
+			// the module.
+			p.placed[id] = next
 			continue
 		}
-		transition, milliseconds := wireTransition(place.transition, before)
+		transition, milliseconds := enterTransition(place.transition.Enter, before)
 		if err := p.link.Place(id, output.Connector, where, transition, milliseconds); err != nil {
 			failures = append(failures, err)
 			continue
 		}
-		p.placed[id] = placedSurface{connector: output.Connector, where: where}
+		p.placed[id] = next
 		stated = true
 	}
+	// A surface no region took leaves the screen with the exit of the
+	// region it was in. A surface the module reported gone is already
+	// off the screen and lost its memo at the top of the pass, so
+	// nothing is sent for it: there is no surface left to fade.
 	for _, unplaced := range decision.unplaced {
 		id, known := ids[unplaced]
 		if !known {
 			continue
 		}
-		if _, before := p.placed[id]; !before {
+		last, before := p.placed[id]
+		if !before {
 			continue
 		}
-		if err := p.link.Hide(id); err != nil {
+		transition, milliseconds := exitTransition(last.exit)
+		if err := p.link.Hide(id, transition, milliseconds); err != nil {
 			failures = append(failures, err)
 			continue
 		}
@@ -541,12 +560,22 @@ func logicalRect(fraction LayoutRect, output layoutOutput) rect {
 // module refuses a fade or a move over zero milliseconds, and a
 // region that states a kind and no duration means an entrance with no
 // animation.
-func wireTransition(transition LayoutTransition, placed bool) (string, int) {
-	if transition.Kind != transitionFade || transition.Milliseconds <= 0 {
+func enterTransition(enter LayoutTransitionHalf, placed bool) (string, int) {
+	if enter.Kind != transitionFade || enter.Milliseconds <= 0 {
 		return transitionNone, 0
 	}
 	if placed {
-		return transitionMove, transition.Milliseconds
+		return transitionMove, enter.Milliseconds
 	}
-	return transitionFade, transition.Milliseconds
+	return transitionFade, enter.Milliseconds
+}
+
+// The transition one hide states to the module. A hide runs no move,
+// because the surface is leaving the screen and there is no rectangle
+// to glide it to, so an exit is a fade or nothing.
+func exitTransition(exit LayoutTransitionHalf) (string, int) {
+	if exit.Kind != transitionFade || exit.Milliseconds <= 0 {
+		return transitionNone, 0
+	}
+	return transitionFade, exit.Milliseconds
 }

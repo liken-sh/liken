@@ -12,9 +12,11 @@
 # socket as wayland-0, that placing each one paints the rectangle the
 # operator asked for and nothing outside it, that moving one leaves
 # the rectangle it came from black, that hiding one leaves the other
-# where it was, that closing the claim's socket unlinks the path, and
-# that a listen on that same name afterwards opens the path again and
-# reports the client that arrives on it.
+# where it was, that a hide with a fade leaves the rectangle painted
+# and dimmer partway through the fade and black after it, that closing
+# the claim's socket unlinks the path, and that a listen on that same
+# name afterwards opens the path again and reports the client that
+# arrives on it.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)

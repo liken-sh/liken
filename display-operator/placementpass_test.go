@@ -84,10 +84,12 @@ func TestATwoRegionLayoutDrawsTwoNamespacesOnOneScreen(t *testing.T) {
 			Selector: LabelSelector{MatchLabels: map[string]string{"panel": "notices"}},
 		},
 		LayoutRegion{
-			Name:       "lot",
-			Rect:       LayoutRect{Left: 0.7, Width: 0.3, Height: 0.6},
-			Selector:   LabelSelector{MatchLabels: map[string]string{"panel": "parking-lot"}},
-			Transition: &LayoutTransition{Kind: transitionFade, Milliseconds: 300},
+			Name:     "lot",
+			Rect:     LayoutRect{Left: 0.7, Width: 0.3, Height: 0.6},
+			Selector: LabelSelector{MatchLabels: map[string]string{"panel": "parking-lot"}},
+			Transition: &LayoutTransition{
+				Enter: LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 300},
+			},
 		})
 	fixture.screen(labMonitor(), DisplaySpec{Layout: "front-desk"})
 	notices := fixture.hold("notices", "wall", noticesClaimUID, "HDMI-A-1", "notices-7d9f")
@@ -219,7 +221,7 @@ func TestALabelThatMovesRestacksTheScreen(t *testing.T) {
 	fixture.run()
 	assertSent(t, fixture.sent(), []string{
 		fmt.Sprintf("place %d HDMI-A-1 0 0 1920 1080 none 0", idleSurface),
-		fmt.Sprintf("hide %d", filmSurface),
+		fmt.Sprintf("hide %d none 0", filmSurface),
 		fmt.Sprintf("order HDMI-A-1 %d", idleSurface),
 		"commit",
 	})
@@ -227,6 +229,78 @@ func TestALabelThatMovesRestacksTheScreen(t *testing.T) {
 	if status.Surfaces[0].Region != "main" || status.Surfaces[1].Region != "" {
 		t.Errorf("status holds %+v, want the idle surface in main and the film surface nowhere",
 			status.Surfaces)
+	}
+}
+
+// The theater of plan 18: the film's region states an exit, so a
+// surface that stops matching the region fades out while its client
+// keeps drawing. media-operator labels the playback pod as the film
+// ends, and its sidecar holds the player alive for the fade.
+func TestASurfaceThatStopsMatchingLeavesWithTheRegionsExit(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.layout("theater",
+		LayoutRegion{
+			Name:     "room",
+			Rect:     LayoutRect{Width: 1, Height: 1},
+			Selector: LabelSelector{MatchLabels: map[string]string{"app": "media-browser"}},
+		},
+		LayoutRegion{
+			Name: "film",
+			Rect: LayoutRect{Width: 1, Height: 1},
+			Selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
+				{Key: "media.liken.sh/component", Operator: selectorIn, Values: []string{"playback"}},
+				{Key: "media.liken.sh/ending", Operator: selectorDoesNotExist},
+			}},
+			Transition: &LayoutTransition{
+				Enter: LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 600},
+				Exit:  LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 250},
+			},
+		})
+	fixture.screen(labMonitor(), DisplaySpec{Layout: "theater"})
+	browser := fixture.hold("living-room", "browser", idleClaimUID, "HDMI-A-1", "browser-0")
+	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("living-room", "browser-0", map[string]string{"app": "media-browser"})
+	fixture.pod("living-room", "film-0", map[string]string{"media.liken.sh/component": "playback"})
+	page := fixture.surface(browser, 1920, 1080)
+	filmSurface := fixture.surface(film, 1920, 1080)
+
+	fixture.run()
+	assertSent(t, fixture.sent(), []string{
+		fmt.Sprintf("place %d HDMI-A-1 0 0 1920 1080 none 0", page),
+		fmt.Sprintf("place %d HDMI-A-1 0 0 1920 1080 fade 600", filmSurface),
+		fmt.Sprintf("order HDMI-A-1 %d %d", page, filmSurface),
+		"commit",
+	})
+
+	// The film is ending. The label takes its surface out of the
+	// region, and the region's exit is what the surface leaves with.
+	fixture.pod("living-room", "film-0", map[string]string{
+		"media.liken.sh/component": "playback",
+		"media.liken.sh/ending":    "true",
+	})
+
+	fixture.run()
+	assertSent(t, fixture.sent(), []string{
+		fmt.Sprintf("hide %d fade 250", filmSurface),
+		fmt.Sprintf("order HDMI-A-1 %d", page),
+		"commit",
+	})
+	if region := fixture.status(labMonitor()).Surfaces[1].Region; region != "" {
+		t.Errorf("the film surface is in %q, want no region", region)
+	}
+
+	// The player exits when the fade ends, and a surface the module
+	// reports gone gets no hide of its own: it is off the screen
+	// already, and there is nothing left to fade.
+	fixture.module.send(fmt.Sprintf("surface-gone %d", filmSurface))
+	waitUntil(t, "the film surface goes", func() bool {
+		_, held := fixture.link.state().Surfaces[filmSurface]
+		return !held
+	})
+
+	fixture.run()
+	if sent := fixture.sent(); len(sent) != 0 {
+		t.Errorf("the pass sent %q for a surface the module reported gone", sent)
 	}
 }
 

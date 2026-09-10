@@ -172,6 +172,19 @@ class Frame:
                 count += 1 if self.is_painted(x, y) else 0
         return count, w * h
 
+    def paint_total(self, rect):
+        """The sum of every channel in the rectangle, which is how
+        bright it is. A surface partway through a fade is dimmer than
+        the same surface at full opacity."""
+        x0, y0, w, h = rect
+        total = 0
+        for y in range(y0, y0 + h):
+            row = self.rows[y]
+            for x in range(x0, x0 + w):
+                i = x * self.channels
+                total += row[i] + row[i + 1] + row[i + 2]
+        return total
+
     def painted_outside(self, rects):
         count = total = 0
         for y in range(self.height):
@@ -205,10 +218,11 @@ def start_client(name, wayland_display):
     )
 
 
-def capture():
-    """Take one screenshot. The clients draw on their own frame
-    callbacks, so this waits for them to paint before it captures."""
-    time.sleep(2)
+def capture(wait=2):
+    """Take one screenshot, after a wait. The clients draw on their own
+    frame callbacks, so the default wait lets them paint. A capture
+    inside a transition passes a shorter one."""
+    time.sleep(wait)
     for stale in glob.glob(os.path.join(SHOTS, "*.png")):
         os.remove(stale)
     docker(
@@ -243,6 +257,18 @@ def assert_black(frame, rect, name):
     count, total = frame.painted_in(rect)
     report("%s: %d of %d pixels painted in %s" % (name, count, total, rect))
     assert count == 0, "%s is painted" % name
+
+
+def assert_fading(frame, rect, name, opaque):
+    """A surface partway through a fade still holds paint, and it is
+    dimmer than the same surface at full opacity, because the pixels
+    it is blended into are the black curtain under it."""
+    count, total = frame.painted_in(rect)
+    brightness = frame.paint_total(rect)
+    report("%s: %d of %d pixels painted in %s, brightness %d of %d"
+           % (name, count, total, rect, brightness, opaque))
+    assert count > 0, "%s is black" % name
+    assert brightness < opaque, "%s is no dimmer than the surface it fades from" % name
 
 
 def assert_nothing_outside(frame, rects):
@@ -308,12 +334,32 @@ def main():
     assert_painted(frame, MOVED_RECT, "the moved surface")
     assert_nothing_outside(frame, [MOVED_RECT, SHARED_RECT])
 
-    control.expect_ok("hide %s" % claim_id)
+    control.expect_ok("hide %s none 0" % claim_id)
     control.expect_ok("commit")
 
     frame = capture()
     assert_black(frame, MOVED_RECT, "the hidden surface")
     assert_painted(frame, SHARED_RECT, "the shared surface")
+    opaque = frame.paint_total(SHARED_RECT)
+
+    # A hide with a fade leaves the surface on the screen while the
+    # fade runs, which is how a surface that is still alive leaves a
+    # region. The headless backend repaints on its own timer, so the
+    # fade progresses with no frame from the client, and the
+    # screenshot below lands inside the fade because the capture takes
+    # a moment of its own.
+    started = time.monotonic()
+    control.expect_ok("hide %s fade 600" % shared_id)
+    control.expect_ok("commit")
+
+    frame = capture(wait=0)
+    report("the fade started %d ms before this frame was read"
+           % (1000 * (time.monotonic() - started)))
+    assert_fading(frame, SHARED_RECT, "the fading surface", opaque)
+
+    # The second frame is read once the fade's 600 ms are past.
+    frame = capture(wait=max(0, started + 0.8 - time.monotonic()))
+    assert_black(frame, SHARED_RECT, "the surface the fade took off")
 
     control.expect_ok("close %s" % CLAIM_SOCKET)
     assert not os.path.exists(path), "%s is still there after close" % path

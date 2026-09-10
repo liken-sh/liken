@@ -35,7 +35,9 @@ number of screens.
           rect: {left: 0.7, top: 0, width: 0.3, height: 0.6}
           selector:
             matchLabels: {panel: parking-lot}
-          transition: {kind: fade, milliseconds: 300}
+          transition:
+            enter: {kind: fade, milliseconds: 300}
+            exit: {kind: fade, milliseconds: 300}
 
 A `Layout` is cluster-scoped, like a `DeviceClass`, and nothing in it
 names a namespace or a monitor. Each rectangle is four fractions of
@@ -51,11 +53,14 @@ nothing here. A region shows one window, the first to arrive from a
 matching pod. A second matching window stays off the screen and is
 reported, and a region with no matching pod is empty and is reported.
 
-A `transition` names how a window enters its region: `fade` over the
-stated milliseconds, or `none`. The compositor owns a window's entry.
-It cannot own a program's exit, because a program that exits takes
-its window with it, so a program that wants a soft exit fades its own
-picture before it ends.
+A `transition` has two halves, and each is `fade` over the stated
+milliseconds or `none`. The `enter` half runs when a window enters
+its region, and a fade brings the window from transparent to opaque.
+The `exit` half runs when a window that is still drawing stops
+matching the region, which is what a label a controller removes does,
+and a fade brings the window back to transparent while the program
+keeps drawing. A program that exits takes its window with it, and
+nothing fades a window the compositor no longer holds.
 
 ## 2. Name it on the `Display`
 
@@ -110,8 +115,10 @@ device allows many claims at once.
 When a window lands in a region, the compositor tells the program the
 region's size and the program redraws at that size, the way it would
 if you dragged a window's edge. A page reflows, and a video player
-letterboxes inside its rectangle. A program that ignores the request
-is scaled to fit.
+letterboxes inside its rectangle. mpv needs `--keepaspect-window=no`
+to do that, because its default keeps the window at the film's own
+aspect and the compositor then scales that smaller buffer up to the
+region. A program that ignores the request is scaled to fit.
 
 ## 4. Read what the screen shows
 

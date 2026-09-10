@@ -201,9 +201,21 @@ func (l *layoutLink) Place(id int, connector string, where rect, transition stri
 }
 
 // Hide makes one surface invisible, and Commit is what takes it off
-// the screen.
-func (l *layoutLink) Hide(id int) error {
-	return l.request(fmt.Sprintf("hide %d", id))
+// the screen. It carries the two tokens a placement carries: a fade
+// runs ivi-layout's visibility-off transition, which is how a surface
+// that is still drawing leaves a region, and none takes it off at
+// once.
+//
+// A hide runs no move. The surface is leaving the screen, so there is
+// no rectangle to glide it to.
+func (l *layoutLink) Hide(id int, transition string, milliseconds int) error {
+	switch transition {
+	case transitionNone, transitionFade:
+	default:
+		return fmt.Errorf("%q is no transition a hide runs: %s or %s",
+			transition, transitionNone, transitionFade)
+	}
+	return l.request(fmt.Sprintf("hide %d %s %d", id, transition, milliseconds))
 }
 
 // Order states the stacking order of one output's surfaces, bottom

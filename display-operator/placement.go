@@ -48,10 +48,14 @@ type surface struct {
 // Where one surface is drawn. Stack is its position in the render
 // order, and a higher one is nearer the viewer.
 type placement struct {
-	surface    string
-	region     string
-	rect       LayoutRect
-	stack      int
+	surface string
+	region  string
+	rect    LayoutRect
+	stack   int
+	// The region's transition, both halves. The enter half runs on
+	// this placement. The exit half runs on the later pass that
+	// finds the surface no longer matching the region, so what
+	// executes this placement has to keep the exit until then.
 	transition LayoutTransition
 }
 
@@ -131,11 +135,10 @@ func defaultPlacement(arrived []surface) screenPlacement {
 	var placed []placement
 	for stack, candidate := range arrived {
 		placed = append(placed, placement{
-			surface:    candidate.id,
-			region:     defaultLayoutName,
-			rect:       wholeScreen,
-			stack:      stack,
-			transition: LayoutTransition{Kind: transitionNone},
+			surface: candidate.id,
+			region:  defaultLayoutName,
+			rect:    wholeScreen,
+			stack:   stack,
 		})
 		// The last surface to arrive is the top of the stack, so it is
 		// the one the region shows.
@@ -155,10 +158,11 @@ func byArrival(surfaces []surface) []surface {
 	return arrived
 }
 
-// The transition a region states, or none.
+// The transition a region states. A region that states none carries
+// two empty halves, which enter and leave a surface at once.
 func transitionOf(region LayoutRegion) LayoutTransition {
 	if region.Transition == nil {
-		return LayoutTransition{Kind: transitionNone}
+		return LayoutTransition{}
 	}
 	return *region.Transition
 }

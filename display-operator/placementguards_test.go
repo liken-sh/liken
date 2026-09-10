@@ -253,31 +253,56 @@ func TestTheRectangleIsTheFractionOfTheOutputsLogicalSize(t *testing.T) {
 func TestTheTransitionOnePlacementStates(t *testing.T) {
 	for _, drill := range []struct {
 		name         string
-		transition   LayoutTransition
+		enter        LayoutTransitionHalf
 		placed       bool
 		want         string
 		milliseconds int
 	}{
-		{"a region with no transition", LayoutTransition{Kind: transitionNone}, false, transitionNone, 0},
+		{"a region with no transition", LayoutTransitionHalf{Kind: transitionNone}, false, transitionNone, 0},
 		{
 			"a fade on a new surface",
-			LayoutTransition{Kind: transitionFade, Milliseconds: 300}, false, transitionFade, 300,
+			LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 300}, false, transitionFade, 300,
 		},
 		{
 			"a fade on a surface that moved",
-			LayoutTransition{Kind: transitionFade, Milliseconds: 300}, true, transitionMove, 300,
+			LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 300}, true, transitionMove, 300,
 		},
 		// The module refuses a fade or a move over zero milliseconds,
 		// and a region that states a kind and no duration means an
 		// entrance with no animation.
-		{"a fade with no duration", LayoutTransition{Kind: transitionFade}, false, transitionNone, 0},
-		{"a move with no duration", LayoutTransition{Kind: transitionFade}, true, transitionNone, 0},
+		{"a fade with no duration", LayoutTransitionHalf{Kind: transitionFade}, false, transitionNone, 0},
+		{"a move with no duration", LayoutTransitionHalf{Kind: transitionFade}, true, transitionNone, 0},
 	} {
 		t.Run(drill.name, func(t *testing.T) {
-			got, milliseconds := wireTransition(drill.transition, drill.placed)
+			got, milliseconds := enterTransition(drill.enter, drill.placed)
 			if got != drill.want || milliseconds != drill.milliseconds {
-				t.Errorf("wireTransition(%+v, %v) = %q, %d; want %q, %d",
-					drill.transition, drill.placed, got, milliseconds, drill.want, drill.milliseconds)
+				t.Errorf("enterTransition(%+v, %v) = %q, %d; want %q, %d",
+					drill.enter, drill.placed, got, milliseconds, drill.want, drill.milliseconds)
+			}
+		})
+	}
+}
+
+func TestTheTransitionOneHideStates(t *testing.T) {
+	for _, drill := range []struct {
+		name         string
+		exit         LayoutTransitionHalf
+		want         string
+		milliseconds int
+	}{
+		{"a region with no exit", LayoutTransitionHalf{}, transitionNone, 0},
+		{"a region that leaves at once", LayoutTransitionHalf{Kind: transitionNone}, transitionNone, 0},
+		{
+			"a region that fades out",
+			LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 250}, transitionFade, 250,
+		},
+		{"a fade with no duration", LayoutTransitionHalf{Kind: transitionFade}, transitionNone, 0},
+	} {
+		t.Run(drill.name, func(t *testing.T) {
+			got, milliseconds := exitTransition(drill.exit)
+			if got != drill.want || milliseconds != drill.milliseconds {
+				t.Errorf("exitTransition(%+v) = %q, %d; want %q, %d",
+					drill.exit, got, milliseconds, drill.want, drill.milliseconds)
 			}
 		})
 	}

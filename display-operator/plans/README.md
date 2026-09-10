@@ -182,6 +182,13 @@ say why it is built the way it is.
   names none shows every surface fullscreen, newest on top, which is
   kiosk-shell's behavior. Prototyped on vega on 2026-09-10: three
   containers on one output, with fade and move transitions.
+* [18, A surface leaves with a fade](18-a-surface-leaves-with-a-fade.md).
+  In progress. A region's `transition` gains an `exit` half beside
+  its `enter` half, the module's `hide` carries a transition, and a
+  surface that stops matching a region fades out. The compositor
+  fades a surface it still holds, so the workload that wants a soft
+  exit keeps drawing while the fade runs instead of fading its own
+  picture.
 
 ## Open problems
 
