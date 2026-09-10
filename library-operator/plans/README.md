@@ -40,7 +40,7 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [10, The documentation site](completed/10-the-documentation-site.md). Built. The manual
   and the generated reference, written after plan 09.
 
-* [37, Prometheus metrics](37-prometheus-metrics.md). In progress.
+* [37, Prometheus metrics](completed/37-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
   Enrichment progress, work needing attention, worker outcomes, and
   observation health, with optional collection and quiet idle libraries.
 * [46, The power key brings the room up](46-the-power-key-brings-the-room-up.md).

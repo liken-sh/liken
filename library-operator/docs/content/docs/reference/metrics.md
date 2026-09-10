@@ -9,7 +9,7 @@ toc: true
 The operator and the media browser each serve Prometheus metrics on
 port 9200, and the catalog pod's Corrosion agent serves its own on its
 own telemetry port, under [liken milestone
-65](https://github.com/liken-sh/liken/blob/main/plans/65-prometheus-metrics.md)'s
+65](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md)'s
 contract. The base applies with no Prometheus in the cluster. An owner
 who runs the prometheus-operator adds the `deploy/monitoring` component
 beside the base, which holds a `PodMonitor` for each of the three.
