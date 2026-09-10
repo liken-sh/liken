@@ -10,10 +10,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The version reaches the binary through -ldflags, so liken_build_info
+# names the release actually running and not dev.
+ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. It runs
 # from scratch, where there is no loader to need.
-RUN CGO_ENABLED=0 go build -trimpath -o /equipment-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /equipment-operator .
 
 FROM scratch
 COPY --from=build /equipment-operator /equipment-operator

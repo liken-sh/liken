@@ -22,14 +22,15 @@ type fakeDenon struct {
 	listener net.Listener
 	commands chan string
 
-	mutex     sync.Mutex
-	power     string
-	volume    int
-	volumeMax int
-	mute      bool
-	input     string
-	soundMode string
-	conns     []net.Conn
+	mutex       sync.Mutex
+	power       string
+	volume      int
+	volumeMax   int
+	mute        bool
+	input       string
+	soundMode   string
+	ignorePower bool
+	conns       []net.Conn
 }
 
 // startFakeDenon listens on the loopback and answers until the test
@@ -115,7 +116,9 @@ func (f *fakeDenon) answer(command string) {
 		}
 	case command == "PWON", command == "PWSTANDBY":
 		f.power = command
-		f.send(f.power)
+		if !f.ignorePower {
+			f.send(f.power)
+		}
 	case command == "MUON", command == "MUOFF":
 		f.mute = command == "MUON"
 		f.send(f.muteLine())
@@ -163,6 +166,15 @@ func (f *fakeDenon) setMute(muted bool) {
 	defer f.mutex.Unlock()
 	f.mute = muted
 	f.send(f.muteLine())
+}
+
+// ignorePowerOn makes the receiver take PWON without ever answering it,
+// which is the one way a test drives a session's power-on wait to its
+// own timeout.
+func (f *fakeDenon) ignorePowerOn() {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.ignorePower = true
 }
 
 // driftLimit is the receiver reporting a new MVMAX. A real AVR-X1700H

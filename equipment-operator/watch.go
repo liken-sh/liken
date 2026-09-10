@@ -21,9 +21,15 @@ var watchRetryPause = 2 * time.Second
 // from a resourceVersion, so no change is missed between reconnects. A
 // dropped stream and a 410 Gone recover the same way: list the
 // collection, wake the loop, and watch again from the list's own
-// version.
-func watchReceivers(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}) {
+// version. Every time but the first, opening that new watch is what
+// equipment_watch_restarts_total counts.
+func watchReceivers(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, readings *metrics) {
+	first := true
 	for ctx.Err() == nil {
+		if !first {
+			readings.watchRestarted()
+		}
+		first = false
 		// The request carries the context, because a read of a stream that
 		// never ends blocks until the far end writes, and closing the body
 		// from elsewhere waits on that same read.

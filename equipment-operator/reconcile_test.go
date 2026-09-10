@@ -193,7 +193,7 @@ func testReceiver(name, address string) Receiver {
 // unit's writer goroutine outlives the test and would race a restore.
 func startController(t *testing.T, api *fakeAPI) *controller {
 	t.Helper()
-	operator := newController(api.client, "127.0.0.1:1")
+	operator := newController(api.client, "127.0.0.1:1", testMetrics(t))
 	operator.now = func() time.Time { return statusNow }
 	return operator
 }
@@ -421,7 +421,7 @@ func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 	api := startFakeAPI(t)
 	api.breakTheList()
 
-	mustFail(t, serve(t.Context(), api.client, "127.0.0.1:1"))
+	mustFail(t, serve(t.Context(), api.client, "127.0.0.1:1", testMetrics(t)))
 }
 
 // serve runs the loop until its context ends.
@@ -435,7 +435,7 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		mustSucceed(t, serve(ctx, api.client, "127.0.0.1:1"))
+		mustSucceed(t, serve(ctx, api.client, "127.0.0.1:1", testMetrics(t)))
 	}()
 
 	api.waitForStatus(t, connected)
@@ -455,7 +455,7 @@ func TestAVolumeEditReachesAStandingSession(t *testing.T) {
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address())
+	operator := newController(api.client, brokers.address(), testMetrics(t))
 	operator.now = func() time.Time { return statusNow }
 
 	api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 1}))
@@ -489,7 +489,7 @@ func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address())
+	operator := newController(api.client, brokers.address(), testMetrics(t))
 	operator.now = func() time.Time { return statusNow }
 
 	rule := ReceiverVolume{Max: 69.5, Step: 1}
@@ -562,7 +562,7 @@ func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
 	brokers := startFakeBrokerServer(t)
-	operator := newController(api.client, brokers.address())
+	operator := newController(api.client, brokers.address(), testMetrics(t))
 	operator.now = func() time.Time { return statusNow }
 	rule := ReceiverVolume{Max: 69.5, Step: 1}
 

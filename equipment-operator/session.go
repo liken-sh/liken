@@ -400,6 +400,7 @@ func (s *session) selectInput(ctx context.Context) {
 			return
 		case <-powered:
 		case <-time.After(sessionPowerWait):
+			s.denon.reportCommand(commandTimeout)
 		}
 	}
 	if ctx.Err() != nil {

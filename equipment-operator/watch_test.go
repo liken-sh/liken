@@ -54,7 +54,7 @@ func startWatch(t *testing.T, api *fakeAPI, resourceVersion string, wake chan st
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		watchReceivers(t.Context(), api.client, resourceVersion, wake)
+		watchReceivers(t.Context(), api.client, resourceVersion, wake, testMetrics(t))
 	}()
 	t.Cleanup(func() {
 		select {

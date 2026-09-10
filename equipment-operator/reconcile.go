@@ -31,6 +31,7 @@ type receiverUnit struct {
 	busAddress string
 	now        func() time.Time
 	denon      *denonClient
+	readings   *metrics
 	cancel     context.CancelFunc
 	dirty      chan struct{}
 	generation atomic.Int64
@@ -83,7 +84,16 @@ func (u *receiverUnit) report(ctx context.Context) {
 }
 
 func (u *receiverUnit) write() {
-	status := buildReceiverStatus(u.denon.State(), u.generation.Load(), u.applied.Conditions, u.now())
+	now := u.now()
+	state := u.denon.State()
+	// Metrics are read from the same state and the same moment that
+	// build the status below, and set whether or not the status itself
+	// turns out to have changed: observation_last_success_timestamp_seconds
+	// advances on every settled burst, not only on a burst that changed
+	// what a person reads in status.
+	u.readings.recordObservation(u.name, state, now)
+
+	status := buildReceiverStatus(state, u.generation.Load(), u.applied.Conditions, now)
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}
@@ -117,12 +127,14 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		held.stop()
 	}
 	if spec == nil {
+		u.readings.setClaimed(u.name, false)
 		return
 	}
 	started := startSession(ctx, u.name, *spec, u.denon, u.busAddress, u.volumeRule)
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
+	u.readings.setClaimed(u.name, true)
 }
 
 // setVolume records the ceiling and the step a person declared, which
@@ -145,7 +157,8 @@ func (u *receiverUnit) volumeRule() ReceiverVolume {
 }
 
 // stop lifts the session and closes the connection, which is what a
-// deleted Receiver leaves behind.
+// deleted Receiver leaves behind. The metrics scoped to this receiver
+// go with it, so a Receiver that is gone stops being reported.
 func (u *receiverUnit) stop() {
 	u.mutex.Lock()
 	held := u.session
@@ -155,6 +168,7 @@ func (u *receiverUnit) stop() {
 		held.stop()
 	}
 	u.cancel()
+	u.readings.forgetReceiver(u.name)
 }
 
 // controller holds what every pass needs and the units it runs.
@@ -163,23 +177,38 @@ type controller struct {
 	busAddress string
 	wake       chan struct{}
 	now        func() time.Time
+	readings   *metrics
 	units      map[string]*receiverUnit
 }
 
-func newController(client *Client, busAddress string) *controller {
+func newController(client *Client, busAddress string, readings *metrics) *controller {
 	return &controller{
 		client:     client,
 		busAddress: busAddress,
 		wake:       make(chan struct{}, 1),
 		now:        time.Now,
+		readings:   readings,
 		units:      map[string]*receiverUnit{},
 	}
 }
 
 // pass derives every unit from the collection as it stands now. It
 // starts a client for a Receiver that names a protocol, moves a session
-// that changed, and stops the client of a Receiver that is gone.
+// that changed, and stops the client of a Receiver that is gone. The
+// whole pass is one equipment_reconcile_duration_seconds observation,
+// because this loop reconciles the collection as a unit and not one
+// resource at a time.
 func (c *controller) pass(ctx context.Context) error {
+	// The wall clock times this pass, and not c.now, because c.now is a
+	// fixture a test holds still to make a status's own timestamp
+	// deterministic; the duration this measures is real regardless.
+	began := time.Now()
+	err := c.doPass(ctx)
+	c.readings.observeReconcile(time.Since(began), err)
+	return err
+}
+
+func (c *controller) doPass(ctx context.Context) error {
 	list, err := ListReceivers(c.client)
 	if err != nil {
 		return err
@@ -232,11 +261,13 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		client:     c.client,
 		busAddress: c.busAddress,
 		now:        c.now,
+		readings:   c.readings,
 		cancel:     cancel,
 		dirty:      make(chan struct{}, 1),
 	}
 	unit.setVolume(receiver.Spec.Volume)
 	unit.denon = newDenonClient(receiver.Spec.Denon.Address, unit.observe)
+	unit.denon.readings = c.readings
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
@@ -312,7 +343,14 @@ func operate() {
 		os.Exit(1)
 	}
 
-	if err := serve(context.Background(), client, config.busAddress); err != nil {
+	ctx := context.Background()
+	readings := newMetrics(version)
+	if _, err := readings.Serve(ctx, config.metricsAddress); err != nil {
+		fmt.Fprintf(os.Stderr, "metrics listener: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := serve(ctx, client, config.busAddress, readings); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -320,14 +358,14 @@ func operate() {
 
 // serve proves the collection can be read, starts the watch from the
 // version that first list carried, and runs the loop until ctx ends.
-func serve(ctx context.Context, client *Client, busAddress string) error {
+func serve(ctx context.Context, client *Client, busAddress string, readings *metrics) error {
 	list, err := ListReceivers(client)
 	if err != nil {
 		return fmt.Errorf("listing receivers: %w", err)
 	}
 
-	operator := newController(client, busAddress)
-	go watchReceivers(ctx, client, list.Metadata.ResourceVersion, operator.wake)
+	operator := newController(client, busAddress, readings)
+	go watchReceivers(ctx, client, list.Metadata.ResourceVersion, operator.wake, readings)
 	operator.run(ctx)
 	return nil
 }

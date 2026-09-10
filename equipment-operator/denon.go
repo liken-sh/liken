@@ -169,9 +169,16 @@ func denonAddress(address string) string {
 // denonClient holds one receiver's connection, the state it reports,
 // and the queue of commands waiting to go out. out is the current
 // connection's queue, or nil while disconnected.
+//
+// readings reports the outcome of every command this client sends, for
+// equipment_commands_total. It is set directly by the caller that
+// wires up metrics, the way reconcile.go wires the listener; a nil
+// value is what a test that does not care about metrics builds, and
+// reportCommand on a nil *metrics is a defined no-op.
 type denonClient struct {
 	address  string
 	listener func(denonEvent)
+	readings *metrics
 
 	mutex sync.Mutex
 	state denonState
@@ -184,6 +191,11 @@ func newDenonClient(address string, listener func(denonEvent)) *denonClient {
 		listener: listener,
 		state:    newDenonState(),
 	}
+}
+
+// reportCommand tells the wired metrics about one command's outcome.
+func (d *denonClient) reportCommand(status string) {
+	d.readings.reportCommand(status)
 }
 
 // State answers what the receiver last said, from any goroutine.
@@ -202,11 +214,13 @@ func (d *denonClient) Send(command string) {
 	out := d.out
 	d.mutex.Unlock()
 	if out == nil {
+		d.reportCommand(commandFailed)
 		return
 	}
 	select {
 	case out <- command:
 	default:
+		d.reportCommand(commandFailed)
 	}
 }
 
@@ -297,10 +311,17 @@ func (d *denonClient) writeLoop(ctx context.Context, conn net.Conn, out <-chan s
 			return
 		case command := <-out:
 			if _, err := conn.Write([]byte(command + string(denonTerminator))); err != nil {
+				d.reportCommand(commandFailed)
 				return
 			}
+			d.reportCommand(commandOK)
 			last = time.Now()
 		case <-ticker.C:
+			// The heartbeat is a keepalive this client invents, not a
+			// command an operator sent for its own reasons, so it never
+			// reaches equipment_commands_total: a socket failure here is
+			// already reported when the read loop's silence limit or a
+			// failed write ends the session and flips Reachable.
 			if time.Since(last) < denonHeartbeat {
 				continue
 			}

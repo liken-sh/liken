@@ -1,0 +1,16 @@
+# One PodMonitor for the operator pod. The pod runs on no particular
+# node, so the target's own node label is the interesting one for a
+# cross-fleet dashboard, and the relabeling below is what puts it there.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: equipment-operator
+spec:
+  selector:
+    matchLabels:
+      app: equipment-operator
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

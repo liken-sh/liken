@@ -1,0 +1,18 @@
+# The monitoring component: liken/plans/65-prometheus-metrics.md's
+# shared contract, this operator's half. It adds one PodMonitor and
+# changes nothing in the base, so a cluster owner with no
+# prometheus-operator never takes this directory at all.
+#
+# An owner who runs the prometheus-operator adds it beside the base:
+#
+#   resources:
+#     - https://github.com/liken-sh/equipment-operator//deploy?ref=<version>
+#   components:
+#     - https://github.com/liken-sh/equipment-operator//deploy/monitoring?ref=<version>
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+namespace: liken-system
+
+resources:
+  - podmonitor.yaml

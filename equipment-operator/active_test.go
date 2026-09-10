@@ -5,7 +5,10 @@ package main
 // flips a Play and a waking screen make on it. The harness these run on
 // is in session_test.go.
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // idleListening is a harness whose session stands with both flags
 // false. It has adopted the level and has sent the equipment nothing.
@@ -179,4 +182,36 @@ func TestTheAwakeFlipsKeepOneBrokerConnection(t *testing.T) {
 	mustMatch(t, len(h.brokers.sessions), 0)
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 	h.equipment.waitForCommands(t, "MV51")
+}
+
+// A power-on the receiver never confirms is the one wait selectInput
+// gives up on, and giving up is what equipment_commands_total counts
+// as a timeout. readings is wired before the client's Run goroutine
+// starts, and never touched again from this goroutine, because the
+// field carries no lock of its own.
+func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
+	waited := sessionPowerWait
+	sessionPowerWait = 50 * time.Millisecond
+	t.Cleanup(func() { sessionPowerWait = waited })
+
+	equipment := startFakeDenon(t)
+	equipment.ignorePowerOn()
+	readings := testMetrics(t)
+	h := &sessionHarness{
+		rule:      ReceiverVolume{Max: 69.5},
+		equipment: equipment,
+		brokers:   startFakeBrokerServer(t),
+		holder:    &sessionHolder{},
+	}
+	h.denon = newDenonClient(equipment.address(), h.holder.observe)
+	h.denon.readings = readings
+	go h.denon.Run(t.Context())
+	h.waitUntil(t, func(state denonState) bool {
+		return state.Power != "" && state.VolumeMax != unknownHalves
+	})
+
+	h.begin(t, "GAME")
+
+	h.equipment.waitForCommands(t, "SIGAME")
+	requireSeries(t, scrape(t, readings), `equipment_commands_total{status="timeout"} 1`)
 }

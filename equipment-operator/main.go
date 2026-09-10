@@ -6,6 +6,11 @@ package main
 
 import "os"
 
+// version is the release this binary was built from. The Dockerfile
+// sets it with -ldflags "-X main.version=...", and a build with no
+// such flag, such as go test, reports dev.
+var version = "dev"
+
 // The operator's own environment. Each value is one the operator
 // cannot derive, so the Deployment states it and this program reads
 // it here.
@@ -17,12 +22,18 @@ const (
 	// EQUIPMENT_BUS_ADDRESS is the broker a session's volume topic is read
 	// from, as host:port.
 	busAddressVariable = "EQUIPMENT_BUS_ADDRESS"
+
+	// EQUIPMENT_METRICS_ADDRESS is where /metrics listens, as host:port.
+	// liken/plans/65-prometheus-metrics.md gives this operator port 9260.
+	// An empty value turns the listener off.
+	metricsAddressVariable = "EQUIPMENT_METRICS_ADDRESS"
 )
 
 // settings is the whole of the operator's configuration.
 type settings struct {
-	namespace  string
-	busAddress string
+	namespace      string
+	busAddress     string
+	metricsAddress string
 }
 
 // readSettings takes the configuration from the environment alone.
@@ -30,8 +41,9 @@ type settings struct {
 // empty value means, so a missing setting never stops the read.
 func readSettings() settings {
 	return settings{
-		namespace:  os.Getenv(podNamespaceVariable),
-		busAddress: os.Getenv(busAddressVariable),
+		namespace:      os.Getenv(podNamespaceVariable),
+		busAddress:     os.Getenv(busAddressVariable),
+		metricsAddress: os.Getenv(metricsAddressVariable),
 	}
 }
 
