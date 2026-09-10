@@ -28,8 +28,11 @@ base=$2
 # program opens by file name at runtime, and every line below is such a
 # library. Each one is a load that ldd cannot report:
 #
-#   weston            opens the backend, the renderer and the shell
-#                     that weston.ini names.
+#   weston            opens the backend, the renderer, the shell and
+#                     the modules that weston.ini names. The one
+#                     module here, liken-layout.so, is not a seed: the
+#                     Dockerfile builds it and copies it into the
+#                     weston stage, the way it copies the hotplug shim.
 #   libEGL.so.1       is glvnd's dispatch. It reads the vendor's JSON
 #                     under /usr/share/glvnd and opens the library the
 #                     JSON names, which for mesa is libEGL_mesa.so.0.
@@ -61,7 +64,7 @@ seeds="
 $lib/libweston-14/drm-backend.so
 $lib/libweston-14/headless-backend.so
 $lib/libweston-14/gl-renderer.so
-$lib/weston/kiosk-shell.so
+$lib/weston/ivi-shell.so
 $lib/libEGL_mesa.so.0
 $lib/gbm/dri_gbm.so
 $lib/dri/libdril_dri.so
