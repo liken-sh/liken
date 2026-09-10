@@ -1,10 +1,10 @@
 # Prometheus metrics
 
-Plan 01. Proposed.
+Plan 01. Built and drilled on liken-1 on 2026-09-10.
 
 The contract for every metric here, the three layers, the names, the
 port table, and the monitoring component, is [liken milestone
-65](https://github.com/liken-sh/liken/blob/main/plans/65-prometheus-metrics.md).
+65](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md).
 This plan states only what this operator adds.
 
 ## The problem
