@@ -12,7 +12,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_exporter_prometheus::{BuildError, Matcher, PrometheusBuilder};
 use metrics_process::Collector;
 
 /// The name milestone 65 gives this process on `liken_build_info`. The
@@ -33,6 +33,26 @@ fn version() -> &'static str {
     option_env!("MEDIA_BROWSER_VERSION").unwrap_or("dev")
 }
 
+/// Bucket bounds for `library_browser_frame_seconds`, in seconds. They
+/// run from 2 ms, a fast frame, to 1 s, a stalled one, with denser
+/// coverage around 60 fps (0.0167 s) and 30 fps (0.033 s), the range
+/// where a regression first shows up.
+const FRAME_SECONDS_BUCKETS: &[f64] = &[
+    0.002, 0.004, 0.008, 0.0167, 0.033, 0.05, 0.1, 0.25, 0.5, 1.0,
+];
+
+/// Configure `library_browser_frame_seconds` with fixed buckets so the
+/// exporter renders it as a Prometheus histogram (`_bucket` lines).
+/// Without a bucket configuration, the exporter renders a histogram as
+/// a summary (`quantile` lines) instead, and a summary cannot be
+/// aggregated across the pods the plan scrapes.
+fn with_frame_seconds_buckets(builder: PrometheusBuilder) -> Result<PrometheusBuilder, BuildError> {
+    builder.set_buckets_for_metric(
+        Matcher::Full("library_browser_frame_seconds".to_string()),
+        FRAME_SECONDS_BUCKETS,
+    )
+}
+
 /// Install the recorder and start the listener, if `address` names one.
 /// `None` serves no metrics, which is what a run outside a pod does and
 /// what a pod gets until the operator sets the listener's address.
@@ -48,6 +68,13 @@ pub fn install(address: Option<SocketAddr>) {
     };
 
     let builder = PrometheusBuilder::new().with_http_listener(address);
+    let builder = match with_frame_seconds_buckets(builder) {
+        Ok(builder) => builder,
+        Err(error) => {
+            eprintln!("media-browser: metrics listener: {error}");
+            return;
+        }
+    };
     if let Err(error) = builder.install() {
         eprintln!("media-browser: metrics listener: {error}");
         return;
@@ -159,6 +186,32 @@ mod tests {
             set_art_cache_bytes(None);
         });
         assert!(recorded.is_none());
+    }
+
+    /// The `DebuggingRecorder` used by the tests above records only the
+    /// facade call, not the exporter's rendering, so it cannot tell a
+    /// histogram from a summary. This test builds the real
+    /// `PrometheusRecorder` instead, with no HTTP listener, and reads
+    /// back its rendered text, the only place the summary-vs-histogram
+    /// distinction shows up.
+    #[test]
+    fn frame_seconds_renders_as_a_histogram_not_a_summary() {
+        let recorder = with_frame_seconds_buckets(PrometheusBuilder::new())
+            .expect("the metric name is a valid matcher")
+            .build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&recorder, || record_frame_seconds(0.008));
+
+        let rendered = handle.render();
+
+        assert!(
+            rendered.contains("library_browser_frame_seconds_bucket"),
+            "expected bucket lines, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("quantile="),
+            "expected no summary quantiles, got:\n{rendered}"
+        );
     }
 
     #[test]
