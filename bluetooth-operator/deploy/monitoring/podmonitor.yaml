@@ -5,6 +5,11 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: bluetooth-operator
+  # The component that lists this resource sets no namespace of its
+  # own, because that would also move the dashboard ConfigMap into
+  # liken-system. This PodMonitor states the namespace it needs
+  # directly: the same one the base puts the operator's pod in.
+  namespace: liken-system
 spec:
   selector:
     matchLabels:
