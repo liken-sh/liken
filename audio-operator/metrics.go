@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -129,6 +130,9 @@ func newMetrics(version string) *metrics {
 	buildInfo.WithLabelValues(component, version).Set(1)
 
 	m.registry.MustRegister(
+		// Layer 1 is the runtime's own numbers beside the build info.
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		buildInfo,
 		m.reconcileDuration, m.reconcileErrors, m.watchRestarts,
 		m.endpointConnected, m.endpointReady, m.endpointClaimed,

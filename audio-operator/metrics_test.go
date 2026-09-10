@@ -34,6 +34,15 @@ func scrape(t *testing.T, readings *metrics) string {
 
 // Layer 1 is the one gauge every process in the organization carries,
 // under its own component name and the version it was built from.
+func TestTheRuntimeCollectorsAreOnTheRegistry(t *testing.T) {
+	body := scrape(t, newMetrics("dev"))
+	for _, want := range []string{"go_goroutines ", "process_start_time_seconds "} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the scrape carries no %s series", strings.TrimSpace(want))
+		}
+	}
+}
+
 func TestBuildInfoNamesTheComponentAndVersion(t *testing.T) {
 	readings := newMetrics("2026.09.10-001")
 	body := scrape(t, readings)
@@ -130,12 +139,29 @@ func TestTheMetricsListenerStopsWithTheRun(t *testing.T) {
 // Repeated scrapes read the registry in memory. Nothing here mutates a
 // counter or reaches PipeWire, BlueZ, or a card, so two scrapes with no
 // write between them read the same numbers.
+// ownSeries keeps the lines the operator itself writes. The runtime's
+// go_* and process_* series move between two scrapes with no write in
+// between, because the collector reads the live process, so a test of
+// the operator's own registry leaves them out.
+func ownSeries(body string) string {
+	var kept []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "go_") || strings.HasPrefix(line, "process_") ||
+			strings.HasPrefix(line, "# HELP go_") || strings.HasPrefix(line, "# TYPE go_") ||
+			strings.HasPrefix(line, "# HELP process_") || strings.HasPrefix(line, "# TYPE process_") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func TestRepeatedScrapesLeaveCountersUnchanged(t *testing.T) {
 	readings := newMetrics("test")
 	readings.controlFailed(operationVolume)
 
-	first := scrape(t, readings)
-	second := scrape(t, readings)
+	first := ownSeries(scrape(t, readings))
+	second := ownSeries(scrape(t, readings))
 	if first != second {
 		t.Errorf("two scrapes with no write between them differ:\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
