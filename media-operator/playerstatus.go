@@ -57,6 +57,23 @@ func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatu
 	return PlayerStatus{Activity: playerIdle}
 }
 
+// publishPlayerStatuses publishes each unit's presentable state from the
+// two things that state comes from: the Plays the pass listed and the
+// report desk. The pass calls this before it reconciles anything,
+// because an ending report has to reach the screen in bus time, and
+// nothing else the pass reads changes the answer.
+//
+// This publishes and writes nothing else. The Kubernetes status, the
+// screen, the panel, and the idle pod are settled later in the pass by
+// reconcilePlayers, which publishes this same state again and skips a
+// payload the broker already holds.
+func (o *operator) publishPlayerStatuses(players []Player, plays []Play) {
+	for index := range players {
+		player := &players[index]
+		o.publishPlayerStatus(player, derivePlayerStatus(player, plays, o.reports), plays)
+	}
+}
+
 // deriveIdleStatus reports what a delegate wires its client from: the
 // resolved controller, the standing claim in the Player's namespace,
 // that claim's request names in claim order, the two resolved windows,
