@@ -319,6 +319,19 @@ def main():
     assert not os.path.exists(path), "%s is still there after close" % path
     report("%s is gone" % path)
 
+    # A Deployment with the Recreate strategy and a re-run Job both keep
+    # their ResourceClaim, so the kubelet closes and opens the same
+    # socket name inside one compositor lifetime.
+    control.expect_ok("listen %s %s" % (CLAIM_SOCKET, CONNECTOR))
+    assert os.path.exists(path), "the module opened no socket at %s again" % path
+    report("the module opened %s again" % path)
+
+    start_client(CLIENT + "-again", CLAIM_SOCKET)
+    surface = control.wait_event("surface").split()
+    assert surface[2] == CLAIM_SOCKET, "the surface came in as %s" % surface[2]
+    assert surface[1] != claim_id, "the module reused surface id %s" % surface[1]
+    report("surface: %s" % " ".join(surface))
+
     print("   PASS", flush=True)
     return 0
 

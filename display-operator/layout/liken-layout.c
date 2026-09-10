@@ -7,10 +7,15 @@
  * background view per output, opens and closes one Wayland listening
  * socket per claim, reports every surface it sees, and places surfaces
  * where the operator tells it to. It holds no layout of its own and
- * makes no decision. A
- * surface the operator has not placed is not visible, and when the
- * operator's connection drops the last committed layout stays on
- * screen.
+ * makes no decision. A surface the operator has not placed is not
+ * visible, and when the operator's connection drops the last committed
+ * layout stays on screen.
+ *
+ * The module binds each claim's listening socket itself and hands the
+ * descriptor to wl_display_add_socket_fd, rather than naming the socket
+ * to wl_display_add_socket. A socket the module binds has no lock file,
+ * so a claim that is unprepared and prepared again gets its socket back
+ * inside one compositor lifetime.
  *
  * The control protocol is lines of text on a Unix stream socket, one
  * request and one reply per line. plans/17-a-layout-for-every-screen.md
@@ -72,10 +77,20 @@ struct output_layer {
 struct listening_socket {
 	char name[NAME_LEN];
 	char connector[NAME_LEN];
-	/* A closed name keeps its entry. libwayland has no call that
-	 * removes a listener, so the descriptor stays open and a client
-	 * can still connect through it. Such a client reports as
-	 * wayland-0 rather than as the claim that is gone. */
+	/* The descriptor libwayland accepts this name's clients on. The
+	 * module binds and listens on it, then hands it to
+	 * wl_display_add_socket_fd, which takes ownership: libwayland
+	 * closes it when the display goes, and closing it under
+	 * libwayland's event source would be unsafe. */
+	int fd;
+	/* A closed name keeps its entry, because libwayland has no call
+	 * that removes a listener. The descriptor stays open with no
+	 * path to reach it, and a client that still connects through it
+	 * reports as wayland-0 rather than as the claim that is gone.
+	 * A listen on a closed name binds a new descriptor at the same
+	 * path and this entry holds that one.
+	 * plans/open-problems/a-claims-listener-outlives-the-claim.md
+	 * counts the cost. */
 	bool open;
 	struct wl_list link;
 };
@@ -454,22 +469,75 @@ socket_path(const char *name, char *out, size_t len)
 	return written > 0 && (size_t)written < len;
 }
 
+/* wl_display_add_socket takes a flock on a lock file beside the socket
+ * and holds it for the compositor's life, so it refuses a listen on a
+ * name the module closed earlier. The module therefore binds the socket
+ * itself and hands the descriptor over, which involves no lock file. A
+ * Deployment with the Recreate strategy and a re-run Job both keep
+ * their ResourceClaim, so the kubelet unprepares and prepares the same
+ * claim, and both would otherwise wait for a compositor restart.
+ *
+ * The socket directory holds no other server, so a path left behind by
+ * an earlier compositor is stale and the bind unlinks it. Losing the
+ * lock file loses that check, which is why do_listen refuses the name
+ * weston opened for itself. */
+static int
+bind_listening_socket(const char *path)
+{
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	int fd;
+
+	if (strlen(path) >= sizeof addr.sun_path) {
+		weston_log("liken-layout: %s is too long for a Unix socket path\n", path);
+		return -1;
+	}
+	snprintf(addr.sun_path, sizeof addr.sun_path, "%s", path);
+
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		weston_log("liken-layout: no socket for %s: %s\n", path, strerror(errno));
+		return -1;
+	}
+	if (unlink(path) < 0 && errno != ENOENT) {
+		weston_log("liken-layout: %s did not unlink: %s\n", path, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	if (bind(fd, (struct sockaddr *)&addr, sizeof addr) < 0 ||
+	    listen(fd, 128) < 0) {
+		weston_log("liken-layout: %s does not listen: %s\n", path, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
 static void
 do_listen(uint32_t seq, char **save)
 {
 	const char *name = strtok_r(NULL, " ", save);
 	const char *connector = strtok_r(NULL, " ", save);
 	struct listening_socket *ls;
+	char path[PATH_MAX];
 	bool is_new = false;
+	int fd;
 
 	if (!name_is_safe(name) || !connector || !connector[0]) {
 		reply_error(seq, "listen takes a socket name and a connector");
+		return;
+	}
+	if (strcmp(name, SHARED_SOCKET) == 0) {
+		reply_error(seq, "wayland-0 belongs to weston, not to a claim");
 		return;
 	}
 
 	ls = socket_named(name);
 	if (ls && ls->open) {
 		reply_ok(seq);
+		return;
+	}
+	if (!socket_path(name, path, sizeof path)) {
+		reply_error(seq, "XDG_RUNTIME_DIR does not name the socket's directory");
 		return;
 	}
 	if (!ls) {
@@ -479,22 +547,35 @@ do_listen(uint32_t seq, char **save)
 			return;
 		}
 		snprintf(ls->name, sizeof ls->name, "%s", name);
+		ls->fd = -1;
 		wl_list_insert(&listening_sockets, &ls->link);
 		is_new = true;
 	}
-	snprintf(ls->connector, sizeof ls->connector, "%s", connector);
 
-	if (wl_display_add_socket(compositor->wl_display, ls->name) < 0) {
+	fd = bind_listening_socket(path);
+	if (fd < 0) {
 		if (is_new) {
 			wl_list_remove(&ls->link);
 			free(ls);
 		}
-		reply_error(seq, "the compositor did not open the socket");
+		reply_error(seq, "the module could not bind the socket");
 		return;
 	}
+	if (wl_display_add_socket_fd(compositor->wl_display, fd) < 0) {
+		close(fd);
+		if (is_new) {
+			wl_list_remove(&ls->link);
+			free(ls);
+		}
+		reply_error(seq, "the compositor did not take the socket");
+		return;
+	}
+
+	snprintf(ls->connector, sizeof ls->connector, "%s", connector);
+	ls->fd = fd;
 	ls->open = true;
-	weston_log("liken-layout: listening on %s for output %s\n",
-		   ls->name, ls->connector);
+	weston_log("liken-layout: listening on %s for output %s on descriptor %d\n",
+		   ls->name, ls->connector, ls->fd);
 	reply_ok(seq);
 }
 
@@ -523,8 +604,9 @@ do_close(uint32_t seq, char **save)
 		return;
 	}
 	ls->open = false;
-	weston_log("liken-layout: closed %s. Clients on it keep their connections\n",
-		   ls->name);
+	weston_log("liken-layout: closed %s. Clients on it keep their connections, "
+		   "and descriptor %d stays open with no path\n",
+		   ls->name, ls->fd);
 	reply_ok(seq);
 }
 

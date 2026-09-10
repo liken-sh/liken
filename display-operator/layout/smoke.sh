@@ -12,7 +12,9 @@
 # socket as wayland-0, that placing each one paints the rectangle the
 # operator asked for and nothing outside it, that moving one leaves
 # the rectangle it came from black, that hiding one leaves the other
-# where it was, and that closing the claim's socket unlinks the path.
+# where it was, that closing the claim's socket unlinks the path, and
+# that a listen on that same name afterwards opens the path again and
+# reports the client that arrives on it.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -24,13 +26,14 @@ work=$(mktemp -d)
 # shellcheck disable=SC2329  # the EXIT trap below is the only caller.
 cleanup() {
 	docker rm -f "$weston_container" "$client_container" \
-		"$client_container-shared" >/dev/null 2>&1 || true
+		"$client_container-shared" "$client_container-again" \
+		>/dev/null 2>&1 || true
 	rm -rf "$work"
 }
 trap cleanup EXIT
 
 docker rm -f "$weston_container" "$client_container" \
-	"$client_container-shared" >/dev/null 2>&1 || true
+	"$client_container-shared" "$client_container-again" >/dev/null 2>&1 || true
 
 echo "== building $image"
 docker build -q -t "$image" -f - "$here" >/dev/null <<'DOCKERFILE'

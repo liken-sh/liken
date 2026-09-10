@@ -148,11 +148,20 @@ connection, which on a Unix socket returns the listener's path.
 `unprepareClaim` asks the module to close it, which unlinks the path
 and stops accepting.
 
-libwayland has no call that removes a listening socket, so the
-listener's descriptor stays open until the compositor restarts. A
-compositor restarts on every mode change and every card flap, and
-the count of claims between restarts is small, so the leak is
-bounded in practice and recorded below as an open problem.
+The module binds each socket itself and hands the descriptor to
+`wl_display_add_socket_fd`, rather than naming the socket to
+`wl_display_add_socket`, which takes a lock file that refuses a
+second `listen` on a name inside one compositor lifetime. A
+`Deployment` with the `Recreate` strategy and a re-run `Job` both
+keep their `ResourceClaim`, so the kubelet prepares the same claim
+again and needs that name back.
+
+libwayland has no call that removes a listening socket, so a
+listener's descriptor stays open until the compositor restarts, one
+descriptor per prepare. A compositor restarts on every mode change
+and every card flap, and the count of prepares between restarts is
+small, so the leak is bounded in practice and recorded below as an
+open problem.
 
 The identity is the socket the claim delivered, and nothing in the
 pod can change it. That is why the app-id is not the identity: it is
