@@ -138,6 +138,7 @@ deploy/
 deploy/monitoring/
   kustomization.yaml       kind: Component
   podmonitor.yaml          a PodMonitor per pod that serves metrics
+  dashboards/<repo>.json   the repository's Grafana dashboard
 ```
 
 Every PodMonitor relabels the pod's node name into the target label
@@ -177,18 +178,28 @@ convenience for the most common stack.
 
 ### Dashboards
 
-liken ships two Grafana dashboards as JSON under
-`monitoring/dashboards/`, and the component wraps each in a ConfigMap
-with the `grafana_dashboard: "1"` label, which the kube-prometheus-stack
-sidecar loads.
+Each repository ships one Grafana dashboard for its own process, as
+JSON under `deploy/monitoring/dashboards/`, and its monitoring
+Component wraps the file in a ConfigMap with the `grafana_dashboard:
+"1"` label, which the kube-prometheus-stack sidecar loads. The
+dashboard draws the repository's layer 2 and its layer 3, so an
+owner who takes the Component gets the panels with the scrape.
+
+liken ships two under `monitoring/dashboards/`:
 
 * **liken fleet.** Machines by phase, release per node and the skew
   from the target, changes pending by tier, approvals outstanding,
-  upgrade durations, crashes, devices per class per node.
-* **liken operators.** Layer 2 for every operator in the cluster:
-  reconcile rate, error rate, duration, and watch restarts, by
-  component and kind. One dashboard reads every repository because
-  the names are the same.
+  crashes, and devices per class per node.
+* **liken operators.** Layer 2 for the machine operator and the
+  cluster operator: reconcile rate, error rate, duration, and watch
+  restarts, by kind.
+
+A provisioned dashboard names its datasource through a template
+variable of type `datasource`, and every panel reads
+`${datasource}`. The grafana.com export form, with `__inputs`, does
+not work here: nothing substitutes the placeholder when a file is
+provisioned, and every panel reports that the datasource was not
+found.
 
 ### liken's own metrics
 
