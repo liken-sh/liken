@@ -17,7 +17,8 @@ count needs a graph, not an alert.
 ## The design
 
 Layers 1 and 2 under the `bluetooth_` prefix, on port 9250. This pod
-runs on the host network, which is why the port is distinct.
+runs on the host network beside the machine operator, which holds
+9200 there, so this one takes a port of its own.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
