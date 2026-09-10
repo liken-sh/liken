@@ -241,10 +241,10 @@ fn anything_but_a_positive_grace_leaves_it_off() {
 
 #[test]
 fn the_operator_arms_the_metrics_listener() {
-    let options = environment(&[(METRICS_ADDRESS, "0.0.0.0:9231")]);
+    let options = environment(&[(METRICS_ADDRESS, "0.0.0.0:9200")]);
     assert_eq!(
         options.metrics_address,
-        Some("0.0.0.0:9231".parse().unwrap())
+        Some("0.0.0.0:9200".parse().unwrap())
     );
 }
 
@@ -256,15 +256,15 @@ fn an_empty_environment_serves_no_metrics() {
 #[test]
 fn a_bare_port_listens_on_every_address() {
     assert_eq!(
-        metrics_address(":9231"),
-        Some("0.0.0.0:9231".parse().unwrap())
+        metrics_address(":9200"),
+        Some("0.0.0.0:9200".parse().unwrap())
     );
 }
 
 #[test]
 fn anything_but_a_host_and_a_port_serves_no_metrics() {
     assert_eq!(metrics_address(""), None);
-    assert_eq!(metrics_address("9231"), None);
+    assert_eq!(metrics_address("9200"), None);
     assert_eq!(metrics_address("not-an-address"), None);
 }
 

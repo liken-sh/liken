@@ -16,9 +16,10 @@ nothing else in this repository does.
 
 ## The design
 
-Layers 1 and 2 under the `library_` prefix, the operator on port 9230.
-The media browser serves on 9231 under `library_browser_`, with the
-`metrics` facade and the Prometheus exporter, and has no layer 2.
+Layers 1 and 2 under the `library_` prefix, the operator on port 9200.
+The media browser serves on the same port under `library_browser_`,
+with the `metrics` facade and the Prometheus exporter, and has no
+layer 2.
 Corrosion keeps its own `corro_*` names; the component scrapes its port
 and this repository owns nothing there.
 

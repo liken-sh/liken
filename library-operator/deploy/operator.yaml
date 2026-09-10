@@ -59,17 +59,17 @@ spec:
             - name: WEBHOOK_PORT
               value: "8080"
             # The metrics listener's address, milestone 65's port for
-            # this operator. An empty value would serve no metrics; the
-            # base states one so a cluster gets them by taking the
-            # manifest as it ships.
+            # every process on the cluster network. An empty value
+            # would serve no metrics; the base states one so a cluster
+            # gets them by taking the manifest as it ships.
             - name: METRICS_LISTEN_ADDRESS
-              value: ":9230"
+              value: ":9200"
           ports:
             - name: webhook
               containerPort: 8080
               protocol: TCP
             - name: metrics
-              containerPort: 9230
+              containerPort: 9200
               protocol: TCP
           securityContext:
             capabilities:

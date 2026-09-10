@@ -32,11 +32,11 @@ import (
 const browserContainer = "browser"
 
 // The port the browser serves Prometheus metrics on, and the name a
-// PodMonitor reads it by. Milestone 65 assigns 9231 to the media
-// browser; every other liken process has a port of its own on the same
-// table.
+// PodMonitor reads it by. Milestone 65 puts every process on 9200,
+// since a pod on the cluster network has its own port space; only a
+// host-network pod needs a port of its own.
 const (
-	browserMetricsPort     = 9231
+	browserMetricsPort     = 9200
 	browserMetricsPortName = "metrics"
 )
 

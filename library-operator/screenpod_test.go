@@ -802,7 +802,7 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 
 	want := map[string]string{
 		windowGraceVariable:           windowGraceSeconds,
-		metricsAddressVariable:        ":9231",
+		metricsAddressVariable:        ":9200",
 		mediaBusAddressVariable:       "bus.liken-system.svc:1883",
 		mediaPlayerNameVariable:       "den-tv",
 		mediaStatusTopicVariable:      "liken/media/players/house/den-tv/status",
@@ -954,7 +954,7 @@ func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
 	environment := browserEnvironment(denScreen())
 
 	if len(environment) != 2 || environment[windowGraceVariable] != windowGraceSeconds ||
-		environment[metricsAddressVariable] != ":9231" {
+		environment[metricsAddressVariable] != ":9200" {
 		t.Errorf("env = %v, want the window grace and the metrics address", environment)
 	}
 }
