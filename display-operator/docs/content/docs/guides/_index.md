@@ -5,8 +5,9 @@ weight: 10
 
 # Guides
 
-The guides give the steps for the two tasks this operator exists
-for: the install, and the claim that puts a window on a screen.
+The guides give the steps for the three tasks this operator exists
+for: the install, the claim that puts a window on a screen, and the
+`Layout` that puts more than one window on it.
 
 ## How the pieces fit
 
@@ -43,8 +44,8 @@ The scheduler matches the claim against the slices, allocates one
 output, and places the pod on that output's machine. The kubelet
 then asks this driver to prepare the claim, and the driver delivers
 the device to the container. For a monitor output, the delivery is
-the compositor's Wayland socket and the app-id that puts your window
-on that screen.
+a Wayland socket the compositor opened for that claim. A window on
+that socket is a window on that screen.
 
 Beside the claim path, the operator creates one
 [`Display`](/docs/reference/displays/) per monitor: a cluster-scoped

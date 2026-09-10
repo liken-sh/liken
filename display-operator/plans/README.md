@@ -173,6 +173,15 @@ say why it is built the way it is.
   compositor: the loader, the Intel and AMD drivers, and the client
   libraries, on scratch. The media browser and the idle screen build
   from it, and a node that draws holds LLVM once.
+* [17, A Layout for every screen](17-a-layout-for-every-screen.md).
+  In progress. The compositor moves to ivi-shell under a controller
+  module of the operator's own, every claim gets its own Wayland
+  socket so the compositor knows whose surface it holds, and a
+  cluster-scoped `Layout` states regions with fractional rectangles
+  and label selectors. A `Display` names its `Layout`, and one that
+  names none shows every surface fullscreen, newest on top, which is
+  kiosk-shell's behavior. Prototyped on vega on 2026-09-10: three
+  containers on one output, with fade and move transitions.
 
 ## Open problems
 
@@ -200,3 +209,10 @@ decided yet what work they become.
   A claim stating a mode the panel will not sync loops the kubelet's
   prepare retries through compositor restarts until the whole card
   taints and the compositor sits in restart backoff.
+* [An external layout engine](open-problems/an-external-layout-engine.md).
+  Plan 17 decides every placement in one function. The seam where a
+  different engine would go is the `Service`, `EndpointSlice`, and
+  kube-proxy split, and it waits for a second engine to exist.
+* [A claim's listener outlives the claim](open-problems/a-claims-listener-outlives-the-claim.md).
+  libwayland removes no listening socket, so a closed claim's
+  descriptor stays open until the compositor restarts.

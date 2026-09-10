@@ -12,8 +12,8 @@ player. You need the operator
 [`liken`](https://liken.sh/docs/) cluster.
 
 The claim names the screen. The scheduler places the pod, and the
-container receives the compositor's Wayland socket and the app-id
-that puts its window on that screen.
+container receives a Wayland socket that the compositor opened for
+that claim. A window on that socket is a window on that screen.
 
 ## 1. Pick the screen
 
@@ -106,32 +106,25 @@ pod starts on its own when a monitor is plugged in.
             - name: browser
               image: <your chromium image>
               args:
-                - --class=$(DISPLAY_APP_ID)
                 - --kiosk
                 - https://grafana.example.com/
               resources:
                 claims:
                   - name: screen
 
-Two lines make this work:
-
-* `resources.claims` gives the container the claim. That is what
-  places the pod and delivers the socket.
-* `--class=$(DISPLAY_APP_ID)` hands the allocated output's app-id to
-  the program. The compositor routes a window to a screen by its
-  app-id, so the program must present the one the claim delivered.
-  Each toolkit has its own flag: `chromium` takes
-  `--class=$(DISPLAY_APP_ID)`, and `mpv` takes
-  `--wayland-app-id=$(DISPLAY_APP_ID)`.
+One line makes this work. `resources.claims` gives the container the
+claim. That is what places the pod, and it is what delivers the
+socket. The program needs no flag and no app-id: the compositor knows
+which screen a window belongs on from the socket it arrived on.
 
 The image is yours. Any Wayland client works; the operator delivers
-only the socket and the app-id.
+only the socket.
 
 `strategy: Recreate` matters. Pods that share one `ResourceClaim`
-share its output, and the compositor refuses nothing. During a
-rolling update, the old and the new pod would both present the same
-app-id and cover each other on the one screen. `Recreate` ends the
-old pod first.
+share its screen, and the compositor refuses nothing. During a
+rolling update the old pod and the new pod would both hold a window
+on the screen, the newer one on top and the older one still drawing
+under it until it ends. `Recreate` ends the old pod first.
 
 ## 4. What the container receives
 
@@ -142,13 +135,17 @@ client draws through the compositor, which holds the card.
 |---|---|
 | mount | `/var/run/display.liken.sh`, the compositor's runtime directory |
 | `XDG_RUNTIME_DIR` | `/var/run/display.liken.sh` |
-| `WAYLAND_DISPLAY` | `wayland-0` |
-| `DISPLAY_APP_ID` | the allocated output's app-id, such as `hdmi-a-1` |
+| `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
+| `DISPLAY_APP_ID` | the allocated output's name, such as `hdmi-a-1`; nothing reads it, and a later release stops delivering it |
 
-The claim assigns the screen; the app-id only routes. What keeps two
+The socket is the identity. The compositor opened it for this claim
+and for no other, so every window that arrives on it belongs to this
+claim, and the [`Display`](/docs/reference/displays/) reports the
+window under the claim's name in `status.surfaces`. What keeps two
 workloads off one screen is the allocation: the second pod cannot
 claim an output the first holds, so it parks until the first
-releases it.
+releases it. What puts two workloads on one screen on purpose is a
+[`Layout`](/docs/guides/layout/).
 
 ## Ask for a mode
 
@@ -333,9 +330,9 @@ connector, and its replacement allocates the output the monitor is
 on now.
 
 **Two screens from one pod.** One container drives one screen,
-because a claim delivers one `DISPLAY_APP_ID` per container. A pod
-that drives two screens runs two containers, each naming its own
-request in the claim.
+because a container has one `WAYLAND_DISPLAY`. A pod that drives two
+screens runs two containers, each naming its own request in the
+claim.
 
 **A screen and its speakers.** A monitor's HDMI speakers belong to
 the [audio operator](https://audio.liken.sh). Both operators publish
