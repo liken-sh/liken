@@ -106,25 +106,19 @@ age that counts up between scrapes.
 
 ### The listener
 
-Each process serves `/metrics` on a port from this table. The ports are
-distinct across the organization because some of these pods run on
-the host network, and two of them can share a node.
+Every process serves `/metrics` on port 9200. A pod on the cluster
+network has a port space of its own, so two pods on one node both
+listen on 9200 with no conflict, and one number is one less thing to
+remember.
 
-| Process | Port |
+A pod on the host network shares the node's port space with every
+other host-network pod and with the node's own exporters, so it takes
+a port nobody else on the host holds. Two pods run there today:
+
+| Host-network process | Port |
 | --- | --- |
 | liken machine-operator | 9200 |
-| liken cluster-operator | 9201 |
-| display-operator | 9210 |
-| media-operator | 9220 |
-| media command sidecar, in a Play pod | 9221 |
-| idle-screen | 9222 |
-| library-operator | 9230 |
-| media-browser | 9231 |
-| audio-operator | 9240 |
 | bluetooth-operator | 9250 |
-| equipment-operator | 9260 |
-| git-csi-driver | 9280 |
-| per-node-csi-driver | 9290 |
 
 The listener takes its address the same way the process takes its
 other settings. An empty address turns it off. The container port is

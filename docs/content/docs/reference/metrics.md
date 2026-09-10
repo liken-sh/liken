@@ -6,8 +6,8 @@ toc: true
 
 # Metrics
 
-The machine operator serves Prometheus metrics on port 9200, and the
-cluster operator serves them on port 9201. Both paths are `/metrics`.
+The machine operator and the cluster operator each serve Prometheus
+metrics on port 9200. Both paths are `/metrics`.
 The base needs no Prometheus: the operators serve these ports whether
 or not anything reads them, and a cluster with no monitoring stack is
 complete. An owner who runs the prometheus-operator adds the
@@ -16,24 +16,11 @@ operator and two Grafana dashboards.
 
 ## Ports
 
-Every process gets a port of its own, because some of these pods run
-on the host network and two of them can share a node.
-
-| Process | Port |
-| --- | --- |
-| `liken` machine-operator | 9200 |
-| `liken` cluster-operator | 9201 |
-| display-operator | 9210 |
-| media-operator | 9220 |
-| media command sidecar, in a Play pod | 9221 |
-| idle-screen | 9222 |
-| library-operator | 9230 |
-| media-browser | 9231 |
-| audio-operator | 9240 |
-| bluetooth-operator | 9250 |
-| equipment-operator | 9260 |
-| git-csi-driver | 9280 |
-| per-node-csi-driver | 9290 |
+Every process serves `/metrics` on port 9200. A pod on the cluster
+network has a port space of its own, so one number serves every
+process. A pod on the host network shares the node's port space, so it
+takes a port nobody else on the host holds: the machine operator holds
+9200 there, and the bluetooth operator 9250.
 
 ## Metrics
 
