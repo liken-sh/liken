@@ -48,7 +48,7 @@ import (
 // would more likely find that version already compacted away (see
 // the 410 case above). Bookmarks keep the resume point fresh at no
 // extra cost; informers request them for this reason.
-func WatchMachines(c *Client, fieldSelector, resourceVersion string, events chan<- *machine.Machine) {
+func WatchMachines(c *Client, fieldSelector, resourceVersion string, events chan<- *machine.Machine, restarted func()) {
 	selector := ""
 	if fieldSelector != "" {
 		selector = "&fieldSelector=" + url.QueryEscape(fieldSelector)
@@ -86,6 +86,13 @@ func WatchMachines(c *Client, fieldSelector, resourceVersion string, events chan
 		if resp != nil {
 			resp.Body.Close()
 		}
+
+		// Every arrival here is one restart: the stream ended, and
+		// the recovery below opens it again. A caller counts these,
+		// because a low rate is the API server's own schedule and a
+		// high rate is a stream that breaks faster than the loop can
+		// use it.
+		restarted()
 
 		RetryPause()
 		var list struct {

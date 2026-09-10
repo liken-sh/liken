@@ -33,6 +33,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -42,8 +43,24 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// component is this program's name in every metric that carries one.
+const component = "liken-machine-operator"
+
+// metricsAddress is where this operator answers a Prometheus scrape.
+// The default is the port that plans/65-prometheus-metrics.md gives
+// the machine operator, so the binary carries the contract and the
+// pod template only has to name the port it exposes. The address is
+// an argument, and not a constant, for two reasons. An empty value
+// turns the listener off, for an owner who runs no Prometheus and
+// wants the port back. This pod also runs on the host's network, so
+// the port belongs to the whole machine, and an owner who already
+// serves 9200 there needs a way to move liken.
+var metricsAddress = flag.String("metrics-address", ":9200",
+	"the address to serve /metrics on; empty serves no metrics")
+
 func main() {
-	fmt.Println("liken-machine-operator", machine.Version)
+	flag.Parse()
+	fmt.Println(component, machine.Version)
 
 	// The boot manifest tells the operator which Machine it manages.
 	// These are the exact bytes init booted under: the proven or
@@ -134,6 +151,15 @@ func main() {
 		clusterName = clusterDoc.Metadata.Name
 	}
 
+	// The release fetcher outlives any one pass: downloads take
+	// minutes, passes take milliseconds, and the fetcher is the one
+	// piece of state that connects them (fetch.go).
+	f := &fetcher{}
+
+	// The metrics registry outlives every pass too, because a
+	// counter's whole value is that it accumulates (metrics.go).
+	operatorMetrics, machineLayer := serveMetrics(*metricsAddress, f)
+
 	// The core of every operator is a level-triggered loop. Three
 	// things wake it, and every pass reconciles from the current state
 	// as it is, never from the event that woke it, so missing one wake
@@ -158,12 +184,8 @@ func main() {
 	// stream. The loop below drains and combines whatever built up
 	// while a pass was running.
 	events := make(chan *machine.Machine, 32)
-	go kubernetes.WatchMachines(client, "metadata.name="+name, current.Metadata.ResourceVersion, events)
-
-	// The release fetcher outlives any one pass: downloads take
-	// minutes, passes take milliseconds, and the fetcher is the one
-	// piece of state that connects them (fetch.go).
-	f := &fetcher{}
+	go kubernetes.WatchMachines(client, "metadata.name="+name, current.Metadata.ResourceVersion, events,
+		func() { operatorMetrics.WatchRestarted(machineKind) })
 
 	// The facts watch turns init's writes into wakes. inotify does not
 	// recurse, so the watch reconciles its set with the tree before
@@ -194,7 +216,9 @@ func main() {
 				fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
 			}
 		}
-		reconcile(client, current, clusterName, f)
+		started := time.Now()
+		err := reconcile(client, current, clusterName, f, machineLayer)
+		operatorMetrics.ObserveReconcile(machineKind, time.Since(started), err)
 		select {
 		case m := <-events:
 			// A busy object queues events faster than passes run, so

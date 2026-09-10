@@ -37,6 +37,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -46,8 +47,21 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// component is this program's name in every metric that carries one.
+const component = "liken-cluster-operator"
+
+// metricsAddress is where this operator answers a Prometheus scrape.
+// The default is the port that plans/65-prometheus-metrics.md gives
+// the cluster operator, one above the machine operator's, so the
+// binary carries the contract and the pod template only has to name
+// the port it exposes. An empty value turns the listener off, for an
+// owner who runs no Prometheus.
+var metricsAddress = flag.String("metrics-address", ":9201",
+	"the address to serve /metrics on; empty serves no metrics")
+
 func main() {
-	fmt.Println("liken-cluster-operator", machine.Version)
+	flag.Parse()
+	fmt.Println(component, machine.Version)
 
 	// A failure during setup ends the process deliberately. This is
 	// the same crash-only method the machine operator uses: kubelet
@@ -68,6 +82,10 @@ func main() {
 	name := clusterDoc.Metadata.Name
 	fmt.Printf("operating cluster %s\n", name)
 
+	// The metrics registry outlives every pass, because a counter's
+	// whole value is that it accumulates (metrics.go).
+	operatorMetrics, clusterLayer := serveMetrics(*metricsAddress)
+
 	// This program uses the same level-triggered loop as the machine
 	// operator, pointed at the whole fleet. The watch spans every
 	// Machine with no fieldSelector, because any machine's transition
@@ -79,7 +97,8 @@ func main() {
 	// state. The first recovery list then establishes a precise
 	// resume point.
 	events := make(chan *machine.Machine, 32)
-	go kubernetes.WatchMachines(client, "", "", events)
+	go kubernetes.WatchMachines(client, "", "", events,
+		func() { operatorMetrics.WatchRestarted(machineKind) })
 
 	// Two values outlive a pass, the same way the machine operator's
 	// release fetcher does. The sweep stays level-triggered and
@@ -97,7 +116,9 @@ func main() {
 	// same window that the machine operators work on.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
-		sweep(client, name, poller, probe)
+		started := time.Now()
+		err := sweep(client, name, poller, probe, clusterLayer)
+		operatorMetrics.ObserveReconcile(clusterKind, time.Since(started), err)
 		select {
 		case <-events:
 			drainEvents(events)
@@ -112,15 +133,15 @@ func main() {
 // poller its look at the spec. Then it lets the fleet sweep list the
 // fleet, judge it, and write the result, carrying the engine probe
 // along so the flux engine's care keeps its own cadence.
-func sweep(c *kubernetes.Client, name string, poller *channelPoller, probe *engineProbe) {
+func sweep(c *kubernetes.Client, name string, poller *channelPoller, probe *engineProbe, cm *clusterMetrics) error {
 	clusterDoc, err := kubernetes.GetCluster(c, name)
 	if err != nil {
 		fmt.Printf("reading cluster %s: %v\n", name, err)
-		return
+		return err
 	}
 	poller.Observe(clusterDoc.Spec.Releases,
 		clusterDoc.Metadata.Annotations[cluster.CheckReleasesAnnotation], time.Now())
-	sweepFleet(c, clusterDoc, poller.Available(), probe, time.Now())
+	return sweepFleet(c, clusterDoc, poller.Available(), probe, cm, time.Now())
 }
 
 // awaitCluster lists Cluster objects until one exists. A 404

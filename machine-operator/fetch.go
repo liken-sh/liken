@@ -97,6 +97,34 @@ type fetcher struct {
 	mu   sync.Mutex
 	snap fetchSnapshot
 	busy bool
+
+	// The fetcher's running totals, kept beside the snapshot because
+	// they outlive every ask. The snapshot describes one release; a
+	// total describes what this machine has spent on downloads since
+	// the operator started, which is what a graph of staging progress
+	// and of a download that keeps failing is drawn from
+	// (metrics.go).
+	downloaded int64
+	failures   int
+}
+
+// DownloadedBytes is how many release artifact bytes this machine
+// has downloaded and verified onto a slot. Bytes count when the
+// artifact lands, so a torn download adds nothing until its retry
+// completes the file.
+func (f *fetcher) DownloadedBytes() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.downloaded
+}
+
+// DownloadFailures is how many downloads ended without a complete
+// slot, whether the network dropped or the bytes did not match the
+// catalog's digests.
+func (f *fetcher) DownloadFailures() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.failures
 }
 
 // errCorrupt distinguishes verification failures from transport
@@ -153,11 +181,18 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 // describes a release the machine no longer needs, so the function
 // discards it.
 func (f *fetcher) run(ask fetchAsk) {
-	fetched, err := fetchRelease(ask)
+	fetched, downloaded, err := fetchRelease(ask)
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.busy = false
+	// The totals count what this run did, even when the ask has
+	// moved on. The bytes reached the slot and the failure happened,
+	// whatever the machine wants now.
+	f.downloaded += downloaded
+	if err != nil {
+		f.failures++
+	}
 	if f.snap.ask != ask {
 		return
 	}
@@ -182,14 +217,17 @@ func (f *fetcher) run(ask fetchAsk) {
 // the document itself to the slot last. This order means a slot
 // carrying release.yaml is a slot whose artifacts were complete
 // when the document was written. fetchRelease returns how many
-// artifacts it actually downloaded. Zero is the idempotent case,
-// where everything was already verified in place.
-func fetchRelease(ask fetchAsk) (int, error) {
+// artifacts it actually downloaded, and how many bytes those
+// artifacts hold. Zero is the idempotent case, where everything was
+// already verified in place. The byte total counts an artifact only
+// after the artifact lands and verifies, so a torn file adds nothing
+// until the run that completes it.
+func fetchRelease(ask fetchAsk) (int, int64, error) {
 	base := strings.TrimSuffix(ask.source, "/") + "/" + ask.version
 
 	raw, err := fetchBytes(base + "/release.yaml")
 	if err != nil {
-		return 0, fmt.Errorf("fetching the release document: %w", err)
+		return 0, 0, fmt.Errorf("fetching the release document: %w", err)
 	}
 
 	// The first check in the trust chain: the document's bytes must
@@ -197,26 +235,28 @@ func fetchRelease(ask fetchAsk) (int, error) {
 	// passes, nothing the document says can be trusted.
 	sum := sha256.Sum256(raw)
 	if digest := "sha256:" + hex.EncodeToString(sum[:]); digest != ask.digest {
-		return 0, fmt.Errorf("the release document's digest %s does not match the catalog's %s: %w", digest, ask.digest, errCorrupt)
+		return 0, 0, fmt.Errorf("the release document's digest %s does not match the catalog's %s: %w", digest, ask.digest, errCorrupt)
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		return 0, fmt.Errorf("the release document does not parse: %v: %w", err, errCorrupt)
+		return 0, 0, fmt.Errorf("the release document does not parse: %v: %w", err, errCorrupt)
 	}
 	if release.Metadata.Name != ask.version {
-		return 0, fmt.Errorf("the release document names version %s, not %s: %w", release.Metadata.Name, ask.version, errCorrupt)
+		return 0, 0, fmt.Errorf("the release document names version %s, not %s: %w", release.Metadata.Name, ask.version, errCorrupt)
 	}
 
 	fetched := 0
+	downloaded := int64(0)
 	for _, artifact := range release.Artifacts {
 		dest := filepath.Join(ask.slotDir, artifact.Name)
 		if verifySlotFile(artifact, dest) == nil {
 			continue // already here from an earlier, interrupted run
 		}
 		if err := fetchArtifact(base, artifact, dest); err != nil {
-			return fetched, err
+			return fetched, downloaded, err
 		}
 		fetched++
+		downloaded += artifact.Size
 	}
 
 	// The deployment layer is the one file the release cannot
@@ -226,7 +266,7 @@ func fetchRelease(ask fetchAsk) (int, error) {
 	// slot with release.yaml is bootable, and a slot without its
 	// layer is not.
 	if err := carryLayer(ask); err != nil {
-		return fetched, err
+		return fetched, downloaded, err
 	}
 
 	// The document lands after the artifacts it describes, written
@@ -234,9 +274,9 @@ func fetchRelease(ask fetchAsk) (int, error) {
 	// which release it holds, byte for byte, without asking the
 	// network.
 	if err := writeDurably(filepath.Join(ask.slotDir, "release.yaml"), raw); err != nil {
-		return fetched, fmt.Errorf("writing the release document to the slot: %w", err)
+		return fetched, downloaded, fmt.Errorf("writing the release document to the slot: %w", err)
 	}
-	return fetched, nil
+	return fetched, downloaded, nil
 }
 
 // carryLayer copies the running slot's deployment layer and

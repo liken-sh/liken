@@ -125,7 +125,14 @@ func (d *disruptions) gate(c *kubernetes.Client, node *nodeObject, nodeErr error
 // passes. Every value in the status it writes was observed moments
 // ago, which is what the Kubernetes convention means by status
 // being reconstructible.
-func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *fetcher) {
+//
+// The pass returns the status write's outcome, and nothing else.
+// Everything above that write reports itself as a condition, which
+// is a fact about the machine. A failed status write is different:
+// it is a fault in the operator, and it means nobody outside this
+// pod can see what the pass observed. That is what the layer 2
+// error counter counts (metrics.go).
+func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *fetcher, mm *machineMetrics) error {
 	now := time.Now()
 
 	// This records what the object held before this pass touched
@@ -288,7 +295,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// the storage roles, which is what keeps the machine's own disks
 	// out of the offer.
 	if nodeErr == nil {
-		publishDeviceInventory(c, node, facts)
+		publishDeviceInventory(c, node, facts, mm)
 	}
 
 	// The claims the kubelet already prepared get the same treatment,
@@ -482,9 +489,16 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// would invite that collision on every boot.
 	kubernetes.RenewHeartbeat(c, m.Metadata.Name, now)
 
-	if err := publishOwnStatus(c, m, status, before); err != nil {
+	// The metrics read the very status this pass is about to
+	// publish, so a graph and a `kubectl get machine -o yaml` always
+	// answer from the same observation (metrics.go).
+	mm.observeStatus(status)
+
+	err = publishOwnStatus(c, m, status, before)
+	if err != nil {
 		fmt.Printf("publishing status: %v\n", err)
 	}
+	return err
 }
 
 // publishOwnStatus is kubernetes.PublishStatus for the machine

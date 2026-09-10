@@ -50,6 +50,13 @@ type fleetSweep struct {
 	tally     cluster.MachineTally
 	condition api.Condition
 	phase     api.Phase
+
+	// The two counts that the fleet's metrics publish (metrics.go).
+	// They are part of the verdict because this loop is the one place
+	// that judges every machine at once, and a second pass over the
+	// same list could only ever repeat this one.
+	phases    map[api.Phase]int
+	approvals int
 }
 
 // decideFleetSweep judges each machine by its effective phase. A
@@ -61,13 +68,17 @@ type fleetSweep struct {
 // MachinesReady condition names the affected machines, so nobody has
 // to search for them.
 func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, now time.Time) fleetSweep {
-	s := fleetSweep{tally: cluster.MachineTally{Total: len(machines)}}
+	s := fleetSweep{tally: cluster.MachineTally{Total: len(machines)}, phases: map[api.Phase]int{}}
 	var transitioning, unwell []string
 	for i := range machines {
 		m := &machines[i]
 		effective := effectivePhase(m, renewals, now)
 		if effective == api.PhaseLost && m.Status.Phase != api.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
+		}
+		s.phases[effective]++
+		if awaitsApproval(m) {
+			s.approvals++
 		}
 
 		switch effective {
@@ -104,22 +115,42 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 	return s
 }
 
+// awaitsApproval reports whether this machine holds a staged change
+// that waits for a person. A machine on the Manual reboot policy
+// stages its change and stops there, and the reason on the
+// convergence condition says so. The cluster operator counts these,
+// because the count is a fleet fact: it says how many machines a
+// person has to visit before the fleet converges.
+func awaitsApproval(m *machine.Machine) bool {
+	for _, c := range m.Status.Conditions {
+		if c.Reason == "RebootPending" || c.Reason == "RestartPending" {
+			return true
+		}
+	}
+	return false
+}
+
 // sweepFleet carries out the sweep. It lists the fleet and its
 // heartbeats, determines the verdict, marks the silent machines Lost,
 // and publishes the verdict on the Cluster. The available parameter
 // is the channel poller's last answer, and probe holds when the flux
 // engine probe last asked. The caller passes both in as plain values,
 // so the sweep itself stays a function of its arguments.
-func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available string, probe *engineProbe, now time.Time) {
+//
+// A pass that cannot read the fleet returns the reason. The reading
+// is the whole pass here: with no list of machines there is no
+// verdict to reach, so this is the failure that the layer 2 error
+// counter counts (metrics.go).
+func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available string, probe *engineProbe, cm *clusterMetrics, now time.Time) error {
 	machines, err := kubernetes.ListMachines(c)
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
-		return
+		return err
 	}
 	renewals, err := kubernetes.ListHeartbeats(c)
 	if err != nil {
 		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
-		return
+		return err
 	}
 	s := decideFleetSweep(machines, renewals, now)
 
@@ -169,6 +200,12 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 
 	markLost(c, machines, s.lost, now)
 	publishClusterStatus(c, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
+
+	// The fleet's metrics come from the verdict that the write above
+	// carries, so the graph and the Cluster's status report one
+	// observation (metrics.go).
+	cm.observeSweep(s, r)
+	return nil
 }
 
 // markLost writes the Lost verdict onto each machine that the sweep

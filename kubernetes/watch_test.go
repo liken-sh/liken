@@ -17,6 +17,16 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// A restartCount stands in for what the operators pass as the
+// restart callback: they increment a Prometheus counter, and these
+// tests count in memory. The count is atomic because the watch runs
+// on its own goroutine.
+type restartCount struct{ n atomic.Int64 }
+
+func (r *restartCount) Add() { r.n.Add(1) }
+
+func (r *restartCount) Count() int64 { return r.n.Load() }
+
 // watchAPI serves one watch stream, where each entry is one event
 // line. It closes the connection on later reconnects, and it answers
 // the recovery list that follows a drop with a MachineList whose own
@@ -76,8 +86,9 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 	}}
 	client := testClient(t, fake.handler())
 
+	restarts := &restartCount{}
 	events := make(chan *machine.Machine, 4)
-	go WatchMachines(client, "", "1", events)
+	go WatchMachines(client, "", "1", events, restarts.Add)
 
 	// The MODIFIED event arrives. The BOOKMARK event does not arrive,
 	// because it only advances the resume point.
@@ -109,8 +120,9 @@ func TestWatchWithoutASelectorSpansTheCollection(t *testing.T) {
 	}}
 	client := testClient(t, fake.handler())
 
+	restarts := &restartCount{}
 	events := make(chan *machine.Machine, 4)
-	go WatchMachines(client, "", "1", events)
+	go WatchMachines(client, "", "1", events, restarts.Add)
 
 	if path := <-fake.paths; strings.Contains(path, "fieldSelector") {
 		t.Errorf("no selector was asked for: %s", path)
@@ -130,8 +142,9 @@ func TestWatchCarriesTheFieldSelector(t *testing.T) {
 	}}
 	client := testClient(t, fake.handler())
 
+	restarts := &restartCount{}
 	events := make(chan *machine.Machine, 4)
-	go WatchMachines(client, "metadata.name=node-1", "1", events)
+	go WatchMachines(client, "metadata.name=node-1", "1", events, restarts.Add)
 
 	if path := <-fake.paths; !strings.Contains(path, "fieldSelector=metadata.name%3Dnode-1") {
 		t.Errorf("the watch should carry the selector: %s", path)
@@ -145,8 +158,9 @@ func TestWatchResumesFromTheListsVersion(t *testing.T) {
 	}}
 	client := testClient(t, fake.handler())
 
+	restarts := &restartCount{}
 	events := make(chan *machine.Machine, 4)
-	go WatchMachines(client, "", "1", events)
+	go WatchMachines(client, "", "1", events, restarts.Add)
 
 	if first := <-fake.paths; !strings.Contains(first, "resourceVersion=1") {
 		t.Errorf("the first watch starts where the caller said: %s", first)
@@ -160,6 +174,25 @@ func TestWatchResumesFromTheListsVersion(t *testing.T) {
 	// from a compacted version with 410 Gone.
 	if second := <-fake.paths; !strings.Contains(second, "resourceVersion=99") {
 		t.Errorf("the reconnect should resume from the list's version: %s", second)
+	}
+}
+
+func TestADroppedStreamCountsOneRestart(t *testing.T) {
+	// The stream ends after its one event, and the loop lists and
+	// watches again. That recovery is one restart. A caller counts
+	// them, because a high rate means a stream that breaks faster
+	// than the loop can use it.
+	fake := &watchAPI{stream: []string{watchEvent(t, "MODIFIED", "node-1", "7")}}
+	client := testClient(t, fake.handler())
+
+	restarts := &restartCount{}
+	events := make(chan *machine.Machine, 4)
+	go WatchMachines(client, "", "1", events, restarts.Add)
+
+	<-events // the streamed event
+	<-events // the first item of the recovery list, after the drop
+	if restarts.Count() < 1 {
+		t.Error("a dropped stream counted no restart")
 	}
 }
 

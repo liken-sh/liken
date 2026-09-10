@@ -1,0 +1,60 @@
+# The monitoring component: liken's metrics wiring, for an owner who
+# runs the prometheus-operator.
+#
+# liken's base needs no Prometheus. The operators serve /metrics on
+# their own ports whether or not anything reads them, so a cluster
+# with no monitoring at all is complete. This component adds the two
+# objects that a prometheus-operator stack needs: the PodMonitors
+# that point a Prometheus at the two operators, and the dashboards
+# that draw what it collects.
+#
+# It is a kustomize Component rather than an overlay, because a
+# component is the kind that a fleet repository mixes into a
+# kustomization of its own. An owner adds one line beside the base:
+#
+#   components:
+#     - https://github.com/liken-sh/liken//monitoring?ref=2026.09.10-001
+#
+# liken has no deploy base to sit beside, because a liken machine
+# applies its own system pods from the image it booted. So this
+# component is at the repository root, and its PodMonitors select
+# those pods where they already run.
+#
+# An owner on a plain Prometheus, Grafana Alloy, or VictoriaMetrics
+# ignores this component and writes a scrape configuration against
+# the ports. The ports and the metric names are the contract;
+# plans/65-prometheus-metrics.md states it.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - podmonitors.yaml
+
+# The dashboards travel as ConfigMaps carrying the
+# `grafana_dashboard: "1"` label. The kube-prometheus-stack runs a
+# sidecar beside Grafana that watches for that label and loads every
+# ConfigMap that carries it, so a dashboard needs no Grafana API call
+# and no provisioning file.
+#
+# The generated names carry no content hash. A hash would make every
+# dashboard edit create a second ConfigMap, and an apply without
+# pruning would leave both loaded, so Grafana would show the old
+# dashboard beside the new one. A stable name replaces the dashboard
+# in place, and the sidecar reloads it.
+configMapGenerator:
+  - name: liken-fleet-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/liken-fleet.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  - name: liken-operators-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/liken-operators.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

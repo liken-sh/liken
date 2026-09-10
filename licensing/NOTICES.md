@@ -231,6 +231,8 @@ and these modules:
 
 Under the MIT license:
 
+* github.com/beorn7/perks: copyright 2013 Blake Mizerany
+* github.com/cespare/xxhash/v2: copyright 2016 Caleb Spare
 * github.com/josharian/native: copyright 2020 Josh Bleecher Snyder
 * github.com/mdlayher/packet: copyright 2022 Matt Layher
 * github.com/mdlayher/socket: copyright 2021 Matt Layher
@@ -249,6 +251,8 @@ Under the BSD 3-Clause license:
   Authors, 2016 The filepathx Authors), Apache 2.0 (copyright
   2016–2017 The New York Times Company), and MIT (copyright 2015
   Klaus Post)
+* github.com/munnerz/goautoneg: copyright 2011 Open Knowledge
+  Foundation Ltd.
 * github.com/pierrec/lz4/v4: copyright 2015 Pierre Curto
 * github.com/u-root/uio: copyright 2012–2021 u-root Authors
 * golang.org/x/crypto, golang.org/x/net, golang.org/x/sync,
@@ -258,6 +262,10 @@ Under the BSD 3-Clause license:
 
 Under the Apache License 2.0:
 
+* github.com/prometheus/client_golang,
+  github.com/prometheus/client_model, github.com/prometheus/common,
+  github.com/prometheus/procfs: copyright 2012–2015 The Prometheus
+  Authors; each includes software developed at SoundCloud Ltd.
 * github.com/vishvananda/netlink: copyright 2014 Vishvananda Ishaya
 * github.com/vishvananda/netns: copyright 2014 Vishvananda Ishaya
 * go.yaml.in/yaml/v2: copyright 2011–2016 Canonical Ltd.

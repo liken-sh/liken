@@ -79,6 +79,13 @@ type rollout struct {
 	grant       []string
 	revoke      []string
 	progressing api.Condition
+
+	// behind counts the machines that do not run the fleet's target
+	// release yet. It belongs to the rollout, because the rollout is
+	// what closes the gap, and this loop already reads every
+	// machine's version. A cluster with no target counts nobody
+	// behind: there is nothing to be behind (metrics.go).
+	behind int
 }
 
 // wantsTurn reports whether any of the machine's conditions carry
@@ -144,6 +151,9 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		leader := slices.Contains(clusterDoc.Spec.Leaders, name)
 		phase := effectivePhase(m, renewals, now)
 		grant := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition)
+		if clusterDoc.Spec.Version != "" && m.Status.Version.Liken != clusterDoc.Spec.Version {
+			r.behind++
+		}
 
 		switch {
 		case grant != nil && available(phase) && !wantsTurn(m):

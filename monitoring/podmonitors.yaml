@@ -1,0 +1,74 @@
+# The two PodMonitors: how a prometheus-operator finds liken's
+# operators.
+#
+# A Prometheus server pulls. Somebody has to tell it which pods to
+# read and on which port, and the prometheus-operator turns these
+# objects into that list. A PodMonitor names a label selector and a
+# port name, and the operator writes the scrape configuration for
+# every pod that matches. Nothing here talks to Prometheus itself.
+#
+# The selectors use the `app` label, because that is the label each
+# workload's own selector uses, so a pod that liken runs always
+# carries it. The port is named, never numbered: the pod template
+# gives the port the name `metrics`, and a name survives a port
+# change that a number would not.
+#
+# Both objects are in the `monitoring` namespace, beside the
+# dashboards this component also carries, and both reach across into
+# `liken-system` with a namespace selector. This keeps the whole
+# component in the namespace that an owner's monitoring stack
+# already watches. An owner whose Prometheus watches every namespace
+# can move these objects beside the pods instead.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: liken-machine-operator
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: liken-machine-operator
+    app.kubernetes.io/part-of: liken
+spec:
+  namespaceSelector:
+    matchNames: [liken-system]
+  selector:
+    matchLabels:
+      app: liken-machine-operator
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      # Every series from this operator describes one machine, and a
+      # scrape carries no machine name of its own. The pod's node is
+      # that name, because this operator is a DaemonSet and its
+      # Machine and its Node share one name. The relabeling copies
+      # the node out of the target's discovery labels, which
+      # Prometheus drops otherwise, so the fleet dashboard can group
+      # and filter by `node`.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: liken-cluster-operator
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: liken-cluster-operator
+    app.kubernetes.io/part-of: liken
+spec:
+  namespaceSelector:
+    matchNames: [liken-system]
+  selector:
+    matchLabels:
+      app: liken-cluster-operator
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      # This operator speaks for the whole fleet, so its series
+      # describe no single machine. The node label still says where
+      # the one replica runs, which is what a person needs when the
+      # sweep stops reporting.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

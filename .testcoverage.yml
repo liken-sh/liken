@@ -55,6 +55,13 @@ override:
   # bootstrapping that only a pod's mounted credentials can satisfy.
   - path: ^kubernetes$
     threshold: 91
+  # The metrics package: the registry, the collectors for the
+  # contract's first two layers, and the listener. The tests scrape
+  # every series through a real handler. What stays untested is the
+  # serving goroutine's own failure, which needs a listener that
+  # fails after it binds.
+  - path: ^metrics$
+    threshold: 92
   # The machine operator: its decisions (drift, staging validation,
   # the convergence truth table, the drain) are pure and tested. The
   # reconcile pass that strings the decisions together, against the

@@ -300,6 +300,22 @@ spec:
           imagePullPolicy: Never
           securityContext:
             privileged: true
+          # The Prometheus port. The operator serves /metrics here,
+          # and plans/65-prometheus-metrics.md gives every liken
+          # process a port of its own, because pods on the host
+          # network share the machine's port space. The binary
+          # carries the number as the default of its
+          # --metrics-address argument, and this entry names the port
+          # so a PodMonitor can select it by name rather than by
+          # number (monitoring/podmonitors.yaml). This pod runs on
+          # the host network, so this port is the machine's port:
+          # nothing else on a liken node may hold 9200. To turn the
+          # listener off, and give the port back, add
+          # `args: ["--metrics-address="]` to this container.
+          ports:
+            - name: metrics
+              containerPort: 9200
+              protocol: TCP
           volumeMounts:
             # These are the operator's inputs: the facts tree init
             # published and, beside it, the manifest this boot ran

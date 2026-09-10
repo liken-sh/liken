@@ -249,6 +249,7 @@ milestone number because their implementation scope is not settled.
   The netbooted report posts to the cluster as an `Enrollment`, and
   approval is applying the proposed `Machine`, with a CLI verb as
   sugar.
+* **65.** [Prometheus metrics](65-prometheus-metrics.md). Every liken process serves Prometheus metrics on a port of its own, under one contract the operators share. The fleet's release skew, pending changes, upgrades, crashes, and devices per node become lines on a graph, and a kustomize Component at monitoring/ carries the PodMonitors and two Grafana dashboards.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.

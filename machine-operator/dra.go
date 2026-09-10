@@ -75,7 +75,7 @@ const maxSliceDevices = 128
 // condition. Inventory is a report about hardware, and a failure to
 // write it is a problem in the operator's own machinery, not a fact
 // about the machine.
-func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machine.MachineStatus) {
+func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machine.MachineStatus, mm *machineMetrics) {
 	devices := inventoryDevices(
 		hardware.DiscoverDevices(draSysfsRoot, draNaming()),
 		func(d hardware.Device) hardware.Delivery {
@@ -87,6 +87,11 @@ func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machi
 			len(devices), maxSliceDevices)
 		devices = devices[:maxSliceDevices]
 	}
+	// The device metric counts the very list the slice carries, so
+	// the count comes from this pass's one sysfs walk and never from
+	// a second one (metrics.go).
+	mm.observeDevices(devices)
+
 	owner := kubernetes.OwnerReference{
 		APIVersion: "v1",
 		Kind:       "Node",

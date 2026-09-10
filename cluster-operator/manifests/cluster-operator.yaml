@@ -261,3 +261,16 @@ spec:
           # anyway.
           image: liken.sh/cluster-operator:installed
           imagePullPolicy: Never
+          # The Prometheus port, one above the machine operator's.
+          # plans/65-prometheus-metrics.md gives every liken process
+          # a port of its own, and the binary carries this number as
+          # the default of its --metrics-address argument. This entry
+          # names the port, so a PodMonitor selects it by name
+          # (monitoring/podmonitors.yaml). This pod runs in its own
+          # network namespace, so the port is the pod's alone. To
+          # turn the listener off, add `args: ["--metrics-address="]`
+          # to this container.
+          ports:
+            - name: metrics
+              containerPort: 9201
+              protocol: TCP
