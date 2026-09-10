@@ -51,6 +51,20 @@ var reportInterval = 1 * time.Second
 // otherwise leave.
 var busFlushGrace = 500 * time.Millisecond
 
+// exitGrace is how long the sidecar holds mpv alive between the ending
+// it publishes and the quit it sends, so the compositor has a live
+// surface to fade out. The label the operator patches onto the pod
+// reaches display-operator through the API server and its pod watch in
+// well under 200 ms, and a 250 ms exit fade fits in what is left of the
+// 500 ms. mpv draws the film through the whole window, which is what a
+// fade over the browser needs under it.
+//
+// It is a constant and not a Player setting, because a person never
+// tunes it: it is the compositor's time to act. The commander holds it
+// in a field so a test proves the order without waiting out the whole
+// window.
+const exitGrace = 500 * time.Millisecond
+
 // commander holds the command sidecar's two sides: the connection to
 // mpv that both the reporter and the command handler write, and the
 // last-known report the connect callback re-publishes on a reconnect.
@@ -136,6 +150,12 @@ type commander struct {
 	// on the run's own goroutine, and the reporter reads it on each send.
 	ended bool
 
+	// grace is how long exit holds mpv alive between the ending and the
+	// quit. Every playback pod sets it from exitGrace, which says why the
+	// window exists. A zero grace quits at once, which is what the art
+	// server and a test that asserts nothing about the fade run with.
+	grace time.Duration
+
 	// Where the bridge writes decoded bgra. It is the shared art volume in the
 	// pod, and a local directory under the harness.
 	artDir string
@@ -218,6 +238,7 @@ func runCommand() {
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 		next:              parseNext(os.Getenv(nextVariable)),
 		artDir:            artMountPath,
+		grace:             exitGrace,
 		playerName:        os.Getenv(playerNameVariable),
 		remotes: playRemoteMap(
 			os.Getenv(remoteEventsTopicsVariable),
@@ -381,10 +402,14 @@ func (c *commander) report(ctx context.Context) {
 
 	// drive returns for one of two reasons, and each is an ending: mpv
 	// reached the end of the last item and closed its socket, or the
-	// kubelet's SIGTERM ended the context. So the mark goes out here, with
-	// the position the last report carried, before runCommand clears the
-	// retained status and marks the pod offline.
-	c.endRun()
+	// kubelet's SIGTERM ended the context. Both take the exit path, so the
+	// mark goes out here with the position the last report carried, before
+	// runCommand clears the retained status and marks the pod offline. A
+	// run that already published its ending waits no second grace, and
+	// drive drops the mpv connection as it returns, so the quit reaches
+	// nothing here, which is the right answer for a run mpv has already
+	// left.
+	c.exit()
 }
 
 // drive is the socket loop the reporter and the standalone art server share.
@@ -632,33 +657,51 @@ func (c *commander) send(report playReport) error {
 // follows: mpv has not said which item plays, so there are no numbers to
 // carry, and the pod's own death is what ends such a run. The art server
 // runs this same code with no bus, and it publishes nothing either.
-func (c *commander) endRun() {
+//
+// The answer is whether this call is the one that marked the run over. A
+// second ending of the same run publishes the mark again, which is the
+// value the topic already holds, and exit reads the answer to know that
+// the grace is spent.
+func (c *commander) endRun() bool {
 	if c.bus == nil {
-		return
+		return false
 	}
 	c.reportMutex.Lock()
+	first := !c.ended
 	c.ended = true
 	c.lastReport.Ended = true
 	payload, have := c.marshalLastReport()
 	c.reportMutex.Unlock()
-	if !have {
-		return
+	if have {
+		c.bus.Publish(c.statusTopic, payload, true)
 	}
-	c.bus.Publish(c.statusTopic, payload, true)
+	return first
 }
 
-// exit ends the run at a person's press. The display broadcasts the exit
-// message when a person presses back at the bare video, and the sidecar
-// answers it here rather than letting the display quit mpv itself,
-// because the order is the whole point: the ending reaches the bus
-// first, and only then does quit reach mpv. So the operator holds the
-// mark while the film is still on the display, and how far mpv gets
-// through its shutdown before its socket closes changes nothing.
+// exit ends one run: it publishes the ending, waits out the grace, and
+// then sends mpv the quit. Every ending takes this path, so every ending
+// fades the same way: the display's exit press, the natural end of the
+// last item, and the kubelet's termination signal.
+//
+// The order is the whole point. The ending reaches the bus first, so the
+// operator patches the ending label onto the pod while the film is still
+// on the screen, and the compositor fades a surface that still draws.
+// The sidecar answers the display's exit message here rather than
+// letting the display quit mpv itself, because the sidecar is the one
+// that publishes the ending, so it is the only one that can put the
+// ending first.
 //
 // The exit code is zero, so the pod ends Completed, the outcome a film
 // that ran to its end gives, and not Error.
 func (c *commander) exit() {
-	c.endRun()
+	// The grace is one window per run, because it is the compositor's time
+	// to act on one ending. So only the ending that marked the run over
+	// waits it out, and a later call on the same run sends its quit at
+	// once: the label is long since on the pod, and the fade has had the
+	// whole window already.
+	if c.endRun() {
+		time.Sleep(c.grace)
+	}
 	c.command(exitCommand())
 }
 

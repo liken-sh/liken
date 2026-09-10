@@ -210,6 +210,67 @@ func TestTheExitPressPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
 	mustMatchAll(t, readLines(t, server, 1), []string{`{"command":["quit","0"]}`})
 }
 
+// The grace between the ending and the quit is what a fade runs under:
+// the operator labels the pod off the ending, and mpv keeps drawing the
+// film until the quit arrives. The window is short here, and the test
+// proves the quit waits by reading nothing off mpv's socket inside it.
+func TestTheQuitWaitsOutTheGraceAfterTheEnding(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := &commander{
+		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+		bus:         bus,
+		mpv:         client,
+		grace:       300 * time.Millisecond,
+		lastReport:  playReport{Item: 1, Position: "0:20:00"},
+		haveReport:  true,
+	}
+
+	go c.exit()
+
+	ending := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, ending.topic, c.statusTopic)
+	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+	mustNoLine(t, lines, 100*time.Millisecond)
+	mustMatch(t, waitForLine(t, lines), `{"command":["quit","0"]}`)
+}
+
+// The grace is one window per run. A second exit on a run that already
+// ended publishes the mark the topic already holds, waits nothing, and
+// quits at once, so a signal and the socket that closes behind it do not
+// hold the pod for two graces. The grace here is a second, which the
+// test would spend if the guard were missing.
+func TestASecondExitOnAnEndedRunWaitsNoGrace(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := &commander{
+		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+		bus:         bus,
+		mpv:         client,
+		grace:       time.Second,
+		lastReport:  playReport{Item: 1, Position: "0:20:00", Ended: true},
+		haveReport:  true,
+		ended:       true,
+	}
+
+	started := time.Now()
+	c.exit()
+	waited := time.Since(started)
+
+	ending := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+	mustMatch(t, waitForLine(t, lines), `{"command":["quit","0"]}`)
+	mustMatch(t, waited < c.grace, true)
+}
+
 // The two endings the sidecar observes on mpv's socket: mpv reaches the end
 // of the last item and closes it, and the kubelet's SIGTERM ends the run's
 // context. Each publishes the ending with the position the last report

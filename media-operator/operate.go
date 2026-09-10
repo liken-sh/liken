@@ -174,6 +174,13 @@ type operator struct {
 	// volumeSeedGrace. Only the pass goroutine touches it.
 	volumeSeedAfter time.Time
 
+	// endingLabeled names the runs whose playback pod already carries the
+	// ending label, so one run patches its pod once and not once a pass.
+	// The pass drops a run the collection no longer holds, so a Play
+	// created later under the same name is labeled on its own ending. Only
+	// the pass goroutine touches it.
+	endingLabeled map[string]bool
+
 	// positionWrites stamps when each run last wrote its position, so a
 	// bare position advance writes no more than once per
 	// positionWriteInterval. Only the pass goroutine touches it.
@@ -273,6 +280,7 @@ func operate() {
 		panelFaults:           map[string]string{},
 		receiverSessions:      map[string]receiverSession{},
 		volumes:               newVolumeDesk(),
+		endingLabeled:         map[string]bool{},
 		positionWrites:        map[string]time.Time{},
 		keysPublished:         map[string]string{},
 		playerStatusPublished: map[string]string{},
@@ -392,6 +400,10 @@ func (o *operator) pass() {
 		play := &list.Items[index]
 		namespace, name := play.Metadata.Namespace, play.Metadata.Name
 		live[runKey(namespace, name)] = true
+		// The ending label goes on first, ahead of every step below that
+		// deletes this Play's pod, because the compositor fades a surface
+		// that still draws. ending.go says what reads the label.
+		o.labelEnding(play)
 		// A deleting Play keeps its pod until its finalizers clear, because
 		// garbage collection waits for them, and the pod keeps the unit's claim
 		// while it waits. So releasePlay deletes the pod itself, the claim frees
@@ -433,6 +445,11 @@ func (o *operator) pass() {
 	for key := range o.positionWrites {
 		if !live[key] {
 			delete(o.positionWrites, key)
+		}
+	}
+	for key := range o.endingLabeled {
+		if !live[key] {
+			delete(o.endingLabeled, key)
 		}
 	}
 	for key := range o.recreateBackoff {

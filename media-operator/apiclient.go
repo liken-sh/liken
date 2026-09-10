@@ -461,6 +461,23 @@ func CreatePod(c *Client, pod *Pod) (*Pod, error) {
 	return created, nil
 }
 
+// PatchPodLabels adds labels to one pod and leaves the labels it
+// already carries alone, which is what a merge patch of
+// metadata.labels does. The operator writes one label this way, the
+// ending, so the patch names no other field of a pod the kubelet is
+// running. An absent pod answers ErrNotFound, because a pod that has
+// gone is nothing to label.
+func PatchPodLabels(c *Client, namespace, name string, labels map[string]string) error {
+	body, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{"labels": labels},
+	})
+	if err != nil {
+		return err
+	}
+	return c.requestJSON(http.MethodPatch, podsPath(namespace)+"/"+name,
+		mergePatchType, body, nil)
+}
+
 // DeletePod removes one playback pod. An already-absent pod is
 // success, because the graceful recreate deletes the pod before it
 // creates the replacement, and a delete that races another pass must

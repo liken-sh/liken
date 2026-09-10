@@ -30,6 +30,18 @@ const (
 	playbackLabelValue = "playback"
 )
 
+// A playback pod carries this label from the moment its run reports the
+// ending, while mpv is still drawing the film. What reads it is a
+// Layout in display-operator whose film region excludes the label: the
+// pod stops matching that region at once, so the compositor fades the
+// film's surface out while the pod still draws it. The word is this
+// operator's own, the way media.liken.sh/component is, and
+// display-operator only matches on what the Layout names.
+const (
+	endingLabelKey   = "media.liken.sh/ending"
+	endingLabelValue = "true"
+)
+
 // playerNodeTaint marks a machine that exists to drive one screen. A
 // cluster owner taints such a machine so scan jobs and other unrelated
 // work stay off a small box.

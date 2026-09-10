@@ -262,6 +262,14 @@ These plans are designed. Each keeps its number and moves to
   is visible the moment a film's surface goes, and the claim's socket
   is the identity. Requires display-operator plan 17 on the cluster
   first.
+* [30, The film leaves with the
+  lights](30-the-film-leaves-with-the-lights.md). In progress. A
+  playback pod carries `media.liken.sh/ending` from the moment its run
+  reports the ending, and the sidecar holds `mpv` alive for 500 ms after
+  that report. So a `Layout` whose film region excludes the label has a
+  live surface to fade out, and the screen no longer cuts from a film to
+  the browser under it. Requires display-operator plan 18 for the fade
+  itself.
 
 ## Open problems
 

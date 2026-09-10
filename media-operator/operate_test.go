@@ -54,6 +54,11 @@ type fakeCluster struct {
 	sessionsFail    bool
 	receiversAbsent bool
 
+	// podPatchFails is a pod label patch the API server refuses, the
+	// failure a pass answers by leaving the pod unlabeled and patching
+	// again on the next pass.
+	podPatchFails bool
+
 	// applyFails is a Display the API server refuses to write,
 	// the failure a pass answers by leaving the panel where it stands
 	// and trying again.
@@ -200,6 +205,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewDecoder(r.Body).Decode(pod)
 			f.pods[pod.Metadata.Name] = pod
 			_ = json.NewEncoder(w).Encode(pod)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/pods/"):
+			f.patchPodLabels(w, r, name)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/plays/"):
 			delete(f.plays, name)
 			w.WriteHeader(http.StatusOK)
@@ -246,6 +253,34 @@ func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name str
 	held.Metadata.ResourceVersion = strconv.Itoa(version + 1)
 	if held.Metadata.deleting() && len(held.Metadata.Finalizers) == 0 {
 		delete(f.plays, name)
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// patchPodLabels folds one merge patch onto a pod's labels, on the API
+// server's own terms: the labels the patch names join the ones the pod
+// carries, and every other field of the pod stands.
+func (f *fakeCluster) patchPodLabels(w http.ResponseWriter, r *http.Request, name string) {
+	held, standing := f.pods[name]
+	if !standing {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var patch struct {
+		Metadata struct {
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if f.podPatchFails {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if held.Metadata.Labels == nil {
+		held.Metadata.Labels = map[string]string{}
+	}
+	for key, value := range patch.Metadata.Labels {
+		held.Metadata.Labels[key] = value
 	}
 	_ = json.NewEncoder(w).Encode(held)
 }
@@ -344,6 +379,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		panelFaults:           map[string]string{},
 		receiverSessions:      map[string]receiverSession{},
 		volumes:               newVolumeDesk(),
+		endingLabeled:         map[string]bool{},
 		positionWrites:        map[string]time.Time{},
 		keysPublished:         map[string]string{},
 		playerStatusPublished: map[string]string{},

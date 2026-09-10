@@ -10,9 +10,12 @@
 # The one object a person created that it deletes is a Play that
 # finished and outlived its own window.
 #
-# The one write beyond those is the finalizer media.liken.sh/bus-topics,
-# which the operator patches onto every Play's metadata and takes off
-# again once the run's retained bus topics are cleared.
+# Two writes stand beyond those, and each is one field of one object's
+# metadata. The finalizer media.liken.sh/bus-topics goes onto every
+# Play, and comes off again once the run's retained bus topics are
+# cleared. The label media.liken.sh/ending goes onto a playback pod when
+# its run reports the ending, so the compositor fades the film out while
+# the pod still draws it.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -145,9 +148,14 @@ rules:
   # every holder is gone, so each of those pods goes before the claim is
   # replaced. Under a delegated idle screen one of those holders is the
   # delegate's own pod.
+  #
+  # The patch verb writes one label, media.liken.sh/ending, onto a
+  # playback pod whose run has reported the ending. A merge patch of
+  # metadata.labels names no other field, so nothing this operator sends
+  # reaches the spec of a pod the kubelet is running.
   - apiGroups: [""]
     resources: [pods]
-    verbs: [get, list, watch, create, delete]
+    verbs: [get, list, watch, create, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
