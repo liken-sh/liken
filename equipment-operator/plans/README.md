@@ -10,7 +10,13 @@ hardware.
 
 The README states what the operator is. These documents state why it
 is built the way it is, and what it still owes an answer to.
-`completed/` holds the plans that are built and drilled.
+`completed/` holds the plans that are built.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
 
 ## The design
 
