@@ -100,6 +100,10 @@ they share, and plans 28 to 31 build them in order.
 * [57, The phases fan out](57-the-phases-fan-out.md). A stub from plan
   34: the phases that share no file run at once, behind a mark per
   finished phase on a shared `emptyDir`.
+* [60, The subtitle fact](60-the-subtitle-fact.md). For later. The
+  enricher fetches the subtitles a video lacks in the household's
+  languages from OpenSubtitles, named the way Jellyfin and Kodi read
+  them, under the account's daily cap.
 
 Plan 32 stands apart from the enrichment work.
 
