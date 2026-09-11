@@ -16,14 +16,16 @@ and this operator's own instance,
 The README states how to use the operator. These documents state why it
 is built the way it is, and what it still owes an answer to.
 
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
+
 ## Planned
 
-Each plan keeps its number and moves to [`completed/`](completed/)
-when it is built and drilled.
-
-* [08, Prometheus metrics](completed/08-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
-  Claimed endpoint availability, failed control operations, and
-  observation health, with optional Prometheus collection.
+Nothing is planned right now. A new plan keeps its number and moves
+to [`completed/`](completed/) when it is built.
 
 ## Designs
 
@@ -80,6 +82,10 @@ when it is built and drilled.
   playing claim on an HDMI slot and on a Bluetooth adapter over
   AVRCP, and the analog jack once liken loaded the codec driver
   first. Still to drill: a card that leaves.
+* [08, Prometheus metrics](completed/08-prometheus-metrics.md).
+  Built, and drilled on liken-1 on 2026-09-10. Claimed endpoint
+  availability, failed control operations, and observation health,
+  with optional Prometheus collection.
 
 ## Open problems
 
