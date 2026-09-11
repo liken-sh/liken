@@ -13,8 +13,14 @@ A document's directory states its status:
 * The markdown files in this directory are the milestones that are not
   built yet.
 
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
+
 The numbers run in one sequence across all three directories. The next
-milestone is 65.
+milestone is 66.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and

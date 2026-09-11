@@ -82,6 +82,9 @@ Follow these rules for the body:
 * **Do not restate the diff.** No file lists, no checklists, and no test
   plan. Name a measurement, not the tests you ran.
 * **Name the issue** when there is one, with "Closes #1234".
+* **Close the plan it builds.** When a commit builds a milestone, the
+  same commit moves the document to `plans/completed/` and dates its
+  header. Do not wait for a later drill.
 * **Do not call the work "comprehensive"** and do not claim a "root
   cause".
 
