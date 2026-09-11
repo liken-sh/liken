@@ -7,7 +7,8 @@ package main
 // organization follows: a build_info gauge, a reconcile loop's
 // duration and errors by resource kind, and the domain's own facts
 // under a prefix of its own. This operator's prefix is bluetooth_, on
-// port 9250, and plans/07-prometheus-metrics.md states which facts.
+// port 9250, and plans/completed/07-prometheus-metrics.md states which
+// facts.
 //
 // This file holds the registry and the two layers every process
 // shares. The domain layer is recorded where each fact is already

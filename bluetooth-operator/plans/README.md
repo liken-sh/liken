@@ -5,8 +5,14 @@ numbered in sequence and keeps its number for life.
 
 The form follows liken's own `plans/`. A document states a problem,
 states the design that answers it, and states what was considered and
-set aside. It stays **Proposed** until the thing it describes runs. A
-drill proves it, and a drill runs on hardware.
+set aside. It separates what was measured from what was only read, and
+it names where the measurement ran.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
 
 The pattern these documents follow is documented in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
