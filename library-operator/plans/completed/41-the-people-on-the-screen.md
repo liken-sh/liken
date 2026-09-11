@@ -1,6 +1,6 @@
 # 41, The people on the screen
 
-[Plan 14](completed/14-watch-state-and-people.md) built the record: a
+[Plan 14](14-watch-state-and-people.md) built the record: a
 `Person`, a `Watch`, and a progress store that every namespace writes
 from the bus. Nothing on a screen reads it yet. This plan puts the record on the screen: the browser asks who is
 watching, sends the answer with every play request, and draws

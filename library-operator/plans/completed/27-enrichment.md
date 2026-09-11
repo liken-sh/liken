@@ -4,7 +4,7 @@ Plan 27. Complete on 2026-09-06: plans 28 to 31 and plan 25 are built.
 
 The design for the operator's third responsibility, and the
 contracts that plans 28 to 31 build on. It replaces plan 11 and plan
-24, which are in [`rejected/`](rejected/) with a note that says so.
+24, which are in [`rejected/`](../rejected/) with a note that says so.
 
 ## The problem
 
@@ -175,7 +175,7 @@ library may want a different art source.
 
 What each provider serves is plan 30's table, checked as it is built.
 The IMDb datasets are bulk files with a store and have
-[plan 33](33-the-imdb-datasets.md) of their own. Music providers wait
+[plan 33](../33-the-imdb-datasets.md) of their own. Music providers wait
 for a music library.
 
 ## Execution

@@ -1,6 +1,18 @@
 # The power key brings the room up
 
-Plan 46. One press of the remote's power key turns the receiver on,
+Plan 46. Built on 2026-09-07: the receiver half shipped in
+`equipment-operator` releases 2026.09.07-004 and -005 with
+`media-operator` 2026.09.07-002 and -003. A press of the power key
+raises the panel desire, the session carries an `awake` flag beside
+`active`, and either flag turning on powers the receiver on and
+selects the input.
+
+The browser half is not built, and it is an [open
+problem](../open-problems/the-power-keys-browser-half-is-not-proved.md),
+not a plan, because plan 54 retired the re-present path this plan's
+third contract bullet names.
+
+One press of the remote's power key turns the receiver on,
 selects the input the machine is on, and puts the media browser on
 the screen, in focus. The key does not turn anything off yet.
 

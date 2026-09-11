@@ -13,7 +13,7 @@ under a `Watch` with two people projected into the `Watch` status
 within a pass, and deleting one of the two people removed their rows
 from the store, took them off the `Watch`'s owners, and left the
 `Play` and the `Watch` with the other. This plan is the backend half;
-[plan 41](../41-the-people-on-the-screen.md) is the screen's.
+[plan 41](41-the-people-on-the-screen.md) is the screen's.
 
 Every `Play` starts at the beginning. Nothing records that a movie was
 half watched, that a season is on episode four, or who was in the room.
@@ -231,7 +231,7 @@ named only that person.
 The browser does not read the store or name people yet. The second
 agent on every screen pod, the question of who is watching, the play
 request that carries the answer, and the continue-watching row are
-[plan 41](../41-the-people-on-the-screen.md). `media-operator` changes
+[plan 41](41-the-people-on-the-screen.md). `media-operator` changes
 nothing in this plan.
 
 ## Failure

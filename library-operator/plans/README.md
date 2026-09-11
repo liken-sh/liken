@@ -6,7 +6,13 @@ numbered in sequence and keeps its number for life.
 The form follows `liken`'s own `plans/` and `media-operator`'s. A
 document states a problem, states the contract that answers it, and
 states what was considered and set aside. It also states how the work is
-proved, and a proof runs on hardware. The pattern is documented in
+proved, and a proof runs on hardware.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem. The pattern is documented in
 `liken`'s repository: [milestone 56, device
 operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md).
 
@@ -43,13 +49,16 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [37, Prometheus metrics](completed/37-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
   Enrichment progress, work needing attention, worker outcomes, and
   observation health, with optional collection and quiet idle libraries.
-* [46, The power key brings the room up](46-the-power-key-brings-the-room-up.md).
-  One press wakes the panel, the receiver, and the input, and ends
-  with the browser presented and focused. Fast follow: the receiver
-  half shipped, the browser half is owed.
-* [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
-  The compose key raises the person picker, the WWW key goes home,
-  and page up and down are named for a later choice. Fast follow.
+* [46, The power key brings the room up](completed/46-the-power-key-brings-the-room-up.md).
+  Built on 2026-09-07. One press wakes the panel, the receiver, and
+  the input. The browser half is an [open
+  problem](open-problems/the-power-keys-browser-half-is-not-proved.md),
+  because plan 54 retired the re-present path the plan named.
+* [49, Remote keys for people and home](completed/49-remote-keys-for-people-and-home.md).
+  Built in release 2026.09.07-005 and running on the house and on
+  `liken-1` since 2026-09-08. The compose key raises the person
+  picker, the WWW key goes home, and page up and down are named for a
+  later choice.
 
 ## Future
 
@@ -65,6 +74,9 @@ for a later agent to shape.
   and games.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
+* [56, Backing up progress](56-backing-up-progress.md). A stub: a
+  copy of the progress store a person can take off the cluster and
+  put back, and the test that says the copy is current.
 
 Enrichment is one design in five plans. Plan 27 states the contracts
 they share, and plans 28 to 31 build them in order.
@@ -80,9 +92,14 @@ they share, and plans 28 to 31 build them in order.
 * [33, The IMDb datasets](33-the-imdb-datasets.md). A stub: a provider
   with a store, because the datasets are bulk files and not a call per
   title. OMDb serves `rating.imdb` until then.
-* [34, Every fact writes its rows](34-every-fact-writes-its-rows.md).
-  Each fact writes its own catalog rows as it writes its files, only
-  the columns it owns, and the phases that share no file run at once.
+* [34, Every fact writes its rows](completed/34-every-fact-writes-its-rows.md).
+  Built on 2026-09-03. Each fact writes its own catalog rows as it
+  writes its files, only the columns it owns, with the art list in its
+  own `arts` column and a prune that spares a row newer than the
+  walk's start.
+* [57, The phases fan out](57-the-phases-fan-out.md). A stub from plan
+  34: the phases that share no file run at once, behind a mark per
+  finished phase on a shared `emptyDir`.
 
 Plan 32 stands apart from the enrichment work.
 
@@ -376,20 +393,15 @@ that took a hearing-impaired flag for Hindi.
 * [Clients that cannot run an
   agent](open-problems/clients-that-cannot-run-an-agent.md). Phones and
   laptops have no path to the catalog.
+* [The power key's browser half is not
+  proved](open-problems/the-power-keys-browser-half-is-not-proved.md).
+  Nothing here reads the `awake` edge, and neither of plan 46's two
+  cases is drilled.
 * [A fresh agent's first version arrives
   late](open-problems/a-fresh-agents-first-version-arrives-late.md).
   A `Job` on a fresh claim pays one echo timeout on its first run,
   because its first write reaches the catalog pod minutes after the
   rest.
-* [Home and search do not cross the
-  bus](open-problems/home-and-search-do-not-cross-the-bus.md). The
-  `media-screen` crate forwards only the arrows, enter, and back to a
-  delegate, so a remote's home, search, and letter keys never reach
-  the browser.
-* [Richer file facts](open-problems/richer-file-facts.md). Plan 29's
-  `probe` concern measures the duration, the codecs, the resolution,
-  and the audio channel layout. The bitrate, the HDR format, and the
-  encode's quality settings are still unread.
 
 ## Rejected
 

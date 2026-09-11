@@ -15,7 +15,7 @@ or a `Trailers` folder beside the feature.
 
 The walk reads the video files and nothing else. An item row carries the
 path of its poster and the list of the three art files
-[plan 04](completed/04-scanners-for-movies-and-series.md) looks for, and
+[plan 04](04-scanners-for-movies-and-series.md) looks for, and
 a file row carries the path of its trickplay directory. Everything else
 on the volume is invisible to the catalog.
 
@@ -111,9 +111,8 @@ pass over the volume.
 The columns already there keep their meanings. `container` is the
 extension, so a subtitle's format reads there. `size_bytes` is the size
 of every file, whatever its type. `width` and `height` stay the video's
-frame; the walk does not open an image to measure it, and
-[richer file facts](../open-problems/richer-file-facts.md) covers the facts
-that need a file opened.
+frame; the walk does not open an image to measure it. The facts that
+need a file opened come from the `probe` concern.
 
 The video row's `trickplay` column stays. It answers "the tiles for this
 file" in one read, where the row of type `trickplay` puts the same

@@ -1,10 +1,21 @@
 # Every fact writes its rows
 
-Plan 34. Shaped on 2026-09-03 after plan 30's first walk with credits.
-Today a fact writes files and nothing else; the next walk reads those
-files into the catalog. This plan makes each fact write its own rows
-the moment it writes its files, and lets the phases that do not share
-a file run at the same time.
+Plan 34. Built on 2026-09-03 in commit 1ce5d9a. The row rules are
+built: a fact writes the rows for what it wrote, through the reader
+the scan uses (`factrows.go`), and writes only the columns it owns
+(`factrowscatalog.go`). The art list has its own `arts` column, and
+the scan's prune spares a row whose file is newer than the walk's
+start (`prune.go`, `walkStart`).
+
+The phase fan-out is not built. The enricher still runs probe,
+arrival, identity, nfo, art, contributors, and trickplay as init
+containers in a row, with no `phases` volume and no marks.
+[Plan 57](../57-the-phases-fan-out.md) carries that half.
+
+Shaped on 2026-09-03 after plan 30's first walk with credits. Before
+this plan a fact wrote files and nothing else, and the next walk read
+those files into the catalog. This plan makes each fact write its own
+rows the moment it writes its files.
 
 ## The problem
 
@@ -82,45 +93,6 @@ the title: the files, the aliases, the attempts, the credits. The scan
 already reads one folder into rows for the webhook, and identity calls
 that.
 
-## The phases
-
-```yaml
-kind: Job
-spec:
-  template:
-    spec:
-      initContainers:
-        - name: corrosion            # native sidecar, restartPolicy: Always
-        - name: probe                # writes streamdetails into the sidecar
-        - name: identity             # writes the ids into the sidecar
-      containers:
-        - name: nfo                  # edits the sidecar body; no other container does
-        - name: art                  # needs the ids; nothing else
-        - name: contributors         # needs the people nfo's credits fact creates
-        - name: trickplay            # needs the probe; nothing else
-        - name: enrich               # the closer: waits for the marks, writes the runs row
-      volumes:
-        - name: phases               # emptyDir, one mark per finished phase
-```
-
-Probe and identity stay in a row, before everything, because the ids
-they write are what every other phase asks a provider with. The nfo
-phase is the only writer of the sidecar body, so it runs alone on that
-file and beside everything else.
-
-A phase runs its gap loop until the loop finds nothing and every phase
-it depends on is done, then writes its mark, a file named for the
-phase on the shared `emptyDir`. Art and trickplay depend on nothing
-in the fan-out, so they run once. Contributors depends on nfo: it
-loops, and each pass finds the people the credits fact has created
-since the last pass, because those rows are already in the pod's own
-catalog. It stops when nfo's mark is there and a pass finds nothing.
-
-The closer waits for every mark the Job named in its environment, then
-writes the runs row and waits for the echo, as today. The marks are
-files and not rows because a file on the pod is instant and needs no
-poll of the catalog.
-
 ## What it costs
 
 A fact's row write is a read of the folder it just wrote, a handful of
@@ -139,9 +111,7 @@ again, which Corrosion folds into nothing.
 On `liken-1`, against the lab libraries. A stripped title, metadata
 only, comes back whole, and the browser shows its poster before the
 next hourly scan. The contributors phase reports people written in the
-same run that created them. A run's `runs` row starts at probe and
-ends after the last phase's mark, and the enrich Job's containers show
-nfo, art, contributors, and trickplay running at once. A walk started
+same run that created them. A walk started
 while an enrich Job is writing does not prune the rows the Job wrote.
 The rebuild drill still holds: delete the catalog's claim, roll, walk,
 and the counts match, because every row still comes from a file.
@@ -150,8 +120,3 @@ and the counts match, because every row still comes from a file.
 
 Whether the art list inside `body` has readers outside the browser.
 The build finds every reader and points it at `arts`.
-
-Whether a phase's gap loop needs a floor between passes when its
-upstream is slow. The contributors phase polling an empty gap every
-second while nfo works through a thousand titles is cheap but
-pointless; a short sleep between empty passes is the likely answer.

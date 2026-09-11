@@ -4,7 +4,9 @@ Plan 49. The X6 has two keys the browser does not use well: the
 compose key, which today goes to the home page, and the WWW key,
 which passes through and no screen takes. This plan gives the compose
 key to the person picker and the WWW key to the home page, and it
-names what the page-up and page-down keys could do.
+names what the page-up and page-down keys could do. Built in release
+2026.09.07-005 and running on the house and on `liken-1` since
+2026-09-08.
 
 ## The problem
 

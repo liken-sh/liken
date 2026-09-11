@@ -118,7 +118,7 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// serves one of the art facts, and it takes a memory line of its own because
 	// it holds an image while it writes it. It is an init container because the
 	// enrich container must run last, and a regular container beside it would
-	// let the run end before the art is written. Plan 30 makes it a regular
+	// let the run end before the art is written. Plan 57 makes it a regular
 	// container once a second fan-out container exists.
 	if served := servedArtFacts(library, providers); len(served) > 0 {
 		images := factsContainer(library, artContainerName, served, path,
@@ -128,7 +128,7 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	}
 	// The contributors container, which fills the people the credits fact named.
 	// It runs after the art container, and it is an init container for the same
-	// reason the art container is: the enrich container must run last. Plan 30
+	// reason the art container is: the enrich container must run last. Plan 57
 	// makes both of them regular containers that run at once.
 	if providers.servingContributors(library.Metadata.Namespace, library.Spec.Sources) != nil {
 		facts = append(facts, factsContainer(library, contributorsContainerName, contributorFactNames,
@@ -139,7 +139,7 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// provider: the file alone answers it. It takes a memory line and a CPU
 	// request of its own because it decodes a video where every other container
 	// reads rows. It is an init container for the reason the art container is:
-	// The enrich container must run last. Plan 30 makes it a regular container
+	// The enrich container must run last. Plan 57 makes it a regular container
 	// once the fan-out exists.
 	if library.Spec.Trickplay.Enabled {
 		tiles := factsContainer(library, trickplayContainerName, []string{factTrickplay},

@@ -7,7 +7,7 @@ and a page of their own for each person.
 
 ## Builds on plan 30
 
-[Plan 30](completed/30-facts-art-and-contributors.md) is done. Its
+[Plan 30](30-facts-art-and-contributors.md) is done. Its
 credits fact writes each person to `.contributors/` with ids under
 every scheme and a headshot, links each credit to that entry in
 `credits.yaml`, and the scanner derives the `contributors`,
