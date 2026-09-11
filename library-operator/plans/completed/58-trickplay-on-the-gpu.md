@@ -75,7 +75,31 @@ node. On a workstation with an Intel GPU the real command line decoded
 a 1080p clip through the iHD driver, capped at half a core: 47 s
 against 98 s in software.
 
-The drill on `liken-1` is owed: roll the release, name the
-`display-render` class on a Library, remove the tile directory from a
-few titles, and time the rebuild against the twenty-minute software
-figure.
+The drill ran on `liken-1` on 2026-09-11, on development build 008.
+The movies Library named the `display-render` class. The operator
+stood the template, the Job's pod claimed a render device and landed
+on the node that holds it, and the log named `/dev/dri/renderD128` as
+the decoder. The node's GPU clock read zero at rest and rose while a
+title decoded. The tile directories of three titles were removed by
+hand, and the fact rebuilt every one, the first through a folder
+webhook and the rest on the next walk. The first run also removed the
+seven maps plan 59 left behind.
+
+| title | length | rebuild |
+| --- | --- | --- |
+| a 1080p feature | 94 min | 9 min 40 s |
+| a 1080p short, web source | 25 min | 4 min 35 s |
+| a 1080p short, disc source | 23 min | 1 min 50 s |
+| two standard-definition shorts | 25 and 23 min | under 30 s each |
+
+The software path on the house tiled a two-hour feature in about
+twenty minutes at half a core. The GPU path here ran with no CPU cap
+and drew about one core, because every decoded frame still comes back
+to memory before the frame-rate filter drops it. Keeping the frames on
+the GPU until the filter, with `-hwaccel_output_format vaapi` and
+`scale_vaapi`, would cut that, at the cost of the per-codec software
+fallback ffmpeg gives the plain form. That is the next measurement.
+
+The trickplay Job's catalog agent took about two and a half minutes
+to sync the namespace catalog onto its new claim before the first run,
+once per Library.
