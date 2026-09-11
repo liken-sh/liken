@@ -1,20 +1,26 @@
-# Three images from one file, each built on the one before it.
+# Five images from one file, each built on the one under it.
 #
 #   --target vulkan    ghcr.io/liken-sh/vulkan, the Vulkan loader, the
 #                      Intel and AMD drivers, and the client libraries
 #                      a Wayland program opens, on nothing else. The
 #                      media browser and the idle screen build FROM it.
-#   --target weston    ghcr.io/liken-sh/weston, that image plus the
-#                      compositor and every library it loads.
-#   the default        ghcr.io/liken-sh/display-operator, that image
-#                      plus the operator's binary.
+#   --target vaapi     ghcr.io/liken-sh/vaapi, that image plus the
+#                      VA-API loader and the Intel media driver, for a
+#                      program that decodes video on the node's GPU.
+#   --target ffmpeg    ghcr.io/liken-sh/ffmpeg, that image plus ffmpeg
+#                      and ffprobe and every library they load. The
+#                      library operator's file facts build FROM it.
+#   --target weston    ghcr.io/liken-sh/weston, the vulkan image plus
+#                      the compositor and every library it loads.
+#   the default        ghcr.io/liken-sh/display-operator, the weston
+#                      image plus the operator's binary.
 #
 # Each image is built from the one below it rather than beside it. The
 # compositor that the release starts is the same set of bytes that the
 # pod runs, and a node that draws with the compositor and the clients
 # holds glibc, libdrm and LLVM once. Docker shares a layer only when
 # the whole chain under it matches, which is why the order is fixed:
-# the base first, the compositor on it, the operator on that.
+# the base first, each image on its base, the operator last.
 #
 # The compositor ships in a workload's image and not in the read-only
 # root that every liken machine boots. That is why the device operator
@@ -90,6 +96,10 @@ FROM debian:trixie-slim AS closure
 # control attribute. It lands in both images because one closure
 # builds one tree, and separating it would cost the operator image a
 # second copy of the mesa libraries for 1.5 MB saved on the other.
+# libva2, libva-drm2 and intel-media-va-driver are the VA-API tree, and
+# ffmpeg is the two programs of the image above it. They install in the
+# same builder as weston, and the weston tree is unchanged by them,
+# checked layer by layer when they were added.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         weston \
@@ -100,15 +110,32 @@ RUN apt-get update \
         libvulkan1 \
         libxkbcommon0 \
         tzdata \
+        libva2 \
+        libva-drm2 \
+        intel-media-va-driver \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-COPY closure.sh vulkan-closure.sh weston-closure.sh /
-# The weston tree is computed whole, then less every file the vulkan
-# tree holds, so the weston layer carries only what the base lacks.
+COPY closure.sh vulkan-closure.sh vaapi-closure.sh ffmpeg-closure.sh weston-closure.sh /
+# Each tree after the first is computed whole, then less every file the
+# trees under its image already hold, so each layer carries only what
+# its base lacks.
 RUN sh /vulkan-closure.sh /out/vulkan \
+    && sh /vaapi-closure.sh /out/vaapi /out/vulkan \
+    && sh /ffmpeg-closure.sh /out/ffmpeg /out/vaapi /out/vulkan \
     && sh /weston-closure.sh /out/weston /out/vulkan
 
 FROM scratch AS vulkan
 COPY --from=closure /out/vulkan /
+
+# The VA-API loader and driver, for a program that decodes on the node's GPU.
+FROM vulkan AS vaapi
+COPY --from=closure /out/vaapi /
+
+# ffmpeg and ffprobe on the VA-API image. The entrypoint is ffmpeg, so a
+# release can run it and read what it says.
+FROM vaapi AS ffmpeg
+COPY --from=closure /out/ffmpeg /
+ENTRYPOINT ["/usr/bin/ffmpeg"]
 
 FROM vulkan AS weston
 COPY --from=closure /out/weston /

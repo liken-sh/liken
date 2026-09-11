@@ -91,6 +91,13 @@ jobs:
             echo '```'
             echo "ghcr.io/liken-sh/vulkan:$VERSION"
             echo '```'
+            echo
+            echo "The VA-API base and the ffmpeg image:"
+            echo
+            echo '```'
+            echo "ghcr.io/liken-sh/vaapi:$VERSION"
+            echo "ghcr.io/liken-sh/ffmpeg:$VERSION"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: docker/setup-buildx-action@v3
@@ -101,10 +108,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # All three images build here and none pushes yet. The
-      # compositor has to start before anything reaches ghcr.io, and a
-      # push that happened first would leave a broken :latest behind
-      # when the start failed.
+      # Every image builds here and none pushes yet. The compositor has
+      # to start and ffmpeg has to run before anything reaches ghcr.io,
+      # and a push that happened first would leave a broken :latest
+      # behind when a check failed.
       #
       # The builds read and write the :buildcache tags beside each
       # image. A tag's release of a commit whose development build
@@ -122,6 +129,32 @@ jobs:
           tags: |
             ghcr.io/liken-sh/vulkan:${{ env.VERSION }}
             ghcr.io/liken-sh/vulkan:latest
+
+      - name: Build the VA-API base
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: vaapi
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/vaapi:${{ env.VERSION }}
+            ghcr.io/liken-sh/vaapi:latest
+
+      - name: Build ffmpeg
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: ffmpeg
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/ffmpeg:${{ env.VERSION }}
+            ghcr.io/liken-sh/ffmpeg:latest
 
       - name: Build the compositor
         uses: docker/build-push-action@v6
@@ -172,6 +205,25 @@ jobs:
           grep -q "Using GL renderer" weston.log
           grep -q "Registered plugin API 'ivi_layout_api_v1'" weston.log
           grep -q "liken-layout: the control socket is /etc/weston/layout.sock" weston.log
+
+      # ffmpeg opens libva, and libva opens the driver, by file name, so
+      # a library the image lacks shows up at the first run and at no
+      # earlier point. The runner has no GPU, so the run proves the
+      # software path and that vaapi is compiled in; the driver load is
+      # proved on hardware.
+      - name: Run ffmpeg
+        run: |
+          docker run --rm "ghcr.io/liken-sh/ffmpeg:$VERSION" \
+            -f lavfi -i testsrc=duration=1:size=64x64:rate=5 -f null -
+          # grep -q closes the pipe early, docker dies on the closed
+          # pipe, and pipefail fails the step, so each check writes the
+          # output to a file first.
+          docker run --rm --entrypoint /usr/bin/ffprobe \
+            "ghcr.io/liken-sh/ffmpeg:$VERSION" -version > ffprobe.txt
+          grep -q '^ffprobe version ' ffprobe.txt
+          docker run --rm "ghcr.io/liken-sh/ffmpeg:$VERSION" \
+            -hide_banner -hwaccels > hwaccels.txt
+          grep -q vaapi hwaccels.txt
 
       - name: Build the operator
         uses: docker/build-push-action@v6
@@ -228,19 +280,22 @@ jobs:
           echo "the ci run for $commit did not finish within ten minutes" >&2
           exit 1
 
-      # Each image is built from the one before it, so the three share
-      # every layer, and after the first push the next two send one
-      # layer each.
+      # Every image builds on the vulkan base, so the base pushes once
+      # and each image after it sends the layers its base lacks.
       #
       # :latest marks the newest release and nothing else. A
       # development build pushes its own tag only.
-      - name: Push the three images
+      - name: Push the images
         run: |
           docker push "ghcr.io/liken-sh/vulkan:$VERSION"
+          docker push "ghcr.io/liken-sh/vaapi:$VERSION"
+          docker push "ghcr.io/liken-sh/ffmpeg:$VERSION"
           docker push "ghcr.io/liken-sh/weston:$VERSION"
           docker push "ghcr.io/liken-sh/display-operator:$VERSION"
           if [ "$RELEASE" = true ]; then
             docker push "ghcr.io/liken-sh/vulkan:latest"
+            docker push "ghcr.io/liken-sh/vaapi:latest"
+            docker push "ghcr.io/liken-sh/ffmpeg:latest"
             docker push "ghcr.io/liken-sh/weston:latest"
             docker push "ghcr.io/liken-sh/display-operator:latest"
           fi

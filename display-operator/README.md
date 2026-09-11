@@ -70,16 +70,21 @@ of is documented in `liken`'s repository, in
     go build ./...
     go test ./...
     docker build --target vulkan -t vulkan .
+    docker build --target vaapi -t vaapi .
+    docker build --target ffmpeg -t ffmpeg .
     docker build --target weston -t weston .
     docker build -t display-operator .
 
-One `Dockerfile` builds three images, each on the one before it.
+One `Dockerfile` builds five images, each on the one under it.
 `ghcr.io/liken-sh/vulkan` is the Vulkan loader, the Intel and AMD
 drivers, and the client libraries a Wayland program opens, on nothing
 else. It is the base image for every Vulkan client liken ships.
-`ghcr.io/liken-sh/weston` is that image plus the compositor and every
-library it loads. `ghcr.io/liken-sh/display-operator` is that image
-plus the operator's static binary, and it is the image the
+`ghcr.io/liken-sh/vaapi` is that image plus the VA-API loader and the
+Intel media driver, and `ghcr.io/liken-sh/ffmpeg` is that plus ffmpeg
+and ffprobe, for a program that decodes video on the node's GPU.
+`ghcr.io/liken-sh/weston` is the vulkan image plus the compositor and
+every library it loads. `ghcr.io/liken-sh/display-operator` is that
+image plus the operator's static binary, and it is the image the
 `DaemonSet` runs. The EDID
 fixtures in `testdata` are read off real monitors with
 `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.

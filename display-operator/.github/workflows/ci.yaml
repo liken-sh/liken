@@ -124,19 +124,22 @@ jobs:
     # which builds every image for that commit at the same moment, so
     # this job runs on a pull request only and no layer builds twice.
     if: github.event_name == 'pull_request'
-    # One job per image, so the three build at once and the run is as
+    # One job per image, so the five build at once and the run is as
     # long as the slowest of them, not the sum.
     #
-    # All three images come from the one Dockerfile, each stage on the
-    # one before it. The base and the compositor entries name their
-    # stages, and the operator entry takes the default, the last stage
-    # in the file.
+    # Every image comes from the one Dockerfile, each stage on the
+    # one under it. Each entry but the operator's names its stage, and
+    # the operator's takes the default, the last stage in the file.
     strategy:
       fail-fast: false
       matrix:
         include:
           - image: vulkan
             target: vulkan
+          - image: vaapi
+            target: vaapi
+          - image: ffmpeg
+            target: ffmpeg
           - image: weston
             target: weston
           - image: display-operator
