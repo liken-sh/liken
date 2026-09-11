@@ -9,12 +9,17 @@ it, and states how the work is proved. It leaves the shape of the code
 to whoever builds it. Each plan starts at low fidelity, and it is
 raised to full fidelity before anyone builds it.
 
-A plan moves to [`completed/`](completed/) when it is built and drilled
-in the lab. A plan that is set aside moves to [`rejected/`](rejected/)
+A plan moves to [`completed/`](completed/) when it is built. A plan that is set aside moves to [`rejected/`](rejected/)
 with the reasons that decided it. A question the current work cannot
 answer is written to [`open-problems/`](open-problems/); those
 documents have no number, because nobody has decided yet what work
 they become.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
 
 ## Planned
 
@@ -92,8 +97,6 @@ so the next plan can start from the facts.
 * [The store on the wrong filesystem](open-problems/the-store-on-the-wrong-filesystem.md).
   A node without the pod-storage partition puts the store on the RAM
   overlay, and nothing says so until the reboot.
-* [What git the driver does not serve](open-problems/what-git-the-driver-does-not-serve.md).
-  Submodules, LFS, and a shallow writeable volume.
 
 ## Rejected
 
