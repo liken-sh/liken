@@ -11,7 +11,13 @@ hardware. The pattern is documented in liken's repository:
 
 The README states what the operator is. These documents state why it
 is built the way it is, and what it still owes an answer to.
-[`completed/`](completed/) holds the plans that are built and drilled.
+[`completed/`](completed/) holds the plans that are built.
+
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
 
 ## The design
 
@@ -23,11 +29,7 @@ is built the way it is, and what it still owes an answer to.
 ## Planned
 
 These plans are designed. Each keeps its number and moves to
-[`completed/`](completed/) when it is built and drilled.
-
-* [26, Prometheus metrics](completed/26-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
-  Playback outcomes, startup delay, and report freshness per `Player`,
-  with explicit rules for retained reports, pause, and normal endings.
+[`completed/`](completed/) when it is built.
 
 ## Completed
 
@@ -246,6 +248,9 @@ These plans are designed. Each keeps its number and moves to
   client, and `status.idle` carries the whole contract a delegate's
   client is wired from. The drill watched the two old pods go and the
   browser return the instant a film ended.
+* [26, Prometheus metrics](completed/26-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
+  Playback outcomes, startup delay, and report freshness per `Player`,
+  with explicit rules for retained reports, pause, and normal endings.
 * [27, One tile in flight](completed/27-one-tile-in-flight.md). Built,
   and drilled on `liken-1` and in the house on 2026-09-08 in release
   2026.09.08-001. The scrubber keeps one trickplay request in flight
