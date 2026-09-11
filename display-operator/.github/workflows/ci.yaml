@@ -124,7 +124,7 @@ jobs:
     # which builds every image for that commit at the same moment, so
     # this job runs on a pull request only and no layer builds twice.
     if: github.event_name == 'pull_request'
-    # One job per image, so the five build at once and the run is as
+    # One job per image, so the six build at once and the run is as
     # long as the slowest of them, not the sum.
     #
     # Every image comes from the one Dockerfile, each stage on the
@@ -140,6 +140,8 @@ jobs:
             target: vaapi
           - image: ffmpeg
             target: ffmpeg
+          - image: mpv
+            target: mpv
           - image: weston
             target: weston
           - image: display-operator

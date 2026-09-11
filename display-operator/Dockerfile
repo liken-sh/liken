@@ -1,4 +1,4 @@
-# Five images from one file, each built on the one under it.
+# Six images from one file, each built on the one under it.
 #
 #   --target vulkan    ghcr.io/liken-sh/vulkan, the Vulkan loader, the
 #                      Intel and AMD drivers, and the client libraries
@@ -10,6 +10,9 @@
 #   --target ffmpeg    ghcr.io/liken-sh/ffmpeg, that image plus ffmpeg
 #                      and ffprobe and every library they load. The
 #                      library operator's file facts build FROM it.
+#   --target mpv       ghcr.io/liken-sh/mpv, the ffmpeg image plus mpv
+#                      and every library and data file it opens by
+#                      name. The media operator's player builds FROM it.
 #   --target weston    ghcr.io/liken-sh/weston, the vulkan image plus
 #                      the compositor and every library it loads.
 #   the default        ghcr.io/liken-sh/display-operator, the weston
@@ -100,6 +103,12 @@ FROM debian:trixie-slim AS closure
 # ffmpeg is the two programs of the image above it. They install in the
 # same builder as weston, and the weston tree is unchanged by them,
 # checked layer by layer when they were added.
+# mpv is the one program of the image above ffmpeg. libspa-0.2-modules
+# carries the SPA plugins its PipeWire output loads by name, pipewire-bin
+# is installed for the one file /usr/share/pipewire/client.conf, and
+# fontconfig-config carries the configuration libass reads. The other
+# trees are unchanged by them, checked layer by layer when they were
+# added.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         weston \
@@ -114,14 +123,20 @@ RUN apt-get update \
         libva-drm2 \
         intel-media-va-driver \
         ffmpeg \
+        mpv \
+        libpipewire-0.3-0t64 \
+        libspa-0.2-modules \
+        pipewire-bin \
+        fontconfig-config \
     && rm -rf /var/lib/apt/lists/*
-COPY closure.sh vulkan-closure.sh vaapi-closure.sh ffmpeg-closure.sh weston-closure.sh /
+COPY closure.sh vulkan-closure.sh vaapi-closure.sh ffmpeg-closure.sh mpv-closure.sh weston-closure.sh /
 # Each tree after the first is computed whole, then less every file the
 # trees under its image already hold, so each layer carries only what
 # its base lacks.
 RUN sh /vulkan-closure.sh /out/vulkan \
     && sh /vaapi-closure.sh /out/vaapi /out/vulkan \
     && sh /ffmpeg-closure.sh /out/ffmpeg /out/vaapi /out/vulkan \
+    && sh /mpv-closure.sh /out/mpv /out/ffmpeg /out/vaapi /out/vulkan \
     && sh /weston-closure.sh /out/weston /out/vulkan
 
 FROM scratch AS vulkan
@@ -136,6 +151,13 @@ COPY --from=closure /out/vaapi /
 FROM vaapi AS ffmpeg
 COPY --from=closure /out/ffmpeg /
 ENTRYPOINT ["/usr/bin/ffmpeg"]
+
+# mpv on the ffmpeg image, which already holds the libav libraries mpv
+# links and the VA-API driver it decodes with. The entrypoint is mpv, so
+# a release can run it and read what it says.
+FROM ffmpeg AS mpv
+COPY --from=closure /out/mpv /
+ENTRYPOINT ["/usr/bin/mpv"]
 
 FROM vulkan AS weston
 COPY --from=closure /out/weston /

@@ -72,16 +72,19 @@ of is documented in `liken`'s repository, in
     docker build --target vulkan -t vulkan .
     docker build --target vaapi -t vaapi .
     docker build --target ffmpeg -t ffmpeg .
+    docker build --target mpv -t mpv .
     docker build --target weston -t weston .
     docker build -t display-operator .
 
-One `Dockerfile` builds five images, each on the one under it.
+One `Dockerfile` builds six images, each on the one under it.
 `ghcr.io/liken-sh/vulkan` is the Vulkan loader, the Intel and AMD
 drivers, and the client libraries a Wayland program opens, on nothing
 else. It is the base image for every Vulkan client liken ships.
 `ghcr.io/liken-sh/vaapi` is that image plus the VA-API loader and the
 Intel media driver, and `ghcr.io/liken-sh/ffmpeg` is that plus ffmpeg
 and ffprobe, for a program that decodes video on the node's GPU.
+`ghcr.io/liken-sh/mpv` is that plus mpv and every library and data
+file it opens by name, and the media operator's player builds on it.
 `ghcr.io/liken-sh/weston` is the vulkan image plus the compositor and
 every library it loads. `ghcr.io/liken-sh/display-operator` is that
 image plus the operator's static binary, and it is the image the

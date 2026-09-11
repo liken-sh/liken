@@ -178,6 +178,10 @@ say why it is built the way it is.
   compositor: the loader, the Intel and AMD drivers, and the client
   libraries, on scratch. The media browser and the idle screen build
   from it, and a node that draws holds LLVM once.
+* [20, The mpv image](completed/20-the-mpv-image.md). Built on
+  2026-09-11. mpv and every library and data file it opens by name,
+  on the ffmpeg image, so the media operator's player leaves its
+  distribution base.
 * [19, The VA-API and ffmpeg images](completed/19-the-vaapi-and-ffmpeg-images.md).
   Built on 2026-09-11. Two more images on the Vulkan base:
   `ghcr.io/liken-sh/vaapi`, the VA-API loader and the Intel media
