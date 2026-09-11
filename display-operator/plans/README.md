@@ -8,6 +8,12 @@ states the design that answers it, and states what was considered and
 set aside. It separates what was measured from what was only read, and
 it names where the measurement ran.
 
+A plan closes in the commit that builds it. That commit moves the
+document to `completed/`, dates its header, and states what the lab
+measured if a drill ran. A drill that has not run yet is not a reason
+to leave a plan open. The built part closes, and the part still owed
+becomes a new plan or an open problem.
+
 The pattern these documents follow is documented in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
@@ -109,9 +115,8 @@ say why it is built the way it is.
   Weston, and the heal is the designed path for the gentle
   re-creations that mis-size surfaces without a crash, the case the
   morning's cropped canvas proved exists; it is unit-proven and
-  waits for one to fire live. The open problem
-  [kiosk-shell loses a surface's output](open-problems/kiosk-shell-loses-a-surfaces-output.md)
-  records the upstream contribution this works around.
+  waits for one to fire live. The kiosk-shell defect this worked
+  around left with kiosk-shell itself in plan 17.
 * [11, Darkening respects the attached input](completed/11-darkening-respects-the-attached-input.md).
   Built, and drilled on liken-1 on 2026-08-27 in release
   2026.08.27-007. A shared monitor dims every input at
@@ -165,7 +170,7 @@ say why it is built the way it is.
 * [14, Prometheus metrics](completed/14-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
   Claimed output availability, control failures, and kernel/compositor
   mode agreement, with alert rules that allow intentional darkness.
-* [15, The output states its scale](15-the-output-states-its-scale.md).
+* [15, The output states its scale](completed/15-the-output-states-its-scale.md). Built on 2026-09-07.
   An output whose mode is 3840 wide or wider gets `scale=2` in its
   section, so every client draws a 4K panel at the 1080p size.
 * [16, The Vulkan base image](completed/16-the-vulkan-base-image.md). Built on

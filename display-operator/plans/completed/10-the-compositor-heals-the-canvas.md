@@ -22,9 +22,9 @@ assignment is one-shot and is never re-run. The behavior is
 unchanged from the 14.0.2 this operator ships through the current
 16.0.0, no `weston.ini` key prevents it, and the newest upstream
 hotplug commit only guards the crash in this window and leaves the
-reassignment un-done. The open problem
-[kiosk-shell loses a surface's output](../open-problems/kiosk-shell-loses-a-surfaces-output.md)
-carries the references.
+reassignment un-done. Plan 17 replaced kiosk-shell with ivi-shell and
+the operator's own layout module, which listens for output events
+itself.
 
 The client is not the stuck party: `mpv` obeys every configure the
 compositor sends. A fresh compositor places every surface at its

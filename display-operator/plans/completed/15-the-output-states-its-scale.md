@@ -1,6 +1,8 @@
 # The output states its scale
 
-Plan 15. The compositor's config states an integer scale on every
+Plan 15. Built on 2026-09-07 and proved on the house 4K `Player` the same day.
+
+The compositor's config states an integer scale on every
 output whose mode is wide enough to need one, so a client that reads
 `wl_output` scale draws a 4K panel at the size it draws a 1080p one.
 
