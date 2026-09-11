@@ -120,3 +120,29 @@ the backfill again, clear `status.jellyfin` or change
 against. The counts of the run, users, items published, and items
 skipped, are in the Job's log, which stays for an hour after the Job
 ends.
+
+## 5. Share the volume with Jellyfin
+
+Jellyfin writes beside the media too, unless its library settings say
+otherwise. For this operator to be the only writer of art and
+sidecars, turn these off on each Jellyfin library that reads a
+`Library`'s volume:
+
+* Saving artwork into media folders. The art fact writes the images.
+* The NFO metadata saver. The nfo fact writes the sidecar.
+* Any subtitle download plugin. Plan 60 covers subtitles.
+
+Leave Jellyfin's trickplay extraction on. With extraction off for a
+library, Jellyfin deletes the whole `.trickplay` directory beside
+every video on each refresh, and the rows it holds for them, whoever
+made the directory. So on a volume this operator tiles, Jellyfin's
+extraction stays on, and the two race for each new title. The trickplay
+Job claims the node's GPU so that it wins, and a directory Jellyfin
+made first is the same sheets, so the fact leaves it alone.
+
+Jellyfin imports a tile directory it did not make: same folder name,
+files present, no row of its own for that width. It records the number
+of files in the folder as the thumbnail count, where its own
+extraction records the number of thumbnails. This operator writes
+nothing but the sheets into the folder, so the count is the sheet
+count. Verified against Jellyfin 10.11.

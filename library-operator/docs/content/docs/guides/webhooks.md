@@ -41,7 +41,10 @@ walk.
 Add a connection of type Webhook. Set the URL to the movies
 `Library`'s address, and the method to POST. Enable the events that
 carry a file: import, upgrade, and rename. An event with no path, such
-as the test, schedules a full walk.
+as the test, schedules a full walk. Saving a new connection runs the
+test on its own, and the Test button runs it again, so a new
+connection costs one full walk for each. Make the connection once and
+let the walks finish before you test it by hand.
 
 ## Sonarr
 
@@ -52,6 +55,15 @@ The same, with the series `Library`'s address.
 Install Jellyfin's Webhook plugin and add a generic destination with
 the `Library`'s address. An item-added notification carries a
 top-level `Path`, which is what the operator reads.
+
+## One writer beside the media
+
+Radarr and Sonarr write beside the media too. This operator reads the
+`uniqueid` in the Kodi `.nfo` they write, so keep that metadata
+option on. Turn off their image writes and their import of extra
+files, so that the art and subtitle facts are the only writers of
+those. The [Jellyfin guide](/docs/guides/jellyfin/#5-share-the-volume-with-jellyfin)
+lists the Jellyfin switches.
 
 ## By hand
 
