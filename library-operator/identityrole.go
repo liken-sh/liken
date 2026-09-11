@@ -58,6 +58,7 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 		title:    item.title,
 		year:     item.year,
 		duration: e.runtimeOf(item, folder),
+		episodes: e.episodeClues(folder),
 	})
 	if err != nil {
 		e.logf("could not identify %s: %v", item.path, err)

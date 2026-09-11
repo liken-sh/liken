@@ -25,6 +25,7 @@ const (
 	testYear     = "year"
 	testNearYear = "a year on either side"
 	testCountry  = "country"
+	testEpisodes = "episode names"
 	testRuntime  = "runtime"
 )
 
@@ -37,13 +38,15 @@ func reasonFrom(tests ...string) string {
 	return strings.Join(tests[:len(tests)-1], ", ") + ", and " + tests[len(tests)-1]
 }
 
-// What the ladder is asked about: the kind, the clues the name gave, and the
-// runtime the probe measured, which is zero where none was read.
+// What the ladder is asked about: the kind, the clues the name gave, the
+// runtime the probe measured, which is zero where none was read, and the
+// episode clues a series folder's file names carry.
 type identitySearch struct {
 	kind     string
 	title    string
 	year     int
 	duration time.Duration
+	episodes []episodeClue
 }
 
 // What the ladder answers: an id with the reason for it, or the candidates a
@@ -63,8 +66,8 @@ type identityMatch struct {
 // The ladder itself, rung by rung. A name with no year climbs on the title
 // alone, because such a folder is exactly the sidecar-less case the ladder
 // exists for. One survivor is written with its reason. Several survivors go
-// to the runtime rung when the probe measured one, and anything else is a
-// candidate list.
+// to the episode rung, then to the runtime rung when the probe measured one,
+// and anything else is a candidate list.
 func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identitySearch) (identityAnswer, error) {
 	search, country := readQualifier(search)
 	matched, err := searchOnYear(ctx, client, search, search.year)
@@ -88,6 +91,15 @@ func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identit
 	}
 	if len(matched) == 1 {
 		return identityAnswer{id: matched[0].result.ID, reason: reasonFrom(tests...)}, nil
+	}
+	if len(matched) > 1 {
+		kept, err := fromEpisodes(ctx, client, search, matched)
+		if err != nil {
+			return identityAnswer{}, err
+		}
+		if len(kept) == 1 {
+			return identityAnswer{id: kept[0].result.ID, reason: reasonFrom(append(tests, testEpisodes)...)}, nil
+		}
 	}
 	if len(matched) > 1 && search.duration > 0 {
 		matched, err = readRuntimes(ctx, client, search.kind, matched)

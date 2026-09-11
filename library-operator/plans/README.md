@@ -207,6 +207,10 @@ Plan 32 stands apart from the enrichment work.
   its first frame within about 60 ms of the `Idle` status. The drill
   widened the edge to a move from any activity to `Idle`, so a `Play`
   that never played returns the page too.
+* [61, A series folder with no year](completed/61-a-series-folder-with-no-year.md).
+  Built on 2026-09-11. The ladder reads the episode titles off the
+  file names and matches them against each candidate's season on
+  TMDb, so a bare series folder identifies without a sidecar.
 * [55, Lights down, lights up](completed/55-lights-down-lights-up.md).
   Built and drilled on `liken-1` on 2026-09-10 in release
   2026.09.10-002, and on the house the same evening. The browser dims

@@ -127,6 +127,28 @@ func (c *tmdbClient) runtime(ctx context.Context, kind string, id int) (time.Dur
 	return answer.runtime(), nil
 }
 
+// One episode of a season, as the season call lists it.
+type tmdbEpisode struct {
+	Number int    `json:"episode_number"`
+	Name   string `json:"name"`
+}
+
+// What TMDb answers for one season of a series.
+type tmdbSeasonAnswer struct {
+	Episodes []tmdbEpisode `json:"episodes"`
+}
+
+// The episodes of one season. The episode rung makes this call, one season
+// per candidate, so a search result never pays for it.
+func (c *tmdbClient) season(ctx context.Context, id, season int) ([]tmdbEpisode, error) {
+	path := "/3/tv/" + strconv.Itoa(id) + "/season/" + strconv.Itoa(season)
+	var answer tmdbSeasonAnswer
+	if err := c.get(ctx, path, nil, &answer); err != nil {
+		return nil, err
+	}
+	return answer.Episodes, nil
+}
+
 // TMDb takes two credential kinds. A v3 API key is 32 hex characters and
 // travels as the api_key query parameter. Anything else is a v4 read access
 // token and travels as a bearer token. TMDb refuses a v3 key sent as a bearer

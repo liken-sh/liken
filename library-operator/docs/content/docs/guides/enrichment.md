@@ -97,8 +97,12 @@ the scrub-bar thumbnails when `spec.trickplay.enabled` is set.
 
 The identity fact asks TMDb for the folder's title and runs a fixed
 sequence of tests: the title, then the year, then a year on either side,
-then the runtime within five minutes. One survivor is the answer, and
-its reason is recorded. Several survivors become candidates in
+then, for a series, the episode names, then the runtime within five
+minutes. The episode test reads the episode titles from the file names
+of the folder's first season and keeps a candidate whose season on TMDb
+carries at least two of them and at least half. So a series folder
+named with the title alone identifies without a sidecar. One survivor
+is the answer, and its reason is recorded. Several survivors become candidates in
 `.liken/identity.yaml`, and the title counts in `status.waiting` until
 a person names the right `uniqueid` in the `.nfo`. A title no provider
 can name counts in `status.unresolved`.
