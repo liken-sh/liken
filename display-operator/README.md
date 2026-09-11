@@ -6,8 +6,8 @@ driver that publishes each monitor output of a graphics card as a
 claimable device on a [`liken`](https://github.com/liken-sh/liken)
 cluster. Its pod runs the Weston compositor in a container of its
 own, supervised by the kubelet. A pod that claims
-an output receives the Wayland socket and the app-id that puts its
-window, fullscreen, on that screen.
+an output receives a Wayland socket of its own, and the window it
+draws goes on that screen.
 
 That makes a screen something you give a workload from a manifest.
 A kiosk browser runs on the lobby screen from a `Deployment`, a

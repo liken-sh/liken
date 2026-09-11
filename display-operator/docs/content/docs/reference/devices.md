@@ -101,7 +101,7 @@ sysfs.
 | Attribute | Type | What it is |
 |---|---|---|
 | `connector` | string | the kernel's connector name: `HDMI-A-1` |
-| `appId` | string | what the compositor routes a window by: `hdmi-a-1` |
+| `appId` | string | the connector in lowercase, delivered as `DISPLAY_APP_ID`: `hdmi-a-1`. Nothing routes by it, and the device class selects on it to keep the class on outputs |
 | `manufacturer` | string | the EDID's three-letter PNP id: `GSM` is LG |
 | `model` | string | the monitor name the EDID states |
 | `serial` | string | the serial the EDID states |
@@ -417,12 +417,16 @@ the [control device](#the-control-device) section lists.
 |---|---|
 | mount | `/var/run/display.liken.sh`, read-write, the same path as on the host |
 | `XDG_RUNTIME_DIR` | `/var/run/display.liken.sh` |
-| `WAYLAND_DISPLAY` | `wayland-0` |
-| `DISPLAY_APP_ID` | the allocated output's app-id |
+| `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
+| `DISPLAY_APP_ID` | the allocated output's name; nothing reads it, and a later release stops delivering it |
+
+The socket is the identity. A window that arrives on it belongs to
+this claim, and nothing in the container can name another claim's
+socket.
 
 A claim that allocates two outputs into one container delivers two
-app-ids, and only the last `DISPLAY_APP_ID` survives. One container
-drives one screen; a pod that drives two screens runs two
+sockets and two app-ids, and only the last of each survives. One
+container drives one screen; a pod that drives two screens runs two
 containers, each naming its own request.
 
 ## The slice's lifetime
