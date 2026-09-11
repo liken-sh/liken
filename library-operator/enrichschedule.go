@@ -140,16 +140,40 @@ func (o *operator) serveChain(ctx context.Context, library *Library, catalog *Na
 			continue
 		}
 		if chain.stages[chainStageEnrich] != nil {
+			// The rescan reads what both stages wrote, so a trickplay stage the
+			// controller has not ended holds the chain here. A stage whose TTL
+			// has taken it leaves the chain to carry on.
+			if tiles := chain.stages[chainStageTrickplay]; tiles != nil && !tiles.finished() {
+				continue
+			}
 			return true, o.createChainScan(ctx, library, chain)
 		}
 		if chain.stages[chainStageScan] == nil || !gapOpen(library, report, providers) {
 			continue
 		}
-		return true, o.createEnrichJob(ctx, library, catalog, providers,
-			chainJobName(name, chainStageEnrich, chain.id), chain.path,
-			chainMarks(chain.id, chain.path, chainStageEnrich))
+		return true, o.createChainStages(ctx, library, catalog, providers, chain)
 	}
 	return false, nil
+}
+
+// The middle of one chain: the enricher of the folder, and beside it the
+// trickplay Job of the same folder where the Library turns the fact on. A new
+// title arrives by webhook, so this is the path that has to win the race for
+// its tiles.
+func (o *operator) createChainStages(ctx context.Context, library *Library, catalog *NamespaceCatalog,
+	providers providerSet, chain chainRun) error {
+	name := library.Metadata.Name
+	if err := o.createEnrichJob(ctx, library, catalog, providers,
+		chainJobName(name, chainStageEnrich, chain.id), chain.path,
+		chainMarks(chain.id, chain.path, chainStageEnrich)); err != nil {
+		return err
+	}
+	if !library.Spec.Trickplay.Enabled {
+		return nil
+	}
+	return o.createTrickplayJob(ctx, library, catalog,
+		chainJobName(name, chainStageTrickplay, chain.id), chain.path,
+		chainMarks(chain.id, chain.path, chainStageTrickplay))
 }
 
 // The enricher Job and the claim it runs on. The claim stands first, because
@@ -161,7 +185,7 @@ func (o *operator) createEnrichJob(ctx context.Context, library *Library, catalo
 		return err
 	}
 	job := buildEnrichJob(library, providers, name, path,
-		o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
+		o.scannerImage, o.ffmpegImage, o.corrosionImage, o.busAddress, o.topicBase)
 	job.Metadata.Annotations = marks
 
 	if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {
@@ -256,16 +280,12 @@ func lastScanFinish(runs []libraryRun) time.Time {
 // nothing to ask.
 func gapOpen(library *Library, report *libraryReport, providers providerSet) bool {
 	for fact, count := range report.Gaps {
-		if count <= 0 && !refreshHasWork(library, report, fact) {
+		// The trickplay gap is the trickplay Job's own, and an enricher that
+		// counted it would run for ever with nothing to do.
+		if fact == factTrickplay {
 			continue
 		}
-		// The trickplay gap counts only where the Library turned the fact on,
-		// because a library that leaves it off never closes that gap and would
-		// schedule a Job every pass for ever.
-		if fact == factTrickplay {
-			if library.Spec.Trickplay.Enabled {
-				return true
-			}
+		if count <= 0 && !refreshHasWork(library, report, fact) {
 			continue
 		}
 		if fact != factProbe && fact != factArrival &&

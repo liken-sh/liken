@@ -87,11 +87,31 @@ walk has finished and a fact still has an open gap. The `Job` runs its
 facts in order, each in a container of its own: `probe` reads each
 video's streams, `arrival` records when a file was first seen,
 `identity` names each title, `nfo` fills the sidecar, `art` downloads
-the images, `contributors` fills the people, and `trickplay` builds
-the scrub-bar thumbnails when `spec.trickplay.enabled` is set.
+the images, and `contributors` fills the people.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=enrich
     kubectl -n media logs job/movies-enrich -c nfo
+
+### The trickplay Job
+
+The scrub-bar thumbnails are a `Job` of their own, named
+`<library>-trickplay`, because one title's decode runs for minutes and
+the other facts must not wait behind it. It runs beside the enrich
+`Job` when `spec.trickplay.enabled` is set and a video has no tile
+directory, and a webhook's folder gets one beside its enrich stage.
+
+The `Job` decodes on the node's GPU when `spec.trickplay.render` names
+a DeviceClass. The operator keeps a `ResourceClaimTemplate` for the
+`Library`, the `Job`'s pod claims one device from it, and `ffmpeg`
+decodes through VA-API and falls back to software for a codec the
+GPU refuses. With no render block the `Job` decodes in software. With
+a render block on a cluster where no node offers such a device, the
+pod stays `Pending`, and its events say so.
+
+    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
+
+The tile directory is the one Jellyfin reads and writes, so a directory
+Jellyfin made first is the answer, and the `Job` leaves it alone.
 
 ### Identification
 

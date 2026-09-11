@@ -51,6 +51,9 @@ type fakeCluster struct {
 	// may take the same name.
 	jobs     map[string]*Job
 	cronJobs map[string]*CronJob
+	// The ResourceClaimTemplates the operator keeps for the Libraries that name
+	// a render node, by namespace and name.
+	claimTemplates map[string]*ResourceClaimTemplate
 	// The Plays the operator creates, in the order it created them. They
 	// are a list and not a map, because every Play takes a name the API
 	// server mints.
@@ -106,6 +109,7 @@ func newFakeCluster() *fakeCluster {
 		configMaps:     map[string]*ConfigMap{},
 		jobs:           map[string]*Job{},
 		cronJobs:       map[string]*CronJob{},
+		claimTemplates: map[string]*ResourceClaimTemplate{},
 		people:         map[string]*Person{},
 		nodes:          map[string]*Node{},
 		broken:         map[string]int{},
@@ -263,6 +267,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveService(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case strings.Contains(r.URL.Path, "/configmaps"):
 		f.serveConfigMap(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/resourceclaimtemplates"):
+		f.serveClaimTemplate(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/plays"):
 		f.createPlay(w, r)
 	case r.Method == http.MethodPost:
@@ -453,6 +459,48 @@ func (f *fakeCluster) writeCronJob(w http.ResponseWriter, r *http.Request, resou
 	written.Metadata.ResourceVersion = resourceVersion
 	f.cronJobs[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
 	_ = json.NewEncoder(w).Encode(written)
+}
+
+// ServeClaimTemplate answers a ResourceClaimTemplate the way the API server
+// does: an absent template is a 404, a create stores what the body carries, and
+// a delete removes it. There is no update, because the API server refuses every
+// change to a template's spec.
+func (f *fakeCluster) serveClaimTemplate(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created ResourceClaimTemplate
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		f.claimTemplates[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
+	case http.MethodDelete:
+		if _, held := f.claimTemplates[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.claimTemplates, key)
+	default:
+		answer(w, f.claimTemplates[key])
+	}
+}
+
+// HeldClaimTemplate is the template the cluster holds, so a test reads what a
+// pass wrote.
+func (f *fakeCluster) heldClaimTemplate(namespace, name string) *ResourceClaimTemplate {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.claimTemplates[namespace+"/"+name]
+}
+
+// HoldClaimTemplate puts a template into the cluster, so a test drives the
+// state a pass reads.
+func (f *fakeCluster) holdClaimTemplate(template *ResourceClaimTemplate) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.claimTemplates[template.Metadata.Namespace+"/"+template.Metadata.Name] = template
 }
 
 func (f *fakeCluster) heldJob(namespace, name string) *Job {
@@ -921,8 +969,8 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
 	return newOperator(NewClient(server.URL, server.Client(), ""),
-		testScannerImage, testCorrosionImage, testBrowserImage, testBusAddress,
-		defaultTopicBase, testOperatorNamespace, testWebhookAddress)
+		testScannerImage, testCorrosionImage, testBrowserImage, testFFmpegImage,
+		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 }
 
 // The namespace the operator itself runs in, which is what every

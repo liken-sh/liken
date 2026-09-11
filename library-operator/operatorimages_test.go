@@ -16,27 +16,32 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 		reference string
 		corrosion string
 		browser   string
+		ffmpeg    string
 		version   string
 	}{
 		{name: "a release tag",
 			reference: "ghcr.io/liken-sh/library-operator:2026.09.03-007",
 			corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007",
 			browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007",
+			ffmpeg:    "ghcr.io/liken-sh/library-operator-ffmpeg:2026.09.03-007",
 			version:   "2026.09.03-007"},
 		{name: "a development build",
 			reference: "ghcr.io/liken-sh/library-operator:2026.09.03-007-dev-003-abcdef01",
 			corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007-dev-003-abcdef01",
 			browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007-dev-003-abcdef01",
+			ffmpeg:    "ghcr.io/liken-sh/library-operator-ffmpeg:2026.09.03-007-dev-003-abcdef01",
 			version:   "2026.09.03-007-dev-003-abcdef01"},
 		{name: "a registry with a port",
 			reference: "registry:5000/liken-sh/library-operator:2026.09.03-007",
 			corrosion: "registry:5000/liken-sh/library-operator-corrosion:2026.09.03-007",
 			browser:   "registry:5000/liken-sh/library-operator-media-browser:2026.09.03-007",
+			ffmpeg:    "registry:5000/liken-sh/library-operator-ffmpeg:2026.09.03-007",
 			version:   "2026.09.03-007"},
 		{name: "no registry",
 			reference: "library-operator:2026.09.03-007",
 			corrosion: "library-operator-corrosion:2026.09.03-007",
 			browser:   "library-operator-media-browser:2026.09.03-007",
+			ffmpeg:    "library-operator-ffmpeg:2026.09.03-007",
 			version:   "2026.09.03-007"},
 	}
 	for _, one := range cases {
@@ -46,7 +51,8 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := images{scanner: one.reference, corrosion: one.corrosion, browser: one.browser, version: one.version}
+			want := images{scanner: one.reference, corrosion: one.corrosion, browser: one.browser,
+				ffmpeg: one.ffmpeg, version: one.version}
 			if derived != want {
 				t.Errorf("images = %+v, want %+v", derived, want)
 			}
@@ -102,6 +108,7 @@ func testImageClient(t *testing.T, cluster *fakeCluster) *Client {
 	t.Setenv(scannerImageVariable, "")
 	t.Setenv(corrosionImageVariable, "")
 	t.Setenv(browserImageVariable, "")
+	t.Setenv(ffmpegImageVariable, "")
 	t.Setenv(podNameVariable, testOperatorPod)
 	return NewClient(server.URL, server.Client(), "")
 }
@@ -120,6 +127,7 @@ func TestTheImagesComeFromTheOperatorsOwnPod(t *testing.T) {
 		scanner:   "ghcr.io/liken-sh/library-operator:2026.09.03-007",
 		corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007",
 		browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007",
+		ffmpeg:    "ghcr.io/liken-sh/library-operator-ffmpeg:2026.09.03-007",
 		version:   "2026.09.03-007",
 	}
 	if got != want {
@@ -132,6 +140,7 @@ func TestOneImageVariableWinsAndTheRestDerive(t *testing.T) {
 	cluster.pods[testOperatorPod] = operatorPod("ghcr.io/liken-sh/library-operator:2026.09.03-007")
 	client := testImageClient(t, cluster)
 	t.Setenv(browserImageVariable, "ghcr.io/liken-sh/library-operator-media-browser:mine")
+	t.Setenv(ffmpegImageVariable, "ghcr.io/liken-sh/library-operator-ffmpeg:mine")
 
 	got, err := operatorImages(context.Background(), client, testOperatorNamespace)
 
@@ -142,6 +151,7 @@ func TestOneImageVariableWinsAndTheRestDerive(t *testing.T) {
 		scanner:   "ghcr.io/liken-sh/library-operator:2026.09.03-007",
 		corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007",
 		browser:   "ghcr.io/liken-sh/library-operator-media-browser:mine",
+		ffmpeg:    "ghcr.io/liken-sh/library-operator-ffmpeg:mine",
 		version:   "2026.09.03-007",
 	}
 	if got != want {
@@ -155,6 +165,7 @@ func TestEveryImageVariableSetReadsNoPod(t *testing.T) {
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
 	t.Setenv(browserImageVariable, testBrowserImage)
+	t.Setenv(ffmpegImageVariable, testFFmpegImage)
 	t.Setenv(podNameVariable, "")
 
 	got, err := operatorImages(context.Background(), client, testOperatorNamespace)
@@ -162,7 +173,8 @@ func TestEveryImageVariableSetReadsNoPod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := images{scanner: testScannerImage, corrosion: testCorrosionImage, browser: testBrowserImage}
+	want := images{scanner: testScannerImage, corrosion: testCorrosionImage,
+		browser: testBrowserImage, ffmpeg: testFFmpegImage}
 	if got != want {
 		t.Errorf("images = %+v, want %+v", got, want)
 	}
@@ -202,5 +214,31 @@ func TestTheImagesFailWhenThePodCannotBeRead(t *testing.T) {
 				t.Fatalf("err = %v, want it to name %s", err, one.want)
 			}
 		})
+	}
+}
+
+// The two facts that open a media file run on the ffmpeg image, and every other
+// container of the enricher runs on the operator's own.
+func TestTheFileFactsRunOnTheFFmpegImage(t *testing.T) {
+	enricher := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
+	tiles := testTrickplayJob(studioMovies(), "")
+
+	stamped := map[string]string{}
+	spec := enricher.Spec.Template.Spec
+	for _, container := range append(spec.InitContainers, spec.Containers...) {
+		stamped[container.Name] = container.Image
+	}
+	stamped[trickplayContainerName] = tiles.Spec.Template.Spec.Containers[0].Image
+
+	for _, name := range []string{factProbe, trickplayContainerName} {
+		if stamped[name] != testFFmpegImage {
+			t.Errorf("%s runs on %q, want the ffmpeg image %q", name, stamped[name], testFFmpegImage)
+		}
+	}
+	for _, name := range []string{arrivalContainerName, factIdentity, enrichMode} {
+		if stamped[name] != testScannerImage {
+			t.Errorf("%s runs on %q, want the operator's own image %q",
+				name, stamped[name], testScannerImage)
+		}
 	}
 }

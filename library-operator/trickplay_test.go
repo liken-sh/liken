@@ -361,62 +361,24 @@ func TestAStrayStagingDirectoryDoesNotBecomeTiles(t *testing.T) {
 	}
 }
 
-// The trickplay container stands only where the Library turns the fact on,
-// and it names one fact, a memory line, and a CPU request of its own.
-func TestTheTrickplayContainerStandsWhereTheLibraryTurnsItOn(t *testing.T) {
-	cases := []struct {
-		name    string
-		enabled bool
-	}{
-		{name: "a library that turns it on", enabled: true},
-		{name: "a library that leaves it off"},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			library := studioMovies()
-			library.Spec.Trickplay.Enabled = test.enabled
-			job := testEnrichJob(library, "", readyProvider("tmdb", "house"))
+// The enricher Job holds no trickplay container. The fact runs in a Job of its
+// own, so an enricher never waits behind a decode.
+func TestTheEnricherHoldsNoTrickplayContainer(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Trickplay.Enabled = true
 
-			var tiles Container
-			for _, container := range job.Spec.Template.Spec.InitContainers {
-				if container.Name == trickplayContainerName {
-					tiles = container
-				}
-			}
-			if (tiles.Name != "") != test.enabled {
-				t.Fatalf("the pod holds the trickplay container: %t, want %t",
-					tiles.Name != "", test.enabled)
-			}
-			if !test.enabled {
-				return
-			}
-			facts := ""
-			for _, variable := range tiles.Env {
-				if variable.Name == libraryFactsVariable {
-					facts = variable.Value
-				}
-			}
-			if facts != factTrickplay {
-				t.Errorf("%s = %q, want %q", libraryFactsVariable, facts, factTrickplay)
-			}
-			if tiles.Resources.Limits["memory"] != trickplayMemoryLimit ||
-				trickplayMemoryLimit == scannerMemoryLimit {
-				t.Errorf("memory limit = %q, want %q, above the scanner's %q",
-					tiles.Resources.Limits["memory"], trickplayMemoryLimit, scannerMemoryLimit)
-			}
-			if tiles.Resources.Requests["cpu"] != trickplayCPURequest ||
-				trickplayCPURequest == scannerCPURequest {
-				t.Errorf("cpu request = %q, want %q, above the scanner's %q",
-					tiles.Resources.Requests["cpu"], trickplayCPURequest, scannerCPURequest)
-			}
-		})
+	job := testEnrichJob(library, "", readyProvider("tmdb", "house"))
+
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		if container.Name == trickplayContainerName {
+			t.Errorf("the enricher holds %s, want the fact in a Job of its own", container.Name)
+		}
 	}
 }
 
-// The trickplay gap opens a Job only where the Library turns the fact on. No
-// provider serves that fact, so the check on the sources cannot answer for it,
-// and a library that leaves it off would otherwise schedule a Job for ever.
-func TestTheTrickplayGapOpensAJobOnlyWhereTheLibraryTurnsItOn(t *testing.T) {
+// The enricher's own gap counts leave the trickplay gap out, on or off, because
+// an enricher that counted it would run for ever with nothing to do.
+func TestTheEnricherDoesNotCountTheTrickplayGap(t *testing.T) {
 	cases := []struct {
 		name    string
 		enabled bool
@@ -430,8 +392,8 @@ func TestTheTrickplayGapOpensAJobOnlyWhereTheLibraryTurnsItOn(t *testing.T) {
 			library.Spec.Trickplay.Enabled = test.enabled
 			report := &libraryReport{Gaps: map[string]int{factTrickplay: 3}}
 
-			if got := gapOpen(library, report, providers); got != test.enabled {
-				t.Errorf("the gap is open: %t, want %t", got, test.enabled)
+			if gapOpen(library, report, providers) {
+				t.Error("the trickplay gap opened an enricher Job, want the trickplay Job to answer it")
 			}
 		})
 	}

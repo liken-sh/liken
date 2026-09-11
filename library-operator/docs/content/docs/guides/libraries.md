@@ -49,7 +49,8 @@ you are likely to set:
   in the cluster's time zone. It defaults to once an hour, on the hour.
 * `spec.trickplay.enabled` builds the thumbnail sheets for the scrub
   bar. It is off by default, because the first pass reads every video
-  end to end.
+  end to end. `spec.trickplay.render` names the DeviceClass of the
+  node's GPU, so the decode runs there instead of on the CPU.
 * `spec.refresh` reopens one fact at a time, so it asks its provider
   again and rewrites its own files in place.
 

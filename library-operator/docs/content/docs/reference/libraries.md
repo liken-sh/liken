@@ -111,7 +111,17 @@ The thumbnail sheets a scrub bar reads, built beside each video from the file al
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass reads every video of the library end to end, which is hours of CPU for a library of any size, and writes a directory of sheets beside every one of them. Turned on, the enricher Job gains a trickplay container that fills the gap one video after another. Default: `false`. |
+| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass reads every video of the library end to end, which is hours of CPU for a library of any size, and writes a directory of sheets beside every one of them. Turned on, the operator stands a trickplay Job beside the enricher, and that Job fills the gap one video after another. Default: `false`. |
+| <span id="spectrickplay--render"></span>`render` | [object](#spectrickplayrender) | no | The render node the trickplay Job decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the Job's pod claims one device of the class. Unset, the Job decodes in software. |
+
+#### spec.trickplay.render
+
+The render node the trickplay Job decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the Job's pod claims one device of the class. Unset, the Job decodes in software.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrickplayrender--class"></span>`class` | string | yes | The name of the DeviceClass the render node is allocated from. |
+| <span id="spectrickplayrender--selector"></span>`selector` | string | no | A CEL expression over device.attributes, for a class that offers more than one render node. |
 
 ## status
 

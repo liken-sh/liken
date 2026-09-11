@@ -64,15 +64,36 @@ func ffmpegSheets(ctx context.Context, input, directory string) error {
 	// which is what the JPEG encoder takes.
 	filter := fmt.Sprintf("fps=1/%d,scale=%d:-2,tile=%dx%d",
 		int(trickplayInterval.Seconds()), trickplayWidth, trickplayColumns, trickplayRows)
-	command := exec.CommandContext(timed, "ffmpeg",
-		"-nostdin", "-loglevel", "error", "-i", input,
+	arguments := []string{"-nostdin", "-loglevel", "error"}
+	// Plain -hwaccel vaapi decodes on the node and downloads the frames, so the
+	// filter chain and the JPEG encode stay in software and a codec the node
+	// refuses falls back to software decoding.
+	if node := renderNode(); node != "" {
+		arguments = append(arguments, "-hwaccel", "vaapi", "-hwaccel_device", node)
+	}
+	arguments = append(arguments, "-i", input,
 		"-an", "-sn", "-dn", "-vf", filter, "-qscale:v", "4",
 		"-start_number", "0", "-f", "image2", filepath.Join(directory, "%d"+sheetExtension))
+	command := exec.CommandContext(timed, "ffmpeg", arguments...)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg %s: %w: %s", filepath.Base(input), err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// The directory the kernel puts a GPU's render nodes in, a variable so a test
+// points the lookup at a directory of its own.
+var renderNodeDirectory = "/dev/dri"
+
+// The first render node of this machine, and an empty string where it holds
+// none, which is the software path.
+func renderNode() string {
+	nodes, err := filepath.Glob(filepath.Join(renderNodeDirectory, "renderD*"))
+	if err != nil || len(nodes) == 0 {
+		return ""
+	}
+	return nodes[0]
 }
 
 // Whether ffmpeg ended the run itself, with an exit code, which is what it

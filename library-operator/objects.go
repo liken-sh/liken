@@ -322,7 +322,8 @@ type PodSpec struct {
 	Volumes        []Volume    `json:"volumes,omitempty"`
 	// The claims the pod holds, under the names its containers ask for
 	// them by. A screen pod names the display claim media-operator stood for
-	// its Player, and no other pod this operator builds holds one.
+	// its Player, and a trickplay Job's pod names the template the
+	// operator keeps for its Library's render node.
 	ResourceClaims []PodResourceClaim `json:"resourceClaims,omitempty"`
 	// The scheduling rules the pod carries. The durable copies of a store
 	// are the only pods this operator gives any.
@@ -377,6 +378,9 @@ type LabelSelector struct {
 type PodResourceClaim struct {
 	Name              string `json:"name"`
 	ResourceClaimName string `json:"resourceClaimName,omitempty"`
+	// The template the kubelet mints this pod's own claim from, which is what a
+	// Job's pod names in place of a standing claim.
+	ResourceClaimTemplateName string `json:"resourceClaimTemplateName,omitempty"`
 }
 
 // Command replaces the image's entrypoint, which is how one image runs

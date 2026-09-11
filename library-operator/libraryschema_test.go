@@ -191,3 +191,27 @@ func TestTheOperatorReadsAFranchisesSpecTheSchemaAdmits(t *testing.T) {
 		t.Errorf("screenClaim = %q, want the art claim", spec.screenClaim())
 	}
 }
+
+// The render block the API server admits is the block the operator reads: a
+// DeviceClass name it requires, and a CEL selector it does not.
+func TestTheOperatorReadsARenderBlockTheSchemaAdmits(t *testing.T) {
+	render := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties", "trickplay", "properties", "render").(map[string]any)
+
+	required := render["required"].([]any)
+	if len(required) != 1 || required[0] != "class" {
+		t.Errorf("required = %v, want the class alone", required)
+	}
+	spec := LibrarySpec{}
+	if err := json.Unmarshal([]byte(`{"trickplay":{"enabled":true,`+
+		`"render":{"class":"gpu.liken.sh","selector":"true"}}}`), &spec); err != nil {
+		t.Fatal(err)
+	}
+	if spec.Trickplay.Render == nil {
+		t.Fatal("the operator read no render block")
+	}
+	if spec.Trickplay.Render.Class != "gpu.liken.sh" || spec.Trickplay.Render.Selector != "true" {
+		t.Errorf("render = %+v, want the class and the selector the schema states",
+			spec.Trickplay.Render)
+	}
+}

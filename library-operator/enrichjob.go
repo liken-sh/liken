@@ -59,7 +59,7 @@ func (o *operator) standEnrichClaim(ctx context.Context, library *Library, catal
 // the identity container, which is how a Library with no Ready provider still
 // runs the probe.
 func buildEnrichJob(library *Library, providers providerSet, name, path string,
-	scannerImage, corrosionImage, busAddress, topicBase string) *Job {
+	scannerImage, ffmpegImage, corrosionImage, busAddress, topicBase string) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	return &Job{
 		APIVersion: batchAPIVersion,
@@ -74,7 +74,7 @@ func buildEnrichJob(library *Library, providers providerSet, name, path string,
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
 			Template: enrichPodTemplate(library, providers, path,
-				scannerImage, corrosionImage, busAddress, topicBase),
+				scannerImage, ffmpegImage, corrosionImage, busAddress, topicBase),
 		},
 	}
 }
@@ -83,7 +83,7 @@ func buildEnrichJob(library *Library, providers providerSet, name, path string,
 // containers, and the enrich container is the one regular container: it
 // writes the runs row last and waits for the echo.
 func enrichPodTemplate(library *Library, providers providerSet, path string,
-	scannerImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
+	scannerImage, ffmpegImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
 	// An enricher holds no Kubernetes credential. It reads its work through the
 	// agent beside it and takes the provider key through a secretKeyRef, so
@@ -95,7 +95,7 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// The facts here edit the same sidecar file, so they must never run at
 	// once.
 	facts := []Container{
-		probeContainer(library, path, scannerImage, busAddress, topicBase),
+		probeContainer(library, path, ffmpegImage, busAddress, topicBase),
 		// The arrival container runs on every Library, because the fact asks no
 		// provider. It runs after the probe, because the probe container writes the
 		// run's started mark.
@@ -133,20 +133,6 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	if providers.servingContributors(library.Metadata.Namespace, library.Spec.Sources) != nil {
 		facts = append(facts, factsContainer(library, contributorsContainerName, contributorFactNames,
 			path, scannerImage, busAddress, topicBase))
-	}
-	// The trickplay container. It runs only where the Library turns the fact on,
-	// because a first pass over a whole library is hours of CPU. It asks no
-	// provider: the file alone answers it. It takes a memory line and a CPU
-	// request of its own because it decodes a video where every other container
-	// reads rows. It is an init container for the reason the art container is:
-	// The enrich container must run last. Plan 57 makes it a regular container
-	// once the fan-out exists.
-	if library.Spec.Trickplay.Enabled {
-		tiles := factsContainer(library, trickplayContainerName, []string{factTrickplay},
-			path, scannerImage, busAddress, topicBase)
-		tiles.Resources.Requests["cpu"] = trickplayCPURequest
-		tiles.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
-		facts = append(facts, tiles)
 	}
 	// The same environment carries the source order, so a container asks its
 	// providers in the order spec.sources names them.
@@ -249,10 +235,11 @@ func refreshValue(library *Library) string {
 // limit allows.
 const probeMemoryLimit = "256Mi"
 
-// The probe container: the one fact that runs a child process, with a memory
-// line of its own for it.
-func probeContainer(library *Library, path, scannerImage, busAddress, topicBase string) Container {
-	probe := factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase)
+// The probe container: the one fact of the enrich Job that runs a child
+// process, with a memory line of its own for it. It runs on the ffmpeg image,
+// because the operator's own image carries no ffprobe.
+func probeContainer(library *Library, path, ffmpegImage, busAddress, topicBase string) Container {
+	probe := factsContainer(library, factProbe, []string{factProbe}, path, ffmpegImage, busAddress, topicBase)
 	probe.Resources.Limits = map[string]string{"memory": probeMemoryLimit}
 	return probe
 }

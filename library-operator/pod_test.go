@@ -19,6 +19,7 @@ const (
 	testScannerImage   = "ghcr.io/liken-sh/library-operator:test"
 	testCorrosionImage = "ghcr.io/liken-sh/library-operator-corrosion:test"
 	testBrowserImage   = "ghcr.io/liken-sh/library-operator-media-browser:test"
+	testFFmpegImage    = "ghcr.io/liken-sh/library-operator-ffmpeg:test"
 	testBusAddress     = "bus.liken-system.svc:1883"
 )
 

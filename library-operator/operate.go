@@ -24,13 +24,14 @@ import (
 	"time"
 )
 
-// The three image overrides. A variable that is set wins over the
+// The four image overrides. A variable that is set wins over the
 // image operatorimages.go derives from the operator's own pod, and
 // one that is unset derives.
 const (
 	scannerImageVariable   = "SCANNER_IMAGE"
 	corrosionImageVariable = "CORROSION_IMAGE"
 	browserImageVariable   = "BROWSER_IMAGE"
+	ffmpegImageVariable    = "FFMPEG_IMAGE"
 )
 
 // The name this operator answers to as an idle controller. A Player
@@ -60,6 +61,8 @@ type operator struct {
 	scannerImage   string
 	corrosionImage string
 	browserImage   string
+	// The image the probe container and the trickplay Job run on.
+	ffmpegImage string
 	// The household wall-clock zone the pass read last, which every screen
 	// pod it stands carries as TZ. Empty where the cluster states none.
 	timeZone   string
@@ -143,13 +146,15 @@ type operator struct {
 // bus subscriptions that fill it. The subscriptions are remembered
 // here and sent on every connection, so they outlive a broker
 // restart.
-func newOperator(client *Client, scannerImage, corrosionImage, browserImage, busAddress, topicBase, namespace, webhookAddress string) *operator {
+func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffmpegImage,
+	busAddress, topicBase, namespace, webhookAddress string) *operator {
 	wake := make(chan struct{}, 1)
 	library := &operator{
 		client:         client,
 		scannerImage:   scannerImage,
 		corrosionImage: corrosionImage,
 		browserImage:   browserImage,
+		ffmpegImage:    ffmpegImage,
 		busAddress:     busAddress,
 		topicBase:      topicBase,
 		namespace:      namespace,
@@ -239,7 +244,7 @@ func operate() error {
 	}
 
 	library := newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
-		busAddress, topicBase, namespace, ":"+port)
+		stamped.ffmpeg, busAddress, topicBase, namespace, ":"+port)
 	library.mediaTopicBase = mediaTopicBase
 
 	// The metrics listener's address, with no default: milestone 65

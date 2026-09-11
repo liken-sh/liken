@@ -141,6 +141,14 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, create, delete]
+  # The ResourceClaimTemplate each Library that names a render node keeps, one
+  # per Library, owned by it. The trickplay Job's pod names the template and the
+  # kubelet mints the claim from it. The delete covers two cases: a Library that
+  # no longer names a render node, and a render block that changed, because a
+  # template's spec is immutable.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaimtemplates]
+    verbs: [get, list, watch, create, delete]
   # The StorageClass every claim names, read by name for one answer: the
   # provisioner behind it. A class the per-node driver serves is the one
   # the operator writes the volume for itself. The operator never

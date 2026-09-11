@@ -74,7 +74,17 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err := o.serveHeldPaths(ctx, library, jobs, now); err != nil {
 			return err
 		}
+		// The render template stands before either scheduler, because a pod
+		// that names a template nothing has created never starts.
+		if err := o.standTrickplayTemplate(ctx, library); err != nil {
+			return err
+		}
 		if err := o.enrich(ctx, library, choice.catalog, report, jobs, providers); err != nil {
+			return err
+		}
+		// The trickplay Job stands beside the enricher and waits on none of its
+		// work.
+		if err := o.trickplay(ctx, library, choice.catalog, report, jobs); err != nil {
 			return err
 		}
 	} else if err := o.stopScanCronJob(ctx, library); err != nil {

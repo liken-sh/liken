@@ -4,12 +4,12 @@ package main
 // come from its own pod. The Deployment names the operator image
 // once, with a tag, and every companion image is that repository at
 // the same tag: library-operator itself for the scanner, and
-// library-operator-corrosion and library-operator-media-browser
-// beside it. So one pin in a kustomization moves every image
-// together, and no manifest names a version twice. SCANNER_IMAGE,
-// CORROSION_IMAGE, and BROWSER_IMAGE still win when set, for a test
-// or for a cluster whose pod names its image by digest, which has no
-// tag to share.
+// library-operator-corrosion, library-operator-media-browser, and
+// library-operator-ffmpeg beside it. So one pin in a kustomization
+// moves every image together, and no manifest names a version twice.
+// SCANNER_IMAGE, CORROSION_IMAGE, BROWSER_IMAGE, and FFMPEG_IMAGE still
+// win when set, for a test or for a cluster whose pod names its image
+// by digest, which has no tag to share.
 
 import (
 	"context"
@@ -27,17 +27,20 @@ const (
 	operatorContainer = "operator"
 )
 
-// The three images the operator stamps into the pods and Jobs it
-// creates, and the tag they share. Version feeds liken_build_info, the
-// gauge every process in the organization carries, so a cluster's
-// dashboard shows this operator's release without a second source for
-// it. It is empty where every image variable is set by hand, because a
-// pin with no tag names no release to report.
+// The four images the operator stamps into the pods and Jobs it creates, and
+// the tag they share. Version feeds liken_build_info, the gauge every process
+// in the organization carries, so a cluster's dashboard shows this operator's
+// release without a second source for it. It is empty where every image
+// variable is set by hand, because a pin with no tag names no release to
+// report.
 type images struct {
 	scanner   string
 	corrosion string
 	browser   string
-	version   string
+	// The image the two file facts run on, which carries ffprobe, ffmpeg, and
+	// the VA-API drivers.
+	ffmpeg  string
+	version string
 }
 
 // operatorImages settles each companion image. A variable that is
@@ -50,8 +53,9 @@ func operatorImages(ctx context.Context, client *Client, namespace string) (imag
 		scanner:   os.Getenv(scannerImageVariable),
 		corrosion: os.Getenv(corrosionImageVariable),
 		browser:   os.Getenv(browserImageVariable),
+		ffmpeg:    os.Getenv(ffmpegImageVariable),
 	}
-	if named.scanner != "" && named.corrosion != "" && named.browser != "" {
+	if named.scanner != "" && named.corrosion != "" && named.browser != "" && named.ffmpeg != "" {
 		return named, nil
 	}
 	name := os.Getenv(podNameVariable)
@@ -78,6 +82,9 @@ func operatorImages(ctx context.Context, client *Client, namespace string) (imag
 	}
 	if named.browser != "" {
 		derived.browser = named.browser
+	}
+	if named.ffmpeg != "" {
+		derived.ffmpeg = named.ffmpeg
 	}
 	return derived, nil
 }
@@ -107,6 +114,7 @@ func deriveImages(reference string) (images, error) {
 		scanner:   reference,
 		corrosion: repository + "-corrosion:" + tag,
 		browser:   repository + "-media-browser:" + tag,
+		ffmpeg:    repository + "-ffmpeg:" + tag,
 		version:   tag,
 	}, nil
 }

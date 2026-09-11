@@ -28,7 +28,7 @@ func testEnrichJob(library *Library, path string, providers ...*MetadataProvider
 		library.Spec.Sources = append(library.Spec.Sources, provider.Metadata.Name)
 	}
 	return buildEnrichJob(library, set, enrichJobName(library.Metadata.Name), path,
-		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testFFmpegImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
 // the pod holds the catalog agent, then the two facts that edit the

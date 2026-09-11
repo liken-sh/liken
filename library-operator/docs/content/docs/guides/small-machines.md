@@ -65,17 +65,18 @@ happens once:
 
 A scan `Job` requests `32Mi` with a `64Mi` limit, and its own catalog
 agent the same. The enrich `Job`'s art container is limited to `256Mi`.
-The trickplay container, when enabled, requests half a CPU with a
-`512Mi` limit, because it runs `ffmpeg` where every other container
-reads rows and files. Every pod that runs an agent has a sixty-second
+The trickplay `Job`, when enabled, requests half a CPU with a `512Mi`
+limit, because it runs `ffmpeg` where every other container reads
+rows and files, and it runs beside the enrich `Job` with a catalog
+agent of its own. Every pod that runs an agent has a sixty-second
 termination grace period, twice the default, because a busy agent
 flushes its database on the way out.
 
 ## What to turn down
 
 * **Leave `spec.trickplay.enabled` off**, its default. The first pass
-  reads every video end to end, hours of CPU on any library, and it is
-  the one enrich container with a CPU request of its own.
+  reads every video end to end, hours of CPU on any library. Where it
+  is on, `spec.trickplay.render` moves the decode onto the GPU.
 * **Walk less often.** `spec.scan.schedule` defaults to once an hour.
   A webhook covers imports between walks:
 

@@ -194,6 +194,17 @@ type LibrarySpec struct {
 // The trickplay block of the spec, off unless the owner turns it on.
 type LibraryTrickplay struct {
 	Enabled bool `json:"enabled,omitempty"`
+
+	// The render node the trickplay Job claims for the decode. Unset, the Job
+	// carries no claim and decodes in software.
+	Render *TrickplayDevice `json:"render,omitempty"`
+}
+
+// One DeviceClass name, and a CEL expression over that class's devices where
+// the class alone chooses too many.
+type TrickplayDevice struct {
+	Class    string `json:"class"`
+	Selector string `json:"selector,omitempty"`
 }
 
 // The schedule the Library's full walk runs on, as the cron

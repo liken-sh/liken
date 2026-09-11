@@ -201,7 +201,7 @@ jobs:
   images:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # One job per image, so the three build at once and the run is as
+    # One job per image, so the four build at once and the run is as
     # long as the slowest of them, not the sum.
     strategy:
       fail-fast: false
@@ -209,10 +209,16 @@ jobs:
         include:
           - image: library-operator
             context: .
+            file: Dockerfile
+          - image: library-operator-ffmpeg
+            context: .
+            file: Dockerfile.ffmpeg
           - image: library-operator-media-browser
             context: media-browser
+            file: media-browser/Dockerfile
           - image: library-operator-corrosion
             context: corrosion
+            file: corrosion/Dockerfile
     steps:
       # The media browser image builds liken-iced from the submodule at
       # media-browser/brand, inside the build context. A checkout
@@ -234,7 +240,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          file: ${{ matrix.context }}/Dockerfile
+          file: ${{ matrix.file }}
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
 

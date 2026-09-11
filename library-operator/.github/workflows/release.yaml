@@ -16,10 +16,9 @@
 # The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The three images release together, always, under one version. The
-# operator names the other two in the pods it creates, and a pair that
-# could drift apart would put the catalog contract at two versions at
-# once.
+# The four images release together, always, under one version. The operator
+# names the other three in the pods it creates, and a set that could drift apart
+# would put the catalog contract at two versions at once.
 #
 # The run is one job: it builds the images, proves them, waits for
 # the ci.yaml run of the same commit, and pushes only when that run
@@ -99,6 +98,8 @@ jobs:
             echo "    newTag: $VERSION"
             echo "  - name: ghcr.io/$GITHUB_REPOSITORY-corrosion"
             echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-ffmpeg"
+            echo "    newTag: $VERSION"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -110,9 +111,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The three images build here and push nothing yet. The gates
-      # below have to pass first, and a push that happened first would
-      # leave a broken :latest behind when a gate failed.
+      # The four images build here and push nothing yet. The gates below have to
+      # pass first, and a push that happened first would leave a broken :latest
+      # behind when a gate failed.
       #
       # The builds read and write the :buildcache tags beside each
       # image. A tag's release of a commit whose development build
@@ -129,6 +130,20 @@ jobs:
           tags: |
             ghcr.io/liken-sh/library-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/library-operator:latest
+
+      # The same binary as the operator image, on liken's ffmpeg base. The probe
+      # container and the trickplay Job take it.
+      - name: Build the ffmpeg image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ffmpeg
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/library-operator-ffmpeg:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/library-operator-ffmpeg:${{ env.VERSION }}
+            ghcr.io/liken-sh/library-operator-ffmpeg:latest
 
       - name: Build the media browser image
         uses: docker/build-push-action@v6
@@ -168,6 +183,12 @@ jobs:
           set -eu
           docker run --rm "ghcr.io/liken-sh/library-operator-media-browser:$VERSION" --help
           docker run --rm "ghcr.io/liken-sh/library-operator-corrosion:$VERSION" --version
+          ffmpeg_image="ghcr.io/liken-sh/library-operator-ffmpeg:$VERSION"
+          docker run --rm --entrypoint /usr/bin/ffprobe "$ffmpeg_image" -version
+          docker run --rm --entrypoint /usr/bin/ffmpeg "$ffmpeg_image" -version
+          # The runner has no GPU to decode on, so the check is that this ffmpeg
+          # was built with the VA-API decoder at all.
+          docker run --rm --entrypoint /usr/bin/ffmpeg "$ffmpeg_image" -hwaccels | grep -q vaapi
 
       # ci.yaml runs beside this workflow on a push to main and holds
       # the coverage floors and the other checks. This step waits for
@@ -215,8 +236,10 @@ jobs:
           docker push "ghcr.io/liken-sh/library-operator:$VERSION"
           docker push "ghcr.io/liken-sh/library-operator-media-browser:$VERSION"
           docker push "ghcr.io/liken-sh/library-operator-corrosion:$VERSION"
+          docker push "ghcr.io/liken-sh/library-operator-ffmpeg:$VERSION"
           if [ "$RELEASE" = true ]; then
             docker push "ghcr.io/liken-sh/library-operator:latest"
             docker push "ghcr.io/liken-sh/library-operator-media-browser:latest"
             docker push "ghcr.io/liken-sh/library-operator-corrosion:latest"
+            docker push "ghcr.io/liken-sh/library-operator-ffmpeg:latest"
           fi

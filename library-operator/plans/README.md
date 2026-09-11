@@ -207,6 +207,10 @@ Plan 32 stands apart from the enrichment work.
   its first frame within about 60 ms of the `Idle` status. The drill
   widened the edge to a move from any activity to `Idle`, so a `Play`
   that never played returns the page too.
+* [58, Trickplay on the GPU](completed/58-trickplay-on-the-gpu.md).
+  Built on 2026-09-11. The trickplay fact runs as its own Job, claims
+  the node's GPU through a ResourceClaimTemplate the Library names,
+  and decodes through VA-API on display-operator's ffmpeg base.
 * [61, A series folder with no year](completed/61-a-series-folder-with-no-year.md).
   Built on 2026-09-11. The ladder reads the episode titles off the
   file names and matches them against each candidate's season on
