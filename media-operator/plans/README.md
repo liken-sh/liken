@@ -275,6 +275,10 @@ These plans are designed. Each keeps its number and moves to
   under the `theater` `Layout` the clock drew in that region and the
   status read `Idle` 144 ms after the ending report.
   display-operator 2026.09.10-001 rolls first on any cluster.
+* [31, The player on the mpv image](completed/31-the-player-on-the-mpv-image.md).
+  Built on 2026-09-11. The player image leaves its Ubuntu base for the
+  display operator's mpv image, a closure on scratch, and answers the
+  open problem "the player image is still a distribution".
 * [30, The film leaves with the
   lights](completed/30-the-film-leaves-with-the-lights.md). Built, and
   drilled on `liken-1` on 2026-09-10 in release 2026.09.10-001. A
@@ -297,12 +301,6 @@ These plans are designed. Each keeps its number and moves to
 owes an answer to. Those documents have no number, because nobody
 has decided yet what work they become.
 
-* [The player image is still a distribution](open-problems/the-player-image-is-still-a-distribution.md).
-  The operator image is one binary on `scratch`; the player image is
-  a distribution base, because `mpv`'s runtime closure is wide. The
-  audio operator's closure-on-scratch treatment applies, with the
-  complication that `mpv` loads its GPU drivers only on real
-  hardware.
 * [The broker is not configurable](open-problems/the-broker-is-not-configurable.md).
   Plan 03 stands up its own MQTT broker and fixes the topic base. A
   home that already runs a broker, for Home Assistant or zigbee2mqtt,

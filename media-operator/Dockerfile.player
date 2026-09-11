@@ -1,9 +1,15 @@
-# The player image: mpv, the libraries that decode on a real machine,
-# and the same binary the operator image carries. In this image the
-# binary runs as the player shim alone; every sidecar mode runs on the
-# sidecar image. The operator's own image cannot serve here, because it
-# is one static binary on scratch and mpv needs a video and audio stack
-# under it.
+# The player image: the display operator's mpv image, the brand's fonts,
+# the display script, and the same binary the operator image carries. In
+# this image the binary runs as the player shim alone; every sidecar mode
+# runs on the sidecar image. The operator's own image cannot serve here,
+# because it is one static binary on scratch and mpv needs a video and
+# audio stack under it.
+
+# The runtime base of the last stage. An argument a FROM line reads has
+# to be declared before the first stage, so it is here and not beside
+# the stage that uses it. The tag pins one release of the display
+# operator, and a workstation sets the argument to a base it built.
+ARG MPV_BASE=ghcr.io/liken-sh/mpv:2026.09.11-002
 
 # The build stage repeats the operator image's, so every image that
 # carries the binary carries the same one, built from the same source.
@@ -23,58 +29,29 @@ COPY edl/ ./edl/
 # serves both images.
 RUN CGO_ENABLED=0 go build -trimpath -o /media-operator .
 
-# A distribution base, unlike the operator's scratch. mpv opens a
-# wide dynamic closure at run time, the GL and EGL stack, the VA-API
-# driver, and the PipeWire client libraries, and the closure comes
-# soundest from the distribution that built mpv against it.
-#
-# The digest pins the base to one exact image, so a rebuild starts from the
-# same bytes after Ubuntu republishes the 26.04 tag. To move to a newer base,
-# read the new digest with docker inspect and replace it here.
-FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
-
-# mpv plays. intel-media-va-driver decodes on the Intel iGPUs these
-# machines have. libgl1-mesa-dri carries Mesa's GL drivers. The
-# dmabuf-wayland output renders nothing through them; they stay for the
-# gpu output, which MEDIA_PLAYER_OPTIONS can still select.
-#
-# pipewire-bin is not optional: libpipewire refuses to build a
-# client context without /usr/share/pipewire/client.conf, that file
-# ships in pipewire-bin, and --ao=pipewire fails without it.
-#
-# The image installs no font package for the display's own family. The
-# brand's two OTF files arrive below as files, and libass resolves the
-# family name display/theme.lua states through fontconfig.
-#
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, so a CJK title or subtitle track name renders instead of a blank box.
 # Source Sans 3 carries none of those characters, and the full Noto CJK family
 # reads better but is far larger, so this face is what the image installs.
-#
-# tzdata carries the zoneinfo database, so the display clock resolves the
-# household's TZ to a wall-clock time instead of UTC.
-#
-# The Snapshot line pins apt to the archive as it stood at one instant, so the
-# versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the seven versions from a build
-# at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries
-# no certificate store, so the build installs ca-certificates from the default
-# archive first, then purges it after the pinned install so it leaves no trace
-# in the runtime.
+# The runtime below has no package manager, so the file comes out of a
+# Debian stage on the suite the base is built from.
+FROM debian:trixie-slim AS fonts
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && sed -i '/^Signed-By:/a Snapshot: 20260822T000000Z' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        mpv=0.41.0-2ubuntu4 \
-        intel-media-va-driver=26.1.2+dfsg1-1 \
-        libgl1-mesa-dri=26.0.8-1ubuntu0.3 \
-        pipewire-bin=1.6.2-1ubuntu1.1 \
-        fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
-        tzdata=2026c-0ubuntu0.26.04.1 \
-    && apt-get purge -y ca-certificates \
-    && apt-get autoremove -y --purge \
+    && apt-get install -y --no-install-recommends fonts-droid-fallback \
     && rm -rf /var/lib/apt/lists/*
+
+# The runtime is liken's mpv image: mpv, the PipeWire client modules and
+# SPA plugins it opens by name, and the fontconfig configuration libass
+# reads, on the ffmpeg, VA-API, and Vulkan trees under it, on scratch.
+# The display operator builds it beside the compositor, so a node that
+# runs both holds one libva and one Mesa. The base carries the zoneinfo
+# database, so the display clock resolves the household's TZ to a
+# wall-clock time. No font package is installed for the display's own
+# family: the brand's two OTF files arrive below as files, and libass
+# resolves the family display/theme.lua names through fontconfig.
+FROM ${MPV_BASE}
+
+COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
 
 COPY --from=build /media-operator /media-operator
 
