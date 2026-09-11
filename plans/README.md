@@ -20,7 +20,7 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 66.
+milestone is 67.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and
@@ -244,14 +244,14 @@ milestone number because their implementation scope is not settled.
 ## Not built yet
 
 * **33.** [Updating the machine's own firmware](33-firmware-updates.md).
-  fwupd as a feature slug, using the rolling-reboot orchestration that
-  liken already has. A shim variable store turns fwupd's firmware
-  writes into requests that init approves or refuses. It waits for
-  experience
-  with bare metal. Its boot-path prerequisite is built: a UEFI machine
-  writes its boot entries again on every boot, and its proven slot
-  holds a loader that a firmware at its defaults finds, so NVRAM loss
-  no longer needs an install stick.
+  fwupd as a feature, with init as the only writer of the boot chain:
+  a tmpfs in place of efivarfs turns fwupd's variable writes into
+  requests that init approves or refuses. The fallback that a
+  firmware update can erase is built: a UEFI machine writes its boot
+  entries again on every boot, and its proven slot holds a loader that
+  a firmware at its defaults finds. The plan names four prerequisites
+  that are not built, and its first slice is a firmware version in
+  Machine status.
 * **34.** [GPU add-ons](34-gpu-add-ons.md). A machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.
@@ -266,6 +266,12 @@ milestone number because their implementation scope is not settled.
   The netbooted report posts to the cluster as an `Enrollment`, and
   approval is applying the proposed `Machine`, with a CLI verb as
   sugar.
+* **66.** [Durability and safety in the boot chain, the operators, and CI](66-durability-and-safety.md).
+  One rule, applied in four places: when the code does not know, it
+  refuses or reports. The BIOS arm and the crash copy get a device
+  flush and a completion marker, init's supervisor bounds its waits
+  and its reaped-status map, the operators refuse to publish on a
+  failed read, and the CRD and CI contracts match what the code does.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
