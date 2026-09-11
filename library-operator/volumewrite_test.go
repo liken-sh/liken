@@ -427,3 +427,47 @@ func TestSyncingATreeThatIsNotThereIsAnError(t *testing.T) {
 		t.Error("the sync ran, want an error")
 	}
 }
+
+func TestOnlyATrickplayMapInALayoutFolderIsRemoved(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "the map in the layout folder", want: true,
+			path: "/media/One (2001).trickplay/320 - 10x10/tiles.vtt"},
+		{name: "a map whose grandparent is no trickplay directory",
+			path: "/media/One (2001)/320 - 10x10/tiles.vtt"},
+		{name: "a map directly under the trickplay directory",
+			path: "/media/One (2001).trickplay/tiles.vtt"},
+		{name: "a sheet in the layout folder",
+			path: "/media/One (2001).trickplay/320 - 10x10/0.jpg"},
+		{name: "a subtitle beside the video",
+			path: "/media/One (2001)/One (2001).vtt"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isTrickplayMap(test.path); got != test.want {
+				t.Errorf("isTrickplayMap(%q) = %v, want %v", test.path, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTheTrickplayDoorRemovesTheMapAndLeavesTheSheet(t *testing.T) {
+	layout := filepath.Join(t.TempDir(), "One (2001)"+trickplayExtension, trickplayTilesFolder())
+	writeFile(t, filepath.Join(layout, trickplayMapName), "WEBVTT\n")
+	writeFile(t, filepath.Join(layout, "0.jpg"), "sheet")
+	writer := newVolumeWriter("movies-enrich")
+
+	if err := writer.removeTrickplayMap(filepath.Join(layout, trickplayMapName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writer.removeTrickplayMap(filepath.Join(layout, "0.jpg")); err == nil {
+		t.Error("the door removed a sheet, want it refused")
+	}
+	if left := namesIn(t, layout); len(left) != 1 || left[0] != "0.jpg" {
+		t.Errorf("the layout folder holds %v, want the sheet alone", left)
+	}
+}

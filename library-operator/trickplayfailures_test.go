@@ -41,24 +41,14 @@ func TestARowTheTrickplayGapCannotUseIsNoGap(t *testing.T) {
 	}
 }
 
-// A sheet ffmpeg wrote that is no image, and a directory the volume will not
-// take, are both errors with a date, so the file is tried again on a later
-// run and never opened twice in one.
+// A run ffmpeg did not finish, and output the volume no longer holds, are both
+// errors with a date, so the file is tried again on a later run and never
+// opened twice in one.
 func TestTheTrickplayFactRecordsWhatTheVolumeRefused(t *testing.T) {
 	cases := []struct {
 		name  string
 		setUp func(t *testing.T, root string)
 	}{
-		{name: "a sheet that is no image", setUp: func(t *testing.T, root string) {
-			t.Helper()
-			standInFFmpegWritingJunk(t)
-		}},
-		{name: "a tiles folder that takes no map", setUp: func(t *testing.T, root string) {
-			t.Helper()
-			video := filepath.Join(root, trickplayFolder, trickplayFile)
-			staging := newVolumeWriter("movies-enrich").temporary(trickplayDirectory(video))
-			standInFFmpegSealing(t, filepath.Join(staging, trickplayTilesFolder()))
-		}},
 		{name: "a crash between two sheets", setUp: func(t *testing.T, root string) {
 			t.Helper()
 			standInFFmpegFailingAfterASheet(t)

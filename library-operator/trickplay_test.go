@@ -5,15 +5,16 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// what these tests read: the gap the trickplay fact works from, the sheets and
-// the map it leaves beside a video, what it does with a directory another tool
-// wrote, and what each outcome records in the ledger.
+// The gap the trickplay fact works from, the sheets it leaves beside a video,
+// what it does with a directory another tool wrote, and what each outcome
+// records in the ledger. The map sweep has its own file.
 
 // The library, the folder, and the file every case below works on.
 const (
@@ -60,19 +61,6 @@ func standInFFmpeg(t *testing.T, sheets int) {
 	}
 	// The stand-in leads the path, so it answers in place of any ffmpeg the
 	// machine holds, and the script still reaches the tools it copies with.
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-// A stand-in for ffmpeg that writes a sheet no image reader can measure, so a
-// test drives what the fact does with output it cannot use.
-func standInFFmpegWritingJunk(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "ffmpeg"),
-		"#!/bin/sh\nfor last; do :; done\necho junk > \"$(dirname \"$last\")/0.jpg\"\n")
-	if err := os.Chmod(filepath.Join(dir, "ffmpeg"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
@@ -140,7 +128,7 @@ func seedTrickplayGap(t *testing.T, catalog *Catalog, root string, duration time
 	}
 }
 
-// The folder the sheets and the map land in for the file above.
+// The folder the sheets land in for the file above.
 func trickplayTilesUnder(root string) string {
 	return filepath.Join(root, trickplayFolder,
 		strings.TrimSuffix(trickplayFile, ".mkv")+trickplayExtension, trickplayTilesFolder())
@@ -210,8 +198,8 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 }
 
 // The whole run over one title: the sheets under Jellyfin's own folder name,
-// the map beside them, and no staging directory left on the volume.
-func TestTheTrickplayFactWritesSheetsAndAMapBesideTheVideo(t *testing.T) {
+// nothing else in that folder, and no staging directory left on the volume.
+func TestTheTrickplayFactWritesSheetsBesideTheVideo(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedTrickplayGap(t, catalog, root, 1050*time.Second)
@@ -222,11 +210,8 @@ func TestTheTrickplayFactWritesSheetsAndAMapBesideTheVideo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tiles := trickplayTilesUnder(root)
-	for _, name := range []string{"0.jpg", "1.jpg", trickplayIndexName} {
-		if !fileExistsInTest(t, filepath.Join(tiles, name)) {
-			t.Errorf("%s is not beside the video", name)
-		}
+	if left := namesIn(t, trickplayTilesUnder(root)); !slices.Equal(left, []string{"0.jpg", "1.jpg"}) {
+		t.Errorf("the tiles folder holds %v, want the sheets alone", left)
 	}
 	if !strings.Contains(log.String(), "wrote the trickplay of 1 of the 1 files") {
 		t.Errorf("log = %q, want the count of the files it filled", log)
@@ -239,31 +224,6 @@ func TestTheTrickplayFactWritesSheetsAndAMapBesideTheVideo(t *testing.T) {
 		if strings.Contains(entry.Name(), likenTempMark) {
 			t.Errorf("the run left %s on the volume", entry.Name())
 		}
-	}
-}
-
-// The map covers the thumbnails of the last, partly filled sheet, and it stops
-// at the title's own end rather than at the end of the padded grid.
-func TestTheMapCoversTheLastPartialSheet(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTrickplayGap(t, catalog, root, 1050*time.Second)
-	standInFFmpeg(t, 2)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	index := readFileString(t, filepath.Join(trickplayTilesUnder(root), trickplayIndexName))
-	if got := strings.Count(index, "#xywh="); got != 105 {
-		t.Errorf("cues = %d, want one per ten seconds of the title", got)
-	}
-	if !strings.Contains(index, "\n1.jpg#xywh=128,0,32,18\n") {
-		t.Error("the map names no thumbnail of the second sheet")
-	}
-	if !strings.Contains(index, "00:17:20.000 --> 00:17:30.000\n") {
-		t.Error("the last cue does not end where the title ends")
 	}
 }
 
@@ -285,7 +245,7 @@ func TestTheTrickplayFactLeavesTilesAnotherToolWrote(t *testing.T) {
 	if got := readFileString(t, held); got != "the sheet another tool wrote" {
 		t.Errorf("the sheet reads %q, want the bytes the other tool left", got)
 	}
-	if fileExistsInTest(t, filepath.Join(trickplayTilesUnder(root), trickplayIndexName)) {
+	if fileExistsInTest(t, filepath.Join(trickplayTilesUnder(root), trickplayMapName)) {
 		t.Error("the fact wrote a map into a directory another tool holds")
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, trickplayFolder), factTrickplay)

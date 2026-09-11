@@ -295,7 +295,7 @@ spec:
                 trickplay:
                   type: object
                   default: {}
-                  description: "The thumbnail sheets and the WebVTT map a scrub bar reads, built beside each video from the file alone, with no provider."
+                  description: "The thumbnail sheets a scrub bar reads, built beside each video from the file alone, with no provider, in the folder layout Jellyfin reads and writes."
                   properties:
                     enabled:
                       type: boolean

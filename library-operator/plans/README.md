@@ -211,6 +211,10 @@ Plan 32 stands apart from the enrichment work.
   Built on 2026-09-11. The ladder reads the episode titles off the
   file names and matches them against each candidate's season on
   TMDb, so a bare series folder identifies without a sidecar.
+* [59, The map nothing reads](completed/59-the-map-nothing-reads.md).
+  Built on 2026-09-11. The trickplay fact writes no WebVTT map, sweeps
+  the maps earlier runs wrote, and leaves the tile directory Jellyfin's
+  own extraction leaves.
 * [55, Lights down, lights up](completed/55-lights-down-lights-up.md).
   Built and drilled on `liken-1` on 2026-09-10 in release
   2026.09.10-002, and on the house the same evening. The browser dims

@@ -3,8 +3,9 @@ package main
 // volumewrite.go is the one door every enricher write to a library volume
 // goes through. On the lab that volume is the production copy, so the rules
 // here are what keep a bad write from losing a file a person cares about: a
-// temporary and a rename, an edit of one element, and a remove that refuses
-// every name but a temporary's.
+// temporary and a rename, an edit of one element, a remove that refuses
+// every name but a temporary's, and a remove that takes one file this
+// operator wrote and nothing else reads, the trickplay map.
 
 import (
 	"bytes"
@@ -124,6 +125,29 @@ func writeAndSync(file *os.File, data []byte) error {
 func (w *volumeWriter) removeTemporary(path string) error {
 	if !strings.Contains(filepath.Base(path), likenTempMark) {
 		return fmt.Errorf("refusing to remove %s: it carries no %s mark", path, likenTempMark)
+	}
+	return os.Remove(path)
+}
+
+// The WebVTT map earlier releases of the trickplay fact wrote beside the sheets.
+const trickplayMapName = "tiles.vtt"
+
+// Whether a path names that map, and only that map: the file name, inside a
+// layout folder, inside a .trickplay directory. A person's subtitle named
+// tiles.vtt sits beside a video and never two levels under a .trickplay.
+func isTrickplayMap(path string) bool {
+	if filepath.Base(path) != trickplayMapName {
+		return false
+	}
+	return filepath.Ext(filepath.Dir(filepath.Dir(path))) == trickplayExtension
+}
+
+// The second remove in the enrichers. It takes the map alone and refuses every
+// other path, so the guard above is the whole rule.
+func (w *volumeWriter) removeTrickplayMap(path string) error {
+	if !isTrickplayMap(path) {
+		return fmt.Errorf("refusing to remove %s: it is no %s under a %s directory",
+			path, trickplayMapName, trickplayExtension)
 	}
 	return os.Remove(path)
 }

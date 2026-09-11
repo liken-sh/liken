@@ -1,9 +1,10 @@
 package main
 
-// The trickplay fact's whole run: the gap of videos with a length and no tiles
-// beside them, the ffmpeg pass over one of them, and the sheets and the map
-// created where none exist. The fact asks no provider, because the file alone
-// answers it, and it writes nothing into the .nfo.
+// The trickplay fact's whole run: the sweep that removes the map earlier runs
+// wrote, the gap of videos with a length and no tiles beside them, the ffmpeg
+// pass over one of them, and the sheets created where none exist. The fact
+// asks no provider, because the file alone answers it, and it writes nothing
+// into the .nfo.
 
 import (
 	"context"
@@ -73,6 +74,9 @@ func (c *Catalog) trickplayGaps(ctx context.Context, library string,
 // the run carries on to the next file. The files run one at a time, so one
 // ffmpeg holds the container's memory line.
 func (e *enricher) trickplayFact(ctx context.Context) error {
+	if err := e.sweepTrickplayMaps(ctx); err != nil {
+		return err
+	}
 	gaps, err := e.catalog.trickplayGaps(ctx, e.library, time.Now().UTC(), e.refresh[factTrickplay])
 	if err != nil {
 		return err
@@ -101,13 +105,16 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 	folder, entry := likenFolderFor(e.kind, absolute)
 	target := trickplayDirectory(absolute)
 	if dirExists(target) {
+		if e.dropTrickplayMap(filepath.Join(target, trickplayTilesFolder())) {
+			e.logf("removed the trickplay map beside the sheets of %s", filepath.Base(absolute))
+		}
 		e.recordArt(folder, factTrickplay, entry, artProviderExisting, attemptFound)
 		return false
 	}
 	// The line goes out before the decode, because a decode of a feature
 	// runs for minutes with nothing else to say.
 	e.logf("tiling %s, %s long", filepath.Base(absolute), gap.duration.Round(time.Second))
-	result := e.buildTrickplay(ctx, absolute, target, gap.duration)
+	result := e.buildTrickplay(ctx, absolute, target)
 	e.recordArt(folder, factTrickplay, entry, "", result)
 	return result == attemptFound
 }
@@ -117,7 +124,7 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 // directory a player reads holds every sheet of the title or does not exist. A
 // run that ends before the rename leaves the staging alone on the volume, and
 // the run that follows it clears that staging first.
-func (e *enricher) buildTrickplay(ctx context.Context, input, target string, duration time.Duration) string {
+func (e *enricher) buildTrickplay(ctx context.Context, input, target string) string {
 	staging, err := e.writer.stageTree(target)
 	if err != nil {
 		e.logf("could not stage the trickplay of %s: %v", filepath.Base(input), err)
@@ -129,7 +136,7 @@ func (e *enricher) buildTrickplay(ctx context.Context, input, target string, dur
 		}
 	}()
 
-	sheets, result := e.stageTrickplay(ctx, input, staging, duration)
+	sheets, result := e.stageTrickplay(ctx, input, staging)
 	if result != attemptFound {
 		return result
 	}
@@ -146,11 +153,9 @@ func (e *enricher) buildTrickplay(ctx context.Context, input, target string, dur
 
 // The staged tree, which is the whole directory a player reads. ffmpeg tiles
 // its sheets straight into the folder that states the width and the grid, so
-// no sheet is ever read back to be written again, and the map goes beside
-// them. The tile size comes off the first sheet's own header, so the map
-// states the region ffmpeg actually wrote.
-func (e *enricher) stageTrickplay(ctx context.Context, input, staging string,
-	duration time.Duration) (int, string) {
+// no sheet is ever read back to be written again, and nothing else goes in
+// the folder: a player reads the geometry off the folder's name.
+func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (int, string) {
 	tiles := filepath.Join(staging, trickplayTilesFolder())
 	if err := os.MkdirAll(tiles, volumeDirectoryPerm); err != nil {
 		e.logf("could not stage the trickplay of %s: %v", filepath.Base(input), err)
@@ -176,15 +181,62 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string,
 		e.logf("ffmpeg read no frame of %s", filepath.Base(input))
 		return 0, attemptNothing
 	}
-	tileWidth, tileHeight, err := tileSize(filepath.Join(tiles, sheets[0]))
-	if err != nil {
-		e.logf("could not measure %s: %v", sheets[0], err)
-		return 0, attemptError
-	}
-	index := trickplayVTT(trickplayTiles(duration, len(sheets)), tileWidth, tileHeight, duration)
-	if err := e.writer.writeInto(tiles, trickplayIndexName, index); err != nil {
-		e.logf("could not write %s: %v", filepath.Join(tiles, trickplayIndexName), err)
-		return 0, attemptError
-	}
 	return len(sheets), attemptFound
+}
+
+// The tiled videos of one library. The scanner writes the directory it found
+// beside a video into the row, so the column names every video that has one,
+// whoever made it.
+func trickplayTiledSQL() string {
+	return `SELECT path, trickplay FROM files ` +
+		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
+		`AND trickplay != ''`
+}
+
+// The sweep. Earlier runs of this fact wrote a WebVTT map beside the sheets,
+// which no player reads and which Jellyfin counts as a thumbnail. The gap
+// never reaches a tiled video, because a video with a directory is no gap, so
+// the sweep reads the tiled videos on its own and removes the map under each.
+// One stat per tiled video, and no decode.
+func (e *enricher) sweepTrickplayMaps(ctx context.Context) error {
+	tiled, removed := 0, 0
+	err := e.catalog.stream(ctx, trickplayTiledSQL(), []any{e.library}, func(cells []any) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(cells) < 2 {
+			return nil
+		}
+		path, _ := cells[0].(string)
+		directory, _ := cells[1].(string)
+		if directory == "" || !e.inScope(path) {
+			return nil
+		}
+		tiled++
+		if e.dropTrickplayMap(filepath.Join(e.root, directory, trickplayTilesFolder())) {
+			removed++
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("reading the tiled files of %s: %w", e.library, err)
+	}
+	e.logf("removed the trickplay map of %d of the %d files that carry tiles", removed, tiled)
+	return nil
+}
+
+// The map of one layout folder, removed where it exists. A removal the volume
+// refuses is logged and changes no attempt, because the sheets beside it are
+// still the answer.
+func (e *enricher) dropTrickplayMap(layout string) bool {
+	path := filepath.Join(layout, trickplayMapName)
+	present, _ := fileExists(path)
+	if !present {
+		return false
+	}
+	if err := e.writer.removeTrickplayMap(path); err != nil {
+		e.logf("could not remove %s: %v", path, err)
+		return false
+	}
+	return true
 }
