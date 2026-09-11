@@ -82,6 +82,15 @@ func ffmpegSheets(ctx context.Context, input, directory string) error {
 	return nil
 }
 
+// What the log says about the decoder: the render node ffmpeg decodes on, or
+// the software path where the machine holds none.
+func decoderName() string {
+	if node := renderNode(); node != "" {
+		return "decoding on " + node
+	}
+	return "decoding in software"
+}
+
 // The directory the kernel puts a GPU's render nodes in, a variable so a test
 // points the lookup at a directory of its own.
 var renderNodeDirectory = "/dev/dri"

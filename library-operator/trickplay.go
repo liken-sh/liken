@@ -112,8 +112,9 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 		return false
 	}
 	// The line goes out before the decode, because a decode of a feature
-	// runs for minutes with nothing else to say.
-	e.logf("tiling %s, %s long", filepath.Base(absolute), gap.duration.Round(time.Second))
+	// runs for minutes with nothing else to say, and it names the decoder,
+	// because nothing else in the log says whether the GPU took the work.
+	e.logf("tiling %s, %s long, %s", filepath.Base(absolute), gap.duration.Round(time.Second), decoderName())
 	result := e.buildTrickplay(ctx, absolute, target)
 	e.recordArt(folder, factTrickplay, entry, "", result)
 	return result == attemptFound

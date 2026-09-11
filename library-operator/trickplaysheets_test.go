@@ -133,3 +133,23 @@ func TestTheDecodeStaysInSoftwareWithNoRenderNode(t *testing.T) {
 		t.Errorf("ffmpeg ran with %q, want no hardware decoder", got)
 	}
 }
+
+func TestTheLogNamesTheDecoder(t *testing.T) {
+	cases := []struct {
+		name  string
+		nodes []string
+		want  string
+	}{
+		{name: "a render node", nodes: []string{"renderD128"}, want: "decoding on "},
+		{name: "no render node", want: "decoding in software"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			seedRenderNodes(t, test.nodes...)
+
+			if got := decoderName(); !strings.HasPrefix(got, test.want) {
+				t.Errorf("decoder = %q, want a prefix of %q", got, test.want)
+			}
+		})
+	}
+}
