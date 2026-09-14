@@ -19,14 +19,19 @@ mp.msg.info("liken display loaded as script " .. mp.get_script_name())
 
 local overlay = mp.create_osd_overlay("ass-events")
 
+-- What the last update carried. mpv takes every osd-overlay command as a
+-- change: it packs the whole OSD again and composites every bitmap again on
+-- the video thread, inside the frame path, before the frame commits. The
+-- scrims cover most of the screen, so that costs the video a dropped frame.
+-- A string that matches the one on screen buys nothing, so it is never sent.
+local sent_data = nil
+local sent_res_x = nil
+local sent_res_y = nil
+
 -- Draw the scrubber, then the strip, then the open chooser last. The scrubber
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
-  -- The ass space is the canvas, and the canvas width follows the surface,
-  -- so the overlay takes both before it draws.
-  overlay.res_x = theme.canvas.w
-  overlay.res_y = theme.canvas.h
   -- The logo overlay tracks the OSD. It shows while the OSD is up, and it hides
   -- when the OSD hides and while a chooser captures, so a corner logo never
   -- lingers over a plain frame or floats above the chooser's dim. overlay-add
@@ -134,7 +139,30 @@ local function redraw()
   if vol then
     parts[#parts + 1] = vol
   end
-  overlay.data = table.concat(parts, "\n")
+  -- The ass space is the canvas, and the canvas width follows the surface, so
+  -- the overlay carries both sizes with the data.
+  local data = table.concat(parts, "\n")
+  local res_x = theme.canvas.w
+  local res_y = theme.canvas.h
+  if data == sent_data and res_x == sent_res_x and res_y == sent_res_y then
+    return
+  end
+  sent_data = data
+  sent_res_x = res_x
+  sent_res_y = res_y
+  -- A hidden OSD removes the overlay rather than send it empty. libass reports
+  -- a track with no events as changed on every frame, and mpv folds that into
+  -- the whole OSD, so an empty overlay left registered makes mpv composite
+  -- every other overlay again on every video frame, a logo or a cover among
+  -- them. A removed overlay reports nothing, and the next update registers it
+  -- again.
+  if data == "" then
+    overlay:remove()
+    return
+  end
+  overlay.res_x = res_x
+  overlay.res_y = res_y
+  overlay.data = data
   overlay:update()
 end
 
@@ -168,12 +196,42 @@ upnext.set_redraw(request_redraw)
 mp.observe_property("duration", "number", function()
   request_redraw()
 end)
-mp.observe_property("time-pos", "number", function()
+-- mpv pushes time-pos on every video frame, about twenty-four times a second,
+-- and a redraw builds the whole layout again. Three things on screen follow
+-- the value. The playhead moves one output pixel every few seconds. The time
+-- label changes once a second. The clock reads the wall minute. The signature
+-- carries the three, so a push that leaves it alone moves nothing a person can
+-- see and asks for no redraw. The second rounds the way the label rounds it.
+-- The minute comes from the wall clock, which runs whether or not the position
+-- moves. Everything else the position feeds changes at most once a minute, and
+-- the whole second catches it within a second.
+-- Every other module asks for its own redraws, and those requests stand.
+local function position_signature(value)
+  if value == nil then
+    return "none"
+  end
+  return string.format(
+    "%s %d %d",
+    tostring(scrubber.position_pixel(value)),
+    math.floor(value + 0.5),
+    math.floor(os.time() / 60)
+  )
+end
+
+local last_signature = nil
+mp.observe_property("time-pos", "number", function(_, value)
+  local signature = position_signature(value)
+  if signature == last_signature then
+    return
+  end
+  last_signature = signature
   request_redraw()
 end)
+-- The card raises itself when the playhead reaches the rise, and it asks for
+-- the redraw that shows it. mpv pushes this property as often as it pushes
+-- time-pos, so nothing else here may ask for one.
 mp.observe_property("percent-pos", "number", function(_, value)
   upnext.on_percent(value)
-  request_redraw()
 end)
 mp.observe_property("chapter", "number", function()
   request_redraw()

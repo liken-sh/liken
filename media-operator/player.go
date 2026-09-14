@@ -75,7 +75,12 @@ func runPlayer(items []string) {
 // run each named command and read the report. The display script directory
 // loads with --script, and the command sidecar drives it over that same IPC
 // socket. --osc=no turns off mpv's built-in on-screen controller,
-// because the display draws its own.
+// because the display draws its own. --load-console=no turns off mpv's
+// built-in command console, which nothing here opens. The console script
+// registers an empty OSD overlay at load and never removes it, and libass
+// reports a track with no events as changed on every frame, so mpv would
+// composite the whole OSD again on every video frame while the display
+// draws anything at all.
 //
 // The list ends with -- because a media path that starts with a dash
 // would otherwise read as a flag.
@@ -110,6 +115,7 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		"--input-ipc-server=" + mpvSocketPath,
 		"--script=" + displayScriptDir,
 		"--osc=no",
+		"--load-console=no",
 		// mpv's own OSD messages draw in the brand family; libass resolves
 		// it through fontconfig against the two OTF files the image installs.
 		"--osd-font=" + overlayFont,

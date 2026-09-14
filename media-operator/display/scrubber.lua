@@ -218,6 +218,40 @@ local function pos_to_x(dur, pos)
   return LEFT + bar_w() * (pos / dur)
 end
 
+-- The bar's geometry moves with the position, and every number in it reaches
+-- libass as text. The visible quantum is one output pixel, so a value that
+-- moves a hundredth of a canvas pixel changes the string and changes nothing a
+-- person sees. mpv answers a changed string with a whole recomposite, and
+-- libass misses its drawing cache on it. So every value that moves with the
+-- position snaps to the output pixel grid, and the string stands still between
+-- two frames of the same pixel. With no output size yet, the value snaps to a
+-- whole canvas pixel.
+-- The caller reads the scale once and passes it here, because the scale comes
+-- from a property read and the bar snaps several values per draw.
+local function to_pixel(x, scale)
+  if scale then
+    return math.floor(x * scale.sx + 0.5)
+  end
+  return math.floor(x + 0.5)
+end
+
+local function snap_x(x, scale)
+  if scale then
+    return to_pixel(x, scale) / scale.sx
+  end
+  return to_pixel(x, scale)
+end
+
+-- The output pixel column a position lands on, and nil with no duration. main
+-- reads it to tell whether a new time-pos moves the bar at all.
+function scrubber.position_pixel(pos)
+  local dur = mp.get_property_number("duration")
+  if not dur or dur <= 0 or pos == nil then
+    return nil
+  end
+  return to_pixel(pos_to_x(dur, math.max(0, math.min(dur, pos))), theme.osd_scale())
+end
+
 -- The displayed position in seconds, the in-flight cursor or time-pos, and nil
 -- with no duration. The thumbnail reads it to pick the frame to show.
 function scrubber.cursor_time()
@@ -235,7 +269,7 @@ function scrubber.cursor_x()
   if not dur or dur <= 0 then
     return nil
   end
-  return pos_to_x(dur, displayed_pos(dur))
+  return snap_x(pos_to_x(dur, displayed_pos(dur)), theme.osd_scale())
 end
 
 function scrubber.draw(axis)
@@ -245,8 +279,10 @@ function scrubber.draw(axis)
   end
   local pos_a, chap_a = brightness(axis)
 
+  -- One read of the output size serves every value the draw snaps.
+  local scale = theme.osd_scale()
   local pos = displayed_pos(dur)
-  local knobx = pos_to_x(dur, pos)
+  local knobx = snap_x(pos_to_x(dur, pos), scale)
 
   local chs = chapter_list()
   local cur = mp.get_property_number("chapter") or 0
@@ -263,6 +299,8 @@ function scrubber.draw(axis)
     parts[#parts + 1] = theme.rounded_rect(
       seg.x0, top, seg.w, BAR_H, SEG_R, theme.color.track, theme.alpha.track
     )
+    -- The fill ends at the playhead, so it moves on the same pixel grid and
+    -- its width holds still between two frames of the same pixel.
     local fill_right = math.max(seg.x0, math.min(seg.x0 + seg.w, knobx))
     local fillw = fill_right - seg.x0
     if fillw >= 1 then
@@ -284,7 +322,7 @@ function scrubber.draw(axis)
   -- read apart when they overlap.
   if cursor then
     local live = math.max(0, math.min(dur, mp.get_property_number("time-pos") or 0))
-    local livex = pos_to_x(dur, live)
+    local livex = snap_x(pos_to_x(dur, live), scale)
     parts[#parts + 1] = theme.rect(livex - 1, top - 6, 2, BAR_H + 12, theme.color.text, theme.alpha.subdued)
   end
 

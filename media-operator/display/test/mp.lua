@@ -15,8 +15,22 @@ function harness.new(properties)
     timeouts = {},
     periodics = {},
     properties = properties or {},
+    observers = {},
+    messages = {},
     time = 0,
   }
+
+  -- mpv writes these lines to the player log. Nothing reads them here.
+  fake.msg = {
+    info = function() end,
+    warn = function() end,
+    error = function() end,
+  }
+
+  -- The remote reaches a script by its name, and the display logs its own.
+  function fake.get_script_name()
+    return "display"
+  end
 
   -- mpv runs the command. This records it, in order.
   function fake.command_native(command)
@@ -41,6 +55,47 @@ function harness.new(properties)
 
   fake.get_property = fake.get_property_native
   fake.get_property_number = fake.get_property_native
+
+  -- The one overlay the display draws through. mpv composites the OSD again
+  -- for every update, so the fake records the data each update carried and a
+  -- test counts them.
+  function fake.create_osd_overlay(format)
+    local overlay = { format = format, updates = {}, removes = 0 }
+    function overlay:update()
+      self.updates[#self.updates + 1] = self.data
+    end
+    function overlay:remove()
+      self.removes = self.removes + 1
+    end
+    fake.overlay = overlay
+    return overlay
+  end
+
+  -- The observers a script arms, by property name. push below sends a value
+  -- to every observer of one property.
+  function fake.observe_property(name, _, fn)
+    local list = fake.observers[name]
+    if not list then
+      list = {}
+      fake.observers[name] = list
+    end
+    list[#list + 1] = fn
+  end
+
+  -- Set a property and tell its observers, the way mpv does when the value
+  -- changes. A reader that asks for the property afterward gets the new value.
+  function fake.push(name, value)
+    fake.properties[name] = value
+    for _, fn in ipairs(fake.observers[name] or {}) do
+      fn(name, value)
+    end
+  end
+
+  -- The script-messages a script answers, by name. A test calls one the way
+  -- the command sidecar sends it.
+  function fake.register_script_message(name, fn)
+    fake.messages[name] = fn
+  end
 
   -- The scrubber measures a hold against this clock. A test moves it by
   -- setting fake.time.
