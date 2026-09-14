@@ -1,6 +1,8 @@
 //! The header, the passive top-left region. It draws the current item's name
 //! from the resolved presentation fields, and takes no focus. A movie shows
 //! its title. A series shows the series name over a season and episode line.
+//! When the item carries a logo, the header shows the logo in place of that
+//! name.
 //! A music item shows the track title over the artist, then the album with
 //! its year.
 //! An album plays as one mpv item whose chapters are its tracks, so the track
@@ -19,6 +21,8 @@ const LEFT: f32 = theme::MARGIN_X;
 const TOP_Y: f32 = theme::MARGIN_Y;
 /// The second line sits below the title, far enough to clear the title glyphs.
 const SECOND_Y: f32 = TOP_Y + 82.0;
+/// With a logo, the second line sits this far below the logo's own bottom.
+const SECOND_GAP: f32 = 26.0;
 /// A music item runs to a third line, so the header keeps one drop from each
 /// of those lines to the next.
 const MUSIC_LINE_GAP: f32 = 46.0;
@@ -123,20 +127,22 @@ fn music_lines(presentation: &Presentation, film: &Film) -> Vec<String> {
     lines
 }
 
-// PROSE: with a logo, the second line clears the logo's own height; the art stage brings the bitmap and this reads the fixed line under the title until it does.
-fn second_y() -> f32 {
-    SECOND_Y
-}
-
-// PROSE: whether a logo stands in the title's place, which the art stage answers with the decoded bitmap.
-fn has_logo() -> bool {
-    false
+/// With a logo, the second line clears the logo's actual height, because a logo
+/// scales to its own size within the box. Without a logo it falls to the fixed
+/// line under the title.
+fn second_y(logo: Option<f32>) -> f32 {
+    match logo {
+        Some(rows) => TOP_Y + rows + SECOND_GAP,
+        None => SECOND_Y,
+    }
 }
 
 /// A series shows the series name over the season line. Everything else with a
 /// title shows the title. A field that resolved to nothing draws nothing. A
-/// logo takes the place of that name, and the second line stays as text.
-pub fn lines(presentation: &Presentation, film: &Film) -> Vec<Line> {
+/// logo takes the place of that name, and the second line stays as text. The
+/// logo is given as the rows it covers in canvas units, so the lines under it
+/// clear it.
+pub fn lines(presentation: &Presentation, film: &Film, logo: Option<f32>) -> Vec<Line> {
     let title = |content: String, y: f32| {
         Line::new(
             content,
@@ -166,10 +172,10 @@ pub fn lines(presentation: &Presentation, film: &Film) -> Vec<Line> {
             lines.push(title(name, TOP_Y));
         }
         for (index, line) in music_lines(presentation, film).into_iter().enumerate() {
-            lines.push(under(line, second_y() + index as f32 * MUSIC_LINE_GAP));
+            lines.push(under(line, second_y(logo) + index as f32 * MUSIC_LINE_GAP));
         }
     } else if presentation.hint() == Some("series") {
-        if !has_logo()
+        if logo.is_none()
             && let Some(series) = presentation
                 .series()
                 .map(str::to_string)
@@ -178,19 +184,19 @@ pub fn lines(presentation: &Presentation, film: &Film) -> Vec<Line> {
             lines.push(title(series, TOP_Y));
         }
         if let Some(line) = second_line(presentation) {
-            lines.push(under(line, second_y()));
+            lines.push(under(line, second_y(logo)));
         }
     } else {
         let name = presentation.title(film);
-        if !has_logo()
+        if logo.is_none()
             && let Some(name) = name.clone()
         {
             lines.push(title(name, TOP_Y));
         }
-        if (has_logo() || name.is_some())
+        if (logo.is_some() || name.is_some())
             && let Some(year) = presentation.year()
         {
-            lines.push(under(num(year), second_y()));
+            lines.push(under(num(year), second_y(logo)));
         }
     }
     lines
@@ -202,9 +208,13 @@ mod tests {
     use serde_json::json;
 
     fn shown(block: &str, film: &Film) -> Vec<(String, Point, f32)> {
+        with_logo(block, film, None)
+    }
+
+    fn with_logo(block: &str, film: &Film, logo: Option<f32>) -> Vec<(String, Point, f32)> {
         let mut presentation = Presentation::default();
         presentation.receive(block);
-        lines(&presentation, film)
+        lines(&presentation, film, logo)
             .into_iter()
             .map(|line| (line.content, line.at, line.size))
             .collect()
@@ -311,6 +321,44 @@ mod tests {
             shown(r#"{"type":"music","title":"A Record"}"#, &Film::default()),
             vec![("A Record".to_string(), Point::new(96.0, 90.0), 64.0)]
         );
+    }
+
+    /// A logo takes the place of the title, and the year under it clears the
+    /// logo's own rows.
+    #[test]
+    fn a_logo_takes_the_place_of_the_title() {
+        assert_eq!(
+            with_logo(
+                r#"{"title":"A Film","year":2014}"#,
+                &Film::default(),
+                Some(96.0)
+            ),
+            vec![("2014".to_string(), Point::new(96.0, 212.0), 34.0)]
+        );
+    }
+
+    /// A series with a logo shows the season line alone, under the logo.
+    #[test]
+    fn a_series_with_a_logo_shows_the_season_line_alone() {
+        assert_eq!(
+            with_logo(
+                r#"{"hint":"series","series":"A Show","episode":7}"#,
+                &Film::default(),
+                Some(110.0)
+            ),
+            vec![("Episode 7".to_string(), Point::new(96.0, 226.0), 34.0)]
+        );
+    }
+
+    /// An item with a logo and no title of its own still shows its year, and
+    /// one with neither a logo nor a title shows nothing at all.
+    #[test]
+    fn a_logo_carries_the_year_under_it() {
+        assert_eq!(
+            with_logo(r#"{"year":2014}"#, &Film::default(), Some(110.0)).len(),
+            1
+        );
+        assert!(shown(r#"{"year":2014}"#, &Film::default()).is_empty());
     }
 
     #[test]
