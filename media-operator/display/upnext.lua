@@ -1,7 +1,7 @@
 -- The up-next offer: the work the Play names as the one that follows it.
--- The command sidecar sends the block as the next script-message. This module
--- draws it as a chip while the film plays and as a card past ninety percent,
--- and focus routes a select on it.
+-- The command sidecar sends the block as the next script-message.
+-- This module draws the block as a chip while the film plays, and as a card
+-- near the end of it. Focus routes a select on it.
 local theme = require("theme")
 local utils = require("mp.utils")
 local advances = require("advances")
@@ -33,13 +33,17 @@ local CHIP_H = 34
 local CHIP_PAD_X = 22
 local CHIP_PAD_Y = 6
 
--- The tab that remains at the screen edge after the card fades.
-local SLIVER_W = 22
-
--- The percent the card rises at. It is the same line the library's progress
--- store counts a play as finished at, so the card rises when the current
--- work counts as watched.
-local RISE_PERCENT = 90
+-- The two amounts of a work that may remain when the card rises: a share
+-- of its length, and a number of seconds. The rule takes whichever leaves
+-- less time, so the seconds apply only to a work over 100 minutes. It is
+-- the shape of the watched rule, which `library-operator` states in
+-- `watched.go` and in `media-browser/src/catalog/progress.rs`, at three
+-- fifths of that rule's two amounts. So both caps begin to apply at the
+-- same length, and the card never rises before the work counts as watched.
+-- The two rules differ because the card marks the credits and the watched
+-- rule marks the end of the story.
+local RISE_PERCENT = 3
+local RISE_SECONDS = 180
 
 -- The card draws at this fraction of its alpha while it waits for the next
 -- work to start.
@@ -278,7 +282,13 @@ function upnext.on_percent(value)
   if type(value) ~= "number" or not offer or risen then
     return
   end
-  if value < RISE_PERCENT then
+  -- mpv states a percent only for a work whose length it has read, so a
+  -- work with no duration never raises the card.
+  local duration = mp.get_property_number("duration")
+  if not duration or duration <= 0 then
+    return
+  end
+  if duration * (100 - value) / 100 > math.min(duration * RISE_PERCENT / 100, RISE_SECONDS) then
     return
   end
   risen = true
@@ -386,13 +396,6 @@ local function card(focused, detail, detail_color)
   return table.concat(parts, "\n")
 end
 
-local function sliver()
-  return theme.rect(
-    theme.canvas.w - SLIVER_W, CARD_TOP, SLIVER_W, CARD_H,
-    theme.color.fill, theme.alpha.subdued
-  )
-end
-
 -- draw returns the offer as part of the OSD, the chip before the rise and the
 -- card after it, at the OSD's own fade. The waiting card is not part of the
 -- OSD, so it does not fade out with it.
@@ -406,10 +409,11 @@ function upnext.draw(focused)
   return chip(focused)
 end
 
--- draw_outside returns what the offer draws over the bare video, on a clock
--- of its own: the risen card for its few seconds, then the sliver, and the
--- dimmed card for the whole wait. Before the rise, a hidden OSD draws
--- nothing for the offer.
+-- draw_outside returns what the offer draws over the bare video, on a
+-- clock of its own: the risen card for its few seconds, and the dimmed card
+-- for the whole wait. Once the card fades, nothing remains of it, because a
+-- mark at the screen edge would draw over the film for the rest of it.
+-- Before the rise, a hidden OSD draws nothing for the offer.
 function upnext.draw_outside(osd_visible)
   if not offer then
     return nil
@@ -419,14 +423,11 @@ function upnext.draw_outside(osd_visible)
   if waiting then
     theme.set_fade(WAIT_FADE)
     out = card(false, WAIT_WORD, theme.color.fill)
-  elseif osd_visible or not risen then
+  elseif osd_visible or not risen or fade <= 0 then
     return nil
-  elseif fade > 0 then
+  else
     theme.set_fade(fade)
     out = card(false, offer.detail, theme.color.muted)
-  else
-    theme.set_fade(1)
-    out = sliver()
   end
   theme.set_fade(outer)
   return out

@@ -33,7 +33,7 @@ local function load(properties)
     package.loaded[name] = nil
   end
   package.loaded["mp.utils"] = { parse_json = parse_json }
-  _G.mp = harness.new(properties or { ["osd-dimensions"] = { w = 1920, h = 1080 } })
+  _G.mp = harness.new(properties or { ["osd-dimensions"] = { w = 1920, h = 1080 }, duration = 100 })
   return require("upnext"), _G.mp
 end
 
@@ -43,12 +43,15 @@ local OFFER = '{"reason":"Next in Harbor Lights \194\183 S02",'
 local WITH_ART = '{"title":"E05 \194\183 The Long Tide","art":"/run/liken/art/next.bgra"}'
 
 -- The canvas numbers the design gives: the right margin, the card box, and
--- the row the chip draws on.
-local RIGHT = 1780
-local CARD_X = 1340
+-- the row the chip draws on. The card is 440 wide and hangs off the right
+-- margin, and its text keeps a 22 pixel pad inside that box.
+local MARGIN = 96
+local RIGHT = 1920 - MARGIN
+local CARD_W = 440
+local CARD_X = RIGHT - CARD_W
 local CARD_TOP = 380
 local CARD_H = 416
-local TEXT_X = 1362
+local TEXT_X = CARD_X + 22
 local CHIP_Y = 806
 local FLOOR = 820
 
@@ -103,7 +106,7 @@ end
 -- The presses that take a risen offer: the rise, a summon, up to the stop,
 -- and one select on the card.
 local function take(focus, upnext)
-  upnext.on_percent(91)
+  upnext.on_percent(98)
   focus.summon()
   focus.nav("up")
   focus.nav("select")
@@ -191,8 +194,10 @@ end
 
 -- The width the advance table gives the longest label of the lab drill, "UP
 -- NEXT The Hobbit: The Desolation of Smaug", at the chip's type size of 28.
--- The panel is that width plus its padding on both sides, and it ends at the
--- right margin plus one padding, at 1802.
+-- The panel is that width plus its padding on both sides.
+-- The panel ends one padding past the right margin, so its left edge is
+-- one padding inside the margin, less the label.
+local CHIP_PAD = 22
 local HOBBIT_W = 413.2589
 local HOBBIT_LABEL = "The Hobbit: The Desolation of Smaug"
 
@@ -202,8 +207,10 @@ test("the chip's panel measures the label by the face's own advances", function(
   local x = panel_x(upnext, HOBBIT_LABEL)
 
   assert(
-    math.abs(x - (1758 - HOBBIT_W)) < 0.01,
-    string.format("the panel drew at %s, want %.2f", tostring(x), 1758 - HOBBIT_W)
+    math.abs(x - (RIGHT - CHIP_PAD - HOBBIT_W)) < 0.01,
+    string.format(
+      "the panel drew at %s, want %.2f", tostring(x), RIGHT - CHIP_PAD - HOBBIT_W
+    )
   )
 end)
 
@@ -225,13 +232,26 @@ test("a codepoint the table has no width for takes the default", function()
   assert(math.abs(euro - 28 * 0.7541 * 0.4749) < 0.01, string.format("U+20AC measured %.4f", euro))
 end)
 
-test("the card rises at ninety percent with the three lines", function()
+test("a long film raises the card three minutes from its end", function()
+  local upnext = load({ ["osd-dimensions"] = { w = 1920, h = 1080 }, duration = 4 * 60 * 60 })
+
+  upnext.receive(OFFER)
+  upnext.on_percent(97)
+  local at_three_percent = upnext.draw(false)
+  upnext.on_percent(98.75)
+  local at_three_minutes = upnext.draw(false)
+
+  lacks(at_three_percent, "NEXT IN HARBOR LIGHTS \194\183 S02")
+  has(at_three_minutes, "NEXT IN HARBOR LIGHTS \194\183 S02")
+end)
+
+test("the card rises at ninety-seven percent with the three lines", function()
   local upnext = load()
 
   upnext.receive(OFFER)
-  upnext.on_percent(89)
+  upnext.on_percent(96)
   local before = upnext.draw(false)
-  upnext.on_percent(90)
+  upnext.on_percent(97)
   local after = upnext.draw(false)
 
   lacks(before, "NEXT IN HARBOR LIGHTS \194\183 S02")
@@ -247,7 +267,7 @@ test("the card holds the comps' box", function()
   local upnext = load()
 
   upnext.receive(OFFER)
-  upnext.on_percent(91)
+  upnext.on_percent(98)
   local ass = upnext.draw(false)
 
   has(ass, string.format("\\pos(%d.00,%d.00)", CARD_X, CARD_TOP))
@@ -259,33 +279,28 @@ test("the unfocused card fills dark and the focused card takes the border", func
   local upnext = load()
 
   upnext.receive(OFFER)
-  upnext.on_percent(91)
+  upnext.on_percent(98)
 
   lacks(upnext.draw(false), "\\bord2\\3c&H9AC4B4&")
   has(upnext.draw(false), "\\1c&H000000&\\1a&H54&")
   has(upnext.draw(true), "\\bord2\\3c&H9AC4B4&")
 end)
 
-test("the card shows itself with the OSD down and leaves a sliver", function()
+test("the card shows itself with the OSD down and then draws nothing", function()
   local upnext, fake = load()
 
   upnext.receive(OFFER)
-  assert(upnext.draw_outside(false) == nil, "the card showed before ninety percent")
-  upnext.on_percent(91)
+  assert(upnext.draw_outside(false) == nil, "the card showed before the rise")
+  upnext.on_percent(98)
   fake.settle()
   local risen = upnext.draw_outside(false)
   assert(upnext.draw_outside(true) == nil, "the card drew twice while the OSD was up")
   fake.fire_timeout()
   fake.settle()
-  local sliver = upnext.draw_outside(false)
 
   has(risen, "E05 \194\183 The Long Tide")
   has(risen, "\\1c&H000000&\\1a&H54&")
-  lacks(sliver, "E05 \194\183 The Long Tide")
-  has(sliver, "\\pos(1898.00,380.00)")
-  has(sliver, string.format("m 0 0 l 22.00 0 l 22.00 %d.00 l 0 %d.00", CARD_H, CARD_H))
-  has(sliver, "\\1c&H9AC4B4&")
-  has(sliver, "\\1a&H80&")
+  assert(upnext.draw_outside(false) == nil, "the faded card left a mark on the screen")
   assert(CARD_TOP + CARD_H <= FLOOR, "the card reaches below the scrubber")
 end)
 
@@ -297,7 +312,7 @@ test("the art request goes once at the art box and the reply is placed", functio
   upnext.sync(false)
   local asked = messages(fake, "liken-art-request")
   upnext.on_art("next", "/run/liken/art/next.bgra", "300", "248", "1200")
-  upnext.on_percent(91)
+  upnext.on_percent(98)
   upnext.sync(true)
   local placed = overlays(fake)
 
@@ -305,7 +320,11 @@ test("the art request goes once at the art box and the reply is placed", functio
   assert(asked[1][3] == "next", "the request named another kind")
   assert(asked[1][4] == "440" and asked[1][5] == "248", "the request left the art box")
   assert(#placed == 1, string.format("placed %d overlays, want 1", #placed))
-  assert(placed[1][3] == 1410 and placed[1][4] == 380, "the bitmap is off the art box's center")
+  local centred = CARD_X + (CARD_W - 300) / 2
+  assert(
+    placed[1][3] == centred and placed[1][4] == 380,
+    "the bitmap is off the art box's center"
+  )
 end)
 
 test("a replay replaces the offer and a new item clears it", function()
