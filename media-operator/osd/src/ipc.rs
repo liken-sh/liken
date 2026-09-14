@@ -70,6 +70,17 @@ pub const PRESENTATION_REQUEST: &str = "liken-presentation-request";
 /// string.
 pub const PRESENTATION: &str = "presentation";
 
+/// The message the sidecar sends with the Play's up-next block, as one JSON
+/// string, once at start and again on every presentation replay. No message
+/// means the Play names no next work, and the display draws nothing for it.
+pub const NEXT: &str = "next";
+
+/// The message the sidecar sends after it applies a level from the bus, for
+/// every message except the first one it reads after it connects. That first
+/// one is the retained value, which a starting pod restores and a person did
+/// not press, so the indicator stays off screen for it.
+pub const VOLUME_CHANGED: &str = "volume-changed";
+
 // The request id every command the display sends carries. No observe uses
 // it, so a reply to a command reads apart from a property push.
 const SENT: u64 = 0;

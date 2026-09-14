@@ -16,4 +16,6 @@ pub mod scrubber;
 pub mod strip;
 pub mod theme;
 pub mod track;
+pub mod upnext;
+pub mod volume;
 pub mod window;

@@ -11,6 +11,7 @@ use crate::ipc::Command;
 use crate::presentation::Presentation;
 use crate::scrubber::{self, Axis, Scrubber};
 use crate::strip::Strip;
+use crate::upnext::UpNext;
 
 /// The six words the command sidecar sends, and the whole of what the display
 /// answers.
@@ -68,6 +69,11 @@ const STOPS: [Stop; 5] = [
 /// the two.
 const EXIT: &str = "liken-exit";
 
+/// The script-message a select on the up-next offer broadcasts. The command
+/// sidecar reads it and publishes the Play's own request block on the Player's
+/// commands topic, and the browser starts the next work.
+const NEXT: &str = "liken-next";
+
 /// What the idle window does after a press. A summon arms one, a dismiss
 /// cancels it, and a press while paused leaves the display standing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -86,9 +92,7 @@ pub struct Parts<'a> {
     pub strip: &'a mut Strip,
     /// The monotonic second the seek ramp reads.
     pub now: f64,
-    // PROSE: whether an offer stands and whether the display waits on the next Play, which the up-next stage answers.
-    pub offer: bool,
-    pub waiting: bool,
+    pub upnext: &'a mut UpNext,
 }
 
 /// Whether the display stands summoned, where the focus is, and how far the
@@ -162,7 +166,7 @@ impl Focus {
     fn stop_available(stop: Stop, parts: &Parts<'_>) -> bool {
         let film = parts.film;
         match stop {
-            Stop::Next => parts.offer,
+            Stop::Next => parts.upnext.available(),
             Stop::Fine => !parts.presentation.is_image() && scrubber::fine_available(film),
             Stop::Chapter => !parts.presentation.is_image() && scrubber::chapter_available(film),
             Stop::Images => images::available(parts.presentation),
@@ -183,7 +187,7 @@ impl Focus {
     /// Clear the display and cancel the idle window.
     pub fn dismiss(&mut self, parts: &mut Parts<'_>) {
         self.summoned = false;
-        // PROSE: a hidden display collapses the up-next expansion, which the up-next stage does here.
+        parts.upnext.collapse();
         parts.strip.close();
         self.hide = Hide::Cancel;
         self.fade.to(0.0);
@@ -238,7 +242,11 @@ impl Focus {
         if self.focused == Some(Stop::Fine) && next != Stop::Fine {
             parts.scrubber.cancel();
         }
-        // PROSE: an expanded offer is part of the stop, so leaving the stop collapses it, which the up-next stage does here.
+        // An expanded card is part of the stop, so leaving the stop collapses
+        // it.
+        if self.focused == Some(Stop::Next) && next != Stop::Next {
+            parts.upnext.collapse();
+        }
         self.focused = Some(next);
     }
 
@@ -278,7 +286,18 @@ impl Focus {
             return parts.strip.handle(Action::Select, parts.film);
         }
         if self.summoned {
-            // PROSE: the first select on the up-next chip grows it into the card and a select on the card sends the ask, which the up-next stage does here.
+            if self.focused == Some(Stop::Next) {
+                // The first select on the chip grows it into the card, and a
+                // select on the card sends the ask. So the offer shows what it
+                // starts before a press starts it. A card the rise raised takes
+                // one press.
+                if parts.upnext.showing_card() {
+                    parts.upnext.take();
+                    return vec![next()];
+                }
+                parts.upnext.expand();
+                return Vec::new();
+            }
             if self.focused == Some(Stop::Strip) {
                 return self.route(Action::Select, parts);
             }
@@ -302,7 +321,7 @@ impl Focus {
         // The offer is taken and the next Play is starting, so the display
         // routes every press to nothing. back still ends the run, on the same
         // message the bare video sends, because a person must be able to leave.
-        if parts.waiting {
+        if parts.upnext.waiting() {
             if action == Action::Back {
                 return vec![exit()];
             }
@@ -359,6 +378,10 @@ fn exit() -> Command {
     vec![json!("script-message"), json!(EXIT)]
 }
 
+fn next() -> Command {
+    vec![json!("script-message"), json!(NEXT)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,8 +395,7 @@ mod tests {
         strip: Strip,
         focus: Focus,
         now: f64,
-        offer: bool,
-        waiting: bool,
+        upnext: UpNext,
     }
 
     impl Display {
@@ -403,9 +425,21 @@ mod tests {
                 strip: Strip::default(),
                 focus: Focus::new(),
                 now: 100.0,
-                offer: false,
-                waiting: false,
+                upnext: UpNext::default(),
             }
+        }
+
+        /// The block the sidecar sends for the work that follows this one.
+        fn offer(&mut self) {
+            self.upnext.receive(OFFER);
+        }
+
+        /// The offer taken, which is the rise, a select on the card, and the
+        /// wait that follows.
+        fn take(&mut self) {
+            self.offer();
+            self.upnext.expand();
+            self.upnext.take();
         }
 
         fn parts(&mut self) -> Parts<'_> {
@@ -415,8 +449,7 @@ mod tests {
                 scrubber: &mut self.scrubber,
                 strip: &mut self.strip,
                 now: self.now,
-                offer: self.offer,
-                waiting: self.waiting,
+                upnext: &mut self.upnext,
             }
         }
 
@@ -440,6 +473,15 @@ mod tests {
         }
     }
 
+    /// The block the sidecar sends for an episode.
+    const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
+        "title":"E05 \u00b7 The Long Tide",
+        "detail":"Harbor Lights \u00b7 S02 \u00b7 45 min"}"#;
+
+    fn ask() -> Vec<Command> {
+        vec![vec![json!("script-message"), json!("liken-next")]]
+    }
+
     fn pause_toggle() -> Vec<Command> {
         vec![vec![json!("no-osd"), json!("cycle"), json!("pause")]]
     }
@@ -454,7 +496,7 @@ mod tests {
             vec![Stop::Fine, Stop::Chapter, Stop::Strip]
         );
 
-        display.offer = true;
+        display.offer();
         assert_eq!(
             Focus::present(&display.parts()),
             vec![Stop::Next, Stop::Fine, Stop::Chapter, Stop::Strip]
@@ -484,7 +526,7 @@ mod tests {
     #[test]
     fn a_summon_lands_on_the_first_stop_below_the_offer() {
         let mut display = Display::new("{}");
-        display.offer = true;
+        display.offer();
         display.summon();
         assert!(display.focus.visible());
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
@@ -513,7 +555,7 @@ mod tests {
     #[test]
     fn up_and_down_walk_the_present_stops() {
         let mut display = Display::new("{}");
-        display.offer = true;
+        display.offer();
         display.summon();
 
         display.press(Action::Up);
@@ -653,7 +695,7 @@ mod tests {
     #[test]
     fn the_waiting_gate_swallows_every_press_but_back() {
         let mut display = Display::new("{}");
-        display.waiting = true;
+        display.take();
         display.summon();
         for action in [
             Action::Up,
@@ -750,6 +792,141 @@ mod tests {
         display.focus = focus;
         assert!(display.strip.capturing().is_none());
         assert!(!display.focus.visible());
+    }
+
+    /// With no offer there is no stop above the bar, and the select that
+    /// would take it plays or pauses the film instead.
+    #[test]
+    fn no_offer_has_no_stop_and_never_asks_for_the_next_work() {
+        let mut display = Display::new("{}");
+        display.summon();
+        display.press(Action::Up);
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+        assert_eq!(display.press(Action::Select), pause_toggle());
+    }
+
+    /// The offer answers select and nothing else, so a horizontal press on it
+    /// moves no focus and starts no scan.
+    #[test]
+    fn left_and_right_on_the_offer_do_nothing() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        display.press(Action::Up);
+
+        for action in [Action::Left, Action::Right] {
+            assert!(display.press(action).is_empty());
+            assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
+            assert!(!display.scrubber.scanning());
+        }
+    }
+
+    /// back on the offer dismisses the display, as it does on every other
+    /// stop, and does not end the run.
+    #[test]
+    fn back_on_the_offer_dismisses_the_display() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        display.press(Action::Up);
+
+        assert!(display.press(Action::Back).is_empty());
+        assert!(!display.focus.visible());
+    }
+
+    /// The first select on the chip grows it into the card and asks for
+    /// nothing, so the offer shows what it starts before a press starts it.
+    #[test]
+    fn the_first_select_on_the_chip_grows_it_into_the_card() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        display.press(Action::Up);
+
+        assert!(display.press(Action::Select).is_empty());
+        assert!(display.upnext.showing_card());
+        assert!(!display.upnext.waiting());
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
+    }
+
+    /// The select after that sends the ask and starts the wait.
+    #[test]
+    fn a_select_on_the_card_asks_for_the_next_work() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        display.press(Action::Up);
+        display.press(Action::Select);
+
+        assert_eq!(display.press(Action::Select), ask());
+        assert!(display.upnext.waiting());
+    }
+
+    /// A card the rise raised takes one press.
+    #[test]
+    fn a_select_on_the_risen_card_asks_for_the_next_work() {
+        let mut display = Display::new("{}");
+        display.offer();
+        assert!(display.upnext.on_percent(Some(98.0), &display.film));
+        display.summon();
+        display.press(Action::Up);
+
+        assert_eq!(display.press(Action::Select), ask());
+        assert!(display.upnext.waiting());
+    }
+
+    /// An expansion is part of the stop, so leaving the stop collapses it.
+    #[test]
+    fn leaving_the_offer_collapses_the_expansion() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        display.press(Action::Up);
+        display.press(Action::Select);
+
+        display.press(Action::Down);
+        assert!(!display.upnext.showing_card());
+    }
+
+    /// A hidden display collapses the expansion too, so a summon shows the
+    /// chip again.
+    #[test]
+    fn a_dismiss_collapses_the_expansion() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        display.press(Action::Up);
+        display.press(Action::Select);
+
+        display.press(Action::Back);
+        assert!(!display.upnext.showing_card());
+    }
+
+    /// The offer's stop stands above the fine axis, and a summon lands below
+    /// it, so a select reaches the offer only after an up press.
+    #[test]
+    fn up_reaches_the_offer_and_down_returns() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.summon();
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+        display.press(Action::Up);
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
+        display.press(Action::Down);
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+    }
+
+    /// The waiting gate ends the run from a hidden display as well.
+    #[test]
+    fn the_waiting_gate_ends_the_run_from_a_hidden_display() {
+        let mut display = Display::new("{}");
+        display.take();
+        assert!(!display.focus.visible());
+
+        assert_eq!(
+            display.press(Action::Back),
+            vec![vec![json!("script-message"), json!("liken-exit")]]
+        );
     }
 
     #[test]
