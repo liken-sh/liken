@@ -8,14 +8,33 @@
 #
 # It needs a media file, named on the command line. The repository names no
 # media of its own.
+#
+# Usage:
+#   local/video <media-file> [start-seconds] [-- <mpv flags>]
+#
+# Every argument after -- reaches mpv. Pass --autofit=1920x1080 to open the
+# window at the size the other two local screens open at, so the three can be
+# held beside each other and compared.
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: local/video <media-file> [start-seconds]" >&2
+  echo "usage: local/video <media-file> [start-seconds] [-- <mpv flags>]" >&2
   exit 2
 fi
 film="$1"
-start="${2:-0}"
+shift
+start="0"
+if [ "$#" -gt 0 ] && [ "$1" != "--" ]; then
+  start="$1"
+  shift
+fi
+# What remains is the caller's own mpv flags, which come after this script's
+# and win, because mpv takes the last value of a flag.
+passed=()
+if [ "$#" -gt 0 ]; then
+  [ "$1" = "--" ] && shift
+  passed=("$@")
+fi
 if [ ! -f "$film" ]; then
   echo "local/video: not a file: $film" >&2
   exit 1
@@ -80,6 +99,7 @@ MPV=(mpv --load-scripts=no --osc=no --start="$start" --volume-max=100
   --script="$display_dir"
   --input-conf="$CONF"
   --input-ipc-server="$SOCK"
+  "${passed[@]}"
   -- "$film")
 
 # The bridge is the media-operator binary in serve-art mode. Reuse a prebuilt

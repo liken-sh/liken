@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn the_time_hangs_from_the_top_right_margin() {
         let layout = Layout::for_surface(Size::new(1920.0, 1080.0));
-        assert_eq!(layout.right(), 1780.0);
+        assert_eq!(layout.right(), 1824.0);
         assert_eq!(look::MARGIN_Y, 90.0);
     }
 }

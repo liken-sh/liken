@@ -77,13 +77,6 @@ local function faded(alpha)
   return string.format("&H%02X&", out)
 end
 
--- faded_alpha is faded for a module that sets an alpha inline. It fades an inline
--- override with the rest of the OSD, so a segment with its own alpha does not hold
--- that alpha while everything around it fades.
-function theme.faded_alpha(alpha)
-  return faded(alpha)
-end
-
 -- The fade timing lives here because two things fade on clocks of their own,
 -- the OSD and the volume indicator, and the two must look the same. A fade
 -- takes fade_in_ms to reach full and fade_out_ms to reach clear, and the out
@@ -126,14 +119,15 @@ theme.type = {
 -- numbers are defined here because two modules that share a row must read
 -- one number, and not keep two copies that happen to agree.
 theme.margin = {
-  x = 140,
+  x = 96,
   y = 90,
 }
 theme.bar_y = 904
 theme.panel_bottom = 876
 -- line_pitch is the drop from one line of the top-right column to the next.
--- The clock draws at the top margin and the volume row two pitches under it,
--- so a clear line separates the two and the row never crowds the clock.
+-- The clock draws at the top margin. The film's end time draws one pitch
+-- under it, and the volume row one pitch under that. So the three read as
+-- one column, and no two of them touch.
 theme.line_pitch = theme.type.small + 12
 
 -- The whole display draws in the brand family. libass resolves it through

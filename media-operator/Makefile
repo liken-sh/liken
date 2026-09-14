@@ -58,6 +58,7 @@ test-go:
 # and the display use only what both accept.
 .PHONY: test-lua
 test-lua:
+	lua5.4 display/test/clock_test.lua
 	lua5.4 display/test/trickplay_test.lua
 	lua5.4 display/test/upnext_test.lua
 

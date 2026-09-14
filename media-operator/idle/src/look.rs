@@ -70,7 +70,7 @@ pub fn canvas_width(surface: (u32, u32)) -> f32 {
 // margin. The bottom margin is the top one by symmetry: the clock and the
 // activity line hang from it, and the identity block stands the same distance
 // off the bottom edge.
-pub const MARGIN_X: f32 = 140.0;
+pub const MARGIN_X: f32 = 96.0;
 pub const MARGIN_Y: f32 = 90.0;
 
 // The face's metric: its bounding height over its em, 1326 units over

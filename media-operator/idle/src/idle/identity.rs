@@ -769,7 +769,7 @@ mod tests {
         };
         let marker = line(&part, 990.0, 10.0).marker.expect("no marker");
 
-        assert_eq!(marker.center, Point::new(122.0, 990.0 - MARKER_RISE));
+        assert_eq!(marker.center, Point::new(78.0, 990.0 - MARKER_RISE));
         assert_eq!(marker.color.a, look::DIM);
     }
 

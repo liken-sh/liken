@@ -260,6 +260,9 @@ mod tests {
     use media_screen::Moment;
     use media_screen::volume::Volume;
 
+    // The x every flush-right part of the row ends on, on a 1920 canvas.
+    const RIGHT: f32 = 1920.0 - look::MARGIN_X;
+
     /// A unit that read a level and then a press of it.
     fn pressed(at: f64) -> Unit {
         let mut unit = Unit::default();
@@ -367,11 +370,11 @@ mod tests {
     #[test]
     fn the_row_stands_two_line_pitches_under_the_top_margin() {
         let row = row(&Layout::for_surface(Size::new(1920.0, 1080.0)));
-        assert_eq!(row.number.x, 1780.0);
+        assert_eq!(row.number.x, RIGHT);
         // The top margin is 90, and a pitch is a 34 pixel line box and 12
         // pixels of air.
         assert!((row.number.y - 182.0).abs() < 0.2, "{}", row.number.y);
-        assert_eq!(row.bar.x, 1780.0 - 84.0 - 220.0);
+        assert_eq!(row.bar.x, RIGHT - 84.0 - 220.0);
         assert_eq!(row.glyph.x, row.bar.x - 16.0 - 26.0);
     }
 
@@ -379,7 +382,7 @@ mod tests {
     fn the_surface_covers_the_three_parts_and_the_padding() {
         let row = row(&Layout::for_surface(Size::new(1920.0, 1080.0)));
         assert_eq!(row.surface.x, row.glyph.x - PAD_X);
-        assert_eq!(row.surface.x + row.surface.width, 1780.0 + PAD_X);
+        assert_eq!(row.surface.x + row.surface.width, RIGHT + PAD_X);
         assert_eq!(row.surface.height, NUMBER_BOX + 2.0 * PAD_Y);
     }
 
