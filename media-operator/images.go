@@ -3,12 +3,13 @@ package main
 // The images the operator stamps into the pods it creates come from
 // its own pod. The Deployment names the operator image once, with a
 // tag, and every companion image is that repository with a suffix at
-// the same tag: media-operator-player, media-operator-idle, and
-// media-operator-sidecar beside media-operator. So one pin in a
-// kustomization moves every image together, and no manifest names a
-// version twice. PLAYER_IMAGE, IDLE_IMAGE, and SIDECAR_IMAGE still
-// win when set, for a test or for a cluster whose pod names its image
-// by digest, which has no tag to share.
+// the same tag: media-operator-player, media-operator-idle,
+// media-operator-sidecar, and media-operator-osd beside
+// media-operator. So one pin in a kustomization moves every image
+// together, and no manifest names a version twice. PLAYER_IMAGE,
+// IDLE_IMAGE, SIDECAR_IMAGE, and OSD_IMAGE still win when set, for a
+// test or for a cluster whose pod names its image by digest, which has
+// no tag to share.
 
 import (
 	"fmt"
@@ -27,11 +28,12 @@ const (
 // every companion image derives from.
 const operatorContainerName = "operator"
 
-// The three images the operator stamps into the pods it creates.
+// The four images the operator stamps into the pods it creates.
 type companionImages struct {
 	player  string
 	idle    string
 	sidecar string
+	osd     string
 }
 
 // resolveImages settles each companion image. A variable that is set
@@ -44,17 +46,18 @@ func resolveImages(client *Client) (companionImages, error) {
 		player:  os.Getenv(playerImageVariable),
 		idle:    os.Getenv(idleImageVariable),
 		sidecar: os.Getenv(sidecarImageVariable),
+		osd:     os.Getenv(osdImageVariable),
 	}
-	if stated.player != "" && stated.idle != "" && stated.sidecar != "" {
+	if stated.player != "" && stated.idle != "" && stated.sidecar != "" && stated.osd != "" {
 		return stated, nil
 	}
 
 	name, namespace := os.Getenv(podNameVariable), os.Getenv(podNamespaceVariable)
 	if name == "" || namespace == "" {
 		return companionImages{}, fmt.Errorf(
-			"%s and %s are unset, so the operator cannot read its own pod to derive %s, %s, and %s",
+			"%s and %s are unset, so the operator cannot read its own pod to derive %s, %s, %s, and %s",
 			podNameVariable, podNamespaceVariable,
-			playerImageVariable, idleImageVariable, sidecarImageVariable)
+			playerImageVariable, idleImageVariable, sidecarImageVariable, osdImageVariable)
 	}
 	pod, err := GetPod(client, namespace, name)
 	if err != nil {
@@ -83,6 +86,9 @@ func resolveImages(client *Client) (companionImages, error) {
 	}
 	if stated.sidecar == "" {
 		stated.sidecar = derived.sidecar
+	}
+	if stated.osd == "" {
+		stated.osd = derived.osd
 	}
 	return stated, nil
 }
@@ -121,13 +127,14 @@ func deriveCompanionImages(reference string) (companionImages, error) {
 	if !tagged {
 		return companionImages{}, fmt.Errorf(
 			"the operator's image %q names no tag, and the companion images take the operator's tag; "+
-				"name the image by tag, or set %s, %s, and %s",
-			reference, playerImageVariable, idleImageVariable, sidecarImageVariable)
+				"name the image by tag, or set %s, %s, %s, and %s",
+			reference, playerImageVariable, idleImageVariable, sidecarImageVariable, osdImageVariable)
 	}
 	return companionImages{
 		player:  repository + "-player:" + tag,
 		idle:    repository + "-idle:" + tag,
 		sidecar: repository + "-sidecar:" + tag,
+		osd:     repository + "-osd:" + tag,
 	}, nil
 }
 

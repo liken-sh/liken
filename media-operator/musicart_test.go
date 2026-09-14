@@ -313,7 +313,7 @@ func bridgeToMPV(t *testing.T) (*commander, <-chan string) {
 // it holds instead, which TestServeAlbumHoldsARequestUntilThePlaylistResolves
 // covers.
 func TestServeAlbumAlwaysAnswers(t *testing.T) {
-	empty := `{"command":["script-message-to","display","liken-art","album","","0","0","0"]}`
+	empty := `{"command":["script-message","liken-art","album","","0","0","0"]}`
 
 	cases := []struct {
 		name  string
@@ -366,7 +366,7 @@ func TestServeAlbumAnswersADecodedCover(t *testing.T) {
 
 	select {
 	case line := <-lines:
-		want := `{"command":["script-message-to","display","liken-art","album","` +
+		want := `{"command":["script-message","liken-art","album","` +
 			filepath.Join(bridge.artDir, "album-1-10x10.bgra") + `","10","10","40"]}`
 		mustMatch(t, line, want)
 	case <-time.After(time.Second):
@@ -378,7 +378,7 @@ func TestServeAlbumAnswersADecodedCover(t *testing.T) {
 // the blob it expects and not the wire shape.
 func artReply(path string, w, h, stride int) string {
 	return fmt.Sprintf(
-		`{"command":["script-message-to","display","liken-art","album","%s","%d","%d","%d"]}`,
+		`{"command":["script-message","liken-art","album","%s","%d","%d","%d"]}`,
 		path, w, h, stride)
 }
 

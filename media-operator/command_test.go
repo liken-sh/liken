@@ -56,7 +56,7 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	// makes the display draw the new position.
 	want := []string{
 		`{"command":["no-osd","seek",30]}`,
-		`{"command":["script-message-to","display","summon"]}`,
+		`{"command":["script-message","summon"]}`,
 	}
 	for _, expected := range want {
 		select {
@@ -132,8 +132,8 @@ func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
 	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
 
 	want := []string{
-		`{"command":["script-message-to","display","presentation","{\"title\":\"First\"}"]}`,
-		`{"command":["script-message-to","display","presentation","{\"title\":\"Second\"}"]}`,
+		`{"command":["script-message","presentation","{\"title\":\"First\"}"]}`,
+		`{"command":["script-message","presentation","{\"title\":\"Second\"}"]}`,
 	}
 	for _, each := range want {
 		select {
@@ -167,7 +167,7 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 	go feedChanges(changes, changeOf("playlist-pos", "0"))
 	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
 
-	want := `{"command":["script-message-to","display","presentation","{}"]}`
+	want := `{"command":["script-message","presentation","{}"]}`
 	select {
 	case line := <-lines:
 		if line != want {
@@ -835,7 +835,7 @@ func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
 
 	go bridge.serveMessages(requestFor(presentationRequestMessage))
 
-	want := `{"command":["script-message-to","display","presentation","{\"type\":\"music\",\"hint\":\"album\"}"]}`
+	want := `{"command":["script-message","presentation","{\"type\":\"music\",\"hint\":\"album\"}"]}`
 	select {
 	case line := <-lines:
 		mustMatch(t, line, want)

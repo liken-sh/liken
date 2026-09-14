@@ -93,7 +93,7 @@ func TestAHeldArrowReachesTheDisplayOnTheRepeat(t *testing.T) {
 
 	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_RIGHT", Value: 2}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["script-message-to","display","right"]}`)
+	mustMatch(t, nextLine(t, lines), `{"command":["script-message","right"]}`)
 }
 
 // A press whose mark names another Player reaches mpv not at all, so a

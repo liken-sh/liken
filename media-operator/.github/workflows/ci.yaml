@@ -142,9 +142,9 @@ jobs:
       # the runner.
       WLR_RENDERER: pixman
     steps:
-      # The idle screen builds against liken-iced, the crate in the
-      # brand repository that carries the mark and the palette. It
-      # arrives with the documentation theme's submodule at
+      # The idle screen and the display both build against liken-iced,
+      # the crate in the brand repository that carries the mark and the
+      # palette. It arrives with the documentation theme's submodule at
       # docs/themes/brand, and a checkout without it resolves no
       # dependency.
       - uses: actions/checkout@v7
@@ -198,6 +198,7 @@ jobs:
           path: |
             coverage-media-screen.xml
             coverage-idle-screen.xml
+            coverage-osd.xml
           if-no-files-found: error
           retention-days: 7
 
@@ -230,6 +231,8 @@ jobs:
             file: Dockerfile.player
           - image: media-operator-idle
             file: Dockerfile.idle
+          - image: media-operator-osd
+            file: Dockerfile.osd
     steps:
       # The idle image compiles liken-iced out of the brand submodule
       # at docs/themes/brand, so the context needs it checked out.

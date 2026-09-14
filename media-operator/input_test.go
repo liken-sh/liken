@@ -25,12 +25,12 @@ func TestCommandFor(t *testing.T) {
 		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"no-osd", "add", "chapter", -1}},
 		{name: "subtitles", command: mediaCommand{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
 		{name: "audio", command: mediaCommand{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},
-		{name: "up", command: mediaCommand{Action: actionUp}, want: []any{"script-message-to", "display", "up"}},
-		{name: "down", command: mediaCommand{Action: actionDown}, want: []any{"script-message-to", "display", "down"}},
-		{name: "left", command: mediaCommand{Action: actionLeft}, want: []any{"script-message-to", "display", "left"}},
-		{name: "right", command: mediaCommand{Action: actionRight}, want: []any{"script-message-to", "display", "right"}},
-		{name: "select", command: mediaCommand{Action: actionSelect}, want: []any{"script-message-to", "display", "select"}},
-		{name: "back", command: mediaCommand{Action: actionBack}, want: []any{"script-message-to", "display", "back"}},
+		{name: "up", command: mediaCommand{Action: actionUp}, want: []any{"script-message", "up"}},
+		{name: "down", command: mediaCommand{Action: actionDown}, want: []any{"script-message", "down"}},
+		{name: "left", command: mediaCommand{Action: actionLeft}, want: []any{"script-message", "left"}},
+		{name: "right", command: mediaCommand{Action: actionRight}, want: []any{"script-message", "right"}},
+		{name: "select", command: mediaCommand{Action: actionSelect}, want: []any{"script-message", "select"}},
+		{name: "back", command: mediaCommand{Action: actionBack}, want: []any{"script-message", "back"}},
 		{
 			name:    "info",
 			command: mediaCommand{Action: actionInfo},
@@ -62,8 +62,8 @@ func TestFeedbackFor(t *testing.T) {
 		command mediaCommand
 		want    []any
 	}{
-		{name: "seek summons the display", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"script-message-to", "display", "summon"}},
-		{name: "chapter summons the display", command: mediaCommand{Action: actionChapter, Amount: 1}, want: []any{"script-message-to", "display", "summon"}},
+		{name: "seek summons the display", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"script-message", "summon"}},
+		{name: "chapter summons the display", command: mediaCommand{Action: actionChapter, Amount: 1}, want: []any{"script-message", "summon"}},
 		{name: "pause needs no follow-up", command: mediaCommand{Action: actionPause}, want: nil},
 		{name: "volume needs no follow-up", command: mediaCommand{Action: actionVolume, Amount: 5}, want: nil},
 		{name: "up needs no follow-up", command: mediaCommand{Action: actionUp}, want: nil},

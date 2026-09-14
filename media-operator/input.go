@@ -179,10 +179,6 @@ const (
 	artSizeLimit  = "16Mi"
 )
 
-// The mpv client name the display script registers under. It is the target of
-// every script-message-to that carries a navigation action to the display.
-const displayClientName = "display"
-
 // The script-message name the sidecar and the display agree on for a
 // presentation block. It sits beside the six navigation actions the
 // display already answers.
@@ -195,8 +191,8 @@ const displaySummonMessage = "summon"
 
 // The two script-message names the display and the bridge agree on for art.
 // The display broadcasts artRequestMessage to ask for a decoded blob at a
-// pixel size. The bridge answers with artReplyMessage, addressed to the
-// display, carrying the ready blob.
+// pixel size. The bridge answers with artReplyMessage, carrying the ready
+// blob.
 //
 // The four art kinds: the film's logo, the scrub tile, the playing
 // album's cover, and the art of the work that follows this run.
@@ -277,14 +273,14 @@ const emptyPresentation = "{}"
 // one string argument, so the display reads it as text and needs no
 // decode.
 func presentationCommand(block json.RawMessage) []any {
-	return []any{"script-message-to", displayClientName, presentationMessage, string(block)}
+	return []any{"script-message", presentationMessage, string(block)}
 }
 
 // nextCommand sends the display the Play's next block as one string
 // argument, the way a presentation block is sent, so the display reads
 // it as text.
 func nextCommand(block json.RawMessage) []any {
-	return []any{"script-message-to", displayClientName, nextMessage, string(block)}
+	return []any{"script-message", nextMessage, string(block)}
 }
 
 // commandFor is where the action vocabulary becomes the words mpv
@@ -313,10 +309,10 @@ func commandFor(command mediaCommand) []any {
 	case actionInfo:
 		return []any{"expand-properties", "show-text", "${filename}\n${time-pos} / ${duration}", 4000}
 	case actionUp, actionDown, actionLeft, actionRight, actionSelect, actionBack:
-		// A navigation action reaches the display script over script-message-to,
-		// and the display draws its own feedback, so it carries no osd-auto prefix
+		// A navigation action reaches the display over script-message, and the
+		// display draws its own feedback, so it carries no osd-auto prefix
 		// and becomes no native mpv command.
-		return []any{"script-message-to", displayClientName, command.Action}
+		return []any{"script-message", command.Action}
 	}
 	return nil
 }
@@ -329,7 +325,7 @@ func commandFor(command mediaCommand) []any {
 func feedbackFor(command mediaCommand) []any {
 	switch command.Action {
 	case actionSeek, actionChapter:
-		return []any{"script-message-to", displayClientName, displaySummonMessage}
+		return []any{"script-message", displaySummonMessage}
 	}
 	return nil
 }

@@ -199,7 +199,7 @@ func openArt(logo string) (io.ReadCloser, error) {
 // registers artReplyMessage and places the blob with overlay-add.
 func (c *commander) replyArt(kind string, blob artBlob) {
 	c.command([]any{
-		"script-message-to", displayClientName, artReplyMessage,
+		"script-message", artReplyMessage,
 		kind, blob.path,
 		strconv.Itoa(blob.width), strconv.Itoa(blob.height), strconv.Itoa(blob.stride),
 	})

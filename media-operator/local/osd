@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# local/osd opens the liken display over a film on this workstation, so the
+# scrim and its key bindings can be seen and felt without a cluster. It runs
+# the shape a playback pod runs: the released compositor nested on the
+# desktop, a stand-in for the display operator that places both surfaces, mpv
+# with no display script, and the display in a process of its own above it. It
+# binds the keyboard to the navigation actions the command bus carries, so a
+# key press drives the display by the path a remote does. It decodes the art
+# with the real Go bridge, so the window shows art decoded the way the pod
+# decodes it.
+#
+# It needs a media file, named on the command line. The repository names no
+# media of its own. It needs docker, because the compositor is an image, and a
+# Wayland session to nest that compositor in.
+#
+# Usage:
+#   local/osd <media-file> [start-seconds] [-- <mpv flags>]
+#
+# Every argument after -- reaches mpv.
+#
+# To capture one frame of the nested screen:
+#   docker exec -e XDG_RUNTIME_DIR=/sockets -e WAYLAND_DISPLAY=wayland-0 \
+#     <the container this script names> weston-screenshooter
+#
+# The frame lands in the socket directory this script prints.
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: local/osd <media-file> [start-seconds] [-- <mpv flags>]" >&2
+  exit 2
+fi
+film="$1"
+shift
+start="0"
+if [ "$#" -gt 0 ] && [ "$1" != "--" ]; then
+  start="$1"
+  shift
+fi
+# What remains is the caller's own mpv flags, which come after this script's
+# and win, because mpv takes the last value of a flag.
+passed=()
+if [ "$#" -gt 0 ]; then
+  [ "$1" = "--" ] && shift
+  passed=("$@")
+fi
+if [ ! -f "$film" ]; then
+  echo "local/osd: not a file: $film" >&2
+  exit 1
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  echo "local/osd: no Wayland session to nest the compositor in" >&2
+  exit 1
+fi
+
+# The Go source and the crate sit in the repository above this file, so their
+# paths resolve from this script's own directory and need no absolute path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+
+# The block comes from the film's sibling NFO. With no NFO local/present
+# prints a block that still carries the art fields, and the display falls back
+# to mpv's own media-title for the name. The {} fallback covers a failed build
+# or run, so the window still opens with no metadata. go -C runs local/present
+# from the repository root, where a relative film path names another file, so
+# the path is made absolute first.
+BLOCK="$(go -C "$root" run ./local/present "$(realpath "$film")" || true)"
+[ -n "$BLOCK" ] || BLOCK="{}"
+
+# The bridge reads MEDIA_PRESENTATIONS as a JSON array, one block per playlist
+# item, so playlist position i indexes item i's block. A film is one item.
+PRESENTATIONS="[$BLOCK]"
+
+# One directory holds every socket: the nested compositor's, the layout
+# module's control socket, and mpv's IPC socket. The compositor's container
+# bind-mounts it, so mpv and the display reach the same sockets from the host.
+SOCKETS="$(mktemp -d --tmpdir local-osd.XXXXXX)"
+chmod 0777 "$SOCKETS"
+SOCK="$SOCKETS/mpv.sock"
+ARTDIR="$SOCKETS/art"
+mkdir -p "$ARTDIR"
+CONF="$SOCKETS/input.conf"
+CONTAINER="local-osd-weston-$$"
+echo "local/osd: sockets and frames in $SOCKETS"
+
+# These bindings send the same script messages the command sidecar publishes,
+# so the keyboard and a controller drive the display alike. They are
+# broadcasts, because an IPC client cannot be named and mpv delivers a
+# script-message to every client. The arrows repeat on hold, so a held key
+# accelerates the seek the way a held remote button does. The bindings live in
+# a temporary file, because they belong to the preview and not to the player
+# image.
+cat >"$CONF" <<'BINDINGS'
+LEFT  repeatable script-message left
+RIGHT repeatable script-message right
+UP    repeatable script-message up
+DOWN  repeatable script-message down
+ENTER script-message select
+ESC   script-message back
+s     script-message summon
+SPACE cycle pause
+q quit
+BINDINGS
+
+# Build what the run needs: the compositor image, the Go binary the bridge
+# runs as, and the display.
+docker build -q -t local-osd-weston:latest "$here/weston-nested" >/dev/null
+BIN="$SOCKETS/media-operator"
+go -C "$root" build -o "$BIN" .
+cargo build --manifest-path "$root/Cargo.toml" --release -p media-osd
+OSD="$root/target/release/media-osd"
+
+WESTON=
+LAYOUT=
+SERVE=
+DISPLAY_PID=
+MPV_PID=
+cleanup() {
+  for pid in "$DISPLAY_PID" "$SERVE" "$LAYOUT" "$MPV_PID"; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
+  [ -n "$WESTON" ] && docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$SOCKETS"
+}
+trap cleanup EXIT
+
+# The compositor runs nested. Its wayland backend draws into a window on this
+# desktop's compositor, and it serves its own clients on the socket directory,
+# which is what mpv and the display open. --debug advertises
+# weston_screenshooter, which is how a frame of the nested screen is captured.
+# The container runs as this user, and joins the groups that own the render
+# node, because a socket weston made as root refuses a connection from mpv and
+# from the display, which both run on the host.
+groups=()
+for node in /dev/dri/card* /dev/dri/renderD*; do
+  groups+=(--group-add "$(stat -c '%g' "$node")")
+done
+docker run -d --name "$CONTAINER" \
+  --user "$(id -u):$(id -g)" \
+  "${groups[@]}" \
+  -v "$SOCKETS:/sockets" \
+  -v "$here/weston-nested/weston.ini:/config/weston.ini:ro" \
+  -v "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/sockets/host-wayland" \
+  -e XDG_RUNTIME_DIR=/sockets \
+  -e WAYLAND_DISPLAY=host-wayland \
+  -e LIKEN_LAYOUT_SOCKET=/sockets/layout.sock \
+  --device /dev/dri:/dev/dri \
+  local-osd-weston:latest \
+  --backend=wayland --config=/config/weston.ini --socket=wayland-0 \
+  --width=1920 --height=1080 --debug >/dev/null
+WESTON=1
+echo "local/osd: compositor container $CONTAINER"
+
+# The compositor binds its own socket as it starts. The wait is bounded, so a
+# compositor that never comes up does not hang the preview.
+for _ in $(seq 1 200); do
+  [ -S "$SOCKETS/wayland-0" ] && break
+  sleep 0.1
+done
+if [ ! -S "$SOCKETS/wayland-0" ]; then
+  echo "local/osd: the nested compositor opened no socket" >&2
+  docker logs "$CONTAINER" >&2 || true
+  exit 1
+fi
+
+# The layout module places nothing on its own. This stand-in states a
+# rectangle for every surface, newest on top, the way the display operator
+# does from a Layout.
+LIKEN_LAYOUT_SOCKET="$SOCKETS/layout.sock" python3 "$here/layout-controller.py" \
+  >"$SOCKETS/layout.log" 2>&1 &
+LAYOUT=$!
+
+# mpv runs with the pod's own arguments and no display script, because the
+# display is its own process now. --load-scripts=no skips the workstation's
+# own mpv scripts, so a personal on-screen controller does not draw over the
+# display.
+MPV=(mpv --load-scripts=no
+  --vo=dmabuf-wayland
+  --hwdec=vaapi
+  --fullscreen
+  --keepaspect-window=no
+  --osc=no
+  --load-console=no
+  --osd-font="Source Sans 3"
+  --start="$start"
+  --input-conf="$CONF"
+  --input-ipc-server="$SOCK"
+  "${passed[@]}"
+  -- "$film")
+
+XDG_RUNTIME_DIR="$SOCKETS" WAYLAND_DISPLAY=wayland-0 "${MPV[@]}" \
+  >"$SOCKETS/mpv.log" 2>&1 &
+MPV_PID=$!
+
+for _ in $(seq 1 200); do
+  [ -S "$SOCK" ] && break
+  sleep 0.1
+done
+if [ ! -S "$SOCK" ]; then
+  echo "local/osd: mpv opened no IPC socket" >&2
+  cat "$SOCKETS/mpv.log" >&2 || true
+  exit 1
+fi
+
+# The bridge is the media-operator binary in serve-art mode. serve-art
+# forwards each item's presentation block to the display and answers every art
+# request with a real image decode, the same code the pod's command sidecar
+# runs.
+MEDIA_MPV_SOCKET="$SOCK" MEDIA_ART_DIR="$ARTDIR" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  MEDIA_TRICKPLAY_INTERVAL="${MEDIA_TRICKPLAY_INTERVAL:-}" \
+  "$BIN" serve-art >"$SOCKETS/serve.log" 2>&1 &
+SERVE=$!
+
+# The display opens its window only after mpv reports a position, so its
+# surface arrives after the film's and the layout stacks it above.
+MEDIA_MPV_SOCKET="$SOCK" XDG_RUNTIME_DIR="$SOCKETS" WAYLAND_DISPLAY=wayland-0 \
+  "$OSD" >"$SOCKETS/osd.log" 2>&1 &
+DISPLAY_PID=$!
+
+# Wait for mpv to close, which is when the user quits the window with q.
+wait "$MPV_PID" || true

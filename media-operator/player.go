@@ -82,6 +82,10 @@ func runPlayer(items []string) {
 // composite the whole OSD again on every video frame while the display
 // draws anything at all.
 //
+// MEDIA_DISPLAY picks the shape. The lua shape passes --script to mpv
+// and runs two containers; the iced shape drops --script and runs
+// three.
+//
 // The list ends with -- because a media path that starts with a dash
 // would otherwise read as a flag.
 //
@@ -113,13 +117,17 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		"--keepaspect-window=no",
 		"--ao=pipewire",
 		"--input-ipc-server=" + mpvSocketPath,
-		"--script=" + displayScriptDir,
+	}
+	if os.Getenv(displayVariable) != displayIced {
+		argv = append(argv, "--script="+displayScriptDir)
+	}
+	argv = append(argv,
 		"--osc=no",
 		"--load-console=no",
 		// mpv's own OSD messages draw in the brand family; libass resolves
 		// it through fontconfig against the two OTF files the image installs.
-		"--osd-font=" + overlayFont,
-	}
+		"--osd-font="+overlayFont,
+	)
 	// --quiet is the default because mpv prints its status line about
 	// eight times a second, this process's stdout is the pod log on the
 	// machine's disk, and containerd and the kubelet tail it. --quiet

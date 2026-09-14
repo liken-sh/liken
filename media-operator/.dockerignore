@@ -1,4 +1,4 @@
-# What never belongs in an image build context. All four images take the
+# What never belongs in an image build context. All five images take the
 # repository root as their context, so one file covers them.
 #
 # cargo writes one target tree at the workspace root on a workstation,

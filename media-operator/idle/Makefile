@@ -6,17 +6,19 @@
 # the frame loop and the graphics setup count too. That test needs cage,
 # wlr-randr, and a Vulkan device, and Mesa's lavapipe is enough of one.
 #
-# This Makefile runs cargo from the workspace root. The two crates share
-# a lock file and a target tree, so one invocation covers both. Each
-# crate keeps a floor of its own, because they earn different numbers:
-# media-screen is rules plus one thread over a socket, and the idle
-# screen carries a window.
+# This Makefile runs cargo from the workspace root. The three crates
+# share a lock file and a target tree, so one invocation covers them
+# all. Each crate keeps a floor of its own, because they earn different
+# numbers: media-screen is rules plus one thread over a socket, the idle
+# screen carries a window, and the display's own window half needs a
+# compositor no unit test has.
 
 # The floor on line coverage, as a percentage, one per crate. CI enforces the
 # same numbers through this file. Raise one when the tests earn it; never
 # lower it.
 IDLE_COVERAGE_FLOOR := 95
 SCREEN_COVERAGE_FLOOR := 99
+OSD_COVERAGE_FLOOR := 88
 
 # Every cargo command runs at the workspace root, which is the directory
 # above this one.
@@ -55,3 +57,8 @@ test:
 		--fail-under-lines $(IDLE_COVERAGE_FLOOR)
 	cd $(ROOT) && cargo llvm-cov report -p idle-screen \
 		--cobertura --output-path $(ROOT)/coverage-idle-screen.xml
+	cd $(ROOT) && cargo llvm-cov clean --workspace --profraw-only
+	cd $(ROOT) && cargo llvm-cov -p media-osd --all-targets \
+		--fail-under-lines $(OSD_COVERAGE_FLOOR)
+	cd $(ROOT) && cargo llvm-cov report -p media-osd \
+		--cobertura --output-path $(ROOT)/coverage-osd.xml

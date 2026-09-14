@@ -16,6 +16,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 		name    string
 		start   string
 		verbose string
+		display string
 		items   []string
 		blocks  []json.RawMessage
 		want    []string
@@ -115,12 +116,44 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--", "/media/0/film.mkv",
 			},
 		},
+		{
+			name:    "the lua display draws inside mpv",
+			display: displayLua,
+			items:   []string{"/media/0/film.mkv"},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--script=/test-display",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--quiet",
+				"--", "/media/0/film.mkv",
+			},
+		},
+		{
+			name:    "the iced display draws in its own container",
+			display: displayIced,
+			items:   []string{"/media/0/film.mkv"},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--quiet",
+				"--", "/media/0/film.mkv",
+			},
+		},
 	}
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			t.Setenv(playStartVariable, each.start)
 			t.Setenv(playerVerboseVariable, each.verbose)
+			t.Setenv(displayVariable, each.display)
 			argv, err := playerArgv(each.items, each.blocks)
 			mustSucceed(t, err)
 			// argv[0] is the resolved binary, so the want list is the

@@ -47,10 +47,10 @@ func parseLogoReply(t *testing.T, line string) (kind, path string, w, h, stride 
 	var command mpvCommand
 	mustSucceed(t, json.Unmarshal([]byte(line), &command))
 	args := command.Command
-	if len(args) != 8 || args[2] != artReplyMessage {
+	if len(args) != 7 || args[1] != artReplyMessage {
 		t.Fatalf("reply = %q, want a liken-art message", line)
 	}
-	return args[3].(string), args[4].(string), atoi(t, args[5]), atoi(t, args[6]), atoi(t, args[7])
+	return args[2].(string), args[3].(string), atoi(t, args[4]), atoi(t, args[5]), atoi(t, args[6])
 }
 
 // How long the test waits to be sure the bridge sent nothing.

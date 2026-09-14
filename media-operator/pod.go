@@ -20,6 +20,7 @@ import (
 const (
 	playerContainer  = "player"
 	commandContainer = "command"
+	osdContainer     = "display"
 	podClaimName     = "devices"
 )
 
@@ -92,8 +93,9 @@ func podName(play string) string {
 // entrypoint shim execs mpv, so the arguments are nothing but the
 // resolved playlist in spec order.
 func buildPod(
-	play *Play, claim *ResourceClaim, resolved resolution, image, sidecarImage, busAddress, topicBase string,
-	remotes []boundRemote, prefs resolvedPreferences, playerVerbose string,
+	play *Play, claim *ResourceClaim, resolved resolution,
+	image, sidecarImage, osdImage, busAddress, topicBase string,
+	remotes []boundRemote, prefs resolvedPreferences, playerVerbose, display string,
 ) *Pod {
 	grace := int64(playbackGracePeriod)
 	// The IPC volume is unconditional, so mpv serves its socket at one
@@ -160,6 +162,13 @@ func buildPod(
 		container.Env = append(container.Env,
 			EnvVar{Name: playerVerboseVariable, Value: playerVerbose})
 	}
+	// The shim reads the same switch. Under iced it passes mpv no
+	// --script, because the display draws in its own container. The lua
+	// shape sets nothing, so the variable's absence is the old pod.
+	if display == displayIced {
+		container.Env = append(container.Env,
+			EnvVar{Name: displayVariable, Value: displayIced})
+	}
 	// The player container holds every request the claim asks for,
 	// because the playback claim holds the player's roles alone.
 	for _, request := range claimRequests(claim) {
@@ -177,6 +186,12 @@ func buildPod(
 	// Player reshaped this pod.
 	initContainers := []Container{
 		commandSidecar(play, claim, blocks, next, resolved.Mounts, sidecarImage, busAddress, topicBase, remotes),
+	}
+	// The display container stands only under iced. The lua shape leaves
+	// the pod as it was, two containers, so the switch changes nothing
+	// for a cluster that has not moved.
+	if display == displayIced {
+		initContainers = append(initContainers, displaySidecar(claim, osdImage, prefs))
 	}
 
 	return &Pod{
@@ -329,6 +344,39 @@ func commandSidecar(
 		VolumeMounts:  append([]VolumeMount{ipcMount(), artMount()}, mediaMounts...),
 		RestartPolicy: sidecarRestartPolicy,
 	}
+}
+
+// displaySidecar is a native sidecar rather than an ordinary container,
+// because the pod's restart policy is Never and the pod must still end
+// when the player ends, which a second ordinary container would
+// prevent.
+//
+// The display draws the on-screen display on its own surface above
+// mpv's. It holds every request the player container holds, because it
+// needs the same screen to open a surface on and the same render device
+// to draw with. It mounts the IPC volume to read mpv and the sidecar's
+// messages, and the art volume to read the bitmaps the sidecar serves.
+func displaySidecar(claim *ResourceClaim, osdImage string, prefs resolvedPreferences) Container {
+	container := Container{
+		Name: osdContainer,
+		// The image's entrypoint is the whole of how the display
+		// starts, so the container names no command.
+		Image:         osdImage,
+		VolumeMounts:  []VolumeMount{ipcMount(), artMount()},
+		RestartPolicy: sidecarRestartPolicy,
+	}
+	// The display clock reads TZ against the image's tz database. Set it only
+	// when the household stated a zone, so an unset zone leaves the pod
+	// unchanged and the clock stays on UTC.
+	if prefs.TimeZone != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: timeZoneVariable, Value: prefs.TimeZone})
+	}
+	for _, request := range claimRequests(claim) {
+		container.Resources.Claims = append(container.Resources.Claims,
+			ContainerClaim{Name: podClaimName, Request: request})
+	}
+	return container
 }
 
 // presentationBlocks bakes every item's block into one JSON array in

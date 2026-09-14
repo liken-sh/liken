@@ -16,13 +16,14 @@
 # The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The four images release together, always, and three Dockerfiles
+# The five images release together, always, and four Dockerfiles
 # build them: the sidecar image is the operator image under a second
 # name, tagged here and never built twice. The operator stamps the
 # player image into every playback pod, the idle image into every idle
-# pod, and the sidecar image into every sidecar container, and images
-# that could drift apart would put the report contract and the screen
-# topic at two versions at once.
+# pod, the osd image into every display container, and the sidecar
+# image into every sidecar container, and images that could drift apart
+# would put the report contract and the screen topic at two versions at
+# once.
 name: release
 
 on:
@@ -100,6 +101,8 @@ jobs:
             echo "    newTag: $VERSION"
             echo "  - name: ghcr.io/$GITHUB_REPOSITORY-sidecar"
             echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-osd"
+            echo "    newTag: $VERSION"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -154,6 +157,18 @@ jobs:
           tags: |
             ghcr.io/liken-sh/media-operator-idle:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-idle:latest
+
+      - name: Build the osd image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.osd
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-osd:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-osd:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/media-operator-osd:${{ env.VERSION }}
+            ghcr.io/liken-sh/media-operator-osd:latest
 
       # The sidecar image is the operator image under a second name.
       # Every sidecar container runs the operator binary in one of its
@@ -238,10 +253,12 @@ jobs:
           docker push "ghcr.io/liken-sh/media-operator:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-player:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-idle:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator-osd:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-sidecar:$VERSION"
           if [ "$RELEASE" = true ]; then
             docker push "ghcr.io/liken-sh/media-operator:latest"
             docker push "ghcr.io/liken-sh/media-operator-player:latest"
             docker push "ghcr.io/liken-sh/media-operator-idle:latest"
+            docker push "ghcr.io/liken-sh/media-operator-osd:latest"
             docker push "ghcr.io/liken-sh/media-operator-sidecar:latest"
           fi

@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-// The operator's own environment: three image overrides, the broker,
+// The operator's own environment: four image overrides, the broker,
 // and the topic base. Only MEDIA_TOPIC_BASE has a default. An image
 // variable that is set wins over the image images.go derives from
 // the operator's own pod, and one that is unset derives.
@@ -39,6 +39,12 @@ const (
 	// image's mpv, drivers, or fonts, because a sidecar decodes
 	// nothing.
 	sidecarImageVariable = "SIDECAR_IMAGE"
+
+	// OSD_IMAGE names the image the display container runs under the
+	// iced value. Like the other companions it derives from the
+	// operator's own image at the same tag, and this variable overrides
+	// that derivation.
+	osdImageVariable = "OSD_IMAGE"
 
 	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
 	// shareable draw companion a Player's idle pod claims. The class is
@@ -113,8 +119,12 @@ type operator struct {
 	// binary alone. It is a release decision, so it arrives in the
 	// environment beside the player image.
 	sidecarImage string
-	busAddress   string
-	topicBase    string
+	// osdImage is the image the display container runs. It arrives the
+	// way the other companion images do, derived from the operator's
+	// image at the same tag, so one release names every container.
+	osdImage   string
+	busAddress string
+	topicBase  string
 	// idleDisplayClass is the display-draw DeviceClass a Player's idle pod
 	// claims. An empty value turns the idle screen off, so reconcileIdle
 	// builds nothing.
@@ -124,8 +134,13 @@ type operator struct {
 	// every playback pod it creates, so `kubectl set env` on the
 	// Deployment turns mpv's full output on for the pods that follow.
 	playerVerbose string
-	bus           *Bus
-	reports       *reports
+	// display is MEDIA_DISPLAY from the operator's own environment: the
+	// display the pods this operator creates run. A running pod keeps
+	// the shape it was created with, so a change reaches the pods that
+	// follow, not the film that plays now.
+	display string
+	bus     *Bus
+	reports *reports
 	// focus is the desk for the retained focus mark, built on the same
 	// wake as the report desk: a cycle request on the bus wakes the pass
 	// that arbitrates it.
@@ -262,6 +277,13 @@ func operate() {
 	// playback pod's mpv is quiet; set, it reaches the pods this operator
 	// creates from now on.
 	playerVerbose := os.Getenv(playerVerboseVariable)
+	// The display switch is read once. Any value but iced reads as lua,
+	// so an unset or misspelled value keeps the display the cluster has
+	// rather than starting pods with no display at all.
+	display := os.Getenv(displayVariable)
+	if display != displayIced {
+		display = displayLua
+	}
 	metricsAddress := os.Getenv(metricsAddressVariable)
 
 	client, err := InClusterClient()
@@ -296,10 +318,12 @@ func operate() {
 		image:            images.player,
 		idleImage:        images.idle,
 		sidecarImage:     images.sidecar,
+		osdImage:         images.osd,
 		busAddress:       busAddress,
 		topicBase:        topicBase,
 		idleDisplayClass: idleDisplayClass,
 		playerVerbose:    playerVerbose,
+		display:          display,
 		reports:          desk,
 		focus:            focusDesk,
 		peripherals:      newPeripheralDesk(),
@@ -1351,7 +1375,8 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if err != nil {
 		return nil, false, err
 	}
-	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)
+	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.osdImage,
+		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose, o.display)
 	if !claimChanged && sameRemoteSet(running, desired) {
 		return running, false, nil
 	}
@@ -1420,7 +1445,8 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 // pod first.
 func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose))
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.osdImage,
+		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose, o.display))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

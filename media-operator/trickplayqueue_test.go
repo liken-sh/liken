@@ -142,8 +142,8 @@ func artReplyKind(t *testing.T, line string) string {
 	t.Helper()
 	var command mpvCommand
 	mustSucceed(t, json.Unmarshal([]byte(line), &command))
-	if len(command.Command) != 8 || command.Command[2] != artReplyMessage {
+	if len(command.Command) != 7 || command.Command[1] != artReplyMessage {
 		t.Fatalf("reply = %q, want a liken-art message", line)
 	}
-	return command.Command[3].(string)
+	return command.Command[2].(string)
 }

@@ -6,7 +6,7 @@
 # their own Makefiles.
 #
 # The coverage floors are the one number each gate enforces: the Go
-# floor is in .testcoverage.yml, and the two Rust floors are in
+# floor is in .testcoverage.yml, and the three Rust floors are in
 # idle/Makefile. CI reads the same files, so a floor moves in one
 # place.
 
@@ -63,9 +63,10 @@ test-lua:
 	lua5.4 display/test/trickplay_test.lua
 	lua5.4 display/test/upnext_test.lua
 
-# The Rust half is a cargo workspace with two members, the media-screen
-# library and the idle screen that draws with it. idle/Makefile holds
-# both gates and runs cargo at the workspace root.
+# The Rust half is a cargo workspace with three members: the media-screen
+# library, the idle screen that draws with it, and the display a playback
+# pod draws over the film. idle/Makefile holds every gate and runs cargo
+# at the workspace root.
 .PHONY: test-rust
 test-rust:
 	$(MAKE) -C idle test
@@ -89,11 +90,13 @@ test-docs:
 # the docs module the way Hugo and crdref are, so it runs from docs/
 # and needs nothing installed. -root names the tree the inputs
 # describe, which is this directory.
-COVERAGE_INPUTS := coverage.out coverage-media-screen.xml coverage-idle-screen.xml
+COVERAGE_INPUTS := coverage.out coverage-media-screen.xml coverage-idle-screen.xml \
+	coverage-osd.xml
 
 .PHONY: coverage-report
 coverage-report:
 	cd docs && go tool coverage -title media-operator -root .. \
 		-label Go -label "Rust (media-screen)" -label "Rust (idle-screen)" \
+		-label "Rust (media-osd)" \
 		-out ../coverage.html \
 		$(addprefix ../,$(COVERAGE_INPUTS))

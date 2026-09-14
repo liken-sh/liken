@@ -267,10 +267,10 @@ func parseArtReply(t *testing.T, line string) (path string, w, h, stride int) {
 	var command mpvCommand
 	mustSucceed(t, json.Unmarshal([]byte(line), &command))
 	args := command.Command
-	if len(args) != 8 || args[2] != artReplyMessage || args[3] != artKindTrickplay {
+	if len(args) != 7 || args[1] != artReplyMessage || args[2] != artKindTrickplay {
 		t.Fatalf("reply = %q, want a trickplay liken-art message", line)
 	}
-	return args[4].(string), atoi(t, args[5]), atoi(t, args[6]), atoi(t, args[7])
+	return args[3].(string), atoi(t, args[4]), atoi(t, args[5]), atoi(t, args[6])
 }
 
 func atoi(t *testing.T, value any) int {

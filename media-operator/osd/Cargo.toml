@@ -1,0 +1,61 @@
+[package]
+name = "media-osd"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the theme, the
+# canvas, the fade, and the IPC framing have unit tests that open no
+# window.
+[lib]
+name = "media_osd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "media-osd"
+path = "src/main.rs"
+
+# The iced facade, not the pieces the idle screen takes, because this
+# display needs no frame capture and drives no winit loop of its own.
+#
+# Every version is exact, so a build from this manifest resolves the
+# crates the lock file names.
+#
+# The target is a Wayland kiosk, so the toolkit builds with Wayland alone
+# and neither X11 nor the software renderer enters the build.
+#
+# `web-colors` is what makes this client blend the way libass blends.
+# Without it `iced_wgpu` converts every colour to linear light before the
+# shader sees it, and the blend runs in linear light. libass composites
+# on the encoded sRGB values, so the scrim at its edge alpha over black
+# reads one value in libass and another in linear light.
+#
+# crisp is on because the display snaps every value that moves with the
+# position to a whole output pixel, and this feature makes the toolkit do
+# the same for what it lays out.
+[dependencies]
+iced = { version = "=0.14.0", default-features = false, features = [
+    "wgpu",
+    "wayland",
+    "canvas",
+    "tokio",
+    "web-colors",
+    "crisp",
+] }
+# liken-iced carries the palette and the brand's two faces. It parses the
+# palette out of liken.css, so a colour on this screen and a colour on a
+# page are one value and cannot drift. The crate is in the brand
+# repository, which this one already takes as a submodule for the
+# documentation theme, and the image build context is the repository
+# root, so one checkout serves both.
+liken-iced = { path = "../docs/themes/brand/iced" }
+serde_json = { workspace = true }
+# The display needs tokio for one unix socket, newline-delimited JSON, and
+# a reconnect loop with a timeout on every wait.
+tokio = { version = "=1.48.0", default-features = false, features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt",
+    "sync",
+    "time",
+] }

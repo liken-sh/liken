@@ -59,13 +59,13 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 	go feedChanges(changes, changeOf("playlist-pos", "0"), changeOf("playlist-pos", "1"))
 	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","presentation","{\"title\":\"First\"}"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","next","{\"title\":\"E05\"}"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","presentation","{}"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{\"title\":\"First\"}"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
 
 	c.serveMessage([]string{presentationRequestMessage})
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","presentation","{}"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","next","{\"title\":\"E05\"}"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
 }
 
 // A Play with no next block sends the display nothing after the
@@ -76,7 +76,7 @@ func TestASidecarWithNoNextBlockSendsNone(t *testing.T) {
 
 	c.serveMessage([]string{presentationRequestMessage})
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message-to","display","presentation","{}"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
 	expectNoArtReply(t, lines)
 }
 
