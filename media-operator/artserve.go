@@ -39,6 +39,7 @@ func runArtServe() {
 
 	cmd := &commander{
 		presentations: parsePresentations(os.Getenv(presentationsVariable)),
+		next:          parseNext(os.Getenv(nextVariable)),
 		artDir:        artDir,
 	}
 

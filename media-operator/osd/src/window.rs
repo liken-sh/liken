@@ -20,7 +20,7 @@ use crate::ipc::{self, Command, Ipc, Wire};
 use crate::presentation::Presentation;
 use crate::scrubber::Scrubber;
 use crate::strip::Strip;
-use crate::upnext::{NoArt, UpNext};
+use crate::upnext::{self, UpNext};
 use crate::volume::Volume;
 use crate::{clock, header, images, theme};
 
@@ -333,10 +333,20 @@ impl Display {
     /// compositor configured, the item, and the scan in flight.
     fn sync_art(&mut self) -> Vec<Command> {
         let (canvas, preview, now) = (self.canvas.get(), self.previewing(), self.now());
-        // PROSE: an offer with a picture of its own stands, which the up-next stage answers here.
-        let offered = false;
-        self.art
-            .sync(&self.presentation, &canvas, preview, offered, now)
+        self.art.sync(
+            &self.presentation,
+            &canvas,
+            preview,
+            self.upnext.offers_art(),
+            now,
+        )
+    }
+
+    fn bridge(&self, canvas: &Canvas) -> Bridge<'_> {
+        Bridge {
+            art: &self.art,
+            canvas: *canvas,
+        }
     }
 
     /// The monotonic second the art bridge's own gate reads, which the wall
@@ -480,8 +490,11 @@ impl Display {
         }
         // The offer draws after the bottom cluster, so the chip and the card
         // read over the scrim and beside the scrubber.
-        self.upnext
-            .draw(brush, self.focus.focused_stop() == Some(Stop::Next), &NoArt);
+        self.upnext.draw(
+            brush,
+            self.focus.focused_stop() == Some(Stop::Next),
+            &self.bridge(&canvas),
+        );
     }
 
     /// The open chooser, which covers every region while it captures input.
@@ -492,8 +505,8 @@ impl Display {
     // draws after the whole of the first, and the dim and the panel cover the
     // text they are meant to cover.
     fn paint_above(&self, brush: &mut Brush<'_>) {
+        let canvas = brush.canvas();
         if self.strip.capturing().is_some() {
-            let canvas = brush.canvas();
             // A chooser is open. Dim the whole frame under it, so the list
             // reads as the one thing in focus and the scrubber and strip
             // recede.
@@ -508,7 +521,7 @@ impl Display {
         // stays for the whole wait, both with the OSD down. So it draws
         // outside the OSD block on a fade of its own.
         self.upnext
-            .draw_outside(brush, self.focus.visible(), &NoArt);
+            .draw_outside(brush, self.focus.visible(), &self.bridge(&canvas));
         // The volume row draws outside the OSD block, because it comes and
         // goes on a clock of its own and a level change must show the level
         // and nothing else. It draws last, so it reads over a chooser's dim as
@@ -560,6 +573,32 @@ impl Display {
     /// up-next card's, and the volume row's.
     fn fading(&self) -> bool {
         self.focus.fade().running() || self.upnext.fade().running() || self.volume.fade().running()
+    }
+}
+
+// PROSE: the two halves meet here. The card states its seam in canvas units and the bridge holds its pictures in real pixels, so this carries the canvas the frame draws on and converts between the two.
+struct Bridge<'a> {
+    art: &'a Art,
+    canvas: Canvas,
+}
+
+impl upnext::Art for Bridge<'_> {
+    fn next(&self) -> Option<Size> {
+        let next = self.art.next()?;
+        Some(Size::new(
+            next.width as f32 / self.canvas.scale,
+            next.height as f32 / self.canvas.scale,
+        ))
+    }
+
+    fn draw(&self, brush: &mut Brush<'_>, bounds: Rectangle) {
+        let Some(next) = self.art.next() else {
+            return;
+        };
+        next.draw(
+            brush,
+            iced::Point::new(bounds.x * self.canvas.scale, bounds.y * self.canvas.scale),
+        );
     }
 }
 
@@ -1249,6 +1288,43 @@ mod tests {
         assert!(display.fading());
         settle(&mut display);
         assert!(!display.fading());
+    }
+
+    const OFFER_WITH_ART: &str = r#"{"title":"E05 · The Long Tide",
+        "art":"/art/next.jpg"}"#;
+
+    #[tokio::test]
+    async fn an_offer_with_a_picture_asks_the_bridge_for_it() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(block("next", OFFER));
+        assert!(!display.upnext.offers_art());
+        assert!(sent(&mut commands).is_empty());
+
+        let _ = display.update(block("next", OFFER_WITH_ART));
+        assert!(display.upnext.offers_art());
+        assert_eq!(
+            sent(&mut commands),
+            vec![concat!(
+                r#"{"command":["script-message","liken-art-request","next","440","248"],"#,
+                r#""request_id":0}"#
+            )]
+        );
+    }
+
+    /// The card asks the bridge for the offer's picture, and the bridge
+    /// answers with the size it draws at, in canvas units.
+    #[tokio::test]
+    async fn the_bridge_answers_the_card_with_the_offers_picture() {
+        let (mut display, _) = display();
+        let canvas = display.canvas.get();
+        assert_eq!(upnext::Art::next(&display.bridge(&canvas)), None);
+
+        let _ = display.update(block("next", OFFER_WITH_ART));
+        let _ = display.update(art_reply("next", 400, 248));
+        assert_eq!(
+            upnext::Art::next(&display.bridge(&canvas)),
+            Some(Size::new(400.0, 248.0))
+        );
     }
 
     /// A socket that closes moves nothing, and the reader dials again.

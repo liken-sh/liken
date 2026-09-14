@@ -69,17 +69,6 @@ pub trait Art {
     fn draw(&self, brush: &mut Brush<'_>, bounds: Rectangle);
 }
 
-// PROSE: the display holds no picture for the offer until the art bridge lands.
-pub struct NoArt;
-
-impl Art for NoArt {
-    fn next(&self) -> Option<Size> {
-        None
-    }
-
-    fn draw(&self, _brush: &mut Brush<'_>, _bounds: Rectangle) {}
-}
-
 /// The block the sidecar sent. A block with none of the three lines and no
 /// art is not an offer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -200,6 +189,10 @@ impl UpNext {
 
     pub fn waiting(&self) -> bool {
         self.waiting
+    }
+
+    pub fn offers_art(&self) -> bool {
+        self.offer.as_ref().is_some_and(|offer| offer.art.is_some())
     }
 
     /// The card is what a select acts on, so the display grows the chip into
@@ -922,12 +915,5 @@ mod tests {
             wide.width - theme::MARGIN_X
         );
         assert_eq!(upnext.chip_line(&wide, false).at.x, wide.width - 96.0);
-    }
-
-    /// The card asks the bridge for nothing to draw while the stand-in stands
-    /// in for it.
-    #[test]
-    fn the_stand_in_bridge_holds_no_picture() {
-        assert_eq!(NoArt.next(), None);
     }
 }
