@@ -24,9 +24,6 @@ use crate::views::{
     area, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
 };
 
-// The margin at both sides of the header's text.
-const MARGIN: f32 = 120.0;
-
 // The share of the width the column of text takes. The column ends inside
 // the part of the scrim that holds its full shade, so every line reads
 // over the art whatever the art holds.
@@ -120,7 +117,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             }
         });
 
-        let dividers = area(inset, region.y, width, region.height);
+        let dividers = area(region.x + inset, region.y, width, region.height);
         frame.with_clip(region, |frame| {
             for (season, band) in series.seasons.iter().zip(&layout.bands) {
                 if !band.shows(offset, region.height) {
@@ -166,7 +163,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                             Some(Focus::Franchise(strip, Place::Heading)) if strip == index
                         ),
                         region: area(
-                            inset,
+                            region.x + inset,
                             region.y + top - offset,
                             region.width - 2.0 * inset,
                             layout::strip_height(),
@@ -194,7 +191,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         heading: band.heading,
                         library: &series.library,
                         region: area(
-                            inset,
+                            region.x + inset,
                             region.y + top - offset,
                             region.width - 2.0 * inset,
                             people::HEIGHT,
@@ -203,7 +200,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 );
             }
 
-            let mut at = Point::new(inset, region.y + layout.foot - offset);
+            let mut at = Point::new(region.x + inset, region.y + layout.foot - offset);
             for row in series.foot.rows() {
                 at.y += row.lead;
                 let color = match row.faint {
@@ -246,7 +243,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 /// the frame whatever the wall under it has scrolled to.
 pub fn head(bounds: Rectangle) -> Rectangle {
     area(
-        MARGIN,
+        layout::header(bounds).x,
         bounds.y + layout::TOP,
         layout::LOGO_WIDTH,
         layout::LOGO_HEIGHT,
@@ -268,8 +265,10 @@ impl<A: Art> Page<'_, A> {
         region: Rectangle,
     ) {
         let series = self.series;
-        let column = region.width * COLUMN;
-        let mut stack = Stack::new(Point::new(MARGIN, region.y + layout::TOP), layout::GAP);
+        // The column is a share of the whole frame's width, and not of the
+        // content region's, so it ends inside the scrim's full shade.
+        let column = bounds.width * COLUMN;
+        let mut stack = Stack::new(Point::new(region.x, region.y + layout::TOP), layout::GAP);
 
         let title = area(stack.at().x, stack.at().y, column, layout::LOGO_HEIGHT);
         frame.with_clip(title, |frame| {

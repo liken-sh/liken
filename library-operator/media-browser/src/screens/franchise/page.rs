@@ -26,11 +26,8 @@ use crate::art::Art;
 use crate::catalog::franchise::Standing;
 use crate::look;
 use crate::views::{
-    REACH, Tone, area, artwork, band, divider, extent, mark, rounded, text, wall as still,
+    REACH, Tone, area, artwork, band, divider, extent, mark, rounded, screen, text, wall as still,
 };
-
-// The margin at both sides of the page.
-const MARGIN: f32 = 80.0;
 
 // The space between the band and the first row.
 const TOP: f32 = 24.0;
@@ -50,13 +47,15 @@ const OUTLINE: f32 = 1.0;
 const ROUND: f32 = 4.0;
 
 /// The part of the frame the wall scrolls in: under the band, and inside
-/// the margins.
+/// the margins. The side margin comes from `views::screen`, and this
+/// page states no measure of one.
 pub fn region(bounds: Rectangle) -> Rectangle {
     let top = band::HEIGHT + TOP;
+    let content = screen::region(bounds);
     area(
-        MARGIN,
+        content.x,
         top,
-        (bounds.width - 2.0 * MARGIN).max(0.0),
+        content.width,
         (bounds.height - top).max(0.0),
     )
 }
@@ -582,8 +581,9 @@ mod tests {
         let region = region(FRAME);
         assert!(region.y > band::HEIGHT);
         assert_eq!(region.y + region.height, FRAME.height);
-        assert_eq!(region.x, MARGIN);
-        assert_eq!(region.width, FRAME.width - 2.0 * MARGIN);
+        let content = screen::region(FRAME);
+        assert_eq!(region.x, content.x);
+        assert_eq!(region.width, content.width);
     }
 
     #[test]

@@ -6,11 +6,7 @@
 use iced_winit::core::Rectangle;
 
 use super::{Block, Home};
-use crate::views::{area, banner, strip, wall};
-
-// The margin at both sides of the strips, which is the band's own inset,
-// so the headings line up.
-pub const MARGIN: f32 = 32.0;
+use crate::views::{area, banner, screen, strip, wall};
 
 // The space between two strips.
 const GAP: f32 = 28.0;
@@ -52,22 +48,23 @@ impl Layout {
         }
     }
 
-    /// The region one row draws in at this scroll, inside a frame this wide,
-    /// on a page this tall.
+    /// The region one row draws in at this scroll, inside this frame: the
+    /// screen's content region, cut to the row's height at the row's
+    /// place.
     pub fn region(
         &self,
         home: &Home,
         index: usize,
         offset: f32,
-        width: f32,
-        page: f32,
+        bounds: Rectangle,
     ) -> Option<Rectangle> {
         let top = self.tops.get(index).copied().flatten()?;
+        let content = screen::region(bounds);
         Some(area(
-            MARGIN,
+            content.x,
             crate::views::band::HEIGHT + top - offset,
-            width - 2.0 * MARGIN,
-            height(&home.blocks[index], page),
+            content.width,
+            height(&home.blocks[index], bounds.height),
         ))
     }
 
@@ -116,6 +113,14 @@ mod tests {
 
     const PAGE: f32 = 1080.0;
 
+    // The frame the rows are measured against in these tests.
+    const FRAME: Rectangle = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1920.0,
+        height: PAGE,
+    };
+
     fn home() -> Home {
         Home::open(&mut Catalog, &[], &[])
     }
@@ -138,10 +143,11 @@ mod tests {
         let offset = layout.scroll(&home, PAGE, PAGE - band::HEIGHT);
         assert_eq!(offset, 0.0);
         let region = layout
-            .region(&home, 0, offset, 1920.0, PAGE)
+            .region(&home, 0, offset, FRAME)
             .expect("the banner has a region");
-        assert_eq!(region.x, MARGIN);
-        assert_eq!(region.width, 1920.0 - 2.0 * MARGIN);
+        let content = screen::region(FRAME);
+        assert_eq!(region.x, content.x);
+        assert_eq!(region.width, content.width);
         assert_eq!(region.y, band::HEIGHT + wall::HEAD);
         assert_eq!(region.height, banner::height(PAGE));
     }
@@ -167,7 +173,7 @@ mod tests {
         let offset = layout.scroll(&home, PAGE, short);
         assert_eq!(offset, 100.0);
         let region = layout
-            .region(&home, 1, offset, 1920.0, PAGE)
+            .region(&home, 1, offset, FRAME)
             .expect("the released strip has a region");
         assert_eq!(region.y + region.height + wall::HEAD, band::HEIGHT + short);
         assert_eq!(
@@ -184,11 +190,11 @@ mod tests {
         let offset = layout.scroll(&home, PAGE, PAGE - band::HEIGHT);
         assert!(offset > 0.0);
         let region = layout
-            .region(&home, 0, offset, 1920.0, PAGE)
+            .region(&home, 0, offset, FRAME)
             .expect("the banner has a region");
         assert!(region.y < band::HEIGHT);
         let region = layout
-            .region(&home, 2, offset, 1920.0, PAGE)
+            .region(&home, 2, offset, FRAME)
             .expect("the second strip has a region");
         assert_eq!(region.y, band::HEIGHT + wall::HEAD);
     }

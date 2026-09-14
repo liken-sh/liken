@@ -89,6 +89,19 @@ pub fn band(columns: usize) -> f32 {
     cells(SCREEN, POSTER, columns).width
 }
 
+/// A cell is wider than the art inside it, by the gutter that holds the
+/// focus mark. A grid laid out inside a content region would therefore
+/// place its art one gutter further in than the heading over it.
+/// `columned` returns the grid region that puts the first and the last
+/// column's art on the content region's own edges: the content region
+/// widened by one gutter at each side.
+pub fn columned(region: Rectangle, columns: usize) -> Rectangle {
+    let gutter = (1.0 - POSTER_SHARE) / 2.0;
+    let width = region.width / (1.0 - 2.0 * gutter / columns as f32);
+    let out = (width - region.width) / 2.0;
+    area(region.x - out, region.y, width, region.height)
+}
+
 /// The poster slot of one index, in viewport space after the scroll.
 pub fn slot(cells: &Cells, index: usize, offset: f32, columns: usize) -> Rectangle {
     let column = (index % columns) as f32;
@@ -194,10 +207,7 @@ pub fn draw<T: Card, A: Art>(
 
     for index in range.clone() {
         let item = &grid.items[index];
-        let slot = lowered(
-            slot(&cells, index, grid.offset, grid.columns),
-            grid.region.y,
-        );
+        let slot = placed(slot(&cells, index, grid.offset, grid.columns), grid.region);
         artwork(
             frame,
             store,
@@ -258,11 +268,13 @@ pub(crate) fn written(
     text::centered(frame, content, band, look::CAPTION, color);
 }
 
-// One slot in frame space: its place in the grid, moved down by the top
-// of the grid's region.
-fn lowered(slot: Rectangle, top: f32) -> Rectangle {
+// One slot in frame space: its place in the grid, moved to the region's
+// corner. The grid's own space starts at zero, and the region says where
+// on the frame that space starts.
+fn placed(slot: Rectangle, region: Rectangle) -> Rectangle {
     Rectangle {
-        y: slot.y + top,
+        x: slot.x + region.x,
+        y: slot.y + region.y,
         ..slot
     }
 }
@@ -314,6 +326,25 @@ mod tests {
 
         fn library(&self) -> &str {
             self.0
+        }
+    }
+
+    // The gutter inside a cell means a region flush with the margin puts
+    // the art further in than the margin, so the region starts outside it.
+    #[test]
+    fn the_first_and_last_column_s_art_lands_on_the_content_region_s_edges() {
+        for (ratio, columns) in WALLS {
+            let content = crate::views::screen::region(area(0.0, 0.0, 1920.0, 1080.0));
+            let grid = columned(content, columns);
+            let cells = cells(grid.width, ratio, columns);
+            let first = slot(&cells, 0, 0.0, columns);
+            let last = slot(&cells, columns - 1, 0.0, columns);
+
+            assert!((grid.x + first.x - content.x).abs() < 0.01, "{first:?}");
+            assert!(
+                (grid.x + last.x + last.width - (content.x + content.width)).abs() < 0.01,
+                "{last:?}"
+            );
         }
     }
 
@@ -405,9 +436,14 @@ mod tests {
     }
 
     #[test]
-    fn the_region_lowers_every_slot_by_its_top() {
+    fn the_region_moves_every_slot_to_its_own_corner() {
         let cells = cells(1920.0, POSTER, COLUMNS);
-        assert_eq!(lowered(slot(&cells, 0, 0.0, COLUMNS), 78.0).y, 78.0);
+        let region = area(60.0, 78.0, 1800.0, 1000.0);
+        let first = slot(&cells, 0, 0.0, COLUMNS);
+        let placed = placed(first, region);
+
+        assert_eq!(placed.y, 78.0);
+        assert_eq!(placed.x, 60.0 + first.x);
     }
 
     #[test]

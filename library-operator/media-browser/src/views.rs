@@ -36,6 +36,7 @@ pub mod people;
 pub mod progress;
 pub mod rail;
 pub mod ratings;
+pub mod screen;
 pub mod scroll;
 pub mod stack;
 pub mod strip;

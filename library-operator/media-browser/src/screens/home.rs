@@ -361,8 +361,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
                 let Some(title) = banner.focused() else {
                     continue;
                 };
-                let Some(region) = layout.region(home, index, offset, bounds.width, bounds.height)
-                else {
+                let Some(region) = layout.region(home, index, offset, bounds) else {
                     continue;
                 };
                 views::banner::backdrop(frame, store, &title.item.library, &title.backdrop, region);
@@ -397,8 +396,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
         frame.with_clip(clip, |frame| {
             let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
-                let Some(region) = layout.region(home, index, offset, bounds.width, bounds.height)
-                else {
+                let Some(region) = layout.region(home, index, offset, bounds) else {
                     continue;
                 };
                 if region.y + region.height < band::HEIGHT || region.y > bounds.height {

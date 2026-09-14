@@ -5,7 +5,19 @@
 //
 // The clock is drawn by the strip, the browser's layer over every
 // screen, through `reading` here. This module keeps the glyph, the
-// halo, and the room the reading reserves.
+// halo, the room the reading reserves, and the box the reading draws
+// in.
+//
+// Three programs draw a clock on one panel. They are this browser, the
+// player's `mpv` display, and the idle screen between films. One
+// replaces another while a person watches. The reading holds one box
+// across all three, so the hour stays where it is when the screen
+// changes. The media operator states the same numbers in
+// `display/theme.lua` and in `idle/src/look.rs`.
+//
+// The vertical measures of that box are below. The side margin the
+// reading ends on is the margin every screen keeps, and `views::screen`
+// states it.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -13,9 +25,28 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle};
 
-use super::{band, label, text};
+use super::{label, screen, text};
 use crate::clock::Time;
 use crate::look;
+
+/// The top margin the reading's line box hangs from, in logical pixels.
+/// The player's canvas is 1080 rows tall, and so is this frame at the
+/// scale the compositor states. The two spaces therefore share every
+/// vertical measure.
+pub const MARGIN_Y: f32 = 90.0;
+
+/// The line box the reading draws in, in logical pixels. `libass`
+/// scales the face until its bounding height fills the size an ASS
+/// `\fs` states. So the player's `\fs34` is 34 rows of canvas, and it
+/// is not a 34-pixel glyph.
+pub const BOX: f32 = 34.0;
+
+/// The type size that fills that box. The brand face measures 1326
+/// units of bounding height over an em of 1000. Those numbers come from
+/// the `OS/2` and `head` tables of `SourceSans3-Regular.otf`. So the
+/// size is the box over that metric, rounded to a whole pixel. The idle
+/// screen rounds it the same way.
+pub const SIZE: f32 = 26.0;
 
 // The strip module: the browser's layer over every screen, which draws
 // the search icon, the field it expands into, and the reading.
@@ -62,13 +93,27 @@ pub fn halo(at: Point) -> [Point; 8] {
 
 /// The room the clock takes at the right edge of a frame.
 pub fn room() -> f32 {
-    text::width(WIDEST, look::CONTROL) * SLACK
+    text::width(WIDEST, SIZE) * SLACK
+}
+
+/// The right edge of the clock in a frame this wide. The reading is set
+/// flush to it, so the hour ends on the side margin whatever it reads.
+pub fn right(width: f32) -> f32 {
+    width - screen::MARGIN_X
 }
 
 /// The left edge of the clock in a frame this wide. The strip's icon,
 /// and the field it expands into, end a margin to the left of it.
 pub fn left(width: f32) -> f32 {
-    width - band::PAD - room()
+    right(width) - room()
+}
+
+/// The middle of the reading's line. The player hangs its own line box
+/// from the top margin by the box's top edge. This toolkit centres a
+/// line on the point it is given. So the same line is half a box lower
+/// here. The strip's other parts take this line as well.
+pub fn middle() -> f32 {
+    MARGIN_Y + BOX / 2.0
 }
 
 // The reading in the room the clock reserves at the right of the frame.
@@ -76,14 +121,12 @@ pub fn left(width: f32) -> f32 {
 // reading reads over art of any brightness and no shape shows around it.
 pub(crate) fn reading(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, time: Time) {
     let reading = time.twelve_hour();
-    let right = bounds.x + bounds.width - band::PAD;
-    let middle = bounds.y + band::HEIGHT / 2.0;
-    let at = Point::new(right, middle);
+    let at = Point::new(bounds.x + right(bounds.width), bounds.y + middle());
     let ink = |point: Point, color: Color| {
         label(
             &reading,
             point,
-            look::CONTROL,
+            SIZE,
             color,
             Alignment::Right,
             Vertical::Center,
@@ -102,8 +145,19 @@ mod tests {
 
     #[test]
     fn the_clock_hangs_off_the_right_edge() {
-        assert_eq!(left(1920.0) + room() + band::PAD, 1920.0);
-        assert_eq!(left(1280.0) + room() + band::PAD, 1280.0);
+        assert_eq!(left(1920.0) + room(), right(1920.0));
+        assert_eq!(left(1280.0) + room(), right(1280.0));
+    }
+
+    #[test]
+    fn the_clock_ends_on_the_margin_the_player_keeps() {
+        assert_eq!(right(1920.0), 1824.0);
+        assert_eq!(right(2560.0), 2464.0);
+    }
+
+    #[test]
+    fn the_clock_sits_on_the_line_the_player_hangs_its_reading_from() {
+        assert_eq!(middle(), 107.0);
     }
 
     #[test]
@@ -134,7 +188,7 @@ mod tests {
         for hour in 0..24 {
             for minute in [0, 59] {
                 let reading = Time { hour, minute }.twelve_hour();
-                assert!(text::width(&reading, look::CONTROL) <= room(), "{reading}");
+                assert!(text::width(&reading, SIZE) <= room(), "{reading}");
             }
         }
     }

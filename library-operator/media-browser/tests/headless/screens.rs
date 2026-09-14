@@ -199,9 +199,11 @@ fn the_clock_draws_at_the_top_right_of_every_screen() {
 }
 
 // The box the clock's reading draws in at 1920 by 1080. The reading
-// hangs off the band's own margin at the right edge and centers on the
-// band's middle line, and nothing else draws inside the box.
-const CLOCK: (u32, u32, u32, u32) = (1800, 28, 1890, 56);
+// ends on the side margin all three programs keep, 96 columns in from
+// the right edge, and centers on the line the player's display places
+// its own reading on. Nothing else draws inside the box: the search icon
+// ends one strip gap to its left.
+const CLOCK: (u32, u32, u32, u32) = (1694, 88, 1826, 126);
 
 // The reading draws in the bright ink over a halo of dark ink, so the
 // box carries a reading only where it holds both a bright pixel and a
@@ -494,14 +496,14 @@ fn a_muted_level_draws_the_slash_on_the_glyph() {
 // The topic the operator names for a unit with sinks.
 const VOLUME_TOPIC: &str = "liken/media/players/house/den-tv/volume";
 
-// Two points of the row in a 1920 by 1080 frame, which the frames below are
-// read at. The row hangs off the top right corner: the number's box ends
-// 120 from the right edge, the bar is the 220 before the 84 the number
-// reserves, and 40 of 100 fills the first 88 of it. The glyph stands 26
-// wide and 16 to the left of the bar, and the point below is inside the
-// speaker's driver box.
-const BAR: (u32, u32) = (1540, 74);
-const GLYPH: (u32, u32) = (1467, 75);
+// Two points of the row in a 1920 by 1080 frame, which the frames below
+// are read at. The row is in the top right corner: the number's box ends
+// on the screen's side margin, the bar is the 220 before the 84 the
+// number reserves, and a level of 40 of 100 fills the first 88 of it.
+// The glyph is 26 wide and 16 to the left of the bar, and the point
+// below is inside the speaker's driver box.
+const BAR: (u32, u32) = (1564, 74);
+const GLYPH: (u32, u32) = (1491, 75);
 
 // One run of the browser on a broker that states this level, and the frame
 // it captured while the row was up. The frame is taken well after the

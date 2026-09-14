@@ -15,12 +15,12 @@ use std::convert::Infallible;
 
 use media_screen::volume::{UNITY_LEVEL, Volume};
 
-use super::{area, label, rounded, text};
+use super::{area, label, rounded, screen, text};
 use crate::look;
 
-// The margins the row hangs off, the same measures a page sets its own
-// blocks by.
-const MARGIN_X: f32 = 120.0;
+// The row ends on the side margin every screen keeps, which
+// `views::screen` states. MARGIN_Y is how far below the top edge the row
+// starts.
 const MARGIN_Y: f32 = 56.0;
 
 // The width the number reserves at the right margin, so the bar and the
@@ -181,7 +181,7 @@ struct Places {
 
 fn places(bounds: Rectangle) -> Places {
     let top = bounds.y + MARGIN_Y;
-    let right = bounds.x + bounds.width - MARGIN_X;
+    let right = bounds.x + bounds.width - screen::MARGIN_X;
     // The bar and the glyph centre on the middle of the number's line, so
     // the three parts read as one row.
     let middle = top + NUMBER_BOX / 2.0;
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn the_row_stands_at_the_top_right_margin() {
         let row = places(bounds());
-        assert_eq!(row.number.x, 1920.0 - MARGIN_X);
+        assert_eq!(row.number.x, 1920.0 - screen::MARGIN_X);
         assert_eq!(row.number.y, MARGIN_Y);
         assert_eq!(row.bar.x, row.number.x - NUMBER_WIDTH - BAR_WIDTH);
         assert_eq!(row.glyph.x, row.bar.x - GLYPH_GAP - GLYPH_WIDTH);
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn the_row_follows_the_frame_it_draws_in() {
         let row = places(area(0.0, 0.0, 1280.0, 720.0));
-        assert_eq!(row.number.x, 1280.0 - MARGIN_X);
+        assert_eq!(row.number.x, 1280.0 - screen::MARGIN_X);
         assert_eq!(row.surface.x + row.surface.width, row.number.x + PAD_X);
     }
 }

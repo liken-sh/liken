@@ -10,7 +10,7 @@ use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle};
 
 use super::clock::{self, strip};
-use super::{area, band, extent, rounded, text};
+use super::{area, extent, rounded, text};
 use crate::look;
 
 // The word for the key that removes the last character.
@@ -96,8 +96,8 @@ const SHARE: f32 = 3.0;
 pub fn bounds(width: f32) -> Rectangle {
     let across = width / SHARE;
     area(
-        clock::left(width) - band::PAD - across,
-        (band::HEIGHT - BOX) / 2.0,
+        clock::left(width) - strip::GAP - across,
+        clock::middle() - BOX / 2.0,
         across,
         BOX,
     )
@@ -146,6 +146,7 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, width: f32, field: &TextField) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::band;
 
     // One case: the text the field held, the word pressed, whether the
     // text changed, and the text after.
@@ -202,7 +203,7 @@ mod tests {
     #[test]
     fn the_field_ends_a_margin_to_the_left_of_the_clock_and_takes_a_third_across() {
         let bounds = bounds(1920.0);
-        assert_eq!(bounds.x + bounds.width, clock::left(1920.0) - band::PAD);
+        assert_eq!(bounds.x + bounds.width, clock::left(1920.0) - strip::GAP);
         assert_eq!(bounds.width, 1920.0 / SHARE);
         assert!(bounds.y > 0.0);
         assert!(bounds.y + bounds.height < band::HEIGHT);

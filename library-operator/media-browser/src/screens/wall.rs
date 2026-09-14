@@ -17,7 +17,7 @@ use super::slots::Slots;
 use crate::art::Art;
 use crate::catalog::{Query, Source};
 use crate::focus;
-use crate::views::{area, band, card, clip_marked, wall};
+use crate::views::{area, band, card, clip_marked, screen, wall};
 
 // The progress module: the bars the wall's film slots draw, read per
 // library the slots span.
@@ -362,10 +362,13 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
 // and never behind it.
 fn region(bounds: Rectangle, under: f32) -> Rectangle {
     let top = band::HEIGHT + under;
+    // The grid is the screen's content region widened by the cell gutter,
+    // so the columns of art land on the region's edges.
+    let grid = wall::columned(screen::region(bounds), wall::COLUMNS);
     area(
-        0.0,
+        grid.x,
         top + wall::HEAD,
-        bounds.width,
+        grid.width,
         bounds.height - top - wall::HEAD,
     )
 }
@@ -391,6 +394,21 @@ mod tests {
         let under = region(frame(), 200.0);
         assert!(under.y > bare.y, "{under:?}");
         assert_eq!(under.y + under.height, HEIGHT);
+    }
+
+    #[test]
+    fn the_grid_s_columns_stand_on_the_screen_s_side_margin() {
+        let region = region(frame(), 0.0);
+        let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, 1);
+        let first = wall::slot(&cells, 0, 0.0, wall::COLUMNS);
+        let last = wall::slot(&cells, wall::COLUMNS - 1, 0.0, wall::COLUMNS);
+
+        let content = screen::region(frame());
+        assert!((region.x + first.x - content.x).abs() < 0.01, "{first:?}");
+        assert!(
+            (region.x + last.x + last.width - (content.x + content.width)).abs() < 0.01,
+            "{last:?}"
+        );
     }
 
     #[test]

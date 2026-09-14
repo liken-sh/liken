@@ -13,17 +13,20 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Element, Length, Point, Rectangle, Theme, mouse};
 
-use super::{area, extent, label, text};
+use super::{area, clock, extent, label, screen, text};
 use crate::look;
 
-/// The height the band takes off the top of the frame.
-pub const HEIGHT: f32 = 84.0;
+/// The height the band takes off the top of the frame. A screen's rows
+/// start at its bottom edge. The strip draws the clock over the band. A
+/// row that reached the clock's line would scroll under the reading. So
+/// the band holds that line and the air under it.
+pub const HEIGHT: f32 = clock::MARGIN_Y + clock::BOX + AIR;
 
-/// The margin at both ends of the band.
-pub const PAD: f32 = 32.0;
+// The air between the clock's line and the first row of a screen.
+const AIR: f32 = 30.0;
 
-/// How far the heading rises over the band's middle to make room for a
-/// note under it, and how far under the middle the note sits.
+/// How far the heading rises over the band's line to make room for a
+/// note under it, and how far under that line the note sits.
 const RISE: f32 = 11.0;
 const DROP: f32 = 13.0;
 
@@ -34,13 +37,17 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, width: f32, heading: &str, note
     // through it.
     let ground = area(0.0, 0.0, width, HEIGHT);
     frame.fill_rectangle(ground.position(), extent(ground), look::BACKGROUND);
+    // The heading takes the clock's own line, so the two ends of the band
+    // read as one row.
     let middle = match note.is_empty() {
-        true => HEIGHT / 2.0,
-        false => HEIGHT / 2.0 - RISE,
+        true => clock::middle(),
+        false => clock::middle() - RISE,
     };
+    // The heading starts on the screen's side margin, the same margin the
+    // clock's reading ends on at the other edge.
     frame.fill_text(label(
         heading,
-        Point::new(PAD, middle),
+        Point::new(screen::MARGIN_X, middle),
         look::NAME,
         look::text(),
         Alignment::Left,
@@ -50,7 +57,7 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, width: f32, heading: &str, note
     if !note.is_empty() {
         frame.fill_text(label(
             &text::cut(note, look::CAPTION, width / 2.0),
-            Point::new(PAD, HEIGHT / 2.0 + DROP),
+            Point::new(screen::MARGIN_X, clock::middle() + DROP),
             look::CAPTION,
             look::faint(),
             Alignment::Left,
@@ -92,4 +99,16 @@ pub fn layer<'a>(heading: &'a str, note: &'a str) -> Element<'a, Infallible, The
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A row that reached the clock's line would scroll under the
+    // reading, so the band holds the whole line box and the air under it.
+    #[test]
+    fn the_band_clears_the_clock_s_line() {
+        const { assert!(HEIGHT > clock::MARGIN_Y + clock::BOX) };
+    }
 }

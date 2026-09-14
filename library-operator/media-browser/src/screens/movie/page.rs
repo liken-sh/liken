@@ -17,10 +17,9 @@ use crate::art::Art;
 use crate::catalog::progress::clock;
 use crate::look;
 use crate::views::stack::{self, Stack};
-use crate::views::{area, buttons, card, curtain, header, people, progress, ratings, strip, text};
-
-// The margin at both sides of the page.
-const MARGIN: f32 = 120.0;
+use crate::views::{
+    area, buttons, card, curtain, header, people, progress, ratings, screen, strip, text,
+};
 
 // The share of the width the column of text takes. The column ends inside
 // the part of the scrim that holds its full shade, so every line reads
@@ -69,14 +68,10 @@ const WATCHED: &str = "Watched";
 /// The box the movie's logo draws in at these bounds, scroll included,
 /// which is where the loading state starts the logo's move.
 pub fn head(movie: &Movie, bounds: Rectangle) -> Rectangle {
-    let blocks = Blocks::of(
-        movie,
-        bounds.width * COLUMN,
-        bounds.width - 2.0 * MARGIN,
-        bounds.height * TOP,
-    );
+    let blocks = Blocks::of(movie, bounds);
     let offset = blocks.scroll(movie, bounds.height);
-    area(MARGIN, blocks.title.top - offset, LOGO_WIDTH, LOGO_HEIGHT)
+    let at = blocks.title.at(offset);
+    area(at.x, at.y, LOGO_WIDTH, LOGO_HEIGHT)
 }
 
 /// The page's front layer as one canvas.
@@ -107,13 +102,9 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
-        let column = bounds.width * COLUMN;
-        let blocks = Blocks::of(
-            movie,
-            column,
-            bounds.width - 2.0 * MARGIN,
-            bounds.height * TOP,
-        );
+        let region = screen::region(bounds);
+        let column = column(bounds);
+        let blocks = Blocks::of(movie, bounds);
         let offset = blocks.scroll(movie, bounds.height);
 
         header::title(
@@ -184,7 +175,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // The bar and its clock, or the word of a film watched, beside and
         // under the row the words just drew.
         let row = row(&words, at);
-        let beside = bounds.width - MARGIN - row.x - row.width - BESIDE;
+        let beside = region.x + region.width - row.x - row.width - BESIDE;
         match &movie.progress {
             Some(watched) if watched.finished => {
                 text::line(
@@ -234,9 +225,9 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                     lines: card::LINES,
                     headed: false,
                     region: area(
-                        MARGIN,
+                        region.x,
                         block.top - offset,
-                        bounds.width - 2.0 * MARGIN,
+                        region.width,
                         strip::height(card::LINES),
                     ),
                 },
@@ -274,9 +265,9 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         Some(Focus::Franchise(strip, Place::Heading)) if strip == index
                     ),
                     region: area(
-                        MARGIN,
+                        region.x,
                         block.top - offset,
-                        bounds.width - 2.0 * MARGIN,
+                        region.width,
                         strip::height(card::LINES),
                     ),
                 },
@@ -301,18 +292,13 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                     },
                     heading: band.heading,
                     library: &movie.library,
-                    region: area(
-                        MARGIN,
-                        block.top - offset,
-                        bounds.width - 2.0 * MARGIN,
-                        people::HEIGHT,
-                    ),
+                    region: area(region.x, block.top - offset, region.width, people::HEIGHT),
                 },
             );
         }
 
-        let mut at = Point::new(MARGIN, blocks.foot.top - offset);
-        let width = bounds.width - 2.0 * MARGIN;
+        let mut at = Point::new(region.x, blocks.foot.top - offset);
+        let width = region.width;
         for row in movie.foot.rows() {
             at.y += row.lead;
             let color = match row.faint {
@@ -339,6 +325,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 // how tall it is.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Block {
+    left: f32,
     top: f32,
     height: f32,
 }
@@ -346,7 +333,7 @@ struct Block {
 impl Block {
     // Where the block draws at this scroll.
     fn at(&self, offset: f32) -> Point {
-        Point::new(MARGIN, self.top - offset)
+        Point::new(self.left, self.top - offset)
     }
 
     fn bottom(&self) -> f32 {
@@ -377,11 +364,14 @@ struct Blocks {
 }
 
 impl Blocks {
-    fn of(movie: &Movie, column: f32, width: f32, top: f32) -> Self {
-        let mut cursor = Stack::new(Point::new(MARGIN, top), GAP);
+    fn of(movie: &Movie, bounds: Rectangle) -> Self {
+        let region = screen::region(bounds);
+        let column = column(bounds);
+        let mut cursor = Stack::new(Point::new(region.x, bounds.height * TOP), GAP);
         let mut place = |lead: f32, height: f32| {
             cursor.skip(lead);
             let block = Block {
+                left: region.x,
                 top: cursor.at().y,
                 height,
             };
@@ -424,7 +414,7 @@ impl Blocks {
             .map(|_| place(STRIPE_LEAD, people::HEIGHT))
             .collect();
 
-        let foot = place(STRIPE_LEAD, movie.foot.height(width));
+        let foot = place(STRIPE_LEAD, movie.foot.height(region.width));
         let last = stripes
             .last()
             .or(franchises.last())
@@ -480,6 +470,12 @@ impl Blocks {
             .find(|top| *top > block.top)
             .unwrap_or(self.content)
     }
+}
+
+// The column of text is a share of the whole frame's width, and not of
+// the content region's, so it ends inside the scrim's full shade.
+fn column(bounds: Rectangle) -> f32 {
+    bounds.width * COLUMN
 }
 
 // The box the button row fills, from the first button's left edge to the

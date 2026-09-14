@@ -14,15 +14,21 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Point, Rectangle, Theme, mouse};
 
-use super::{left, reading};
+use super::{SIZE, left, middle, reading};
 use crate::clock::Time;
 use crate::look;
 use crate::views::field::{self, TextField};
-use crate::views::{area, band, mark, text};
+use crate::views::{area, mark, text};
+
+/// The space between two parts of the strip: the circles, the glass or
+/// the field, and the reading are this far apart. It is not a screen
+/// margin. The screen's own side inset is `views::screen::MARGIN_X`, and
+/// the two are separate measures.
+pub const GAP: f32 = 32.0;
 
 /// The side of the icon's square box. The icon is the size of the
 /// reading beside it, so the two read as one strip.
-pub const GLASS: f32 = look::CONTROL;
+pub const GLASS: f32 = SIZE;
 
 // The circle's radius and the center it turns about, as shares of the
 // box, and where the handle ends, so the icon scales with the box.
@@ -38,8 +44,8 @@ const LINE: f32 = 2.0;
 /// margin to the left of the clock, on the same middle line.
 pub fn glass_at(width: f32) -> Rectangle {
     area(
-        left(width) - band::PAD - GLASS,
-        (band::HEIGHT - GLASS) / 2.0,
+        left(width) - GAP - GLASS,
+        middle() - GLASS / 2.0,
         GLASS,
         GLASS,
     )
@@ -118,8 +124,8 @@ pub fn circles_width(count: usize) -> f32 {
 /// margin before the glass, and nothing at all where the room is empty.
 pub fn circles_at(width: f32, count: usize) -> Rectangle {
     let taken = circles_width(count);
-    let right = glass_at(width).x - band::PAD;
-    area(right - taken, (band::HEIGHT - CIRCLE) / 2.0, taken, CIRCLE)
+    let right = glass_at(width).x - GAP;
+    area(right - taken, middle() - CIRCLE / 2.0, taken, CIRCLE)
 }
 
 /// The box one circle of the row draws in.
@@ -223,16 +229,18 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::views::clock::room;
+    use crate::views::band;
+    use crate::views::clock::{right, room};
 
     const WIDTH: f32 = 1920.0;
 
     #[test]
     fn the_icon_stands_a_margin_to_the_left_of_the_clock() {
         let at = glass_at(WIDTH);
-        assert_eq!(at.x + at.width + band::PAD, left(WIDTH));
+        assert_eq!(at.x + at.width + GAP, left(WIDTH));
         assert_eq!(at.width, GLASS);
         assert_eq!(at.height, GLASS);
+        assert_eq!(at.center_y(), middle());
         assert!(at.y > 0.0);
         assert!(at.y + at.height < band::HEIGHT);
     }
@@ -241,7 +249,7 @@ mod tests {
     fn the_circles_of_the_room_end_a_margin_before_the_glass() {
         let row = circles_at(WIDTH, 3);
 
-        assert_eq!(row.x + row.width + band::PAD, glass_at(WIDTH).x);
+        assert_eq!(row.x + row.width + GAP, glass_at(WIDTH).x);
         assert_eq!(row.width, 3.0 * CIRCLE + 2.0 * CIRCLE_GAP);
         assert_eq!(row.height, CIRCLE);
         assert_eq!(row.center_y(), glass_at(WIDTH).center_y());
@@ -252,7 +260,7 @@ mod tests {
         let row = circles_at(WIDTH, 0);
 
         assert_eq!(row.width, 0.0);
-        assert_eq!(row.x + band::PAD, glass_at(WIDTH).x);
+        assert_eq!(row.x + GAP, glass_at(WIDTH).x);
     }
 
     #[test]
@@ -271,11 +279,8 @@ mod tests {
     #[test]
     fn the_field_reaches_the_same_margin_and_holds_the_icon_at_its_left_end() {
         let box_of = field::bounds(WIDTH);
-        assert_eq!(box_of.x + box_of.width + band::PAD, left(WIDTH));
-        assert_eq!(
-            box_of.x + box_of.width + band::PAD + room(),
-            WIDTH - band::PAD
-        );
+        assert_eq!(box_of.x + box_of.width + GAP, left(WIDTH));
+        assert_eq!(box_of.x + box_of.width + GAP + room(), right(WIDTH));
 
         let icon = field::icon(box_of);
         assert!(icon.x > box_of.x);

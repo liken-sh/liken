@@ -11,6 +11,14 @@ use crate::screens::{Item, facts};
 const WIDTH: f32 = 1920.0;
 const HEIGHT: f32 = 1080.0;
 
+// The frame every measure here is taken against.
+const FRAME: Rectangle = Rectangle {
+    x: 0.0,
+    y: 0.0,
+    width: WIDTH,
+    height: HEIGHT,
+};
+
 // A 720p frame, which a crowded page is taller than, so the scroll
 // has something to do.
 const SHORT: f32 = 720.0;
@@ -99,7 +107,7 @@ fn crowded(focus: Focus) -> Movie {
 }
 
 fn blocks(movie: &Movie) -> Blocks {
-    Blocks::of(movie, WIDTH * COLUMN, WIDTH - 2.0 * MARGIN, HEIGHT * TOP)
+    Blocks::of(movie, FRAME)
 }
 
 // The top of the set strip, the block the button row's own block stands
@@ -132,7 +140,7 @@ fn the_bar_under_the_button_row_holds_a_band_of_its_own() {
 // The words of the row a film the audience is in the middle of draws, and
 // where the row starts on the page.
 const WORDS: [&str; 3] = ["Resume", "Start over", "Trailer"];
-const AT: Point = Point::new(MARGIN, 640.0);
+const AT: Point = Point::new(screen::MARGIN_X, 640.0);
 
 #[test]
 fn the_row_spans_the_first_button_to_the_last() {
@@ -243,7 +251,10 @@ fn the_foot_follows_the_last_stripe_and_keeps_the_page_s_foot_margin() {
     let blocks = blocks(&movie);
     let last = blocks.stripes.last().expect("the crowded page credits");
     assert_eq!(blocks.foot.top, last.bottom() + GAP + STRIPE_LEAD);
-    assert_eq!(blocks.foot.height, movie.foot.height(WIDTH - 2.0 * MARGIN));
+    assert_eq!(
+        blocks.foot.height,
+        movie.foot.height(screen::region(FRAME).width)
+    );
     assert_eq!(blocks.content, blocks.foot.bottom() + FOOT);
 }
 

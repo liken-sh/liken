@@ -14,10 +14,7 @@ use super::Person;
 use crate::art::Art;
 use crate::look;
 use crate::views::stack::Stack;
-use crate::views::{area, card, extent, text, wall};
-
-// The margin at both sides of the head.
-const MARGIN: f32 = 120.0;
+use crate::views::{area, card, extent, screen, text, wall};
 
 // The space over the headshot, and the space under it before the
 // wall's region.
@@ -52,10 +49,13 @@ pub fn head() -> f32 {
 
 /// The part of the frame the wall scrolls in: under the head, and under
 /// the space that keeps the first row's mark off it. The scroll clamps
-/// to this region, so the last row's lines end inside it.
+/// to this region, so the last row's lines end inside it. The grid is
+/// the screen's content region widened by the cell gutter, so the first
+/// column's poster is directly under the headshot.
 pub fn region(bounds: Rectangle) -> Rectangle {
     let top = (head() + wall::HEAD).min(bounds.height);
-    area(bounds.x, bounds.y + top, bounds.width, bounds.height - top)
+    let grid = wall::columned(screen::region(bounds), wall::COLUMNS);
+    area(grid.x, bounds.y + top, grid.width, bounds.height - top)
 }
 
 /// The page as one canvas.
@@ -83,11 +83,12 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
-        let headshot = area(MARGIN, TOP, headshot_width(), HEADSHOT);
+        let content = screen::region(bounds);
+        let headshot = area(content.x, TOP, headshot_width(), HEADSHOT);
         drawn(&mut frame, store, person, headshot);
 
         let left = headshot.x + headshot.width + BESIDE;
-        let column = bounds.width - left - MARGIN;
+        let column = content.x + content.width - left;
         let mut words = Stack::new(Point::new(left, TOP), GAP);
         for (content, size, color, cap) in [
             (&person.name, look::TITLE, look::text(), 1),
@@ -159,6 +160,18 @@ mod tests {
         assert_eq!(region.y, head() + wall::HEAD);
         assert_eq!(region.y + region.height, HEIGHT);
         assert!(head() < HEIGHT / 2.0, "{}", head());
+    }
+
+    // The headshot and the first column of the wall under it share one
+    // left edge: the left edge of the screen's content region.
+    #[test]
+    fn the_first_poster_stands_under_the_headshot() {
+        let region = region(frame());
+        let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, LINES);
+        let first = wall::slot(&cells, 0, 0.0, wall::COLUMNS);
+        let content = screen::region(frame());
+
+        assert!((region.x + first.x - content.x).abs() < 0.01, "{first:?}");
     }
 
     #[test]

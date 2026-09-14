@@ -7,7 +7,8 @@
 use super::{COLUMNS, Focus, Season};
 use crate::look;
 use crate::views::{
-    REACH, area, card, clip_marked, divider, people, ratings, scroll, stack, strip, text, wall,
+    REACH, area, card, clip_marked, divider, people, ratings, screen, scroll, stack, strip, text,
+    wall,
 };
 use iced_winit::core::Rectangle;
 
@@ -48,9 +49,16 @@ const TRAIL: f32 = 0.25;
 
 /// The part of the frame the header draws in: the height its blocks take,
 /// whatever this series carries, so the wall under it starts at the same
-/// place on every series.
+/// place on every series. The header draws on the screen's content
+/// region, which `views::screen` states.
 pub fn header(bounds: Rectangle) -> Rectangle {
-    area(bounds.x, bounds.y, bounds.width, head().min(bounds.height))
+    let content = screen::region(bounds);
+    area(
+        content.x,
+        bounds.y,
+        content.width,
+        head().min(bounds.height),
+    )
 }
 
 // The height of the screen the browser is drawn for. The rail's bars
@@ -74,13 +82,16 @@ pub fn rail_clip(region: Rectangle) -> Rectangle {
     clip_marked(region)
 }
 
-/// The part of the frame the wall scrolls in, under the header.
+/// The part of the frame the wall scrolls in, under the header. The grid
+/// is the screen's content region widened by the cell gutter, so the
+/// first and the last column's stills land on the region's own edges.
 pub fn region(bounds: Rectangle) -> Rectangle {
     let header = header(bounds);
+    let grid = wall::columned(screen::region(bounds), COLUMNS);
     area(
-        bounds.x,
+        grid.x,
         bounds.y + header.height,
-        bounds.width,
+        grid.width,
         bounds.height - header.height,
     )
 }
