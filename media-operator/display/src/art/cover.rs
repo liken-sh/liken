@@ -193,7 +193,7 @@ mod tests {
 
     /// One album folder of its own, emptied before each test writes into it.
     fn folder(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("media-osd-{name}.album"));
+        let dir = std::env::temp_dir().join(format!("media-display-{name}.album"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("an album folder");
         dir

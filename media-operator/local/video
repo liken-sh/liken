@@ -123,8 +123,8 @@ BINDINGS
 docker build -q -t local-video-weston:latest "$here/weston-nested" >/dev/null
 BIN="$SOCKETS/media-operator"
 go -C "$root" build -o "$BIN" .
-cargo build --manifest-path "$root/Cargo.toml" --release -p media-osd
-OSD="$root/target/release/media-osd"
+cargo build --manifest-path "$root/Cargo.toml" --release -p media-display
+DISPLAY_BIN="$root/target/release/media-display"
 
 WESTON=
 LAYOUT=
@@ -234,7 +234,7 @@ SERVE=$!
 # to try another value.
 MEDIA_MPV_SOCKET="$SOCK" XDG_RUNTIME_DIR="$SOCKETS" WAYLAND_DISPLAY=wayland-0 \
   MEDIA_TRICKPLAY_INTERVAL="${MEDIA_TRICKPLAY_INTERVAL:-}" \
-  "$OSD" >"$SOCKETS/osd.log" 2>&1 &
+  "$DISPLAY_BIN" >"$SOCKETS/display.log" 2>&1 &
 DISPLAY_PID=$!
 
 # Wait for mpv to close, which is when the user quits the window with q.

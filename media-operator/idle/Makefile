@@ -18,7 +18,7 @@
 # lower it.
 IDLE_COVERAGE_FLOOR := 95
 SCREEN_COVERAGE_FLOOR := 99
-OSD_COVERAGE_FLOOR := 90
+DISPLAY_COVERAGE_FLOOR := 90
 
 # Every cargo command runs at the workspace root, which is the directory
 # above this one.
@@ -58,7 +58,7 @@ test:
 	cd $(ROOT) && cargo llvm-cov report -p idle-screen \
 		--cobertura --output-path $(ROOT)/coverage-idle-screen.xml
 	cd $(ROOT) && cargo llvm-cov clean --workspace --profraw-only
-	cd $(ROOT) && cargo llvm-cov -p media-osd --all-targets \
-		--fail-under-lines $(OSD_COVERAGE_FLOOR)
-	cd $(ROOT) && cargo llvm-cov report -p media-osd \
-		--cobertura --output-path $(ROOT)/coverage-osd.xml
+	cd $(ROOT) && cargo llvm-cov -p media-display --all-targets \
+		--fail-under-lines $(DISPLAY_COVERAGE_FLOOR)
+	cd $(ROOT) && cargo llvm-cov report -p media-display \
+		--cobertura --output-path $(ROOT)/coverage-display.xml

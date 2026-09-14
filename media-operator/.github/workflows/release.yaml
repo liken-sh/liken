@@ -20,7 +20,7 @@
 # build them: the sidecar image is the operator image under a second
 # name, tagged here and never built twice. The operator stamps the
 # player image into every playback pod, the idle image into every idle
-# pod, the osd image into every display container, and the sidecar
+# pod, the display image into every display container, and the sidecar
 # image into every sidecar container, and images that could drift apart
 # would put the report contract and the screen topic at two versions at
 # once.
@@ -101,7 +101,7 @@ jobs:
             echo "    newTag: $VERSION"
             echo "  - name: ghcr.io/$GITHUB_REPOSITORY-sidecar"
             echo "    newTag: $VERSION"
-            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-osd"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-display"
             echo "    newTag: $VERSION"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -158,17 +158,17 @@ jobs:
             ghcr.io/liken-sh/media-operator-idle:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-idle:latest
 
-      - name: Build the osd image
+      - name: Build the display image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.osd
+          file: Dockerfile.display
           load: true
-          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-osd:buildcache
-          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-osd:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache,mode=max
           tags: |
-            ghcr.io/liken-sh/media-operator-osd:${{ env.VERSION }}
-            ghcr.io/liken-sh/media-operator-osd:latest
+            ghcr.io/liken-sh/media-operator-display:${{ env.VERSION }}
+            ghcr.io/liken-sh/media-operator-display:latest
 
       # The sidecar image is the operator image under a second name.
       # Every sidecar container runs the operator binary in one of its
@@ -253,12 +253,12 @@ jobs:
           docker push "ghcr.io/liken-sh/media-operator:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-player:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-idle:$VERSION"
-          docker push "ghcr.io/liken-sh/media-operator-osd:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator-display:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-sidecar:$VERSION"
           if [ "$RELEASE" = true ]; then
             docker push "ghcr.io/liken-sh/media-operator:latest"
             docker push "ghcr.io/liken-sh/media-operator-player:latest"
             docker push "ghcr.io/liken-sh/media-operator-idle:latest"
-            docker push "ghcr.io/liken-sh/media-operator-osd:latest"
+            docker push "ghcr.io/liken-sh/media-operator-display:latest"
             docker push "ghcr.io/liken-sh/media-operator-sidecar:latest"
           fi

@@ -30,18 +30,18 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY idle/Cargo.toml idle/
 COPY media-screen/Cargo.toml media-screen/
-COPY osd/Cargo.toml osd/
+COPY display/Cargo.toml display/
 COPY docs/themes/brand/iced/Cargo.toml docs/themes/brand/iced/Cargo.lock docs/themes/brand/iced/
 
 # A stub library and a stub binary for each workspace member, and a stub
 # library for liken-iced, give cargo something to compile the dependencies
 # against. That build is the layer the image cache keeps.
-RUN mkdir idle/src media-screen/src osd/src docs/themes/brand/iced/src \
+RUN mkdir idle/src media-screen/src display/src docs/themes/brand/iced/src \
     && echo 'fn main() {}' > idle/src/main.rs \
     && : > idle/src/lib.rs \
     && : > media-screen/src/lib.rs \
-    && echo 'fn main() {}' > osd/src/main.rs \
-    && : > osd/src/lib.rs \
+    && echo 'fn main() {}' > display/src/main.rs \
+    && : > display/src/lib.rs \
     && : > docs/themes/brand/iced/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
@@ -49,9 +49,9 @@ RUN mkdir idle/src media-screen/src osd/src docs/themes/brand/iced/src \
 # --locked builds the versions the lock file names and never rewrites it.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked -p media-osd
+    cargo build --release --locked -p media-display
 
-COPY osd/src/ osd/src/
+COPY display/src/ display/src/
 # liken-iced's sources land here, over the stub, with the two brand files it
 # parses and the two font files it embeds. All four are inputs of the real
 # build alone; the stub compiles without them.
@@ -63,8 +63,8 @@ COPY docs/themes/brand/fonts/ docs/themes/brand/fonts/
 # cargo compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch osd/src/main.rs osd/src/lib.rs docs/themes/brand/iced/src/*.rs \
-    && cargo build --release --locked -p media-osd
+    touch display/src/main.rs display/src/lib.rs docs/themes/brand/iced/src/*.rs \
+    && cargo build --release --locked -p media-display
 
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, for the reason the player image installs it: a title or a track name
@@ -100,10 +100,10 @@ COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
      docs/themes/brand/fonts/LICENSE.md \
      /usr/share/fonts/opentype/source-sans-3/
 
-COPY --from=build /src/target/release/media-osd /media-osd
+COPY --from=build /src/target/release/media-display /media-display
 
 # The binary is the container's own process, so the kubelet sends it the
 # signal and carries its exit code out as the pod's outcome. The operator
 # names this image on a display container and sets no command, so the
 # entrypoint is the whole of how the display starts.
-ENTRYPOINT ["/media-osd"]
+ENTRYPOINT ["/media-display"]

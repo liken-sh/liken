@@ -597,7 +597,7 @@ mod tests {
     /// closing, and dials again.
     #[tokio::test]
     async fn the_loop_attaches_reports_the_close_and_dials_again() {
-        let dir = std::env::temp_dir().join(format!("media-osd-serve-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("media-display-serve-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory for the socket");
         let path = dir.join("mpv.sock");

@@ -14,7 +14,7 @@
 /coverage.out
 /coverage-media-screen.xml
 /coverage-idle-screen.xml
-/coverage-osd.xml
+/coverage-display.xml
 /coverage.html
 
 # The Rust build tree. The two crates are one cargo workspace, so cargo

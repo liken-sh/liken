@@ -4,10 +4,10 @@ package main
 // its own pod. The Deployment names the operator image once, with a
 // tag, and every companion image is that repository with a suffix at
 // the same tag: media-operator-player, media-operator-idle,
-// media-operator-sidecar, and media-operator-osd beside
+// media-operator-sidecar, and media-operator-display beside
 // media-operator. So one pin in a kustomization moves every image
 // together, and no manifest names a version twice. PLAYER_IMAGE,
-// IDLE_IMAGE, SIDECAR_IMAGE, and OSD_IMAGE still win when set, for a
+// IDLE_IMAGE, SIDECAR_IMAGE, and DISPLAY_IMAGE still win when set, for a
 // test or for a cluster whose pod names its image by digest, which has
 // no tag to share.
 
@@ -33,7 +33,7 @@ type companionImages struct {
 	player  string
 	idle    string
 	sidecar string
-	osd     string
+	display string
 }
 
 // resolveImages settles each companion image. A variable that is set
@@ -46,9 +46,9 @@ func resolveImages(client *Client) (companionImages, error) {
 		player:  os.Getenv(playerImageVariable),
 		idle:    os.Getenv(idleImageVariable),
 		sidecar: os.Getenv(sidecarImageVariable),
-		osd:     os.Getenv(osdImageVariable),
+		display: os.Getenv(displayImageVariable),
 	}
-	if stated.player != "" && stated.idle != "" && stated.sidecar != "" && stated.osd != "" {
+	if stated.player != "" && stated.idle != "" && stated.sidecar != "" && stated.display != "" {
 		return stated, nil
 	}
 
@@ -57,7 +57,7 @@ func resolveImages(client *Client) (companionImages, error) {
 		return companionImages{}, fmt.Errorf(
 			"%s and %s are unset, so the operator cannot read its own pod to derive %s, %s, %s, and %s",
 			podNameVariable, podNamespaceVariable,
-			playerImageVariable, idleImageVariable, sidecarImageVariable, osdImageVariable)
+			playerImageVariable, idleImageVariable, sidecarImageVariable, displayImageVariable)
 	}
 	pod, err := GetPod(client, namespace, name)
 	if err != nil {
@@ -87,8 +87,8 @@ func resolveImages(client *Client) (companionImages, error) {
 	if stated.sidecar == "" {
 		stated.sidecar = derived.sidecar
 	}
-	if stated.osd == "" {
-		stated.osd = derived.osd
+	if stated.display == "" {
+		stated.display = derived.display
 	}
 	return stated, nil
 }
@@ -128,13 +128,13 @@ func deriveCompanionImages(reference string) (companionImages, error) {
 		return companionImages{}, fmt.Errorf(
 			"the operator's image %q names no tag, and the companion images take the operator's tag; "+
 				"name the image by tag, or set %s, %s, %s, and %s",
-			reference, playerImageVariable, idleImageVariable, sidecarImageVariable, osdImageVariable)
+			reference, playerImageVariable, idleImageVariable, sidecarImageVariable, displayImageVariable)
 	}
 	return companionImages{
 		player:  repository + "-player:" + tag,
 		idle:    repository + "-idle:" + tag,
 		sidecar: repository + "-sidecar:" + tag,
-		osd:     repository + "-osd:" + tag,
+		display: repository + "-display:" + tag,
 	}, nil
 }
 

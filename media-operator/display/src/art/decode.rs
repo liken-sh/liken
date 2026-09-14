@@ -216,7 +216,7 @@ pub(super) mod tests {
     /// that is not there reads nothing.
     #[test]
     fn a_reference_that_is_not_https_names_a_file() {
-        let path = std::env::temp_dir().join("media-osd-open.png");
+        let path = std::env::temp_dir().join("media-display-open.png");
         let bytes = encoded(4, 4, ImageFormat::Png, [0, 0, 0, 255]);
         std::fs::write(&path, &bytes).expect("a file to read back");
         assert_eq!(open(&path.to_string_lossy()), Some(bytes));

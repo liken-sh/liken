@@ -79,12 +79,12 @@ test-docs:
 # and needs nothing installed. -root names the tree the inputs
 # describe, which is this directory.
 COVERAGE_INPUTS := coverage.out coverage-media-screen.xml coverage-idle-screen.xml \
-	coverage-osd.xml
+	coverage-display.xml
 
 .PHONY: coverage-report
 coverage-report:
 	cd docs && go tool coverage -title media-operator -root .. \
 		-label Go -label "Rust (media-screen)" -label "Rust (idle-screen)" \
-		-label "Rust (media-osd)" \
+		-label "Rust (media-display)" \
 		-out ../coverage.html \
 		$(addprefix ../,$(COVERAGE_INPUTS))

@@ -1,5 +1,5 @@
 [package]
-name = "media-osd"
+name = "media-display"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,11 +7,11 @@ edition = "2024"
 # canvas, the fade, and the IPC framing have unit tests that open no
 # window.
 [lib]
-name = "media_osd"
+name = "media_display"
 path = "src/lib.rs"
 
 [[bin]]
-name = "media-osd"
+name = "media-display"
 path = "src/main.rs"
 
 # The iced facade, not the pieces the idle screen takes, because this

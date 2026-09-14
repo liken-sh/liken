@@ -182,7 +182,7 @@ jobs:
           path: |
             coverage-media-screen.xml
             coverage-idle-screen.xml
-            coverage-osd.xml
+            coverage-display.xml
           if-no-files-found: error
           retention-days: 7
 
@@ -215,8 +215,8 @@ jobs:
             file: Dockerfile.player
           - image: media-operator-idle
             file: Dockerfile.idle
-          - image: media-operator-osd
-            file: Dockerfile.osd
+          - image: media-operator-display
+            file: Dockerfile.display
     steps:
       # The idle image compiles liken-iced out of the brand submodule
       # at docs/themes/brand, so the context needs it checked out.

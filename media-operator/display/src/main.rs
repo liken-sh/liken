@@ -2,8 +2,8 @@
 // controller stacks a claim's surfaces newest on top, so the display's
 // surface has to arrive after the film's.
 
-use media_osd::ipc::Ipc;
-use media_osd::window;
+use media_display::ipc::Ipc;
+use media_display::window;
 
 fn main() {
     let ipc = Ipc::from_environment();
@@ -20,14 +20,14 @@ fn main() {
 
     if !playing {
         eprintln!(
-            "media-osd: mpv reported no position within {:?}",
+            "media-display: mpv reported no position within {:?}",
             window::PLAYER_GRACE
         );
         std::process::exit(1);
     }
 
     if let Err(error) = window::run(ipc) {
-        eprintln!("media-osd: {error}");
+        eprintln!("media-display: {error}");
         std::process::exit(1);
     }
 }

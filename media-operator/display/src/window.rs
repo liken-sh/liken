@@ -1045,7 +1045,7 @@ mod tests {
 
     /// One picture on disk, of the size a decode reads back.
     fn picture(name: &str, width: u32, height: u32) -> String {
-        let path = std::env::temp_dir().join(format!("media-osd-window-{name}.png"));
+        let path = std::env::temp_dir().join(format!("media-display-window-{name}.png"));
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
             width,

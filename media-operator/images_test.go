@@ -22,7 +22,7 @@ func TestDeriveCompanionImages(t *testing.T) {
 				player:  "ghcr.io/liken-sh/media-operator-player:2026.09.03-007",
 				idle:    "ghcr.io/liken-sh/media-operator-idle:2026.09.03-007",
 				sidecar: "ghcr.io/liken-sh/media-operator-sidecar:2026.09.03-007",
-				osd:     "ghcr.io/liken-sh/media-operator-osd:2026.09.03-007",
+				display: "ghcr.io/liken-sh/media-operator-display:2026.09.03-007",
 			},
 		},
 		{
@@ -32,7 +32,7 @@ func TestDeriveCompanionImages(t *testing.T) {
 				player:  "ghcr.io/liken-sh/media-operator-player:2026.09.02-005-dev-003-83f15cab",
 				idle:    "ghcr.io/liken-sh/media-operator-idle:2026.09.02-005-dev-003-83f15cab",
 				sidecar: "ghcr.io/liken-sh/media-operator-sidecar:2026.09.02-005-dev-003-83f15cab",
-				osd:     "ghcr.io/liken-sh/media-operator-osd:2026.09.02-005-dev-003-83f15cab",
+				display: "ghcr.io/liken-sh/media-operator-display:2026.09.02-005-dev-003-83f15cab",
 			},
 		},
 		{
@@ -42,7 +42,7 @@ func TestDeriveCompanionImages(t *testing.T) {
 				player:  "registry:5000/liken-sh/media-operator-player:2026.09.03-007",
 				idle:    "registry:5000/liken-sh/media-operator-idle:2026.09.03-007",
 				sidecar: "registry:5000/liken-sh/media-operator-sidecar:2026.09.03-007",
-				osd:     "registry:5000/liken-sh/media-operator-osd:2026.09.03-007",
+				display: "registry:5000/liken-sh/media-operator-display:2026.09.03-007",
 			},
 		},
 		{
@@ -52,7 +52,7 @@ func TestDeriveCompanionImages(t *testing.T) {
 				player:  "media-operator-player:2026.09.03-007",
 				idle:    "media-operator-idle:2026.09.03-007",
 				sidecar: "media-operator-sidecar:2026.09.03-007",
-				osd:     "media-operator-osd:2026.09.03-007",
+				display: "media-operator-display:2026.09.03-007",
 			},
 		},
 	}
@@ -132,7 +132,7 @@ func TestResolveImagesReadsTheOperatorsOwnPod(t *testing.T) {
 		player:  "ghcr.io/liken-sh/media-operator-player:2026.09.03-007",
 		idle:    "ghcr.io/liken-sh/media-operator-idle:2026.09.03-007",
 		sidecar: "ghcr.io/liken-sh/media-operator-sidecar:2026.09.03-007",
-		osd:     "ghcr.io/liken-sh/media-operator-osd:2026.09.03-007",
+		display: "ghcr.io/liken-sh/media-operator-display:2026.09.03-007",
 	})
 }
 
@@ -151,7 +151,7 @@ func TestResolveImagesTakesOneEnvironmentOverride(t *testing.T) {
 		player:  "ghcr.io/liken-sh/media-operator-player:2026.09.03-007",
 		idle:    "ghcr.io/liken-sh/media-browser:2026.09.03-004",
 		sidecar: "ghcr.io/liken-sh/media-operator-sidecar:2026.09.03-007",
-		osd:     "ghcr.io/liken-sh/media-operator-osd:2026.09.03-007",
+		display: "ghcr.io/liken-sh/media-operator-display:2026.09.03-007",
 	})
 }
 
@@ -161,7 +161,7 @@ func TestResolveImagesTakesEveryEnvironmentOverrideWithNoPod(t *testing.T) {
 	t.Setenv(playerImageVariable, "ghcr.io/liken-sh/media-operator-player:2026.09.03-007")
 	t.Setenv(idleImageVariable, "ghcr.io/liken-sh/media-operator-idle:2026.09.03-007")
 	t.Setenv(sidecarImageVariable, "ghcr.io/liken-sh/media-operator-sidecar:2026.09.03-007")
-	t.Setenv(osdImageVariable, "ghcr.io/liken-sh/media-operator-osd:2026.09.03-007")
+	t.Setenv(displayImageVariable, "ghcr.io/liken-sh/media-operator-display:2026.09.03-007")
 	api := &cannedAPI{}
 
 	images, err := resolveImages(testAPIClient(t, api.handler()))
@@ -171,7 +171,7 @@ func TestResolveImagesTakesEveryEnvironmentOverrideWithNoPod(t *testing.T) {
 		player:  "ghcr.io/liken-sh/media-operator-player:2026.09.03-007",
 		idle:    "ghcr.io/liken-sh/media-operator-idle:2026.09.03-007",
 		sidecar: "ghcr.io/liken-sh/media-operator-sidecar:2026.09.03-007",
-		osd:     "ghcr.io/liken-sh/media-operator-osd:2026.09.03-007",
+		display: "ghcr.io/liken-sh/media-operator-display:2026.09.03-007",
 	})
 	mustMatch(t, len(api.requests), 0)
 }

@@ -20,7 +20,7 @@ import (
 const (
 	playerContainer  = "player"
 	commandContainer = "command"
-	osdContainer     = "display"
+	displayContainer = "display"
 	podClaimName     = "devices"
 )
 
@@ -94,7 +94,7 @@ func podName(play string) string {
 // resolved playlist in spec order.
 func buildPod(
 	play *Play, claim *ResourceClaim, resolved resolution,
-	image, sidecarImage, osdImage, busAddress, topicBase string,
+	image, sidecarImage, displayImage, busAddress, topicBase string,
 	remotes []boundRemote, prefs resolvedPreferences, playerVerbose string,
 ) *Pod {
 	grace := int64(playbackGracePeriod)
@@ -171,7 +171,7 @@ func buildPod(
 	// off the pod to tell whether a Player reshaped this pod.
 	initContainers := []Container{
 		commandSidecar(play, claim, blocks, next, sidecarImage, busAddress, topicBase, remotes),
-		displaySidecar(play, claim, resolved.Mounts, osdImage, prefs),
+		displaySidecar(play, claim, resolved.Mounts, displayImage, prefs),
 	}
 
 	return &Pod{
@@ -334,17 +334,17 @@ func commandSidecar(
 // Play names by https URL is a fetch the pod's network already allows.
 func displaySidecar(
 	play *Play, claim *ResourceClaim, mediaMounts []VolumeMount,
-	osdImage string, prefs resolvedPreferences,
+	displayImage string, prefs resolvedPreferences,
 ) Container {
 	interval := play.Spec.TrickplayInterval
 	if interval == "" {
 		interval = defaultTrickplayInterval
 	}
 	container := Container{
-		Name: osdContainer,
+		Name: displayContainer,
 		// The image's entrypoint is the whole of how the display
 		// starts, so the container names no command.
-		Image:         osdImage,
+		Image:         displayImage,
 		Env:           []EnvVar{{Name: trickplayIntervalVariable, Value: interval}},
 		VolumeMounts:  append([]VolumeMount{ipcMount()}, mediaMounts...),
 		RestartPolicy: sidecarRestartPolicy,

@@ -211,7 +211,7 @@ mod tests {
     /// One trickplay directory: a layout directory of the stated name, holding
     /// the stated sheets in order.
     fn trickplay(name: &str, layout: &str, sheets: &[Vec<u8>]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("media-osd-{name}.trickplay"));
+        let dir = std::env::temp_dir().join(format!("media-display-{name}.trickplay"));
         let _ = std::fs::remove_dir_all(&dir);
         let layout = dir.join(layout);
         std::fs::create_dir_all(&layout).expect("a layout directory");

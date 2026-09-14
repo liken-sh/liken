@@ -40,10 +40,10 @@ const (
 	// nothing.
 	sidecarImageVariable = "SIDECAR_IMAGE"
 
-	// OSD_IMAGE names the image the display container runs. Like the
+	// DISPLAY_IMAGE names the image the display container runs. Like the
 	// other companions it derives from the operator's own image at the
 	// same tag, and this variable overrides that derivation.
-	osdImageVariable = "OSD_IMAGE"
+	displayImageVariable = "DISPLAY_IMAGE"
 
 	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
 	// shareable draw companion a Player's idle pod claims. The class is
@@ -118,12 +118,12 @@ type operator struct {
 	// binary alone. It is a release decision, so it arrives in the
 	// environment beside the player image.
 	sidecarImage string
-	// osdImage is the image the display container runs. It arrives the
+	// displayImage is the image the display container runs. It arrives the
 	// way the other companion images do, derived from the operator's
 	// image at the same tag, so one release names every container.
-	osdImage   string
-	busAddress string
-	topicBase  string
+	displayImage string
+	busAddress   string
+	topicBase    string
 	// idleDisplayClass is the display-draw DeviceClass a Player's idle pod
 	// claims. An empty value turns the idle screen off, so reconcileIdle
 	// builds nothing.
@@ -305,7 +305,7 @@ func operate() {
 		image:            images.player,
 		idleImage:        images.idle,
 		sidecarImage:     images.sidecar,
-		osdImage:         images.osd,
+		displayImage:     images.display,
 		busAddress:       busAddress,
 		topicBase:        topicBase,
 		idleDisplayClass: idleDisplayClass,
@@ -1361,7 +1361,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if err != nil {
 		return nil, false, err
 	}
-	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.osdImage,
+	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.displayImage,
 		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)
 	if !claimChanged && sameRemoteSet(running, desired) {
 		return running, false, nil
@@ -1431,7 +1431,7 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 // pod first.
 func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.osdImage,
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.displayImage,
 		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
