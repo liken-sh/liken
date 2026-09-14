@@ -12,6 +12,7 @@ use iced::{Color, Element, Length, Rectangle, Renderer, Size, Subscription, Task
 use jiff::Zoned;
 use tokio::sync::broadcast;
 
+use crate::art::{self, Art};
 use crate::canvas::{Brush, Canvas, Scrim};
 use crate::film::Film;
 use crate::focus::{Focus, Hide, Parts, Stop};
@@ -51,6 +52,7 @@ pub struct Display {
     presentation: Presentation,
     scrubber: Scrubber,
     strip: Strip,
+    art: Art,
     /// How many summons have landed. The count names each idle window.
     summons: u64,
     /// The idle window that stands, if one does. Arming a window replaces
@@ -93,6 +95,7 @@ impl Display {
             presentation: Presentation::default(),
             scrubber: Scrubber::default(),
             strip: Strip::default(),
+            art: Art::default(),
             summons: 0,
             armed: None,
             started: Instant::now(),
@@ -103,7 +106,17 @@ impl Display {
         }
     }
 
+    /// One message, and then the art bridge's own turn, which asks for what
+    /// the state it leaves behind needs, the way the Lua runs its four syncs at
+    /// the top of a redraw.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.step(message);
+        let commands = self.sync_art();
+        self.send(commands);
+        task
+    }
+
+    fn step(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Mpv(ipc::Event::Message(words)) => return self.on_message(&words),
             Message::Mpv(ipc::Event::Property { name, value }) => {
@@ -163,7 +176,17 @@ impl Display {
         } else if word == ipc::PRESENTATION {
             self.presentation
                 .receive(words.get(1).map_or("", String::as_str));
-            // PROSE: a new block is a new item, so the art stage swaps the logo, the tile, and the cover here.
+            // A new block is a new item. The art bridge drops the previous
+            // item's pictures and asks for the new item's logo.
+            let commands = self.art.on_item(&self.presentation, &self.canvas.get());
+            self.send(commands);
+        } else if word == art::REPLY {
+            let (changed, commands) = self.art.on_reply(words, self.now());
+            self.send(commands);
+            if changed {
+                self.redraw();
+            }
+            return Task::none();
         } else {
             return Task::none();
         }
@@ -200,6 +223,43 @@ impl Display {
             return self.idle_window();
         }
         Task::none()
+    }
+
+    /// What the art bridge needs to know for this state: the surface the
+    /// compositor configured, the item, and the scan in flight.
+    fn sync_art(&mut self) -> Vec<Command> {
+        let (canvas, preview, now) = (self.canvas.get(), self.previewing(), self.now());
+        // PROSE: an offer with a picture of its own stands, which the up-next stage answers here.
+        let offered = false;
+        self.art
+            .sync(&self.presentation, &canvas, preview, offered, now)
+    }
+
+    /// The monotonic second the art bridge's own gate reads, which the wall
+    /// clock cannot give.
+    fn now(&self) -> f64 {
+        self.started.elapsed().as_secs_f64()
+    }
+
+    /// Whether a picture the OSD carries shows. The logo, the tile, and the
+    /// offer's picture show while the OSD is up, and hide when it hides and
+    /// while a chooser captures, so a corner logo never lingers over a plain
+    /// frame or floats above the chooser's dim.
+    fn showing(&self) -> bool {
+        self.focus.visible() && self.strip.capturing().is_none()
+    }
+
+    /// The time the thumbnail previews. It shows only while a fine scan is in
+    /// flight, for an item that declares trickplay. At rest the video shows the
+    /// frame the thumbnail would, so the tile appears only when the scan
+    /// previews another position.
+    fn previewing(&self) -> Option<f64> {
+        (self.showing()
+            && self.focus.focused_stop() == Some(Stop::Fine)
+            && self.scrubber.scanning()
+            && self.presentation.trickplay().is_some())
+        .then(|| self.scrubber.cursor_time(&self.film))
+        .flatten()
     }
 
     fn signature(&self, at: Option<f64>) -> Signature {
@@ -244,10 +304,27 @@ impl Display {
     /// focused.
     fn paint_below(&self, brush: &mut Brush<'_>, now: &Zoned) {
         let canvas = brush.canvas();
+        // The cover does not track the OSD, because a music screen with the OSD
+        // down would otherwise be a black frame.
+        if let Some(cover) = self.art.cover() {
+            cover.draw(brush, art::cover_at(&canvas, cover));
+        }
+        if brush.fade() <= 0.0 {
+            return;
+        }
+
         // The top scrim backs the header and the clock, drawn before them so
         // their text is on top.
-        let head = header::lines(&self.presentation, &self.film);
+        let logo = self.art.logo();
+        let head = header::lines(
+            &self.presentation,
+            &self.film,
+            logo.map(|logo| logo.canvas_height(&canvas)),
+        );
         let reading = clock::lines(&canvas, &self.film, now);
+        if let Some(logo) = logo.filter(|_| self.showing()) {
+            logo.draw(brush, art::logo_at(&canvas));
+        }
         if !head.is_empty() || !reading.is_empty() {
             brush.scrim(&Scrim::top());
             for line in head.into_iter().chain(reading) {
@@ -280,7 +357,14 @@ impl Display {
                 brush.text(line);
             }
         }
-        // PROSE: the thumbnail draws here, over the bar it centres on, once the art stage lands: it shows while a fine scan is in flight for an item that declares trickplay, at scrubber.cursor_time() and scrubber.cursor_x().
+        // The thumbnail stands over the bar, centred on the playhead it
+        // previews.
+        if let Some(tile) = self.art.tile()
+            && self.previewing().is_some()
+            && let Some(cursor) = self.scrubber.cursor_x(&canvas, &self.film)
+        {
+            tile.draw(brush, art::tile_at(&canvas, tile, cursor));
+        }
         // PROSE: the up-next chip and card draw here, over the bottom cluster, once the up-next stage lands.
     }
 
@@ -391,9 +475,12 @@ impl canvas::Program<Message> for Layer<'_> {
         }
 
         // A frame with nothing in it is what the display draws between
-        // summons: the film below shows through every pixel of the window.
+        // summons: the film below shows through every pixel of the window. The
+        // cover is the one picture that holds the frame with the OSD down, so
+        // the layer under the OSD draws for it as well.
         let fade = self.display.focus.fade().value();
-        if fade <= 0.0 {
+        let cover = self.part == Part::Below && self.display.art.cover().is_some();
+        if fade <= 0.0 && !cover {
             return Vec::new();
         }
 
@@ -739,6 +826,112 @@ mod tests {
             "presentation".to_string(),
         ])));
         assert_eq!(display.presentation.title(&display.film), None);
+    }
+
+    /// One block the sidecar sends, as the message it arrives in.
+    fn present(block: &str) -> Message {
+        Message::Mpv(ipc::Event::Message(vec![
+            "presentation".to_string(),
+            block.to_string(),
+        ]))
+    }
+
+    /// One reply the bridge sends, over a file it could have written.
+    fn art_reply(kind: &str, width: u32, height: u32) -> Message {
+        let path = std::env::temp_dir().join(format!("media-osd-window-{kind}.bgra"));
+        std::fs::write(&path, vec![255; (width * height * 4) as usize]).expect("a file to read");
+        Message::Mpv(ipc::Event::Message(
+            [
+                art::REPLY,
+                kind,
+                &path.to_string_lossy(),
+                &width.to_string(),
+                &height.to_string(),
+                &(width * 4).to_string(),
+            ]
+            .iter()
+            .map(|word| word.to_string())
+            .collect(),
+        ))
+    }
+
+    /// A new item asks the bridge for the logo it declares, and the reply the
+    /// bridge sends back clears the header's second line.
+    #[tokio::test]
+    async fn an_item_asks_for_its_logo_and_the_reply_moves_the_second_line() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(present(r#"{"title":"A Film","logo":"/art/logo.png"}"#));
+        assert_eq!(
+            sent(&mut commands),
+            vec![concat!(
+                r#"{"command":["script-message","liken-art-request","logo","760","110"],"#,
+                r#""request_id":0}"#
+            )]
+        );
+
+        let _ = display.update(art_reply("logo", 400, 64));
+        let logo = display.art.logo().expect("the reply carries a picture");
+        assert_eq!(logo.canvas_height(&display.canvas.get()), 64.0);
+        assert!(sent(&mut commands).is_empty());
+    }
+
+    /// A music item asks for its cover, and holds it whether or not the OSD is
+    /// up.
+    #[tokio::test]
+    async fn a_music_item_asks_for_its_cover_and_holds_it() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(present(r#"{"type":"music","title":"A Record"}"#));
+        assert_eq!(
+            sent(&mut commands),
+            vec![concat!(
+                r#"{"command":["script-message","liken-art-request","album","1728","532"],"#,
+                r#""request_id":0}"#
+            )]
+        );
+
+        let _ = display.update(art_reply("album", 532, 532));
+        assert!(display.art.cover().is_some());
+        assert!(!display.focus.visible());
+    }
+
+    /// The tile is asked for only while a fine scan is in flight for an item
+    /// that declares trickplay.
+    #[tokio::test]
+    async fn only_a_scan_on_a_trickplay_item_asks_for_a_tile() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(present(r#"{"title":"A Film"}"#));
+        let _ = display.update(message("summon"));
+        let _ = display.update(message("right"));
+        assert!(display.previewing().is_none());
+        assert!(sent(&mut commands).is_empty());
+
+        let _ = display.update(present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#));
+        let _ = display.update(message("right"));
+        assert!(display.previewing().is_some());
+        assert_eq!(
+            sent(&mut commands),
+            vec![concat!(
+                r#"{"command":["script-message","liken-art-request","trickplay","1205000","360","220"],"#,
+                r#""request_id":0}"#
+            )]
+        );
+    }
+
+    /// A chooser hides the logo and the tile, the way a hidden display does.
+    #[tokio::test]
+    async fn a_chooser_hides_the_pictures_the_osd_carries() {
+        let (mut display, _) = display();
+        let _ = display.update(present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#));
+        let _ = display.update(message("summon"));
+        let _ = display.update(message("right"));
+        assert!(display.showing());
+        assert!(display.previewing().is_some());
+
+        let _ = display.update(message("down"));
+        let _ = display.update(message("down"));
+        let _ = display.update(message("select"));
+        assert!(!display.showing());
+        assert!(display.previewing().is_none());
     }
 
     /// The three properties no part of the display draws by itself.

@@ -5,6 +5,7 @@
 use std::sync::Once;
 
 use iced::advanced::graphics::text::Paragraph;
+use iced::advanced::image::{FilterMethod, Handle, Image};
 use iced::advanced::text::{self, LineHeight, Paragraph as _, Shaping, Wrapping};
 use iced::alignment::Vertical;
 use iced::widget::canvas::{Fill, Frame, Stroke, Style, Text};
@@ -210,6 +211,22 @@ impl<'a> Brush<'a> {
                 theme::alpha::PANEL,
                 self.fade,
             )),
+        );
+    }
+
+    // One decoded picture over the ground it covers. The bridge decodes every
+    // picture to the pixel size the screen takes, so it is drawn at its own
+    // size with no filtering of its own and snapped to the pixel grid.
+    //
+    // A picture draws over every shape in its layer and under every line of
+    // text, whatever order the calls come in, because the renderer draws one
+    // layer in four passes: quads, then meshes, then images, then text.
+    pub fn image(&mut self, bounds: Rectangle, handle: &Handle) {
+        self.frame.draw_image(
+            bounds,
+            Image::new(handle.clone())
+                .filter_method(FilterMethod::Nearest)
+                .snap(true),
         );
     }
 
