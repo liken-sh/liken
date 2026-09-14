@@ -412,10 +412,11 @@ fn a_status_off_idle_dims_the_page_under_it() {
 // The topic the operator names for the `Player`'s retained status.
 const STATUS_TOPIC: &str = "liken/media/players/house/den-tv/status";
 
-// The band under the strip, which the page draws in whole. The strip
-// keeps its own brightness over the dim, so a reading that took the
-// whole frame would read the clock and not the page.
-const PAGE: (u32, u32) = (120, 1080);
+// The band of rows under the strip, which the page draws in whole. The
+// strip keeps its own brightness over the dim, so a reading that started
+// higher would read the clock and not the page. The first row is the
+// strip's own height, so the two never overlap whatever that height is.
+const PAGE: (u32, u32) = (media_browser::views::band::HEIGHT as u32 + 2, 1080);
 
 // The brightest channel a movie page reaches in one run, with the status
 // this broker states while the page draws. The run browses the fixture
