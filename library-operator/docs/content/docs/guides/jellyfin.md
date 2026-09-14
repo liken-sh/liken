@@ -55,8 +55,8 @@ destination. Its URL is the `Service` the operator stood, in the
 
 Set the rest of the destination like this.
 
-* Notification types: `PlaybackStart`, `PlaybackProgress`, and
-  `PlaybackStop`.
+* Notification types: `PlaybackStart`, `PlaybackProgress`,
+  `PlaybackStop`, and `UserDataSaved`.
 * Item types: enable Movies and Episodes.
 * Request header: `Content-Type` with the value `application/json`.
 
@@ -66,7 +66,7 @@ anything that writes the plugin's configuration through Jellyfin's API
 must encode the template field the same way.
 
 ```
-{"event":"{{NotificationType}}","user":"{{{NotificationUsername}}}","userId":"{{UserId}}","itemId":"{{ItemId}}","itemType":"{{ItemType}}","seriesId":"{{SeriesId}}","season":"{{SeasonNumber}}","episode":"{{EpisodeNumber}}","positionTicks":"{{PlaybackPositionTicks}}","runTimeTicks":"{{RunTimeTicks}}","paused":"{{IsPaused}}","playedToCompletion":"{{PlayedToCompletion}}","tmdb":"{{Provider_tmdb}}","imdb":"{{Provider_imdb}}","tvdb":"{{Provider_tvdb}}"}
+{"event":"{{NotificationType}}","user":"{{{NotificationUsername}}}","userId":"{{UserId}}","itemId":"{{ItemId}}","itemType":"{{ItemType}}","seriesId":"{{SeriesId}}","season":"{{SeasonNumber}}","episode":"{{EpisodeNumber}}","positionTicks":"{{PlaybackPositionTicks}}","runTimeTicks":"{{RunTimeTicks}}","paused":"{{IsPaused}}","playedToCompletion":"{{PlayedToCompletion}}","saveReason":"{{SaveReason}}","played":"{{Played}}","tmdb":"{{Provider_tmdb}}","imdb":"{{Provider_imdb}}","tvdb":"{{Provider_tvdb}}"}
 ```
 
 ## 3. What crosses
@@ -80,6 +80,24 @@ A `Play` on a screen goes the other way. The role writes each person's
 position to Jellyfin every ten seconds while the position moves, and
 once more when the `Play` ends.
 
+A work counts as watched when the time left is at or under a twentieth
+of the work, and at or under five minutes. The rule takes whichever of
+the two leaves less time. So a short episode is watched near its end,
+and a long film is watched with up to five minutes left.
+
+Every write to Jellyfin carries a played mark. The role reads the mark
+off the position it writes, with that same rule. So a replay from the
+start clears the mark, because the new position does not pass the rule.
+
+A `UserDataSaved` post with the save reason `TogglePlayed` is a mark a
+person set by hand in Jellyfin. The role records it as a position at
+the end of the work, because Jellyfin stores a mark set by hand as a
+state with no position. An unmark records a position at the start.
+
+The role drops every other save reason. Each of those is the role's own
+write to Jellyfin, posted back as a save. Reading one would record the
+role's write as a play.
+
 A person's Jellyfin user name must be their `Person` name. A Jellyfin
 user with no `Person` of that name still records a row, and no screen
 shows it, because no `Person` claims it.
@@ -89,11 +107,12 @@ shows it, because no `Person` claims it.
 The operator runs one backfill on its own, with no step for you to
 take. It waits until every durable copy of the progress store is up,
 then runs one Job named after the `Catalog` with the suffix
-`-jellyfin-backfill`. For every Jellyfin user, the Job reads the items
-with a resume point and the items the user finished, and records each
-one in the progress store under the title's provider ids, with the
-position, whether the user finished it, and the date Jellyfin last
-saw it played.
+`-jellyfin-backfill`.
+
+For every Jellyfin user the Job reads two lists. It records an item
+with a resume point at the position Jellyfin holds. It records an item
+the user finished at the end of the work. Each row carries the date
+Jellyfin last recorded a play of that item.
 
 Jellyfin holds one state per item and no list of viewings, so the
 backfill carries no history. An item with no provider ids is counted

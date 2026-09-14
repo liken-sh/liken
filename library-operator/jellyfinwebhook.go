@@ -1,14 +1,16 @@
 package main
 
-// jellyfinwebhook.go carries a play that ran outside this cluster onto the
-// bus. Jellyfin's Webhook plugin posts one body per playback event, and the
-// role turns one post into one outside play the progress role records.
+// jellyfinwebhook.go turns a play that ran outside this cluster into a
+// message on the bus. Jellyfin's Webhook plugin posts one body per
+// playback event, and one per save of a person's user data. The role turns
+// each post into one outside play, which the progress role records.
 // Every value of the body is a string. The plugin renders a Handlebars
 // template, a variable it does not hold renders empty, and a boolean of the
 // server arrives as True or False.
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -31,12 +33,20 @@ const (
 	jellyfinHealthPath  = "GET /healthz"
 )
 
-// The event names the plugin posts. A stop is what marks the row ended.
+// The event names the plugin posts. A stop marks the row ended. The
+// fourth, a user-data save, is what the plugin posts when a person marks
+// a work played or unplayed by hand, with no playback at all.
 const (
 	jellyfinStartEvent    = "PlaybackStart"
 	jellyfinProgressEvent = "PlaybackProgress"
 	jellyfinStopEvent     = "PlaybackStop"
+	jellyfinUserDataEvent = "UserDataSaved"
 )
+
+// The one save reason the role reads. Every other reason, chiefly
+// UpdateUserData, is this role's own write posted back to it. Reading one
+// would record the role's write as a play.
+const jellyfinToggleReason = "TogglePlayed"
 
 // The name the store's player column carries for a play that ran in Jellyfin.
 // The column names a Player, and no Player of this cluster ran it.
@@ -56,6 +66,8 @@ type jellyfinEvent struct {
 	RunTimeTicks       string `json:"runTimeTicks"`
 	Paused             string `json:"paused"`
 	PlayedToCompletion string `json:"playedToCompletion"`
+	SaveReason         string `json:"saveReason"`
+	Played             string `json:"played"`
 	Tmdb               string `json:"tmdb"`
 	Imdb               string `json:"imdb"`
 	Tvdb               string `json:"tvdb"`
@@ -105,34 +117,69 @@ func (j *jellyfin) webhook(w http.ResponseWriter, request *http.Request) {
 // The name is the user and the item, so one person's progress in one item is
 // one row that moves, and a rewatch moves it again.
 func (j *jellyfin) outsideOf(ctx context.Context, event jellyfinEvent) (string, outsidePlay, bool) {
-	if event.User == "" || event.UserID == "" || event.ItemID == "" {
+	user, item := jellyfinID(event.UserID), jellyfinID(event.ItemID)
+	if event.User == "" || user == "" || item == "" {
 		j.logf("a jellyfin webhook names no user or no item")
 		return "", outsidePlay{}, false
 	}
-	position := jellyfinSeconds(jellyfinNumber(event.PositionTicks))
+	if !jellyfinCarried(event) {
+		return "", outsidePlay{}, false
+	}
+	duration := jellyfinSeconds(jellyfinNumber(event.RunTimeTicks))
+	position := jellyfinPosition(jellyfinNumber(event.PositionTicks), duration, jellyfinMarked(event))
 	// The echo drop. A position this role wrote a moment ago is its own
 	// write coming back, and recording it would set the row's recorded
 	// time forward for no new fact.
-	if j.out.echoes.echoed(event.UserID, event.ItemID, position) {
+	if j.out.echoes.echoed(user, item, position) {
 		return "", outsidePlay{}, false
 	}
 	aliases := j.aliasesOf(ctx, event)
 	if len(aliases) == 0 {
-		j.logf("a jellyfin webhook for the item %s names no provider ids", event.ItemID)
+		j.logf("a jellyfin webhook for the item %s names no provider ids", item)
 		return "", outsidePlay{}, false
 	}
 
-	return jellyfinPlayerName + "-" + event.UserID + "-" + event.ItemID, outsidePlay{
+	return jellyfinPlayerName + "-" + user + "-" + item, outsidePlay{
 		Player:   jellyfinPlayerName,
 		People:   []string{event.User},
 		Aliases:  aliases,
 		Season:   jellyfinCount(event.Season),
 		Episode:  jellyfinCount(event.Episode),
 		Position: position,
-		Duration: jellyfinSeconds(jellyfinNumber(event.RunTimeTicks)),
+		Duration: duration,
 		Ended:    strings.EqualFold(event.Event, jellyfinStopEvent) || jellyfinFlag(event.PlayedToCompletion),
 		At:       j.now().Unix(),
 	}, true
+}
+
+// Whether one post reaches the bus. A playback event always does. A
+// user-data save does only when its reason is TogglePlayed, a mark a
+// person set by hand.
+func jellyfinCarried(event jellyfinEvent) bool {
+	if !strings.EqualFold(event.Event, jellyfinUserDataEvent) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(event.SaveReason), jellyfinToggleReason)
+}
+
+// Whether the post is a mark a person set by hand that says they played
+// the work.
+func jellyfinMarked(event jellyfinEvent) bool {
+	return strings.EqualFold(event.Event, jellyfinUserDataEvent) && jellyfinFlag(event.Played)
+}
+
+// One id from the post, in the spelling Jellyfin's API writes: 32
+// hexadecimal digits with no dashes. The plugin renders the same Guid
+// through Handlebars, which has no Guid formatter and writes the dashed
+// form. Two spellings of one id would make two rows and break the echo
+// drop. A value that is not a Guid is returned as the post spells it.
+func jellyfinID(value string) string {
+	held := strings.ToLower(strings.TrimSpace(value))
+	stripped := strings.ReplaceAll(held, "-", "")
+	if _, err := hex.DecodeString(stripped); err != nil || len(stripped) != 32 {
+		return held
+	}
+	return stripped
 }
 
 // The identity of the work the event names. An episode takes the series'
@@ -140,13 +187,25 @@ func (j *jellyfin) outsideOf(ctx context.Context, event jellyfinEvent) (string, 
 // play, and the payload carries the episode's own ids alone.
 func (j *jellyfin) aliasesOf(ctx context.Context, event jellyfinEvent) map[string]string {
 	if strings.EqualFold(event.ItemType, jellyfinEpisodeType) {
-		return j.index.seriesAliases(ctx, event.SeriesID)
+		return j.index.seriesAliases(ctx, jellyfinID(event.SeriesID))
 	}
 	return jellyfinProviders(map[string]string{
 		"tmdb": event.Tmdb,
 		"imdb": event.Imdb,
 		"tvdb": event.Tvdb,
 	})
+}
+
+// The position of a play Jellyfin reports as played, which is the end of
+// the work. Jellyfin stores played as a state of its own, and a mark set
+// by hand has a position of zero. When the post states no run time, the
+// position stays as the post gave it, because nothing says where the end
+// is.
+func jellyfinPosition(ticks int64, duration int, played bool) int {
+	if played && duration > 0 {
+		return duration
+	}
+	return jellyfinSeconds(ticks)
 }
 
 // One number of the payload. A field the template did not render is empty and

@@ -143,13 +143,15 @@ func TestOneJellyfinItemBecomesAnOutsidePlay(t *testing.T) {
 				Season:  3, Episode: 5, Position: 1320, Duration: 1320, Ended: true, At: played},
 		},
 		{
-			name: "an item a person marked played by hand, with no date",
+			name: "an item a person marked played by hand, at no position and with no date",
 			item: jellyfinItem{ID: "item-arrival", Type: "Movie",
-				ProviderIds: map[string]string{"Tmdb": "329865"},
-				UserData:    jellyfinUserData{Played: true}},
+				ProviderIds:  map[string]string{"Tmdb": "329865"},
+				RunTimeTicks: 71400000000,
+				UserData:     jellyfinUserData{Played: true}},
 			play: "jellyfin-user-chris-item-arrival",
 			want: outsidePlay{Player: "jellyfin", People: []string{"Chris"},
-				Aliases: map[string]string{"tmdb": "329865"}, Ended: true, At: 1},
+				Aliases:  map[string]string{"tmdb": "329865"},
+				Position: 7140, Duration: 7140, Ended: true, At: 1},
 		},
 		{
 			name: "an item whose date is of another shape",
@@ -202,10 +204,12 @@ func TestTheBackfillReadsBothFiltersAndRetainsNothing(t *testing.T) {
 		t.Fatalf("running the backfill: %v", err)
 	}
 
+	items := "/Items?userId=user-chris&recursive=true&includeItemTypes=Movie,Episode" +
+		"&fields=ProviderIds&enableImages=false"
 	want := []string{
 		"/Users",
-		"/Items?userId=user-chris&recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds&filters=IsResumable",
-		"/Items?userId=user-chris&recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds&isPlayed=true",
+		items + "&filters=IsResumable&startIndex=0&limit=500",
+		items + "&isPlayed=true&startIndex=0&limit=500",
 	}
 	if !reflect.DeepEqual(fake.queries, want) {
 		t.Errorf("queries = %q, want %q", fake.queries, want)

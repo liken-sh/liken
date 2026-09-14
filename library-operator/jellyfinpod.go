@@ -38,6 +38,16 @@ const (
 	jellyfinProbePath = "/healthz"
 )
 
+// The resources the role requests. The role has limits of its own, not
+// the scanner's, because the two workloads have nothing in common and a
+// change to the scanner must not move these. An index build peaks at
+// about 13.6 MiB, far under the 64 MiB limit.
+const (
+	jellyfinCPURequest    = "10m"
+	jellyfinMemoryRequest = "32Mi"
+	jellyfinMemoryLimit   = "64Mi"
+)
+
 // The pod and the Service take the Catalog's name with the suffix -jellyfin,
 // so every pass names the same objects and the operator keeps no record of
 // them.
@@ -104,8 +114,8 @@ func jellyfinRole(catalog *NamespaceCatalog, image, busAddress, topicBase, media
 			HTTPGet: &HTTPGetAction{Path: jellyfinProbePath, Port: jellyfinPort},
 		},
 		Resources: ResourceRequirements{
-			Requests: map[string]string{"cpu": scannerCPURequest, "memory": scannerMemoryRequest},
-			Limits:   map[string]string{"memory": scannerMemoryLimit},
+			Requests: map[string]string{"cpu": jellyfinCPURequest, "memory": jellyfinMemoryRequest},
+			Limits:   map[string]string{"memory": jellyfinMemoryLimit},
 		},
 		SecurityContext: unprivileged(),
 	}

@@ -335,3 +335,121 @@ func TestACountOfThePayload(t *testing.T) {
 		})
 	}
 }
+
+// A mark a person set by hand in Jellyfin becomes one outside play.
+// Played puts the position at the end of the work, and unplayed puts it
+// at the start.
+func TestAHandMarkBecomesAnOutsidePlay(t *testing.T) {
+	at := newJellyfinClock().at.Unix()
+	for _, test := range []struct {
+		name  string
+		event jellyfinEvent
+		want  outsidePlay
+	}{
+		{
+			name: "a film marked played",
+			event: jellyfinEvent{Event: jellyfinUserDataEvent, SaveReason: jellyfinToggleReason,
+				User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie",
+				Played: "True", PositionTicks: "0", RunTimeTicks: "81600000000", Tmdb: "603"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
+				Aliases:  map[string]string{"tmdb": "603"},
+				Position: 8160, Duration: 8160, At: at},
+		},
+		{
+			name: "a film marked unplayed",
+			event: jellyfinEvent{Event: jellyfinUserDataEvent, SaveReason: jellyfinToggleReason,
+				User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie",
+				Played: "False", PositionTicks: "0", RunTimeTicks: "81600000000", Tmdb: "603"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
+				Aliases: map[string]string{"tmdb": "603"}, Duration: 8160, At: at},
+		},
+		{
+			name: "a film marked played on a server that states no run time",
+			event: jellyfinEvent{Event: jellyfinUserDataEvent, SaveReason: jellyfinToggleReason,
+				User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie",
+				Played: "True", PositionTicks: "42100000000", Tmdb: "603"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
+				Aliases: map[string]string{"tmdb": "603"}, Position: 4210, At: at},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			role, _, _ := standJellyfinRole(t, jellyfinFixture())
+
+			_, got, ok := role.outsideOf(t.Context(), test.event)
+
+			if !ok {
+				t.Fatal("the role dropped a hand mark")
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Errorf("play = %+v, want %+v", got, test.want)
+			}
+		})
+	}
+}
+
+// Every save reason but TogglePlayed is dropped. The role's own write to
+// Jellyfin comes back as a save, and reading it would record the write as
+// a play.
+func TestAUserDataSaveOfAnotherReasonIsDropped(t *testing.T) {
+	for _, reason := range []string{"UpdateUserData", "PlaybackProgress", "PlaybackFinished", ""} {
+		t.Run(reason, func(t *testing.T) {
+			role, _, _ := standJellyfinRole(t, jellyfinFixture())
+
+			_, _, ok := role.outsideOf(t.Context(), jellyfinEvent{
+				Event: jellyfinUserDataEvent, SaveReason: reason, User: "chris",
+				UserID: "u1", ItemID: "i1", ItemType: "Movie", Played: "True",
+				RunTimeTicks: "81600000000", Tmdb: "603"})
+
+			if ok {
+				t.Fatal("the role mapped a save it did not ask for")
+			}
+		})
+	}
+}
+
+// The plugin's template renders a Guid with dashes, and Jellyfin's API
+// writes the same Guid with none. The role reads a webhook id back into
+// the API's spelling, so both name one play.
+func TestAWebhookGuidReadsAsTheApisOwnSpelling(t *testing.T) {
+	role, _, _ := standJellyfinRole(t, jellyfinFixture())
+
+	play, _, ok := role.outsideOf(t.Context(), jellyfinEvent{
+		Event: jellyfinProgressEvent, User: "chris",
+		UserID:   "A1B2C3D4-E5F6-0011-2233-445566778899",
+		ItemID:   "ffeeddcc-bbaa-0011-2233-445566778899",
+		ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "603"})
+
+	if !ok {
+		t.Fatal("the role dropped a post that names a person and a work")
+	}
+	want := "jellyfin-a1b2c3d4e5f600112233445566778899-ffeeddccbbaa00112233445566778899"
+	if play != want {
+		t.Errorf("play = %q, want %q", play, want)
+	}
+}
+
+// The echo drop keys on the API's spelling. So a dashed id in a post
+// matches the write the role made under the dashless one.
+func TestTheEchoDropMatchesADashedGuid(t *testing.T) {
+	role, messages, _ := standJellyfinRole(t, jellyfinFixture())
+	role.out.echoes.remember("a1b2c3d4e5f600112233445566778899",
+		"ffeeddccbbaa00112233445566778899", 4210)
+	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "chris",
+		UserID:   "A1B2C3D4-E5F6-0011-2233-445566778899",
+		ItemID:   "ffeeddcc-bbaa-0011-2233-445566778899",
+		ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "603"})
+
+	answer := jellyfinPosted(t, role, body)
+
+	if answer != http.StatusOK || len(messages.held) != 0 {
+		t.Errorf("status = %d with %d messages, want %d with none",
+			answer, len(messages.held), http.StatusOK)
+	}
+}
+
+// An id that is not a Guid is returned as the post spells it.
+func TestAnIdOfAnotherShapeStands(t *testing.T) {
+	if got := jellyfinID("item-office"); got != "item-office" {
+		t.Errorf("id = %q, want the post's own spelling", got)
+	}
+}

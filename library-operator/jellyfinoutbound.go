@@ -21,17 +21,12 @@ import (
 // the loop in milliseconds.
 var jellyfinWriteInterval = 10 * time.Second
 
-// How near the end of a work counts as watched, in seconds. A person who
-// stopped inside the last two minutes finished it.
-const jellyfinPlayedWindow = 120
-
 // What the role holds for one Play: what the status says, what the audience
 // says, and where the last write left it.
 type jellyfinPlay struct {
 	item     int
 	position int
 	duration int
-	phase    string
 	people   []string
 	aliases  map[string]string
 	season   int
@@ -63,7 +58,7 @@ func newJellyfinOutbound(api *jellyfinAPI, index *jellyfinIndex, now func() time
 	return &jellyfinOutbound{
 		api:    api,
 		index:  index,
-		echoes: newJellyfinEchoes(),
+		echoes: newJellyfinEchoes(now),
 		now:    now,
 		log:    log,
 		plays:  map[string]*jellyfinPlay{},
@@ -127,11 +122,11 @@ func (o *jellyfinOutbound) final(ctx context.Context, name string, payload []byt
 
 	o.mutex.Lock()
 	held := o.entry(name)
-	held.item, held.position, held.duration, held.phase = final.Item, position, duration, final.Phase
+	held.item, held.position, held.duration = final.Item, position, duration
 	held.reported = true
 	o.mutex.Unlock()
 
-	o.write(ctx, name, true)
+	o.write(ctx, name)
 }
 
 // tick writes every Play whose position moved since its last write. A Play
@@ -139,7 +134,7 @@ func (o *jellyfinOutbound) final(ctx context.Context, name string, payload []byt
 // bus and no request to Jellyfin.
 func (o *jellyfinOutbound) tick(ctx context.Context) {
 	for _, name := range o.moved() {
-		o.write(ctx, name, false)
+		o.write(ctx, name)
 	}
 }
 
@@ -163,7 +158,7 @@ func (o *jellyfinOutbound) moved() []string {
 // A work or a person Jellyfin does not hold leaves a line in the pod log and
 // no write. The index has already asked the server again by the time this
 // answers.
-func (o *jellyfinOutbound) write(ctx context.Context, name string, ended bool) {
+func (o *jellyfinOutbound) write(ctx context.Context, name string) {
 	o.mutex.Lock()
 	live, standing := o.plays[name]
 	if !standing {
@@ -183,7 +178,7 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string, ended bool) {
 	}
 	data := jellyfinUserData{
 		PlaybackPositionTicks: jellyfinTicks(held.position),
-		Played:                jellyfinPlayed(held, ended),
+		Played:                watched(held.position, held.duration),
 		LastPlayedDate:        o.now().UTC().Format(time.RFC3339),
 	}
 	for _, person := range held.people {
@@ -207,20 +202,6 @@ func (o *jellyfinOutbound) writeOne(ctx context.Context, person, item string, po
 		return
 	}
 	o.echoes.remember(user, item, position)
-}
-
-// Whether a Play that ended counts as watched. It is the end of a work that
-// is within the last two minutes of it, or a Play that reached the end of a
-// work it finished. A work of no duration is never watched, because a
-// duration of zero says the report never carried one.
-func jellyfinPlayed(held jellyfinPlay, ended bool) bool {
-	if !ended || held.duration <= 0 {
-		return false
-	}
-	if held.phase == playPhaseFinished && held.position >= held.duration {
-		return true
-	}
-	return held.position >= held.duration-jellyfinPlayedWindow
 }
 
 // forget drops one Play. The operator clears a Play's topics once it releases
@@ -262,39 +243,63 @@ func (o *jellyfinOutbound) logf(format string, args ...any) {
 // The positions this role last wrote, one per user and item. A webhook that
 // carries a position this role wrote a moment ago is that write coming back,
 // and the drop is what keeps it out of the store.
+// Each entry records the time of its write. So a pod holds only the writes
+// it made within jellyfinEchoLife.
 type jellyfinEchoes struct {
 	mutex   sync.Mutex
-	written map[string]int
+	now     func() time.Time
+	written map[string]jellyfinEcho
+}
+
+// One write this role made: the position it wrote, and when.
+type jellyfinEcho struct {
+	position int
+	at       time.Time
 }
 
 // How near a written position an inbound position must be to read as the echo
 // of it, in seconds.
 const jellyfinEchoWindow = 1
 
-func newJellyfinEchoes() *jellyfinEchoes {
-	return &jellyfinEchoes{written: map[string]int{}}
+// How long the role keeps a write to drop its echo. Jellyfin posts the
+// event of a write at once. So a write older than this has no echo still
+// to come, and the role drops its entry.
+const jellyfinEchoLife = 5 * time.Minute
+
+func newJellyfinEchoes(now func() time.Time) *jellyfinEchoes {
+	return &jellyfinEchoes{now: now, written: map[string]jellyfinEcho{}}
 }
 
 func jellyfinEchoKey(user, item string) string {
 	return user + "/" + item
 }
 
+// remember records one write and drops every write older than
+// jellyfinEchoLife. So the map holds no entry for a Play that ended long
+// ago.
 func (e *jellyfinEchoes) remember(user, item string, position int) {
+	at := e.now()
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	e.written[jellyfinEchoKey(user, item)] = position
+	for key, written := range e.written {
+		if at.Sub(written.at) > jellyfinEchoLife {
+			delete(e.written, key)
+		}
+	}
+	e.written[jellyfinEchoKey(user, item)] = jellyfinEcho{position: position, at: at}
 }
 
 // Whether this user, item, and position is the last write of this role coming
 // back.
 func (e *jellyfinEchoes) echoed(user, item string, position int) bool {
+	at := e.now()
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 	written, held := e.written[jellyfinEchoKey(user, item)]
-	if !held {
+	if !held || at.Sub(written.at) > jellyfinEchoLife {
 		return false
 	}
-	gap := written - position
+	gap := written.position - position
 	if gap < 0 {
 		gap = -gap
 	}

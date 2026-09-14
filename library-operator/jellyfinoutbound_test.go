@@ -1,13 +1,14 @@
 package main
 
 // What these tests prove: the join of a Play's two messages, the ten
-// second throttle, the rule that says a person finished a work, and
-// what the role does with a work or a person Jellyfin does not hold.
+// second throttle, what the role does with a work or a person Jellyfin
+// does not have, and the watched mark every write carries.
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // One outbound half over a fake Jellyfin, with the index already
@@ -104,6 +105,44 @@ func TestATickWritesOnlyThePositionsThatMoved(t *testing.T) {
 	}
 }
 
+// A running play past the watched rule is written as watched. No final is
+// needed, because the position alone says the person watched the work.
+func TestARunningPlayPastTheWatchedLineIsWrittenWatched(t *testing.T) {
+	fake := jellyfinFixture()
+	out, _ := standJellyfinOutbound(t, fake)
+	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+
+	out.status("play-1", []byte(`{"item":0,"position":"2:10:59","duration":"2:16:00"}`))
+	out.tick(t.Context())
+	out.status("play-1", []byte(`{"item":0,"position":"2:11:00","duration":"2:16:00"}`))
+	out.tick(t.Context())
+
+	if len(fake.writes) != 2 {
+		t.Fatalf("writes = %+v, want one for each position", fake.writes)
+	}
+	if fake.writes[0].data.Played || !fake.writes[1].data.Played {
+		t.Errorf("played = %v then %v, want false then true",
+			fake.writes[0].data.Played, fake.writes[1].data.Played)
+	}
+}
+
+// A replay from the start clears the mark. The position alone says
+// whether a person watched the work, and a replay puts it back at the
+// start.
+func TestAReplayFromTheStartClearsTheWatchedMark(t *testing.T) {
+	fake := jellyfinFixture()
+	out, _ := standJellyfinOutbound(t, fake)
+	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+
+	out.final(t.Context(), "play-1", []byte(`{"phase":"Finished","item":0,"position":"2:16:00","duration":"2:16:00"}`))
+	out.status("play-1", []byte(`{"item":0,"position":"0:00:30","duration":"2:16:00"}`))
+	out.tick(t.Context())
+
+	if len(fake.writes) != 2 || !fake.writes[0].data.Played || fake.writes[1].data.Played {
+		t.Errorf("writes = %+v, want the mark set and then cleared", fake.writes)
+	}
+}
+
 // A Play's final writes at once, because the position a person resumes
 // from is the one the Play ended on.
 func TestAFinalWritesAtOnce(t *testing.T) {
@@ -115,38 +154,6 @@ func TestAFinalWritesAtOnce(t *testing.T) {
 
 	if len(fake.writes) != 1 || !fake.writes[0].data.Played {
 		t.Errorf("writes = %+v, want one write that says the film was watched", fake.writes)
-	}
-}
-
-// A person finished a work when the Play ended inside the last two
-// minutes of it, or when a Play that reached the end says it finished.
-// A duration of zero says the report never carried one, and no such
-// Play is watched.
-func TestWhatCountsAsWatched(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		play   jellyfinPlay
-		ended  bool
-		played bool
-	}{
-		{name: "a film that ran to the end", ended: true, played: true,
-			play: jellyfinPlay{position: 8160, duration: 8160, phase: playPhaseFinished}},
-		{name: "a film stopped inside the last two minutes", ended: true, played: true,
-			play: jellyfinPlay{position: 8100, duration: 8160}},
-		{name: "a film stopped an hour in", ended: true, played: false,
-			play: jellyfinPlay{position: 3600, duration: 8160}},
-		{name: "a film still running", ended: false, played: false,
-			play: jellyfinPlay{position: 8160, duration: 8160, phase: playPhaseFinished}},
-		{name: "a play that carried no duration", ended: true, played: false,
-			play: jellyfinPlay{position: 0, duration: 0, phase: playPhaseFinished}},
-		{name: "a play that failed short of the end", ended: true, played: false,
-			play: jellyfinPlay{position: 10, duration: 8160, phase: playPhaseFailed}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := jellyfinPlayed(test.play, test.ended); got != test.played {
-				t.Errorf("played = %v, want %v", got, test.played)
-			}
-		})
 	}
 }
 
@@ -287,13 +294,32 @@ func TestWhatCountsAsAnEcho(t *testing.T) {
 		{name: "another user", user: "user-kelly", item: "item-matrix", position: 4210, echo: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			echoes := newJellyfinEchoes()
+			echoes := newJellyfinEchoes(newJellyfinClock().now)
 			echoes.remember("user-chris", "item-matrix", 4210)
 
 			if got := echoes.echoed(test.user, test.item, test.position); got != test.echo {
 				t.Errorf("echoed = %v, want %v", got, test.echo)
 			}
 		})
+	}
+}
+
+// The written positions are bounded. The next write drops every write
+// older than jellyfinEchoLife, so a pod that ran for weeks holds only its
+// recent writes.
+func TestAWrittenPositionIsDroppedOnceItAges(t *testing.T) {
+	clock := newJellyfinClock()
+	echoes := newJellyfinEchoes(clock.now)
+	echoes.remember("user-chris", "item-matrix", 4210)
+
+	clock.advance(jellyfinEchoLife + time.Second)
+	echoes.remember("user-kelly", "item-arrival", 10)
+
+	if echoes.echoed("user-chris", "item-matrix", 4210) {
+		t.Error("a write past the echo's life still dropped a post")
+	}
+	if len(echoes.written) != 1 {
+		t.Errorf("held %d writes, want the one still inside the life", len(echoes.written))
 	}
 }
 

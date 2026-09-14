@@ -2,12 +2,17 @@ package main
 
 // jellyfinindex.go is the map between the catalog's identity of a work and
 // Jellyfin's item id, and between a Person name and a Jellyfin user id.
-// Jellyfin has no lookup by provider id, so the index is built from one
-// recursive listing of every movie, episode, and series. It is the role's
-// only state, and a start rebuilds it from nothing.
+// Jellyfin has no lookup by provider id, so the index is built from two
+// recursive listings: every series, then every movie and episode. It is the
+// role's only state, and a start rebuilds it from nothing.
+//
+// A build folds each item into the lookups as it arrives and holds no
+// listing. So the memory a build takes is the lookups it ends with. A
+// larger library costs the role a larger index and no transient beside it.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -24,6 +29,12 @@ const (
 	jellyfinIndexLifetime = time.Hour
 	jellyfinIndexFloor    = time.Minute
 )
+
+// The time one whole build may take, over every page of both listings.
+// A build past it fails and installs nothing, so the index stays as it
+// was. The budget is many times what a build needs. It bounds a server
+// that stopped answering, not one that is slow.
+const jellyfinIndexBudget = 2 * time.Minute
 
 // One index: the two lookups the outbound writes need, the series ids the
 // inbound webhook needs, the users, and when each half was last read.
@@ -186,45 +197,88 @@ func (i *jellyfinIndex) refreshItems(ctx context.Context, age time.Duration) boo
 	i.itemsRead = i.now()
 	i.mutex.Unlock()
 
-	items, err := i.api.items(ctx)
+	built, err := i.build(ctx)
 	if err != nil {
 		i.logf("could not read the items of jellyfin: %v", err)
 		return false
 	}
-	i.hold(items)
+	i.hold(built)
 	return true
 }
 
-// hold turns one listing into the two lookups. The series pass runs first,
-// because an episode is keyed on its series' ids and the listing carries the
-// two in no order.
-func (i *jellyfinIndex) hold(items []jellyfinItem) {
-	series := map[string]map[string]string{}
-	for _, item := range items {
+// The three lookups one build makes. A build fills these rather than the maps
+// the role reads, so a listing the server cuts short leaves the index as it
+// was. A half-built index would lack every work in the failed listing, and
+// a lookup that misses writes nothing to Jellyfin.
+type jellyfinLookups struct {
+	movies   map[string]string
+	episodes map[string]string
+	series   map[string]map[string]string
+}
+
+// build reads the two listings and folds each item as it arrives. The series
+// listing comes first, because an episode is keyed on its series' provider
+// ids and only the series carries them.
+func (i *jellyfinIndex) build(ctx context.Context) (jellyfinLookups, error) {
+	budget, done := jellyfinBuildBudget(ctx)
+	defer done()
+
+	built := jellyfinLookups{
+		movies:   map[string]string{},
+		episodes: map[string]string{},
+		series:   map[string]map[string]string{},
+	}
+	if err := i.api.items(budget, jellyfinSeriesListing, func(item jellyfinItem) {
 		if strings.EqualFold(item.Type, jellyfinSeriesType) {
-			series[item.ID] = jellyfinProviders(item.ProviderIds)
+			built.series[item.ID] = jellyfinProviders(item.ProviderIds)
+		}
+	}); err != nil {
+		return built, err
+	}
+	return built, i.api.items(budget, jellyfinWorksListing, built.fold)
+}
+
+// The context one build runs on. A build makes one request per page, and
+// a caller's deadline is sized for one request. The budget drops the
+// caller's deadline and keeps the caller's cancel. A build that ignored a
+// cancel would keep the pod running past its stop signal.
+func jellyfinBuildBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	budget, done := context.WithTimeout(context.WithoutCancel(ctx), jellyfinIndexBudget)
+	// A caller's deadline that passed bounds the caller's own work, not
+	// the build. Only a cancel ends the build.
+	stop := context.AfterFunc(ctx, func() {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			done()
+		}
+	})
+	return budget, func() {
+		stop()
+		done()
+	}
+}
+
+// fold adds one item to the lookups under its keys. A movie is keyed on
+// every provider id it has, and an episode on its series' provider ids plus
+// the season and episode numbers.
+func (l jellyfinLookups) fold(item jellyfinItem) {
+	switch {
+	case strings.EqualFold(item.Type, jellyfinMovieType):
+		for provider, id := range jellyfinProviders(item.ProviderIds) {
+			l.movies[jellyfinAlias(provider, id)] = item.ID
+		}
+	case strings.EqualFold(item.Type, jellyfinEpisodeType):
+		for provider, id := range l.series[item.SeriesID] {
+			l.episodes[jellyfinEpisodeAlias(jellyfinAlias(provider, id),
+				item.ParentIndexNumber, item.IndexNumber)] = item.ID
 		}
 	}
+}
 
-	movies := map[string]string{}
-	episodes := map[string]string{}
-	for _, item := range items {
-		if strings.EqualFold(item.Type, jellyfinMovieType) {
-			for provider, id := range jellyfinProviders(item.ProviderIds) {
-				movies[jellyfinAlias(provider, id)] = item.ID
-			}
-		}
-		if strings.EqualFold(item.Type, jellyfinEpisodeType) {
-			for provider, id := range series[item.SeriesID] {
-				episodes[jellyfinEpisodeAlias(jellyfinAlias(provider, id),
-					item.ParentIndexNumber, item.IndexNumber)] = item.ID
-			}
-		}
-	}
-
+// hold puts one finished build in place of the index the role was reading.
+func (i *jellyfinIndex) hold(built jellyfinLookups) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	i.movies, i.episodes, i.series = movies, episodes, series
+	i.movies, i.episodes, i.series = built.movies, built.episodes, built.series
 }
 
 // refreshUsers reads the users and replaces the map, under the same floor the

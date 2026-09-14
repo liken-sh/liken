@@ -6,6 +6,11 @@ package main
 // Every call bounds itself with a context of ten seconds, and every failure
 // is an error the caller logs. A Jellyfin that is down costs the role its
 // writes and never the process.
+//
+// The client reads a listing one page at a time. It decodes each page element
+// by element and passes each element to the caller's function. Nothing holds
+// a whole listing. So the memory one read takes is one page, and it does not
+// grow with the library.
 
 import (
 	"bytes"
@@ -27,27 +32,58 @@ const jellyfinRequestTimeout = 10 * time.Second
 // counts every position in ticks and the store counts in seconds.
 const jellyfinTicksPerSecond = 10_000_000
 
-// The bound on one answer and on the message an answer outside 2xx carries.
-// The item listing is the large one, and it is decoded as it arrives rather
-// than held whole.
-const (
-	jellyfinAnswerLimit = 64 << 20
-	jellyfinErrorLimit  = 2048
+// The most bytes of an error message the client reads from an answer
+// outside 2xx.
+const jellyfinErrorLimit = 2048
+
+// The most bytes the client reads from one answer, and how many items it
+// asks for in one listing page.
+//
+// The answer limit is far below the pod's memory limit on purpose. When a
+// server answers with more than the page it was asked for, the client
+// cuts the read short at the limit. That costs the role one index build.
+// An answer the size of the pod's memory limit would cost it the
+// container instead. Both are variables so that a test can set them to
+// small numbers.
+var (
+	jellyfinAnswerLimit int64 = 8 << 20
+	jellyfinPageSize          = 500
 )
 
 // The names this client gives itself in the authorization header. Jellyfin
 // logs the client and the device beside the session, so a write from this
 // role is legible in Jellyfin's own dashboard.
 const (
-	jellyfinClientName  = "liken"
-	jellyfinDeviceName  = "library-operator"
-	jellyfinAPIVersion  = "1"
-	jellyfinItemsPath   = "/Items?recursive=true&includeItemTypes=Movie,Episode,Series&fields=ProviderIds,Path"
-	jellyfinSeriesQuery = "/Items?fields=ProviderIds&ids="
+	jellyfinClientName = "liken"
+	jellyfinDeviceName = "library-operator"
+	jellyfinAPIVersion = "1"
+)
+
+// The queries the role reads items with. None asks for images, because
+// the role reads only provider ids. Without enableImages=false, Jellyfin
+// answers an item with its image tags, its parents' image tags, and a blur
+// hash for each. Those fields are most of an item's bytes, and nothing
+// here reads them.
+const (
+	// The two listings an index build reads. The series listing is read
+	// apart from the works, because an episode is keyed on its series'
+	// provider ids and only the series carries them. Two listings let the
+	// build fold every item as it arrives and hold no listing at all.
+	jellyfinSeriesListing = "/Items?recursive=true&includeItemTypes=Series&fields=ProviderIds&enableImages=false"
+	jellyfinWorksListing  = "/Items?recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds&enableImages=false"
+	jellyfinSeriesQuery   = "/Items?fields=ProviderIds&enableImages=false&ids="
 	// the listing one user takes. It names the user, so every item
 	// carries that person's own user data, and the caller adds the filter
 	// that narrows the answer.
-	jellyfinUserItemsQuery = "&recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds"
+	jellyfinUserItemsQuery = "&recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds&enableImages=false"
+)
+
+// The two fields of a listing answer that the reader acts on: the items, and
+// the count of every item the query matched. The count says whether another
+// page follows.
+const (
+	jellyfinItemsField = "Items"
+	jellyfinTotalField = "TotalRecordCount"
 )
 
 // The three item types the role reads. Jellyfin writes them in this case, and
@@ -107,9 +143,12 @@ type jellyfinItem struct {
 }
 
 // The listing's envelope. Jellyfin answers a query with the items under one
-// field and the counts beside it, and the role reads the items alone.
+// field and the count of every item the query matched beside them. Only the
+// one-item read decodes this envelope whole, because one item is small. A
+// listing is read page by page.
 type jellyfinItemList struct {
 	Items []jellyfinItem `json:"Items"`
+	Total int            `json:"TotalRecordCount"`
 }
 
 // What one user-data write states: where the person reached, whether they
@@ -130,27 +169,145 @@ func (a *jellyfinAPI) users(ctx context.Context) ([]jellyfinUser, error) {
 	return users, nil
 }
 
-// Every movie, episode, and series of the server in one recursive call.
-// Jellyfin has no lookup by provider id, so the whole listing is what the
-// index is built from.
-func (a *jellyfinAPI) items(ctx context.Context) ([]jellyfinItem, error) {
-	list := jellyfinItemList{}
-	if err := a.get(ctx, jellyfinItemsPath, &list); err != nil {
-		return nil, err
+// items reads one listing and passes every item in it to hold. Jellyfin has
+// no lookup by provider id, so the index is built from a listing.
+//
+// The read is paged. Nothing holds a page once hold has read every item in
+// it. So the memory one build takes is one page plus what the caller keeps,
+// and the page does not grow with the library.
+func (a *jellyfinAPI) items(ctx context.Context, listing string, hold func(jellyfinItem)) error {
+	for start := 0; ; {
+		read, total, err := a.itemsPage(ctx, listing, start, hold)
+		if err != nil {
+			return err
+		}
+		start += read
+		// An empty page ends the read, whatever count the answer
+		// states. Without this check, a count that never agrees with
+		// the pages would keep the read asking for pages without end.
+		if read == 0 {
+			return nil
+		}
+		// When the server states a count, the count ends the read.
+		// The read stops once the pages have delivered every item
+		// the count names. A page smaller than the one this client
+		// asked for does not end the read, because a server is free
+		// to answer a short page.
+		if total > 0 {
+			if start >= total {
+				return nil
+			}
+			continue
+		}
+		// When the server states no count, the first page smaller
+		// than the one this client asked for is the last page, and
+		// it ends the read.
+		if read < jellyfinPageSize {
+			return nil
+		}
 	}
-	return list.Items, nil
 }
 
 // the items of one user, with that person's user data on each. The query the
 // caller adds is what narrows the answer, because two filters narrow together
 // and the backfill needs the two answers apart.
-func (a *jellyfinAPI) userItems(ctx context.Context, user, query string) ([]jellyfinItem, error) {
-	list := jellyfinItemList{}
-	path := "/Items?userId=" + url.QueryEscape(user) + jellyfinUserItemsQuery + query
-	if err := a.get(ctx, path, &list); err != nil {
-		return nil, err
+func (a *jellyfinAPI) userItems(ctx context.Context, user, query string, hold func(jellyfinItem)) error {
+	return a.items(ctx, "/Items?userId="+url.QueryEscape(user)+jellyfinUserItemsQuery+query, hold)
+}
+
+// One page of a listing, decoded as it arrives. It returns how many items
+// the page held and the count the server states. The count says whether
+// another page follows.
+func (a *jellyfinAPI) itemsPage(ctx context.Context, listing string, start int,
+	hold func(jellyfinItem)) (int, int, error) {
+	read, total := 0, 0
+	path := fmt.Sprintf("%s&startIndex=%d&limit=%d", listing, start, jellyfinPageSize)
+	err := a.read(ctx, path, func(decoder *json.Decoder) error {
+		var err error
+		read, total, err = jellyfinReadPage(decoder, hold)
+		return err
+	})
+	return read, total, err
+}
+
+// jellyfinReadPage reads one answer field by field and passes each element
+// of the items array to hold as it decodes that element.
+//
+// The whole answer is never held. encoding/json buffers a whole value
+// before it unmarshals it. So a decode of the envelope into jellyfinItemList
+// would hold the page's bytes and the decoded items at the same time.
+func jellyfinReadPage(decoder *json.Decoder, hold func(jellyfinItem)) (int, int, error) {
+	read, total := 0, 0
+	open, err := decoder.Token()
+	if err != nil {
+		return 0, 0, err
 	}
-	return list.Items, nil
+	// An answer that is not an object is an error, not an empty page. An
+	// empty page would end the read, and the build that asked for it
+	// would install an empty index.
+	if open != json.Delim('{') {
+		return 0, 0, fmt.Errorf("jellyfin answered a listing that is no object")
+	}
+
+	for decoder.More() {
+		field, err := decoder.Token()
+		if err != nil {
+			return 0, 0, err
+		}
+		switch field {
+		case jellyfinItemsField:
+			if read, err = jellyfinReadItems(decoder, hold); err != nil {
+				return 0, 0, err
+			}
+		case jellyfinTotalField:
+			if err := decoder.Decode(&total); err != nil {
+				return 0, 0, err
+			}
+		default:
+			// Every other field of the answer is decoded and
+			// discarded. Such a field costs the read only its own
+			// bytes, and the answer limit bounds the whole answer.
+			var past json.RawMessage
+			if err := decoder.Decode(&past); err != nil {
+				return 0, 0, err
+			}
+		}
+	}
+
+	// The read consumes the closing brace, so a stream that stopped part
+	// way is an error. decoder.More returns false after a read that
+	// failed, the same as after the last field. Without this check, an
+	// answer whose end never arrived would read as an empty page and
+	// empty the index.
+	if _, err := decoder.Token(); err != nil {
+		return 0, 0, err
+	}
+	return read, total, nil
+}
+
+// The items of one page, decoded one at a time. A field that holds no array
+// reads as an empty page, which is what a server writes for a listing with
+// no items.
+func jellyfinReadItems(decoder *json.Decoder, hold func(jellyfinItem)) (int, error) {
+	open, err := decoder.Token()
+	if err != nil {
+		return 0, err
+	}
+	if open != json.Delim('[') {
+		return 0, nil
+	}
+
+	read := 0
+	for decoder.More() {
+		item := jellyfinItem{}
+		if err := decoder.Decode(&item); err != nil {
+			return read, err
+		}
+		hold(item)
+		read++
+	}
+	_, err = decoder.Token()
+	return read, err
 }
 
 // One item by id, which the role reads for a series an episode names and the
@@ -178,9 +335,12 @@ func (a *jellyfinAPI) writeUserData(ctx context.Context, item, user string, data
 	return a.post(ctx, "/UserItems/"+url.PathEscape(item)+"/UserData?userId="+url.QueryEscape(user), body)
 }
 
-// One read, decoded as it arrives. The bound covers the whole call, the
-// decode included, because the body is read after the answer's header.
-func (a *jellyfinAPI) get(ctx context.Context, path string, into any) error {
+// One read. The caller's function drives a decoder over the answer. The
+// timeout covers the whole call, the decode included, because the body
+// arrives after the answer's header. The decoder reads through an
+// io.LimitReader, so an answer past jellyfinAnswerLimit ends the decode in
+// an error.
+func (a *jellyfinAPI) read(ctx context.Context, path string, decode func(*json.Decoder) error) error {
 	bounded, done := context.WithTimeout(ctx, jellyfinRequestTimeout)
 	defer done()
 
@@ -192,7 +352,13 @@ func (a *jellyfinAPI) get(ctx context.Context, path string, into any) error {
 	if err := jellyfinStatus(path, response); err != nil {
 		return err
 	}
-	return json.NewDecoder(io.LimitReader(response.Body, jellyfinAnswerLimit)).Decode(into)
+	return decode(json.NewDecoder(io.LimitReader(response.Body, jellyfinAnswerLimit)))
+}
+
+// One small answer, decoded whole. The user list and one item are both short
+// enough to hold, unlike a listing.
+func (a *jellyfinAPI) get(ctx context.Context, path string, into any) error {
+	return a.read(ctx, path, func(decoder *json.Decoder) error { return decoder.Decode(into) })
 }
 
 // One write. Jellyfin answers a user-data write with no content, so nothing

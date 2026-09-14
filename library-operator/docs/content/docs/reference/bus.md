@@ -319,6 +319,10 @@ The `{name}` segment is not a `Play`. It is `jellyfin-{userId}-{itemId}`,
 so one person's progress in one item is one row that moves, and a
 rewatch moves it again.
 
+The two ids are Jellyfin Guids, in the spelling its API writes: 32
+hexadecimal digits with no dashes. The webhook and the backfill both
+write that spelling, so the two name one row.
+
 | Field | Type | Meaning |
 |---|---|---|
 | `player` | string | `jellyfin`, in the column that names a `Player`. |
@@ -328,6 +332,10 @@ rewatch moves it again.
 | `position`, `duration` | integers | The position and the length, in seconds. |
 | `ended` | boolean | True on a stop, which marks the row ended. |
 | `at` | integer | The Unix time of the event, which the store writes as the recorded time. A newer `at` wins over what the row holds. |
+
+A work Jellyfin reports as played carries a `position` at the end of
+the work, whatever resume point Jellyfin holds. A mark a person set by
+hand has no position of its own.
 
     {
       "player": "jellyfin",

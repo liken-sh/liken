@@ -69,9 +69,10 @@ func TestJellyfinPodStandsWithNoCredential(t *testing.T) {
 	if role.SecurityContext == nil || role.SecurityContext.Capabilities == nil {
 		t.Error("the role has no security context")
 	}
-	if role.Resources.Requests["cpu"] != scannerCPURequest ||
-		role.Resources.Requests["memory"] != scannerMemoryRequest {
-		t.Errorf("requests = %v, want the scanner's", role.Resources.Requests)
+	if role.Resources.Requests["cpu"] != jellyfinCPURequest ||
+		role.Resources.Requests["memory"] != jellyfinMemoryRequest ||
+		role.Resources.Limits["memory"] != jellyfinMemoryLimit {
+		t.Errorf("resources = %+v, want the role's own requests and limit", role.Resources)
 	}
 }
 

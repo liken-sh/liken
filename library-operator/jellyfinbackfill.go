@@ -228,26 +228,27 @@ func (b *jellyfinBackfill) carry(ctx context.Context, user jellyfinUser,
 
 // the two reads one user takes, as one list with no item twice. An item that
 // is both resumable and played comes back in both answers, and the played
-// answer wins, because it is the one that says the person finished.
+// answer wins, because it is the one that says the person finished. So the
+// played read runs second and overwrites what the resumable read left.
+//
+// Each read is folded into the list as it arrives. The run holds one
+// person's items, the ones they watched, and never a whole listing.
 func (b *jellyfinBackfill) itemsOf(ctx context.Context, user string) ([]jellyfinItem, error) {
-	resumable, err := b.api.userItems(ctx, user, jellyfinResumableQuery)
-	if err != nil {
-		return nil, err
-	}
-	played, err := b.api.userItems(ctx, user, jellyfinPlayedQuery)
-	if err != nil {
-		return nil, err
-	}
-
 	at := map[string]int{}
-	held := make([]jellyfinItem, 0, len(resumable)+len(played))
-	for _, item := range append(resumable, played...) {
+	held := []jellyfinItem{}
+	fold := func(item jellyfinItem) {
 		if index, seen := at[item.ID]; seen {
 			held[index] = item
-			continue
+			return
 		}
 		at[item.ID] = len(held)
 		held = append(held, item)
+	}
+
+	for _, query := range []string{jellyfinResumableQuery, jellyfinPlayedQuery} {
+		if err := b.api.userItems(ctx, user, query, fold); err != nil {
+			return nil, err
+		}
 	}
 	return held, nil
 }
@@ -262,14 +263,15 @@ func (b *jellyfinBackfill) outsideOf(ctx context.Context, user jellyfinUser,
 	if len(aliases) == 0 {
 		return "", outsidePlay{}, false
 	}
+	duration := jellyfinSeconds(item.RunTimeTicks)
 	return jellyfinPlayerName + "-" + user.ID + "-" + item.ID, outsidePlay{
 		Player:   jellyfinPlayerName,
 		People:   []string{user.Name},
 		Aliases:  aliases,
 		Season:   season,
 		Episode:  episode,
-		Position: jellyfinSeconds(item.UserData.PlaybackPositionTicks),
-		Duration: jellyfinSeconds(item.RunTimeTicks),
+		Position: jellyfinPosition(item.UserData.PlaybackPositionTicks, duration, item.UserData.Played),
+		Duration: duration,
 		Ended:    item.UserData.Played,
 		At:       jellyfinBackfillAt(item.UserData.LastPlayedDate),
 	}, true

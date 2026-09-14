@@ -1,10 +1,14 @@
 package main
 
-// What these tests prove: the index the role builds from one listing,
-// the keys a movie and an episode take, the series ids the webhook
-// needs, and the two bounds a rebuild takes.
+// What these tests prove: the index the role builds from the two
+// listings, the keys a movie and an episode take, the series ids the
+// webhook needs, the two bounds on a rebuild, and that a build which
+// fails leaves the index as it was.
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -121,8 +125,8 @@ func TestAMissRebuildsTheIndexAtMostOnceAMinute(t *testing.T) {
 	if _, found := index.itemFor(t.Context(), dune, 0, 0); found {
 		t.Error("the index answered a film it had not read")
 	}
-	if fake.listings != 1 {
-		t.Fatalf("the index read %d listings, want the one it was primed with", fake.listings)
+	if fake.listings != jellyfinFixtureBuild {
+		t.Fatalf("the index made %d listing requests, want the build it was primed with", fake.listings)
 	}
 
 	clock.advance(jellyfinIndexFloor)
@@ -131,8 +135,8 @@ func TestAMissRebuildsTheIndexAtMostOnceAMinute(t *testing.T) {
 	if item != "item-dune" || !found {
 		t.Errorf("item = %q, %v, want item-dune", item, found)
 	}
-	if fake.listings != 2 {
-		t.Errorf("the index read %d listings, want two", fake.listings)
+	if fake.listings != 2*jellyfinFixtureBuild {
+		t.Errorf("the index made %d listing requests, want two builds", fake.listings)
 	}
 }
 
@@ -147,8 +151,76 @@ func TestAnIndexOlderThanAnHourIsRebuilt(t *testing.T) {
 	if _, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0); !found {
 		t.Error("the index lost the film it held")
 	}
-	if fake.listings != 2 {
-		t.Errorf("the index read %d listings, want two", fake.listings)
+	if fake.listings != 2*jellyfinFixtureBuild {
+		t.Errorf("the index made %d listing requests, want two builds", fake.listings)
+	}
+}
+
+// A build that reads the series listing and then fails on the works
+// leaves the index as it was. The build folds into maps of its own, and
+// it installs them once both listings are read. A half-built index
+// would lack every work in the failed listing.
+func TestABuildThatFailsHalfwayLeavesTheIndexAsItWas(t *testing.T) {
+	fake := jellyfinFixture()
+	index, clock, logged := standJellyfinIndex(t, fake)
+	index.prime(t.Context())
+	fake.refuse = "Movie,Episode"
+	clock.advance(jellyfinIndexLifetime)
+
+	item, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0)
+
+	if item != "item-matrix" || !found {
+		t.Errorf("item = %q, %v, want the film the first build held", item, found)
+	}
+	if !strings.Contains(logged.String(), "could not read the items") {
+		t.Errorf("log = %q, want the listing it could not read", logged.String())
+	}
+}
+
+// A build takes a budget of its own, so a caller whose deadline has
+// already passed still gets an index.
+func TestABuildRunsOnItsOwnBudgetAndNotTheCallers(t *testing.T) {
+	index, _, logged := standJellyfinIndex(t, jellyfinFixture())
+	spent, done := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer done()
+
+	built := index.refreshItems(spent, 0)
+
+	if !built {
+		t.Fatalf("the build did not run on a budget of its own; log = %q", logged.String())
+	}
+	item, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0)
+	if item != "item-matrix" || !found {
+		t.Errorf("item = %q, %v, want item-matrix", item, found)
+	}
+}
+
+// How long a cancelled build may run before this test counts it as
+// stuck. It is far under the budget, so a build that ran to the budget
+// instead of stopping on the cancel fails the test.
+const jellyfinCancelWindow = 2 * time.Second
+
+// A caller's cancel ends a build. Without this, the pod would run on for
+// the whole budget after its stop signal.
+func TestABuildEndsWithACallerThatIsCancelled(t *testing.T) {
+	stopping, stop := context.WithCancel(t.Context())
+	defer stop()
+	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		stop()
+		<-request.Context().Done()
+	}))
+	t.Cleanup(blocked.Close)
+	index := newJellyfinIndex(newJellyfinAPI(blocked.URL+"/", "the-key", blocked.Client()),
+		newJellyfinClock().now, nil)
+
+	started := time.Now()
+	built := index.refreshItems(stopping, 0)
+
+	if built {
+		t.Error("the build installed an index from a server that answered nothing")
+	}
+	if spent := time.Since(started); spent > jellyfinCancelWindow {
+		t.Errorf("the build ran %s past the cancel, want it to end with the caller", spent)
 	}
 }
 

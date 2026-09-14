@@ -5,15 +5,21 @@ pub mod thread;
 
 use super::draw::Date;
 
-/// The part of a work a play must reach before a screen counts it
-/// finished, as a percentage. Credits run past the story, so a play that
-/// stopped in them is finished. This is a first setting, not a ruling.
-pub const FINISHED_PERCENT: i64 = 90;
+/// The two amounts of a work that may remain when it counts as watched: a
+/// share of its length, and a number of seconds. The rule takes whichever
+/// leaves less time, so the seconds apply only to a work over 100 minutes.
+/// Credits run past the story, so a play that stopped in them counts as
+/// watched.
+pub const WATCHED_PERCENT: i64 = 5;
+pub const WATCHED_SECONDS: i64 = 300;
 
 /// Whether a play reached the end of its work. A work with no duration is
 /// never finished, because nothing says how long it is.
+/// `library-operator`'s `watched.go` states the same rule. The up-next
+/// card in `media-operator`'s `display/upnext.lua` rises on a rule of its
+/// own, later in the work than this one.
 pub fn finished(position: i64, duration: i64) -> bool {
-    duration > 0 && position >= duration * FINISHED_PERCENT / 100
+    duration > 0 && position >= duration - (duration * WATCHED_PERCENT / 100).min(WATCHED_SECONDS)
 }
 
 /// The position and the duration of one play as a page draws them,
@@ -177,10 +183,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_play_past_nine_tenths_of_its_work_is_finished() {
-        assert!(finished(90, 100));
-        assert!(finished(100, 100));
-        assert!(!finished(89, 100));
+    fn a_twenty_two_minute_work_is_finished_with_one_minute_six_left() {
+        assert!(finished(1_320 - 66, 1_320));
+        assert!(!finished(1_320 - 67, 1_320));
+    }
+
+    #[test]
+    fn a_forty_two_minute_work_is_finished_with_two_minutes_six_left() {
+        assert!(finished(2_520 - 126, 2_520));
+        assert!(!finished(2_520 - 127, 2_520));
+    }
+
+    #[test]
+    fn a_hundred_minute_work_is_finished_with_five_minutes_left() {
+        assert!(finished(6_000 - 300, 6_000));
+        assert!(!finished(6_000 - 301, 6_000));
+    }
+
+    #[test]
+    fn a_hundred_and_fifty_minute_work_is_finished_with_five_minutes_left() {
+        assert!(finished(9_000 - 300, 9_000));
+        assert!(!finished(9_000 - 301, 9_000));
+    }
+
+    #[test]
+    fn a_play_that_reached_the_end_is_finished() {
+        assert!(finished(6_000, 6_000));
+        assert!(finished(6_100, 6_000));
     }
 
     #[test]
