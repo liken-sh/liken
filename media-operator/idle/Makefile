@@ -18,7 +18,7 @@
 # lower it.
 IDLE_COVERAGE_FLOOR := 95
 SCREEN_COVERAGE_FLOOR := 99
-OSD_COVERAGE_FLOOR := 88
+OSD_COVERAGE_FLOOR := 89
 
 # Every cargo command runs at the workspace root, which is the directory
 # above this one.

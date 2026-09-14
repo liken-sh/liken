@@ -4,22 +4,30 @@
 //! transparent. Between summons it draws nothing, and a frame that draws
 //! nothing is a fully transparent frame.
 
-use std::time::Duration;
+use std::cell::Cell;
+use std::time::{Duration, Instant};
 
 use iced::widget::canvas;
 use iced::{Color, Element, Length, Rectangle, Renderer, Size, Subscription, Task, Theme};
+use jiff::Zoned;
+use tokio::sync::broadcast;
 
-use crate::canvas::{Canvas, Scrim};
-use crate::fade::Fade;
-use crate::ipc::{self, Ipc};
-use crate::theme;
+use crate::canvas::{Brush, Canvas, Scrim};
+use crate::film::Film;
+use crate::focus::{Focus, Hide, Parts, Stop};
+use crate::ipc::{self, Command, Ipc, Wire};
+use crate::presentation::Presentation;
+use crate::scrubber::Scrubber;
+use crate::strip::Strip;
+use crate::{clock, header, images, theme};
 
 /// How long the display waits for mpv to report a position before it exits
 /// and lets the kubelet restart the container. It is longer than a player
 /// takes to open a film and shorter than a person waits at a bare picture.
 pub const PLAYER_GRACE: Duration = Duration::from_secs(60);
 
-/// How many messages the socket reader may run ahead of the frame loop.
+/// How many messages the socket reader may run ahead of the frame loop, and
+/// how many commands the frame loop may run ahead of the socket.
 const EVENT_QUEUE: usize = 64;
 
 /// What moves the display.
@@ -34,116 +42,294 @@ pub enum Message {
     Hide(u64),
 }
 
-/// The whole of the display's state so far: whether it stands summoned, how
-/// far the fade has moved, and whether the film is paused.
-#[derive(Debug, Default)]
+/// The whole of the display's state: what mpv reports, what the item declared,
+/// where the focus stands, and how far the fade has moved.
 pub struct Display {
-    ipc: Ipc,
-    fade: Fade,
-    summoned: bool,
+    wire: Wire,
+    focus: Focus,
+    film: Film,
+    presentation: Presentation,
+    scrubber: Scrubber,
+    strip: Strip,
     /// How many summons have landed. The count names each idle window.
     summons: u64,
     /// The idle window that stands, if one does. Arming a window replaces
     /// what stood, and a dismiss cancels it.
     armed: Option<u64>,
-    paused: bool,
-    /// mpv reports the pause state once when the display observes it. The
-    /// first report only records it, so a film that loads paused starts with
-    /// the display hidden.
-    first_pause: bool,
+    /// The monotonic clock the seek ramp reads, which the scan's rate needs
+    /// and the wall clock cannot give.
+    started: Instant,
+    /// The last position signature, so a push that moves nothing a person can
+    /// see redraws nothing.
+    signature: Option<Signature>,
+    /// The surface the compositor last configured, which the signature reads
+    /// to tell whether the playhead moved one output pixel.
+    canvas: Cell<Canvas>,
+    /// The two drawn layers. mpv pushes a position on every video frame, and a
+    /// layer is rebuilt only when one of the things it draws changes.
+    below: canvas::Cache,
+    above: canvas::Cache,
+}
+
+/// What a position moves on screen: the playhead's own output pixel, the whole
+/// second the label reads, and the wall minute the clock reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Signature {
+    pixel: Option<i32>,
+    second: i64,
+    minute: i64,
 }
 
 impl Display {
     pub fn new(ipc: Ipc) -> Self {
+        let (commands, _) = broadcast::channel(EVENT_QUEUE);
         Self {
-            ipc,
-            first_pause: true,
-            ..Self::default()
+            wire: Wire {
+                path: ipc.path().to_path_buf(),
+                commands,
+            },
+            focus: Focus::new(),
+            film: Film::default(),
+            presentation: Presentation::default(),
+            scrubber: Scrubber::default(),
+            strip: Strip::default(),
+            summons: 0,
+            armed: None,
+            started: Instant::now(),
+            signature: None,
+            canvas: Cell::new(Canvas::default()),
+            below: canvas::Cache::new(),
+            above: canvas::Cache::new(),
         }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Mpv(ipc::Event::Message(arguments)) if ipc::summons(&arguments) => {
-                return self.summon();
+            Message::Mpv(ipc::Event::Message(words)) => return self.on_message(&words),
+            Message::Mpv(ipc::Event::Property { name, value }) => {
+                return self.on_property(&name, &value);
             }
-            Message::Mpv(ipc::Event::Property { name, value }) if name == "pause" => {
-                return self.on_pause(value.as_bool().unwrap_or(false));
+            Message::Mpv(ipc::Event::Detached) => {}
+            Message::Tick => {
+                self.focus.fade_mut().step();
+                self.redraw();
             }
-            Message::Mpv(_) => {}
-            Message::Tick => self.fade.step(),
-            Message::Hide(summons) if self.armed == Some(summons) => self.dismiss(),
+            Message::Hide(summons) if self.armed == Some(summons) => {
+                let mut focus = self.focus;
+                focus.dismiss(&mut self.parts());
+                self.focus = focus;
+                self.redraw();
+                return self.idle_window();
+            }
             Message::Hide(_) => {}
         }
         Task::none()
     }
 
-    /// Show the display and arm the idle window. It moves no focus.
-    fn summon(&mut self) -> Task<Message> {
-        self.summoned = true;
-        self.fade.to(1.0);
-        self.arm_hide()
+    // Rebuild both layers on the next frame, which is what a change to
+    // anything the display draws asks for.
+    fn redraw(&self) {
+        self.below.clear();
+        self.above.clear();
     }
 
-    /// Clear the display and cancel the idle window.
-    fn dismiss(&mut self) {
-        self.summoned = false;
-        self.armed = None;
-        self.fade.to(0.0);
+    /// The modules one press reaches. The frame loop owns them, so it hands
+    /// them to the router for the length of the press.
+    fn parts(&mut self) -> Parts<'_> {
+        Parts {
+            presentation: &self.presentation,
+            film: &self.film,
+            scrubber: &mut self.scrubber,
+            strip: &mut self.strip,
+            now: self.started.elapsed().as_secs_f64(),
+            // PROSE: an offer stands and the display waits on the next Play only once the up-next stage lands.
+            offer: false,
+            waiting: false,
+        }
     }
 
-    /// A pause summons the display and holds it, and a resume dismisses it at
-    /// once.
-    fn on_pause(&mut self, paused: bool) -> Task<Message> {
-        self.paused = paused;
-        if self.first_pause {
-            self.first_pause = false;
+    /// The six navigation words the command sidecar sends, the summon it sends
+    /// after a seek of its own, and the block it sends for every item.
+    fn on_message(&mut self, words: &[String]) -> Task<Message> {
+        let Some(word) = words.first() else {
+            return Task::none();
+        };
+        let mut focus = self.focus;
+        if word == ipc::SUMMON {
+            focus.summon(&self.parts());
+        } else if let Some(action) = crate::focus::Action::from_word(word) {
+            let commands = focus.nav(action, &mut self.parts());
+            self.send(commands);
+        } else if word == ipc::PRESENTATION {
+            self.presentation
+                .receive(words.get(1).map_or("", String::as_str));
+            // PROSE: a new block is a new item, so the art stage swaps the logo, the tile, and the cover here.
+        } else {
             return Task::none();
         }
-        if paused {
-            return self.summon();
+        self.focus = focus;
+        self.redraw();
+        self.idle_window()
+    }
+
+    /// mpv pushes a position on every video frame, about twenty-four times a
+    /// second, and a redraw builds the whole layer again. Three things on
+    /// screen follow the value. The playhead moves one output pixel every few
+    /// seconds. The time label changes once a second. The clock reads the wall
+    /// minute. The signature carries the three, so a push that leaves it alone
+    /// moves nothing a person can see and redraws nothing.
+    fn on_property(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
+        self.film.apply(name, value);
+        if !draws(name) {
+            return Task::none();
         }
-        if self.summoned {
-            self.dismiss();
+        if name == "time-pos" {
+            let signature = self.signature(value.as_f64());
+            if self.signature == Some(signature) {
+                return Task::none();
+            }
+            self.signature = Some(signature);
+            self.redraw();
+            return Task::none();
+        }
+        self.redraw();
+        if name == "pause" {
+            let mut focus = self.focus;
+            focus.on_pause(value.as_bool().unwrap_or(false), &mut self.parts());
+            self.focus = focus;
+            return self.idle_window();
         }
         Task::none()
     }
 
-    /// Arm the idle window on this summon. A summon while paused arms
-    /// nothing, so the display stands for as long as the film does.
-    fn arm_hide(&mut self) -> Task<Message> {
-        self.summons += 1;
-        self.armed = None;
-        if self.paused {
-            return Task::none();
+    fn signature(&self, at: Option<f64>) -> Signature {
+        Signature {
+            pixel: crate::scrubber::position_pixel(&self.canvas.get(), &self.film, at),
+            second: (at.unwrap_or(0.0) + 0.5).floor() as i64,
+            minute: clock::minute(&clock::now()),
         }
-        let summons = self.summons;
-        self.armed = Some(summons);
-        Task::perform(tokio::time::sleep(theme::IDLE_HIDE), move |()| {
-            Message::Hide(summons)
-        })
+    }
+
+    /// Arm or cancel the idle window the last press asked for. A window a
+    /// later summon replaced dismisses nothing, so each one carries the count
+    /// of the summon that armed it.
+    fn idle_window(&mut self) -> Task<Message> {
+        match self.focus.take_hide() {
+            Hide::Arm => {
+                self.summons += 1;
+                let summons = self.summons;
+                self.armed = Some(summons);
+                Task::perform(tokio::time::sleep(theme::IDLE_HIDE), move |()| {
+                    Message::Hide(summons)
+                })
+            }
+            Hide::Cancel => {
+                self.armed = None;
+                Task::none()
+            }
+            Hide::Keep => Task::none(),
+        }
+    }
+
+    /// Write every command one press asked for to the socket the display
+    /// already reads.
+    fn send(&self, commands: Vec<Command>) {
+        for command in commands {
+            let _ = self.wire.commands.send(ipc::line(&command));
+        }
+    }
+
+    /// Draw the header and the clock, then the scrubber, then the strip. The
+    /// scrubber owns two focus stops but draws one bar, told which axis is
+    /// focused.
+    fn paint_below(&self, brush: &mut Brush<'_>, now: &Zoned) {
+        let canvas = brush.canvas();
+        // The top scrim backs the header and the clock, drawn before them so
+        // their text is on top.
+        let head = header::lines(&self.presentation, &self.film);
+        let reading = clock::lines(&canvas, &self.film, now);
+        if !head.is_empty() || !reading.is_empty() {
+            brush.scrim(&Scrim::top());
+            for line in head.into_iter().chain(reading) {
+                brush.text(line);
+            }
+        }
+
+        let bar = (!self.presentation.is_image())
+            .then(|| self.scrubber.bar(&canvas, &self.film, self.focus.axis()))
+            .flatten();
+        let counter = if images::available(&self.presentation) {
+            images::lines(&canvas, &self.film)
+        } else {
+            Vec::new()
+        };
+        let strip = self.strip.lines(
+            &canvas,
+            &self.presentation,
+            &self.film,
+            self.focus.focused_stop() == Some(Stop::Strip),
+        );
+        if bar.is_some() || !counter.is_empty() || !strip.is_empty() {
+            // The bottom scrim backs the scrubber and the strip, drawn before
+            // them so their text is on top.
+            brush.scrim(&Scrim::bottom());
+            if bar.is_some() {
+                self.scrubber.draw(brush, &self.film, self.focus.axis());
+            }
+            for line in counter.into_iter().chain(strip) {
+                brush.text(line);
+            }
+        }
+        // PROSE: the thumbnail draws here, over the bar it centres on, once the art stage lands: it shows while a fine scan is in flight for an item that declares trickplay, at scrubber.cursor_time() and scrubber.cursor_x().
+        // PROSE: the up-next chip and card draw here, over the bottom cluster, once the up-next stage lands.
+    }
+
+    /// The open chooser, which covers every region while it captures input.
+    ///
+    // The chooser draws in a layer of its own. iced_wgpu draws one layer in
+    // four passes, quads then meshes then images then text, so a rectangle in
+    // the same layer as the text lands under every line of it. A second layer
+    // draws after the whole of the first, and the dim and the panel cover the
+    // text they are meant to cover.
+    fn paint_above(&self, brush: &mut Brush<'_>) {
+        if self.strip.capturing().is_none() {
+            return;
+        }
+        let canvas = brush.canvas();
+        // A chooser is open. Dim the whole frame under it, so the list reads
+        // as the one thing in focus and the scrubber and strip recede.
+        brush.rect(
+            Rectangle::new(iced::Point::ORIGIN, Size::new(canvas.width, canvas.height)),
+            theme::color::SHADOW,
+            theme::alpha::DIM,
+        );
+        self.strip.draw_chooser(brush, &self.film);
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        canvas(Scrims {
-            fade: self.fade.value(),
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        let layer = |part| {
+            canvas(Layer {
+                display: self,
+                part,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+        };
+        iced::widget::stack![layer(Part::Below), layer(Part::Above)].into()
     }
 
     /// The socket reader always runs. The frame tick runs only while the
     /// fade is moving, so a display standing at either end costs the process
     /// nothing.
     pub fn subscription(&self) -> Subscription<Message> {
-        let mpv = Subscription::run_with(self.ipc.path().to_path_buf(), |path| {
-            let ipc = Ipc::at(path);
+        let mpv = Subscription::run_with(self.wire.clone(), |wire| {
+            let ipc = Ipc::at(&wire.path);
+            let commands = wire.commands.clone();
             iced::stream::channel(EVENT_QUEUE, async move |mut output| {
                 use iced::futures::SinkExt;
 
                 let (sender, mut events) = tokio::sync::mpsc::channel(EVENT_QUEUE);
-                tokio::spawn(async move { ipc.serve(sender).await });
+                tokio::spawn(async move { ipc.serve(sender, &commands).await });
                 while let Some(event) = events.recv().await {
                     if output.send(Message::Mpv(event)).await.is_err() {
                         return;
@@ -151,7 +337,7 @@ impl Display {
                 }
             })
         });
-        if !self.fade.running() {
+        if !self.focus.fade().running() {
             return mpv;
         }
         Subscription::batch([
@@ -161,12 +347,30 @@ impl Display {
     }
 }
 
-/// The two scrims, and nothing else yet.
-struct Scrims {
-    fade: f32,
+/// Whether one property push changes anything the display draws.
+///
+/// mpv pushes the position of the play as often as it pushes a frame. The
+/// up-next offer reads it and raises itself at the rise, and the volume
+/// indicator comes and goes on a clock of its own, so none of the three
+/// redraws the layer by itself.
+fn draws(name: &str) -> bool {
+    !matches!(name, "percent-pos" | "volume" | "mute")
 }
 
-impl canvas::Program<Message> for Scrims {
+/// Which of the two layers one canvas draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Below,
+    Above,
+}
+
+/// One layer of the display, which the modules draw into.
+struct Layer<'a> {
+    display: &'a Display,
+    part: Part,
+}
+
+impl canvas::Program<Message> for Layer<'_> {
     type State = ();
 
     fn draw(
@@ -177,22 +381,34 @@ impl canvas::Program<Message> for Scrims {
         bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        // A frame with nothing in it is what the display draws between
-        // summons: the film below shows through every pixel of the window.
-        if self.fade <= 0.0 {
-            return Vec::new();
-        }
-
         // The size comes from the surface the compositor configured, not
         // from the 1920 by 1080 the window asked for, because the region a
         // Layout gives this pod is the compositor's choice and not this
         // client's.
         let canvas = Canvas::for_output(bounds.size());
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        frame.scale(canvas.scale);
-        Scrim::top().draw(&mut frame, &canvas, self.fade);
-        Scrim::bottom().draw(&mut frame, &canvas, self.fade);
-        vec![frame.into_geometry()]
+        if canvas != self.display.canvas.get() {
+            self.display.canvas.set(canvas);
+        }
+
+        // A frame with nothing in it is what the display draws between
+        // summons: the film below shows through every pixel of the window.
+        let fade = self.display.focus.fade().value();
+        if fade <= 0.0 {
+            return Vec::new();
+        }
+
+        let (cache, now) = match self.part {
+            Part::Below => (&self.display.below, Some(clock::now())),
+            Part::Above => (&self.display.above, None),
+        };
+        vec![cache.draw(renderer, bounds.size(), |frame| {
+            frame.scale(canvas.scale);
+            let mut brush = Brush::new(frame, canvas, fade);
+            match now {
+                Some(now) => self.display.paint_below(&mut brush, &now),
+                None => self.display.paint_above(&mut brush),
+            }
+        })]
     }
 }
 
@@ -237,64 +453,104 @@ mod tests {
         Message::Mpv(ipc::Event::Message(vec![word.to_string()]))
     }
 
-    fn pause(paused: bool) -> Message {
+    fn property(name: &str, value: serde_json::Value) -> Message {
         Message::Mpv(ipc::Event::Property {
-            name: "pause".to_string(),
-            value: json!(paused),
+            name: name.to_string(),
+            value,
         })
+    }
+
+    fn pause(paused: bool) -> Message {
+        property("pause", json!(paused))
+    }
+
+    /// One display over a film with a length, chapters, and two audio tracks,
+    /// with a reader on the socket so the commands it sends can be read back.
+    fn display() -> (Display, broadcast::Receiver<String>) {
+        let mut display = Display::new(Ipc::default());
+        let commands = display.wire.commands.subscribe();
+        for (name, value) in [
+            ("duration", json!(6000.0)),
+            ("time-pos", json!(1200.0)),
+            ("chapter", json!(1)),
+            (
+                "chapter-list",
+                json!([{ "time": 0.0 }, { "time": 1500.0 }, { "time": 4500.0 }]),
+            ),
+            (
+                "track-list",
+                json!([
+                    { "id": 1, "type": "audio", "lang": "eng", "selected": true },
+                    { "id": 2, "type": "audio", "lang": "fra" },
+                ]),
+            ),
+        ] {
+            let _ = display.update(property(name, value));
+        }
+        (display, commands)
     }
 
     /// Run the fade to wherever it is going, the way the tick does.
     fn settle(display: &mut Display) {
-        while display.fade.running() {
+        while display.focus.fade().running() {
             let _ = display.update(Message::Tick);
         }
+    }
+
+    fn sent(commands: &mut broadcast::Receiver<String>) -> Vec<String> {
+        let mut lines = Vec::new();
+        while let Ok(line) = commands.try_recv() {
+            lines.push(line.trim_end().to_string());
+        }
+        lines
     }
 
     #[test]
     fn the_display_starts_clear() {
         let display = Display::new(Ipc::default());
-        assert_eq!(display.fade.value(), 0.0);
-        assert!(!display.summoned);
+        assert_eq!(display.focus.fade().value(), 0.0);
+        assert!(!display.focus.visible());
     }
 
     #[tokio::test]
     async fn the_summon_and_the_six_actions_raise_the_display() {
-        for word in ["summon", "up", "down", "left", "right", "select", "back"] {
-            let mut display = Display::new(Ipc::default());
+        for word in ["summon", "up", "down", "left", "right"] {
+            let (mut display, _) = display();
             let _ = display.update(message(word));
             settle(&mut display);
-            assert!(display.summoned, "{word} raises the display");
-            assert_eq!(display.fade.value(), 1.0);
+            assert!(display.focus.visible(), "{word} raises the display");
+            assert_eq!(display.focus.fade().value(), 1.0);
         }
     }
 
-    #[test]
-    fn a_message_the_display_has_no_case_for_raises_nothing() {
-        let mut display = Display::new(Ipc::default());
+    #[tokio::test]
+    async fn a_message_the_display_has_no_case_for_raises_nothing() {
+        let (mut display, _) = display();
         let _ = display.update(message("liken-art"));
-        assert!(!display.summoned);
-        assert_eq!(display.fade.value(), 0.0);
+        let _ = display.update(Message::Mpv(ipc::Event::Message(Vec::new())));
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
     }
 
     #[tokio::test]
     async fn the_idle_window_dismisses_the_display() {
-        let mut display = Display::new(Ipc::default());
+        let (mut display, _) = display();
         let _ = display.update(message("summon"));
         settle(&mut display);
         let armed = display.armed.expect("a summon arms an idle window");
 
         let _ = display.update(Message::Hide(armed));
         settle(&mut display);
-        assert!(!display.summoned);
-        assert_eq!(display.fade.value(), 0.0);
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
+        assert_eq!(display.armed, None);
     }
 
     /// A second summon arms a second window, and the first one's expiry
     /// dismisses nothing.
     #[tokio::test]
     async fn a_stale_idle_window_dismisses_nothing() {
-        let mut display = Display::new(Ipc::default());
+        let (mut display, _) = display();
         let _ = display.update(message("summon"));
         let first = display.armed.expect("a summon arms an idle window");
         let _ = display.update(message("up"));
@@ -302,61 +558,51 @@ mod tests {
 
         assert_ne!(display.armed, Some(first));
         let _ = display.update(Message::Hide(first));
-        assert!(display.summoned);
-        assert_eq!(display.fade.value(), 1.0);
+        assert!(display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 1.0);
     }
 
     /// mpv reports the pause state once at registration. The first report
     /// only records it, so a film that loads paused starts hidden.
-    #[test]
-    fn a_film_that_loads_paused_starts_hidden() {
-        let mut display = Display::new(Ipc::default());
+    #[tokio::test]
+    async fn a_film_that_loads_paused_starts_hidden() {
+        let (mut display, _) = display();
         let _ = display.update(pause(true));
         settle(&mut display);
-        assert!(!display.summoned);
-        assert_eq!(display.fade.value(), 0.0);
-        assert!(display.paused);
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
+        assert!(display.focus.paused());
     }
 
     #[tokio::test]
     async fn a_pause_raises_the_display_and_arms_no_idle_window() {
-        let mut display = Display::new(Ipc::default());
+        let (mut display, _) = display();
         let _ = display.update(pause(false));
         let _ = display.update(pause(true));
         settle(&mut display);
-        assert!(display.summoned);
-        assert_eq!(display.fade.value(), 1.0);
+        assert!(display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 1.0);
         assert_eq!(display.armed, None);
     }
 
     #[tokio::test]
     async fn a_resume_dismisses_the_display_at_once() {
-        let mut display = Display::new(Ipc::default());
+        let (mut display, _) = display();
         let _ = display.update(pause(false));
         let _ = display.update(pause(true));
         settle(&mut display);
 
         let _ = display.update(pause(false));
         settle(&mut display);
-        assert!(!display.summoned);
-        assert_eq!(display.fade.value(), 0.0);
-    }
-
-    #[test]
-    fn a_resume_with_the_display_already_hidden_changes_nothing() {
-        let mut display = Display::new(Ipc::default());
-        let _ = display.update(pause(true));
-        let _ = display.update(pause(false));
-        settle(&mut display);
-        assert!(!display.summoned);
-        assert_eq!(display.fade.value(), 0.0);
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
     }
 
     /// A summon while the fade is falling reverses it in place, so the
     /// display never drops to nothing and rises again.
     #[tokio::test]
     async fn a_summon_during_a_fade_out_reverses_it() {
-        let mut display = Display::new(Ipc::default());
+        let (mut display, _) = display();
         let _ = display.update(message("summon"));
         settle(&mut display);
         let armed = display.armed.expect("a summon arms an idle window");
@@ -364,29 +610,29 @@ mod tests {
         for _ in 0..18 {
             let _ = display.update(Message::Tick);
         }
-        let standing = display.fade.value();
+        let standing = display.focus.fade().value();
         assert!(standing > 0.0 && standing < 1.0);
 
-        let _ = display.update(message("select"));
-        assert!(display.fade.value() >= standing);
+        let _ = display.update(message("up"));
+        assert!(display.focus.fade().value() >= standing);
         settle(&mut display);
-        assert_eq!(display.fade.value(), 1.0);
+        assert_eq!(display.focus.fade().value(), 1.0);
     }
 
     /// The socket reader always runs, and the frame tick joins it only
     /// while the fade is moving.
     #[tokio::test]
     async fn the_frame_tick_runs_only_while_the_fade_moves() {
-        let mut display = Display::new(Ipc::default());
-        assert!(!display.fade.running());
+        let (mut display, _) = display();
+        assert!(!display.focus.fade().running());
         let _ = display.subscription();
 
         let _ = display.update(message("summon"));
-        assert!(display.fade.running());
+        assert!(display.focus.fade().running());
         let _ = display.subscription();
 
         settle(&mut display);
-        assert!(!display.fade.running());
+        assert!(!display.focus.fade().running());
         let _ = display.subscription();
     }
 
@@ -411,15 +657,114 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_property_the_display_has_no_case_for_moves_nothing() {
+    /// A frame of playback that moves nothing redraws nothing, and a whole
+    /// second of it redraws the layer.
+    #[tokio::test]
+    async fn a_position_that_moves_nothing_a_person_sees_redraws_nothing() {
+        let (mut display, _) = display();
+        let _ = display.update(message("summon"));
+
+        let _ = display.update(property("time-pos", json!(1200.0)));
+        let first = display.signature.expect("a position carries a signature");
+        let _ = display.update(property("time-pos", json!(1200.0417)));
+        assert_eq!(display.signature, Some(first));
+
+        let _ = display.update(property("time-pos", json!(1200.6)));
+        assert_ne!(display.signature, Some(first));
+        assert_eq!(display.film.position, Some(1200.6));
+    }
+
+    /// A pixel of playhead travel redraws the layer, although the label reads
+    /// the same second.
+    #[tokio::test]
+    async fn a_pixel_of_playhead_travel_carries_a_new_signature() {
+        let (mut display, _) = display();
+        let _ = display.update(property("time-pos", json!(1200.0)));
+        let first = display.signature.expect("a position carries a signature");
+        let _ = display.update(property("time-pos", json!(1204.0)));
+        let moved = display.signature.expect("a moved position carries one too");
+        assert_ne!(moved.pixel, first.pixel);
+    }
+
+    /// A film with no length carries no pixel, so a position on it follows the
+    /// whole second alone.
+    #[tokio::test]
+    async fn a_film_with_no_length_carries_no_playhead_pixel() {
         let mut display = Display::new(Ipc::default());
-        let _ = display.update(Message::Mpv(ipc::Event::Property {
-            name: "time-pos".to_string(),
-            value: json!(12.5),
-        }));
+        let _ = display.update(property("time-pos", json!(12.5)));
+        assert_eq!(
+            display.signature.map(|signature| signature.pixel),
+            Some(None)
+        );
+    }
+
+    /// Every press the router answers reaches mpv on the display's own socket.
+    #[tokio::test]
+    async fn a_press_the_router_answers_reaches_mpv() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(message("summon"));
+        assert!(sent(&mut commands).is_empty());
+
+        let _ = display.update(message("right"));
+        assert!(sent(&mut commands).is_empty());
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"seek\",1205.0,\"absolute+exact\"],\"request_id\":0}"]
+        );
+
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"no-osd\",\"cycle\",\"pause\"],\"request_id\":0}"]
+        );
+    }
+
+    /// The block the sidecar sends names the item, and a block for another
+    /// item replaces it.
+    #[tokio::test]
+    async fn the_block_the_sidecar_sends_names_the_item() {
+        let (mut display, _) = display();
+        let _ = display.update(Message::Mpv(ipc::Event::Message(vec![
+            "presentation".to_string(),
+            r#"{"title":"A Film","year":2014}"#.to_string(),
+        ])));
+        assert_eq!(
+            display.presentation.title(&display.film).as_deref(),
+            Some("A Film")
+        );
+        assert!(!display.focus.visible());
+
+        let _ = display.update(Message::Mpv(ipc::Event::Message(vec![
+            "presentation".to_string(),
+        ])));
+        assert_eq!(display.presentation.title(&display.film), None);
+    }
+
+    /// The three properties no part of the display draws by itself.
+    #[test]
+    fn a_property_no_part_of_the_display_draws_redraws_nothing() {
+        for name in ["percent-pos", "volume", "mute"] {
+            assert!(!draws(name), "{name} redraws nothing");
+        }
+        for name in [
+            "time-pos",
+            "duration",
+            "chapter",
+            "chapter-list",
+            "track-list",
+            "pause",
+        ] {
+            assert!(draws(name), "{name} redraws the layer");
+        }
+    }
+
+    /// A socket that closes moves nothing, and the reader dials again.
+    #[tokio::test]
+    async fn a_socket_that_closes_moves_nothing() {
+        let (mut display, _) = display();
         let _ = display.update(Message::Mpv(ipc::Event::Detached));
-        assert!(!display.summoned);
-        assert_eq!(display.fade.value(), 0.0);
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
     }
 }

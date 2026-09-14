@@ -70,6 +70,16 @@ pub fn opacity(alpha: u8) -> f32 {
     1.0 - f32::from(alpha) / 255.0
 }
 
+/// One colour at one ASS alpha under the fade. The fade scales every alpha the
+/// display draws, so the whole layer fades as one. At a fade of 1 the colour
+/// carries the alpha the caller states.
+pub fn faded(color: Color, alpha: u8, fade: f32) -> Color {
+    Color {
+        a: opacity(alpha) * fade,
+        ..color
+    }
+}
+
 /// The fade timing lives here because two things fade on clocks of their
 /// own, the OSD and the volume indicator, and the two must look the same. A
 /// fade takes `FADE_IN` to reach full and `FADE_OUT` to reach clear, and the
@@ -88,12 +98,35 @@ pub const FADE_TICK: Duration = Duration::from_nanos(16_666_667);
 pub const IDLE_HIDE: Duration = Duration::from_secs(4);
 
 /// The type scale, in canvas pixels. The sizes are large enough to read from
-/// a couch at 1080.
+/// a couch at 1080. Each number is a line box, the measure the Lua display
+/// states as an ASS `\\fs`, and [`type_size`] turns one into the size the
+/// toolkit takes.
 pub mod type_scale {
     pub const TITLE: f32 = 64.0;
     pub const LABEL: f32 = 40.0;
     pub const SMALL: f32 = 34.0;
     pub const TINY: f32 = 28.0;
+}
+
+/// The face's metric: its bounding height over its em, 1326 units over 1000.
+/// The bounding height is `usWinAscent` plus `usWinDescent` and the em is
+/// `unitsPerEm`, from the `OS/2` and `head` tables of
+/// `SourceSans3-Regular.otf`, the face the brand crate carries and both
+/// renderers draw.
+///
+/// libass scales a face so that its bounding height fills the size an ASS
+/// `\\fs` states, so one `\\fs` number states two measures: the line box the
+/// text draws in, in canvas pixels, and the type size, which is that box
+/// divided by this metric. A layout measure the Lua display writes in `\\fs`
+/// units is a canvas measure here and passes through unchanged; only a type
+/// size goes through the metric.
+const FACE_METRIC: f32 = 1326.0 / 1000.0;
+
+/// The type size that draws in a line box `height` canvas pixels tall. A
+/// line's anchor falls on that box in both renderers, so a line placed by its
+/// top or its bottom puts its baseline where libass puts it.
+pub fn type_size(height: f32) -> f32 {
+    height / FACE_METRIC
 }
 
 /// The side margin every flush-left and flush-right element keeps.
@@ -163,6 +196,29 @@ mod tests {
         assert!((opacity(alpha::PANEL) - 0.922).abs() < 0.001);
         assert!((opacity(alpha::HIGHLIGHT) - 0.812).abs() < 0.001);
         assert!((opacity(SCRIM_EDGE_ALPHA) - 0.796).abs() < 0.001);
+    }
+
+    /// The Lua states a size as an ASS `\\fs`, which is the line box. The
+    /// toolkit takes the type size, which is that box through the metric.
+    #[test]
+    fn a_type_size_is_its_line_box_through_the_face_metric() {
+        assert!((type_size(type_scale::SMALL) - 25.641).abs() < 0.001);
+        assert!((type_size(type_scale::TINY) - 21.116).abs() < 0.001);
+        assert!((type_size(type_scale::LABEL) - 30.166).abs() < 0.001);
+        assert!((type_size(type_scale::TITLE) - 48.265).abs() < 0.001);
+    }
+
+    #[test]
+    fn a_faded_colour_keeps_its_channels_and_scales_its_alpha() {
+        let full = faded(color::text(), alpha::OPAQUE, 1.0);
+        assert_eq!(
+            (full.r, full.g, full.b),
+            (color::text().r, color::text().g, color::text().b)
+        );
+        assert_eq!(full.a, 1.0);
+        assert_eq!(faded(color::fill(), alpha::OPAQUE, 0.5).a, 0.5);
+        assert_eq!(faded(color::fill(), alpha::SUBDUED, 0.0).a, 0.0);
+        assert!((faded(color::fill(), alpha::SUBDUED, 1.0).a - 0.498).abs() < 0.001);
     }
 
     #[test]

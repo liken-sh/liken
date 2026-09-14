@@ -7,6 +7,11 @@ use iced::{Color, Point, Size};
 
 use crate::theme;
 
+pub mod brush;
+pub mod shape;
+
+pub use brush::{Anchor, Brush, Line, measure};
+
 /// How the layout space maps to the real surface. `scale` maps a canvas
 /// length to output pixels, and the two axes share it because the width
 /// follows the surface's own ratio.

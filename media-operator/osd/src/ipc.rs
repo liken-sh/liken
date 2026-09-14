@@ -4,6 +4,7 @@
 //! display arrives as a `client-message` event, because mpv delivers a
 //! `script-message` to every client and an IPC client cannot be named.
 
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -11,6 +12,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
 
 /// mpv serves its JSON IPC socket on an emptyDir the playback pod always
@@ -26,9 +28,14 @@ pub const SOCKET_PATH: &str = "/ipc/mpv.sock";
 pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 
 /// The properties the display observes. mpv pushes each one once at
-/// registration and then on every change.
+/// registration and then on every change, so the display runs no timer of its
+/// own for these values.
 ///
-pub const OBSERVED: [&str; 16] = [
+/// The two delays are observed here although the Lua read them on demand.
+/// An IPC client reads a property over the same socket it draws from, so
+/// the display holds every value it draws and asks for nothing inside a
+/// frame.
+pub const OBSERVED: [&str; 18] = [
     "duration",
     "time-pos",
     "percent-pos",
@@ -45,14 +52,27 @@ pub const OBSERVED: [&str; 16] = [
     "pause",
     "volume",
     "mute",
+    "audio-delay",
+    "sub-delay",
 ];
 
 /// The message that shows the display, arms the idle hide, and moves no
 /// focus.
 pub const SUMMON: &str = "summon";
 
-/// The six navigation actions. The word is the whole of the message.
-pub const ACTIONS: [&str; 6] = ["up", "down", "left", "right", "select", "back"];
+/// The command sidecar can present an item before the display attaches, and a
+/// block sent then reaches nobody. So the display asks once, with every
+/// property observed, and the sidecar answers by sending the current item's
+/// block again.
+pub const PRESENTATION_REQUEST: &str = "liken-presentation-request";
+
+/// The message the sidecar sends with the current item's block, as one JSON
+/// string.
+pub const PRESENTATION: &str = "presentation";
+
+// The request id every command the display sends carries. No observe uses
+// it, so a reply to a command reads apart from a property push.
+const SENT: u64 = 0;
 
 /// How long a dial waits before it counts as a socket that does not answer.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -87,6 +107,15 @@ pub enum Event {
 pub enum Incoming {
     Reply { id: u64, data: Value },
     Event(Event),
+}
+
+/// One command the display sends mpv, as the words mpv's own command takes.
+pub type Command = Vec<Value>;
+
+// One command as the line the display writes. The frame loop hands it to
+// the socket reader over a channel, because the loop holds no socket.
+pub fn line(command: &Command) -> String {
+    self::command(SENT, command.clone())
 }
 
 /// One command as the line mpv's socket takes: newline-delimited JSON,
@@ -134,15 +163,6 @@ pub fn decode(line: &str) -> Option<Incoming> {
             Some(Incoming::Reply { id, data })
         }
     }
-}
-
-/// Whether one `client-message` summons the display. The `summon` message
-/// says so outright, and every navigation action wakes a hidden display as
-/// well.
-pub fn summons(arguments: &[String]) -> bool {
-    arguments
-        .first()
-        .is_some_and(|word| word == SUMMON || ACTIONS.contains(&word.as_str()))
 }
 
 /// The mpv socket the display reads.
@@ -204,11 +224,11 @@ impl Ipc {
     /// process ends. A socket that closes reports `Detached` and the loop
     /// dials again, because mpv restarting is the pod's own business and the
     /// display outlives it.
-    pub async fn serve(&self, events: Sender<Event>) {
+    pub async fn serve(&self, events: Sender<Event>, commands: &broadcast::Sender<String>) {
         loop {
             match tokio::time::timeout(DIAL_TIMEOUT, UnixStream::connect(&self.path)).await {
                 Ok(Ok(stream)) => {
-                    let _ = session(stream, &events).await;
+                    let _ = session(stream, &events, &mut commands.subscribe()).await;
                     if events.send(Event::Detached).await.is_err() {
                         return;
                     }
@@ -224,6 +244,21 @@ impl Ipc {
     }
 }
 
+// The socket and the channel the frame loop writes its commands to, as one
+// subscription. The path alone names the subscription, so a redraw that
+// rebuilds it attaches to the same socket instead of dialing again.
+#[derive(Debug, Clone)]
+pub struct Wire {
+    pub path: PathBuf,
+    pub commands: broadcast::Sender<String>,
+}
+
+impl Hash for Wire {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
 /// One attachment: observe every property, then read lines until the socket
 /// closes.
 ///
@@ -231,7 +266,11 @@ impl Ipc {
 /// does. A paused film writes nothing for as long as it stands, so silence
 /// on an attached socket is not a failure. The socket closing is, and that
 /// is what ends the session.
-pub async fn session<S>(stream: S, events: &Sender<Event>) -> io::Result<()>
+pub async fn session<S>(
+    stream: S,
+    events: &Sender<Event>,
+    commands: &mut broadcast::Receiver<String>,
+) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -241,16 +280,30 @@ where
             .write_all(observe(index as u64 + 1, name).as_bytes())
             .await?;
     }
+    writer
+        .write_all(line(&vec![json!("script-message"), json!(PRESENTATION_REQUEST)]).as_bytes())
+        .await?;
 
     let mut lines = BufReader::new(reader).lines();
-    while let Some(line) = lines.next_line().await? {
-        if let Some(Incoming::Event(event)) = decode(&line)
-            && events.send(event).await.is_err()
-        {
-            return Ok(());
+    loop {
+        tokio::select! {
+            read = lines.next_line() => {
+                let Some(read) = read? else { return Ok(()) };
+                if let Some(Incoming::Event(event)) = decode(&read)
+                    && events.send(event).await.is_err()
+                {
+                    return Ok(());
+                }
+            }
+            written = commands.recv() => {
+                match written {
+                    Ok(written) => writer.write_all(written.as_bytes()).await?,
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                }
+            }
         }
     }
-    Ok(())
 }
 
 /// Ask for both gate properties once and answer whether mpv is playing with
@@ -371,41 +424,77 @@ mod tests {
         assert_eq!(decode("{}"), None);
     }
 
-    #[test]
-    fn the_summon_and_the_six_actions_show_the_display() {
-        assert!(summons(&["summon".to_string()]));
-        for action in ACTIONS {
-            assert!(summons(&[action.to_string()]), "{action} summons");
-        }
-        assert!(!summons(&["liken-art".to_string()]));
-        assert!(!summons(&["presentation".to_string(), "{}".to_string()]));
-        assert!(!summons(&[]));
-    }
-
     /// The session opens on one half of a pipe and mpv's half reads back
-    /// every observe the display sent, in the order the list names them.
+    /// every observe the display sent, in the order the list names them, and
+    /// the ask for the current item's block after them.
     #[tokio::test]
-    async fn a_session_observes_every_property_the_display_reads() {
+    async fn a_session_observes_every_property_and_asks_for_the_block() {
         let (display, mut mpv) = tokio::io::duplex(8192);
         let (sender, _events) = mpsc::channel(64);
+        let (commands, mut receiver) = broadcast::channel(64);
         let session = tokio::spawn(async move {
-            let _ = session(display, &sender).await;
+            let _ = session(display, &sender, &mut receiver).await;
         });
 
-        let mut read = vec![0u8; 4096];
-        let mut sent = String::new();
-        while sent.lines().count() < OBSERVED.len() {
-            let count = mpv.read(&mut read).await.expect("mpv reads the observes");
-            sent.push_str(&String::from_utf8_lossy(&read[..count]));
-        }
-        let lines: Vec<&str> = sent.lines().collect();
-        assert_eq!(lines.len(), OBSERVED.len());
+        let sent = read_lines(&mut mpv, OBSERVED.len() + 1).await;
+        assert_eq!(sent.len(), OBSERVED.len() + 1);
         for (index, name) in OBSERVED.iter().enumerate() {
-            assert_eq!(lines[index], observe(index as u64 + 1, name).trim_end());
+            assert_eq!(sent[index], observe(index as u64 + 1, name).trim_end());
         }
+        assert_eq!(
+            sent[OBSERVED.len()],
+            "{\"command\":[\"script-message\",\"liken-presentation-request\"],\"request_id\":0}"
+        );
 
+        drop(commands);
         drop(mpv);
         session.await.expect("the session ends with the socket");
+    }
+
+    /// Every command the frame loop sends reaches mpv on the socket the
+    /// display already reads.
+    #[tokio::test]
+    async fn a_command_the_frame_loop_sends_reaches_mpv() {
+        let (display, mut mpv) = tokio::io::duplex(8192);
+        let (sender, _events) = mpsc::channel(64);
+        let (commands, mut receiver) = broadcast::channel(64);
+        let session = tokio::spawn(async move {
+            let _ = session(display, &sender, &mut receiver).await;
+        });
+
+        let _ = read_lines(&mut mpv, OBSERVED.len() + 1).await;
+        commands
+            .send(line(&vec![
+                json!("seek"),
+                json!(12.5),
+                json!("absolute+exact"),
+            ]))
+            .expect("the session reads the channel");
+        assert_eq!(
+            read_lines(&mut mpv, 1).await,
+            vec!["{\"command\":[\"seek\",12.5,\"absolute+exact\"],\"request_id\":0}"]
+        );
+
+        drop(commands);
+        session.await.expect("the session ends with the channel");
+    }
+
+    /// Read whole lines off mpv's half of the pipe until it has as many as the
+    /// caller waits for.
+    async fn read_lines<S>(mpv: &mut S, count: usize) -> Vec<String>
+    where
+        S: AsyncRead + Unpin,
+    {
+        let mut buffer = vec![0u8; 8192];
+        let mut sent = String::new();
+        while sent.lines().count() < count {
+            let read = mpv.read(&mut buffer).await.expect("mpv reads the line");
+            if read == 0 {
+                break;
+            }
+            sent.push_str(&String::from_utf8_lossy(&buffer[..read]));
+        }
+        sent.lines().map(str::to_string).collect()
     }
 
     /// Every line mpv writes on an attached socket reaches the display as an
@@ -414,8 +503,9 @@ mod tests {
     async fn a_session_carries_every_event_mpv_writes() {
         let (display, mut mpv) = tokio::io::duplex(8192);
         let (sender, mut events) = mpsc::channel(64);
+        let (_commands, mut receiver) = broadcast::channel(64);
         let session = tokio::spawn(async move {
-            let _ = session(display, &sender).await;
+            let _ = session(display, &sender, &mut receiver).await;
         });
 
         mpv.write_all(
@@ -504,7 +594,8 @@ mod tests {
 
         let ipc = Ipc::at(&path);
         let (sender, mut events) = mpsc::channel(64);
-        let serving = tokio::spawn(async move { ipc.serve(sender).await });
+        let (commands, _receiver) = broadcast::channel(64);
+        let serving = tokio::spawn(async move { ipc.serve(sender, &commands).await });
 
         let (mut mpv, _) = listener.accept().await.expect("the display dials");
         let mut read = vec![0u8; 4096];
@@ -541,7 +632,8 @@ mod tests {
         let (sender, events) = mpsc::channel(1);
         drop(events);
 
-        tokio::time::timeout(Duration::from_secs(5), ipc.serve(sender))
+        let (commands, _receiver) = broadcast::channel(64);
+        tokio::time::timeout(Duration::from_secs(5), ipc.serve(sender, &commands))
             .await
             .expect("the loop ends");
     }

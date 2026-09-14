@@ -33,7 +33,10 @@ path = "src/main.rs"
 # position to a whole output pixel, and this feature makes the toolkit do
 # the same for what it lays out.
 [dependencies]
+# advanced is on because the display measures a run of text through the
+# toolkit's own shaper, which the facade keeps behind that feature.
 iced = { version = "=0.14.0", default-features = false, features = [
+    "advanced",
     "wgpu",
     "wayland",
     "canvas",
@@ -48,6 +51,15 @@ iced = { version = "=0.14.0", default-features = false, features = [
 # documentation theme, and the image build context is the repository
 # root, so one checkout serves both.
 liken-iced = { path = "../docs/themes/brand/iced" }
+# jiff reads the wall clock in the zone TZ names. Its tzdb-zoneinfo feature
+# reads the image's own /usr/share/zoneinfo, and the bundled databases stay
+# out of the binary, so the clock and the rest of the image name the same
+# zone rules.
+jiff = { version = "=0.2.35", default-features = false, features = [
+    "std",
+    "tz-system",
+    "tzdb-zoneinfo",
+] }
 serde_json = { workspace = true }
 # The display needs tokio for one unix socket, newline-delimited JSON, and
 # a reconnect loop with a timeout on every wait.
