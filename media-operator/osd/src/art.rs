@@ -2,7 +2,9 @@
 //! for a picture at a pixel size. The bridge reads the file, scales it, writes
 //! the bgra to the volume it shares with the display, and answers with the path
 //! and the size.
-// PROSE: one module holds the four pictures the bridge serves, because the display draws them in its own z order instead of handing four overlay ids to mpv.
+// One module holds the four pictures the bridge serves, because the
+// display draws them in its own z order instead of handing four overlay
+// ids to mpv.
 
 use iced::advanced::image::Handle;
 use iced::{Point, Rectangle, Size};
@@ -79,7 +81,9 @@ fn request(kind: &str, arguments: &[String]) -> Command {
 /// What the bridge may hand a bitmap in one go. A toolkit image at or over
 /// this size uploads on a thread of its own and draws no earlier than the next
 /// frame, so a picture that large is read as bands under the limit.
-// PROSE: the band split is the port's own: the Lua handed mpv one file and mpv did the upload.
+// The band split is the display's own. The Lua handed mpv one file and
+// mpv did the upload. The toolkit uploads a picture synchronously up to a
+// size limit, so a larger one goes up in bands.
 const MAX_SYNC: usize = 2 * 1024 * 1024;
 
 /// One band of a bitmap: the row it starts at, the rows it covers, and the
@@ -107,7 +111,9 @@ impl Bitmap {
         Self::decode(&std::fs::read(path).ok()?, width, height, stride)
     }
 
-    // PROSE: the bridge writes premultiplied bgra, which is what mpv's overlay took, and the toolkit blends on straight alpha, so each channel divides its alpha out here.
+    // The bridge writes premultiplied BGRA, which is what mpv's overlay took,
+    // and the toolkit blends on straight alpha, so each channel divides its
+    // alpha out here.
     fn decode(bytes: &[u8], width: u32, height: u32, stride: u32) -> Option<Self> {
         let (rows, row) = (height as usize, width as usize * 4);
         if width == 0 || height == 0 || (stride as usize) < row {
@@ -218,7 +224,8 @@ pub struct Art {
     /// box are not asked for again.
     inflight: Option<String>,
     tile_want: Option<Wanted>,
-    // PROSE: the gate reopens at a deadline the next turn reads, because this client holds no timer of its own.
+    // The gate reopens at a deadline the next turn reads, because this client
+    // holds no timer of its own.
     deadline: Option<f64>,
     cover: Slot,
     /// The box the bridge has already answered for. A redraw then asks once,
@@ -228,7 +235,9 @@ pub struct Art {
     /// Whether an offer with a picture stands, so a reply for an offer that no
     /// longer stands is dropped.
     offered: bool,
-    // PROSE: the canvas the last requests were sized for; the Lua read osd-dimensions, and this client learns its own surface from the frame it draws.
+    // The canvas the last requests were sized for. The Lua read
+    // osd-dimensions; this client learns its own surface from the frame it
+    // draws.
     canvas: Option<Canvas>,
 }
 

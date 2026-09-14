@@ -38,9 +38,12 @@ a surface on the compositor's socket and draw with Vulkan. It mounts
 the IPC volume and the art volume the sidecar already writes.
 
 **Stacking.** The compositor's controller stacks a claim's surfaces
-newest on top. The display waits until mpv's socket answers and
-`time-pos` is a number, then opens its window. So its surface arrives
-after mpv's and sits above it. The window is 1920 by 1080 in logical
+newest on top. The display waits until mpv's socket answers, `time-pos`
+is a number, and `vo-configured` is true, then opens its window. The
+last of the three is what makes the order hold: mpv reports a position
+before it maps its surface, and a display that waited on the position
+alone arrived first and sat under the film. So its surface arrives
+after mpv's and is drawn above it. The window is 1920 by 1080 in logical
 pixels, undecorated, and transparent. Between summons it draws
 nothing, and a frame that draws nothing is a fully transparent frame.
 
@@ -59,13 +62,19 @@ publishes them, the focus mark gates them, and the sidecar turns them
 into the six action messages. Outside control over the commands topic
 reaches the display the same way it reaches the Lua.
 
-**Art.** The sidecar keeps serving bitmaps as it does: a `liken-art`
-reply names a BGRA file under the art volume with its width, height,
-and stride. The display reads that file into a GPU image itself, and
-draws it in its own z order, so the four `overlay-add` ids and the
-rule that a bitmap always sits above the ASS layer go away. The album
-cover keeps its one exception: it holds the frame whether or not the
-OSD is up.
+**Art.** Through the side-by-side, the sidecar keeps serving bitmaps
+as it does: a `liken-art` reply names a BGRA file under the art
+volume with its width, height, and stride, and the display reads that
+file into a GPU image and draws it in its own z order, so the four
+`overlay-add` ids and the rule that a bitmap always draws above the
+ASS layer go away. The album cover keeps its one exception: it holds
+the frame whether or not the OSD is up. That indirection was mpv's
+need, not ours: its overlay command takes a raw file, and a script
+cannot decode. Once the port matches, the display decodes the sources
+itself, the logo file or URL, the trickplay sheet, and the cover, and
+the request, the reply, the files, and the sidecar's art half go. The
+display container then mounts the media the way the player does and
+reaches the network for an https logo.
 
 **The look, one to one.** The inventory of the Lua display is the
 specification: every element with its position formula in canvas
@@ -83,7 +92,13 @@ controls, header, presentation, clock, chooser, images, album,
 trickplay, up next, volume. Two things change under the same look.
 Text measures with the toolkit's own shaping instead of the advance
 table. And a panel dims with the fade like everything else, which the
-Lua's panel helper skipped.
+Lua's panel helper skipped. Two more came out of the side-by-side.
+A logo, a tile, and the offer's art fade with the layer instead of
+popping in at full strength over text that is still rising. And a
+bitmap draws in its own colors: mpv's overlay path ran every bitmap
+through the film's color conversion, so on an HDR film the Lua washed
+the logo and the tile out, and the port draws them as their sources
+are.
 
 Text is the one place the port is allowed to differ by a few pixels.
 libass and the toolkit shape and hint the same face differently, so a
@@ -94,11 +109,12 @@ it carries, and when it moves.
 
 **Local review.** The screens in `local/` stay the way the player and
 the display are reviewed on a workstation, so the port keeps them
-working. `local/video` gains the display's new shape: the released
-compositor runs nested on the desktop with ivi-shell, a stand-in
-controller places surfaces the way the operator does, and mpv, the
-sidecar, and the display run beside it as they run in the pod. The
-prototype that proved the plumbing is the seed of that harness.
+working. `local/video` and `local/music` take the display's new
+shape: the released compositor runs nested on the desktop with
+ivi-shell, a stand-in controller places surfaces the way the operator
+does, and mpv, the sidecar, and the display run beside it as they run
+in the pod. The prototype that proved the plumbing is the seed of that
+harness, and `local/osd` carries it until the two screens absorb it.
 
 **The cost model.** A fade re-renders one transparent surface on the
 GPU in the display's process. mpv's video thread does video. The
@@ -143,7 +159,15 @@ describes the display describes the new one.
    frame, then the default flips.
 8. The removal: the Lua display, its tests, the knob, the script flag,
    and every living sentence that describes the old display, with the
-   completed plans left as they are.
+   completed plans left as they are. The local screens take the new
+   shape in the same step.
+9. The art decoded in the display, and the sidecar's art half removed.
+
+What this plan does not do, and a later one should: the port drew a
+brush, a fade clock, a text measure, and a canvas snap that the idle
+screen and the library's browser draw in their own words. Those
+belong in the brand's iced crate, and moving them touches three
+repositories, so they move under a plan of their own.
 
 Each step lands on the testbed under the knob, and each carries the
 tests the Lua's four test files carry today, in Rust, plus a test per
@@ -152,7 +176,7 @@ module the Lua left untested.
 ## Considered and set aside
 
 **The display inside the idle client.** The idle client is on the
-screen already, knows the bus, and on some units is the library's
+screen already, holds a bus connection, and on some units is the library's
 browser. Folding the OSD into it ties the player's display to another
 operator's release and to every idle controller a unit might name. The
 display belongs to the Play's lifetime, so it lives in the Play's pod.

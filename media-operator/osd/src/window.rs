@@ -576,7 +576,9 @@ impl Display {
     }
 }
 
-// PROSE: the two halves meet here. The card states its seam in canvas units and the bridge holds its pictures in real pixels, so this carries the canvas the frame draws on and converts between the two.
+// The two halves meet here. The card states its seam in canvas units and
+// the bridge holds its pictures in real pixels, so this carries the canvas
+// the frame draws on and converts between the two.
 struct Bridge<'a> {
     art: &'a Art,
     canvas: Canvas,

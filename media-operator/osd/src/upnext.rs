@@ -62,7 +62,9 @@ const WAIT_WORD: &str = "Starting";
 /// The ellipsis a clipped line ends on, U+2026.
 const ELLIPSIS: &str = "\u{2026}";
 
-// PROSE: the seam the art bridge fills: the card asks for the offer's picture where it draws the art plate, the bridge answers with the size it draws at, and the card hands back the box to draw it in.
+// The seam the art bridge fills. The card asks for the offer's picture
+// where it draws the art plate, the bridge answers with the size it draws
+// at, and the card hands back the box to draw it in.
 pub trait Art {
     fn next(&self) -> Option<Size>;
 
