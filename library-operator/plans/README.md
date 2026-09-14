@@ -104,6 +104,10 @@ they share, and plans 28 to 31 build them in order.
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
+* [62, Intro and credits marks](62-intro-and-credits-marks.md). A
+  stub. Nothing says where a work's story starts or ends. So a person
+  skips an episode's recap and titles by hand, and a percentage of the
+  runtime guesses where the credits start.
 
 Plan 32 stands apart from the enrichment work.
 
