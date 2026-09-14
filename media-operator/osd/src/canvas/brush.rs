@@ -7,7 +7,7 @@ use std::sync::Once;
 use iced::advanced::graphics::text::Paragraph;
 use iced::advanced::text::{self, LineHeight, Paragraph as _, Shaping, Wrapping};
 use iced::alignment::Vertical;
-use iced::widget::canvas::{Fill, Frame, Stroke, Style, Text};
+use iced::widget::canvas::{Fill, Frame, Path, Stroke, Style, Text};
 use iced::{Color, Pixels, Point, Rectangle, Size};
 
 use super::{Canvas, Scrim, shape};
@@ -138,6 +138,18 @@ impl<'a> Brush<'a> {
         self.fade
     }
 
+    /// One part of the frame at a fade of its own. The volume row and the
+    /// up-next card come and go on clocks of their own, so each draws at its
+    /// own factor and the caller's factor stands for the rest of the frame.
+    pub fn at_fade(&mut self, fade: f32, draw: impl FnOnce(&mut Brush<'_>)) {
+        let mut inner = Brush {
+            frame: &mut *self.frame,
+            canvas: self.canvas,
+            fade,
+        };
+        draw(&mut inner);
+    }
+
     pub fn rect(&mut self, shape: Rectangle, color: Color, alpha: u8) {
         self.frame.fill_rectangle(
             Point::new(shape.x, shape.y),
@@ -211,6 +223,36 @@ impl<'a> Brush<'a> {
                 self.fade,
             )),
         );
+    }
+
+    /// One path the caller states, for a mark the named shapes above do not
+    /// cover, such as the volume glyph. The path is already where it stands,
+    /// and the mark takes the same fade every other shape takes.
+    pub fn shape(&mut self, path: &Path, color: Color, alpha: u8) {
+        self.frame.fill(path, theme::faded(color, alpha, self.fade));
+    }
+
+    /// The same mark inside a border, so a mark over another mark in the same
+    /// color reads apart from it. libass draws a border outside the shape and
+    /// the toolkit centers a stroke on its path, so the stroke runs at twice
+    /// the width and the fill covers the half that falls inside.
+    pub fn bordered(
+        &mut self,
+        path: &Path,
+        color: Color,
+        alpha: u8,
+        border: f32,
+        border_color: Color,
+    ) {
+        self.frame.stroke(
+            path,
+            Stroke {
+                width: border * 2.0,
+                style: Style::Solid(theme::faded(border_color, alpha, self.fade)),
+                ..Stroke::default()
+            },
+        );
+        self.shape(path, color, alpha);
     }
 
     /// One line of text. The scrim holds the contrast, so a line draws flat,

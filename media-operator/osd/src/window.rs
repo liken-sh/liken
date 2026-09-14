@@ -19,6 +19,8 @@ use crate::ipc::{self, Command, Ipc, Wire};
 use crate::presentation::Presentation;
 use crate::scrubber::Scrubber;
 use crate::strip::Strip;
+use crate::upnext::{NoArt, UpNext};
+use crate::volume::Volume;
 use crate::{clock, header, images, theme};
 
 /// How long the display waits for mpv to report a position before it exits
@@ -40,6 +42,47 @@ pub enum Message {
     /// The idle window ran out. The count says which summon armed it, so a
     /// window a later summon replaced dismisses nothing.
     Hide(u64),
+    /// The up-next card's own window ran out, so the card leaves while the
+    /// film plays on.
+    HideCard(u64),
+    /// The volume row's own window ran out.
+    HideRow(u64),
+}
+
+/// One hide window: how many have been armed, and which one stands. A window a
+/// later change replaced takes nothing down, so each one carries the count of
+/// the change that armed it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Idle {
+    count: u64,
+    armed: Option<u64>,
+}
+
+impl Idle {
+    fn arm(&mut self, hide: Hide, wrap: fn(u64) -> Message) -> Task<Message> {
+        match hide {
+            Hide::Arm => {
+                self.count += 1;
+                let at = self.count;
+                self.armed = Some(at);
+                Task::perform(tokio::time::sleep(theme::IDLE_HIDE), move |()| wrap(at))
+            }
+            Hide::Cancel => {
+                self.armed = None;
+                Task::none()
+            }
+            Hide::Keep => Task::none(),
+        }
+    }
+
+    /// Whether this window is the one that stands, which takes it down.
+    fn expired(&mut self, at: u64) -> bool {
+        if self.armed != Some(at) {
+            return false;
+        }
+        self.armed = None;
+        true
+    }
 }
 
 /// The whole of the display's state: what mpv reports, what the item declared,
@@ -51,6 +94,12 @@ pub struct Display {
     presentation: Presentation,
     scrubber: Scrubber,
     strip: Strip,
+    upnext: UpNext,
+    volume: Volume,
+    /// The hide windows the card and the row wait out, each on its own clock
+    /// and neither reading the display's.
+    card: Idle,
+    row: Idle,
     /// How many summons have landed. The count names each idle window.
     summons: u64,
     /// The idle window that stands, if one does. Arming a window replaces
@@ -93,6 +142,10 @@ impl Display {
             presentation: Presentation::default(),
             scrubber: Scrubber::default(),
             strip: Strip::default(),
+            upnext: UpNext::default(),
+            volume: Volume::default(),
+            card: Idle::default(),
+            row: Idle::default(),
             summons: 0,
             armed: None,
             started: Instant::now(),
@@ -112,6 +165,8 @@ impl Display {
             Message::Mpv(ipc::Event::Detached) => {}
             Message::Tick => {
                 self.focus.fade_mut().step();
+                self.upnext.fade_mut().step();
+                self.volume.fade_mut().step();
                 self.redraw();
             }
             Message::Hide(summons) if self.armed == Some(summons) => {
@@ -119,7 +174,19 @@ impl Display {
                 focus.dismiss(&mut self.parts());
                 self.focus = focus;
                 self.redraw();
-                return self.idle_window();
+                return self.windows();
+            }
+            Message::HideCard(at) => {
+                if self.card.expired(at) {
+                    self.upnext.hide();
+                    self.redraw();
+                }
+            }
+            Message::HideRow(at) => {
+                if self.row.expired(at) {
+                    self.volume.hide();
+                    self.redraw();
+                }
             }
             Message::Hide(_) => {}
         }
@@ -142,9 +209,7 @@ impl Display {
             scrubber: &mut self.scrubber,
             strip: &mut self.strip,
             now: self.started.elapsed().as_secs_f64(),
-            // PROSE: an offer stands and the display waits on the next Play only once the up-next stage lands.
-            offer: false,
-            waiting: false,
+            upnext: &mut self.upnext,
         }
     }
 
@@ -164,12 +229,16 @@ impl Display {
             self.presentation
                 .receive(words.get(1).map_or("", String::as_str));
             // PROSE: a new block is a new item, so the art stage swaps the logo, the tile, and the cover here.
+        } else if word == ipc::NEXT {
+            self.upnext.receive(words.get(1).map_or("", String::as_str));
+        } else if word == ipc::VOLUME_CHANGED {
+            self.volume.show();
         } else {
             return Task::none();
         }
         self.focus = focus;
         self.redraw();
-        self.idle_window()
+        self.windows()
     }
 
     /// mpv pushes a position on every video frame, about twenty-four times a
@@ -181,7 +250,7 @@ impl Display {
     fn on_property(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
         self.film.apply(name, value);
         if !draws(name) {
-            return Task::none();
+            return self.own_clock(name, value);
         }
         if name == "time-pos" {
             let signature = self.signature(value.as_f64());
@@ -197,7 +266,42 @@ impl Display {
             let mut focus = self.focus;
             focus.on_pause(value.as_bool().unwrap_or(false), &mut self.parts());
             self.focus = focus;
-            return self.idle_window();
+            return self.windows();
+        }
+        // The offer is for the item the Play started on, so a move to another
+        // item drops it.
+        if name == "playlist-pos" {
+            self.upnext.on_playlist_pos(value.as_i64());
+        }
+        Task::none()
+    }
+
+    /// The three properties no part of the display draws by itself. The offer
+    /// raises its card at the rise and asks for the one redraw that shows it.
+    /// The volume row records the level and the muted flag, and redraws only
+    /// while it is on screen, so a level that lands after the sidecar's
+    /// message reaches the bar it belongs to.
+    fn own_clock(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
+        match name {
+            "percent-pos" => {
+                if self.upnext.on_percent(value.as_f64(), &self.film) {
+                    self.redraw();
+                    return self.windows();
+                }
+            }
+            "volume" => {
+                self.volume.on_volume(value.as_f64());
+                if self.volume.showing() {
+                    self.redraw();
+                }
+            }
+            "mute" => {
+                self.volume.on_mute(value.as_bool());
+                if self.volume.showing() {
+                    self.redraw();
+                }
+            }
+            _ => {}
         }
         Task::none()
     }
@@ -229,6 +333,15 @@ impl Display {
             }
             Hide::Keep => Task::none(),
         }
+    }
+
+    /// Arm or cancel every hide window the last change asked for. The
+    /// display, the up-next card, and the volume row each wait out a window of
+    /// its own.
+    fn windows(&mut self) -> Task<Message> {
+        let card = self.card.arm(self.upnext.take_hide(), Message::HideCard);
+        let row = self.row.arm(self.volume.take_hide(), Message::HideRow);
+        Task::batch([self.idle_window(), card, row])
     }
 
     /// Write every command one press asked for to the socket the display
@@ -281,7 +394,10 @@ impl Display {
             }
         }
         // PROSE: the thumbnail draws here, over the bar it centres on, once the art stage lands: it shows while a fine scan is in flight for an item that declares trickplay, at scrubber.cursor_time() and scrubber.cursor_x().
-        // PROSE: the up-next chip and card draw here, over the bottom cluster, once the up-next stage lands.
+        // The offer draws after the bottom cluster, so the chip and the card
+        // read over the scrim and beside the scrubber.
+        self.upnext
+            .draw(brush, self.focus.focused_stop() == Some(Stop::Next), &NoArt);
     }
 
     /// The open chooser, which covers every region while it captures input.
@@ -292,18 +408,28 @@ impl Display {
     // draws after the whole of the first, and the dim and the panel cover the
     // text they are meant to cover.
     fn paint_above(&self, brush: &mut Brush<'_>) {
-        if self.strip.capturing().is_none() {
-            return;
+        if self.strip.capturing().is_some() {
+            let canvas = brush.canvas();
+            // A chooser is open. Dim the whole frame under it, so the list
+            // reads as the one thing in focus and the scrubber and strip
+            // recede.
+            brush.rect(
+                Rectangle::new(iced::Point::ORIGIN, Size::new(canvas.width, canvas.height)),
+                theme::color::SHADOW,
+                theme::alpha::DIM,
+            );
+            self.strip.draw_chooser(brush, &self.film);
         }
-        let canvas = brush.canvas();
-        // A chooser is open. Dim the whole frame under it, so the list reads
-        // as the one thing in focus and the scrubber and strip recede.
-        brush.rect(
-            Rectangle::new(iced::Point::ORIGIN, Size::new(canvas.width, canvas.height)),
-            theme::color::SHADOW,
-            theme::alpha::DIM,
-        );
-        self.strip.draw_chooser(brush, &self.film);
+        // The card shows itself when the playhead crosses the rise, and it
+        // stays for the whole wait, both with the OSD down. So it draws
+        // outside the OSD block on a fade of its own.
+        self.upnext
+            .draw_outside(brush, self.focus.visible(), &NoArt);
+        // The volume row draws outside the OSD block, because it comes and
+        // goes on a clock of its own and a level change must show the level
+        // and nothing else. It draws last, so it reads over a chooser's dim as
+        // well as over the bare video.
+        self.volume.draw(brush);
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -337,13 +463,19 @@ impl Display {
                 }
             })
         });
-        if !self.focus.fade().running() {
+        if !self.fading() {
             return mpv;
         }
         Subscription::batch([
             mpv,
             iced::time::every(theme::FADE_TICK).map(|_| Message::Tick),
         ])
+    }
+
+    /// Whether any of the three fades is moving: the display's own, the
+    /// up-next card's, and the volume row's.
+    fn fading(&self) -> bool {
+        self.focus.fade().running() || self.upnext.fade().running() || self.volume.fade().running()
     }
 }
 
@@ -392,8 +524,21 @@ impl canvas::Program<Message> for Layer<'_> {
 
         // A frame with nothing in it is what the display draws between
         // summons: the film below shows through every pixel of the window.
+        // The up-next card and the volume row come and go on clocks of their
+        // own, so the layer above draws for them with the display down.
         let fade = self.display.focus.fade().value();
-        if fade <= 0.0 {
+        let draws = match self.part {
+            Part::Below => fade > 0.0,
+            Part::Above => {
+                fade > 0.0
+                    || self
+                        .display
+                        .upnext
+                        .draws_outside(self.display.focus.visible())
+                    || self.display.volume.showing()
+            }
+        };
+        if !draws {
             return Vec::new();
         }
 
@@ -490,9 +635,9 @@ mod tests {
         (display, commands)
     }
 
-    /// Run the fade to wherever it is going, the way the tick does.
+    /// Run every fade to wherever it is going, the way the tick does.
     fn settle(display: &mut Display) {
-        while display.focus.fade().running() {
+        while display.fading() {
             let _ = display.update(Message::Tick);
         }
     }
@@ -757,6 +902,161 @@ mod tests {
         ] {
             assert!(draws(name), "{name} redraws the layer");
         }
+    }
+
+    /// The block the sidecar sends for the work that follows this one.
+    const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
+        "title":"E05 \u00b7 The Long Tide",
+        "detail":"Harbor Lights \u00b7 S02 \u00b7 45 min"}"#;
+
+    fn block(word: &str, text: &str) -> Message {
+        Message::Mpv(ipc::Event::Message(vec![
+            word.to_string(),
+            text.to_string(),
+        ]))
+    }
+
+    /// The offer arrives on its own message and raises nothing by itself.
+    #[tokio::test]
+    async fn the_offer_the_sidecar_sends_raises_nothing() {
+        let (mut display, _) = display();
+        let _ = display.update(block("next", OFFER));
+        assert!(display.upnext.available());
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
+
+        let _ = display.update(block("next", "{}"));
+        assert!(!display.upnext.available());
+    }
+
+    /// The position raises the card at the rise, on its own fade and its own
+    /// hide window, with the display still down.
+    #[tokio::test]
+    async fn the_position_raises_the_card_with_the_display_down() {
+        let (mut display, _) = display();
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("percent-pos", json!(50.0)));
+        assert!(!display.upnext.fade().running());
+        assert_eq!(display.card.armed, None);
+
+        let _ = display.update(property("percent-pos", json!(99.0)));
+        settle(&mut display);
+        assert!(display.upnext.draws_outside(false));
+        assert!(!display.focus.visible());
+        let armed = display.card.armed.expect("the rise arms a hide window");
+
+        let _ = display.update(Message::HideCard(armed));
+        settle(&mut display);
+        assert!(!display.upnext.draws_outside(false));
+        assert_eq!(display.card.armed, None);
+    }
+
+    /// A hide window a later change replaced takes nothing down.
+    #[tokio::test]
+    async fn a_stale_card_window_takes_nothing_down() {
+        let (mut display, _) = display();
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("percent-pos", json!(99.0)));
+        settle(&mut display);
+        let armed = display.card.armed.expect("the rise arms a hide window");
+
+        let _ = display.update(Message::HideCard(armed + 1));
+        settle(&mut display);
+        assert!(display.upnext.draws_outside(false));
+    }
+
+    /// A select on the card asks the sidecar for the next work, and the wait
+    /// deadens every press but back.
+    #[tokio::test]
+    async fn a_select_on_the_card_asks_for_the_next_work() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("percent-pos", json!(99.0)));
+        let _ = display.update(message("summon"));
+        let _ = display.update(message("up"));
+        assert!(sent(&mut commands).is_empty());
+
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"script-message\",\"liken-next\"],\"request_id\":0}"]
+        );
+        assert!(display.upnext.waiting());
+
+        let _ = display.update(message("select"));
+        assert!(sent(&mut commands).is_empty());
+        let _ = display.update(message("back"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"script-message\",\"liken-exit\"],\"request_id\":0}"]
+        );
+    }
+
+    /// A new item drops the offer, and the first report of the position the
+    /// Play started on does not.
+    #[tokio::test]
+    async fn a_new_item_drops_the_offer() {
+        let (mut display, _) = display();
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("playlist-pos", json!(0)));
+        assert!(display.upnext.available());
+
+        let _ = display.update(property("playlist-pos", json!(1)));
+        assert!(!display.upnext.available());
+    }
+
+    /// The level shows the row and nothing else on the display.
+    #[tokio::test]
+    async fn a_level_change_shows_the_row_alone() {
+        let (mut display, _) = display();
+        let _ = display.update(property("volume", json!(40.0)));
+        assert!(!display.volume.showing());
+
+        let _ = display.update(message("volume-changed"));
+        settle(&mut display);
+        assert!(display.volume.showing());
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
+
+        let armed = display.row.armed.expect("a level change arms a window");
+        let _ = display.update(Message::HideRow(armed));
+        settle(&mut display);
+        assert!(!display.volume.showing());
+    }
+
+    /// The row draws for a level the observer reported, so a message with no
+    /// level behind it draws nothing.
+    #[tokio::test]
+    async fn a_level_change_with_no_level_draws_nothing() {
+        let (mut display, _) = display();
+        let _ = display.update(message("volume-changed"));
+        settle(&mut display);
+        assert!(!display.volume.showing());
+
+        let _ = display.update(property("volume", json!(40.0)));
+        assert!(display.volume.showing());
+        let _ = display.update(property("mute", json!(true)));
+        assert!(display.volume.showing());
+    }
+
+    /// The frame tick runs while any of the three fades moves, and the card's
+    /// fade moves with the display down.
+    #[tokio::test]
+    async fn the_frame_tick_runs_for_every_fade() {
+        let (mut display, _) = display();
+        assert!(!display.fading());
+
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("percent-pos", json!(99.0)));
+        assert!(display.fading());
+        settle(&mut display);
+        assert!(!display.fading());
+
+        let _ = display.update(property("volume", json!(40.0)));
+        let _ = display.update(message("volume-changed"));
+        assert!(display.fading());
+        settle(&mut display);
+        assert!(!display.fading());
     }
 
     /// A socket that closes moves nothing, and the reader dials again.
