@@ -57,12 +57,6 @@ spec:
             # passes the address into every pod it creates.
             - name: MEDIA_BUS_ADDRESS
               value: bus.liken-system.svc:1883
-            # MEDIA_DISPLAY picks the display a playback pod runs. lua
-            # draws inside mpv, and iced draws in a third container on
-            # its own surface. lua is the default until the port reaches
-            # parity.
-            - name: MEDIA_DISPLAY
-              value: lua
             # The metrics listener, on the port milestone 65 assigns this
             # process. It answers with no Prometheus running anywhere in
             # the cluster; nothing scrapes it until an owner applies

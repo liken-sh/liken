@@ -692,7 +692,7 @@ mod tests {
     /// The bar's own numbers at a film's middle: the playhead where the
     /// position falls, the time above it, and the two lines below.
     #[test]
-    fn the_bar_puts_every_part_where_the_lua_puts_it() {
+    fn the_bar_puts_every_part_at_a_films_middle() {
         let bar = Scrubber::default()
             .bar(&Canvas::default(), &chaptered(), Some(Axis::Fine))
             .expect("a film with a length draws a bar");

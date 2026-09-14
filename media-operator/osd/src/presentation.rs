@@ -33,8 +33,8 @@ impl Presentation {
             .or_else(|| film.media_title.clone())
     }
 
-    /// The item's type. The Lua display names this field `type`, which Rust
-    /// keeps for itself.
+    /// The item's type. The block names this field `type`, which Rust keeps
+    /// for itself.
     pub fn kind(&self) -> Option<&str> {
         self.word("type")
     }

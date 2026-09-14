@@ -14,9 +14,9 @@ use iced::{Color, Pixels, Point, Rectangle, Size};
 use super::{Canvas, Scrim, shape};
 use crate::theme;
 
-/// Where a line's position falls on the line, in the ASS anchors the Lua
-/// display states. A line box carries the anchor, so a line placed by its top
-/// or its bottom puts its baseline where libass puts it.
+/// Where a line's position falls on the line, in the ASS anchors the display
+/// states. A line box carries the anchor, so a line placed by its top or its
+/// bottom puts its baseline where libass puts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Anchor {
     /// `\an7`, the anchor every shape and most lines take.
@@ -31,15 +31,14 @@ pub enum Anchor {
     BottomCentre,
 }
 
-/// One line of text, the way the Lua display's `theme.text` states one: an
-/// anchor, a position in canvas units, a size from the type scale, a colour,
-/// and an ASS alpha.
+/// One line of text: an anchor, a position in canvas units, a size from the
+/// type scale, a colour, and an ASS alpha.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
     pub content: String,
     pub at: Point,
     pub anchor: Anchor,
-    /// The line box, which is the number the Lua states as an ASS `\fs`.
+    /// The line box, which is the number the display states as an ASS `\fs`.
     pub size: f32,
     pub color: Color,
     pub alpha: u8,
@@ -95,9 +94,8 @@ fn shaped(content: &str, size: f32) -> text::Text<&str> {
     }
 }
 
-// How wide one run draws, in canvas units. The Lua measured against a
-// generated table of per-codepoint advances because libass cannot answer;
-// the toolkit shapes the same face and answers itself.
+// How wide one run draws, in canvas units. The toolkit shapes the same face
+// and answers itself.
 pub fn measure(content: &str, size: f32) -> f32 {
     faces();
     Paragraph::with_text(shaped(content, size)).min_width()
@@ -128,7 +126,7 @@ impl<'a> Brush<'a> {
     }
 
     // One scrim. It draws a gradient of its own rather than a fill of one
-    // color, because the Lua's blurred shape is a gradient once it is drawn.
+    // color, because a blurred shape is a gradient once it is drawn.
     pub fn scrim(&mut self, scrim: &Scrim) {
         let (canvas, fade) = (self.canvas, self.fade);
         scrim.draw(self.frame, &canvas, fade);
@@ -167,8 +165,7 @@ impl<'a> Brush<'a> {
     }
 
     // One hexagon inside its own border. The border draws first and the fill
-    // over it, the order libass composites them in, so the fill's alpha shows
-    // the border through it the way it does today.
+    // over it, so the fill's alpha shows the border through it.
     pub fn hexagon(
         &mut self,
         at: Point,
@@ -199,9 +196,7 @@ impl<'a> Brush<'a> {
     /// chooser or an adjuster reads as one surface over the video. The border
     /// is liken's green, and the fill dims the video behind the text without
     /// hiding it.
-    // The panel fades with everything else. The Lua's own panel helper wrote
-    // literal alphas and skipped the fade, and this is the one place the port
-    // changes the look on purpose.
+    // The panel fades with everything else.
     pub fn panel(&mut self, shape: Rectangle) {
         let (outline, radius) = shape::outside_rounded(shape, PANEL_RADIUS, PANEL_BORDER);
         self.frame.stroke(
@@ -316,8 +311,7 @@ const PANEL_BORDER: f32 = 2.0;
 mod tests {
     use super::*;
 
-    /// The face's own advances, through the toolkit. The numbers are what the
-    /// Lua's generated table holds for the same face: one unit of ASS size is
+    /// The face's own advances, through the toolkit. One unit of ASS size is
     /// 0.7541 em, and the middle dot and the ellipsis measure 0.2490 and
     /// 0.9480 of an em.
     #[test]

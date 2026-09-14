@@ -490,7 +490,7 @@ mod tests {
         phase
     }
 
-    // The Lua adds one tick of the rate it reads at the end of each frame,
+    // The loop adds one tick of the rate it reads at the end of each frame,
     // which is a right-hand Riemann sum of the integral the closed form takes.
     // Such a sum leads the integral by `(TICK / 2) * (rate at the end - rate at
     // the start)`, which is 0.012 s over a ramp between rest and full swing,
@@ -499,13 +499,13 @@ mod tests {
     //
     // Twelve milliseconds of animation clock turns the fastest hexagon's sines
     // by 0.008 of a cycle, which moves a vertex by a third of a pixel on a
-    // 1080-row canvas. The two screens draw the same frame.
-    const LUA_TOLERANCE: f64 = 0.02;
+    // 1080-row canvas.
+    const LOOP_TOLERANCE: f64 = 0.02;
 
     #[test]
-    fn the_closed_form_agrees_with_the_display_energy_lua_loop() {
+    fn the_closed_form_agrees_with_the_stepped_loop() {
         let drift = closed(0.0, 1.0, RAMP_UP, 1.2) - accumulated(0.0, 1.0, RAMP_UP, 1.2);
-        assert!(drift.abs() < LUA_TOLERANCE, "{drift}");
+        assert!(drift.abs() < LOOP_TOLERANCE, "{drift}");
     }
 
     #[test]

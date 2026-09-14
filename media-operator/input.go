@@ -201,7 +201,7 @@ const nextMessage = "next"
 
 // presentationRequestMessage is the script-message the display broadcasts
 // once, when it loads. The sidecar sends each item's block the moment the
-// playlist reaches it, and a block sent before the script registered
+// playlist reaches it, and a block sent before the display connected
 // reaches nobody. The display carries no block of its own until one
 // arrives, so it asks for the current one as soon as it can answer, and
 // the sidecar replays it.
@@ -209,7 +209,7 @@ const presentationRequestMessage = "liken-presentation-request"
 
 // isExitMessage reads a client-message as the display's exit press. The
 // first argument names the request, the same shape an art request takes,
-// so another script's broadcast is not an ending.
+// so another client's broadcast is not an ending.
 func isExitMessage(args []string) bool {
 	return len(args) > 0 && args[0] == exitMessage
 }

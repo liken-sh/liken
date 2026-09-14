@@ -8,9 +8,8 @@ use crate::canvas::{Brush, Canvas};
 /// What the toolkit may hand a bitmap in one go. A toolkit image at or over
 /// this size uploads on a thread of its own and draws no earlier than the next
 /// frame, so a picture that large is read as bands under the limit.
-// The band split is the display's own. The Lua handed mpv one file and
-// mpv did the upload. The toolkit uploads a picture synchronously up to a
-// size limit, so a larger one goes up in bands.
+// The toolkit uploads a picture synchronously up to a size limit, so a
+// larger one goes up in bands.
 const MAX_SYNC: usize = 2 * 1024 * 1024;
 
 /// One band of a bitmap: the row it starts at, the rows it covers, and the

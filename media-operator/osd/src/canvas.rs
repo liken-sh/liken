@@ -71,11 +71,11 @@ pub enum Edge {
 /// of blur width.
 const EDGE_SIGMA_PER_BLUR: f32 = 0.85;
 
-/// The falloff stops widening here. libass caps the blur it applies, so the
-/// two scrims fall off over the same distance although one asks for a wider
-/// blur than the other. The cap is measured off captured frames of the Lua
-/// display at a 1920 by 1080 surface, and the port carries it so both scrims
-/// look as they did.
+/// The falloff stops widening here, so the two scrims fall off over the same
+/// distance although one asks for a wider blur than the other.
+/// The distance is the display's own: both scrims soften over 85 rows of
+/// the 1080-row canvas, so the header's scrim and the scrubber's read as
+/// one family whatever reach each one states.
 const EDGE_SIGMA_LIMIT: f32 = 85.0;
 
 /// How many stops one gradient carries. The toolkit takes eight.
@@ -89,11 +89,10 @@ const TAIL: f32 = 3.0;
 /// The dark gradient behind a cluster of text, so the text reads against one
 /// background whatever the frame behind it.
 ///
-/// The Lua draws one blurred rectangle, and this is the vertical profile
-/// that rectangle has. A dark plateau covers the text at the screen edge, and
-/// the edge falls off to clear over the reach. The rectangle bleeds past the
-/// screen edge by the blur width, so the very edge reads a little under the
-/// plateau.
+/// This is the vertical profile one blurred rectangle has. A dark plateau
+/// covers the text at the screen edge, and the edge falls off to clear over
+/// the reach. The rectangle bleeds past the screen edge by the blur width, so
+/// the very edge reads a little under the plateau.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scrim {
     /// The blurred rectangle's own edges, in canvas rows.
@@ -306,10 +305,10 @@ mod tests {
         assert_eq!((half.snap(271.0) * half.scale).fract(), 0.0);
     }
 
-    /// The rows the Lua's own call produces: the top scrim's rectangle runs
-    /// from -123 to 270.6, and the bottom's from 763.2 to 1224.
+    /// The scrim rows: the top scrim's rectangle runs from -123 to 270.6, and
+    /// the bottom's from 763.2 to 1224.
     #[test]
-    fn the_scrim_rectangles_stand_where_the_lua_puts_them() {
+    fn the_scrim_rectangles_stand_at_their_own_rows() {
         let top = Scrim::top();
         assert!((top.near - -123.0).abs() < 0.01);
         assert!((top.far - 270.6).abs() < 0.01);

@@ -162,8 +162,7 @@ impl Display {
     }
 
     /// One message, and then the art's own turn, which asks for what the state
-    /// it leaves behind needs, the way the Lua runs its four syncs at the top
-    /// of a redraw.
+    /// it leaves behind needs.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
         let jobs = self.sync_art();

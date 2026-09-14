@@ -117,7 +117,7 @@ func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
 	gamePod := buildPod(game, buildClaim(game, console),
 		resolution{Items: []string{"https://nas/film.mkv"}},
 		"registry.example/player:test", "registry.example/sidecar:test", "registry.example/osd:test",
-		"bus.media.svc:1883", defaultTopicBase, boundSofa(), resolvedPreferences{}, "", displayLua)
+		"bus.media.svc:1883", defaultTopicBase, boundSofa(), resolvedPreferences{}, "")
 	gamePod.Status.Phase = podRunning
 	cluster.pods["game-playback"] = gamePod
 	cluster.claims["game-devices"] = buildClaim(game, console)
@@ -129,7 +129,7 @@ func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
 	moviePod := buildPod(movie, buildClaim(movie, theater),
 		resolution{Items: []string{"https://nas/film.mkv"}},
 		"registry.example/player:test", "registry.example/sidecar:test", "registry.example/osd:test",
-		"bus.media.svc:1883", defaultTopicBase, boundSofa(), resolvedPreferences{}, "", displayLua)
+		"bus.media.svc:1883", defaultTopicBase, boundSofa(), resolvedPreferences{}, "")
 	moviePod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = moviePod
 	cluster.claims["movie-devices"] = buildClaim(movie, theater)

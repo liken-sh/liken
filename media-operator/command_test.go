@@ -850,8 +850,8 @@ func positions(reports []playReport) []string {
 }
 
 // The display broadcasts one request for the current block when it loads,
-// because the sidecar's own send races the script's registration: a block sent
-// before the script registered reaches nobody, and the display would then
+// because the sidecar's own send races the display's connection: a block sent
+// before the display connected reaches nobody, and the display would then
 // never learn the item's type or ask for its art.
 func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
 	bridge, lines := bridgeToMPV(t)

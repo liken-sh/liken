@@ -10,13 +10,11 @@ import (
 func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 	mpv := useMPV(t)
 	useSocket(t, "/tmp/test-mpv.sock")
-	useScriptDir(t, "/test-display")
 
 	cases := []struct {
 		name    string
 		start   string
 		verbose string
-		display string
 		items   []string
 		blocks  []json.RawMessage
 		want    []string
@@ -28,7 +26,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
 				"--osc=no",
 				"--load-console=no",
 				"--osd-font=Source Sans 3",
@@ -51,7 +48,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
 				"--osc=no",
 				"--load-console=no",
 				"--osd-font=Source Sans 3",
@@ -72,7 +68,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
 				"--osc=no",
 				"--load-console=no",
 				"--osd-font=Source Sans 3",
@@ -90,7 +85,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
 				"--osc=no",
 				"--load-console=no",
 				"--osd-font=Source Sans 3",
@@ -109,41 +103,9 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
 				"--osc=no",
 				"--load-console=no",
 				"--osd-font=Source Sans 3",
-				"--", "/media/0/film.mkv",
-			},
-		},
-		{
-			name:    "the lua display draws inside mpv",
-			display: displayLua,
-			items:   []string{"/media/0/film.mkv"},
-			want: []string{
-				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
-				"--keepaspect-window=no",
-				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
-				"--osc=no",
-				"--load-console=no",
-				"--osd-font=Source Sans 3",
-				"--quiet",
-				"--", "/media/0/film.mkv",
-			},
-		},
-		{
-			name:    "the iced display draws in its own container",
-			display: displayIced,
-			items:   []string{"/media/0/film.mkv"},
-			want: []string{
-				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
-				"--keepaspect-window=no",
-				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--osc=no",
-				"--load-console=no",
-				"--osd-font=Source Sans 3",
-				"--quiet",
 				"--", "/media/0/film.mkv",
 			},
 		},
@@ -153,7 +115,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 		t.Run(each.name, func(t *testing.T) {
 			t.Setenv(playStartVariable, each.start)
 			t.Setenv(playerVerboseVariable, each.verbose)
-			t.Setenv(displayVariable, each.display)
 			argv, err := playerArgv(each.items, each.blocks)
 			mustSucceed(t, err)
 			// argv[0] is the resolved binary, so the want list is the
@@ -193,13 +154,4 @@ func useSocket(t *testing.T, path string) {
 	was := mpvSocketPath
 	t.Cleanup(func() { mpvSocketPath = was })
 	mpvSocketPath = path
-}
-
-// useScriptDir moves the display script directory for the length of one
-// test, so the shim writes the --script flag the test expects.
-func useScriptDir(t *testing.T, path string) {
-	t.Helper()
-	was := displayScriptDir
-	t.Cleanup(func() { displayScriptDir = was })
-	displayScriptDir = path
 }

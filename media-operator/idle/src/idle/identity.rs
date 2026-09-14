@@ -37,12 +37,11 @@ const LEFT: f32 = look::MARGIN_X;
 /// the list.
 const HEADER_SIZE: f32 = look::LABEL;
 
-/// The line box a part's name draws in, in canvas pixels. `identity.lua` states
-/// it as `theme.type.small - 4`, four ASS units under the shared small size, so
-/// the parts read a touch lighter without changing that size for every other
-/// element.
+/// The line box a part's name draws in, in canvas pixels. It is four ASS units
+/// under the shared small size, so the parts read a touch lighter without
+/// changing that size for every other element.
 ///
-/// That one number does two jobs in the Lua, and this block keeps them apart.
+/// That one number does two jobs, and this block keeps them apart.
 /// `ITEM_BOX` is the layout measure, and every step and offset below is a
 /// fraction of it. `ITEM_SIZE` is the type size the same number states.
 const ITEM_BOX: f32 = look::SMALL_BOX - 4.0;
@@ -51,8 +50,8 @@ const ITEM_BOX: f32 = look::SMALL_BOX - 4.0;
 /// metric.
 const ITEM_SIZE: f32 = look::type_size(ITEM_BOX);
 
-/// The drop from one part's line to the next: 1.1 line boxes, the leading
-/// `identity.lua` gives its list.
+/// The drop from one part's line to the next: 1.1 line boxes, the leading of
+/// its list.
 const ITEM_STEP: f32 = 1.1 * ITEM_BOX;
 
 /// The drop from the header to the first part, 1.3 line boxes. The gap is wider
@@ -112,8 +111,8 @@ const MARKER_REST: f32 = look::DIM;
 
 /// The marker's resting opacity on a dim line, which is `look::DIM` of
 /// `look::DIM`. The marker keeps the same fraction of a dim line that it keeps
-/// of a lit one, so it never reads brighter than the part it marks.
-/// `identity.lua` states the same value as the ASS alpha byte 0xE1.
+/// of a lit one, so it never reads brighter than the part it marks. The value
+/// is the ASS alpha byte 0xE1.
 const MARKER_DIM: f32 = look::DIM * look::DIM;
 
 /// Draw the element into the frame, in canvas units.
@@ -467,8 +466,8 @@ mod tests {
         }
     }
 
-    /// Two readings of one measure, where `expected` is the number
-    /// `identity.lua` rounds to and the port lands `tolerance` away from it.
+    /// Two readings of one measure, where `measured` lands `tolerance` away
+    /// from `expected`.
     #[track_caller]
     fn assert_close(measured: f32, expected: f32, tolerance: f32) {
         assert!(
@@ -584,17 +583,16 @@ mod tests {
     }
 
     #[test]
-    fn the_markers_two_resting_opacities_are_the_lua_alphas() {
-        // `identity.lua` states them as the ASS alpha bytes 0xA8 and 0xE1,
-        // which leave 87 and 30 of the 255 steps of light. Half a step is
-        // under what a panel draws.
+    fn the_markers_two_resting_opacities_are_the_ass_alphas() {
+        // The ASS alpha bytes 0xA8 and 0xE1 leave 87 and 30 of the 255 steps
+        // of light. Half a step is under what a panel draws.
         assert_close(MARKER_REST, 87.0 / 255.0, 0.5 / 255.0);
         assert_close(MARKER_DIM, 30.0 / 255.0, 0.5 / 255.0);
     }
 
     #[test]
     fn the_block_measures_in_line_boxes_and_draws_at_the_size_that_box_states() {
-        // `identity.lua` lists its parts in a 30 pixel line box, which is 22.6
+        // The block lists its parts in a 30 pixel line box, which is 22.6
         // canvas pixels of type, and it places the marker a fifth of that box
         // wide and 0.42 of it over the line.
         assert_close(ITEM_BOX, 30.0, 0.1);
@@ -804,8 +802,8 @@ mod tests {
 
     #[test]
     fn the_parts_stack_upward_from_the_bottom_margin() {
-        // One step is 1.1 of the 30 canvas pixels `identity.lua` gives a
-        // part's line box, and that file rounds each step to 33.
+        // One step is 1.1 of the 30 canvas pixels of a part's line box, and
+        // each step is 33.
         assert_close(item_y(990.0, 0), 990.0, 0.2);
         assert_close(item_y(990.0, 1), 957.0, 0.2);
         assert_close(item_y(990.0, 2), 924.0, 0.2);
@@ -813,8 +811,8 @@ mod tests {
 
     #[test]
     fn the_header_reads_a_wider_gap_over_the_first_part() {
-        // The header's step is 1.3 of the same line box, which `identity.lua`
-        // rounds to 39, six pixels wider than a step between two parts.
+        // The header's step is 1.3 of the same line box, which is 39, six
+        // pixels wider than a step between two parts.
         assert_close(header_y(990.0, 3), 924.0 - 39.0, 0.2);
         assert_close(header_y(990.0, 1), 990.0 - 39.0, 0.2);
         assert_close(header_y(990.0, 0), 990.0, 0.2);

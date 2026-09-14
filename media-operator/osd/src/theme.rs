@@ -54,8 +54,7 @@ pub mod color {
 }
 
 /// An ASS alpha runs from 00, opaque, to FF, transparent. The display keeps
-/// the same bytes the Lua keeps, and `opacity` turns one into the fraction
-/// the toolkit takes.
+/// the bytes, and `opacity` turns one into the fraction the toolkit takes.
 pub mod alpha {
     pub const OPAQUE: u8 = 0x00;
     pub const SUBDUED: u8 = 0x80;
@@ -98,7 +97,7 @@ pub const FADE_TICK: Duration = Duration::from_nanos(16_666_667);
 pub const IDLE_HIDE: Duration = Duration::from_secs(4);
 
 /// The type scale, in canvas pixels. The sizes are large enough to read from
-/// a couch at 1080. Each number is a line box, the measure the Lua display
+/// a couch at 1080. Each number is a line box, the measure the display
 /// states as an ASS `\\fs`, and [`type_size`] turns one into the size the
 /// toolkit takes.
 pub mod type_scale {
@@ -117,7 +116,7 @@ pub mod type_scale {
 /// libass scales a face so that its bounding height fills the size an ASS
 /// `\\fs` states, so one `\\fs` number states two measures: the line box the
 /// text draws in, in canvas pixels, and the type size, which is that box
-/// divided by this metric. A layout measure the Lua display writes in `\\fs`
+/// divided by this metric. A layout measure the display writes in `\\fs`
 /// units is a canvas measure here and passes through unchanged; only a type
 /// size goes through the metric.
 const FACE_METRIC: f32 = 1326.0 / 1000.0;
@@ -164,10 +163,9 @@ pub const SCRIM_REACH: f32 = 0.3;
 mod tests {
     use super::*;
 
-    /// The four tokens the palette reads out of `liken.css`, as the Lua
-    /// wrote them out by hand in its own ASS literals.
+    /// The four tokens the palette reads out of `liken.css`.
     #[test]
-    fn the_palette_holds_the_colours_the_lua_wrote_out() {
+    fn the_palette_holds_the_colours() {
         let hex = |color: Color| {
             let byte = |channel: f32| (channel * 255.0).round() as u8;
             format!(
@@ -198,7 +196,7 @@ mod tests {
         assert!((opacity(SCRIM_EDGE_ALPHA) - 0.796).abs() < 0.001);
     }
 
-    /// The Lua states a size as an ASS `\\fs`, which is the line box. The
+    /// The display states a size as an ASS `\\fs`, which is the line box. The
     /// toolkit takes the type size, which is that box through the metric.
     #[test]
     fn a_type_size_is_its_line_box_through_the_face_metric() {
@@ -222,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn the_top_right_column_reads_at_the_lua_rows() {
+    fn the_top_right_column_reads_at_the_line_pitch() {
         assert_eq!(LINE_PITCH, 46.0);
         assert_eq!(MARGIN_Y, 90.0);
         assert_eq!(MARGIN_Y + LINE_PITCH, 136.0);

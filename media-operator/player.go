@@ -22,15 +22,9 @@ import (
 // needs no display and no sound card.
 var mpvBinary = "mpv"
 
-// The path of the display script directory inside the image, the one mpv loads
-// with --script. It is a variable rather than a constant so a test can point it
-// at a stand-in, the way mpvBinary is.
-var displayScriptDir = "/display"
-
 // overlayFont is the family the overlay draws in, installed as two OTF
 // files in the player image and named here for mpv's own OSD. The brand
-// crate carries the same family for the idle screen, and display/theme.lua
-// names it in its ASS tags, which is what draws the overlay's text.
+// crate carries the same family for the idle screen.
 const overlayFont = "Source Sans 3"
 
 // runPlayer builds mpv's argument vector and execs mpv, so mpv becomes
@@ -72,19 +66,10 @@ func runPlayer(items []string) {
 // surface. The PipeWire audio output, because Wayland
 // carries no audio and the sink claim delivers that socket. The IPC
 // server stays because the command sidecar drives that same socket to
-// run each named command and read the report. The display script directory
-// loads with --script, and the command sidecar drives it over that same IPC
-// socket. --osc=no turns off mpv's built-in on-screen controller,
-// because the display draws its own. --load-console=no turns off mpv's
-// built-in command console, which nothing here opens. The console script
-// registers an empty OSD overlay at load and never removes it, and libass
-// reports a track with no events as changed on every frame, so mpv would
-// composite the whole OSD again on every video frame while the display
-// draws anything at all.
-//
-// MEDIA_DISPLAY picks the shape. The lua shape passes --script to mpv
-// and runs two containers; the iced shape drops --script and runs
-// three.
+// run each named command and read the report. --osc=no turns off mpv's
+// built-in on-screen controller, because the display draws its own.
+// --load-console=no turns off mpv's built-in command console, which
+// nothing here opens.
 //
 // The list ends with -- because a media path that starts with a dash
 // would otherwise read as a flag.
@@ -117,17 +102,12 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		"--keepaspect-window=no",
 		"--ao=pipewire",
 		"--input-ipc-server=" + mpvSocketPath,
-	}
-	if os.Getenv(displayVariable) != displayIced {
-		argv = append(argv, "--script="+displayScriptDir)
-	}
-	argv = append(argv,
 		"--osc=no",
 		"--load-console=no",
 		// mpv's own OSD messages draw in the brand family; libass resolves
 		// it through fontconfig against the two OTF files the image installs.
-		"--osd-font="+overlayFont,
-	)
+		"--osd-font=" + overlayFont,
+	}
 	// --quiet is the default because mpv prints its status line about
 	// eight times a second, this process's stdout is the pod log on the
 	// machine's disk, and containerd and the kubelet tail it. --quiet

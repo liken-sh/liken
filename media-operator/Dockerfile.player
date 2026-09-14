@@ -1,9 +1,8 @@
 # The player image: the display operator's mpv image, the brand's fonts,
-# the display script, and the same binary the operator image carries. In
-# this image the binary runs as the player shim alone; every sidecar mode
-# runs on the sidecar image. The operator's own image cannot serve here,
-# because it is one static binary on scratch and mpv needs a video and
-# audio stack under it.
+# and the same binary the operator image carries. In this image the binary
+# runs as the player shim alone; every sidecar mode runs on the sidecar
+# image. The operator's own image cannot serve here, because it is one
+# static binary on scratch and mpv needs a video and audio stack under it.
 
 # The runtime base of the last stage. An argument a FROM line reads has
 # to be declared before the first stage, so it is here and not beside
@@ -44,11 +43,9 @@ RUN apt-get update \
 # SPA plugins it opens by name, and the fontconfig configuration libass
 # reads, on the ffmpeg, VA-API, and Vulkan trees under it, on scratch.
 # The display operator builds it beside the compositor, so a node that
-# runs both holds one libva and one Mesa. The base carries the zoneinfo
-# database, so the display clock resolves the household's TZ to a
-# wall-clock time. No font package is installed for the display's own
-# family: the brand's two OTF files arrive below as files, and libass
-# resolves the family display/theme.lua names through fontconfig.
+# runs both holds one libva and one Mesa. No font package is installed
+# for the brand's own family: its two OTF files arrive below as files,
+# and libass resolves the family through fontconfig.
 FROM ${MPV_BASE}
 
 COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
@@ -56,16 +53,12 @@ COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droi
 COPY --from=build /media-operator /media-operator
 
 # The brand's upright and italic faces, as files fontconfig finds when it
-# scans /usr/share/fonts, so libass resolves the family the display names
-# with no cache step and no font package.
+# scans /usr/share/fonts, so libass resolves the family with no cache step
+# and no font package.
 COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
      docs/themes/brand/fonts/SourceSans3-It.otf \
      docs/themes/brand/fonts/LICENSE.md \
      /usr/share/fonts/opentype/source-sans-3/
-
-# mpv treats a directory that holds main.lua as one client and adds it to
-# Lua's package path, so the display script directory copies whole.
-COPY display/ /display/
 
 # The entrypoint is the player shim, and mpv is the container's own
 # process. The shim builds mpv's arguments from what the operator set

@@ -102,14 +102,14 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32)) -> Option<Graphics> 
             }
         };
 
-        // The client draws what libass draws, and libass composites on the
-        // encoded sRGB values rather than in linear light. A format the
-        // hardware treats as sRGB converts every colour on the way in and out,
-        // and the blend then runs in linear light: the display's dim alpha
-        // over black reads 143 of 255 that way and 79 of 255 the way libass
-        // reads it. So the surface takes a format that stores what the shader
-        // writes, and the `web-colors` feature of `iced_wgpu` hands the shader
-        // the colours unconverted.
+        // The brand states every color and alpha as encoded sRGB, and every
+        // translucent surface was judged by eye against a blend on those values,
+        // so the blend runs on them and not in linear light.
+        // A format the hardware treats as sRGB converts every colour on the
+        // way in and out, and the blend then runs in linear light. So the
+        // surface takes a format that stores what the shader writes, and the
+        // `web-colors` feature of `iced_wgpu` hands the shader the colours
+        // unconverted.
         //
         // The compositor reads the buffer as sRGB either way. The only change
         // is where the encoding happens, and here the client has already done

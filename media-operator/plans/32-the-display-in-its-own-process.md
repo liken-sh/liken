@@ -114,7 +114,7 @@ shape: the released compositor runs nested on the desktop with
 ivi-shell, a stand-in controller places surfaces the way the operator
 does, and mpv, the sidecar, and the display run beside it as they run
 in the pod. The prototype that proved the plumbing is the seed of that
-harness, and `local/osd` carries it until the two screens absorb it.
+harness.
 
 **The cost model.** A fade re-renders one transparent surface on the
 GPU in the display's process. mpv's video thread does video. The

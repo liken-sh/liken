@@ -40,10 +40,9 @@ const GLYPH_GAP: f32 = 16.0;
 /// the middle of it and the dark surface covers it, so the three parts read as
 /// one row whatever the number's own type size.
 ///
-/// `volume.lua` writes this measure as `theme.type.small`, the same `\fs` it
-/// draws the number at. The number here draws at `look::SMALL`, which is that
-/// `\fs` through the face metric, and the measure is that size's line box,
-/// which is the `\fs` again. The two readings meet at 34 canvas pixels.
+/// The number here draws at `look::SMALL`, which is the `\fs` through the face
+/// metric, and the measure is that size's line box, which is the `\fs` again.
+/// The two readings meet at 34 canvas pixels.
 const NUMBER_BOX: f32 = look::line_box(look::SMALL);
 /// The row appears over whatever frame is on screen, with nothing under it, and
 /// on a bright frame the glyph and the number would vanish. So the row carries

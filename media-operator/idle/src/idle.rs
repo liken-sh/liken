@@ -11,9 +11,8 @@
 //! applies to its own colours, and every `draw` below takes it.
 //!
 //! Every element draws in the display's own space, 1080 rows tall, and the
-//! frame scales that space onto the surface. `media-operator`'s
-//! `display/theme.lua` holds the same space for the same reason: one layout
-//! serves 720, 1080, and 4K with no branch.
+//! frame scales that space onto the surface. One layout serves 720, 1080, and
+//! 4K with no branch.
 
 pub mod activity;
 pub mod clock;

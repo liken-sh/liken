@@ -1,8 +1,8 @@
 //! The display is an IPC client of mpv, on the socket the command sidecar
-//! already drives. It reads properties over that socket and observes the
-//! ones the Lua display observes. Every message the sidecar sends the
-//! display arrives as a `client-message` event, because mpv delivers a
-//! `script-message` to every client and an IPC client cannot be named.
+//! already drives. It reads properties over that socket. Every message the
+//! sidecar sends the display arrives as a `client-message` event, because
+//! mpv delivers a `script-message` to every client and an IPC client cannot
+//! be named.
 
 use std::hash::{Hash, Hasher};
 use std::io;
@@ -31,10 +31,9 @@ pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 /// registration and then on every change, so the display runs no timer of its
 /// own for these values.
 ///
-/// The two delays are observed here although the Lua read them on demand.
-/// An IPC client reads a property over the same socket it draws from, so
-/// the display holds every value it draws and asks for nothing inside a
-/// frame.
+/// The two delays are observed here. An IPC client reads a property over the
+/// same socket it draws from, so the display holds every value it draws and
+/// asks for nothing inside a frame.
 pub const OBSERVED: [&str; 19] = [
     "duration",
     "time-pos",

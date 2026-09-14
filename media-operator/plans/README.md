@@ -34,9 +34,8 @@ These plans are designed. Each keeps its number and moves to
 * [32, The display in its own
   process](32-the-display-in-its-own-process.md). The on-screen
   display leaves mpv's process for an iced client in a third container
-  of the playback pod, drawing on its own surface above mpv's, with the
-  same look the Lua display has today. The player, the sidecar, the
-  bus, and every resource stay as they are.
+  of the playback pod, drawing on its own surface above mpv's. The
+  player, the sidecar, the bus, and every resource stay as they are.
 
 ## Completed
 
@@ -86,11 +85,10 @@ These plans are designed. Each keeps its number and moves to
   Built across slices 07-a through 07-e, 07-g, and 07-h, and proven on
   the workstation through `media-preview`. The on-hardware drill on
   `liken-1` runs with the next release. `liken` draws its own on-screen
-  display as one `mpv` script through `libass` and `overlay-add`: a
-  summoned scrubber, a focus stack with chapter and track choosers, a
-  `presentation` block resolved per item, art decoded to `bgra`, a
-  trickplay seekbar, a blurred scrim, and a grouped control strip with a
-  clock. The composed music experience moved to plan 11.
+  display: a summoned scrubber, a focus stack with chapter and track
+  choosers, a `presentation` block resolved per item, art decoded to
+  `bgra`, a trickplay seekbar, a blurred scrim, and a grouped control
+  strip with a clock. The composed music experience moved to plan 11.
 * [08, Preferred languages and subtitles](completed/08-preferred-languages.md).
   Built. The on-hardware drill on `liken-1` runs with the next release.
   `MediaPreferences` states the audio and subtitle languages a viewer
@@ -189,10 +187,10 @@ These plans are designed. Each keeps its number and moves to
   and running on `liken-1`. The idle screen is `media-operator-idle`,
   a Rust client on the Iced toolkit that reads the bus. The sidecar
   publishes its four decisions on a screen topic and has no socket,
-  the seven Lua modules that drew the screen are deleted, and the
-  playback overlay stays. Releases -002 through -005 fixed a covered
-  client's stall: the client presents without vsync, reads the bus on
-  every wake, and heals a lost present.
+  the seven Lua modules that drew the screen are deleted. Releases
+  -002 through -005 fixed a covered client's stall: the client
+  presents without vsync, reads the bus on every wake, and heals a
+  lost present.
 * [19, A claim as a media
   reference](completed/19-a-claim-as-a-media-reference.md). Built,
   released in 2026.09.01-002, and drilled on `liken-1` on 2026-09-01.

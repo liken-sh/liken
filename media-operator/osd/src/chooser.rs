@@ -21,9 +21,7 @@ const BOTTOM: f32 = theme::PANEL_BOTTOM;
 const MAX_ROWS: usize = 8;
 
 // The widest a row draws before it is clipped: the panel inside its
-// padding. The Lua counted bytes because it measured against a generated
-// table; the toolkit measures the run, so the width is the one with a
-// reason behind it.
+// padding. The toolkit measures the run.
 const MAX_WIDTH: f32 = W - 2.0 * PAD;
 
 /// The one mark a clipped row ends on.

@@ -1,9 +1,7 @@
 //! The clock: the wall-clock time at the top right.
 //!
-//! A viewer reads the hour without leaving the screen. `display/clock.lua`
-//! draws the end of the film beside the time as well, from the duration and the
-//! position `mpv` reports. An idle client plays no film and has no duration to
-//! read, so it draws the time alone.
+//! A viewer reads the hour without leaving the screen. An idle client plays no
+//! film and has no duration to read, so it draws the time alone.
 
 use iced_winit::core::Point;
 

@@ -6,8 +6,7 @@
 //! watching it, and a person who pressed a button is waiting.
 //!
 //! The shade draws no shape of its own. It is one factor, and every element
-//! scales its own colours by it. `look::under` states why, and
-//! `display/theme.lua` holds the same mechanism in `theme.fade`.
+//! scales its own colours by it. `look::under` states why.
 
 use super::energy::ease;
 use crate::unit::Unit;
@@ -34,8 +33,7 @@ pub fn cover(unit: &Unit, at: f64) -> f64 {
 }
 
 /// The fraction of full brightness every element draws at, from 1 on a clear
-/// screen to 0 on a dark one. It is the complement of the cover, and it is the
-/// factor `display/theme.lua` calls `theme.fade`.
+/// screen to 0 on a dark one. It is the complement of the cover.
 pub fn fade(unit: &Unit, at: f64) -> f32 {
     1.0 - cover(unit, at) as f32
 }

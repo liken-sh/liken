@@ -441,10 +441,9 @@ fn card_x(canvas: &Canvas) -> f32 {
 /// Drop the glyphs a line has no room for and mark the cut with an ellipsis,
 /// so a long title stays inside the card.
 ///
-/// The Lua added up a generated table of per-codepoint advances, because
-/// libass reports no text width to a script. The toolkit shapes the same face
-/// and measures the run itself, so each prefix is measured as it draws, and a
-/// pair of glyphs the face kerns measures as the face kerns it.
+/// The toolkit shapes the same face and measures the run itself, so each
+/// prefix is measured as it draws, and a pair of glyphs the face kerns
+/// measures as the face kerns it.
 fn clip(content: &str, size: f32, room: f32) -> String {
     if measure(content, size) <= room {
         return content.to_string();

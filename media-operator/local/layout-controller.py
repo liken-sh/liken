@@ -1,4 +1,4 @@
-# The smallest thing that stands in for the display operator, for local/osd.
+# The smallest thing that stands in for the display operator, for local/video.
 #
 # liken-layout.so places nothing on its own: a surface stays invisible until
 # a controller states a rectangle for it. On a cluster that controller is the
@@ -81,7 +81,7 @@ def connect():
 def main():
     connection = connect()
     controller = Controller(connection)
-    controller.send("hello local-osd 1")
+    controller.send("hello local-video 1")
 
     buffered = b""
     while True:

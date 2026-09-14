@@ -1,6 +1,5 @@
-//! The paths the display draws. Each one is placed at its own top-left, the
-//! way the Lua display places a shape with `\an7` and `\pos`, so the numbers
-//! here are the shape's own local box offset to where it stands.
+//! The paths the display draws. Each one is placed at its own top-left, so
+//! the numbers here are the shape's own local box offset to where it stands.
 
 use iced::widget::canvas::Path;
 use iced::{Point, Rectangle, Size};
@@ -11,8 +10,8 @@ const HEXAGON_HALF_WIDTH: f32 = 0.866_025_4;
 /// One rounded rectangle. A radius wider than half the shape has no meaning,
 /// so a bar with a few pixels of fill rounds by what it has.
 // Each corner is a cubic Bezier whose two control points are the corner
-// point itself. That is the curve the Lua's own path states, and it runs
-// tighter than a circular arc, so the corners keep their shape.
+// point itself. That curve runs tighter than a circular arc, so the corners
+// keep their shape.
 pub fn rounded(shape: Rectangle, radius: f32) -> Path {
     let r = radius.min(shape.width / 2.0).min(shape.height / 2.0);
     let (x, y, w, h) = (shape.x, shape.y, shape.width, shape.height);

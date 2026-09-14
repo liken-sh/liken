@@ -23,11 +23,13 @@ path = "src/main.rs"
 # The target is a Wayland kiosk, so the toolkit builds with Wayland alone
 # and neither X11 nor the software renderer enters the build.
 #
-# `web-colors` is what makes this client blend the way libass blends.
-# Without it `iced_wgpu` converts every colour to linear light before the
-# shader sees it, and the blend runs in linear light. libass composites
-# on the encoded sRGB values, so the scrim at its edge alpha over black
-# reads one value in libass and another in linear light.
+# Without `web-colors` `iced_wgpu` converts every colour to linear light
+# before the shader sees it, and the blend runs in linear light.
+# The theme states every color and alpha as encoded sRGB, and every
+# scrim, dim, and panel was judged by eye against a blend on those
+# values. A blend in linear light reads every translucent surface
+# lighter or darker than the value the theme names, so the colors reach
+# the shader as they were written.
 #
 # crisp is on because the display snaps every value that moves with the
 # position to a whole output pixel, and this feature makes the toolkit do

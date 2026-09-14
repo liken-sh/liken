@@ -40,10 +40,9 @@ const (
 	// nothing.
 	sidecarImageVariable = "SIDECAR_IMAGE"
 
-	// OSD_IMAGE names the image the display container runs under the
-	// iced value. Like the other companions it derives from the
-	// operator's own image at the same tag, and this variable overrides
-	// that derivation.
+	// OSD_IMAGE names the image the display container runs. Like the
+	// other companions it derives from the operator's own image at the
+	// same tag, and this variable overrides that derivation.
 	osdImageVariable = "OSD_IMAGE"
 
 	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
@@ -134,13 +133,8 @@ type operator struct {
 	// every playback pod it creates, so `kubectl set env` on the
 	// Deployment turns mpv's full output on for the pods that follow.
 	playerVerbose string
-	// display is MEDIA_DISPLAY from the operator's own environment: the
-	// display the pods this operator creates run. A running pod keeps
-	// the shape it was created with, so a change reaches the pods that
-	// follow, not the film that plays now.
-	display string
-	bus     *Bus
-	reports *reports
+	bus           *Bus
+	reports       *reports
 	// focus is the desk for the retained focus mark, built on the same
 	// wake as the report desk: a cycle request on the bus wakes the pass
 	// that arbitrates it.
@@ -277,13 +271,6 @@ func operate() {
 	// playback pod's mpv is quiet; set, it reaches the pods this operator
 	// creates from now on.
 	playerVerbose := os.Getenv(playerVerboseVariable)
-	// The display switch is read once. Any value but iced reads as lua,
-	// so an unset or misspelled value keeps the display the cluster has
-	// rather than starting pods with no display at all.
-	display := os.Getenv(displayVariable)
-	if display != displayIced {
-		display = displayLua
-	}
 	metricsAddress := os.Getenv(metricsAddressVariable)
 
 	client, err := InClusterClient()
@@ -323,7 +310,6 @@ func operate() {
 		topicBase:        topicBase,
 		idleDisplayClass: idleDisplayClass,
 		playerVerbose:    playerVerbose,
-		display:          display,
 		reports:          desk,
 		focus:            focusDesk,
 		peripherals:      newPeripheralDesk(),
@@ -1376,7 +1362,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		return nil, false, err
 	}
 	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.osdImage,
-		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose, o.display)
+		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)
 	if !claimChanged && sameRemoteSet(running, desired) {
 		return running, false, nil
 	}
@@ -1446,7 +1432,7 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.osdImage,
-		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose, o.display))
+		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

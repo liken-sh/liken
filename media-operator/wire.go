@@ -74,19 +74,6 @@ const (
 	// whole switch.
 	playerVerboseVariable = "MEDIA_PLAYER_VERBOSE"
 
-	// MEDIA_DISPLAY picks which display a playback pod runs. Under lua,
-	// mpv loads the display script and the pod is the player and the
-	// command sidecar. Under iced, mpv loads no script, and a third
-	// container draws the display on its own surface above mpv's.
-	displayVariable = "MEDIA_DISPLAY"
-
-	// The two values. lua draws with libass inside mpv, and iced draws
-	// with the toolkit in its own process. lua is the default until the
-	// port reaches parity, so a Deployment that states nothing keeps the
-	// display it has.
-	displayLua  = "lua"
-	displayIced = "iced"
-
 	// TZ is the standard name, not a MEDIA_ variable. The playback pod
 	// and the idle pod both set it, and each clock reads it against its
 	// own image's tz database to show the household's wall-clock zone.

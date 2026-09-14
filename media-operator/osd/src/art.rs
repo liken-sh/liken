@@ -196,9 +196,8 @@ pub struct Art {
     /// The offer's art reference while an offer with a picture stands, so an
     /// answer for an offer that no longer stands is dropped.
     offer: Option<String>,
-    // The canvas the last requests were sized for. The Lua read
-    // osd-dimensions; this client learns its own surface from the frame it
-    // draws.
+    // The canvas the last requests were sized for. This client learns its
+    // own surface from the frame it draws.
     canvas: Option<Canvas>,
     /// How many items have played. Each decode carries the count it was asked
     /// under, so an answer the item swap outran lands on nothing.
@@ -262,8 +261,7 @@ impl Art {
         self.canvas = Some(*canvas);
     }
 
-    /// The frame's own turn: ask for what this state needs, the way the Lua
-    /// runs its four syncs at the top of a redraw.
+    /// The frame's own turn: ask for what this state needs.
     ///
     /// `preview` carries the target time while a fine scan is in flight for an
     /// item that declares trickplay, and nothing at every other moment.

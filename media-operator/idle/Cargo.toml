@@ -40,13 +40,13 @@ measure = ["dep:image"]
 iced_winit = { version = "=0.14.0", default-features = false, features = [
     "wayland",
 ] }
-# `web-colors` is what makes this client blend the way libass blends. Without
-# it `iced_wgpu` converts every colour to linear light before the shader sees
-# it, and the blend runs in linear light. libass composites on the encoded sRGB
-# values, so a name at the display's dim alpha over black reads 79 of 255 in
-# libass and 143 of 255 in linear light. With the feature on, the colours reach
-# the shader as they were written, and `graphics::open` takes a surface format
-# that stores them unconverted.
+# The brand states every color and alpha as encoded sRGB, and every
+# translucent surface was judged by eye against a blend on those values,
+# so the blend runs on them and not in linear light.
+# Without `web-colors`, `iced_wgpu` converts every colour to linear light
+# before the shader sees it, and the blend runs in linear light. With the
+# feature on, the colours reach the shader as they were written, and
+# `graphics::open` takes a surface format that stores them unconverted.
 iced_wgpu = { version = "=0.14.0", features = [
     "geometry",
     "image",

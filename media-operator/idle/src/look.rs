@@ -55,10 +55,9 @@ pub const fn faded(color: Color, alpha: f32) -> Color {
 // inside where it belongs.
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
-/// The canvas width for one surface size, rounded the way `display/theme.lua`
-/// rounds it. The surface can change size while the client runs, so every
-/// element measures against the screen that is there now rather than a width
-/// read once at startup.
+/// The canvas width for one surface size. The surface can change size while
+/// the client runs, so every element measures against the screen that is there
+/// now rather than a width read once at startup.
 pub fn canvas_width(surface: (u32, u32)) -> f32 {
     if surface.0 == 0 || surface.1 == 0 {
         return CANVAS_HEIGHT * 16.0 / 9.0;
@@ -82,15 +81,13 @@ pub const MARGIN_Y: f32 = 90.0;
 // libass scales a face so that its bounding height fills the size an ASS
 // `\fs` states, so one `\fs` number states two measures: the line box the
 // text draws in, in canvas pixels, and the type size, which is that box
-// divided by this metric. A layout measure `display/theme.lua` writes in
-// `\fs` units is a canvas measure here and passes through unchanged; only
-// a type size goes through the metric.
+// divided by this metric. A layout measure in `\fs` units is a canvas
+// measure here and passes through unchanged. Only a type size goes through
+// the metric.
 const FACE_METRIC: f32 = 1326.0 / 1000.0;
 
 /// The line box one type size draws in, in canvas pixels. A line's anchor falls
-/// on that box in both renderers, so a line placed by its top or its bottom
-/// puts its baseline where libass puts it. It is also the `\fs` number
-/// `display/theme.lua` states the size as.
+/// on that box. It is also the `\fs` number that states the size.
 pub const fn line_box(size: f32) -> f32 {
     size * FACE_METRIC
 }
@@ -102,36 +99,31 @@ pub const fn type_size(height: f32) -> f32 {
 }
 
 // The type scale, in canvas pixels. The sizes are large enough to read from a
-// couch at 1080. They are `display/theme.lua`'s `\fs40`, `\fs34`, and `\fs28`
-// through `type_size`, each rounded to a whole pixel.
+// couch at 1080. They are `\fs40`, `\fs34`, and `\fs28` through `type_size`,
+// each rounded to a whole pixel.
 pub const LABEL: f32 = 30.0;
 pub const SMALL: f32 = 26.0;
 pub const TINY: f32 = 21.0;
 
-/// The small size's line box, `theme.lua`'s `\fs34`, as the canvas measure
-/// every layout built on that box reads. It is stated, not read back
-/// through `line_box(SMALL)`, because the type size is rounded to a whole
-/// pixel and its box is then up to half a metric off the number the Lua
-/// states.
+/// The small size's line box, `\fs34`, as the canvas measure every layout
+/// built on that box reads. It is stated, not read back through
+/// `line_box(SMALL)`, because the type size is rounded to a whole pixel and
+/// its box is then up to half a metric off the `\fs34`.
 pub const SMALL_BOX: f32 = 34.0;
 
 /// The drop from one line of the top-right column to the next: one line box of
-/// the small size, and 12 canvas pixels of air. It is `theme.lua`'s
-/// `theme.type.small + 12`, where the `\fs` is the line box and the 12 is
-/// canvas pixels. The clock hangs at the top margin, the activity line one
-/// pitch under it, and the volume row one pitch under that, so the three read
-/// as a column and no two of them touch.
+/// the small size, and 12 canvas pixels of air. The clock hangs at the top
+/// margin, the activity line one pitch under it, and the volume row one pitch
+/// under that, so the three read as a column and no two of them touch.
 pub const LINE_PITCH: f32 = SMALL_BOX + 12.0;
 
-/// The one family the whole display draws in, the family
-/// `display/theme.lua` names for the playback overlay. It comes from the
-/// brand crate, which carries the two files and loads them into the toolkit
-/// before the first frame, so this screen and every other liken display
-/// draw one face.
+/// The one family the whole display draws in. It comes from the brand crate,
+/// which carries the two files and loads them into the toolkit before the
+/// first frame, so this screen and every other liken display draw one face.
 pub use liken_iced::font::FAMILY as FONT;
 
-/// Where a line's position falls on the line, in the ASS anchors
-/// `display/theme.lua` states. The display draws with three of the nine.
+/// Where a line's position falls on the line, in ASS anchors. The display
+/// draws with three of the nine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Anchor {
     /// `\an1`. The identity block stacks upward from the bottom margin, so
@@ -144,9 +136,8 @@ pub enum Anchor {
     TopRight,
 }
 
-/// One line of text, the way `display/theme.lua`'s `theme.text` states one:
-/// an anchor, a position in canvas units, a size from the type scale, and a
-/// colour.
+/// One line of text: an anchor, a position in canvas units, a size from the
+/// type scale, and a colour.
 pub fn line(content: String, at: Point, anchor: Anchor, size: f32, color: Color) -> Text {
     Text {
         content,
@@ -189,22 +180,20 @@ pub fn rounded(shape: Rectangle, radius: f32) -> Path {
 /// quads then meshes then images then text, and a canvas frame is one layer,
 /// so a rectangle drawn last still lands under every line of text. Over the
 /// black ground this display fills, an alpha scaled by `light` composites to
-/// the pixels a black cover would give. `display/theme.lua` fades its whole
-/// overlay the same way, through `theme.fade`.
+/// the pixels a black cover would give.
 pub const fn under(color: Color, light: f32) -> Color {
     faded(color, color.a * light)
 }
 
 /// A part of the screen far enough under full brightness that a glance tells
-/// it from the rest, and bright enough to read. `display/theme.lua` states it
-/// as the ASS alpha byte 0xA8, which leaves 87 of the 255 steps of light.
+/// it from the rest, and bright enough to read. It is the ASS alpha byte 0xA8,
+/// which leaves 87 of the 255 steps of light.
 pub const DIM: f32 = 87.0 / 255.0;
-/// A bar's track, under the fill that reads against it. `theme.lua` states it
-/// as the ASS alpha byte 0x50.
+/// A bar's track, under the fill that reads against it. It is the ASS alpha
+/// byte 0x50.
 pub const TRACK_OPACITY: f32 = 175.0 / 255.0;
 /// The dark surface an element carries when it draws over a frame with no
-/// scrim under it. `theme.lua` states it as `scrim_edge_alpha`, the ASS alpha
-/// byte 0x34.
+/// scrim under it. It is the ASS alpha byte 0x34.
 pub const SURFACE: f32 = 203.0 / 255.0;
 
 #[cfg(test)]
@@ -249,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn the_type_scale_is_the_lua_scale_through_the_face_metric() {
+    fn the_type_scale_is_the_ass_scale_through_the_face_metric() {
         assert_eq!(LABEL, type_size(40.0).round());
         assert_eq!(SMALL, type_size(34.0).round());
         assert_eq!(TINY, type_size(28.0).round());
@@ -257,9 +246,9 @@ mod tests {
 
     #[test]
     fn a_size_and_its_line_box_are_the_two_readings_of_one_ass_size() {
-        // `theme.lua` states the small size as `\fs34`, so the line box the
-        // small size draws in is 34 canvas pixels. The size is rounded to a
-        // whole pixel, so its box lands within half a metric of that number.
+        // The small size is `\fs34`, so the line box the small size draws in
+        // is 34 canvas pixels. The size is rounded to a whole pixel, so its
+        // box lands within half a metric of that number.
         let box_ = line_box(SMALL);
 
         assert!((box_ - 34.0).abs() < FACE_METRIC / 2.0, "{box_}");

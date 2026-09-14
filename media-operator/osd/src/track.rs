@@ -4,8 +4,7 @@
 //!
 //! The audio control, the subtitle control, and the video control differ in
 //! the list they filter, the word their cell reads, and the property a select
-//! writes. Everything else they share, so they are one type here and three
-//! files in the Lua display.
+//! writes. Everything else they share, so they are one type here.
 
 use serde_json::json;
 

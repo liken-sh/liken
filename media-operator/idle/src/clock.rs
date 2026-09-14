@@ -26,8 +26,7 @@ pub fn now() -> Time {
 
 impl Time {
     /// A twelve-hour clock with no leading zero and a lowercase suffix, as in
-    /// "3:01 pm". It is what `display/clock.lua` draws, so the two screens read
-    /// the same at the same minute.
+    /// "3:01 pm".
     pub fn twelve_hour(self) -> String {
         let suffix = if self.hour < 12 { "am" } else { "pm" };
         let twelve = match self.hour % 12 {
