@@ -61,6 +61,18 @@ jiff = { version = "=0.2.35", default-features = false, features = [
     "tz-system",
     "tzdb-zoneinfo",
 ] }
+# image decodes the logo, the cover, and the trickplay sheets, which are
+# PNG and JPEG on the volumes, so no other decoder builds. The library's
+# browser decodes the same two formats with the same crate, so a picture
+# reads the same on both screens.
+image = { version = "=0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
+# lofty reads the picture inside a music file's tags, which is the cover
+# tier between the block's own reference and a cover file beside the
+# track. It reads the ID3, MP4, FLAC, Vorbis, and APE families.
+lofty = "=0.25.2"
 serde_json = { workspace = true }
 # The display needs tokio for one unix socket, newline-delimited JSON, and
 # a reconnect loop with a timeout on every wait.
@@ -72,3 +84,7 @@ tokio = { version = "=1.48.0", default-features = false, features = [
     "sync",
     "time",
 ] }
+# ureq fetches an https logo. The library's browser reads its own streams
+# with the same crate; this one turns tls on, because a logo the Play
+# names is a URL on the internet, and leaves the rest of the defaults off.
+ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }

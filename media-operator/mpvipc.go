@@ -40,12 +40,6 @@ const (
 	audioLanguageProperty    = "current-tracks/audio/lang"
 	subtitleLanguageProperty = "current-tracks/sub/lang"
 
-	// The playlist is the one observed property no report carries. The
-	// bridge resolves each item's album art from it once, before the
-	// display asks for any of it. It is observed rather than asked for,
-	// because the supervisor observes properties and never polls.
-	playlistProperty = "playlist"
-
 	// The four properties plan 26's decode metrics read. None of them
 	// join a report: the command sidecar is the one process that holds
 	// mpv's socket, so these are its own Prometheus series and never
@@ -69,7 +63,6 @@ const (
 var observedProperties = []string{
 	"pause", "playlist-pos", "time-pos", "duration",
 	audioLanguageProperty, subtitleLanguageProperty,
-	playlistProperty,
 	codecProperty, hardwareProperty, droppedFramesProperty, delayProperty,
 }
 

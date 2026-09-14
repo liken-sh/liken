@@ -102,9 +102,9 @@ func buildPod(
 	// path whether or not this pod binds a remote. The mount list is
 	// built fresh rather than appended to resolved.Mounts, so the
 	// resolution's own slice is never written through.
-	mounts := make([]VolumeMount, 0, len(resolved.Mounts)+2)
+	mounts := make([]VolumeMount, 0, len(resolved.Mounts)+1)
 	mounts = append(mounts, resolved.Mounts...)
-	mounts = append(mounts, artMount(), ipcMount())
+	mounts = append(mounts, ipcMount())
 
 	blocks := presentationBlocks(play.Spec.Items, resolved.Logos, resolved.Trickplays, resolved.Arts)
 	next := nextBlock(play.Spec.Next, resolved.Next)
@@ -176,22 +176,23 @@ func buildPod(
 			ContainerClaim{Name: podClaimName, Request: request})
 	}
 
-	volumes := make([]Volume, 0, len(resolved.Volumes)+2)
+	volumes := make([]Volume, 0, len(resolved.Volumes)+1)
 	volumes = append(volumes, resolved.Volumes...)
-	volumes = append(volumes, artVolume(), Volume{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
+	volumes = append(volumes, Volume{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
 
 	// The pod's one sidecar is the command sidecar. It owns the mpv
 	// socket and reads every controller the unit names, and the operator
 	// reads its events-topic list back off the pod to tell whether a
 	// Player reshaped this pod.
 	initContainers := []Container{
-		commandSidecar(play, claim, blocks, next, resolved.Mounts, sidecarImage, busAddress, topicBase, remotes),
+		commandSidecar(play, claim, blocks, next, sidecarImage, busAddress, topicBase, remotes),
 	}
 	// The display container stands only under iced. The lua shape leaves
 	// the pod as it was, two containers, so the switch changes nothing
 	// for a cluster that has not moved.
 	if display == displayIced {
-		initContainers = append(initContainers, displaySidecar(claim, osdImage, prefs))
+		initContainers = append(initContainers,
+			displaySidecar(play, claim, resolved.Mounts, osdImage, prefs))
 	}
 
 	return &Pod{
@@ -268,20 +269,15 @@ func mpvVolumeOptions(volume *PlayVolume) []string {
 // volume, because it is the one container besides mpv that reaches the
 // socket.
 func commandSidecar(
-	play *Play, claim *ResourceClaim, blocks, next string, mediaMounts []VolumeMount,
+	play *Play, claim *ResourceClaim, blocks, next string,
 	sidecarImage, busAddress, topicBase string, remotes []boundRemote,
 ) Container {
-	interval := play.Spec.TrickplayInterval
-	if interval == "" {
-		interval = defaultTrickplayInterval
-	}
 	env := []EnvVar{
 		{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
 		{Name: playNameVariable, Value: play.Metadata.Name},
 		{Name: busAddressVariable, Value: busAddress},
 		{Name: topicBaseVariable, Value: topicBase},
 		{Name: presentationsVariable, Value: blocks},
-		{Name: trickplayIntervalVariable, Value: interval},
 	}
 	if next != "" {
 		env = append(env, EnvVar{Name: nextVariable, Value: next})
@@ -336,12 +332,10 @@ func commandSidecar(
 		Command: []string{"/media-operator", commandMode},
 		Env:     env,
 		Ports:   []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
-		// The command sidecar reads mpv's socket on the IPC volume and writes
-		// decoded art on the art volume, and mpv reads that art back through the
-		// same art volume. It also holds the player's media mounts, because the
-		// source art, a logo or a trickplay sheet, sits in the film's own folder
-		// and the sidecar opens it from there.
-		VolumeMounts:  append([]VolumeMount{ipcMount(), artMount()}, mediaMounts...),
+		// The command sidecar reads mpv's socket on the IPC volume, which is
+		// the one volume it needs: it drives mpv and reports the run, and it
+		// opens no media of its own.
+		VolumeMounts:  []VolumeMount{ipcMount()},
 		RestartPolicy: sidecarRestartPolicy,
 	}
 }
@@ -355,14 +349,25 @@ func commandSidecar(
 // mpv's. It holds every request the player container holds, because it
 // needs the same screen to open a surface on and the same render device
 // to draw with. It mounts the IPC volume to read mpv and the sidecar's
-// messages, and the art volume to read the bitmaps the sidecar serves.
-func displaySidecar(claim *ResourceClaim, osdImage string, prefs resolvedPreferences) Container {
+// messages, and the player's media mounts, because it decodes its own art
+// and a logo, a cover, and a trickplay sheet sit in the film's own folder.
+// The mounts are the resolution's own, which are read-only, and a logo the
+// Play names by https URL is a fetch the pod's network already allows.
+func displaySidecar(
+	play *Play, claim *ResourceClaim, mediaMounts []VolumeMount,
+	osdImage string, prefs resolvedPreferences,
+) Container {
+	interval := play.Spec.TrickplayInterval
+	if interval == "" {
+		interval = defaultTrickplayInterval
+	}
 	container := Container{
 		Name: osdContainer,
 		// The image's entrypoint is the whole of how the display
 		// starts, so the container names no command.
 		Image:         osdImage,
-		VolumeMounts:  []VolumeMount{ipcMount(), artMount()},
+		Env:           []EnvVar{{Name: trickplayIntervalVariable, Value: interval}},
+		VolumeMounts:  append([]VolumeMount{ipcMount()}, mediaMounts...),
 		RestartPolicy: sidecarRestartPolicy,
 	}
 	// The display clock reads TZ against the image's tz database. Set it only
@@ -384,9 +389,9 @@ func displaySidecar(claim *ResourceClaim, osdImage string, prefs resolvedPrefere
 // with no presentation becomes an empty object, so every position has a
 // definite value the sidecar forwards as it is.
 //
-// Each block carries the resolved logo for its item, so the bridge reads an
-// nfs or claim logo by an in-pod path and mpv fetches an https logo by its
-// URL. The cover art resolves the same way.
+// Each block carries the resolved logo for its item, so the display reads an
+// nfs or claim logo by an in-pod path and fetches an https logo by its URL.
+// The cover art resolves the same way.
 func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) string {
 	blocks := make([]json.RawMessage, len(items))
 	for index, item := range items {
@@ -437,17 +442,6 @@ func nextBlock(next *PlayNext, art string) string {
 
 func ipcMount() VolumeMount {
 	return VolumeMount{Name: ipcVolumeName, MountPath: ipcMountPath}
-}
-
-func artMount() VolumeMount {
-	return VolumeMount{Name: artVolumeName, MountPath: artMountPath}
-}
-
-// artVolume is disk-backed, not memory, so a decoded logo never counts against
-// the pod's memory. Its sizeLimit caps it, because the bridge writes into it
-// and a runaway decode must not fill the node disk.
-func artVolume() Volume {
-	return Volume{Name: artVolumeName, EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}}
 }
 
 // sameRemoteSet reports whether two pods carry the same controllers,

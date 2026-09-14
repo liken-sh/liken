@@ -56,6 +56,10 @@ pub struct Film {
     pub tracks: Vec<Track>,
     pub metadata: Vec<(String, String)>,
     pub media_title: Option<String>,
+    /// The file mpv plays, as the playlist named it. The music cover reads the
+    /// picture inside it, or a cover file beside it, when the item's block
+    /// states none.
+    pub path: Option<String>,
     pub playlist_pos: Option<i64>,
     pub playlist_count: Option<i64>,
     pub paused: bool,
@@ -76,6 +80,7 @@ impl Film {
             "metadata" => self.metadata = pairs(value),
             "track-list" => self.tracks = tracks(value),
             "media-title" => self.media_title = text(value),
+            "path" => self.path = text(value),
             "playlist-pos" => self.playlist_pos = value.as_i64(),
             "playlist-count" => self.playlist_count = value.as_i64(),
             "pause" => self.paused = value.as_bool().unwrap_or(false),

@@ -12,7 +12,7 @@ use iced::{Color, Element, Length, Rectangle, Renderer, Size, Subscription, Task
 use jiff::Zoned;
 use tokio::sync::broadcast;
 
-use crate::art::{self, Art};
+use crate::art::{self, Answer, Art, Job};
 use crate::canvas::{Brush, Canvas, Scrim};
 use crate::film::Film;
 use crate::focus::{Focus, Hide, Parts, Stop};
@@ -48,6 +48,8 @@ pub enum Message {
     HideCard(u64),
     /// The volume row's own window ran out.
     HideRow(u64),
+    /// One decode came back from the blocking pool.
+    Art(Answer),
 }
 
 /// One hide window: how many have been armed, and which one stands. A window a
@@ -159,14 +161,13 @@ impl Display {
         }
     }
 
-    /// One message, and then the art bridge's own turn, which asks for what
-    /// the state it leaves behind needs, the way the Lua runs its four syncs at
-    /// the top of a redraw.
+    /// One message, and then the art's own turn, which asks for what the state
+    /// it leaves behind needs, the way the Lua runs its four syncs at the top
+    /// of a redraw.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
-        let commands = self.sync_art();
-        self.send(commands);
-        task
+        let jobs = self.sync_art();
+        Task::batch([task, decode(jobs)])
     }
 
     fn step(&mut self, message: Message) -> Task<Message> {
@@ -202,6 +203,13 @@ impl Display {
                 }
             }
             Message::Hide(_) => {}
+            Message::Art(answer) => {
+                let (changed, jobs) = self.art.on_answer(answer, self.now());
+                if changed {
+                    self.redraw();
+                }
+                return decode(jobs);
+            }
         }
         Task::none()
     }
@@ -241,21 +249,13 @@ impl Display {
         } else if word == ipc::PRESENTATION {
             self.presentation
                 .receive(words.get(1).map_or("", String::as_str));
-            // A new block is a new item. The art bridge drops the previous
-            // item's pictures and asks for the new item's logo.
-            let commands = self.art.on_item(&self.presentation, &self.canvas.get());
-            self.send(commands);
+            // A new block is a new item. It drops the previous item's
+            // pictures, and the turn that follows decodes the new item's logo.
+            self.art.on_item(&self.presentation, &self.canvas.get());
         } else if word == ipc::NEXT {
             self.upnext.receive(words.get(1).map_or("", String::as_str));
         } else if word == ipc::VOLUME_CHANGED {
             self.volume.show();
-        } else if word == art::REPLY {
-            let (changed, commands) = self.art.on_reply(words, self.now());
-            self.send(commands);
-            if changed {
-                self.redraw();
-            }
-            return Task::none();
         } else {
             return Task::none();
         }
@@ -329,15 +329,17 @@ impl Display {
         Task::none()
     }
 
-    /// What the art bridge needs to know for this state: the surface the
-    /// compositor configured, the item, and the scan in flight.
-    fn sync_art(&mut self) -> Vec<Command> {
+    /// What the decode needs to know for this state: the surface the compositor
+    /// configured, the item, the file mpv plays, and the scan in flight.
+    fn sync_art(&mut self) -> Vec<Job> {
         let (canvas, preview, now) = (self.canvas.get(), self.previewing(), self.now());
+        let offer = self.upnext.art().map(str::to_string);
         self.art.sync(
             &self.presentation,
+            &self.film,
             &canvas,
             preview,
-            self.upnext.offers_art(),
+            offer.as_deref(),
             now,
         )
     }
@@ -349,8 +351,8 @@ impl Display {
         }
     }
 
-    /// The monotonic second the art bridge's own gate reads, which the wall
-    /// clock cannot give.
+    /// The monotonic second the tile's own gate reads, which the wall clock
+    /// cannot give.
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64()
     }
@@ -428,9 +430,12 @@ impl Display {
     fn paint_below(&self, brush: &mut Brush<'_>, now: &Zoned) {
         let canvas = brush.canvas();
         // The cover does not track the OSD, because a music screen with the OSD
-        // down would otherwise be a black frame.
+        // down would otherwise be a black frame. Every other picture rises and
+        // falls with the layer; this one holds the frame at full strength.
         if let Some(cover) = self.art.cover() {
-            cover.draw(brush, art::cover_at(&canvas, cover));
+            brush.at_fade(1.0, |brush| {
+                cover.draw(brush, art::cover_at(&canvas, cover));
+            });
         }
         if brush.fade() <= 0.0 {
             return;
@@ -576,8 +581,26 @@ impl Display {
     }
 }
 
+// The decode runs on tokio's blocking pool. A file read, an https fetch,
+// and a sprite-sheet decode are all blocking work that must never run
+// inside a frame. A task that never finishes drops its answer, and the
+// tile's deadline reopens the gate.
+// https fetch, and a sprite-sheet decode are all blocking work that must never
+// run inside a frame; a task that never finishes drops its answer and the
+// tile's deadline reopens the gate.
+fn decode(jobs: Vec<Job>) -> Task<Message> {
+    Task::batch(jobs.into_iter().map(|job| {
+        Task::future(async move { tokio::task::spawn_blocking(move || job.run()).await }).then(
+            |answer| match answer {
+                Ok(answer) => Task::done(Message::Art(answer)),
+                Err(_) => Task::none(),
+            },
+        )
+    }))
+}
+
 // The two halves meet here. The card states its seam in canvas units and
-// the bridge holds its pictures in real pixels, so this carries the canvas
+// the display holds its pictures in real pixels, so this carries the canvas
 // the frame draws on and converts between the two.
 struct Bridge<'a> {
     art: &'a Art,
@@ -1021,85 +1044,118 @@ mod tests {
         ]))
     }
 
-    /// One reply the bridge sends, over a file it could have written.
-    fn art_reply(kind: &str, width: u32, height: u32) -> Message {
-        let path = std::env::temp_dir().join(format!("media-osd-window-{kind}.bgra"));
-        std::fs::write(&path, vec![255; (width * height * 4) as usize]).expect("a file to read");
-        Message::Mpv(ipc::Event::Message(
-            [
-                art::REPLY,
-                kind,
-                &path.to_string_lossy(),
-                &width.to_string(),
-                &height.to_string(),
-                &(width * 4).to_string(),
-            ]
-            .iter()
-            .map(|word| word.to_string())
-            .collect(),
+    /// One picture on disk, of the size a decode reads back.
+    fn picture(name: &str, width: u32, height: u32) -> String {
+        let path = std::env::temp_dir().join(format!("media-osd-window-{name}.png"));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            width,
+            height,
+            image::Rgba([255, 255, 255, 255]),
         ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("a picture the display can decode");
+        std::fs::write(&path, bytes).expect("a file to read");
+        path.to_string_lossy().to_string()
     }
 
-    /// A new item asks the bridge for the logo it declares, and the reply the
-    /// bridge sends back clears the header's second line.
-    #[tokio::test]
-    async fn an_item_asks_for_its_logo_and_the_reply_moves_the_second_line() {
-        let (mut display, mut commands) = display();
-        let _ = display.update(present(r#"{"title":"A Film","logo":"/art/logo.png"}"#));
-        assert_eq!(
-            sent(&mut commands),
-            vec![concat!(
-                r#"{"command":["script-message","liken-art-request","logo","760","110"],"#,
-                r#""request_id":0}"#
-            )]
-        );
-
-        let _ = display.update(art_reply("logo", 400, 64));
-        let logo = display.art.logo().expect("the reply carries a picture");
-        assert_eq!(logo.canvas_height(&display.canvas.get()), 64.0);
-        assert!(sent(&mut commands).is_empty());
+    /// One message, and the decodes the state it leaves behind asks for. The
+    /// frame loop hands these to the blocking pool; a test runs them itself.
+    fn asks(display: &mut Display, message: Message) -> Vec<Job> {
+        let _ = display.step(message);
+        display.sync_art()
     }
 
-    /// A music item asks for its cover, and holds it whether or not the OSD is
-    /// up.
+    /// One decode run the way the pool runs it, with its answer taken back
+    /// into the display and the decode it may start in turn.
+    fn answer(display: &mut Display, job: Job) -> Vec<Job> {
+        let now = display.now();
+        let (changed, more) = display.art.on_answer(job.run(), now);
+        if changed {
+            display.redraw();
+        }
+        more
+    }
+
+    /// A new item decodes the logo it declares, and the answer clears the
+    /// header's second line.
     #[tokio::test]
-    async fn a_music_item_asks_for_its_cover_and_holds_it() {
-        let (mut display, mut commands) = display();
-        let _ = display.update(present(r#"{"type":"music","title":"A Record"}"#));
+    async fn an_item_decodes_its_logo_and_the_answer_moves_the_second_line() {
+        let (mut display, _) = display();
+        let logo = picture("logo", 800, 128);
+        let jobs = asks(
+            &mut display,
+            present(&format!(r#"{{"title":"A Film","logo":"{logo}"}}"#)),
+        );
+        assert_eq!(jobs.len(), 1);
+
+        assert!(answer(&mut display, jobs.into_iter().next().unwrap()).is_empty());
+        let drawn = display.art.logo().expect("the answer carries a picture");
+        assert_eq!(drawn.canvas_height(&display.canvas.get()), 110.0);
+        // The box is asked for once per item, and a new item asks again.
+        assert!(asks(&mut display, property("time-pos", json!(12.0))).is_empty());
         assert_eq!(
-            sent(&mut commands),
-            vec![concat!(
-                r#"{"command":["script-message","liken-art-request","album","1728","532"],"#,
-                r#""request_id":0}"#
-            )]
+            asks(&mut display, present(&format!(r#"{{"logo":"{logo}"}}"#))).len(),
+            1
+        );
+    }
+
+    /// A music item whose block names no cover waits for the file mpv plays,
+    /// because an answer of no cover would end the asking for the whole run.
+    /// One whose block names its cover decodes it at once, and holds it
+    /// whether or not the OSD is up.
+    #[tokio::test]
+    async fn a_music_item_decodes_its_cover_and_holds_it() {
+        let (mut display, _) = display();
+        assert!(
+            asks(
+                &mut display,
+                present(r#"{"type":"music","title":"A Record"}"#)
+            )
+            .is_empty()
         );
 
-        let _ = display.update(art_reply("album", 532, 532));
+        let jobs = asks(&mut display, property("path", json!("/media/track.flac")));
+        assert_eq!(jobs.len(), 1);
+        assert!(answer(&mut display, jobs.into_iter().next().unwrap()).is_empty());
+        assert!(display.art.cover().is_none());
+        // The box is answered, so the asking ends there.
+        assert!(asks(&mut display, property("time-pos", json!(12.0))).is_empty());
+
+        let cover = picture("cover", 532, 532);
+        let jobs = asks(
+            &mut display,
+            present(&format!(r#"{{"type":"music","art":"{cover}"}}"#)),
+        );
+        assert_eq!(jobs.len(), 1);
+        let _ = answer(&mut display, jobs.into_iter().next().unwrap());
         assert!(display.art.cover().is_some());
         assert!(!display.focus.visible());
     }
 
-    /// The tile is asked for only while a fine scan is in flight for an item
+    /// The tile is decoded only while a fine scan is in flight for an item
     /// that declares trickplay.
     #[tokio::test]
-    async fn only_a_scan_on_a_trickplay_item_asks_for_a_tile() {
-        let (mut display, mut commands) = display();
-        let _ = display.update(present(r#"{"title":"A Film"}"#));
-        let _ = display.update(message("summon"));
-        let _ = display.update(message("right"));
+    async fn only_a_scan_on_a_trickplay_item_decodes_a_tile() {
+        let (mut display, _) = display();
+        let _ = asks(&mut display, present(r#"{"title":"A Film"}"#));
+        let _ = asks(&mut display, message("summon"));
+        assert!(asks(&mut display, message("right")).is_empty());
         assert!(display.previewing().is_none());
-        assert!(sent(&mut commands).is_empty());
 
-        let _ = display.update(present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#));
-        let _ = display.update(message("right"));
-        assert!(display.previewing().is_some());
-        assert_eq!(
-            sent(&mut commands),
-            vec![concat!(
-                r#"{"command":["script-message","liken-art-request","trickplay","1205000","360","220"],"#,
-                r#""request_id":0}"#
-            )]
+        let jobs = asks(
+            &mut display,
+            present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#),
         );
+        assert!(display.previewing().is_some());
+        assert_eq!(jobs.len(), 1);
+        // The directory holds no sheet, so the tile answers nothing and the
+        // gate reopens.
+        assert!(answer(&mut display, jobs.into_iter().next().unwrap()).is_empty());
+        assert!(display.art.tile().is_none());
     }
 
     /// A chooser hides the logo and the tile, the way a hidden display does.
@@ -1292,40 +1348,39 @@ mod tests {
         assert!(!display.fading());
     }
 
-    const OFFER_WITH_ART: &str = r#"{"title":"E05 · The Long Tide",
-        "art":"/art/next.jpg"}"#;
-
-    #[tokio::test]
-    async fn an_offer_with_a_picture_asks_the_bridge_for_it() {
-        let (mut display, mut commands) = display();
-        let _ = display.update(block("next", OFFER));
-        assert!(!display.upnext.offers_art());
-        assert!(sent(&mut commands).is_empty());
-
-        let _ = display.update(block("next", OFFER_WITH_ART));
-        assert!(display.upnext.offers_art());
-        assert_eq!(
-            sent(&mut commands),
-            vec![concat!(
-                r#"{"command":["script-message","liken-art-request","next","440","248"],"#,
-                r#""request_id":0}"#
-            )]
-        );
+    /// One offer that carries a picture, 800 by 400, which the card's own box
+    /// is narrower than.
+    fn offer_with_art() -> String {
+        format!(
+            r#"{{"title":"E05 · The Long Tide","art":"{}"}}"#,
+            picture("next", 800, 400)
+        )
     }
 
-    /// The card asks the bridge for the offer's picture, and the bridge
-    /// answers with the size it draws at, in canvas units.
     #[tokio::test]
-    async fn the_bridge_answers_the_card_with_the_offers_picture() {
+    async fn an_offer_with_a_picture_decodes_it() {
+        let (mut display, _) = display();
+        assert!(asks(&mut display, block("next", OFFER)).is_empty());
+        assert_eq!(display.upnext.art(), None);
+
+        let jobs = asks(&mut display, block("next", &offer_with_art()));
+        assert!(display.upnext.art().is_some());
+        assert_eq!(jobs.len(), 1);
+    }
+
+    /// The card takes the offer's picture at the size it draws at, in canvas
+    /// units. The picture is wider than its box, so it comes back letterboxed.
+    #[tokio::test]
+    async fn the_card_takes_the_offers_picture_at_the_size_it_draws_at() {
         let (mut display, _) = display();
         let canvas = display.canvas.get();
         assert_eq!(upnext::Art::next(&display.bridge(&canvas)), None);
 
-        let _ = display.update(block("next", OFFER_WITH_ART));
-        let _ = display.update(art_reply("next", 400, 248));
+        let jobs = asks(&mut display, block("next", &offer_with_art()));
+        let _ = answer(&mut display, jobs.into_iter().next().unwrap());
         assert_eq!(
             upnext::Art::next(&display.bridge(&canvas)),
-            Some(Size::new(400.0, 248.0))
+            Some(Size::new(440.0, 220.0))
         );
     }
 

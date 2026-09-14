@@ -18,9 +18,9 @@
 // controllers' key events and the commands topic, and publishes the
 // report.
 //
-// As `serve-art` it is the command sidecar's decode side alone, run against a
-// plain mpv socket for local display work with no cluster and no bus. It runs
-// the same decode code the sidecar runs.
+// As `serve-blocks` it is the command sidecar's presentation side alone, run
+// against a plain mpv socket for local display work with no cluster and no
+// bus. It runs the same forwarding code the sidecar runs.
 //
 // The split is the trust boundary. The playback pod decodes media
 // pulled off the network, so it is the least trusted process in the
@@ -35,10 +35,10 @@ import "os"
 // into a container's command, over the image's entrypoint. The operator
 // itself runs with no argument.
 const (
-	playerMode   = "player"
-	remoteMode   = "remote"
-	commandMode  = "command"
-	artServeMode = "serve-art"
+	playerMode  = "player"
+	remoteMode  = "remote"
+	commandMode = "command"
+	blocksMode  = "serve-blocks"
 )
 
 func main() {
@@ -53,8 +53,8 @@ func main() {
 		case commandMode:
 			runCommand()
 			return
-		case artServeMode:
-			runArtServe()
+		case blocksMode:
+			runBlocksServe()
 			return
 		}
 	}

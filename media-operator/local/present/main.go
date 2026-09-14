@@ -2,8 +2,7 @@ package main
 
 // present is a workstation testing utility. It builds and runs on its own,
 // with `go run ./local/present`, and no part of it ships in the media-operator
-// binary. The local/video script runs it to build the block it hands to
-// serve-art.
+// binary. The local screens run it to build the block they hand the display.
 
 // present reads the NFO that sits beside a media file and prints the
 // presentation block the liken display expects. The block is one JSON object
@@ -11,7 +10,7 @@ package main
 // sibling <basename>.nfo with a <season> and an <episode>.
 //
 // When a logo art file or a trickplay directory sits beside the media, the
-// block carries its path, so the bridge decodes the art and crops the tiles.
+// block carries its path, so the display decodes the art and crops the tiles.
 //
 // The art does not need an NFO. With no NFO the block starts empty, and the
 // display falls back to mpv's own media-title for the name. The art fields are

@@ -256,20 +256,21 @@ impl<'a> Brush<'a> {
         self.shape(path, color, alpha);
     }
 
-    // One decoded picture over the ground it covers. The bridge decodes every
+    // One decoded picture over the ground it covers. The display decodes every
     // picture to the pixel size the screen takes, so it is drawn at its own
     // size with no filtering of its own and snapped to the pixel grid.
+    //
+    // The picture takes the brush's fade, the way every shape and every line
+    // does, so a logo, a tile, and the offer's art rise and fall with the rest
+    // of the layer instead of arriving at full strength over text that is
+    // still rising. The album cover is the one picture that holds the frame
+    // with the OSD down, and it draws at a fade of its own.
     //
     // A picture draws over every shape in its layer and under every line of
     // text, whatever order the calls come in, because the renderer draws one
     // layer in four passes: quads, then meshes, then images, then text.
     pub fn image(&mut self, bounds: Rectangle, handle: &Handle) {
-        self.frame.draw_image(
-            bounds,
-            Image::new(handle.clone())
-                .filter_method(FilterMethod::Nearest)
-                .snap(true),
-        );
+        self.frame.draw_image(bounds, picture(handle, self.fade));
     }
 
     /// One line of text. The scrim holds the contrast, so a line draws flat,
@@ -296,6 +297,14 @@ impl<'a> Brush<'a> {
             ..Text::default()
         });
     }
+}
+
+// One decoded picture as the toolkit draws it.
+fn picture(handle: &Handle, fade: f32) -> Image {
+    Image::new(handle.clone())
+        .filter_method(FilterMethod::Nearest)
+        .opacity(fade)
+        .snap(true)
 }
 
 /// Every panel rounds its corners by this radius and carries a border this
@@ -325,6 +334,20 @@ mod tests {
         assert!(measure("Off", 40.0) > 0.0);
         assert!(measure("English (EN)", 40.0) > measure("Off", 40.0));
         assert!(measure("Off", 64.0) > measure("Off", 40.0));
+    }
+
+    /// A picture takes the brush's own fade, so a logo, a tile, and the
+    /// offer's art rise and fall with the rest of the layer. It draws at its
+    /// own size, so it takes no filtering and snaps to the pixel grid.
+    #[test]
+    fn a_picture_takes_the_brushs_own_fade() {
+        let handle = Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+        for fade in [0.0, 0.35, 1.0] {
+            let drawn = picture(&handle, fade);
+            assert_eq!(drawn.opacity, fade);
+            assert_eq!(drawn.filter_method, FilterMethod::Nearest);
+            assert!(drawn.snap);
+        }
     }
 
     #[test]

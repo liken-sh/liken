@@ -248,13 +248,11 @@ func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testPlayerImage, testSidecarImage, testOSDImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "", displayLua)
 
 	volumes := append(append([]Volume{}, resolved.Volumes...),
-		Volume{Name: "art", EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}},
 		Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}})
 	if !reflect.DeepEqual(pod.Spec.Volumes, volumes) {
 		t.Errorf("volumes = %+v, want %+v", pod.Spec.Volumes, volumes)
 	}
 	mounts := append(append([]VolumeMount{}, resolved.Mounts...),
-		VolumeMount{Name: "art", MountPath: "/art"},
 		VolumeMount{Name: "ipc", MountPath: "/ipc"})
 	if got := pod.Spec.Containers[0].VolumeMounts; !reflect.DeepEqual(got, mounts) {
 		t.Errorf("volumeMounts = %+v, want %+v", got, mounts)
@@ -290,9 +288,9 @@ func TestBuildPodWithNoRemotesCarriesOnlyTheCommandSidecar(t *testing.T) {
 }
 
 // The command sidecar is the sidecar image in its command mode. It
-// holds no device claim, and it mounts the IPC socket, the art volume,
-// and the same media mounts the player holds, so it can open the source
-// art. It carries the play's identity, the bus, and the base.
+// holds no device claim, and it mounts the IPC socket alone, because it
+// drives mpv and opens no media of its own. It carries the play's
+// identity, the bus, and the base.
 func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	pod := testPod(t)
 
@@ -307,16 +305,14 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: busAddressVariable, Value: testBusAddress},
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: presentationsVariable, Value: "[{}]"},
-			{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
 			{Name: playerNameVariable, Value: "theater"},
 			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
 			{Name: playerVolumeOwnerTopicVariable, Value: playerVolumeOwnerTopic(testTopicBase, "house", "theater")},
 			{Name: metricsAddressVariable, Value: "0.0.0.0:9200"},
 			{Name: mediaVersionVariable, Value: "test"},
 		},
-		Ports: []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
-		VolumeMounts: append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
-			testResolution(t).Mounts...),
+		Ports:         []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
+		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
 		RestartPolicy: "Always",
 	}
 	if !reflect.DeepEqual(command, want) {
@@ -546,8 +542,8 @@ func TestBuildPodCarriesTheResolvedTimeZone(t *testing.T) {
 	}
 }
 
-// A run with no timezone carries no TZ variable, so an ordinary pod is
-// unchanged.
+// A run with no timezone carries no TZ variable, so an ordinary pod carries
+// the trickplay interval alone.
 func TestBuildPodWithNoTimeZoneCarriesNoTZ(t *testing.T) {
 	pod := testPod(t)
 	if got := envValue(pod.Spec.Containers[0], timeZoneVariable); got != "" {
@@ -632,13 +628,34 @@ func TestTheDisplayContainerHoldsThePlayersRequests(t *testing.T) {
 	mustMatchAll(t, display.Resources.Claims, pod.Spec.Containers[0].Resources.Claims)
 }
 
-func TestTheDisplayContainerMountsTheIPCAndArtVolumes(t *testing.T) {
+// The display container mounts the IPC socket and the same media mounts the
+// player holds, because it decodes its own art and a logo, a cover, and a
+// trickplay sheet sit in the film's own folder. The media mounts are
+// read-only, the way the resolution wrote them.
+func TestTheDisplayContainerMountsTheIPCVolumeAndTheMedia(t *testing.T) {
 	display := initContainer(t, icedPod(t, resolvedPreferences{}), osdContainer)
 
-	mustMatchAll(t, display.VolumeMounts, []VolumeMount{
-		{Name: "ipc", MountPath: "/ipc"},
-		{Name: "art", MountPath: "/art"},
-	})
+	mustMatchAll(t, display.VolumeMounts,
+		append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}}, testResolution(t).Mounts...))
+	for _, mount := range display.VolumeMounts[1:] {
+		mustMatch(t, mount.ReadOnly, true)
+	}
+}
+
+// The trickplay interval is the display's own now, because the display crops
+// the tile. A Play that states none takes Jellyfin's default.
+func TestTheDisplayContainerCarriesTheTrickplayInterval(t *testing.T) {
+	display := initContainer(t, icedPod(t, resolvedPreferences{}), osdContainer)
+	mustMatchAll(t, display.Env,
+		[]EnvVar{{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval}})
+
+	play := testPlay()
+	play.Spec.TrickplayInterval = "5s"
+	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
+		testPlayerImage, testSidecarImage, testOSDImage, testBusAddress, testTopicBase,
+		nil, resolvedPreferences{}, "", displayIced)
+	mustMatchAll(t, initContainer(t, pod, osdContainer).Env,
+		[]EnvVar{{Name: trickplayIntervalVariable, Value: "5s"}})
 }
 
 func TestBuildPodTellsThePlayerWhichDisplayDraws(t *testing.T) {
@@ -653,7 +670,10 @@ func TestTheDisplayContainerCarriesTheResolvedTimeZone(t *testing.T) {
 	pod := icedPod(t, resolvedPreferences{TimeZone: "America/New_York"})
 
 	display := initContainer(t, pod, osdContainer)
-	mustMatchAll(t, display.Env, []EnvVar{{Name: timeZoneVariable, Value: "America/New_York"}})
+	mustMatchAll(t, display.Env, []EnvVar{
+		{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
+		{Name: timeZoneVariable, Value: "America/New_York"},
+	})
 }
 
 // A run with no timezone carries no TZ variable, so an ordinary pod is
@@ -661,5 +681,6 @@ func TestTheDisplayContainerCarriesTheResolvedTimeZone(t *testing.T) {
 func TestTheDisplayContainerWithNoTimeZoneCarriesNoTZ(t *testing.T) {
 	display := initContainer(t, icedPod(t, resolvedPreferences{}), osdContainer)
 
-	mustMatchAll(t, display.Env, nil)
+	mustMatchAll(t, display.Env,
+		[]EnvVar{{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval}})
 }

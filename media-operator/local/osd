@@ -5,9 +5,9 @@
 # desktop, a stand-in for the display operator that places both surfaces, mpv
 # with no display script, and the display in a process of its own above it. It
 # binds the keyboard to the navigation actions the command bus carries, so a
-# key press drives the display by the path a remote does. It decodes the art
-# with the real Go bridge, so the window shows art decoded the way the pod
-# decodes it.
+# key press drives the display by the path a remote does. The display decodes
+# its own art, so the window shows the logo, the tile, the cover, and the
+# offer's art the way the pod draws them.
 #
 # It needs a media file, named on the command line. The repository names no
 # media of its own. It needs docker, because the compositor is an image, and a
@@ -66,8 +66,9 @@ root="$(cd "$here/.." && pwd)"
 BLOCK="$(go -C "$root" run ./local/present "$(realpath "$film")" || true)"
 [ -n "$BLOCK" ] || BLOCK="{}"
 
-# The bridge reads MEDIA_PRESENTATIONS as a JSON array, one block per playlist
-# item, so playlist position i indexes item i's block. A film is one item.
+# The block server reads MEDIA_PRESENTATIONS as a JSON array, one block per
+# playlist item, so playlist position i indexes item i's block. A film is one
+# item.
 PRESENTATIONS="[$BLOCK]"
 
 # One directory holds every socket: the nested compositor's, the layout
@@ -76,8 +77,6 @@ PRESENTATIONS="[$BLOCK]"
 SOCKETS="$(mktemp -d --tmpdir local-osd.XXXXXX)"
 chmod 0777 "$SOCKETS"
 SOCK="$SOCKETS/mpv.sock"
-ARTDIR="$SOCKETS/art"
-mkdir -p "$ARTDIR"
 CONF="$SOCKETS/input.conf"
 CONTAINER="local-osd-weston-$$"
 echo "local/osd: sockets and frames in $SOCKETS"
@@ -101,8 +100,8 @@ SPACE cycle pause
 q quit
 BINDINGS
 
-# Build what the run needs: the compositor image, the Go binary the bridge
-# runs as, and the display.
+# Build what the run needs: the compositor image, the Go binary the block
+# server runs as, and the display.
 docker build -q -t local-osd-weston:latest "$here/weston-nested" >/dev/null
 BIN="$SOCKETS/media-operator"
 go -C "$root" build -o "$BIN" .
@@ -201,18 +200,21 @@ if [ ! -S "$SOCK" ]; then
   exit 1
 fi
 
-# The bridge is the media-operator binary in serve-art mode. serve-art
-# forwards each item's presentation block to the display and answers every art
-# request with a real image decode, the same code the pod's command sidecar
-# runs.
-MEDIA_MPV_SOCKET="$SOCK" MEDIA_ART_DIR="$ARTDIR" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
-  MEDIA_TRICKPLAY_INTERVAL="${MEDIA_TRICKPLAY_INTERVAL:-}" \
-  "$BIN" serve-art >"$SOCKETS/serve.log" 2>&1 &
+# The block server is the media-operator binary in serve-blocks mode.
+# serve-blocks forwards each item's presentation block to the display, the same
+# code the pod's command sidecar runs.
+MEDIA_MPV_SOCKET="$SOCK" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  "$BIN" serve-blocks >"$SOCKETS/serve.log" 2>&1 &
 SERVE=$!
 
 # The display opens its window only after mpv reports a position, so its
-# surface arrives after the film's and the layout stacks it above.
+# surface arrives after the film's and the layout stacks it above. It decodes
+# its own art, so it reads the media the way the pod's display container does.
+# MEDIA_TRICKPLAY_INTERVAL sets the seconds one trickplay tile covers. The
+# display defaults it to 10s, Jellyfin's own default, so pass it through only
+# to try another value.
 MEDIA_MPV_SOCKET="$SOCK" XDG_RUNTIME_DIR="$SOCKETS" WAYLAND_DISPLAY=wayland-0 \
+  MEDIA_TRICKPLAY_INTERVAL="${MEDIA_TRICKPLAY_INTERVAL:-}" \
   "$OSD" >"$SOCKETS/osd.log" 2>&1 &
 DISPLAY_PID=$!
 

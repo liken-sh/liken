@@ -35,7 +35,7 @@ pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 /// An IPC client reads a property over the same socket it draws from, so
 /// the display holds every value it draws and asks for nothing inside a
 /// frame.
-pub const OBSERVED: [&str; 18] = [
+pub const OBSERVED: [&str; 19] = [
     "duration",
     "time-pos",
     "percent-pos",
@@ -46,6 +46,7 @@ pub const OBSERVED: [&str; 18] = [
     "track-list",
     "aid",
     "media-title",
+    "path",
     "sid",
     "playlist-pos",
     "playlist-count",

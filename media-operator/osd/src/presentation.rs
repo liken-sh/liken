@@ -105,18 +105,23 @@ impl Presentation {
         self.word("date")
     }
 
-    /// The logo is a resolved reference: an in-pod path the bridge reads, or an
-    /// https URL the bridge fetches. The header asks the bridge to decode it,
-    /// and the display never opens the file itself.
+    /// The logo is a resolved reference: an in-pod path on the media mount, or
+    /// an https URL. The header decodes it to the box it draws it in.
     pub fn logo(&self) -> Option<&str> {
         self.word("logo")
     }
 
-    /// The trickplay reference, the sprite-sheet directory the bridge crops
-    /// tiles from. The display never opens it, and nothing means the item shows
-    /// no thumbnail.
+    /// The trickplay reference, the sprite-sheet directory the scan crops tiles
+    /// from. Nothing means the item shows no thumbnail.
     pub fn trickplay(&self) -> Option<&str> {
         self.word("trickplay")
+    }
+
+    /// The cover reference, resolved the way the logo is. It is the first tier
+    /// of the art the music layout draws, and the picture inside the file and a
+    /// cover beside it follow.
+    pub fn art(&self) -> Option<&str> {
+        self.word("art")
     }
 
     fn field(&self, name: &str) -> Option<&Value> {
@@ -174,12 +179,14 @@ mod tests {
 
     #[test]
     fn an_empty_field_falls_through_to_the_tier_below() {
-        let presentation = block(r#"{"title":"","artist":"","album":"","logo":"","trickplay":""}"#);
+        let presentation =
+            block(r#"{"title":"","artist":"","album":"","logo":"","trickplay":"","art":""}"#);
         assert_eq!(presentation.title(&film()).as_deref(), Some("the-file.mkv"));
         assert_eq!(presentation.artist(&film()).as_deref(), Some("The Band"));
         assert_eq!(presentation.album(&film()).as_deref(), Some("The Record"));
         assert_eq!(presentation.logo(), None);
         assert_eq!(presentation.trickplay(), None);
+        assert_eq!(presentation.art(), None);
     }
 
     #[test]
@@ -192,7 +199,7 @@ mod tests {
         let presentation = block(
             r#"{"type":"series","hint":"series","series":"A Show","season":2,"episode":7,
                 "episodeTitle":"The One","date":"2017-03-05","year":2014,
-                "logo":"/art/logo.png","trickplay":"/art/tiles"}"#,
+                "logo":"/art/logo.png","trickplay":"/art/tiles","art":"/art/cover.jpg"}"#,
         );
         assert_eq!(presentation.kind(), Some("series"));
         assert_eq!(presentation.hint(), Some("series"));
@@ -204,6 +211,7 @@ mod tests {
         assert_eq!(presentation.year(), Some(&json!(2014)));
         assert_eq!(presentation.logo(), Some("/art/logo.png"));
         assert_eq!(presentation.trickplay(), Some("/art/tiles"));
+        assert_eq!(presentation.art(), Some("/art/cover.jpg"));
         assert!(!presentation.is_image());
         assert!(!presentation.is_music());
     }

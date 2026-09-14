@@ -3,8 +3,12 @@
 # scrubber and its key bindings can be seen and felt without a cluster. It
 # loads the same display script the player runs, and binds the keyboard to
 # the navigation actions the command bus carries, so a key press drives the
-# display by the path a remote does. It decodes the art with the real Go
-# bridge, so the window shows art decoded the way the pod decodes it.
+# display by the path a remote does.
+#
+# PROSE: this screen draws no art. The display script reads a bitmap through
+# mpv's overlay path, the sidecar half that produced those bitmaps is gone, and
+# plan 32's next step removes the script. local/osd is the screen that shows
+# art.
 #
 # It needs a media file, named on the command line. The repository names no
 # media of its own.
@@ -56,8 +60,9 @@ display_dir="$root/display"
 BLOCK="$(go -C "$root" run ./local/present "$(realpath "$film")" || true)"
 [ -n "$BLOCK" ] || BLOCK="{}"
 
-# The bridge reads MEDIA_PRESENTATIONS as a JSON array, one block per playlist
-# item, so playlist position i indexes item i's block. A film is one item.
+# The block server reads MEDIA_PRESENTATIONS as a JSON array, one block per
+# playlist item, so playlist position i indexes item i's block. A film is one
+# item.
 PRESENTATIONS="[$BLOCK]"
 
 # These bindings send the same script messages the translator sidecar
@@ -73,7 +78,7 @@ PRESENTATIONS="[$BLOCK]"
 # so mpv's built-in text never draws.
 CONF="$(mktemp --tmpdir local-video.XXXXXX.conf)"
 SOCK="$(mktemp -u --tmpdir local-video.XXXXXX.sock)"
-ARTDIR="$(mktemp -d --tmpdir local-video.XXXXXX.art)"
+LOGS="$(mktemp -d --tmpdir local-video.XXXXXX.logs)"
 cat >"$CONF" <<'BINDINGS'
 LEFT  repeatable script-message-to display left
 RIGHT repeatable script-message-to display right
@@ -92,8 +97,9 @@ BINDINGS
 # mpv scripts, so a personal on-screen controller does not draw over the
 # display. --osc=no turns off mpv's built-in controller for the same reason.
 # --volume-max=100 caps the level at unity, the same cap the bus clamps to on
-# a cluster. --input-ipc-server opens the socket the bridge dials, because a
-# local mpv serves its socket somewhere other than the pod's fixed path. The
+# a cluster. --input-ipc-server opens the socket the block server dials,
+# because a local mpv serves its socket somewhere other than the pod's fixed
+# path. The
 # workstation's mpv.conf still chooses the video output that renders here.
 MPV=(mpv --load-scripts=no --osc=no --start="$start" --volume-max=100
   --script="$display_dir"
@@ -102,8 +108,8 @@ MPV=(mpv --load-scripts=no --osc=no --start="$start" --volume-max=100
   "${passed[@]}"
   -- "$film")
 
-# The bridge is the media-operator binary in serve-art mode. Reuse a prebuilt
-# one, or build it from the checkout.
+# The block server is the media-operator binary in serve-blocks mode. Reuse a
+# prebuilt one, or build it from the checkout.
 BIN="${LIKEN_MEDIA_OPERATOR_BIN:-}"
 BUILT=0
 if [ -z "$BIN" ]; then
@@ -112,13 +118,13 @@ if [ -z "$BIN" ]; then
   BUILT=1
 fi
 
-# Clean up the temporary files, the decoded art, the bridge, and a built
-# binary on exit.
+# Clean up the temporary files, the logs, the block server, and a built binary
+# on exit.
 SERVE=
 cleanup() {
   [ -n "$SERVE" ] && kill "$SERVE" 2>/dev/null || true
   rm -f "$CONF" "$SOCK"
-  rm -rf "$ARTDIR"
+  rm -rf "$LOGS"
   [ "$BUILT" -eq 1 ] && rm -f "$BIN" || true
 }
 trap cleanup EXIT
@@ -138,15 +144,11 @@ if [ ! -S "$SOCK" ]; then
   exit 1
 fi
 
-# Launch the real bridge against mpv's socket. serve-art forwards each item's
-# presentation block to the display and answers every logo request with a real
-# image decode, the same code the pod's command sidecar runs.
-# MEDIA_TRICKPLAY_INTERVAL sets the seconds one trickplay tile covers. The
-# bridge defaults it to 10s, Jellyfin's own default, so pass it through only
-# to try another value.
-MEDIA_MPV_SOCKET="$SOCK" MEDIA_ART_DIR="$ARTDIR" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
-  MEDIA_TRICKPLAY_INTERVAL="${MEDIA_TRICKPLAY_INTERVAL:-}" \
-  "$BIN" serve-art >"$ARTDIR/serve.log" 2>&1 &
+# Launch the real block server against mpv's socket. serve-blocks forwards each
+# item's presentation block to the display, the same code the pod's command
+# sidecar runs.
+MEDIA_MPV_SOCKET="$SOCK" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  "$BIN" serve-blocks >"$LOGS/serve.log" 2>&1 &
 SERVE=$!
 
 # Wait for mpv to close, which is when the user quits the window with q.

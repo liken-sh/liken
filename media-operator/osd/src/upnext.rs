@@ -62,9 +62,9 @@ const WAIT_WORD: &str = "Starting";
 /// The ellipsis a clipped line ends on, U+2026.
 const ELLIPSIS: &str = "\u{2026}";
 
-// The seam the art bridge fills. The card asks for the offer's picture
-// where it draws the art plate, the bridge answers with the size it draws
-// at, and the card hands back the box to draw it in.
+// The seam the decode fills. The card asks for the offer's picture where
+// it draws the art plate, the decode answers with the size it draws at, and
+// the card hands back the box to draw it in.
 pub trait Art {
     fn next(&self) -> Option<Size>;
 
@@ -193,8 +193,11 @@ impl UpNext {
         self.waiting
     }
 
-    pub fn offers_art(&self) -> bool {
-        self.offer.as_ref().is_some_and(|offer| offer.art.is_some())
+    /// The offer's art reference, which the display decodes into the card's
+    /// own art box. An offer with no art is not one the card draws a picture
+    /// for.
+    pub fn art(&self) -> Option<&str> {
+        self.offer.as_ref()?.art.as_deref()
     }
 
     /// The card is what a select acts on, so the display grows the chip into

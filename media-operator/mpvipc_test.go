@@ -21,11 +21,10 @@ func TestObservePropertiesAsksForEachPropertyOnce(t *testing.T) {
 		`{"command":["observe_property",4,"duration"]}`,
 		`{"command":["observe_property",5,"current-tracks/audio/lang"]}`,
 		`{"command":["observe_property",6,"current-tracks/sub/lang"]}`,
-		`{"command":["observe_property",7,"playlist"]}`,
-		`{"command":["observe_property",8,"current-tracks/video/codec"]}`,
-		`{"command":["observe_property",9,"hwdec-current"]}`,
-		`{"command":["observe_property",10,"frame-drop-count"]}`,
-		`{"command":["observe_property",11,"avsync"]}`,
+		`{"command":["observe_property",7,"current-tracks/video/codec"]}`,
+		`{"command":["observe_property",8,"hwdec-current"]}`,
+		`{"command":["observe_property",9,"frame-drop-count"]}`,
+		`{"command":["observe_property",10,"avsync"]}`,
 	})
 }
 
@@ -113,15 +112,15 @@ func TestDialMPVStopsWithItsContext(t *testing.T) {
 	mustFail(t, err)
 }
 
-// The display asks for a logo by broadcasting a script-message, which
-// mpv delivers to the bridge as a client-message event, and readEvents hands
-// its arguments through untouched.
+// The display asks for the current block by broadcasting a script-message,
+// which mpv delivers to the sidecar as a client-message event, and readEvents
+// hands its arguments through untouched.
 func TestReadEventsDeliversClientMessages(t *testing.T) {
 	changes := make(chan propertyChange, 8)
 	messages := make(chan clientMessage, 8)
 	lines := []string{
 		`{"event":"property-change","id":1,"name":"pause","data":true}`,
-		`{"event":"client-message","args":["liken-art-request","logo","280","96"]}`,
+		`{"event":"client-message","args":["liken-presentation-request"]}`,
 		`{"event":"client-message","args":["someone-elses-broadcast"]}`,
 	}
 	stream := strings.NewReader(strings.Join(lines, "\n") + "\n")
@@ -133,7 +132,7 @@ func TestReadEventsDeliversClientMessages(t *testing.T) {
 	for message := range messages {
 		got = append(got, strings.Join(message.Args, ","))
 	}
-	mustMatchAll(t, got, []string{"liken-art-request,logo,280,96", "someone-elses-broadcast"})
+	mustMatchAll(t, got, []string{"liken-presentation-request", "someone-elses-broadcast"})
 	mustMatch(t, len(changes), 1)
 }
 

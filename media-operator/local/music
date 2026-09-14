@@ -4,8 +4,12 @@
 # can be seen and felt without a cluster. It loads the same display script
 # the player runs, and binds the keyboard to the navigation actions the
 # command bus carries, so a key press drives the display by the path a
-# remote does. It decodes the art with the real Go bridge, so the cover
-# comes out the way the pod decodes it.
+# remote does.
+#
+# PROSE: this screen draws no cover. The display script reads a bitmap through
+# mpv's overlay path, the sidecar half that produced those bitmaps is gone, and
+# plan 32's next step removes the script. local/osd is the screen that shows
+# the cover.
 #
 # An album plays as one piece of media: local/edl reads the directory's
 # tags and writes one mpv EDL timeline, each track a segment with its
@@ -34,15 +38,15 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 display_dir="$root/display"
 
-# Clean up the temporary files, the decoded art, the bridge, and a built
-# binary on exit. The handler is installed before the first temporary file
+# Clean up the temporary files, the logs, the block server, and a built binary
+# on exit. The handler is installed before the first temporary file
 # exists, so a failure in the steps below leaks nothing. Each name is empty
 # until its step sets it, and the handler reads an empty name as nothing to
 # remove.
 EDL=""
 CONF=""
 SOCK=""
-ARTDIR=""
+LOGS=""
 BIN=""
 BUILT=0
 SERVE=""
@@ -51,7 +55,7 @@ cleanup() {
   [ -n "$CONF" ] && rm -f "$CONF" || true
   [ -n "$SOCK" ] && rm -f "$SOCK" || true
   [ -n "$EDL" ] && rm -f "$EDL" || true
-  [ -n "$ARTDIR" ] && rm -rf "$ARTDIR" || true
+  [ -n "$LOGS" ] && rm -rf "$LOGS" || true
   [ "$BUILT" -eq 1 ] && rm -f "$BIN" || true
 }
 trap cleanup EXIT
@@ -91,7 +95,7 @@ PRESENTATIONS="[$BLOCK]"
 # so mpv's built-in text never draws.
 CONF="$(mktemp --tmpdir local-music.XXXXXX.conf)"
 SOCK="$(mktemp -u --tmpdir local-music.XXXXXX.sock)"
-ARTDIR="$(mktemp -d --tmpdir local-music.XXXXXX.art)"
+LOGS="$(mktemp -d --tmpdir local-music.XXXXXX.logs)"
 cat >"$CONF" <<'BINDINGS'
 LEFT  repeatable script-message-to display left
 RIGHT repeatable script-message-to display right
@@ -112,7 +116,7 @@ BINDINGS
 # workstation's own mpv scripts, so a personal on-screen controller does not
 # draw over the display. --osc=no turns off mpv's built-in controller for the
 # same reason. --volume-max=100 caps the level at unity, the same cap the bus
-# clamps to on a cluster. --input-ipc-server opens the socket the bridge
+# clamps to on a cluster. --input-ipc-server opens the socket the block server
 # dials, because a local mpv serves its socket somewhere other than the pod's
 # fixed path.
 MPV=(mpv --vid=no --force-window=yes --load-scripts=no --osc=no
@@ -122,8 +126,8 @@ MPV=(mpv --vid=no --force-window=yes --load-scripts=no --osc=no
   --input-ipc-server="$SOCK"
   -- "$MEDIA")
 
-# The bridge is the media-operator binary in serve-art mode. Reuse a prebuilt
-# one, or build it from the checkout.
+# The block server is the media-operator binary in serve-blocks mode. Reuse a
+# prebuilt one, or build it from the checkout.
 BIN="${LIKEN_MEDIA_OPERATOR_BIN:-}"
 if [ -z "$BIN" ]; then
   BIN="$(mktemp -u --tmpdir media-operator.XXXXXX)"
@@ -146,12 +150,11 @@ if [ ! -S "$SOCK" ]; then
   exit 1
 fi
 
-# Launch the real bridge against mpv's socket. serve-art forwards the album's
-# presentation block to the display and answers every art request with a real
-# decode, the same code the pod's command sidecar runs. The cover resolves
-# from the EDL's first segment, through the same tiers a plain file takes.
-MEDIA_MPV_SOCKET="$SOCK" MEDIA_ART_DIR="$ARTDIR" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
-  "$BIN" serve-art >"$ARTDIR/serve.log" 2>&1 &
+# Launch the real block server against mpv's socket. serve-blocks forwards the
+# album's presentation block to the display, the same code the pod's command
+# sidecar runs.
+MEDIA_MPV_SOCKET="$SOCK" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  "$BIN" serve-blocks >"$LOGS/serve.log" 2>&1 &
 SERVE=$!
 
 # Wait for mpv to close, which is when the user quits the window with q.

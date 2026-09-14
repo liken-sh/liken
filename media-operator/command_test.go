@@ -129,7 +129,7 @@ func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
 		changeOf("time-pos", "1.0"),
 		changeOf("playlist-pos", "1"),
 	)
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil)
 
 	want := []string{
 		`{"command":["script-message","presentation","{\"title\":\"First\"}"]}`,
@@ -165,7 +165,7 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 
 	changes := make(chan propertyChange, 8)
 	go feedChanges(changes, changeOf("playlist-pos", "0"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil)
 
 	want := `{"command":["script-message","presentation","{}"]}`
 	select {
@@ -471,6 +471,34 @@ func TestTheFirstLevelOfASessionAppliesSilently(t *testing.T) {
 
 // mustNoLine fails when the sidecar writes anything to mpv inside this
 // window.
+// bridgeToMPV is a commander wired to a socket a test reads, so a message the
+// sidecar sends comes back as the line mpv would receive.
+func bridgeToMPV(t *testing.T) (*commander, <-chan string) {
+	t.Helper()
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+
+	lines := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(server)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	return &commander{mpv: client}, lines
+}
+
+func waitForLine(t *testing.T, lines <-chan string) string {
+	t.Helper()
+	select {
+	case line := <-lines:
+		return line
+	case <-time.After(time.Second):
+		t.Fatal("nothing reached mpv")
+		return ""
+	}
+}
+
 func mustNoLine(t *testing.T, lines <-chan string, window time.Duration) {
 	t.Helper()
 	select {
@@ -712,7 +740,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("playlist-pos", "1"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil)
 
 		mustMatchAll(t, itemsAndPauses(sent()), []string{"1 playing", "1 paused", "2 paused"})
 	})
@@ -729,7 +757,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changes <- changeOf("time-pos", "2.0")
 			close(changes)
 		}()
-		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil)
 
 		mustMatchAll(t, positions(sent()), []string{"", "0:00:02"})
 	})
@@ -744,7 +772,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("duration", "60.0"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil)
 
 		mustMatch(t, len(sent()), 0)
 	})
@@ -763,7 +791,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("time-pos", "2.0"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil)
 
 		mustMatch(t, attempts, 3)
 	})
@@ -831,7 +859,7 @@ func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
 		json.RawMessage(`{"title":"First"}`),
 		json.RawMessage(`{"type":"music","hint":"album"}`),
 	}
-	bridge.artItem = 2
+	bridge.item = 2
 
 	go bridge.serveMessages(requestFor(presentationRequestMessage))
 

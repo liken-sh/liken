@@ -985,7 +985,7 @@ type PersistentVolumeClaimVolumeSource struct {
 // socket.
 //
 // SizeLimit caps the volume. The IPC volume leaves it empty, so it marshals as
-// {}. The art volume sets it, so a runaway decode cannot fill the node disk.
+// {}.
 type EmptyDirVolumeSource struct {
 	SizeLimit string `json:"sizeLimit,omitempty"`
 }

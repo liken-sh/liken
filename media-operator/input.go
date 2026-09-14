@@ -169,16 +169,6 @@ const (
 	ipcSocketPath = "/ipc/mpv.sock"
 )
 
-// The decoded-art volume the command sidecar and mpv share. The bridge writes
-// each logo as raw bgra here, and mpv reads it back by path through
-// overlay-add. It is disk-backed, so the art never counts against the pod's
-// memory, and its sizeLimit caps how much the bridge can write.
-const (
-	artVolumeName = "art"
-	artMountPath  = "/art"
-	artSizeLimit  = "16Mi"
-)
-
 // The script-message name the sidecar and the display agree on for a
 // presentation block. It sits beside the six navigation actions the
 // display already answers.
@@ -188,22 +178,6 @@ const presentationMessage = "presentation"
 // display after a seek or a chapter jump, so the scrubber shows the new
 // position. It sits beside the navigation actions the display already answers.
 const displaySummonMessage = "summon"
-
-// The two script-message names the display and the bridge agree on for art.
-// The display broadcasts artRequestMessage to ask for a decoded blob at a
-// pixel size. The bridge answers with artReplyMessage, carrying the ready
-// blob.
-//
-// The four art kinds: the film's logo, the scrub tile, the playing
-// album's cover, and the art of the work that follows this run.
-const (
-	artRequestMessage = "liken-art-request"
-	artReplyMessage   = "liken-art"
-	artKindLogo       = "logo"
-	artKindTrickplay  = "trickplay"
-	artKindAlbum      = "album"
-	artKindNext       = "next"
-)
 
 // exitMessage is the script-message the display broadcasts when a person
 // presses back at the bare video. The command sidecar answers it: it

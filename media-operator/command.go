@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"image"
 	"math"
 	"net"
 	"os"
@@ -152,56 +151,17 @@ type commander struct {
 
 	// grace is how long exit holds mpv alive between the ending and the
 	// quit. Every playback pod sets it from exitGrace, which says why the
-	// window exists. A zero grace quits at once, which is what the art
+	// window exists. A zero grace quits at once, which is what the block
 	// server and a test that asserts nothing about the fade run with.
 	grace time.Duration
 
-	// Where the bridge writes decoded bgra. It is the shared art volume in the
-	// pod, and a local directory under the harness.
-	artDir string
+	// item is the playlist position that plays now, which the resend answers
+	// with and the offer is sent after. It sits under itemMutex, because the
+	// reporter goroutine writes it while the message goroutine reads it.
+	itemMutex sync.Mutex
+	item      int
 
-	// artItem is the item the shared art volume holds art for. artCache maps a
-	// decoded size to its blob. Both sit under artMutex, because the reporter
-	// goroutine swaps the item while the art goroutine reads and writes the
-	// cache.
-	artMutex sync.Mutex
-	artItem  int
-	artCache map[string]artBlob
-
-	// The one decoded sheet the bridge holds. A scrub within one sheet crops
-	// every tile from this image, so it reads no new file.
-	trickSheet    image.Image
-	trickSheetKey string
-
-	// The last tile written for the current item. A request that maps to the
-	// same tile replies with this blob and crops nothing, so the overlay does
-	// not churn.
-	trickHave bool
-	trickItem int
-	trickIdx  int
-	trickBlob artBlob
-
-	// The prior tile file, kept one step longer than the current one. mpv places
-	// a tile on a later turn than the reply that named it, so that file must
-	// still exist when mpv maps it. The bridge removes a tile only once a second,
-	// newer tile has replaced it.
-	trickHavePrev bool
-	trickPrev     artBlob
-
-	// The playlist as the bridge resolved it: the file names mpv reported,
-	// and the art tier each item resolved to.
-	playlistFiles []string
-	tracks        []trackEntry
-
-	// The one album request the bridge holds, nil when it holds none. The
-	// display asks for the cover as soon as it reads the item's block, and
-	// mpv reports the playing item before it reports the playlist, so the
-	// request can arrive in the moment between, when the bridge does not yet
-	// know what the item's art is. A newer request replaces an older one,
-	// because only the latest box is still on the screen.
-	pendingAlbum *artRequest
-
-	// metrics is nil for the art server and for a test that has no use
+	// metrics is nil for the block server and for a test that has no use
 	// for it, so drive and runReporter guard every call through it. A
 	// deployed playback pod always sets it: runCommand builds one on
 	// every start, the way it builds a bus connection on every start.
@@ -253,7 +213,6 @@ func runCommand() {
 		volumeOwnerTopic:  os.Getenv(playerVolumeOwnerTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 		next:              parseNext(os.Getenv(nextVariable)),
-		artDir:            artMountPath,
 		grace:             exitGrace,
 		playerName:        os.Getenv(playerNameVariable),
 		remotes: playRemoteMap(
@@ -428,12 +387,11 @@ func (c *commander) report(ctx context.Context) {
 	c.exit()
 }
 
-// drive is the socket loop the reporter and the standalone art server share.
+// drive is the socket loop the reporter and the standalone block server share.
 // It observes the properties, reads the events, folds each into a report
-// through send, forwards the current item's block, and answers each logo
-// request. The reporter passes its bus-backed send. The art server passes a
-// send that reports nothing, so the same decode code runs with or without a
-// bus.
+// through send, and forwards the current item's block. The reporter passes its
+// bus-backed send. The block server passes a send that reports nothing, so the
+// same forwarding code runs with or without a bus.
 func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender) {
 	// observeProperties writes the socket, and so does the commands
 	// handler, so the observe runs under the same mutex the handler
@@ -469,40 +427,25 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 		}
 	}()
 
-	// The message goroutine answers the display's exit press and its logo
+	// The message goroutine answers the display's exit press and its block
 	// requests off the same socket the reporter reads. It ends when the
 	// socket closes and the reader closes the messages channel.
 	go c.serveMessages(messages)
 
-	runReporter(ctx, changes, send, c.present, c.playlistChanged, c.metrics)
+	runReporter(ctx, changes, send, c.present, c.metrics)
 	<-reading
 }
 
 // serveMessages answers the three things the display broadcasts: the exit
-// press, its request for the current block, and each art request. It runs
-// beside the reporter, so a slow decode or a network fetch never holds up the
-// position reports.
-//
-// A trickplay request is served only after the loop drains what is already
-// queued. The newest tile request in the queue is the one it serves, and the
-// other messages it passed on the way are served first, in their order.
-// trickplayqueue.go says why.
+// press, its select on the offer, and its request for the current block. It
+// runs beside the reporter, so an answer never holds up the position reports.
 func (c *commander) serveMessages(messages <-chan clientMessage) {
 	for message := range messages {
-		args := message.Args
-		if isTrickplayRequest(args) {
-			var passed [][]string
-			args, passed = drainTrickplay(args, messages)
-			for _, each := range passed {
-				c.serveMessage(each)
-			}
-		}
-		c.serveMessage(args)
+		c.serveMessage(message.Args)
 	}
 }
 
-// serveMessage answers one broadcast. The exit press and the presentation
-// request each have one answer, and every other message is an art request.
+// serveMessage answers one broadcast.
 func (c *commander) serveMessage(args []string) {
 	if isExitMessage(args) {
 		c.exit()
@@ -514,21 +457,17 @@ func (c *commander) serveMessage(args []string) {
 	}
 	if isPresentationRequest(args) {
 		c.resendPresentation()
-		return
 	}
-	c.serveArt(args)
 }
 
 // resendPresentation answers the display's request with the block for the
 // item that is playing. It sends nothing before the first item, because the
 // reporter presents that item as soon as mpv says which one plays, so a
-// block is on its way already. It does not swap the art the way present
-// does: the item has not changed, and the decoded art the volume holds is
-// still the current item's own.
+// block is on its way already.
 func (c *commander) resendPresentation() {
-	c.artMutex.Lock()
-	item := c.artItem
-	c.artMutex.Unlock()
+	c.itemMutex.Lock()
+	item := c.item
+	c.itemMutex.Unlock()
 	if item < 1 {
 		return
 	}
@@ -586,11 +525,8 @@ func parsePresentations(value string) []json.RawMessage {
 
 // present hands the current item's block to the display over the mpv
 // socket.
-//
-// It clears the previous item's art first, so the shared volume holds only
-// what the current item can show.
 func (c *commander) present(item int) {
-	first := c.swapArt(item)
+	first := c.reachItem(item)
 	c.command(presentationCommand(c.blockForItem(item)))
 	// One offer serves the whole run, so it is sent once, after the first
 	// item's presentation.
@@ -599,34 +535,19 @@ func (c *commander) present(item int) {
 	}
 }
 
-// swapArt drops the previous item's decoded art when the playlist reaches a
-// new item, so one item's logo never lingers on the next and the shared volume
-// holds only the current item's blobs.
+// reachItem records the playlist position that plays now, so a resend answers
+// with that item's block.
 //
 // The return value says whether the run reached its first item, which is
 // the moment the offer is sent.
-func (c *commander) swapArt(item int) bool {
-	c.artMutex.Lock()
-	defer c.artMutex.Unlock()
-	if item == c.artItem {
+func (c *commander) reachItem(item int) bool {
+	c.itemMutex.Lock()
+	defer c.itemMutex.Unlock()
+	if item == c.item {
 		return false
 	}
-	first := c.artItem == 0
-	for _, blob := range c.artCache {
-		os.Remove(blob.path)
-	}
-	c.artCache = nil
-	if c.trickHave {
-		os.Remove(c.trickBlob.path)
-	}
-	if c.trickHavePrev && c.trickPrev.path != c.trickBlob.path {
-		os.Remove(c.trickPrev.path)
-	}
-	c.trickHave = false
-	c.trickHavePrev = false
-	c.trickSheet = nil
-	c.trickSheetKey = ""
-	c.artItem = item
+	first := c.item == 0
+	c.item = item
 	return first
 }
 
@@ -876,7 +797,7 @@ type playlistReceiver func(playlist json.RawMessage)
 // one channel.
 func runReporter(
 	ctx context.Context, changes <-chan propertyChange, send reportSender,
-	present itemPresenter, playlist playlistReceiver, metrics *commandMetrics,
+	present itemPresenter, metrics *commandMetrics,
 ) {
 	var state playbackState
 	var sent time.Time
@@ -888,16 +809,6 @@ func runReporter(
 		case change, open := <-changes:
 			if !open {
 				return
-			}
-			// The playlist is the art, not the report, so it leaves here
-			// and folds into no playbackState field. It arrives before mpv
-			// says which item plays, because observe answers every property
-			// with its current value at subscribe time.
-			if change.Name == playlistProperty {
-				if change.known() {
-					playlist(change.Data)
-				}
-				continue
 			}
 			if metrics != nil {
 				metrics.observe(change)

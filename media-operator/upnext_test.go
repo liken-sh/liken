@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"image/color"
 	"net"
 	"os"
 	"syscall"
@@ -57,7 +56,7 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 
 	changes := make(chan propertyChange, 8)
 	go feedChanges(changes, changeOf("playlist-pos", "0"), changeOf("playlist-pos", "1"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {}, nil)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil)
 
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{\"title\":\"First\"}"]}`)
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
@@ -72,12 +71,12 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 // presentation, so the display offers nothing.
 func TestASidecarWithNoNextBlockSendsNone(t *testing.T) {
 	c, lines := bridgeToMPV(t)
-	c.artItem = 1
+	c.item = 1
 
 	c.serveMessage([]string{presentationRequestMessage})
 
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
-	expectNoArtReply(t, lines)
+	mustNoLine(t, lines, 100*time.Millisecond)
 }
 
 // The display's ask becomes one message on the Player's commands topic,
@@ -119,46 +118,6 @@ func TestTheAskPublishesNothingWithoutABlockOrAPlayer(t *testing.T) {
 			c.serveMessage([]string{nextRequestMessage})
 
 			mustPublishNothing(t, brokers[0])
-		})
-	}
-}
-
-// The card's art decodes the way a logo does: the bridge fits the image
-// inside the box the display asked for, keeps its ratio, and answers with
-// the file it wrote and that file's size.
-func TestServeArtDecodesTheNextBlocksArt(t *testing.T) {
-	c, lines := bridgeToMPV(t)
-	c.next = json.RawMessage(nextBlockValue(writeLogo(t, t.TempDir(), "next.png", color.NRGBA{R: 10, G: 200, B: 30, A: 255})))
-
-	go c.serveArt([]string{artRequestMessage, artKindNext, "20", "20"})
-
-	kind, path, w, h, stride := parseLogoReply(t, waitForLine(t, lines))
-	mustMatch(t, kind, artKindNext)
-	mustMatch(t, w, 20)
-	mustMatch(t, h, 10)
-	mustMatch(t, stride, 80)
-	mustExist(t, path)
-}
-
-// A request the bridge has no art for gets no answer, the way a missing
-// logo does, and the display draws its lines alone.
-func TestServeArtAnswersNothingWithoutNextArt(t *testing.T) {
-	cases := []struct {
-		name  string
-		block json.RawMessage
-	}{
-		{name: "no block at all"},
-		{name: "a block with no art", block: json.RawMessage(`{"title":"E05"}`)},
-		{name: "art the bridge cannot read", block: json.RawMessage(`{"art":"/nowhere/next.jpg"}`)},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			c, lines := bridgeToMPV(t)
-			c.next = one.block
-
-			c.serveArt([]string{artRequestMessage, artKindNext, "20", "20"})
-
-			expectNoArtReply(t, lines)
 		})
 	}
 }
