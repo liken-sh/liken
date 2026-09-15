@@ -208,6 +208,133 @@ func TestATrailerAskReportsAFailureOnlyWhereNoBlockAnswered(t *testing.T) {
 	}
 }
 
+// One block that reports it was asked, then waits for the gate.
+type gatedTrailers struct {
+	block   string
+	entries []trailerEntry
+	arrive  chan<- struct{}
+	open    <-chan struct{}
+}
+
+func (g gatedTrailers) providerBlock() string { return g.block }
+
+func (g gatedTrailers) trailers(ctx context.Context, _ trailerTitle) ([]trailerEntry, error) {
+	g.arrive <- struct{}{}
+	select {
+	case <-g.open:
+		return g.entries, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// The gate opens once every block has been asked. It never opens for a line
+// that asks one block at a time, so that ask ends on its context instead of
+// holding the test.
+func trailerGate(ctx context.Context, blocks int) (chan struct{}, chan struct{}) {
+	arrive := make(chan struct{}, blocks)
+	open := make(chan struct{})
+	go func() {
+		for range blocks {
+			select {
+			case <-arrive:
+			case <-ctx.Done():
+				return
+			}
+		}
+		close(open)
+	}()
+	return arrive, open
+}
+
+// Every block is asked at once, so one title costs the slowest provider and
+// not the sum of them.
+func TestATrailerAskAsksEveryBlockAtOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	arrive, open := trailerGate(ctx, 3)
+	line := trailerLineOf(
+		gatedTrailers{block: providerBlockTMDb, arrive: arrive, open: open,
+			entries: []trailerEntry{trailerEntryOf(providerBlockTMDb, "aaa", 90)}},
+		gatedTrailers{block: providerBlockPeerTube, arrive: arrive, open: open,
+			entries: []trailerEntry{trailerEntryOf(providerBlockPeerTube, "bbb", 40)}},
+		gatedTrailers{block: providerBlockArchive, arrive: arrive, open: open,
+			entries: []trailerEntry{trailerEntryOf(providerBlockArchive, "ccc", 30)}},
+	)
+
+	entries, blocks, err := line.ask(ctx, trailerTitle{})
+
+	if err != nil {
+		t.Fatalf("err = %v, want the three blocks asked at once", err)
+	}
+	if len(entries) != 3 {
+		t.Errorf("entries = %+v, want one of each block", entries)
+	}
+	if !slices.Equal(blocks, []string{providerBlockTMDb, providerBlockPeerTube, providerBlockArchive}) {
+		t.Errorf("blocks = %v, want the three that answered", blocks)
+	}
+}
+
+// One block that answers only after the block it names has answered.
+type chainedTrailers struct {
+	block   string
+	entries []trailerEntry
+	after   <-chan struct{}
+	done    chan struct{}
+}
+
+func (c chainedTrailers) providerBlock() string { return c.block }
+
+func (c chainedTrailers) trailers(ctx context.Context, _ trailerTitle) ([]trailerEntry, error) {
+	defer close(c.done)
+	select {
+	case <-c.after:
+		return c.entries, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// A channel that is already closed, which the block that answers first waits
+// on.
+func openedTrailerGate() chan struct{} {
+	gate := make(chan struct{})
+	close(gate)
+	return gate
+}
+
+// The entries and the blocks come out in the line's order, whichever block
+// answered first.
+func TestATrailerAskAssemblesInTheOrderOfTheLine(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	last := chainedTrailers{block: providerBlockArchive, done: make(chan struct{}),
+		after:   openedTrailerGate(),
+		entries: []trailerEntry{trailerEntryOf(providerBlockArchive, "ccc", 30)}}
+	middle := chainedTrailers{block: providerBlockPeerTube, done: make(chan struct{}),
+		after:   last.done,
+		entries: []trailerEntry{trailerEntryOf(providerBlockPeerTube, "bbb", 40)}}
+	first := chainedTrailers{block: providerBlockTMDb, done: make(chan struct{}),
+		after:   middle.done,
+		entries: []trailerEntry{trailerEntryOf(providerBlockTMDb, "aaa", 90)}}
+
+	entries, blocks, err := trailerLineOf(first, middle, last).ask(ctx, trailerTitle{})
+
+	if err != nil {
+		t.Fatalf("err = %v, want the answers of the three blocks", err)
+	}
+	keys := []string{}
+	for _, entry := range entries {
+		keys = append(keys, entry.Key)
+	}
+	if !slices.Equal(keys, []string{"aaa", "bbb", "ccc"}) {
+		t.Errorf("entries = %v, want the line's order", keys)
+	}
+	if !slices.Equal(blocks, []string{providerBlockTMDb, providerBlockPeerTube, providerBlockArchive}) {
+		t.Errorf("blocks = %v, want the line's order", blocks)
+	}
+}
+
 // One identified movie with a sidecar that carries its ids, which is the
 // shape of every trailer gap.
 func seedTrailerGap(t *testing.T, catalog *Catalog, root, folder string) {

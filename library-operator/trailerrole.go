@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -49,21 +50,38 @@ func newTrailerLine(blocks []string, value func(string) string) *trailerLine {
 // that is down leaves the other blocks their answer, so the error stands only
 // where no block answered at all.
 func (l *trailerLine) ask(ctx context.Context, title trailerTitle) ([]trailerEntry, []string, error) {
+	// Every answerer is asked at once, so one title costs the slowest provider
+	// and not the sum of them. Each provider paces itself, so the asks never
+	// share a slot. Each goroutine writes the slot of its own answerer, so the
+	// answers need no lock.
+	held := make([][]trailerEntry, len(l.answerers))
+	failures := make([]error, len(l.answerers))
+	var asking sync.WaitGroup
+	for at, one := range l.answerers {
+		asking.Add(1)
+		go func() {
+			defer asking.Done()
+			held[at], failures[at] = one.trailers(ctx, title)
+		}()
+	}
+	asking.Wait()
+
+	// The slots are read in the line's order, so the answer does not depend on
+	// which answerer finished first.
 	var entries []trailerEntry
 	var blocks []string
 	var failure error
-	for _, one := range l.answerers {
-		held, err := one.trailers(ctx, title)
-		if err != nil {
+	for at, one := range l.answerers {
+		if failures[at] != nil {
 			if failure == nil {
-				failure = err
+				failure = failures[at]
 			}
 			continue
 		}
-		if len(held) == 0 {
+		if len(held[at]) == 0 {
 			continue
 		}
-		entries = append(entries, held...)
+		entries = append(entries, held[at]...)
 		blocks = append(blocks, one.providerBlock())
 	}
 	if len(entries) == 0 {
