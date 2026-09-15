@@ -2,9 +2,7 @@ package main
 
 // tmdb.go is the whole of what the identity fact asks TMDb: a search by
 // title and year, and the runtime of one result. A 429 is a cooldown inside
-// the container and nothing more. TMDb's limit is about 40 requests a second,
-// and one library's gaps never come near it, so no limiter lives anywhere
-// else.
+// the container and nothing more.
 
 import (
 	"context"

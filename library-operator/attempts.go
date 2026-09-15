@@ -171,7 +171,7 @@ func (s likenSidecar) trailerRows(entries []trailerEntry) []trailerRow {
 			Library: s.library, Item: item, Provider: entry.Provider, Key: entry.Key,
 			Site: entry.Site, URL: entry.URL, Name: entry.Name, Kind: entry.Kind,
 			Language: entry.Language, Official: entry.Official, Published: entry.Published,
-			Score: entry.Score, Reason: entry.Reason,
+			Resolution: entry.Resolution, Score: entry.Score, Reason: entry.Reason,
 		})
 	}
 	return rows

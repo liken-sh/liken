@@ -58,7 +58,7 @@ func (o *operator) standEnrichClaim(ctx context.Context, library *Library, catal
 // the chain's. Sources that reach no Ready provider of the identity fact omit
 // the identity container, which is how a Library with no Ready provider still
 // runs the probe.
-func buildEnrichJob(library *Library, providers providerSet, name, path string,
+func buildEnrichJob(library *Library, providers providerSet, languages []string, name, path string,
 	scannerImage, ffmpegImage, corrosionImage, busAddress, topicBase string) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	return &Job{
@@ -73,7 +73,7 @@ func buildEnrichJob(library *Library, providers providerSet, name, path string,
 		Spec: JobSpec{
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
-			Template: enrichPodTemplate(library, providers, path,
+			Template: enrichPodTemplate(library, providers, languages, path,
 				scannerImage, ffmpegImage, corrosionImage, busAddress, topicBase),
 		},
 	}
@@ -82,7 +82,7 @@ func buildEnrichJob(library *Library, providers providerSet, name, path string,
 // The pod the enricher Job runs. The facts that must run in order are init
 // containers, and the enrich container is the one regular container: it
 // writes the runs row last and waits for the echo.
-func enrichPodTemplate(library *Library, providers providerSet, path string,
+func enrichPodTemplate(library *Library, providers providerSet, languages []string, path string,
 	scannerImage, ffmpegImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
 	// An enricher holds no Kubernetes credential. It reads its work through the
@@ -144,7 +144,9 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	}
 	// The same environment carries the source order, so a container asks its
 	// providers in the order spec.sources names them.
-	keys := providerEnv(library, providers)
+	// The languages travel in the same environment, so every container ranks by
+	// one list.
+	keys := providerEnv(library, providers, languages)
 	for index := range facts {
 		facts[index].Env = append(facts[index].Env, keys...)
 	}

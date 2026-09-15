@@ -1,7 +1,7 @@
 package main
 
 // tmdbtrailers.go is what the trailer fact asks TMDb: the videos of one
-// title, and the trailer entry each one becomes.
+// title, and the trailer entry each one it records becomes.
 
 import (
 	"context"
@@ -56,8 +56,8 @@ func tmdbVideoSite(site, key string) (string, string) {
 }
 
 // The words TMDb names a video's type with. Three of them are kinds this
-// fact ranks; every other type (Featurette, Behind the Scenes, Bloopers)
-// is other.
+// fact has a word for; every other type (Featurette, Behind the Scenes,
+// Bloopers) is other.
 const (
 	tmdbVideoTypeTrailer = "Trailer"
 	tmdbVideoTypeTeaser  = "Teaser"
@@ -89,6 +89,8 @@ func (a tmdbTrailerAnswerer) providerBlock() string { return providerBlockTMDb }
 
 // Every video TMDb holds for this title. The ask keys on the TMDb id, so a
 // title with no TMDb id gets no call and no trailer.
+// A clip and a video of any other kind are dropped before they are scored,
+// because this fact records trailers, teasers, and TV spots alone.
 func (a tmdbTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) ([]trailerEntry, error) {
 	id, err := strconv.Atoi(title.ids["tmdb"])
 	if err != nil || id <= 0 {
@@ -104,6 +106,10 @@ func (a tmdbTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) (
 		if site == "" {
 			continue
 		}
+		kind := tmdbVideoKind(video.Type)
+		if !recordedTrailerKind(kind) {
+			continue
+		}
 		entry := trailerEntry{
 			Path:      likenSelfPath,
 			Provider:  providerBlockTMDb,
@@ -111,12 +117,16 @@ func (a tmdbTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) (
 			Site:      site,
 			URL:       address,
 			Name:      video.Name,
-			Kind:      tmdbVideoKind(video.Type),
+			Kind:      kind,
 			Language:  video.Language,
 			Official:  video.Official,
 			Published: trailerDate(video.PublishedAt),
+			// TMDb states the video's height in lines as size.
+			Resolution: video.Size,
 		}
-		entry.Score, entry.Reason = scoreTrailer(entry, trailerName{}, title)
+		// The ask keyed on the title's own TMDb id, so every video it answers
+		// belongs to the title.
+		entry.Score, entry.Reason = scoreTrailer(entry, trailerMatch{keyed: true}, title.languages)
 		entries = append(entries, entry)
 	}
 	return entries, nil

@@ -81,6 +81,8 @@ func peertubeWatchURL(base string, video peertubeVideo) string {
 
 // The trailer answerer of one instance. It keys on the title's own name,
 // because an instance holds no provider ids.
+// A search answer states no resolution, so every entry this answerer makes
+// carries none.
 type peertubeTrailerAnswerer struct {
 	client *peertubeClient
 }
@@ -91,9 +93,11 @@ func newPeertubeTrailerAnswerer(client *peertubeClient) peertubeTrailerAnswerer 
 
 func (a peertubeTrailerAnswerer) providerBlock() string { return providerBlockPeerTube }
 
-// Every result whose own name carries this title and this year. A search
-// for `Dune` answers every Dune video the instance holds, so a result that
-// scores 0 is dropped and never recorded.
+// Every result whose name carries this title. A name that states no year
+// still matches on the title alone, at a lower score. A name that says clip
+// or names no kind is dropped before it is scored, because a trailer song is
+// no trailer of the title. A search for `Dune` answers every Dune video the
+// instance holds, so a result that scores 0 is dropped and never recorded.
 func (a peertubeTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) ([]trailerEntry, error) {
 	if title.title == "" {
 		return nil, nil
@@ -105,6 +109,9 @@ func (a peertubeTrailerAnswerer) trailers(ctx context.Context, title trailerTitl
 	entries := []trailerEntry{}
 	for _, video := range videos {
 		parsed := parseTrailerName(video.Name)
+		if !recordedTrailerKind(parsed.kind) {
+			continue
+		}
 		entry := trailerEntry{
 			Path:      likenSelfPath,
 			Provider:  providerBlockPeerTube,
@@ -116,7 +123,11 @@ func (a peertubeTrailerAnswerer) trailers(ctx context.Context, title trailerTitl
 			Language:  video.Language.ID,
 			Published: trailerDate(video.PublishedAt),
 		}
-		entry.Score, entry.Reason = scoreTrailer(entry, parsed, title)
+		entry.Score, entry.Reason = scoreTrailer(entry, trailerMatch{
+			title:     foldTitle(parsed.title) == foldTitle(title.title),
+			year:      parsed.year == title.year,
+			yearKnown: parsed.year != 0,
+		}, title.languages)
 		if entry.Score <= 0 {
 			continue
 		}

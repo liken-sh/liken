@@ -65,7 +65,11 @@ type operator struct {
 	ffmpegImage string
 	// The household wall-clock zone the pass read last, which every screen
 	// pod it stands carries as TZ. Empty where the cluster states none.
-	timeZone   string
+	timeZone string
+	// The household languages the pass read last. Every enricher the pass stands
+	// ranks a provider's answers by them.
+	languages []string
+
 	busAddress string
 	topicBase  string
 	bus        *Bus
@@ -417,6 +421,9 @@ func (o *operator) pass() {
 		preferences = &MediaPreferencesList{}
 	}
 	o.timeZone = householdZone(preferences)
+	// The languages come off the same list, so one read per pass answers both
+	// fields.
+	o.languages = householdLanguages(preferences)
 	// The Jobs and the member pods are read once for the whole
 	// pass, because a Library's status reads both and the catalog step
 	// reads the pods again. A list that fails ends the pass: without the

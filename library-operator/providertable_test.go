@@ -24,6 +24,8 @@ func providerOfBlock(name, block string) *MetadataProvider {
 		provider.Spec.TVmaze = &ProviderTVmaze{}
 	case providerBlockPeerTube:
 		provider.Spec.PeerTube = &ProviderPeerTube{Endpoint: "https://tube.example"}
+	case providerBlockArchive:
+		provider.Spec.Archive = &ProviderArchive{}
 	}
 	provider.Status.Conditions = []Condition{
 		{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
@@ -44,6 +46,7 @@ func TestTheBlockAndTheSecretOfOneSpec(t *testing.T) {
 		{name: "an account with Fanart.tv", block: providerBlockFanart, wantSecret: "one-key"},
 		{name: "TVmaze, which takes no account", block: providerBlockTVmaze},
 		{name: "a PeerTube instance, which takes no account", block: providerBlockPeerTube},
+		{name: "the Internet Archive, which takes no account", block: providerBlockArchive},
 		{name: "a spec that names no block"},
 	}
 	for _, one := range cases {
@@ -70,10 +73,10 @@ func TestTheBlockAndTheSecretOfOneSpec(t *testing.T) {
 // Every fact a row names is a fact of the vocabulary, so a provider cannot
 // serve a name no container runs and no CRD admits.
 func TestEveryRowNamesFactsOfTheVocabulary(t *testing.T) {
-	for block, row := range providerFacts {
-		for _, fact := range row {
+	for _, block := range providerBlocks {
+		for _, fact := range block.facts {
 			if !slices.Contains(factVocabulary, fact) {
-				t.Errorf("%s serves %q, which is no fact of the vocabulary", block, fact)
+				t.Errorf("%s serves %q, which is no fact of the vocabulary", block.name, fact)
 			}
 		}
 	}
@@ -107,13 +110,13 @@ func TestWhichProvidersServeEachFact(t *testing.T) {
 		{fact: factSeasonPoster, want: []string{providerBlockTMDb, providerBlockFanart}},
 		{fact: factSeasonBanner, want: []string{providerBlockFanart}},
 		{fact: factEpisodeThumb, want: []string{providerBlockTMDb}},
-		{fact: factTrailer, want: []string{providerBlockTMDb, providerBlockPeerTube}},
+		{fact: factTrailer, want: []string{providerBlockTMDb, providerBlockPeerTube,
+			providerBlockArchive}},
 		{fact: factContributorIDs, want: []string{providerBlockTMDb}},
 		{fact: factContributorBiography, want: []string{providerBlockTMDb}},
 		{fact: factContributorHeadshot, want: []string{providerBlockTMDb}},
 	}
-	blocks := []string{providerBlockTMDb, providerBlockOMDb, providerBlockFanart,
-		providerBlockTVmaze, providerBlockPeerTube}
+	blocks := everyProviderBlock()
 	for _, one := range cases {
 		t.Run(one.fact, func(t *testing.T) {
 			serving := []string{}

@@ -143,7 +143,7 @@ func TestTheSourceOrderOfALibrary(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			env := providerEnv(libraryWithSources(one.sources...),
-				providersOf(tmdb, omdb, tvmaze, second, refused))
+				providersOf(tmdb, omdb, tvmaze, second, refused), nil)
 
 			order := ""
 			for _, variable := range env {
@@ -185,16 +185,48 @@ func TestThePeerTubeEndpointOfALibrary(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			env := providerEnv(libraryWithSources(one.sources...),
-				providersOf(tmdb, tube, second, refused))
+				providersOf(tmdb, tube, second, refused), nil)
 
 			endpoint := ""
 			for _, variable := range env {
-				if variable.Name == peertubeEndpointVariable {
+				if variable.Name == providerEndpointVariable(providerBlockPeerTube) {
 					endpoint = variable.Value
 				}
 			}
 			if endpoint != one.want {
-				t.Errorf("%s = %q, want %q", peertubeEndpointVariable, endpoint, one.want)
+				t.Errorf("%s = %q, want %q", providerEndpointVariable(providerBlockPeerTube), endpoint, one.want)
+			}
+		})
+	}
+}
+
+// The languages one facts container reads: the library's own first, then the
+// household's that the library did not name, and English where neither names
+// one.
+func TestTheLanguagesOfALibraryAndItsHousehold(t *testing.T) {
+	cases := []struct {
+		name      string
+		library   []string
+		household []string
+		want      string
+	}{
+		{name: "neither names one", want: "en"},
+		{name: "the library alone", library: []string{"ko", "en"}, want: "ko,en"},
+		{name: "the household alone", household: []string{"ko", "en"}, want: "ko,en"},
+		{name: "the library's first, then the household's",
+			library: []string{"ko"}, household: []string{"en-US"}, want: "ko,en-US"},
+		{name: "a tag both name, in the library's own spelling",
+			library: []string{"EN-us"}, household: []string{"en-US", "ko"}, want: "EN-us,ko"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			library := libraryWithSources()
+			library.Spec.Languages = one.library
+
+			env := providerEnv(library, providerSet{}, one.household)
+
+			if got := containerEnvironment(Container{Env: env})[libraryLanguagesVariable]; got != one.want {
+				t.Errorf("%s = %q, want %q", libraryLanguagesVariable, got, one.want)
 			}
 		})
 	}

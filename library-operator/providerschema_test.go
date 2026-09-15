@@ -43,9 +43,15 @@ func schemaField(t *testing.T, from map[string]any, keys ...string) any {
 	return held
 }
 
-// Every block the operator holds a row for, which the CRD names one by one.
-var providerBlocks = []string{providerBlockTMDb, providerBlockOMDb,
-	providerBlockFanart, providerBlockTVmaze, providerBlockPeerTube}
+// Every block the operator's table holds a row for, which the CRD names one
+// by one.
+func everyProviderBlock() []string {
+	names := []string{}
+	for _, block := range providerBlocks {
+		names = append(names, block.name)
+	}
+	return names
+}
 
 // The field names one block's schema requires, none for a block that requires
 // nothing.
@@ -75,26 +81,41 @@ func TestTheFactsEnumIsTheOperatorsVocabulary(t *testing.T) {
 	}
 }
 
-// The CRD holds one block per row of the operator's table, and a block whose
-// provider takes a key requires the Secret that holds it.
+// The CRD names one block per row of the operator's table and no other, and a
+// block whose provider takes a key requires the Secret that holds it, so a
+// spec the API server admits is a spec this operator serves.
 func TestTheCRDHoldsOneBlockPerProvider(t *testing.T) {
 	schema := providerSchema(t)
 	blocks := schemaField(t, schema, "schema", "openAPIV3Schema", "properties",
 		"spec", "properties").(map[string]any)
 
-	for _, block := range providerBlocks {
+	named := []string{}
+	for name := range blocks {
+		if name != "facts" {
+			named = append(named, name)
+		}
+	}
+	want := everyProviderBlock()
+	slices.Sort(named)
+	slices.Sort(want)
+	if !slices.Equal(named, want) {
+		t.Errorf("the CRD names the blocks %v, want %v", named, want)
+	}
+
+	for _, block := range everyProviderBlock() {
 		t.Run(block, func(t *testing.T) {
 			if _, held := blocks[block]; !held {
 				t.Fatalf("the spec holds no %s block", block)
-			}
-			if _, held := providerFacts[block]; !held {
-				t.Errorf("the operator's table holds no row for %s", block)
 			}
 			required := requiredNames(schemaField(t, blocks, block, "required"))
 			wantsSecret := providerOfBlock("one", block).secretRef() != nil
 			if wantsSecret != slices.Contains(required, "secretRef") {
 				t.Errorf("%s requires %v, and the operator reads a Secret: %v",
 					block, required, wantsSecret)
+			}
+			if wantsSecret != blockOf(block).key {
+				t.Errorf("%s reads a Secret: %v, and the table states %v",
+					block, wantsSecret, blockOf(block).key)
 			}
 		})
 	}
@@ -132,7 +153,7 @@ func TestTheSpecAdmitsExactlyOneBlock(t *testing.T) {
 	if !strings.Contains(rule, "exists_one") {
 		t.Errorf("the rule is %q, want one that admits exactly one block", rule)
 	}
-	for _, block := range providerBlocks {
+	for _, block := range everyProviderBlock() {
 		if !strings.Contains(rule, "has(self."+block+")") {
 			t.Errorf("the rule is %q, and it does not read the %s block", rule, block)
 		}

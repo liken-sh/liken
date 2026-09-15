@@ -289,16 +289,17 @@ func (c *Catalog) UpsertTrailers(ctx context.Context, rows []trailerRow) (int, e
 	for i, row := range rows {
 		statements[i] = statement{
 			sql: `INSERT INTO trailers (library, item, provider, key, site, url, name, kind, ` +
-				`language, official, published, score, reason) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+				`language, official, published, resolution, score, reason) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, item, provider, key) DO UPDATE SET ` +
 				`site = excluded.site, url = excluded.url, name = excluded.name, ` +
 				`kind = excluded.kind, language = excluded.language, ` +
 				`official = excluded.official, published = excluded.published, ` +
+				`resolution = excluded.resolution, ` +
 				`score = excluded.score, reason = excluded.reason`,
 			params: []any{row.Library, row.Item, row.Provider, row.Key, row.Site, row.URL,
 				row.Name, row.Kind, row.Language, presentValue(row.Official), row.Published,
-				row.Score, row.Reason},
+				row.Resolution, row.Score, row.Reason},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -315,11 +316,11 @@ func (c *Catalog) ReplaceTrailers(ctx context.Context, library, item string, row
 	for _, row := range rows {
 		statements = append(statements, statement{
 			sql: `INSERT INTO trailers (library, item, provider, key, site, url, name, kind, ` +
-				`language, official, published, score, reason) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`language, official, published, resolution, score, reason) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			params: []any{row.Library, row.Item, row.Provider, row.Key, row.Site, row.URL,
 				row.Name, row.Kind, row.Language, presentValue(row.Official), row.Published,
-				row.Score, row.Reason},
+				row.Resolution, row.Score, row.Reason},
 		})
 	}
 	return c.apply(ctx, statements)

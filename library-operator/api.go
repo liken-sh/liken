@@ -169,6 +169,11 @@ type LibrarySpec struct {
 	// are asked. Enrichment reads the list; nothing acts on it yet.
 	Sources []string `json:"sources,omitempty"`
 
+	// The languages this library prefers, most preferred first, as tags such as
+	// en or en-US. Enrichment ranks a provider's answers by them, ahead of the
+	// household's own list.
+	Languages []string `json:"languages,omitempty"`
+
 	// The path components the walk skips, wherever they sit under the
 	// library root. An owner names the junk their storage keeps, such as
 	// a recycle bin or a staging folder, because no fixed list can
@@ -441,12 +446,17 @@ type MediaPreferences struct {
 	Spec       MediaPreferencesSpec `json:"spec"`
 }
 
-// The one field of the household defaults this operator reads.
+// The two fields of the household defaults this operator reads: the zone and
+// the audio languages.
 type MediaPreferencesSpec struct {
 	// The household wall-clock zone, an IANA name like America/New_York.
 	// The browser pod reads it as TZ, so its clock and its day's draw
 	// follow the house and not UTC.
 	TimeZone string `json:"timeZone,omitempty"`
+
+	// The languages the household prefers for audio, most preferred first. The
+	// enricher ranks trailers by them.
+	AudioLanguages []string `json:"audioLanguages,omitempty"`
 }
 
 // The collection ListMediaPreferences answers. Its resourceVersion is
@@ -456,16 +466,36 @@ type MediaPreferencesList struct {
 	Items    []MediaPreferences `json:"items"`
 }
 
+// The one MediaPreferences of the cluster, out of the list one pass read, or
+// nothing where the cluster holds none or holds one under another name. Every
+// household setting this operator reads comes off this object, so one list
+// answers them all.
+func householdPreferences(list *MediaPreferencesList) *MediaPreferences {
+	for index := range list.Items {
+		if list.Items[index].Metadata.Name == mediaPreferencesName {
+			return &list.Items[index]
+		}
+	}
+	return nil
+}
+
 // The household zone the list holds: the default MediaPreferences' own,
 // or nothing where the cluster states none. A pod with no TZ reads UTC,
 // the way media-operator's own pods do.
 func householdZone(list *MediaPreferencesList) string {
-	for _, preferences := range list.Items {
-		if preferences.Metadata.Name == mediaPreferencesName {
-			return preferences.Spec.TimeZone
-		}
+	if preferences := householdPreferences(list); preferences != nil {
+		return preferences.Spec.TimeZone
 	}
 	return ""
+}
+
+// The languages the household states, most preferred first, or none where the
+// cluster states none.
+func householdLanguages(list *MediaPreferencesList) []string {
+	if preferences := householdPreferences(list); preferences != nil {
+		return preferences.Spec.AudioLanguages
+	}
+	return nil
 }
 
 // The half of a Player's status this operator acts on. The idle block

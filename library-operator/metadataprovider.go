@@ -43,6 +43,7 @@ type MetadataProviderSpec struct {
 	Fanart   *ProviderFanart   `json:"fanart,omitempty"`
 	TVmaze   *ProviderTVmaze   `json:"tvmaze,omitempty"`
 	PeerTube *ProviderPeerTube `json:"peertube,omitempty"`
+	Archive  *ProviderArchive  `json:"archive,omitempty"`
 	Facts    []string          `json:"facts,omitempty"`
 }
 
@@ -73,6 +74,10 @@ type ProviderTVmaze struct{}
 type ProviderPeerTube struct {
 	Endpoint string `json:"endpoint"`
 }
+
+// The archive block is empty, because the Internet Archive serves its search
+// with no account. The block alone says that the operator may ask it.
+type ProviderArchive struct{}
 
 // One key in one Secret of the provider's own namespace.
 type SecretKeyRef struct {

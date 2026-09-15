@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"slices"
 )
 
 // TMDb's art answerer: one account and the settings it read. The settings are
@@ -25,7 +24,7 @@ func newTMDbArtAnswerer(client *tmdbClient) *tmdbArtAnswerer {
 func (a *tmdbArtAnswerer) providerBlock() string { return providerBlockTMDb }
 
 func (a *tmdbArtAnswerer) serves(fact string) bool {
-	return slices.Contains(providerFacts[providerBlockTMDb], fact)
+	return blockServes(providerBlockTMDb, fact)
 }
 
 func (a *tmdbArtAnswerer) fetchFile(ctx context.Context, address string) ([]byte, error) {

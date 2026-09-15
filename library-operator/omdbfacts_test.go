@@ -137,7 +137,7 @@ func TestAnOMDbValueOfNotAvailableIsNoAnswer(t *testing.T) {
 	})
 	answerer := newOMDbAnswerer(client)
 
-	for _, fact := range providerFacts[providerBlockOMDb] {
+	for _, fact := range blockOf(providerBlockOMDb).facts {
 		t.Run(fact, func(t *testing.T) {
 			answer, held, err := answerer.answer(t.Context(), fact,
 				titleRef{kind: libraryKindMovies, ids: harbourIDs()})
@@ -213,7 +213,7 @@ func TestTheFactsOfOneTitleCostOneOMDbCall(t *testing.T) {
 			})
 			answerer := newOMDbAnswerer(client)
 
-			for _, fact := range providerFacts[providerBlockOMDb] {
+			for _, fact := range blockOf(providerBlockOMDb).facts {
 				if _, _, err := answerer.answer(t.Context(), fact,
 					titleRef{kind: libraryKindMovies, ids: harbourIDs()}); err != nil {
 					t.Fatalf("the %s fact answered %v", fact, err)

@@ -3,6 +3,8 @@ package main
 // What every provider client shares: one request form, the 429 cooldown rule,
 // and the error an answer outside 2xx becomes. Each provider file holds its
 // own address, its own auth form, and the calls it makes.
+// The pace between two requests is shared here too, so no client sends faster
+// than its provider asks.
 
 import (
 	"context"
@@ -14,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,16 +35,32 @@ var providerRequestTimeout = 30 * time.Second
 // container.
 const providerAnswerLimit = 1 << 20
 
+// The interval one block takes, out of the table, or none for a block the
+// table holds no row for. It is a variable so a test drives a pace of its own
+// and no test sleeps.
+var providerPaceFor = func(block string) time.Duration { return blockOf(block).pace }
+
+// When the next request of one client may go. A pointer, so every copy of the
+// client takes its slots from one line.
+type providerSlot struct {
+	mutex sync.Mutex
+	next  time.Time
+}
+
 // What every client is made of: the block name, which names the provider in
 // an error; the address, which only a test replaces; the wait a cooldown
 // takes, which a test replaces so no test sleeps; and the form the key
 // travels in.
+// It holds the pace as well: the interval between two of its requests, which
+// a test zeroes, and the slot the next one takes.
 type providerRequests struct {
 	provider  string
 	base      string
 	http      *http.Client
 	wait      func(context.Context, time.Duration) error
 	authorize func(*http.Request)
+	interval  time.Duration
+	slot      *providerSlot
 }
 
 // The requests one account makes. A provider that needs no key authorizes
@@ -53,7 +72,31 @@ func newProviderRequests(provider, base string, authorize func(*http.Request)) p
 		http:      &http.Client{Timeout: providerRequestTimeout},
 		wait:      waitFor,
 		authorize: authorize,
+		interval:  providerPaceFor(provider),
+		slot:      &providerSlot{},
 	}
+}
+
+// Each request takes its slot under the lock and waits for it outside, so two
+// callers queue instead of waking together. The wait is this layer's own, not
+// the replaceable one a cooldown takes, so a test that counts cooldowns
+// counts no slots.
+func (r *providerRequests) pace(ctx context.Context) error {
+	if r.slot == nil {
+		return nil
+	}
+	r.slot.mutex.Lock()
+	now := time.Now()
+	wait := r.slot.next.Sub(now)
+	if wait < 0 {
+		wait = 0
+	}
+	r.slot.next = now.Add(wait + r.interval)
+	r.slot.mutex.Unlock()
+	if wait <= 0 {
+		return nil
+	}
+	return waitFor(ctx, wait)
 }
 
 // The wait ends on the context as well as on the clock, so a container that
@@ -114,6 +157,9 @@ func (r *providerRequests) get(ctx context.Context, path string, query url.Value
 // The send builds the request and lets the key's own shape decide the form it
 // travels in.
 func (r *providerRequests) send(ctx context.Context, path string, query url.Values) (int, time.Duration, []byte, error) {
+	if err := r.pace(ctx); err != nil {
+		return 0, 0, nil, err
+	}
 	address := r.base + path
 	if len(query) > 0 {
 		address += "?" + query.Encode()
@@ -171,6 +217,9 @@ func (r *providerRequests) fetchFile(ctx context.Context, address string) ([]byt
 }
 
 func (r *providerRequests) sendFile(ctx context.Context, address string) (int, time.Duration, []byte, error) {
+	if err := r.pace(ctx); err != nil {
+		return 0, 0, nil, err
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return 0, 0, nil, err

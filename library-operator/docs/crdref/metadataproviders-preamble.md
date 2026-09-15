@@ -7,11 +7,15 @@ fact the first provider in that list that serves it is the one
 asked.
 
 A `MetadataProvider` names exactly one provider block: `tmdb`,
-`omdb`, `fanart`, `tvmaze`, or `peertube`. TMDb, OMDb, and Fanart.tv
-take a key from a `Secret`; TVmaze takes none, so its block is empty.
-PeerTube takes no key either, but it is software that many people
-run, so its block names the address of one instance. The `PROVIDER`
-column shows the block.
+`omdb`, `fanart`, `tvmaze`, `peertube`, or `archive`. TMDb, OMDb, and
+Fanart.tv take a key from a `Secret`; TVmaze and the Internet Archive
+take none, so their blocks are empty. PeerTube takes no key either,
+but it is software that many people run, so its block names the
+address of one instance. The `PROVIDER` column shows the block.
+
+The operator paces every provider: one request at a time per block,
+with a fixed gap between requests that fits each provider's stated
+limits, and one second for the Internet Archive.
 
 `spec.facts` is optional. A provider that names none serves every
 fact the operator knows how to ask it for, and `status.facts`, shown

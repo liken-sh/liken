@@ -31,28 +31,27 @@ type answerLine struct {
 	spent     map[string]bool
 }
 
-// The line is built in the order LIBRARY_SOURCES names the blocks, which is
-// the Library's own spec.sources order, and the two rules for who answers
-// read that order. A block this image has no answerer for yet, and a block
-// whose key did not reach the container, are both skipped with no error.
-// TVmaze joins the line with no key, because it takes no account.
+// The answerer of each block the nfo facts can ask. TVmaze is built with no
+// key, because it takes no account.
+var nfoAnswerers = map[string]func(base, token string) answerer{
+	providerBlockTMDb: func(base, token string) answerer {
+		return tmdbAnswerer{client: newTMDbClient(base, token)}
+	},
+	providerBlockOMDb: func(base, token string) answerer {
+		return newOMDbAnswerer(newOMDbClient(base, token))
+	},
+	providerBlockTVmaze: func(base, _ string) answerer {
+		return newTVmazeAnswerer(newTVmazeClient(base))
+	},
+}
+
+// The line the two rules for who answers read, in the order the Library's own
+// spec.sources names the blocks.
 func newAnswerLine(blocks []string, value func(string) string) *answerLine {
-	line := &answerLine{spent: map[string]bool{}}
-	for _, block := range blocks {
-		token := value(providerTokenVariable(block))
-		switch {
-		case block == providerBlockTMDb && token != "":
-			line.answerers = append(line.answerers,
-				tmdbAnswerer{client: newTMDbClient(tmdbAPIBase, token)})
-		case block == providerBlockOMDb && token != "":
-			line.answerers = append(line.answerers,
-				newOMDbAnswerer(newOMDbClient(omdbAPIBase, token)))
-		case block == providerBlockTVmaze:
-			line.answerers = append(line.answerers,
-				newTVmazeAnswerer(newTVmazeClient(tvmazeAPIBase)))
-		}
+	return &answerLine{
+		answerers: answerersOf(blocks, value, nfoAnswerers),
+		spent:     map[string]bool{},
 	}
-	return line
 }
 
 // A fact with no answerer left has nothing to ask, so the titles that remain

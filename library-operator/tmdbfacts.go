@@ -315,7 +315,7 @@ type tmdbAnswerer struct {
 func (a tmdbAnswerer) providerBlock() string { return providerBlockTMDb }
 
 func (a tmdbAnswerer) serves(fact string) bool {
-	return slices.Contains(providerFacts[providerBlockTMDb], fact)
+	return blockServes(providerBlockTMDb, fact)
 }
 
 func (a tmdbAnswerer) answer(ctx context.Context, fact string, title titleRef) (factAnswer, bool, error) {

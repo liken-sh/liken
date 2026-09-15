@@ -355,6 +355,41 @@ func TestTheHouseholdZoneIsTheDefaultPreferencesOwn(t *testing.T) {
 	}
 }
 
+// The household languages come off the same list the zone does, so one read
+// answers both. A cluster that holds no MediaPreferences states none.
+func TestTheHouseholdLanguagesAreTheDefaultPreferencesOwn(t *testing.T) {
+	cases := []struct {
+		name string
+		list MediaPreferencesList
+		want []string
+	}{
+		{name: "a cluster that holds none"},
+		{name: "the languages the household states",
+			list: MediaPreferencesList{Items: []MediaPreferences{{
+				Metadata: ObjectMeta{Name: "default"},
+				Spec:     MediaPreferencesSpec{AudioLanguages: []string{"ko", "en-US"}},
+			}}},
+			want: []string{"ko", "en-US"}},
+		{name: "a household that states none",
+			list: MediaPreferencesList{Items: []MediaPreferences{{
+				Metadata: ObjectMeta{Name: "default"},
+				Spec:     MediaPreferencesSpec{TimeZone: "America/New_York"},
+			}}}},
+		{name: "preferences under another name",
+			list: MediaPreferencesList{Items: []MediaPreferences{{
+				Metadata: ObjectMeta{Name: "other"},
+				Spec:     MediaPreferencesSpec{AudioLanguages: []string{"ko"}},
+			}}}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if got := householdLanguages(&one.list); !slices.Equal(got, one.want) {
+				t.Errorf("the household states %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
 // Adding a finalizer answers a new list, so a patch that fails leaves the
 // caller's copy of the object alone. Adding one the object already carries
 // changes nothing. Removing takes every name it is given and keeps the rest

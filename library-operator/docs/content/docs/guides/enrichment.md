@@ -54,6 +54,10 @@ The providers, and the facts each one serves:
   `peertube: {endpoint: https://tube.example}`. The trailer fact
   searches the instance by title, so pick an instance that publishes
   trailers.
+* `archive`, the Internet Archive: trailers only, from its
+  `movie_trailers` collection, and it needs no account. Declare it
+  with an empty block, `archive: {}`. It holds trailers for many older
+  films, and the operator asks it no faster than once a second.
 
 The operator reads the `Secret` once per pass, to check the provider
 answers. The key reaches an enricher container through a
@@ -158,14 +162,30 @@ The `trailer` fact records links, not files. It asks every source
 that serves it and writes what it finds to `.liken/trailer.yaml`
 beside the title, one entry per video: the provider, the provider's
 own key, the site the video plays from, the page to watch it on, its
-name, its kind (`trailer`, `teaser`, `spot`, `clip`, or `other`), and
-a score from 0 to 100 with a one-line reason. TMDb names a video by
-the title's own id, so its score is 100. A PeerTube instance answers a
-search by title, so a video scores only when its name carries the
-same title and year, and a trailer scores above a teaser or a TV
-spot. The catalog's `trailers` table holds the same rows. Nothing
-plays or downloads a trailer yet; a trailer file beside the title
-still plays as before.
+name, its kind (`trailer`, `teaser`, or `spot`), its language, its
+resolution where the provider states one, and a score from 1 to 100
+with a one-line reason. The catalog's `trailers` table holds the same
+rows.
+
+The score ranks the videos of one title, so a screen can take the
+first. A video keyed by the title's own id, as TMDb's are, starts at
+100. A video found by a search starts at 90 when its name carries the
+same title and year, and at 60 when the name carries the title and no
+year at all; a search result whose name carries another title or
+another year is not recorded. Then the kind takes points off, a teaser
+less than a TV spot, and so does a language the household does not
+prefer, and so does a TMDb video that is not marked official. The
+reason says which of these applied. Clips, featurettes, and other
+extras are not recorded at all. Within one provider, videos with the
+same name collapse to the best one, and at most five videos per
+provider are kept for a title.
+
+The preferred languages are the library's `spec.languages`, then the
+household's `audioLanguages` from the media operator's
+`MediaPreferences`, and `en` when neither names any.
+
+Nothing plays or downloads a trailer yet; a trailer file beside the
+title still plays as before.
 
 ### When a fact asks again
 

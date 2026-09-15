@@ -611,8 +611,10 @@ CREATE INDEX aliases_alias ON aliases (alias);
 -- plays from, and url is the page a person opens to watch it. kind is one
 -- of trailer, teaser, spot, clip, or other. score is how sure the trailer
 -- fact is that this video belongs to this title, from 0 to 100, and reason
--- says why in one line. The rows are the projection of .liken/trailer.yaml,
--- so the walk writes them again from the file.
+-- says why in one line.
+-- resolution is the height in lines the provider states, or 0 where it states
+-- none. The rows are the projection of .liken/trailer.yaml, so the walk
+-- writes them again from the file.
 CREATE TABLE trailers (
     library TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
@@ -625,6 +627,7 @@ CREATE TABLE trailers (
     language TEXT NOT NULL DEFAULT '',
     official INTEGER NOT NULL DEFAULT 0,
     published TEXT NOT NULL DEFAULT '',
+    resolution INTEGER NOT NULL DEFAULT 0,
     score INTEGER NOT NULL DEFAULT 0,
     reason TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, item, provider, key)

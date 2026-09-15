@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -213,5 +214,53 @@ func TestTheOperatorReadsARenderBlockTheSchemaAdmits(t *testing.T) {
 	if spec.Trickplay.Render.Class != "gpu.liken.sh" || spec.Trickplay.Render.Selector != "true" {
 		t.Errorf("render = %+v, want the class and the selector the schema states",
 			spec.Trickplay.Render)
+	}
+}
+
+// The languages a library may name: BCP-47 tags the schema's own pattern
+// admits, in the order the owner wrote them, and the list the operator reads
+// back off a spec the API server admitted.
+func TestTheSchemaTakesTheLanguagesOfALibrary(t *testing.T) {
+	languages := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties", "languages").(map[string]any)
+
+	if languages["type"] != "array" || languages["maxItems"] != 8 {
+		t.Errorf("languages reads %+v, want an array of at most 8 tags", languages)
+	}
+	pattern := languages["items"].(map[string]any)["pattern"].(string)
+	tags := regexp.MustCompile(pattern)
+	cases := []struct {
+		tag   string
+		admit bool
+	}{
+		{tag: "en", admit: true},
+		{tag: "en-US", admit: true},
+		{tag: "pt-BR", admit: true},
+		{tag: "zh-Hant", admit: true},
+		{tag: "fil", admit: true},
+		{tag: "e"},
+		{tag: "en_US"},
+		{tag: "english (US)"},
+		{tag: ""},
+	}
+	for _, one := range cases {
+		t.Run(one.tag, func(t *testing.T) {
+			if got := tags.MatchString(one.tag); got != one.admit {
+				t.Errorf("the pattern admits %q = %v, want %v", one.tag, got, one.admit)
+			}
+		})
+	}
+}
+
+// The spec the API server admits is the spec the operator reads: the
+// languages in the order the owner named them.
+func TestTheOperatorReadsTheLanguagesTheSchemaAdmits(t *testing.T) {
+	spec := LibrarySpec{}
+	if err := json.Unmarshal([]byte(`{"languages":["ko","en-US"]}`), &spec); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(spec.Languages, []string{"ko", "en-US"}) {
+		t.Errorf("languages = %v, want the order the owner named", spec.Languages)
 	}
 }

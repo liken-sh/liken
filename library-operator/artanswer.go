@@ -35,24 +35,23 @@ type artLine struct {
 	answerers []artAnswerer
 }
 
-// The line is built in the order LIBRARY_SOURCES names the blocks, which is
-// the Library's own spec.sources order, and the rule for who answers reads
-// that order. A block this image has no answerer for yet, and a block whose
-// key did not reach the container, are both skipped with no error.
+// The answerer of each block the art facts can ask.
+var artAnswerers = map[string]func(base, token string) artAnswerer{
+	providerBlockTMDb: func(base, token string) artAnswerer {
+		return newTMDbArtAnswerer(newTMDbClient(base, token))
+	},
+	providerBlockFanart: func(base, token string) artAnswerer {
+		return fanartArtAnswerer{client: newFanartClient(base, token)}
+	},
+	providerBlockTVmaze: func(base, _ string) artAnswerer {
+		return newTVmazeArtAnswerer(newTVmazeClient(base))
+	},
+}
+
+// The line the rule for who answers reads, in the order the Library's own
+// spec.sources names the blocks.
 func newArtLine(blocks []string, value func(string) string) *artLine {
-	line := &artLine{}
-	for _, block := range blocks {
-		token := value(providerTokenVariable(block))
-		switch {
-		case block == providerBlockTMDb && token != "":
-			line.answerers = append(line.answerers, newTMDbArtAnswerer(newTMDbClient(tmdbAPIBase, token)))
-		case block == providerBlockFanart && token != "":
-			line.answerers = append(line.answerers, fanartArtAnswerer{client: newFanartClient(fanartAPIBase, token)})
-		case block == providerBlockTVmaze:
-			line.answerers = append(line.answerers, newTVmazeArtAnswerer(newTVmazeClient(tvmazeAPIBase)))
-		}
-	}
-	return line
+	return &artLine{answerers: answerersOf(blocks, value, artAnswerers)}
 }
 
 // A fact with no answerer left has nothing to ask, so the titles that remain

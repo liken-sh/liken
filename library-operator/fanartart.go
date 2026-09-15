@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -19,7 +18,7 @@ type fanartArtAnswerer struct {
 func (a fanartArtAnswerer) providerBlock() string { return providerBlockFanart }
 
 func (a fanartArtAnswerer) serves(fact string) bool {
-	return slices.Contains(providerFacts[providerBlockFanart], fact)
+	return blockServes(providerBlockFanart, fact)
 }
 
 func (a fanartArtAnswerer) fetchFile(ctx context.Context, address string) ([]byte, error) {

@@ -70,12 +70,15 @@ func TestAPeerTubeSearchAsksForTheNewestVideos(t *testing.T) {
 
 // Every result whose name carries this title and year becomes one trailer. A
 // result that names another year is dropped.
+// A result whose name says clip or names no kind is dropped too, because a
+// trailer song is no trailer of the title.
 func TestThePeerTubeTrailerAnswererKeepsWhatTheNameMatches(t *testing.T) {
 	client, _ := newFakePeerTube(t, trailerFixture(t, "peertube-search.json"))
 	answerer := newPeertubeTrailerAnswerer(client)
 
 	entries, err := answerer.trailers(t.Context(),
-		trailerTitle{kind: libraryKindMovies, title: "Dune: Part Three", year: 2026})
+		trailerTitle{kind: libraryKindMovies, title: "Dune: Part Three", year: 2026,
+			languages: []string{"en"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,38 +89,31 @@ func TestThePeerTubeTrailerAnswererKeepsWhatTheNameMatches(t *testing.T) {
 			Site: trailerSitePeerTube, URL: client.base + "/w/uCGxtW81oT5vDUc1LoZUDk",
 			Name: "DUNE: PART THREE (2026) - IMAX Trailer [4K Ultra HD]",
 			Kind: trailerKindTrailer, Language: "en", Published: "2026-07-14",
-			Score: 90, Reason: "title and year match; the name says trailer"},
+			Score: 90, Reason: "title and year match; trailer; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "7f2d3e89-3a4b-4c32-8a0b-1d2e3f4a5b6c",
 			Site: trailerSitePeerTube, URL: client.base + "/w/vDHyuX92pU6wEVd2MpAVEl",
 			Name: "DUNE: PART THREE (2026) - Official Trailer [4K Ultra HD]",
 			Kind: trailerKindTrailer, Language: "en", Published: "2026-06-02",
-			Score: 90, Reason: "title and year match; the name says trailer"},
+			Score: 90, Reason: "title and year match; trailer; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "8a3e4f90-4b5c-4d43-9b1c-2e3f4a5b6c7d",
 			Site: trailerSitePeerTube, URL: client.base + "/w/wEIzvY03qV7xFWe3NqBWFm",
 			Name: "DUNE: PART THREE (2026) - Teaser Trailer [4K Ultra HD]",
 			Kind: trailerKindTeaser, Language: "en", Published: "2026-02-09",
-			Score: 80, Reason: "title and year match; the name says teaser"},
+			Score: 80, Reason: "title and year match; teaser; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "9b4f5a01-5c6d-4e54-8c2d-3f4a5b6c7d8e",
 			Site: trailerSitePeerTube, URL: client.base + "/w/xFJawZ14rW8yGXf4OrCXGn",
 			Name: `DUNE: PART THREE (2026) - "Awakening" Teaser [4K Ultra HD]`,
 			Kind: trailerKindTeaser, Language: "en", Published: "2025-12-20",
-			Score: 80, Reason: "title and year match; the name says teaser"},
+			Score: 80, Reason: "title and year match; teaser; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "1d6b7c23-7e8f-4a76-8e4f-5b6c7d8e9f01",
 			Site: trailerSitePeerTube, URL: client.base + "/w/zHLcyB36tY0AIZh6QtEZIp",
 			Name: `DUNE: PART THREE (2026) - "Sandworm" TV Spot [4K Ultra HD]`,
 			Kind: trailerKindSpot, Language: "en", Published: "2026-08-01",
-			Score: 60, Reason: "title and year match; the name says spot"},
-		{Path: likenSelfPath, Provider: providerBlockPeerTube,
-			Key:  "2e7c8d34-8f90-4b87-9f50-6c7d8e9f0123",
-			Site: trailerSitePeerTube,
-			URL:  client.base + "/w/2e7c8d34-8f90-4b87-9f50-6c7d8e9f0123",
-			Name: "DUNE: PART THREE (2026) Trailer Song",
-			Kind: trailerKindOther, Published: "2026-07-19",
-			Score: 40, Reason: "title and year match; the name says other"},
+			Score: 60, Reason: "title and year match; spot; en"},
 	}
 	if !reflect.DeepEqual(entries, want) {
 		t.Errorf("the answerer held\n%+v\nwant\n%+v", entries, want)

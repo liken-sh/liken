@@ -1,7 +1,7 @@
 package main
 
 // What these tests read: the videos call of each kind, the trailer every
-// field of a TMDb video becomes, the site the answerer has no address for,
+// field of a TMDb video becomes, the videos the answerer records none of,
 // and the title with no TMDb id.
 
 import (
@@ -48,13 +48,15 @@ func newTrailerTMDb(t *testing.T) tmdbTrailerAnswerer {
 	return newTMDbTrailerAnswerer(client)
 }
 
-// Every field of a TMDb video reaches the trailer. A site the answerer has no
-// address for is dropped.
+// Every field of a TMDb video reaches the trailer, the size as the
+// resolution. A site the answerer has no address for is dropped.
+// A clip and a video of another kind are dropped as well, because a
+// featurette is no trailer of the title.
 func TestTheTMDbTrailerAnswererReadsEveryVideo(t *testing.T) {
 	answerer := newTrailerTMDb(t)
 
-	entries, err := answerer.trailers(t.Context(),
-		trailerTitle{kind: libraryKindMovies, ids: providerIDs{"tmdb": "603"}})
+	entries, err := answerer.trailers(t.Context(), trailerTitle{kind: libraryKindMovies,
+		ids: providerIDs{"tmdb": "603"}, languages: []string{"en"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,23 +65,18 @@ func TestTheTMDbTrailerAnswererReadsEveryVideo(t *testing.T) {
 		{Path: likenSelfPath, Provider: providerBlockTMDb, Key: "vKQi3bBA1y8",
 			Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=vKQi3bBA1y8",
 			Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en", Official: true,
-			Published: "2026-03-18", Score: 100, Reason: "keyed by the tmdb id"},
+			Published: "2026-03-18", Resolution: 1080,
+			Score: 100, Reason: "keyed by the tmdb id; trailer; en"},
 		{Path: likenSelfPath, Provider: providerBlockTMDb, Key: "m8e-FF8MsqU",
 			Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=m8e-FF8MsqU",
 			Name: "Teaser", Kind: trailerKindTeaser, Language: "en",
-			Published: "2025-11-02", Score: 100, Reason: "keyed by the tmdb id"},
+			Published: "2025-11-02", Resolution: 720,
+			Score: 80, Reason: "keyed by the tmdb id; teaser; en; unofficial"},
 		{Path: likenSelfPath, Provider: providerBlockTMDb, Key: "76979871",
 			Site: trailerSiteVimeo, URL: "https://vimeo.com/76979871",
 			Name: "Bande-annonce", Kind: trailerKindTrailer, Language: "fr", Official: true,
-			Published: "2026-04-01", Score: 100, Reason: "keyed by the tmdb id"},
-		{Path: likenSelfPath, Provider: providerBlockTMDb, Key: "L0fw0WzFaBM",
-			Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=L0fw0WzFaBM",
-			Name: "Making The Matrix", Kind: trailerKindOther, Language: "en", Official: true,
-			Score: 100, Reason: "keyed by the tmdb id"},
-		{Path: likenSelfPath, Provider: providerBlockTMDb, Key: "Pi1FAdEQlmA",
-			Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=Pi1FAdEQlmA",
-			Name: "Lobby Scene", Kind: trailerKindClip, Language: "en",
-			Published: "2024-02-11", Score: 100, Reason: "keyed by the tmdb id"},
+			Published: "2026-04-01", Resolution: 1080,
+			Score: 70, Reason: "keyed by the tmdb id; trailer; language fr not preferred"},
 	}
 	if !reflect.DeepEqual(entries, want) {
 		t.Errorf("the answerer held\n%+v\nwant\n%+v", entries, want)

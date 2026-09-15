@@ -7,6 +7,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ func TestTheCheckOfEachProviderBlock(t *testing.T) {
 		{block: providerBlockOMDb, path: "/", secret: true},
 		{block: providerBlockFanart, path: fanartCheckPath, secret: true},
 		{block: providerBlockTVmaze, path: tvmazeCheckPath},
+		{block: providerBlockArchive, path: archiveSearchPath},
 	}
 	answers := []struct {
 		name   string
@@ -182,7 +184,7 @@ func TestProviderStatusReportsTheFactsItServesNow(t *testing.T) {
 		want   []string
 	}{
 		{name: "a spec that names no fact serves the whole table",
-			status: http.StatusOK, want: providerFacts[providerBlockTMDb]},
+			status: http.StatusOK, want: blockOf(providerBlockTMDb).facts},
 		{name: "a spec narrows the table to what it names",
 			facts: []string{factIdentity}, status: http.StatusOK, want: []string{factIdentity}},
 		{name: "a spec that names a fact outside the table serves none",
@@ -589,6 +591,39 @@ func TestTheCheckOfAPeerTubeInstance(t *testing.T) {
 				t.Errorf("the check asked for %s, want %s", asked, peertubeCheckPath)
 			}
 		})
+	}
+}
+
+// The archive is checked at the same search the trailer fact uses, asked for
+// no rows at all, so the check costs the collection one count and carries no
+// result back.
+func TestTheCheckOfTheInternetArchive(t *testing.T) {
+	asked := url.URL{}
+	archive := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			asked = *r.URL
+			w.WriteHeader(http.StatusOK)
+		}))
+	t.Cleanup(archive.Close)
+	cluster := newFakeCluster()
+	provider := providerOfBlock("archive", providerBlockArchive)
+	cluster.providers["archive"] = provider
+	operator := testOperator(t, cluster)
+	operator.providerBases[providerBlockArchive] = archive.URL
+
+	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+	ready := conditionNamed(cluster.heldProvider("archive").Status.Conditions, conditionReady)
+	if ready.Status != ConditionTrue || ready.Reason != reasonReachable {
+		t.Errorf("Ready = %s/%s, want %s/%s",
+			ready.Status, ready.Reason, ConditionTrue, reasonReachable)
+	}
+	if asked.Path != archiveSearchPath {
+		t.Errorf("the check asked for %s, want %s", asked.Path, archiveSearchPath)
+	}
+	query := asked.Query()
+	if query.Get("q") != "collection:"+archiveCollection || query.Get("rows") != "0" {
+		t.Errorf("the check asked %v, want the collection and no rows", query)
 	}
 }
 

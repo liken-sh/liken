@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -25,28 +24,14 @@ type providerReach struct {
 	authorize func(*http.Request, string)
 }
 
-var providerReaches = map[string]providerReach{
-	providerBlockTMDb:     {path: tmdbConfigurationPath, authorize: authorizeTMDb},
-	providerBlockOMDb:     {path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter)},
-	providerBlockFanart:   {path: fanartCheckPath, authorize: authorizeParameter(fanartAPIKeyParam)},
-	providerBlockTVmaze:   {path: tvmazeCheckPath},
-	providerBlockPeerTube: {path: peertubeCheckPath},
-}
-
 // The call every PeerTube instance answers with no account. It is the
 // cheapest read an instance serves, so the check costs one small request.
 const peertubeCheckPath = "/api/v1/config"
 
-// The address of each provider the check calls, which a test replaces with a
-// server of its own.
-func defaultProviderBases() map[string]string {
-	return map[string]string{
-		providerBlockTMDb:   tmdbAPIBase,
-		providerBlockOMDb:   omdbAPIBase,
-		providerBlockFanart: fanartAPIBase,
-		providerBlockTVmaze: tvmazeAPIBase,
-	}
-}
+// The search the trailer fact uses, asked for no rows at all, so the check
+// reads that the collection answers and carries no result back.
+const archiveCheckPath = archiveSearchPath +
+	"?q=collection%3A" + archiveCollection + "&rows=0&output=json"
 
 // A key that travels as a query parameter, in the shape the check calls an
 // authorization in.
@@ -226,8 +211,7 @@ func (o *operator) askProvider(ctx context.Context, provider *MetadataProvider, 
 	asking, done := context.WithTimeout(ctx, providerCheckTimeout)
 	defer done()
 
-	block := provider.block()
-	reach := providerReaches[block]
+	reach := blockOf(provider.block()).reach
 	request, err := http.NewRequestWithContext(asking, http.MethodGet,
 		o.providerBase(provider)+reach.path, nil)
 	if err != nil {
@@ -255,16 +239,6 @@ func (o *operator) providerBase(provider *MetadataProvider) string {
 		return endpoint
 	}
 	return o.providerBases[provider.block()]
-}
-
-// The address the provider's block names. Only the peertube block names
-// one, because a PeerTube instance is one server among many. Every other
-// block is one service at one fixed address, so this is empty for them.
-func (p *MetadataProvider) endpoint() string {
-	if p.Spec.PeerTube != nil {
-		return strings.TrimSuffix(p.Spec.PeerTube.Endpoint, "/")
-	}
-	return ""
 }
 
 // The Sources condition's reasons: every named provider resolves, one does

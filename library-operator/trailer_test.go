@@ -16,7 +16,8 @@ func trailerOf(provider, key string, score int) trailerRow {
 		Library: "house/movies", Item: "movie:tmdb:1", Provider: provider, Key: key,
 		Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=" + key,
 		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en",
-		Official: true, Published: "2026-08-01", Score: score, Reason: "official trailer",
+		Official: true, Published: "2026-08-01", Resolution: 1080,
+		Score: score, Reason: "official trailer",
 	}
 }
 
@@ -26,7 +27,7 @@ func trailerLines(t *testing.T, catalog *Catalog) []string {
 	lines, err := catalog.queryStrings(t.Context(),
 		`SELECT provider || '|' || key || '|' || site || '|' || url || '|' || name || '|' ||`+
 			` kind || '|' || language || '|' || official || '|' || published || '|' ||`+
-			` score || '|' || reason FROM trailers WHERE library = ? AND item = ?`+
+			` resolution || '|' || score || '|' || reason FROM trailers WHERE library = ? AND item = ?`+
 			` ORDER BY provider, key`,
 		[]any{"house/movies", "movie:tmdb:1"})
 	if err != nil {
@@ -49,7 +50,7 @@ func TestTheCatalogHoldsTheTrailersOfATitle(t *testing.T) {
 		t.Errorf("the write reported %d rows, want 1", written)
 	}
 	want := "tmdb|sJ9mvBJ1aTI|youtube|https://www.youtube.com/watch?v=sJ9mvBJ1aTI|" +
-		"Official Trailer|trailer|en|1|2026-08-01|90|official trailer"
+		"Official Trailer|trailer|en|1|2026-08-01|1080|90|official trailer"
 	if got := strings.Join(trailerLines(t, catalog), ","); got != want {
 		t.Errorf("the table holds\n%s\nwant\n%s", got, want)
 	}
@@ -154,46 +155,100 @@ func TestHowATrailerTitleFolds(t *testing.T) {
 	}
 }
 
+// The languages one household asked for, most preferred first.
+var householdEnglish = []string{"en-US", "en"}
+
 // What one trailer scores, and why.
 func TestWhatATrailerScores(t *testing.T) {
-	title := trailerTitle{kind: libraryKindMovies, title: "Dune: Part Three", year: 2026}
 	cases := []struct {
-		name     string
-		provider string
-		parsed   trailerName
-		want     int
-		reason   string
+		name   string
+		entry  trailerEntry
+		match  trailerMatch
+		want   int
+		reason string
 	}{
-		{name: "a TMDb video", provider: providerBlockTMDb,
-			parsed: trailerName{}, want: 100, reason: "keyed by the tmdb id"},
-		{name: "a name of another title", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE - PART TWO", year: 2026, kind: trailerKindTrailer},
-			want:   0, reason: "the name's title differs"},
-		{name: "a name of another year", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE: PART THREE", year: 2024, kind: trailerKindTrailer},
-			want:   0, reason: "the name's year differs"},
-		{name: "a trailer", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindTrailer},
-			want:   90, reason: "title and year match; the name says trailer"},
-		{name: "a teaser", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindTeaser},
-			want:   80, reason: "title and year match; the name says teaser"},
-		{name: "a spot", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindSpot},
-			want:   60, reason: "title and year match; the name says spot"},
-		{name: "a clip", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindClip},
-			want:   40, reason: "title and year match; the name says clip"},
-		{name: "anything else", provider: providerBlockPeerTube,
-			parsed: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindOther},
-			want:   40, reason: "title and year match; the name says other"},
+		{name: "a keyed official trailer in a preferred language",
+			entry: trailerEntry{Provider: providerBlockTMDb, Kind: trailerKindTrailer,
+				Language: "en", Official: true},
+			match: trailerMatch{keyed: true},
+			want:  100, reason: "keyed by the tmdb id; trailer; en"},
+		{name: "a keyed unofficial teaser in another language",
+			entry: trailerEntry{Provider: providerBlockTMDb, Kind: trailerKindTeaser, Language: "fr"},
+			match: trailerMatch{keyed: true},
+			want:  50, reason: "keyed by the tmdb id; teaser; language fr not preferred; unofficial"},
+		{name: "a keyed video with no language at all",
+			entry: trailerEntry{Provider: providerBlockTMDb, Kind: trailerKindOther, Official: true},
+			match: trailerMatch{keyed: true},
+			want:  45, reason: "keyed by the tmdb id; other; no language"},
+		{name: "a search trailer whose name carries the title and the year",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindTrailer, Language: "en"},
+			match: trailerMatch{title: true, year: true, yearKnown: true},
+			want:  90, reason: "title and year match; trailer; en"},
+		{name: "a search spot with no language",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindSpot},
+			match: trailerMatch{title: true, year: true, yearKnown: true},
+			want:  55, reason: "title and year match; spot; no language"},
+		{name: "a search clip whose name states no year",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindClip, Language: "en"},
+			match: trailerMatch{title: true},
+			want:  20, reason: "title matches, no year known; clip; en"},
+		{name: "the floor a matched video never falls below",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindOther, Language: "ko"},
+			match: trailerMatch{title: true},
+			want:  1, reason: "title matches, no year known; other; language ko not preferred"},
+		{name: "a search provider states no official mark of its own",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindTrailer, Language: "en"},
+			match: trailerMatch{title: true, year: true, yearKnown: true},
+			want:  90, reason: "title and year match; trailer; en"},
+		{name: "a name of another title",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindTrailer, Language: "en"},
+			match: trailerMatch{year: true, yearKnown: true}},
+		{name: "a name of another year",
+			entry: trailerEntry{Provider: providerBlockPeerTube, Kind: trailerKindTrailer, Language: "en"},
+			match: trailerMatch{title: true, yearKnown: true}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			score, reason := scoreTrailer(trailerEntry{Provider: test.provider}, test.parsed, title)
+			score, reason := scoreTrailer(test.entry, test.match, householdEnglish)
 			if score != test.want || reason != test.reason {
 				t.Errorf("the trailer scores %d, %q, want %d, %q",
 					score, reason, test.want, test.reason)
+			}
+		})
+	}
+}
+
+// Which video languages a household's own list prefers. The primary subtag
+// before the hyphen is what the two tags are compared on.
+func TestWhichLanguagesATrailerScorePrefers(t *testing.T) {
+	cases := []struct {
+		name      string
+		languages []string
+		language  string
+		want      bool
+	}{
+		{name: "the same tag", languages: []string{"en-US"}, language: "en-US", want: true},
+		{name: "a region the video states none of", languages: []string{"en-US"},
+			language: "en", want: true},
+		{name: "a region the preference states none of", languages: []string{"en"},
+			language: "en-US", want: true},
+		{name: "another case", languages: []string{"EN"}, language: "en-us", want: true},
+		{name: "the second preference", languages: []string{"ko", "en"},
+			language: "en", want: true},
+		{name: "another language", languages: []string{"en-US"}, language: "ko"},
+		{name: "no preference at all", language: "en"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			entry := trailerEntry{Provider: providerBlockPeerTube,
+				Kind: trailerKindTrailer, Language: test.language}
+			score, reason := scoreTrailer(entry, trailerMatch{title: true, year: true, yearKnown: true},
+				test.languages)
+
+			preferred := score == trailerScoreTitleYear
+			if preferred != test.want {
+				t.Errorf("%s against %v scores %d (%q), want preferred = %v",
+					test.language, test.languages, score, reason, test.want)
 			}
 		})
 	}

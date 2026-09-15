@@ -27,7 +27,7 @@ func testEnrichJob(library *Library, path string, providers ...*MetadataProvider
 		set[libraryKey(provider.Metadata.Namespace, provider.Metadata.Name)] = provider
 		library.Spec.Sources = append(library.Spec.Sources, provider.Metadata.Name)
 	}
-	return buildEnrichJob(library, set, enrichJobName(library.Metadata.Name), path,
+	return buildEnrichJob(library, set, nil, enrichJobName(library.Metadata.Name), path,
 		testScannerImage, testFFmpegImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
@@ -607,10 +607,31 @@ func TestTheTrailerContainerReadsThePeerTubeAddress(t *testing.T) {
 		if container.Name != trailerContainerName {
 			continue
 		}
-		if got := containerEnvironment(container)[peertubeEndpointVariable]; got != "https://tube.example" {
-			t.Errorf("%s = %q, want the instance the source names", peertubeEndpointVariable, got)
+		if got := containerEnvironment(container)[providerEndpointVariable(providerBlockPeerTube)]; got != "https://tube.example" {
+			t.Errorf("%s = %q, want the instance the source names", providerEndpointVariable(providerBlockPeerTube), got)
 		}
 		return
 	}
 	t.Fatal("the pod holds no trailer container")
+}
+
+// The languages the pass resolved reach every container that asks a
+// provider, because the score of a trailer reads them and no container holds
+// a credential to read the Library or the household itself.
+func TestEveryFactsContainerCarriesTheLanguages(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Languages = []string{"en-US"}
+	library.Spec.Sources = []string{"tmdb"}
+	tmdb := readyProvider("tmdb", "house", factIdentity)
+	set := providerSet{libraryKey(tmdb.Metadata.Namespace, tmdb.Metadata.Name): tmdb}
+
+	job := buildEnrichJob(library, set, []string{"en-US", "ko"},
+		enrichJobName(library.Metadata.Name), "",
+		testScannerImage, testFFmpegImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+
+	for _, container := range job.Spec.Template.Spec.InitContainers[1:] {
+		if got := containerEnvironment(container)[libraryLanguagesVariable]; got != "en-US,ko" {
+			t.Errorf("%s reads %s = %q, want the union", container.Name, libraryLanguagesVariable, got)
+		}
+	}
 }

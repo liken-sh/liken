@@ -364,6 +364,7 @@ const trailerLedger = `trailers:
       language: en
       official: true
       published: "2026-08-01"
+      resolution: 1080
       score: 90
       reason: official trailer
     - path: .
@@ -399,7 +400,7 @@ func TestATrailerLedgerYieldsTheTrailerRowsOfItsTitle(t *testing.T) {
 		Key: "sJ9mvBJ1aTI", Site: trailerSiteYouTube,
 		URL:  "https://www.youtube.com/watch?v=sJ9mvBJ1aTI",
 		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en", Official: true,
-		Published: "2026-08-01", Score: 90, Reason: "official trailer",
+		Published: "2026-08-01", Resolution: 1080, Score: 90, Reason: "official trailer",
 	}
 	if result.trailers[0] != want {
 		t.Errorf("trailers[0] = %+v, want %+v", result.trailers[0], want)
@@ -427,12 +428,13 @@ func TestTheWalkWritesTheTrailersOfATitleAgainstTheRealSchema(t *testing.T) {
 	}
 
 	rows, err := catalog.queryStrings(t.Context(),
-		`SELECT provider || '|' || key || '|' || official || '|' || score FROM trailers `+
+		`SELECT provider || '|' || key || '|' || official || '|' || resolution || '|' || score `+
+			`FROM trailers `+
 			`WHERE library = ? ORDER BY provider`, []any{"house/movies"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "peertube|e6b1-4c2f|0|40,tmdb|sJ9mvBJ1aTI|1|90"
+	want := "peertube|e6b1-4c2f|0|0|40,tmdb|sJ9mvBJ1aTI|1|1080|90"
 	if got := strings.Join(rows, ","); got != want {
 		t.Errorf("the table holds %q, want %q", got, want)
 	}

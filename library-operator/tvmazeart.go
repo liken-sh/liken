@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"slices"
 )
 
 // TVmaze's art answerer, which needs no account. It holds the nfo answerer's
@@ -23,7 +22,7 @@ func newTVmazeArtAnswerer(client *tvmazeClient) *tvmazeArtAnswerer {
 func (a *tvmazeArtAnswerer) providerBlock() string { return providerBlockTVmaze }
 
 func (a *tvmazeArtAnswerer) serves(fact string) bool {
-	return slices.Contains(providerFacts[providerBlockTVmaze], fact)
+	return blockServes(providerBlockTVmaze, fact)
 }
 
 func (a *tvmazeArtAnswerer) fetchFile(ctx context.Context, address string) ([]byte, error) {

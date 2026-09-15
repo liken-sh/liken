@@ -282,8 +282,8 @@ func TestTheArtFactsJoinTheEnricherMaps(t *testing.T) {
 // Whether any provider block can serve the fact, because an art fact no
 // provider serves is a file nothing can write.
 func servedByAnyProvider(fact string) bool {
-	for _, facts := range providerFacts {
-		if slices.Contains(facts, fact) {
+	for _, block := range providerBlocks {
+		if blockServes(block.name, fact) {
 			return true
 		}
 	}

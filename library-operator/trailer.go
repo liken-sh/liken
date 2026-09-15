@@ -46,8 +46,10 @@ type trailerEntry struct {
 	Language  string `yaml:"language,omitempty"`
 	Official  bool   `yaml:"official,omitempty"`
 	Published string `yaml:"published,omitempty"` // YYYY-MM-DD
-	Score     int    `yaml:"score"`
-	Reason    string `yaml:"reason,omitempty"`
+	// The height in lines the provider states, or 0 where it states none.
+	Resolution int    `yaml:"resolution,omitempty"`
+	Score      int    `yaml:"score"`
+	Reason     string `yaml:"reason,omitempty"`
 }
 
 // One row of the trailers table: the ledger entry with the library and the
@@ -56,6 +58,7 @@ type trailerRow struct {
 	Library, Item, Provider, Key, Site, URL, Name, Kind, Language string
 	Official                                                      bool
 	Published                                                     string
+	Resolution                                                    int
 	Score                                                         int
 	Reason                                                        string
 }
@@ -67,6 +70,9 @@ type trailerTitle struct {
 	ids   providerIDs
 	title string
 	year  int
+	// The household and library languages, most preferred first, which the score
+	// reads.
+	languages []string
 }
 
 // One provider block, asked for the trailers of one title. A provider that
@@ -96,35 +102,46 @@ var trailerYearPattern = regexp.MustCompile(`\((\d{4})\)`)
 func parseTrailerName(name string) trailerName {
 	years := trailerYearPattern.FindAllStringSubmatchIndex(name, -1)
 	if len(years) == 0 {
-		return trailerName{title: strings.TrimSpace(name), kind: trailerNameKind(name)}
+		kind, _ := trailerNameKind(name)
+		return trailerName{title: strings.TrimSpace(name), kind: kind}
 	}
 	last := years[len(years)-1]
 	year, _ := strconv.Atoi(name[last[2]:last[3]])
+	kind, _ := trailerNameKind(name[last[1]:])
 	return trailerName{
 		title: strings.TrimSpace(name[:last[0]]),
 		year:  year,
-		kind:  trailerNameKind(name[last[1]:]),
+		kind:  kind,
 	}
 }
 
 // The kind the words after the year name. Song and spot are read before
 // trailer, because a "Trailer Song" is not a trailer and a "TV Spot" is
 // its own kind.
-func trailerNameKind(rest string) string {
+// The second answer is whether a word named a kind at all. A provider whose
+// whole collection is trailers reads it and takes trailer where no word did.
+func trailerNameKind(rest string) (string, bool) {
 	rest = strings.ToLower(rest)
 	switch {
 	case strings.Contains(rest, "song"):
-		return trailerKindOther
+		return trailerKindOther, true
 	case strings.Contains(rest, "spot"):
-		return trailerKindSpot
+		return trailerKindSpot, true
 	case strings.Contains(rest, "teaser"):
-		return trailerKindTeaser
+		return trailerKindTeaser, true
 	case strings.Contains(rest, "clip"):
-		return trailerKindClip
+		return trailerKindClip, true
 	case strings.Contains(rest, "trailer"):
-		return trailerKindTrailer
+		return trailerKindTrailer, true
 	}
-	return trailerKindOther
+	return trailerKindOther, false
+}
+
+// Whether a provider that holds videos of every kind records one of this
+// kind: a trailer, a teaser, and a TV spot are recorded, and a clip and a
+// video of another kind are not.
+func recordedTrailerKind(kind string) bool {
+	return kind != trailerKindClip && kind != trailerKindOther
 }
 
 // One title as a comparison reads it: lower case, & as and, and letters
@@ -151,39 +168,120 @@ func trailerDate(published string) string {
 	return published[:trailerDateLength]
 }
 
-// What one trailer is worth to this title, 0 to 100, and the line that
-// says why. A provider keyed by the title's own id is sure. A provider
-// keyed by a search is sure only when the name carries the same title and
-// year, and then the kind sets the score.
-const (
-	trailerScoreKeyed   = 100
-	trailerScoreTrailer = 90
-	trailerScoreTeaser  = 80
-	trailerScoreSpot    = 60
-	trailerScoreOther   = 40
-)
-
-func scoreTrailer(entry trailerEntry, parsed trailerName, title trailerTitle) (int, string) {
-	if entry.Provider == providerBlockTMDb {
-		return trailerScoreKeyed, "keyed by the tmdb id"
-	}
-	if foldTitle(parsed.title) != foldTitle(title.title) {
-		return 0, "the name's title differs"
-	}
-	if parsed.year != title.year {
-		return 0, "the name's year differs"
-	}
-	return trailerKindScore(parsed.kind), "title and year match; the name says " + parsed.kind
+// What one provider's answer proves about the title it names.
+type trailerMatch struct {
+	keyed     bool // the provider keyed on the title's own id
+	title     bool // a search provider's name carries the same title
+	year      bool // ... and the same year
+	yearKnown bool // the provider stated a year at all
 }
 
-func trailerKindScore(kind string) int {
+// Where the ladder starts, by what the provider's answer proves.
+const (
+	trailerScoreKeyed      = 100
+	trailerScoreTitleYear  = 90
+	trailerScoreTitleAlone = 60
+)
+
+// What each part of a video costs, and the score a matched video never falls
+// below.
+const (
+	trailerTeaserPenalty = -10
+	trailerSpotPenalty   = -30
+	trailerClipPenalty   = -40
+	trailerOtherPenalty  = -50
+
+	trailerNoLanguagePenalty    = -5
+	trailerOtherLanguagePenalty = -30
+
+	trailerUnofficialPenalty = -10
+
+	trailerLowestScore = 1
+)
+
+// The parts of one reason, in the order the ladder applied them.
+const trailerReasonSeparator = "; "
+
+// What one trailer is worth to this title, 0 to 100, and the line that says
+// why. The score ranks the videos of one title, so a screen can take the
+// first.
+func scoreTrailer(entry trailerEntry, match trailerMatch, languages []string) (int, string) {
+	score, start := trailerStart(match)
+	if score == 0 {
+		return 0, ""
+	}
+	reason := []string{start}
+
+	kind, word := trailerKindPenalty(entry.Kind)
+	score += kind
+	reason = append(reason, word)
+
+	language, note := trailerLanguagePenalty(entry.Language, languages)
+	score += language
+	reason = append(reason, note)
+
+	// TMDb alone states whether the title's own studio published the video.
+	if entry.Provider == providerBlockTMDb && !entry.Official {
+		score += trailerUnofficialPenalty
+		reason = append(reason, "unofficial")
+	}
+	return max(score, trailerLowestScore), strings.Join(reason, trailerReasonSeparator)
+}
+
+// A provider keyed by the title's own id is sure. A search provider is sure
+// only where the name carries the title, and surer where it carries the year.
+func trailerStart(match trailerMatch) (int, string) {
+	switch {
+	case match.keyed:
+		return trailerScoreKeyed, "keyed by the tmdb id"
+	case match.title && match.year:
+		return trailerScoreTitleYear, "title and year match"
+	case match.title && !match.yearKnown:
+		return trailerScoreTitleAlone, "title matches, no year known"
+	}
+	return 0, ""
+}
+
+// What the kind of video costs, and the word the reason names it by.
+func trailerKindPenalty(kind string) (int, string) {
 	switch kind {
 	case trailerKindTrailer:
-		return trailerScoreTrailer
+		return 0, trailerKindTrailer
 	case trailerKindTeaser:
-		return trailerScoreTeaser
+		return trailerTeaserPenalty, trailerKindTeaser
 	case trailerKindSpot:
-		return trailerScoreSpot
+		return trailerSpotPenalty, trailerKindSpot
+	case trailerKindClip:
+		return trailerClipPenalty, trailerKindClip
 	}
-	return trailerScoreOther
+	return trailerOtherPenalty, trailerKindOther
+}
+
+// A video in a language the household asked for costs nothing. A video that
+// states no language costs little. A video in another language costs the
+// most.
+func trailerLanguagePenalty(language string, languages []string) (int, string) {
+	if language == "" {
+		return trailerNoLanguagePenalty, "no language"
+	}
+	for _, preferred := range languages {
+		if sameLanguage(preferred, language) {
+			return 0, language
+		}
+	}
+	return trailerOtherLanguagePenalty, "language " + language + " not preferred"
+}
+
+// Two tags name one language where their primary subtags are the same, so a
+// preference for en-US reads a video marked en, and a preference for en reads
+// a video marked en-US.
+func sameLanguage(preferred, language string) bool {
+	return primarySubtag(preferred) == primarySubtag(language)
+}
+
+// The primary subtag of a language tag, folded to lower case: everything
+// before the first hyphen.
+func primarySubtag(tag string) string {
+	primary, _, _ := strings.Cut(strings.ToLower(tag), "-")
+	return primary
 }

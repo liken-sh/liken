@@ -1,0 +1,45 @@
+{
+  "responseHeader": {
+    "status": 0,
+    "QTime": 41,
+    "params": {
+      "qin": "collection:movie_trailers AND title:(\"His Girl Friday\")",
+      "rows": "20",
+      "wt": "json"
+    }
+  },
+  "response": {
+    "numFound": 4,
+    "start": 0,
+    "docs": [
+      {
+        "identifier": "turner_video_71",
+        "title": "His Girl Friday",
+        "year": "1940",
+        "mediatype": "movies"
+      },
+      {
+        "identifier": "His_Girl_Friday_trailer",
+        "title": "His Girl Friday trailer",
+        "year": 1940,
+        "date": "1940-01-11T00:00:00Z",
+        "licenseurl": "http://creativecommons.org/licenses/publicdomain/",
+        "mediatype": "movies"
+      },
+      {
+        "identifier": "HowardHawkshisGirlFridayMovieTrailer1940",
+        "title": "Howard Hawks' \"HIS GIRL FRIDAY\" movie trailer (1940)",
+        "date": "2013-07-22T16:39:55Z",
+        "mediatype": "movies"
+      },
+      {
+        "identifier": "TheOthers2001TheatricalTrailer",
+        "title": ["The Others (2001) theatrical trailer"],
+        "year": "2001",
+        "date": "2001-06-29T00:00:00Z",
+        "licenseurl": "http://creativecommons.org/licenses/publicdomain/",
+        "mediatype": "movies"
+      }
+    ]
+  }
+}

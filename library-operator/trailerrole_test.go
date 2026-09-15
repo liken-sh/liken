@@ -37,6 +37,15 @@ func trailerEntryOf(provider, key string, score int) trailerEntry {
 	}
 }
 
+// One trailer a provider names, with the name, the score, and the published
+// date a test states.
+func namedTrailer(provider, key, name string, score int, published string) trailerEntry {
+	entry := trailerEntryOf(provider, key, score)
+	entry.Name = name
+	entry.Published = published
+	return entry
+}
+
 // The line one test asks: the answerers it names and no others, in the order
 // it names them.
 func trailerLineOf(answerers ...trailerAnswerer) *trailerLine {
@@ -63,7 +72,7 @@ func TestTheTrailerLineTakesTheBlocksThatCanAnswer(t *testing.T) {
 		},
 		{
 			name: "peertube with its address", blocks: []string{providerBlockPeerTube},
-			env:  map[string]string{peertubeEndpointVariable: "https://videos.example"},
+			env:  map[string]string{providerEndpointVariable(providerBlockPeerTube): "https://videos.example"},
 			want: []string{providerBlockPeerTube},
 		},
 		{
@@ -71,14 +80,20 @@ func TestTheTrailerLineTakesTheBlocksThatCanAnswer(t *testing.T) {
 			env: map[string]string{}, want: nil,
 		},
 		{
-			name:   "the source order is the order of the line",
-			blocks: []string{providerBlockPeerTube, providerBlockOMDb, providerBlockTMDb},
+			name:   "archive, which needs no setting of its own",
+			blocks: []string{providerBlockArchive}, env: map[string]string{},
+			want: []string{providerBlockArchive},
+		},
+		{
+			name: "the source order is the order of the line",
+			blocks: []string{providerBlockPeerTube, providerBlockOMDb,
+				providerBlockArchive, providerBlockTMDb},
 			env: map[string]string{
-				tmdbTokenVariable:                        "a-key",
-				peertubeEndpointVariable:                 "https://videos.example",
-				providerTokenVariable(providerBlockOMDb): "another-key",
+				tmdbTokenVariable: "a-key",
+				providerEndpointVariable(providerBlockPeerTube): "https://videos.example",
+				providerTokenVariable(providerBlockOMDb):        "another-key",
 			},
-			want: []string{providerBlockPeerTube, providerBlockTMDb},
+			want: []string{providerBlockPeerTube, providerBlockArchive, providerBlockTMDb},
 		},
 	}
 	for _, test := range cases {
@@ -224,8 +239,8 @@ func TestTheTrailerFactWritesTheLedgerAndTheRowsOfOneTitle(t *testing.T) {
 			trailerEntryOf(providerBlockPeerTube, "e6b1", 40),
 		}},
 		scriptedTrailers{block: providerBlockTMDb, entries: []trailerEntry{
-			trailerEntryOf(providerBlockTMDb, "low", 20),
-			trailerEntryOf(providerBlockTMDb, "high", 90),
+			namedTrailer(providerBlockTMDb, "low", "Teaser", 20, "2026-08-01"),
+			namedTrailer(providerBlockTMDb, "high", "Official Trailer", 90, "2026-08-01"),
 		}},
 	)
 
@@ -265,6 +280,125 @@ func TestTheTrailerFactWritesTheLedgerAndTheRowsOfOneTitle(t *testing.T) {
 	}
 }
 
+// What the trim leaves of one provider's answer, and what it never collapses.
+func TestTheTrimLeavesOneEntryPerNameAndAtMostFivePerProvider(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []trailerEntry
+		want    []string
+	}{
+		{
+			name: "nine uploads of one name collapse to the highest score",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "tcm1", "The Ghost Breakers", 40, "2019-03-02"),
+				namedTrailer(providerBlockArchive, "tcm2", "THE GHOST BREAKERS", 45, "2019-03-03"),
+				namedTrailer(providerBlockArchive, "tcm3", "The Ghost Breakers!", 30, "2019-03-04"),
+				namedTrailer(providerBlockArchive, "tcm4", "The Ghost Breakers", 70, "2019-03-05"),
+				namedTrailer(providerBlockArchive, "tcm5", "The Ghost Breakers", 55, "2019-03-06"),
+				namedTrailer(providerBlockArchive, "tcm6", "The Ghost Breakers", 20, "2019-03-07"),
+				namedTrailer(providerBlockArchive, "tcm7", "The Ghost Breakers", 65, "2019-03-08"),
+				namedTrailer(providerBlockArchive, "tcm8", "The Ghost Breakers", 35, "2019-03-09"),
+				namedTrailer(providerBlockArchive, "tcm9", "The Ghost Breakers", 50, "2019-03-10"),
+			},
+			want: []string{"tcm4"},
+		},
+		{
+			name: "a tie on score keeps the earliest date",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "late", "Dune", 50, "2026-08-01"),
+				namedTrailer(providerBlockArchive, "early", "Dune", 50, "2019-03-02"),
+				namedTrailer(providerBlockArchive, "undated", "Dune", 50, ""),
+			},
+			want: []string{"early"},
+		},
+		{
+			name: "a tie on score keeps a dated entry over one with no date",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "undated", "Dune", 50, ""),
+				namedTrailer(providerBlockArchive, "dated", "Dune", 50, "2020-01-01"),
+			},
+			want: []string{"dated"},
+		},
+		{
+			name: "a tie on score and date keeps the first seen",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "first", "Dune", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "second", "Dune", 50, "2020-01-01"),
+			},
+			want: []string{"first"},
+		},
+		{
+			name: "seven entries of one provider drop the two lowest scores",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "k1", "One", 10, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k2", "Two", 20, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k3", "Three", 30, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k4", "Four", 40, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k5", "Five", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k6", "Six", 60, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k7", "Seven", 70, "2020-01-01"),
+			},
+			want: []string{"k3", "k4", "k5", "k6", "k7"},
+		},
+		{
+			name: "the cap breaks a tie on score by the order they arrived",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "k1", "One", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k2", "Two", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k3", "Three", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k4", "Four", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k5", "Five", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "k6", "Six", 50, "2020-01-01"),
+			},
+			want: []string{"k1", "k2", "k3", "k4", "k5"},
+		},
+		{
+			name: "two providers that name one video keep both",
+			entries: []trailerEntry{
+				namedTrailer(providerBlockArchive, "arc", "Dune Official Trailer", 40, "2020-01-01"),
+				namedTrailer(providerBlockPeerTube, "pt", "Dune Official Trailer", 90, "2021-01-01"),
+			},
+			want: []string{"arc", "pt"},
+		},
+		{
+			name: "an empty list",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var keys []string
+			for _, entry := range trimTrailers(test.entries) {
+				keys = append(keys, entry.Key)
+			}
+
+			if !slices.Equal(keys, test.want) {
+				t.Errorf("the trim leaves %v, want %v", keys, test.want)
+			}
+		})
+	}
+}
+
+// The list one title records is the trimmed list.
+func TestTheTrailerFactRecordsTheTrimmedList(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	folder := "The Signal (2014)"
+	seedTrailerGap(t, catalog, root, folder)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	var held []trailerEntry
+	for _, key := range []string{"tcm1", "tcm2", "tcm3", "tcm4", "tcm5", "tcm6"} {
+		held = append(held, namedTrailer(providerBlockArchive, key, "The Signal", 40, "2019-03-02"))
+	}
+	line := trailerLineOf(scriptedTrailers{block: providerBlockArchive, entries: held})
+
+	work.trailerOne(t.Context(), line, trailerItem(t, catalog))
+
+	ledger := artLedger(t, filepath.Join(root, folder), factTrailer)
+	if len(ledger.Trailers) != 1 || ledger.Trailers[0].Key != "tcm1" {
+		t.Errorf("the ledger holds %+v, want the one entry the trim left", ledger.Trailers)
+	}
+}
+
 // The ids the fact asks with come off the sidecar the identity fact wrote.
 func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
@@ -286,6 +420,26 @@ func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 	}
 	if asked.title.kind != libraryKindMovies {
 		t.Errorf("the ask carried the kind %q, want the Library's own", asked.title.kind)
+	}
+}
+
+// The languages the household asked for reach the ask, because the score
+// reads them and a container holds no API credential to read the Library
+// itself.
+func TestATrailerAskCarriesTheLanguagesOfTheLibrary(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrailerGap(t, catalog, root, "The Signal (2014)")
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	asked := &askedTrailerTitle{}
+	t.Setenv(libraryLanguagesVariable, "en-US, fr,")
+
+	if err := work.trailerGap(t.Context(), trailerLineOf(asked)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(asked.title.languages, []string{"en-US", "fr"}) {
+		t.Errorf("the ask carried %v, want the languages the variable names", asked.title.languages)
 	}
 }
 

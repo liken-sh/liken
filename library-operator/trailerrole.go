@@ -23,25 +23,25 @@ type trailerLine struct {
 	answerers []trailerAnswerer
 }
 
-// The line is built in the order LIBRARY_SOURCES names the blocks. A block
-// whose key or address did not reach the container is skipped with no error.
+// The answerer of each block the trailer fact can ask. A PeerTube instance is
+// built on the address that reached the container. The archive takes no key
+// and no address of its own, so the block's presence in the source order is
+// the whole account.
+var trailerAnswerers = map[string]func(base, token string) trailerAnswerer{
+	providerBlockTMDb: func(base, token string) trailerAnswerer {
+		return newTMDbTrailerAnswerer(newTMDbClient(base, token))
+	},
+	providerBlockPeerTube: func(base, _ string) trailerAnswerer {
+		return newPeertubeTrailerAnswerer(newPeertubeClient(base))
+	},
+	providerBlockArchive: func(base, _ string) trailerAnswerer {
+		return newArchiveTrailerAnswerer(newArchiveClient(base))
+	},
+}
+
+// The line, in the order the Library's own spec.sources names the blocks.
 func newTrailerLine(blocks []string, value func(string) string) *trailerLine {
-	line := &trailerLine{}
-	for _, block := range blocks {
-		switch block {
-		case providerBlockTMDb:
-			if token := value(providerTokenVariable(block)); token != "" {
-				line.answerers = append(line.answerers,
-					newTMDbTrailerAnswerer(newTMDbClient(tmdbAPIBase, token)))
-			}
-		case providerBlockPeerTube:
-			if endpoint := value(peertubeEndpointVariable); endpoint != "" {
-				line.answerers = append(line.answerers,
-					newPeertubeTrailerAnswerer(newPeertubeClient(endpoint)))
-			}
-		}
-	}
-	return line
+	return &trailerLine{answerers: answerersOf(blocks, value, trailerAnswerers)}
 }
 
 // One title's ask: every answerer, because the trailers of a title are the
@@ -127,7 +127,7 @@ func (e *enricher) trailerOne(ctx context.Context, line *trailerLine, item ident
 		e.recordTrailers(folder, []trailerEntry{}, nil, attemptNothing)
 		return false
 	}
-	e.recordTrailers(folder, sortedTrailers(entries), blocks, attemptFound)
+	e.recordTrailers(folder, sortedTrailers(trimTrailers(entries)), blocks, attemptFound)
 	return true
 }
 
@@ -136,7 +136,8 @@ func (e *enricher) trailerOne(ctx context.Context, line *trailerLine, item ident
 // provider keyed by search. A folder with no sidecar carries no id, which is
 // not an error.
 func (e *enricher) trailerTitle(item identityItem, folder string) trailerTitle {
-	title := trailerTitle{kind: e.kind, title: item.title, year: item.year}
+	title := trailerTitle{kind: e.kind, title: item.title, year: item.year,
+		languages: commaNames(os.Getenv(libraryLanguagesVariable))}
 	sidecar, _ := identitySidecar(e.kind, folder)
 	document, err := os.ReadFile(sidecar)
 	if err != nil {
@@ -144,6 +145,69 @@ func (e *enricher) trailerTitle(item identityItem, folder string) trailerTitle {
 	}
 	title.ids = sidecarIDs(document)
 	return title
+}
+
+// How many entries of one provider one title's list holds at most.
+const trailersPerProvider = 5
+
+// One entry per provider and folded name, and at most trailersPerProvider
+// entries of each provider. A name two providers hold is two entries, because
+// they are two videos. The order the entries arrived in survives.
+func trimTrailers(entries []trailerEntry) []trailerEntry {
+	collapsed := make([]trailerEntry, 0, len(entries))
+	first := map[string]int{}
+	for _, entry := range entries {
+		name := entry.Provider + "\n" + foldTitle(entry.Name)
+		at, seen := first[name]
+		if !seen {
+			first[name] = len(collapsed)
+			collapsed = append(collapsed, entry)
+			continue
+		}
+		if betterTrailer(entry, collapsed[at]) {
+			collapsed[at] = entry
+		}
+	}
+	return cappedTrailers(collapsed)
+}
+
+// Which of two entries of one name the list keeps: the higher score, then the
+// earlier date, with no date last, then the one seen first.
+func betterTrailer(entry, held trailerEntry) bool {
+	if entry.Score != held.Score {
+		return entry.Score > held.Score
+	}
+	if entry.Published == "" || held.Published == "" {
+		return entry.Published != "" && held.Published == ""
+	}
+	return entry.Published < held.Published
+}
+
+// The highest scores of each provider, ties kept in the order they arrived.
+func cappedTrailers(entries []trailerEntry) []trailerEntry {
+	held := map[string][]int{}
+	for at, entry := range entries {
+		held[entry.Provider] = append(held[entry.Provider], at)
+	}
+	dropped := map[int]bool{}
+	for _, positions := range held {
+		if len(positions) <= trailersPerProvider {
+			continue
+		}
+		slices.SortStableFunc(positions, func(a, b int) int {
+			return cmp.Compare(entries[b].Score, entries[a].Score)
+		})
+		for _, at := range positions[trailersPerProvider:] {
+			dropped[at] = true
+		}
+	}
+	kept := make([]trailerEntry, 0, len(entries)-len(dropped))
+	for at, entry := range entries {
+		if !dropped[at] {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 // The order a person reads the list in: the provider, then the score, highest

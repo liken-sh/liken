@@ -96,10 +96,12 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get, list, watch]
-  # The household defaults, cluster-scoped and read-only, for one field:
+  # The household defaults, cluster-scoped and read-only, for two fields:
   # the wall-clock zone every screen pod carries as TZ, so the browser's
-  # clock shows the house's own hour. The watch is the wake signal, so a
-  # zone the household sets rolls the screens on the next pass.
+  # clock shows the house's own hour, and the audio languages every
+  # enricher ranks a trailer by. One list per pass reads both. The watch
+  # is the wake signal, so a zone or a language the household sets rolls
+  # the screens or the next enricher on the next pass.
   - apiGroups: [media.liken.sh]
     resources: [mediapreferences]
     verbs: [get, list, watch]

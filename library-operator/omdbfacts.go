@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -110,7 +109,7 @@ func newOMDbAnswerer(client *omdbClient) omdbAnswerer {
 func (a omdbAnswerer) providerBlock() string { return providerBlockOMDb }
 
 func (a omdbAnswerer) serves(fact string) bool {
-	return slices.Contains(providerFacts[providerBlockOMDb], fact)
+	return blockServes(providerBlockOMDb, fact)
 }
 
 // The ask. The day's limit is read before the call and after it, so a key
