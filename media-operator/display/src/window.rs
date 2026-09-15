@@ -841,12 +841,19 @@ pub fn run(ipc: Ipc) -> iced::Result {
         // The window answers its own size once at the start. Every later
         // size arrives as a resize event, so the display holds the surface
         // it draws on from its first frame.
+        //
+        // The display reads no pointer, so its surface takes an empty
+        // input region and the pointer reaches the film's surface under
+        // it. The compositor's shell gives the keyboard to the surface a
+        // click lands on, so without this the scrim takes every click
+        // and the player never gets a key.
         move || {
             (
                 Display::new(ipc.clone()),
-                iced::window::oldest()
-                    .and_then(iced::window::size)
-                    .map(Message::Resized),
+                iced::window::oldest().and_then(|id| {
+                    iced::window::enable_mouse_passthrough(id)
+                        .chain(iced::window::size(id).map(Message::Resized))
+                }),
             )
         },
         Display::update,

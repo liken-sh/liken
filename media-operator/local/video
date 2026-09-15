@@ -17,6 +17,11 @@
 # media of its own. It needs docker, because the compositor is an image, and a
 # Wayland session to nest that compositor in.
 #
+# Click in the nested window once before a key does anything. The
+# compositor's shell gives the keyboard to the surface a click lands on,
+# and it gives it to nothing until then. A liken node needs no click,
+# because a press there arrives on the command bus and not on a keyboard.
+#
 # Usage:
 #   local/video <media-file> [start-seconds] [-- <mpv flags>]
 #
@@ -55,6 +60,11 @@ if [ -z "${WAYLAND_DISPLAY:-}" ]; then
   echo "local/video: no Wayland session to nest the compositor in" >&2
   exit 1
 fi
+# mpv and the display run with XDG_RUNTIME_DIR pointed at the socket
+# directory, so the desktop's own runtime directory is saved here: it is
+# where the nested compositor's parent socket lives, and where pipewire
+# listens.
+HOST_RUNTIME="$XDG_RUNTIME_DIR"
 
 # The Go source and the crate sit in the repository above this file, so their
 # paths resolve from this script's own directory and need no absolute path.
@@ -156,7 +166,7 @@ docker run -d --name "$CONTAINER" \
   "${groups[@]}" \
   -v "$SOCKETS:/sockets" \
   -v "$here/weston-nested/weston.ini:/config/weston.ini:ro" \
-  -v "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/sockets/host-wayland" \
+  -v "$HOST_RUNTIME/$WAYLAND_DISPLAY:/sockets/host-wayland" \
   -e XDG_RUNTIME_DIR=/sockets \
   -e WAYLAND_DISPLAY=host-wayland \
   -e LIKEN_LAYOUT_SOCKET=/sockets/layout.sock \
@@ -193,6 +203,12 @@ LAYOUT=$!
 MPV=(mpv --load-scripts=no
   --vo=dmabuf-wayland
   --hwdec=vaapi
+  # --ao=pipewire is the pod's own flag. Without it mpv's automatic
+  # choice walks past pipewire, because XDG_RUNTIME_DIR names the socket
+  # directory, and lands on a driver that opens no device. That driver
+  # underruns, and because video follows the audio clock the film then
+  # plays at about one frame a second.
+  --ao=pipewire
   --fullscreen
   --keepaspect-window=no
   --osc=no
@@ -205,7 +221,11 @@ MPV=(mpv --load-scripts=no
   "${passed[@]}"
   -- "$film")
 
-XDG_RUNTIME_DIR="$SOCKETS" WAYLAND_DISPLAY=wayland-0 "${MPV[@]}" \
+# PIPEWIRE_RUNTIME_DIR names the desktop's runtime directory, because
+# XDG_RUNTIME_DIR names the socket directory here and pipewire's socket
+# is not in it. On a cluster the two are the same directory.
+PIPEWIRE_RUNTIME_DIR="$HOST_RUNTIME" \
+  XDG_RUNTIME_DIR="$SOCKETS" WAYLAND_DISPLAY=wayland-0 "${MPV[@]}" \
   >"$SOCKETS/mpv.log" 2>&1 &
 MPV_PID=$!
 
