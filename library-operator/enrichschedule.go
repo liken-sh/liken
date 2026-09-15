@@ -61,12 +61,13 @@ func chainMarks(chain, path, stage string) map[string]string {
 	}
 }
 
-// The standing enricher of one Library, named from the walk it answers. One
-// walk yields one enricher however many passes read it, and the walk after it
-// names a new Job at once instead of waiting out the TTL of the finished one.
-func standingEnrichJobName(library string, runs []libraryRun) string {
+// The standing enricher of one Library, named from the cause it answers: the
+// walk's finish or the refresh time. One cause yields one Job however many
+// passes read it, and the next cause names a new Job at once instead of
+// waiting out the TTL of the finished one.
+func standingEnrichJobName(library string, cause time.Time) string {
 	return chainJobName(library, chainStageEnrich,
-		strconv.FormatInt(lastScanFinish(runs).Unix(), 36))
+		strconv.FormatInt(cause.Unix(), 36))
 }
 
 // One chain as the cluster holds it: the folder it covers and the Job of each
@@ -110,7 +111,7 @@ func chainsOf(jobs []Job, namespace, library string) []chainRun {
 // The enrichment step of one Library's pass. It creates at most one Job,
 // because every enricher of a Library runs on the one claim its agent keeps.
 func (o *operator) enrich(ctx context.Context, library *Library, catalog *NamespaceCatalog,
-	report *libraryReport, jobs []Job, providers providerSet) error {
+	report *libraryReport, jobs []Job, providers providerSet, now time.Time) error {
 	if report == nil {
 		return nil
 	}
@@ -122,11 +123,12 @@ func (o *operator) enrich(ctx context.Context, library *Library, catalog *Namesp
 	if err != nil || served {
 		return err
 	}
-	if !scanFollowedEnrich(report.Runs) || !gapOpen(library, report, providers) {
+	cause := enrichCause(library, report.Runs, now)
+	if !enrichDue(cause, report.Runs) || !gapOpen(library, report, providers) {
 		return nil
 	}
 	return o.createEnrichJob(ctx, library, catalog, providers,
-		standingEnrichJobName(name, report.Runs), "", nil)
+		standingEnrichJobName(name, cause), "", nil)
 }
 
 // The next stage of the first chain that has one, or false when every chain
@@ -252,17 +254,29 @@ func enrichUnfinished(jobs []Job, namespace, library string) bool {
 	return false
 }
 
-// Whether a walk has finished since the last enrich run, so that run's writes
-// have become rows and the gap counts are current. A library no walk has
-// finished for has no counts to schedule on. A library that has never
-// enriched has nothing else to wait for.
-func scanFollowedEnrich(runs []libraryRun) bool {
-	walked := lastScanFinish(runs)
-	if walked.IsZero() {
+// The cause of the next enricher: the later of the last walk's finish and the
+// newest refresh time that has come. A refresh in the future waits for its
+// time, the way refreshSeconds makes it wait.
+func enrichCause(library *Library, runs []libraryRun, now time.Time) time.Time {
+	cause := lastScanFinish(runs)
+	for _, refresh := range library.Spec.Refresh {
+		if !refresh.After(now) && refresh.After(cause) {
+			cause = refresh
+		}
+	}
+	return cause
+}
+
+// Whether an enricher is due: a cause has come that no enrich run has
+// answered. An enricher reads spec.refresh when its Job is created, so a run
+// that started before the cause never saw it, and a refresh set during a run
+// stands one more run after it. A run that wrote no finish answered nothing.
+func enrichDue(cause time.Time, runs []libraryRun) bool {
+	if cause.IsZero() {
 		return false
 	}
 	enrich, held := runOf(runs, workerEnrich)
-	return !held || walked.After(enrich.Finished)
+	return !held || enrich.Finished.IsZero() || cause.After(enrich.Started)
 }
 
 // When a walk of this library last finished, whether it was the full walk or

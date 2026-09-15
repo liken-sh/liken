@@ -198,7 +198,9 @@ time in `spec.refresh`:
       refresh:
         overview: "2026-09-06T00:00:00Z"
 
-Every attempt of that fact before the time no longer counts. The fact
+Every attempt of that fact before the time no longer counts. A refresh
+starts an enricher on the next pass without a walk behind it, and a
+refresh set while an enricher runs starts another one after it. The fact
 rewrites its own files and rows in place, and nothing is deleted.
 
 ## 4. The Jellyfin handover

@@ -79,7 +79,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err := o.standTrickplayTemplate(ctx, library); err != nil {
 			return err
 		}
-		if err := o.enrich(ctx, library, choice.catalog, report, jobs, providers); err != nil {
+		if err := o.enrich(ctx, library, choice.catalog, report, jobs, providers, now); err != nil {
 			return err
 		}
 		// The trickplay Job stands beside the enricher and waits on none of its

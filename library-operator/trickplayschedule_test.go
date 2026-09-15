@@ -86,7 +86,7 @@ func TestTheTrickplayJobAndTheEnricherStandTogether(t *testing.T) {
 	}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, nil, providers); err != nil {
+		report, nil, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	if err := operator.trickplay(t.Context(), library, testNamespaceCatalog(),
@@ -94,7 +94,7 @@ func TestTheTrickplayJobAndTheEnricherStandTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldJob("house", standingEnrichJobName("movies", report.Runs)) == nil {
+	if cluster.heldJob("house", standingEnrichJobName("movies", testNow)) == nil {
 		t.Errorf("the pass stood no enricher, jobs = %v", cluster.heldJobs())
 	}
 	if cluster.heldJob("house", standingTrickplayJobName("movies", report.Runs)) == nil {
@@ -122,7 +122,7 @@ func TestTheChainStandsATrickplayStageTheRescanWaitsFor(t *testing.T) {
 		workerLabels("movies", workerScan), chainMarks(chain, folder, chainStageScan))}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	enriched := cluster.heldJob("house", chainJobName("movies", chainStageEnrich, chain))
@@ -139,7 +139,7 @@ func TestTheChainStandsATrickplayStageTheRescanWaitsFor(t *testing.T) {
 		finishedJob(enriched.Metadata.Name, "house", enriched.Metadata.Labels, enriched.Metadata.Annotations),
 		Job{Metadata: tiles.Metadata, Status: JobStatus{Active: 1}})
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	if cluster.heldJob("house", chainJobName("movies", chainStageRescan, chain)) != nil {
@@ -150,7 +150,7 @@ func TestTheChainStandsATrickplayStageTheRescanWaitsFor(t *testing.T) {
 	jobs[len(jobs)-1] = finishedJob(tiles.Metadata.Name, "house",
 		tiles.Metadata.Labels, tiles.Metadata.Annotations)
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	if cluster.heldJob("house", chainJobName("movies", chainStageRescan, chain)) == nil {
@@ -173,7 +173,7 @@ func TestAChainWithTheFactOffStandsNoTrickplayStage(t *testing.T) {
 		workerLabels("movies", workerScan), chainMarks(chain, folder, chainStageScan))}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 

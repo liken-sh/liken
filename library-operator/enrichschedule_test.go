@@ -100,11 +100,11 @@ func TestEnrichSchedulesOneJobPerLibrary(t *testing.T) {
 			report := &libraryReport{Gaps: one.gaps, Runs: one.runs}
 
 			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-				report, one.jobs, providers); err != nil {
+				report, one.jobs, providers, testNow); err != nil {
 				t.Fatal(err)
 			}
 
-			stood := cluster.heldJob("house", standingEnrichJobName("movies", one.runs)) != nil
+			stood := cluster.heldJob("house", standingEnrichJobName("movies", lastScanFinish(one.runs))) != nil
 			if stood != one.want {
 				t.Errorf("the pass stood the enricher: %v, want %v", stood, one.want)
 			}
@@ -155,11 +155,11 @@ func TestADeadRunDoesNotHoldTheScheduler(t *testing.T) {
 			report := &libraryReport{Gaps: map[string]int{factIdentity: 7}, Runs: one.runs}
 
 			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-				report, one.jobs, providers); err != nil {
+				report, one.jobs, providers, testNow); err != nil {
 				t.Fatal(err)
 			}
 
-			stood := cluster.heldJob("house", standingEnrichJobName("movies", one.runs)) != nil
+			stood := cluster.heldJob("house", standingEnrichJobName("movies", lastScanFinish(one.runs))) != nil
 			if stood != one.want {
 				t.Errorf("the pass stood the enricher: %v, want %v", stood, one.want)
 			}
@@ -177,11 +177,11 @@ func TestEnrichJobTakesTheProviderTheSourcesName(t *testing.T) {
 	report := &libraryReport{Gaps: map[string]int{factIdentity: 2}, Runs: walkedRuns(testNow)}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, nil, providers); err != nil {
+		report, nil, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 
-	job := cluster.heldJob("house", standingEnrichJobName("movies", report.Runs))
+	job := cluster.heldJob("house", standingEnrichJobName("movies", testNow))
 	if job == nil {
 		t.Fatal("the pass stood no enricher")
 	}
@@ -206,21 +206,21 @@ func TestEnrichNamesTheJobAfterTheWalkItAnswers(t *testing.T) {
 	first := testNow.Add(-time.Hour)
 	runs := []libraryRun{
 		{Worker: workerScan, Job: "movies-scan-2", Started: testNow.Add(-time.Minute), Finished: testNow},
-		{Worker: workerEnrich, Job: standingEnrichJobName("movies", walkedRuns(first)),
+		{Worker: workerEnrich, Job: standingEnrichJobName("movies", first),
 			Started: first, Finished: first.Add(time.Minute)},
 	}
 	// The enricher of the walk before this one has finished and its TTL
 	// has not taken it yet.
-	jobs := []Job{finishedJob(standingEnrichJobName("movies", walkedRuns(first)), "house",
+	jobs := []Job{finishedJob(standingEnrichJobName("movies", first), "house",
 		workerLabels("movies", workerEnrich), nil)}
 	report := &libraryReport{Gaps: map[string]int{factProbe: 2}, Runs: runs}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldJob("house", standingEnrichJobName("movies", runs)) == nil {
+	if cluster.heldJob("house", standingEnrichJobName("movies", testNow)) == nil {
 		t.Errorf("the newer walk stood no enricher of its own, jobs = %v", cluster.heldJobs())
 	}
 }
@@ -241,7 +241,7 @@ func TestWebhookChainRunsScanEnrichRescan(t *testing.T) {
 	// The scan of the folder has finished, so the enricher of the same
 	// folder follows it.
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	enrichJob := cluster.heldJob("house", chainJobName("movies", chainStageEnrich, chain))
@@ -251,7 +251,7 @@ func TestWebhookChainRunsScanEnrichRescan(t *testing.T) {
 	if got := containerEnvironment(enrichJob.Spec.Template.Spec.Containers[0]); got[scanPathVariable] != folder {
 		t.Errorf("%s = %q, want the folder the chain carries", scanPathVariable, got[scanPathVariable])
 	}
-	if cluster.heldJob("house", standingEnrichJobName("movies", report.Runs)) != nil {
+	if cluster.heldJob("house", standingEnrichJobName("movies", testNow)) != nil {
 		t.Error("the chain stood the standing enricher as well")
 	}
 
@@ -260,7 +260,7 @@ func TestWebhookChainRunsScanEnrichRescan(t *testing.T) {
 	jobs = append(jobs, finishedJob(enrichJob.Metadata.Name, "house",
 		enrichJob.Metadata.Labels, enrichJob.Metadata.Annotations))
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	rescan := cluster.heldJob("house", chainJobName("movies", chainStageRescan, chain))
@@ -279,13 +279,13 @@ func TestWebhookChainRunsScanEnrichRescan(t *testing.T) {
 	jobs = append(jobs, finishedJob(rescan.Metadata.Name, "house",
 		rescan.Metadata.Labels, rescan.Metadata.Annotations))
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	if got := chainJobsStood(cluster, chain); len(got) != 2 {
 		t.Errorf("the chain stood %v, want the enrich and the rescan", got)
 	}
-	if cluster.heldJob("house", standingEnrichJobName("movies", report.Runs)) == nil {
+	if cluster.heldJob("house", standingEnrichJobName("movies", testNow)) == nil {
 		t.Error("the open gap stood no enricher for the whole Library")
 	}
 }
@@ -329,7 +329,7 @@ func TestChainReadsTheStageThatIsLeft(t *testing.T) {
 				workerLabels("movies", one.worker), chainMarks(chain, folder, one.stage))}
 
 			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-				report, jobs, providers); err != nil {
+				report, jobs, providers, testNow); err != nil {
 				t.Fatal(err)
 			}
 
@@ -354,7 +354,7 @@ func TestWebhookChainStopsWhenNoGapIsOpen(t *testing.T) {
 		workerLabels("movies", workerScan), chainMarks(chain, "/library/movies/Arrival (2016)", chainStageScan))}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		report, jobs, providers); err != nil {
+		report, jobs, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -391,7 +391,7 @@ func TestEnrichWaitsForAReport(t *testing.T) {
 	operator := testOperator(t, cluster)
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-		nil, nil, providers); err != nil {
+		nil, nil, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -523,7 +523,7 @@ func TestEnrichReportsWhatTheAPIServerRefuses(t *testing.T) {
 			report := &libraryReport{Gaps: map[string]int{factIdentity: 1}, Runs: walkedRuns(testNow)}
 
 			err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
-				report, one.jobs, providers)
+				report, one.jobs, providers, testNow)
 
 			if err == nil {
 				t.Error("the pass reported no failure")
@@ -602,4 +602,77 @@ func TestARefreshOpensTheEnricherWithNoGapCounted(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A refresh time is a cause for an enricher, the way a walk's finish is.
+// The Job is named from whichever of the two is later, so a refresh set
+// after the walk's enricher ran stands a Job of its own at once.
+func TestARefreshStandsTheEnricherWithoutWaitingForAWalk(t *testing.T) {
+	walked := testNow.Add(-3 * time.Hour)
+	cases := []struct {
+		name    string
+		refresh time.Time
+		started time.Time
+		ended   time.Time
+		want    time.Time
+	}{
+		{name: "a walk with no enricher behind it yet", want: walked},
+		{name: "a walk whose own enricher has run",
+			started: walked.Add(time.Minute), ended: walked.Add(2 * time.Minute)},
+		{name: "a refresh newer than the last enrich run",
+			refresh: testNow.Add(-time.Hour),
+			started: walked.Add(time.Minute), ended: walked.Add(2 * time.Minute),
+			want: testNow.Add(-time.Hour)},
+		{name: "a refresh set while the enricher ran",
+			refresh: testNow.Add(-90 * time.Minute),
+			started: testNow.Add(-2 * time.Hour), ended: testNow.Add(-time.Hour),
+			want: testNow.Add(-90 * time.Minute)},
+		{name: "a refresh whose queued enricher has started",
+			refresh: testNow.Add(-90 * time.Minute),
+			started: testNow.Add(-30 * time.Minute), ended: testNow.Add(-25 * time.Minute)},
+		{name: "a refresh still in the future",
+			refresh: testNow.Add(time.Hour),
+			started: walked.Add(time.Minute), ended: walked.Add(2 * time.Minute)},
+		{name: "a walk newer than the refresh",
+			refresh: walked.Add(-time.Hour),
+			started: walked.Add(-2 * time.Hour), ended: walked.Add(-90 * time.Minute),
+			want: walked},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library, providers := libraryWithProvider()
+			library.Spec.Refresh = map[string]time.Time{factProbe: one.refresh}
+			boundHouse(cluster)
+			operator := testOperator(t, cluster)
+			report := &libraryReport{Gaps: map[string]int{factProbe: 4},
+				Runs: enrichedRuns(walked, one.started, one.ended)}
+
+			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
+				report, nil, providers, testNow); err != nil {
+				t.Fatal(err)
+			}
+
+			stood := cluster.heldJobs()
+			if one.want.IsZero() {
+				if len(stood) != 0 {
+					t.Fatalf("the pass stood %v, want nothing", stood)
+				}
+				return
+			}
+			if cluster.heldJob("house", standingEnrichJobName("movies", one.want)) == nil {
+				t.Errorf("the pass stood %v, want the enricher named from %v", stood, one.want)
+			}
+		})
+	}
+}
+
+// the runs of a library whose walk finished and whose enricher then ran.
+func enrichedRuns(walked, started, ended time.Time) []libraryRun {
+	runs := walkedRuns(walked)
+	if started.IsZero() {
+		return runs
+	}
+	return append(runs, libraryRun{Worker: workerEnrich, Job: "movies-enrich",
+		Started: started, Finished: ended})
 }
