@@ -31,14 +31,17 @@ becomes a new plan or an open problem.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built.
 
-* [32, The display in its own
-  process](32-the-display-in-its-own-process.md). The on-screen
-  display leaves mpv's process for an iced client in a third container
-  of the playback pod, drawing on its own surface above mpv's. The
-  player, the sidecar, the bus, and every resource stay as they are.
-
 ## Completed
 
+* [32, The display in its own
+  process](completed/32-the-display-in-its-own-process.md). Built and
+  drilled on `liken-1` on 2026-09-14 in release 2026.09.14-002. The
+  on-screen display left mpv's process for an iced client in a third
+  container of the playback pod, drawing on its own surface above
+  mpv's, with the look the Lua display had. The video thread's cost
+  with the OSD up fell from 13.5% to 3% of a core and the dropped
+  frames from 3 to 0 in the same window; the Lua display, its tests,
+  and the sidecar's art half are gone.
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
   drilled on `liken-1` on 2026-08-20 in release 2026.08.20-001. The
   first slice: `Player` and `Play`, the operator, the player image,

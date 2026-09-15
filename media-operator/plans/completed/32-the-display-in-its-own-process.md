@@ -1,6 +1,8 @@
 # 32, The display in its own process
 
-The on-screen display leaves mpv's process. It becomes an iced client
+Built on 2026-09-14, and drilled on `liken-1` the same day on the
+development build that became release 2026.09.14-002. The on-screen
+display leaves mpv's process. It becomes an iced client
 in a third container of the playback pod, drawing on its own Wayland
 surface above mpv's, and it looks exactly as the Lua display looks
 today: the same positions, colors, alphas, type, animations, and
@@ -224,3 +226,41 @@ the same film at the same position: idle, summoned, each focus stop,
 each chooser open, a scan with a trickplay tile, the up-next chip and
 card, the volume row, and the music screen with its cover. The port is
 done when Chris finds no difference he wants kept.
+
+## What the lab measured
+
+The drill ran on the lab's portable unit, a four-core Celeron with a
+1080p panel, playing a 1920 by 800 HEVC film with hardware decoding,
+with the same scripts that measured the Lua display before and after
+its fix earlier the same day. The video thread's share of one core,
+the dropped-frame counter over a twelve-second window with the OSD up,
+and the display's own process:
+
+| measure | Lua before its fix | Lua after its fix | this plan |
+|---|---|---|---|
+| video thread, OSD shown and still | 85% | 13.5% | 2% to 3% |
+| video thread, OSD hidden | 3% | 4.5% | 3% to 3.5% |
+| display's thread or process, shown | 90% | 8% | 0.7% |
+| display's process, during a fade | | | 2% |
+| dropped frames, 12 s with the OSD up | 49 | 3 | 0 |
+
+A fade costs the video thread nothing it did not cost hidden, which
+is the test this plan set. The display's surface commits about fifty
+frames a second while summoned and about two a second while hidden.
+
+The hardware-plane question closed on the kernel's own view. With the
+OSD hidden and with it shown, the DDB report for the panel's pipe is
+byte-identical: the primary plane holds the compositor's buffer, both
+overlay planes are empty, and no video-format framebuffer exists on
+the device in either state. The compositor composites the film on the
+GPU whether or not the display's surface is mapped, so mapping it takes
+nothing away, and the contingency of unmapping between summons is not
+needed on this hardware.
+
+Two things the drill could not do. The compositor runs without its
+debug protocol, so no frame capture and no scene-graph read were
+possible on the unit, and the plane question was answered from
+debugfs instead. And the display and the sidecar log nothing on their
+happy path, so a silent container with no restarts is the pass
+signal; the summon was proved to land by the display's write rate,
+which rises from two a second to fifty when a press arrives on the bus.
