@@ -58,9 +58,11 @@ type providerBlock struct {
 
 // The table, one row per provider block, each row's facts in the order the
 // facts run. A provider block with no row here serves nothing.
-// The paces follow what each provider asks for. TMDb states about 50 requests
-// a second and TVmaze 20 calls every 10 seconds, and these stay far under
-// both. The archive states no number, so it gets the slowest pace.
+// The paces follow what each provider publishes. TMDb states about 40 to 50
+// requests a second; OMDb a daily count and no rate; TVmaze 20 calls every
+// 10 seconds; a PeerTube instance 50 every 10 seconds by default; Fanart.tv
+// and the Internet Archive no number for these calls. Each pace sits at or
+// under its provider's number, and the 429 cooldown covers a stricter day.
 var providerBlocks = []providerBlock{
 	{
 		name: providerBlockTMDb,
@@ -80,7 +82,7 @@ var providerBlocks = []providerBlock{
 			factContributorBiography,
 			factContributorHeadshot,
 		},
-		pace:  100 * time.Millisecond,
+		pace:  50 * time.Millisecond,
 		reach: providerReach{path: tmdbConfigurationPath, authorize: authorizeTMDb},
 		base:  tmdbAPIBase,
 		key:   true,
@@ -103,7 +105,7 @@ var providerBlocks = []providerBlock{
 			factRatingRottenTomatoes,
 			factRatingMetacritic,
 		},
-		pace:  250 * time.Millisecond,
+		pace:  100 * time.Millisecond,
 		reach: providerReach{path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter)},
 		base:  omdbAPIBase,
 		key:   true,
@@ -129,7 +131,7 @@ var providerBlocks = []providerBlock{
 			factSeasonPoster,
 			factSeasonBanner,
 		},
-		pace:  250 * time.Millisecond,
+		pace:  100 * time.Millisecond,
 		reach: providerReach{path: fanartCheckPath, authorize: authorizeParameter(fanartAPIKeyParam)},
 		base:  fanartAPIBase,
 		key:   true,
@@ -169,7 +171,7 @@ var providerBlocks = []providerBlock{
 	{
 		name:     providerBlockPeerTube,
 		facts:    []string{factTrailer},
-		pace:     500 * time.Millisecond,
+		pace:     250 * time.Millisecond,
 		reach:    providerReach{path: peertubeCheckPath},
 		endpoint: true,
 		account: func(spec *MetadataProviderSpec) *providerAccount {
@@ -184,7 +186,7 @@ var providerBlocks = []providerBlock{
 	{
 		name:  providerBlockArchive,
 		facts: []string{factTrailer},
-		pace:  time.Second,
+		pace:  250 * time.Millisecond,
 		reach: providerReach{path: archiveCheckPath},
 		base:  archiveAPIBase,
 		account: func(spec *MetadataProviderSpec) *providerAccount {

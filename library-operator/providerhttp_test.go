@@ -183,12 +183,12 @@ func TestThePaceEachProviderBlockHoldsTo(t *testing.T) {
 		block string
 		want  time.Duration
 	}{
-		{block: providerBlockTMDb, want: 100 * time.Millisecond},
-		{block: providerBlockOMDb, want: 250 * time.Millisecond},
-		{block: providerBlockFanart, want: 250 * time.Millisecond},
+		{block: providerBlockTMDb, want: 50 * time.Millisecond},
+		{block: providerBlockOMDb, want: 100 * time.Millisecond},
+		{block: providerBlockFanart, want: 100 * time.Millisecond},
 		{block: providerBlockTVmaze, want: 500 * time.Millisecond},
-		{block: providerBlockPeerTube, want: 500 * time.Millisecond},
-		{block: providerBlockArchive, want: time.Second},
+		{block: providerBlockPeerTube, want: 250 * time.Millisecond},
+		{block: providerBlockArchive, want: 250 * time.Millisecond},
 		{block: "a block of no pace", want: 0},
 	}
 	for _, one := range cases {

@@ -57,7 +57,7 @@ The providers, and the facts each one serves:
 * `archive`, the Internet Archive: trailers only, from its
   `movie_trailers` collection, and it needs no account. Declare it
   with an empty block, `archive: {}`. It holds trailers for many older
-  films, and the operator asks it no faster than once a second.
+  films, and the operator asks it no faster than four times a second.
 
 The operator reads the `Secret` once per pass, to check the provider
 answers. The key reaches an enricher container through a

@@ -131,7 +131,7 @@ spec:
                       description: "The address of the instance, such as https://tube.example. The operator checks it at /api/v1/config once per pass, and the trailer fact searches its videos by title."
                 archive:
                   type: object
-                  description: "The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than once a second."
+                  description: "The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second."
                 facts:
                   type: array
                   x-kubernetes-list-type: atomic

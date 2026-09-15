@@ -150,8 +150,8 @@ func TestAnArchiveClientTakesThePaceTheTableStates(t *testing.T) {
 
 	client := newArchiveClient(archiveAPIBase)
 
-	if client.interval != time.Second {
-		t.Errorf("the client paces at %v, want one request a second", client.interval)
+	if client.interval != 250*time.Millisecond {
+		t.Errorf("the client paces at %v, want four requests a second", client.interval)
 	}
 }
 

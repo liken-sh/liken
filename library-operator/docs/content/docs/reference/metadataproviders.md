@@ -23,7 +23,7 @@ address of one instance. The `PROVIDER` column shows the block.
 
 The operator paces every provider: one request at a time per block,
 with a fixed gap between requests that fits each provider's stated
-limits, and one second for the Internet Archive.
+limits, and a quarter second for the Internet Archive.
 
 `spec.facts` is optional. A provider that names none serves every
 fact the operator knows how to ask it for, and `status.facts`, shown
@@ -91,7 +91,7 @@ The provider this account is with, and the facts it may serve. A spec that names
 | <span id="spec--fanart"></span>`fanart` | [object](#specfanart) | no | The account is with Fanart.tv, which serves art alone. It is the only provider of the clearart, the banner, the landscape, the discart, and the season banner. |
 | <span id="spec--tvmaze"></span>`tvmaze` | object | no | The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze. |
 | <span id="spec--peertube"></span>`peertube` | [object](#specpeertube) | no | The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address. |
-| <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than once a second. |
+| <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second. |
 | <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator knows how to ask this provider for. Omit it to serve all of that. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
