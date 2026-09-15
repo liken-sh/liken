@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -150,13 +151,15 @@ func archiveDetailsURL(identifier string) string {
 const trailerSiteArchive = "archive"
 
 // The kind the item's own name states, or trailer where the name states none.
-// The length of the item's own video decides whether it is a trailer at all.
-func archiveDocKind(name string) string {
+// The kind the item's own name states, or trailer where the name states none.
+// The second answer says whether the name stated a kind: only an item that
+// stated none needs its metadata read to tell a trailer from a whole film.
+func archiveDocKind(name string) (string, bool) {
 	kind, stated := trailerNameKind(name)
 	if !stated {
-		return trailerKindTrailer
+		return trailerKindTrailer, false
 	}
-	return kind
+	return kind, true
 }
 
 // The two forms an item's own title states a year in: (1940) or |1940|.
@@ -368,13 +371,21 @@ func newArchiveTrailerAnswerer(client *archiveClient) archiveTrailerAnswerer {
 
 func (a archiveTrailerAnswerer) providerBlock() string { return providerBlockArchive }
 
+// One item the search matched, with the entry it becomes.
+// One item the search kept. An item whose own name stated no kind is
+// ambiguous, and its metadata is what tells a trailer from a whole film.
+type archiveCandidate struct {
+	entry     trailerEntry
+	ambiguous bool
+}
+
 // Every item whose own title carries this title. A search for `Dune` answers
 // every Dune item the collection holds, so an item that scores 0 is dropped
 // and never recorded.
 // Every item whose own title carries this title. A search for `Dune` answers
 // every Dune item the collection holds, so an item that scores 0 is dropped
-// and never recorded. The metadata of each item the score kept states how
-// long its video runs, and an item longer than eight minutes is dropped as a
+// and never recorded. The metadata of each ambiguous item is read, and an
+// item with no video or with one longer than eight minutes is dropped as a
 // whole film.
 func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) ([]trailerEntry, error) {
 	if title.title == "" {
@@ -384,10 +395,17 @@ func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle
 	if err != nil {
 		return nil, err
 	}
-	entries := []trailerEntry{}
-	asked, refused := 0, 0
-	var firstRefusal error
+	kept := archiveCandidates(docs, title)
+	items, failures := a.metadata(ctx, kept)
+	return archiveEntries(kept, items, failures)
+}
+
+// The items the title and the score kept, in the order the search answered
+// them.
+func archiveCandidates(docs []archiveDoc, title trailerTitle) []archiveCandidate {
+	kept := []archiveCandidate{}
 	for _, doc := range docs {
+		kind, stated := archiveDocKind(doc.Title)
 		entry := trailerEntry{
 			Path:      likenSelfPath,
 			Provider:  providerBlockArchive,
@@ -395,7 +413,7 @@ func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle
 			Site:      trailerSiteArchive,
 			URL:       archiveDetailsURL(doc.Identifier),
 			Name:      doc.Title,
-			Kind:      archiveDocKind(doc.Title),
+			Kind:      kind,
 			Published: archiveDocPublished(doc),
 		}
 		if !recordedTrailerKind(entry.Kind) {
@@ -405,26 +423,60 @@ func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle
 		if entry.Score <= 0 {
 			continue
 		}
-		// The metadata of a dropped item is never read, so the ask costs one
-		// request for each item it records.
+		kept = append(kept, archiveCandidate{entry: entry, ambiguous: !stated})
+	}
+	return kept
+}
+
+// The metadata of every ambiguous item at once. The client's own pace holds
+// the requests to the archive's interval, and the latency is what a title
+// waits on. Each goroutine writes the slot of its own item, so the answers
+// need no lock.
+func (a archiveTrailerAnswerer) metadata(ctx context.Context, kept []archiveCandidate) ([]archiveItem, []error) {
+	items := make([]archiveItem, len(kept))
+	failures := make([]error, len(kept))
+	var reading sync.WaitGroup
+	for at, one := range kept {
+		if !one.ambiguous {
+			continue
+		}
+		reading.Add(1)
+		go func() {
+			defer reading.Done()
+			items[at], failures[at] = a.client.item(ctx, one.entry.Key)
+		}()
+	}
+	reading.Wait()
+	return items, failures
+}
+
+// The entries in the search's own order, so the answer does not depend on
+// which metadata read finished first. One item the archive refused is one
+// item lost. Every item refused is an answer the caller cannot stand on.
+func archiveEntries(kept []archiveCandidate, items []archiveItem, failures []error) ([]trailerEntry, error) {
+	entries := []trailerEntry{}
+	asked, refused := 0, 0
+	var firstRefusal error
+	for at, one := range kept {
+		if !one.ambiguous {
+			entries = append(entries, one.entry)
+			continue
+		}
 		asked++
-		item, err := a.client.item(ctx, doc.Identifier)
-		if err != nil {
+		if failures[at] != nil {
 			refused++
 			if firstRefusal == nil {
-				firstRefusal = err
+				firstRefusal = failures[at]
 			}
 			continue
 		}
-		videos := archiveVideoFiles(item)
+		videos := archiveVideoFiles(items[at])
 		if len(videos) == 0 || archiveVideoLength(videos) > archiveTrailerLongest {
 			continue
 		}
-		entry.Resolution = archiveVideoHeight(videos)
-		entries = append(entries, entry)
+		one.entry.Resolution = archiveVideoHeight(videos)
+		entries = append(entries, one.entry)
 	}
-	// One item the archive refused is one item lost. Every item refused is an
-	// answer the caller cannot stand on.
 	if asked > 0 && refused == asked {
 		return nil, firstRefusal
 	}

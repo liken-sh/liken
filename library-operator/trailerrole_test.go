@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -404,6 +405,96 @@ func TestTheTrailerFactWritesTheLedgerAndTheRowsOfOneTitle(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "the trailers of 1 of the 1 titles") {
 		t.Errorf("log = %q, want the line that counts the run", log.String())
+	}
+}
+
+// One identified movie for each title a test wants in the gap.
+func seedTrailerGapTitles(t *testing.T, catalog *Catalog, root string, titles int) {
+	t.Helper()
+	movies := []movieRow{}
+	for at := range titles {
+		folder := fmt.Sprintf("Title %d (2014)", at)
+		writeFile(t, filepath.Join(root, folder, folder+".mkv"), "video")
+		movies = append(movies, movieRow{
+			Id: fmt.Sprintf("movie:tmdb:%d", 600+at), Library: "house/movies",
+			Kind: libraryKindMovies, Path: folder, Title: fmt.Sprintf("Title %d", at),
+			Released: "2014-06-13",
+		})
+	}
+	if err := upsertWalk(t.Context(), catalog, &walkResult{movies: movies}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The width the gap runs at, written out, so a narrower pool never opens this
+// test's gate.
+const trailerAsksAtOnce = 4
+
+// The gap asks about four titles at once, so a title costs the providers'
+// latency and not the sum over the gap.
+func TestTheTrailerGapAsksAboutFourTitlesAtOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrailerGapTitles(t, catalog, root, trailerAsksAtOnce)
+	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+	arrive, open := trailerGate(ctx, trailerAsksAtOnce)
+	line := trailerLineOf(gatedTrailers{block: providerBlockTMDb, arrive: arrive, open: open,
+		entries: []trailerEntry{trailerEntryOf(providerBlockTMDb, "aaa", 90)}})
+
+	if err := work.trailerGap(ctx, line); err != nil {
+		t.Fatalf("err = %v, want the %d titles asked about at once", err, trailerAsksAtOnce)
+	}
+
+	want := fmt.Sprintf("the trailers of %d of the %d titles", trailerAsksAtOnce, trailerAsksAtOnce)
+	if !strings.Contains(log.String(), want) {
+		t.Errorf("log = %q, want the line that counts %q", log.String(), want)
+	}
+}
+
+// One block that stops the run's context on its first ask.
+type stoppingTrailers struct {
+	stop func()
+}
+
+func (s stoppingTrailers) providerBlock() string { return providerBlockTMDb }
+
+func (s stoppingTrailers) trailers(context.Context, trailerTitle) ([]trailerEntry, error) {
+	s.stop()
+	return nil, nil
+}
+
+// A run whose context ends stops feeding titles and reports the context's own
+// error.
+func TestTheTrailerGapEndsOnItsContext(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrailerGapTitles(t, catalog, root, 2*trailerWorkers)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+
+	err := work.trailerGap(ctx, trailerLineOf(stoppingTrailers{stop: stop}))
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want the context's own error", err)
+	}
+}
+
+// A catalog read that fails ends the run, because the gap list is the work.
+func TestTheTrailerGapEndsWhereTheCatalogRefusesATitle(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrailerGapTitles(t, catalog, root, 2*trailerWorkers)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	// The gap query is the first read, and the title read after it is refused.
+	agent.queriesLeft = 2
+
+	err := work.trailerGap(t.Context(), trailerLineOf(scriptedTrailers{block: providerBlockTMDb}))
+
+	if err == nil {
+		t.Error("the run read every title, want the error the catalog gave")
 	}
 }
 

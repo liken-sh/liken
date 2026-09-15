@@ -240,22 +240,30 @@ func TestTheTitleAnArchiveItemStates(t *testing.T) {
 
 // The kind an item's own name states, and trailer for a name that states
 // none.
+// The kind an item's own name states, and whether it stated one at all, which
+// is what decides the metadata read.
 func TestTheKindAnArchiveItemStates(t *testing.T) {
 	cases := []struct {
-		name string
-		want string
+		name       string
+		want       string
+		wantStated bool
 	}{
-		{name: "His Girl Friday", want: trailerKindTrailer},
-		{name: "His Girl Friday trailer", want: trailerKindTrailer},
-		{name: "HIS GIRL FRIDAY (1940) teaser", want: trailerKindTeaser},
-		{name: "HIS GIRL FRIDAY (1940) TV spot", want: trailerKindSpot},
-		{name: "HIS GIRL FRIDAY opening clip", want: trailerKindClip},
-		{name: "HIS GIRL FRIDAY trailer song", want: trailerKindOther},
+		{name: "His Girl Friday", want: trailerKindTrailer, wantStated: false},
+		{name: "His Girl Friday trailer", want: trailerKindTrailer, wantStated: true},
+		{name: "HIS GIRL FRIDAY (1940) teaser", want: trailerKindTeaser, wantStated: true},
+		{name: "HIS GIRL FRIDAY (1940) TV spot", want: trailerKindSpot, wantStated: true},
+		{name: "HIS GIRL FRIDAY opening clip", want: trailerKindClip, wantStated: true},
+		{name: "HIS GIRL FRIDAY trailer song", want: trailerKindOther, wantStated: true},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			if got := archiveDocKind(one.name); got != one.want {
-				t.Errorf("the kind is %q, want %q", got, one.want)
+			kind, stated := archiveDocKind(one.name)
+
+			if kind != one.want {
+				t.Errorf("the kind is %q, want %q", kind, one.want)
+			}
+			if stated != one.wantStated {
+				t.Errorf("the name stated a kind: %v, want %v", stated, one.wantStated)
 			}
 		})
 	}
@@ -295,6 +303,8 @@ func TestWhatAnArchiveItemSaysAboutOneTitle(t *testing.T) {
 // Every item whose own title carries this title becomes one trailer. An item
 // that carries another title is dropped. An item that names no kind is a
 // trailer, because the collection holds trailers alone.
+// Only the item that names no kind carries a resolution, because only its
+// metadata is read.
 func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 	client, _ := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
 	answerer := newArchiveTrailerAnswerer(client)
@@ -314,14 +324,13 @@ func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "His_Girl_Friday_trailer",
 			Site: trailerSiteArchive, URL: "https://archive.org/details/His_Girl_Friday_trailer",
 			Name: "His Girl Friday trailer", Kind: trailerKindTrailer, Published: "1940-01-11",
-			Resolution: 1080,
-			Score:      85, Reason: "title and year match; trailer; no language"},
+			Score: 85, Reason: "title and year match; trailer; no language"},
 		{Path: likenSelfPath, Provider: providerBlockArchive,
 			Key:  "HowardHawkshisGirlFridayMovieTrailer1940",
 			Site: trailerSiteArchive,
 			URL:  "https://archive.org/details/HowardHawkshisGirlFridayMovieTrailer1940",
 			Name: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`,
-			Kind: trailerKindTrailer, Published: "2013-07-22", Resolution: 1080,
+			Kind: trailerKindTrailer, Published: "2013-07-22",
 			Score: 85, Reason: "title and year match; trailer; no language"},
 	}
 	if !reflect.DeepEqual(entries, want) {
@@ -335,6 +344,12 @@ func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 // The search this table drives: one item that matches the title.
 const archiveSearchOfOneItem = `{"response":{"numFound":1,"docs":[` +
 	`{"identifier":"one","title":"His Girl Friday","year":"1940"}]}}`
+
+// Two items whose names state no kind, which are the two the answerer reads
+// the metadata of.
+const archiveSearchOfTwoAmbiguousItems = `{"response":{"numFound":2,"docs":[` +
+	`{"identifier":"one","title":"His Girl Friday","year":"1940"},` +
+	`{"identifier":"two","title":"His Girl Friday [1080p]","year":"1940"}]}}`
 
 // The item's own duration is the shortest of its video files, and the
 // collection holds whole films, so an item longer than eight minutes is
@@ -396,8 +411,8 @@ func TestWhatTheFilesOfAnArchiveItemDecide(t *testing.T) {
 
 // The metadata of one item that the archive refuses drops that item alone.
 func TestAnArchiveItemWhoseMetadataTheArchiveRefuses(t *testing.T) {
-	client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
-	fake.items["His_Girl_Friday_trailer"] = fakeArchiveItem{
+	client, fake := newFakeArchive(t, archiveSearchOfTwoAmbiguousItems)
+	fake.items["two"] = fakeArchiveItem{
 		status: http.StatusInternalServerError, body: "the item is down"}
 
 	entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
@@ -410,7 +425,7 @@ func TestAnArchiveItemWhoseMetadataTheArchiveRefuses(t *testing.T) {
 	for _, entry := range entries {
 		keys = append(keys, entry.Key)
 	}
-	want := []string{"turner_video_71", "HowardHawkshisGirlFridayMovieTrailer1940"}
+	want := []string{"one"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Errorf("the answerer held %v, want %v", keys, want)
 	}
@@ -446,9 +461,9 @@ func TestAnArchiveSearchWhoseEveryItemCannotBeRead(t *testing.T) {
 	}
 }
 
-// One metadata request per item the search matched, and none for an item the
-// score dropped.
-func TestTheArchiveAnswererReadsTheMetadataOfMatchedItemsAlone(t *testing.T) {
+// The metadata of an item whose name states a kind is never read, and neither
+// is the metadata of an item the score dropped.
+func TestTheArchiveAnswererReadsTheMetadataOfNamesThatStateNoKind(t *testing.T) {
 	client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
 
 	_, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
@@ -460,11 +475,66 @@ func TestTheArchiveAnswererReadsTheMetadataOfMatchedItemsAlone(t *testing.T) {
 	want := []string{
 		archiveSearchPath,
 		archiveMetadataPath + "turner_video_71",
-		archiveMetadataPath + "His_Girl_Friday_trailer",
-		archiveMetadataPath + "HowardHawkshisGirlFridayMovieTrailer1940",
 	}
 	if got := fake.paths(); !reflect.DeepEqual(got, want) {
 		t.Errorf("the answerer asked %v, want %v", got, want)
+	}
+}
+
+// The gate opens once two metadata requests are in flight, so a serial
+// answerer never passes it.
+func archiveMetadataGate(ctx context.Context, items int) (chan struct{}, chan struct{}) {
+	arrive := make(chan struct{}, items)
+	open := make(chan struct{})
+	go func() {
+		for range items {
+			select {
+			case <-arrive:
+			case <-ctx.Done():
+				return
+			}
+		}
+		close(open)
+	}()
+	return arrive, open
+}
+
+// The metadata of two ambiguous items is read at once, so a title costs one
+// read and not two.
+func TestTheArchiveAnswererReadsTwoAmbiguousItemsAtOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	arrive, open := archiveMetadataGate(ctx, 2)
+	trailer := trailerFixture(t, "archive-item-trailer.json")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, archiveMetadataPath) {
+			_, _ = io.WriteString(w, archiveSearchOfTwoAmbiguousItems)
+			return
+		}
+		arrive <- struct{}{}
+		select {
+		case <-open:
+		case <-ctx.Done():
+		}
+		_, _ = io.WriteString(w, trailer)
+	}))
+	t.Cleanup(server.Close)
+	client := newArchiveClient(server.URL)
+	client.http = server.Client()
+	client.interval = 0
+
+	entries, err := newArchiveTrailerAnswerer(client).trailers(ctx,
+		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+
+	if err != nil {
+		t.Fatalf("err = %v, want the metadata of the two items read at once", err)
+	}
+	keys := []string{}
+	for _, entry := range entries {
+		keys = append(keys, entry.Key)
+	}
+	if !reflect.DeepEqual(keys, []string{"one", "two"}) {
+		t.Errorf("the answerer held %v, want both items in the search's order", keys)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -103,32 +104,114 @@ func (e *enricher) trailerFact(ctx context.Context) error {
 	return e.trailerGap(ctx, e.trailers)
 }
 
+// How many titles the trailer gap asks about at once.
+// How many titles one gap asks about at once. An Internet Archive search
+// costs about 1.7 s and a metadata read about 3 s, so a title waits on the
+// providers and not on this container. Four titles in flight keep the
+// providers' own pacers busy without a burst.
+const trailerWorkers = 4
+
+// The workers of one gap write one log. A writer that is not goroutine-safe
+// takes one line at a time behind this lock.
+type serialLog struct {
+	mutex sync.Mutex
+	to    io.Writer
+}
+
+func (s *serialLog) Write(line []byte) (int, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.to.Write(line)
+}
+
+// What the workers of one gap share: the count of the titles a provider
+// named, and the first failure, which stops the feed.
+type trailerRun struct {
+	mutex   sync.Mutex
+	found   int
+	failure error
+	stopped chan struct{}
+}
+
+func (r *trailerRun) note() {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.found++
+}
+
+// The first failure is the one the run reports, and it closes the feed so no
+// worker takes another title.
+func (r *trailerRun) fail(err error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if r.failure != nil {
+		return
+	}
+	r.failure = err
+	close(r.stopped)
+}
+
 // A catalog read that fails ends the container, because the gap list is the
 // work. One title that fails records an error attempt, and the run carries on
 // to the next.
+// A catalog read that fails ends the container, because the gap list is the
+// work. One title that fails records an error attempt, and the run carries on
+// to the next. trailerWorkers titles are asked about at once; the ids of one
+// gap are unique, so no two workers write one title's folder.
 func (e *enricher) trailerGap(ctx context.Context, line *trailerLine) error {
 	ids, err := e.gaps(ctx, factTrailer, time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	found := 0
+	if e.log != nil {
+		e.log = &serialLog{to: e.log}
+	}
+	run := &trailerRun{stopped: make(chan struct{})}
+	titles := make(chan string)
+	var workers sync.WaitGroup
+	for range trailerWorkers {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for id := range titles {
+				e.trailerGapTitle(ctx, line, run, id)
+			}
+		}()
+	}
+feeding:
 	for _, id := range ids {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		item, held, err := e.catalog.identityItem(ctx, e.library, id)
-		if err != nil {
-			return err
-		}
-		if !held || !e.inScope(item.path) {
-			continue
-		}
-		if e.trailerOne(ctx, line, item) {
-			found++
+		select {
+		case titles <- id:
+		case <-run.stopped:
+			break feeding
 		}
 	}
-	e.logf("named the trailers of %d of the %d titles the gap held", found, len(ids))
+	close(titles)
+	workers.Wait()
+	if run.failure != nil {
+		return run.failure
+	}
+	e.logf("named the trailers of %d of the %d titles the gap held", run.found, len(ids))
 	return nil
+}
+
+// One title of the gap: the catalog read, the scope test, and the ask.
+func (e *enricher) trailerGapTitle(ctx context.Context, line *trailerLine, run *trailerRun, id string) {
+	if err := ctx.Err(); err != nil {
+		run.fail(err)
+		return
+	}
+	item, held, err := e.catalog.identityItem(ctx, e.library, id)
+	if err != nil {
+		run.fail(err)
+		return
+	}
+	if !held || !e.inScope(item.path) {
+		return
+	}
+	if e.trailerOne(ctx, line, item) {
+		run.note()
+	}
 }
 
 // One title's ask and the record of it. The whole list is replaced, because
