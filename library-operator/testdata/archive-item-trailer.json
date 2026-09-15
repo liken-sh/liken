@@ -1,0 +1,35 @@
+{
+  "created": 1757000000,
+  "metadata": {
+    "identifier": "turner_video_47594",
+    "title": "Night of the Living Dead",
+    "mediatype": "movies",
+    "collection": ["movie_trailers"]
+  },
+  "files": [
+    {
+      "name": "47594.mp4",
+      "source": "original",
+      "format": "MPEG4",
+      "length": "108.29",
+      "width": "1920",
+      "height": "1080",
+      "size": "110550963"
+    },
+    {
+      "name": "47594.ia.mp4",
+      "source": "derivative",
+      "format": "h.264 IA",
+      "length": "108.29",
+      "width": "640",
+      "height": "360",
+      "size": "10550963"
+    },
+    {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "format": "Item Tile",
+      "size": "17346"
+    }
+  ]
+}

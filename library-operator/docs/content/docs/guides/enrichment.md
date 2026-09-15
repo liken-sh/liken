@@ -178,7 +178,9 @@ prefer, and so does a TMDb video that is not marked official. The
 reason says which of these applied. Clips, featurettes, and other
 extras are not recorded at all. Within one provider, videos with the
 same name collapse to the best one, and at most five videos per
-provider are kept for a title.
+provider are kept for a title. An Internet Archive item is kept only
+when its own video runs eight minutes or less, because the
+`movie_trailers` collection holds whole films beside the trailers.
 
 The preferred languages are the library's `spec.languages`, then the
 household's `audioLanguages` from the media operator's

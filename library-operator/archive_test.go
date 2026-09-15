@@ -12,15 +12,26 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
 // What one fake archive recorded: the address of every request it was asked.
+// The metadata of one item, by identifier, where a test states one of its
+// own.
 type fakeArchive struct {
 	mutex    sync.Mutex
 	requests []url.URL
+	items    map[string]fakeArchiveItem
+}
+
+// One item's metadata as the fake answers it, with the status it answers
+// first.
+type fakeArchiveItem struct {
+	status int
+	body   string
 }
 
 func (f *fakeArchive) read() []url.URL {
@@ -29,16 +40,39 @@ func (f *fakeArchive) read() []url.URL {
 	return f.requests
 }
 
+// The paths of the requests the fake was asked.
+func (f *fakeArchive) paths() []string {
+	paths := []string{}
+	for _, asked := range f.read() {
+		paths = append(paths, asked.Path)
+	}
+	return paths
+}
+
 // The client and the fake archive it reads, at no pace at all, so no test
 // reaches archive.org and no test sleeps unless it says so.
+// The search answers one body, and every item answers the trailer fixture,
+// except the items a test states itself.
 func newFakeArchive(t *testing.T, body string) (*archiveClient, *fakeArchive) {
 	t.Helper()
-	fake := &fakeArchive{}
+	fake := &fakeArchive{items: map[string]fakeArchiveItem{}}
+	trailer := trailerFixture(t, "archive-item-trailer.json")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mutex.Lock()
 		fake.requests = append(fake.requests, *r.URL)
+		item, stated := fake.items[strings.TrimPrefix(r.URL.Path, archiveMetadataPath)]
 		fake.mutex.Unlock()
-		_, _ = io.WriteString(w, body)
+		if !strings.HasPrefix(r.URL.Path, archiveMetadataPath) {
+			_, _ = io.WriteString(w, body)
+			return
+		}
+		if !stated {
+			item = fakeArchiveItem{body: trailer}
+		}
+		if item.status != 0 {
+			w.WriteHeader(item.status)
+		}
+		_, _ = io.WriteString(w, item.body)
 	}))
 	t.Cleanup(server.Close)
 
@@ -275,17 +309,19 @@ func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "turner_video_71",
 			Site: trailerSiteArchive, URL: "https://archive.org/details/turner_video_71",
 			Name: "His Girl Friday", Kind: trailerKindTrailer, Published: "1940-01-01",
-			Score: 85, Reason: "title and year match; trailer; no language"},
+			Resolution: 1080,
+			Score:      85, Reason: "title and year match; trailer; no language"},
 		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "His_Girl_Friday_trailer",
 			Site: trailerSiteArchive, URL: "https://archive.org/details/His_Girl_Friday_trailer",
 			Name: "His Girl Friday trailer", Kind: trailerKindTrailer, Published: "1940-01-11",
-			Score: 85, Reason: "title and year match; trailer; no language"},
+			Resolution: 1080,
+			Score:      85, Reason: "title and year match; trailer; no language"},
 		{Path: likenSelfPath, Provider: providerBlockArchive,
 			Key:  "HowardHawkshisGirlFridayMovieTrailer1940",
 			Site: trailerSiteArchive,
 			URL:  "https://archive.org/details/HowardHawkshisGirlFridayMovieTrailer1940",
 			Name: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`,
-			Kind: trailerKindTrailer, Published: "2013-07-22",
+			Kind: trailerKindTrailer, Published: "2013-07-22", Resolution: 1080,
 			Score: 85, Reason: "title and year match; trailer; no language"},
 	}
 	if !reflect.DeepEqual(entries, want) {
@@ -293,6 +329,142 @@ func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 	}
 	if got := answerer.providerBlock(); got != providerBlockArchive {
 		t.Errorf("the answerer names the block %q, want %q", got, providerBlockArchive)
+	}
+}
+
+// The search this table drives: one item that matches the title.
+const archiveSearchOfOneItem = `{"response":{"numFound":1,"docs":[` +
+	`{"identifier":"one","title":"His Girl Friday","year":"1940"}]}}`
+
+// The item's own duration is the shortest of its video files, and the
+// collection holds whole films, so an item longer than eight minutes is
+// dropped. The resolution is the tallest video file's height.
+func TestWhatTheFilesOfAnArchiveItemDecide(t *testing.T) {
+	cases := []struct {
+		name string
+		item string
+		// The resolution of each entry the answerer held.
+		want []int
+	}{
+		{name: "a trailer of 108 seconds", want: []int{1080},
+			item: trailerFixture(t, "archive-item-trailer.json")},
+		{name: "a film of 73 minutes", want: []int{},
+			item: trailerFixture(t, "archive-item-film.json")},
+		{name: "an item of no video at all", want: []int{},
+			item: `{"files":[{"name":"__ia_thumb.jpg","format":"Item Tile"}]}`},
+		{name: "a length in minutes and seconds", want: []int{720},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","length":"1:48","height":"720"}]}`},
+		{name: "a length in hours, minutes, and seconds", want: []int{},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","length":"1:20:00","height":"720"}]}`},
+		{name: "a format the archive has no word for, in a video file", want: []int{1080},
+			item: `{"files":[{"name":"a.mkv","format":"","length":"90","height":"1080"}]}`},
+		{name: "a file that states no length", want: []int{480},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","height":"480"}]}`},
+		{name: "the shortest file states the length, the tallest the height",
+			want: []int{1080},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","length":"600","height":"1080"},` +
+				`{"name":"b.mp4","format":"MPEG4","length":"100","height":"360"}]}`},
+		{name: "a height of no number", want: []int{0},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","length":"90","height":"n/a"}]}`},
+		{name: "a length of more parts than an hour, a minute, and a second",
+			want: []int{360},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","length":"1:2:3:4","height":"360"}]}`},
+		{name: "a length and a height as numbers", want: []int{1080},
+			item: `{"files":[{"name":"a.mp4","format":"MPEG4","length":108.29,"height":1080}]}`},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			client, fake := newFakeArchive(t, archiveSearchOfOneItem)
+			fake.items["one"] = fakeArchiveItem{body: one.item}
+
+			entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
+				trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := []int{}
+			for _, entry := range entries {
+				got = append(got, entry.Resolution)
+			}
+			if !reflect.DeepEqual(got, one.want) {
+				t.Errorf("the answerer held the resolutions %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
+// The metadata of one item that the archive refuses drops that item alone.
+func TestAnArchiveItemWhoseMetadataTheArchiveRefuses(t *testing.T) {
+	client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
+	fake.items["His_Girl_Friday_trailer"] = fakeArchiveItem{
+		status: http.StatusInternalServerError, body: "the item is down"}
+
+	entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
+		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys := []string{}
+	for _, entry := range entries {
+		keys = append(keys, entry.Key)
+	}
+	want := []string{"turner_video_71", "HowardHawkshisGirlFridayMovieTrailer1940"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("the answerer held %v, want %v", keys, want)
+	}
+}
+
+// A search whose every item the archive cannot answer is an error, because
+// nothing about the title was read.
+func TestAnArchiveSearchWhoseEveryItemCannotBeRead(t *testing.T) {
+	cases := []struct {
+		name string
+		item fakeArchiveItem
+	}{
+		{name: "an item the archive refused", item: fakeArchiveItem{
+			status: http.StatusInternalServerError, body: "the item is down"}},
+		{name: "a file that is no object",
+			item: fakeArchiveItem{body: `{"files":["not a file"]}`}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
+			fake.items["turner_video_71"] = one.item
+			fake.items["His_Girl_Friday_trailer"] = one.item
+			fake.items["HowardHawkshisGirlFridayMovieTrailer1940"] = one.item
+
+			entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
+				trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+
+			if err == nil || len(entries) != 0 {
+				t.Errorf("the answerer held %+v and %v, want the error the archive gave",
+					entries, err)
+			}
+		})
+	}
+}
+
+// One metadata request per item the search matched, and none for an item the
+// score dropped.
+func TestTheArchiveAnswererReadsTheMetadataOfMatchedItemsAlone(t *testing.T) {
+	client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
+
+	_, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
+		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		archiveSearchPath,
+		archiveMetadataPath + "turner_video_71",
+		archiveMetadataPath + "His_Girl_Friday_trailer",
+		archiveMetadataPath + "HowardHawkshisGirlFridayMovieTrailer1940",
+	}
+	if got := fake.paths(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the answerer asked %v, want %v", got, want)
 	}
 }
 

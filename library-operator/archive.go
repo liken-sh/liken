@@ -3,6 +3,8 @@ package main
 // archive.go is what the trailer fact asks the Internet Archive: a search of
 // its movie_trailers collection by title, and the trailer entry each item
 // becomes.
+// The metadata of an item states how long its video runs, which is what tells
+// a trailer from a whole film.
 
 import (
 	"context"
@@ -11,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The archive is one service at one fixed address.
@@ -18,11 +21,17 @@ const archiveAPIBase = "https://archive.org"
 
 // The path the archive answers a search on, and the collection this block
 // reads.
+// The metadata of one item answers on its own path.
 const (
-	archiveSearchPath  = "/advancedsearch.php"
-	archiveDetailsPath = "/details/"
-	archiveCollection  = "movie_trailers"
+	archiveSearchPath   = "/advancedsearch.php"
+	archiveDetailsPath  = "/details/"
+	archiveMetadataPath = "/metadata/"
+	archiveCollection   = "movie_trailers"
 )
+
+// The longest video this answerer records. The movie_trailers collection
+// holds whole films beside the trailers, and a trailer runs a few minutes.
+const archiveTrailerLongest = 8 * time.Minute
 
 // How many items one search reads, and the fields it asks for.
 const (
@@ -140,8 +149,8 @@ func archiveDetailsURL(identifier string) string {
 // The site of an entry the archive named.
 const trailerSiteArchive = "archive"
 
-// The kind the item's own name states, or trailer where the name states none,
-// because every item of the movie_trailers collection is one.
+// The kind the item's own name states, or trailer where the name states none.
+// The length of the item's own video decides whether it is a trailer at all.
 func archiveDocKind(name string) string {
 	kind, stated := trailerNameKind(name)
 	if !stated {
@@ -218,6 +227,135 @@ func archiveDocPublished(doc archiveDoc) string {
 	return ""
 }
 
+// One item's metadata: the file list the length and the resolution are read
+// from.
+type archiveItem struct {
+	Files []archiveFile `json:"files"`
+}
+
+// One file of an item, in the fields that state what it is, how long it runs,
+// and how tall it is.
+type archiveFile struct {
+	Name   string
+	Format string
+	Length string
+	Height string
+}
+
+// The same file as the metadata answers it, each field raw, because a number
+// and a word both arrive here.
+type archiveFileFields struct {
+	Name   json.RawMessage `json:"name"`
+	Format json.RawMessage `json:"format"`
+	Length json.RawMessage `json:"length"`
+	Height json.RawMessage `json:"height"`
+}
+
+func (f *archiveFile) UnmarshalJSON(body []byte) error {
+	held := archiveFileFields{}
+	if err := json.Unmarshal(body, &held); err != nil {
+		return err
+	}
+	*f = archiveFile{
+		Name:   archiveText(held.Name),
+		Format: archiveText(held.Format),
+		Length: archiveText(held.Length),
+		Height: archiveText(held.Height),
+	}
+	return nil
+}
+
+func (c *archiveClient) item(ctx context.Context, identifier string) (archiveItem, error) {
+	var answer archiveItem
+	if err := c.get(ctx, archiveMetadataPath+identifier, nil, &answer); err != nil {
+		return archiveItem{}, err
+	}
+	return answer, nil
+}
+
+// The formats the archive names its video files by.
+var archiveVideoFormats = map[string]bool{
+	"MPEG4": true, "h.264": true, "h.264 IA": true, "Matroska": true,
+	"QuickTime": true, "Ogg Video": true, "WebM": true, "MPEG2": true,
+	"Windows Media": true, "Flash Video": true, "DivX": true,
+	"512Kb MPEG4": true, "Cinepack": true,
+}
+
+// The names of video files, for a format this operator has no word for.
+var archiveVideoNames = []string{
+	".mp4", ".mkv", ".mov", ".avi", ".webm", ".ogv", ".m4v", ".wmv", ".flv",
+	".mpg", ".mpeg",
+}
+
+func archiveFileIsVideo(file archiveFile) bool {
+	if archiveVideoFormats[file.Format] {
+		return true
+	}
+	name := strings.ToLower(file.Name)
+	for _, ending := range archiveVideoNames {
+		if strings.HasSuffix(name, ending) {
+			return true
+		}
+	}
+	return false
+}
+
+// The video files of one item.
+func archiveVideoFiles(item archiveItem) []archiveFile {
+	videos := []archiveFile{}
+	for _, file := range item.Files {
+		if archiveFileIsVideo(file) {
+			videos = append(videos, file)
+		}
+	}
+	return videos
+}
+
+// The length one file states, as seconds, as h:mm:ss, or as mm:ss.
+func archiveFileLength(stated string) (time.Duration, bool) {
+	seconds := 0.0
+	parts := strings.Split(strings.TrimSpace(stated), ":")
+	if len(parts) > 3 {
+		return 0, false
+	}
+	for _, part := range parts {
+		value, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+		if err != nil || value < 0 {
+			return 0, false
+		}
+		seconds = seconds*60 + value
+	}
+	return time.Duration(seconds * float64(time.Second)), true
+}
+
+// The item runs as long as its shortest video file, which is the trailer
+// where an item holds a trailer and a whole film both.
+func archiveVideoLength(videos []archiveFile) time.Duration {
+	shortest := time.Duration(0)
+	for _, file := range videos {
+		length, stated := archiveFileLength(file.Length)
+		if !stated {
+			continue
+		}
+		if shortest == 0 || length < shortest {
+			shortest = length
+		}
+	}
+	return shortest
+}
+
+// The tallest video file's height, which is the resolution the entry records.
+func archiveVideoHeight(videos []archiveFile) int {
+	tallest := 0
+	for _, file := range videos {
+		height, err := strconv.Atoi(strings.TrimSpace(file.Height))
+		if err == nil && height > tallest {
+			tallest = height
+		}
+	}
+	return tallest
+}
+
 // The archive's trailer answerer keys on the title's own name, because the
 // collection holds no provider ids.
 type archiveTrailerAnswerer struct {
@@ -233,6 +371,11 @@ func (a archiveTrailerAnswerer) providerBlock() string { return providerBlockArc
 // Every item whose own title carries this title. A search for `Dune` answers
 // every Dune item the collection holds, so an item that scores 0 is dropped
 // and never recorded.
+// Every item whose own title carries this title. A search for `Dune` answers
+// every Dune item the collection holds, so an item that scores 0 is dropped
+// and never recorded. The metadata of each item the score kept states how
+// long its video runs, and an item longer than eight minutes is dropped as a
+// whole film.
 func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) ([]trailerEntry, error) {
 	if title.title == "" {
 		return nil, nil
@@ -242,6 +385,8 @@ func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle
 		return nil, err
 	}
 	entries := []trailerEntry{}
+	asked, refused := 0, 0
+	var firstRefusal error
 	for _, doc := range docs {
 		entry := trailerEntry{
 			Path:      likenSelfPath,
@@ -260,7 +405,28 @@ func (a archiveTrailerAnswerer) trailers(ctx context.Context, title trailerTitle
 		if entry.Score <= 0 {
 			continue
 		}
+		// The metadata of a dropped item is never read, so the ask costs one
+		// request for each item it records.
+		asked++
+		item, err := a.client.item(ctx, doc.Identifier)
+		if err != nil {
+			refused++
+			if firstRefusal == nil {
+				firstRefusal = err
+			}
+			continue
+		}
+		videos := archiveVideoFiles(item)
+		if len(videos) == 0 || archiveVideoLength(videos) > archiveTrailerLongest {
+			continue
+		}
+		entry.Resolution = archiveVideoHeight(videos)
 		entries = append(entries, entry)
+	}
+	// One item the archive refused is one item lost. Every item refused is an
+	// answer the caller cannot stand on.
+	if asked > 0 && refused == asked {
+		return nil, firstRefusal
 	}
 	return entries, nil
 }

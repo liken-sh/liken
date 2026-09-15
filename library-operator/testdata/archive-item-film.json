@@ -1,0 +1,26 @@
+{
+  "created": 1757000000,
+  "metadata": {
+    "identifier": "night-of-the-living-dead-1968-web-rip-us-hd-1080p",
+    "title": "Night of the Living Dead |1968| WebRip US (HD 1080p)",
+    "mediatype": "movies",
+    "collection": ["movie_trailers"]
+  },
+  "files": [
+    {
+      "name": "Night of the Living Dead 1968 WebRip US HD 1080p.mp4",
+      "source": "original",
+      "format": "MPEG4",
+      "length": "4427.4",
+      "width": "1280",
+      "height": "720",
+      "size": "1470550963"
+    },
+    {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "format": "Item Tile",
+      "size": "17346"
+    }
+  ]
+}
