@@ -12,10 +12,12 @@
 // the gaps around it, and an entry no library holds is a thin row, so the
 // rows are not one height, and every measure of the wall reads the row
 // tops the wall lays out once.
+// One more column stands between the strip and the cards: the circles
+// that say where the room and each person in it stand in the story.
 
 use iced_winit::core::Rectangle;
 
-use super::metro;
+use super::{metro, runs};
 use crate::catalog::franchise::{Entry, Era, Franchise, Held, SERIES, SPAN, Standing};
 use crate::catalog::{Calendar, art};
 use crate::look;
@@ -182,6 +184,10 @@ pub struct Cell {
     pub tagline: bool,
     pub note: String,
     pub standing: Standing,
+    /// The runs of a series member, as the entry holds them. A press hands
+    /// them to the page it opens, so that page reads only the episodes this
+    /// row stands for.
+    pub runs: Vec<(i64, i64)>,
 }
 
 impl Cell {
@@ -443,6 +449,7 @@ fn cell(entry: &Entry, columns: &[String], today: &str) -> Cell {
         },
         note: note(entry, today),
         standing: entry.standing(today),
+        runs: entry.runs.clone(),
     }
 }
 
@@ -456,13 +463,12 @@ fn dated(entry: &Entry, held: &Held) -> String {
     }
 }
 
-/// The facts line: Film or Series, the year, and then a film's running
-/// time or a series run's episodes where the catalog holds them. A fact
-/// the entry does not carry leaves no gap and no dot behind.
-/// The facts under one entry: the kind word, the year, and a film's
-/// running time or a series run's episodes. The franchise strip on a
-/// film's page and on a series' page draws the same line under its
-/// members, so the words are spelled once.
+/// The facts line under one entry: Film or Series, the year, the run a
+/// series member covers, and then a film's running time or a series
+/// run's episodes where the catalog holds them. A fact the entry does not
+/// carry leaves no gap and no dot behind. The franchise strip on a film's
+/// page and on a series' page draws the same line under its members, so
+/// the words are spelled once.
 pub fn facts(entry: &Entry, held: &Held) -> String {
     let series = entry.kind == SERIES;
     let held_facts = match (entry.held.is_some(), series) {
@@ -473,6 +479,7 @@ pub fn facts(entry: &Entry, held: &Held) -> String {
     facts::joined(&[
         facts::kind_word(&entry.kind),
         &dated(entry, held),
+        &runs::run_words(&entry.runs),
         &held_facts,
     ])
 }
@@ -663,9 +670,10 @@ pub fn labelled(rows: &[Row]) -> bool {
 }
 
 /// The lane of the wall: the wall itself, the part the strip and the
-/// cards share, the strip, and the cards. The left-hand room is only
-/// what is used: the time label takes its column only where a row
-/// carries one, and the strip a pitch for every lane its runs fill.
+/// cards share, the strip, the circles, and the cards. The left-hand
+/// room is only what is used: the time label takes its column only where
+/// a row carries one, and the strip a pitch for every lane its runs
+/// fill.
 /// Where none of them stands at the left, the cards keep the width they
 /// have beside a time column at its floor and stand centered in the
 /// region, so a page of one universe with no calendar does not sit off
@@ -675,13 +683,18 @@ pub struct Lane {
     pub wall: Rectangle,
     pub columned: Rectangle,
     pub strip: Rectangle,
+    /// The column of circles, which takes no width where no marker
+    /// stands.
+    pub people: Rectangle,
     pub cards: Rectangle,
 }
 
 impl Lane {
     /// The lane for these runs over the region, beside a time column of
     /// this width.
-    pub fn of(region: Rectangle, runs: &[metro::Run], time: f32) -> Self {
+    /// `people` is the width of the circles column, and zero where no
+    /// marker stands.
+    pub fn of(region: Rectangle, runs: &[metro::Run], time: f32, people: f32) -> Self {
         let wall = region;
         let columned = columned(wall, time);
         let strip = area(columned.x, columned.y, metro::width(runs), columned.height);
@@ -689,7 +702,13 @@ impl Lane {
             true => GAP,
             false => 0.0,
         };
-        let bare = time <= 0.0 && strip.width == 0.0;
+        let people = area(
+            strip.x + strip.width + gap,
+            columned.y,
+            people,
+            columned.height,
+        );
+        let bare = time <= 0.0 && strip.width == 0.0 && people.width == 0.0;
         let cards = match bare {
             true => area(
                 region.x + floor() / 2.0,
@@ -698,9 +717,9 @@ impl Lane {
                 region.height,
             ),
             false => area(
-                strip.x + strip.width + gap,
+                people.x + people.width,
                 columned.y,
-                (columned.width - strip.width - gap).max(0.0),
+                (columned.width - strip.width - gap - people.width).max(0.0),
                 columned.height,
             ),
         };
@@ -708,6 +727,7 @@ impl Lane {
             wall,
             columned,
             strip,
+            people,
             cards,
         }
     }

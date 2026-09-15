@@ -84,8 +84,20 @@ pub(crate) fn next_in(container: &Container, member: i64, title: String) -> Reas
             id: membership.id.clone(),
             position: member,
             title,
+            runs: runs_of(membership, member),
         },
     }
+}
+
+// The runs of the member at this position in the membership, and none
+// where the membership holds no such member, which is the whole show.
+fn runs_of(membership: &Membership, member: i64) -> Vec<(i64, i64)> {
+    membership
+        .members
+        .iter()
+        .find(|entry| entry.position == member)
+        .map(|entry| entry.runs.clone())
+        .unwrap_or_default()
 }
 
 // One offer onto the cards. The card of the same leaf takes the reason,
@@ -237,11 +249,13 @@ pub(crate) fn in_franchise(reason: &Reason) -> Option<InFranchise> {
             library,
             id,
             position,
+            runs,
             ..
         } => Some(InFranchise {
             library: library.clone(),
             id: id.clone(),
             position: *position,
+            runs: runs.clone(),
         }),
         _ => None,
     }

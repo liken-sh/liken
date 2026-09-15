@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use crate::catalog::progress::thread;
-use crate::catalog::{Episode, InSeries, Membership, Resume, Slot, Source, franchise};
+use crate::catalog::{Episode, InSeries, Membership, Resume, Slot, Source};
 
 // The kind words the leaves carry. They are the catalog's own item tables,
 // so a slot of this row reads as every other slot of that kind.
@@ -73,7 +73,7 @@ pub fn title(source: &mut dyn Source, container: &Container) -> Option<String> {
 pub struct Episodes(HashMap<Work, Vec<Episode>>);
 
 impl Episodes {
-    fn of(&mut self, source: &mut dyn Source, library: &str, id: &str) -> Vec<Episode> {
+    pub(crate) fn of(&mut self, source: &mut dyn Source, library: &str, id: &str) -> Vec<Episode> {
         self.0
             .entry((library.to_string(), id.to_string()))
             .or_insert_with(|| source.episodes(library, id))
@@ -102,42 +102,18 @@ pub fn leaves(
             .into_iter()
             .map(|member| leaf(Slot::of(library, MOVIES, member), 0))
             .collect(),
-        Container::Franchise(membership) => membership
-            .members
-            .iter()
-            .flat_map(|entry| member(source, episodes, entry))
-            .collect(),
+        Container::Franchise(membership) => {
+            crate::screens::franchise::leaves::of(source, episodes, &membership.members)
+        }
     }
 }
 
-fn leaf(slot: Slot, member: i64) -> Leaf {
+pub(crate) fn leaf(slot: Slot, member: i64) -> Leaf {
     Leaf { slot, member }
 }
 
-// The leaves of one franchise member: the film, or the episodes of the
-// series inside its runs.
-fn member(source: &mut dyn Source, episodes: &mut Episodes, entry: &franchise::Entry) -> Vec<Leaf> {
-    let Some(held) = &entry.held else {
-        return Vec::new();
-    };
-    if held.kind != "series" {
-        return vec![leaf(franchise::slot(held.clone()), entry.position)];
-    }
-    episodes
-        .of(source, &held.library, &held.id)
-        .into_iter()
-        .filter(|episode| entry.covers(episode.season, episode.episode))
-        .map(|episode| {
-            leaf(
-                still(&held.library, &held.id, &held.title, episode),
-                entry.position,
-            )
-        })
-        .collect()
-}
-
 // One episode of a series as the slot the row draws.
-fn still(library: &str, series: &str, name: &str, episode: Episode) -> Slot {
+pub(crate) fn still(library: &str, series: &str, name: &str, episode: Episode) -> Slot {
     Slot {
         library: library.to_string(),
         kind: EPISODES.to_string(),

@@ -229,15 +229,10 @@ impl Entry {
         }
     }
 
-    // Whether one aired episode is inside the member's runs. Every episode
-    // is, where the file names no run. Otherwise a run names a season, and an
-    // episode inside it where it names one.
+    // Whether one aired episode is inside the member's runs. The rule is
+    // `covers`, so a page opened on the member applies the same cut.
     pub fn covers(&self, season: i64, episode: i64) -> bool {
-        self.runs.is_empty()
-            || self
-                .runs
-                .iter()
-                .any(|run| run.0 == season && (run.1 == 0 || run.1 == episode))
+        covers(&self.runs, season, episode)
     }
 
     /// Whether some library holds the entry, the title is still to come, or
@@ -257,6 +252,16 @@ impl Entry {
             false => Standing::Missing,
         }
     }
+}
+
+// Whether one aired episode is inside a list of runs. Every episode is,
+// where the list names no run. Otherwise a run names a season, and an
+// episode inside it where it names one.
+pub fn covers(runs: &[(i64, i64)], season: i64, episode: i64) -> bool {
+    runs.is_empty()
+        || runs
+            .iter()
+            .any(|run| run.0 == season && (run.1 == 0 || run.1 == episode))
 }
 
 /// What the page says about an entry: the catalog holds it, the title is still
@@ -586,6 +591,25 @@ mod tests {
                 member.covers(season, episode),
                 covered,
                 "S{season}E{episode}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_list_of_runs_covers_a_whole_season_one_episode_and_every_episode() {
+        let cases = [
+            (Vec::new(), 3, 7, true),
+            (vec![(1, 0)], 1, 9, true),
+            (vec![(1, 0)], 2, 1, false),
+            (vec![(2, 3)], 2, 3, true),
+            (vec![(2, 3)], 2, 4, false),
+            (vec![(1, 0), (2, 3)], 3, 1, false),
+        ];
+        for (runs, season, episode, covered) in cases {
+            assert_eq!(
+                covers(&runs, season, episode),
+                covered,
+                "{runs:?} S{season}E{episode}"
             );
         }
     }

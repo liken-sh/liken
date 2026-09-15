@@ -5,6 +5,7 @@
 use super::super::*;
 use super::serials::{SERIES, Serials};
 use crate::catalog::Progress;
+use crate::screens::InFranchise;
 use crate::views::Card;
 
 // The one `Person` these cases record their plays against. The name is
@@ -134,4 +135,66 @@ fn a_reread_holds_the_focus_the_wall_already_had() {
     page.reread(&mut source);
 
     assert_eq!(page.focus, Focus::Still(2));
+}
+
+// The page of a series of four seasons of five, opened as the franchise
+// member these runs cut out of it, after the browser read these plays.
+fn inside(runs: Vec<(i64, i64)>, progress: Vec<Progress>) -> Series {
+    let mut source = Serials {
+        seasons: vec![5, 5, 5, 5],
+        progress,
+        ..Serials::default()
+    };
+    let mut page =
+        Series::open("screening/serials", SERIES, &mut source).expect("the catalog holds it");
+    page.via = Some(InFranchise {
+        library: "screening/orders".into(),
+        id: "franchise:name:the-cycle".into(),
+        position: 2,
+        runs,
+    });
+    progress::read(&mut page, &mut source, &[WATCHER.to_string()]);
+    page
+}
+
+// The aired numbers of the episode focus is on.
+fn landed(page: &Series) -> Option<(i64, i64)> {
+    page.focused().map(|still| (still.season, still.episode))
+}
+
+#[test]
+fn a_page_opened_inside_a_run_opens_on_the_first_episode_of_the_run() {
+    let page = inside(vec![(3, 0), (4, 0)], Vec::new());
+
+    assert_eq!(page.focus, Focus::Still(10));
+    assert_eq!(landed(&page), Some((3, 1)));
+}
+
+#[test]
+fn a_page_opened_inside_a_run_opens_after_the_episode_they_finished() {
+    let page = inside(vec![(3, 0), (4, 0)], vec![played(3, 1, 100, RUNTIME)]);
+
+    assert_eq!(landed(&page), Some((3, 2)));
+}
+
+#[test]
+fn a_play_outside_the_run_leaves_the_page_on_the_first_episode_of_the_run() {
+    let page = inside(vec![(3, 0), (4, 0)], vec![played(1, 5, 100, 690)]);
+
+    assert_eq!(landed(&page), Some((3, 1)));
+}
+
+#[test]
+fn a_run_the_catalog_holds_no_episode_of_opens_on_the_first_still() {
+    let page = inside(vec![(9, 0)], Vec::new());
+
+    assert_eq!(page.focus, Focus::Still(0));
+    assert_eq!(landed(&page), Some((1, 1)));
+}
+
+#[test]
+fn a_run_of_two_seasons_apart_opens_on_the_first_episode_of_the_later_one() {
+    let page = inside(vec![(2, 0), (4, 0)], vec![played(2, 5, 100, RUNTIME)]);
+
+    assert_eq!(landed(&page), Some((4, 1)));
 }

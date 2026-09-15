@@ -275,7 +275,14 @@ mod tests {
 
     #[test]
     fn a_title_in_no_franchise_draws_no_strip() {
-        let strips = Strips::of("screening/films", "movies:2", &mut Orders { empty: true });
+        let strips = Strips::of(
+            "screening/films",
+            "movies:2",
+            &mut Orders {
+                empty: true,
+                ..Orders::default()
+            },
+        );
         assert!(strips.is_empty());
         assert_eq!(strips.first(), None);
         assert_eq!(strips.last(), None);

@@ -5,6 +5,7 @@
 use super::{Focus, Series, Still};
 use crate::catalog::progress::thread;
 use crate::catalog::{Progress, Resume, Source};
+use crate::screens::InFranchise;
 
 /// Read how far these people reached in each episode of the series, and
 /// hang each row on the still it names. Focus lands on the episode to watch
@@ -27,7 +28,8 @@ pub fn read(page: &mut Series, source: &mut dyn Source, people: &[String]) {
     }
     if !page.placed {
         let plays = source.plays_of(&page.library, &page.id, people);
-        page.focus = Focus::Still(next_episode(&page.stills, &plays));
+        let next = next_episode(&page.stills, &plays, page.via.as_ref());
+        page.focus = Focus::Still(next);
         page.refoot(source);
     }
 }
@@ -54,17 +56,19 @@ pub fn start(still: &Still) -> Option<i64> {
 }
 
 // The episode the wall opens on: the leaf the thread rule offers over
-// the stills in aired order and these plays of the series, which is the
-// episode the continue-watching row's card names. The first episode where
-// the walk offers nothing.
-pub fn next_episode(stills: &[Still], plays: &[Resume]) -> usize {
+// the stills the page's way in covers, in aired order, and these plays of
+// the series, which is the episode the continue-watching row's card names.
+// The first covered still where the walk offers nothing.
+pub fn next_episode(stills: &[Still], plays: &[Resume], via: Option<&InFranchise>) -> usize {
+    let covered = covered(stills, via);
     let on: Vec<thread::Play> = plays
         .iter()
         .filter_map(|play| {
             let numbers = (play.progress.season, play.progress.episode);
-            let leaf = stills
-                .iter()
-                .position(|still| (still.season, still.episode) == numbers)?;
+            let leaf = covered.iter().position(|index| {
+                let still = &stills[*index];
+                (still.season, still.episode) == numbers
+            })?;
             Some(thread::Play {
                 leaf,
                 progress: play.progress.clone(),
@@ -72,9 +76,28 @@ pub fn next_episode(stills: &[Still], plays: &[Resume]) -> usize {
             })
         })
         .collect();
-    thread::walk(stills.len(), &on)
+    let leaf = thread::walk(covered.len(), &on)
         .map(|offer| offer.leaf)
-        .unwrap_or(0)
+        .unwrap_or(0);
+    covered.get(leaf).copied().unwrap_or(0)
+}
+
+// The stills the walk runs over, by their index in the wall. A page
+// opened as one member of a franchise walks only the stills the member's
+// runs cover. A page opened any other way walks every still, and so does
+// a member whose run names no episode the catalog holds, because a walk
+// over nothing would land nowhere.
+fn covered(stills: &[Still], via: Option<&InFranchise>) -> Vec<usize> {
+    let inside: Vec<usize> = stills
+        .iter()
+        .enumerate()
+        .filter(|(_, still)| via.is_some_and(|place| place.covers(still.season, still.episode)))
+        .map(|(index, _)| index)
+        .collect();
+    match inside.is_empty() {
+        true => (0..stills.len()).collect(),
+        false => inside,
+    }
 }
 
 #[cfg(test)]
@@ -129,7 +152,7 @@ mod tests {
 
     // The still the wall opens on after these plays.
     fn opens_on(played: &[(usize, i64, bool)]) -> usize {
-        next_episode(&stills(played), &plays(played))
+        next_episode(&stills(played), &plays(played), None)
     }
 
     #[test]
@@ -156,14 +179,14 @@ mod tests {
     fn a_play_of_more_people_alone_opens_the_wall_on_its_first_episode() {
         let mut plays = plays(&[(1, 100, true)]);
         plays[0].exact = false;
-        assert_eq!(next_episode(&stills(&[]), &plays), 0);
+        assert_eq!(next_episode(&stills(&[]), &plays, None), 0);
     }
 
     #[test]
     fn a_play_of_an_episode_the_wall_does_not_hold_is_not_in_the_walk() {
         let mut plays = plays(&[(0, 100, true), (1, 200, true)]);
         plays[1].progress.season = 9;
-        assert_eq!(next_episode(&stills(&[]), &plays), 1);
+        assert_eq!(next_episode(&stills(&[]), &plays, None), 1);
     }
 
     #[test]

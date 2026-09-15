@@ -87,7 +87,7 @@ pub enum Step {
         start: Option<i64>,
         // The work that follows this one. The page that answered the press
         // names it, and it is nothing where the container ends here.
-        next: Option<upnext::Next>,
+        next: Option<Box<upnext::Next>>,
     },
 }
 
@@ -191,11 +191,21 @@ impl Screen {
     /// audience. The two pages a title plays from read it, and so does
     /// every wall, whose film slots draw a bar under the art. The home page
     /// is the one screen that reads its own, through the reader thread.
-    pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
+    ///
+    /// `letters` are the initials of those people, in the same order. The
+    /// franchise page draws them as the circles of the room. Every other
+    /// screen reads none.
+    pub fn read_progress(
+        &mut self,
+        source: &mut dyn Source,
+        people: &[String],
+        letters: &[String],
+    ) {
         match self {
             Self::Movie(screen) => screen.read_progress(source, people),
             Self::Series(screen) => series::progress::read(screen, source, people),
             Self::Wall(screen) => screen.read_progress(source, people),
+            Self::Franchise(screen) => franchise::progress::read(screen, source, people, letters),
             _ => {}
         }
     }
@@ -309,6 +319,19 @@ pub struct InFranchise {
     pub library: String,
     pub id: String,
     pub position: i64,
+    // The member's runs, as the catalog's entry holds them: (season,
+    // episode) pairs, where episode zero is a whole season, and an empty
+    // list is the whole show.
+    pub runs: Vec<(i64, i64)>,
+}
+
+impl InFranchise {
+    /// Whether one aired episode is inside the member's runs, by the rule
+    /// the catalog's entry uses. The series page cuts its next-episode walk
+    /// with it, so a press on the second half of a show lands in that half.
+    pub fn covers(&self, season: i64, episode: i64) -> bool {
+        crate::catalog::franchise::covers(&self.runs, season, episode)
+    }
 }
 
 impl Item {

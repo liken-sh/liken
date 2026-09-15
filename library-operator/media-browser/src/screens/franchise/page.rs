@@ -6,6 +6,9 @@
 // over the page is, because inside one canvas the renderer draws every
 // fill before any text, and a ground drawn in the wall's canvas would
 // draw under the words of rows that scroll up under the line. The wall
+// The circles of the room draw in their own column beside the rows, and
+// a bar under each card's art says how far the room reached in that
+// member.
 // scrolls inside its own region and is clipped to it, and the rows are
 // clipped under the held line, so no art draws over it. A row the region does not reach builds no geometry, so
 // a wall of a hundred rows costs only the rows a person sees.
@@ -20,13 +23,15 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::Franchise;
 use super::card::{self, GROUND_TONE};
-use super::metro;
 use super::wall::{self, Cell, GAP};
+use super::{circles, metro};
 use crate::art::Art;
 use crate::catalog::franchise::Standing;
 use crate::look;
+use crate::views::clock::strip;
 use crate::views::{
-    REACH, Tone, area, artwork, band, divider, extent, mark, rounded, screen, text, wall as still,
+    REACH, Tone, area, artwork, band, divider, extent, mark, progress, rounded, screen, text,
+    wall as still,
 };
 
 // The space between the band and the first row.
@@ -96,6 +101,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             wall,
             columned,
             strip,
+            people,
             cards,
             art,
             tops,
@@ -129,7 +135,15 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         continue;
                     }
                     match row.cell.held() {
-                        true => entry(frame, store, &row.cell, bounds, cells, art),
+                        true => entry(
+                            frame,
+                            store,
+                            &row.cell,
+                            bounds,
+                            cells,
+                            art,
+                            page.marks.bar(index),
+                        ),
                         false => thin(frame, &row.cell, bounds),
                     }
                     if focus == Some(index) {
@@ -137,6 +151,19 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                     }
                 }
             });
+
+            // The circles take a clip of their own, because their column
+            // stands to the left of the rows' clip.
+            if people.width > 0.0 {
+                let column = wall::clipped(wall::under(people, held.is_some()));
+                frame.with_clip(column, |frame| {
+                    for (letter, at) in
+                        circles::drawn(people, &page.marks, &page.headings, &tops, down)
+                    {
+                        strip::circle(frame, at, &letter);
+                    }
+                });
+            }
 
             // The headings draw in the flow of the rows, and scroll up
             // under the held line with them.
@@ -217,6 +244,7 @@ struct Layout {
     wall: Rectangle,
     columned: Rectangle,
     strip: Rectangle,
+    people: Rectangle,
     cards: Rectangle,
     art: f32,
     tops: Vec<f32>,
@@ -236,8 +264,9 @@ fn layout(page: &Franchise, bounds: Rectangle) -> Layout {
         wall,
         columned,
         strip,
+        people,
         cards,
-    } = wall::Lane::of(region, &page.runs, page.time);
+    } = wall::Lane::of(region, &page.runs, page.time, circles::width(&page.marks));
     let art = wall::art_height(region.height - wall::HEAD);
     let tops = wall::tops(&page.rows, &page.headings, art, wall::HEAD);
     // Both canvases read the scroll the last frame left and write the
@@ -258,6 +287,7 @@ fn layout(page: &Franchise, bounds: Rectangle) -> Layout {
         wall,
         columned,
         strip,
+        people,
         cards,
         art,
         tops,
@@ -347,6 +377,8 @@ fn column(wall: Rectangle, time: f32, region: Rectangle) -> Rectangle {
 // art. The ground draws first, then the art, then the words; the images
 // of one layer draw in the order the canvas drew them, so the sharp art
 // lands over the ground.
+// The bar of the room's progress draws along the foot of the art, the way
+// the film walls draw it.
 fn entry<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
     store: &mut A,
@@ -354,6 +386,7 @@ fn entry<A: Art>(
     bounds: Rectangle,
     clip: Rectangle,
     art: f32,
+    share: Option<f32>,
 ) {
     ground(frame, store, cell, bounds, clip);
     let box_of = card::art_box(bounds, art);
@@ -362,6 +395,9 @@ fn entry<A: Art>(
         false => card::poster_box(box_of),
     };
     artwork(frame, store, &cell.library, &cell.art, art, "", Tone::Full);
+    if let Some(share) = share {
+        progress::fill(frame, art, share);
+    }
     words(frame, cell, card::words_box(bounds, art));
 }
 

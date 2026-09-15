@@ -333,8 +333,9 @@ impl<S: Source, A: Art> Browser<S, A> {
     fn read_again(&mut self) {
         self.home_stale = true;
         let people = self.audience.current(self.clock).to_vec();
+        let letters = self.audience.letters(self.clock);
         if let Some(top) = self.stack.last_mut() {
-            top.read_progress(&mut self.source, &people);
+            top.read_progress(&mut self.source, &people, &letters);
         }
     }
 
@@ -540,7 +541,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             library: request.library,
             selection: request.selection,
             start,
-            next,
+            next: next.map(Box::new),
         });
     }
 

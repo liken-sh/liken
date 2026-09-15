@@ -21,6 +21,9 @@ pub enum Reason {
         id: String,
         position: i64,
         title: String,
+        // The member's runs, so the page a press opens cuts its walk to
+        // the same episodes the card counted.
+        runs: Vec<(i64, i64)>,
     },
 }
 
@@ -70,6 +73,7 @@ mod tests {
             id: "franchise:name:mcu".into(),
             position: 4,
             title: "the MCU".into(),
+            runs: Vec::new(),
         }
     }
 
@@ -132,6 +136,7 @@ mod tests {
                 id: "franchise:name:multiverse".into(),
                 position: 1,
                 title: "the Multiverse".into(),
+                runs: Vec::new(),
             },
         ];
         stacked(&mut reasons);

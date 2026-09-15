@@ -262,6 +262,21 @@ fn a_series_run_says_how_many_episodes_the_catalog_holds() {
     assert_eq!(rows[2].cell.note, "Missing");
 }
 
+#[test]
+fn a_series_run_names_the_seasons_it_covers() {
+    let serial = |runs: Vec<(i64, i64)>| Entry {
+        kind: SERIES.into(),
+        episodes: 20,
+        held: Some(held("series:path:1")),
+        runs,
+        ..entry(1, (0.0, 0.0), &[])
+    };
+    let page = franchise(vec![serial(vec![(3, 0)]), serial(Vec::new())]);
+    let rows = story(&page, &columns(&page), TODAY);
+    assert_eq!(rows[0].cell.facts, "Series · 1980 · Season 3 · 20 episodes");
+    assert_eq!(rows[1].cell.facts, "Series · 1980 · 20 episodes");
+}
+
 fn era(name: &str, from: f64, to: f64) -> Era {
     Era {
         name: name.into(),
@@ -581,7 +596,7 @@ fn a_wall_with_no_eras_no_time_labels_and_one_universe_centers_its_cards() {
     };
     let rows = story(&page, &columns(&page), TODAY);
     assert!(!labelled(&rows));
-    let lane = Lane::of(REGION, &metro::runs(&rows, &columns(&page)), 0.0);
+    let lane = Lane::of(REGION, &metro::runs(&rows, &columns(&page)), 0.0, 0.0);
     assert_eq!(lane.wall, REGION);
     assert_eq!(lane.strip.width, 0.0);
     assert_eq!(lane.cards.width, REGION.width - floor());
@@ -594,7 +609,7 @@ fn a_time_label_earns_its_column_and_a_strip_a_pitch_for_every_lane() {
     let rows = mixed();
     let time = time_width(&rows);
     assert!(labelled(&rows));
-    let one = Lane::of(REGION, &[], time);
+    let one = Lane::of(REGION, &[], time, 0.0);
     assert_eq!(one.columned.x, REGION.x + time);
     assert_eq!(one.cards, one.columned);
 
@@ -606,7 +621,7 @@ fn a_time_label_earns_its_column_and_a_strip_a_pitch_for_every_lane() {
     ]);
     let crossed = story(&page, &columns(&page), TODAY);
     let runs = metro::runs(&crossed, &columns(&page));
-    let three = Lane::of(REGION, &runs, time);
+    let three = Lane::of(REGION, &runs, time, 0.0);
     assert_eq!(three.strip.x, REGION.x + time);
     assert_eq!(three.strip.width, 3.0 * metro::PITCH);
     assert_eq!(three.cards.x, three.strip.x + three.strip.width + GAP);

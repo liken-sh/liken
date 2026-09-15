@@ -270,6 +270,7 @@ fn the_request_block_comes_back_the_way_it_went_out() {
             library: ORDERS.into(),
             id: RUN.into(),
             position: 1,
+            runs: Vec::new(),
         })
     );
 }

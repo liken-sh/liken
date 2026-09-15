@@ -19,12 +19,13 @@ impl<S: Source, A: Art> Browser<S, A> {
     // reader, so the read that uncovers it never holds the frame thread.
     pub(super) fn reread_top(&mut self) {
         let people = self.audience.current(self.clock).to_vec();
+        let letters = self.audience.letters(self.clock);
         let Some(top) = self.stack.last_mut() else {
             self.refresh_home();
             return;
         };
         top.reread(&mut self.source);
-        top.read_progress(&mut self.source, &people);
+        top.read_progress(&mut self.source, &people, &letters);
         top.volume(&*self.store.borrow());
     }
 
@@ -54,7 +55,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 // no film will ever cover the page. The press enters no
                 // lights. They answer the `Player`'s status alone, so a
                 // `Play` this browser never asked for dims the page too.
-                if self.request_play(&library, &selection, start, next.as_ref()) {
+                if self.request_play(&library, &selection, start, next.as_deref()) {
                     self.loading = Some(loading::Loading::entered(self.clock));
                 }
             }
@@ -67,7 +68,8 @@ impl<S: Source, A: Art> Browser<S, A> {
     // resolves a library's root.
     pub(super) fn opened(&mut self, mut screen: screens::Screen) {
         let people = self.audience.current(self.clock).to_vec();
-        screen.read_progress(&mut self.source, &people);
+        let letters = self.audience.letters(self.clock);
+        screen.read_progress(&mut self.source, &people, &letters);
         screen.volume(&*self.store.borrow());
         self.stack.push(screen);
         self.on_strip = false;

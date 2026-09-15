@@ -71,11 +71,16 @@ person() {
 }
 
 # The audience of one scenario, as the comma-separated list emit_play splits.
+# The roles wrap around the names given, so a run with fewer names than
+# roles names one person twice. The store holds one row per play and
+# person, so a repeated name is dropped.
 people_of() {
-  local out="" role
+  local out="" role name
   for role in "$@"; do
+    name="$(person "$role")"
+    case ",$out," in *",$name,"*) continue ;; esac
     [ -n "$out" ] && out="$out,"
-    out="$out$(person "$role")"
+    out="$out$name"
   done
   printf '%s' "$out"
 }
@@ -396,6 +401,150 @@ movie_row_play 17 "$library_key" "$id" "$slug" "$duration" 98% $((9 * day)) "$(p
 # series and the franchise stacked on it.
 IFS="$tab" read -r library_key id season episode <<<"${within[0]}"
 episode_play 18 "$(printf '%s\t%s' "$library_key" "$id")" "$season" "$episode" 99% $((2 * day)) "$(people_of 1 2 3)"
+
+# 19. A franchise that cuts one series into runs. The room is inside the
+# second run, one person alone is on the film before it, and one person
+# alone is through the last leaf of the whole story. The franchise page
+# then shows the room's stack, one solo circle, no marker for the person
+# who finished, and a bar under each run.
+#
+# The SQL fragment the picker and the member reads share: episode e is
+# inside the runs of member m. A member that names no run covers its
+# whole show.
+covers_run="(NOT EXISTS (SELECT 1 FROM franchise_runs r
+                         WHERE r.library = m.library AND r.franchise = m.franchise
+                           AND r.position = m.position)
+             OR EXISTS (SELECT 1 FROM franchise_runs r
+                        WHERE r.library = m.library AND r.franchise = m.franchise
+                          AND r.position = m.position AND r.season = e.season
+                          AND r.episode IN (0, e.episode)))"
+
+# The first franchise, in the order the browser lists them, that cuts one
+# series into two or more runs with episodes the catalog holds. The
+# second run must hold the two episodes the scenario plays, and a film
+# must stand before it, so the solo half of the scenario has a film to
+# play. Without that last condition the first hit is a franchise with no
+# film before its cut, and the scenario shows no solo circle.
+mapfile -t split < <(catalog_query "
+  WITH covered AS (
+    SELECT m.library, m.franchise, m.position, m.alias,
+           count(DISTINCT e.season || 'e' || e.episode) AS leaves
+    FROM franchise_members m
+    JOIN aliases a ON a.alias = m.alias
+    JOIN episodes e ON e.library = a.library AND e.series = a.item
+    WHERE m.kind = 'series' AND e.duration > 0 AND $covers_run
+    GROUP BY m.library, m.franchise, m.position
+  ),
+  cut AS (
+    SELECT c.library, c.franchise, min(c.position) AS first_run,
+           (SELECT min(n.position) FROM covered n
+            WHERE n.library = c.library AND n.franchise = c.franchise
+              AND n.alias = c.alias AND n.position > min(c.position)) AS second_run
+    FROM covered c GROUP BY c.library, c.franchise, c.alias HAVING count(*) >= 2
+  )
+  SELECT cut.library, cut.franchise, cut.first_run, cut.second_run
+  FROM cut JOIN franchises f ON f.library = cut.library AND f.id = cut.franchise
+  WHERE EXISTS (SELECT 1 FROM covered n
+                WHERE n.library = cut.library AND n.franchise = cut.franchise
+                  AND n.position = cut.second_run AND n.leaves >= 2)
+    AND EXISTS (SELECT 1 FROM franchise_members b
+                WHERE b.library = cut.library AND b.franchise = cut.franchise
+                  AND b.kind = 'movie' AND b.position < cut.second_run)
+  ORDER BY f.sort_key, cut.library, cut.franchise, cut.first_run LIMIT 1")
+
+if [ "${#split[@]}" -lt 1 ]; then
+  echo "local/seed-progress: the catalog holds no franchise that cuts a series into two runs it holds episodes for; the franchise scenario writes nothing" >&2
+else
+  IFS="$tab" read -r franchise_library franchise first_run second_run <<<"${split[0]}"
+
+  # The series one member names, as the library that holds it and its id.
+  # The alias resolves the way the browser's franchise read resolves it:
+  # the first library by name wins.
+  member_series() {
+    catalog_query "
+      SELECT a.library, a.item FROM franchise_members m
+      JOIN aliases a ON a.alias = m.alias
+      JOIN series s ON s.library = a.library AND s.id = a.item
+      WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+        AND m.position = $1
+      ORDER BY a.library LIMIT 1"
+  }
+
+  # The episodes one member covers, with a duration, in aired order.
+  member_episodes() {
+    catalog_query "
+      SELECT e.season, e.episode FROM franchise_members m
+      JOIN aliases a ON a.alias = m.alias
+      JOIN episodes e ON e.library = a.library AND e.series = a.item
+      WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+        AND m.position = $1 AND e.duration > 0 AND $covers_run
+      GROUP BY e.season, e.episode ORDER BY e.season, e.episode"
+  }
+
+  # The film one member names, where the catalog holds it with a duration.
+  member_movie() {
+    catalog_query "
+      SELECT mv.library, mv.id, mv.slug, mv.duration FROM franchise_members m
+      JOIN aliases a ON a.alias = m.alias
+      JOIN movies mv ON mv.library = a.library AND mv.id = a.item
+      WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+        AND m.position = $1 AND mv.duration > 0
+      ORDER BY mv.library LIMIT 1"
+  }
+
+  # The room is the first two names as one audience. It finished the first
+  # episode of the second run and is partway through the next. These are
+  # the latest plays of the whole set, because the thread rule stands on
+  # the latest play that names exactly the audience, and scenarios 7 and 8
+  # play this same franchise hours earlier.
+  room_series="$(member_series "$second_run")"
+  mapfile -t room_leaves < <(member_episodes "$second_run")
+  IFS="$tab" read -r season episode <<<"${room_leaves[0]}"
+  episode_play 19 "$room_series" "$season" "$episode" 99% $((hour / 2)) "$(people_of 1 2)"
+  IFS="$tab" read -r season episode <<<"${room_leaves[1]}"
+  episode_play 19 "$room_series" "$season" "$episode" 40% $((hour / 4)) "$(people_of 1 2)"
+
+  # The first person alone is partway into the held film nearest before the
+  # second run. Where the catalog holds no such film, that person finished
+  # the last episode of the first run instead.
+  film_position="$(catalog_query "
+    SELECT max(m.position) FROM franchise_members m
+    JOIN aliases a ON a.alias = m.alias
+    JOIN movies mv ON mv.library = a.library AND mv.id = a.item
+    WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+      AND m.kind = 'movie' AND m.position < $second_run AND mv.duration > 0")"
+  if [ -n "$film_position" ]; then
+    IFS="$tab" read -r film_library film_id film_slug film_duration <<<"$(member_movie "$film_position")"
+    movie_row_play 19 "$film_library" "$film_id" "$film_slug" "$film_duration" 30% $((3 * hour)) "$(people_of 1)"
+  else
+    mapfile -t first_leaves < <(member_episodes "$first_run")
+    IFS="$tab" read -r season episode <<<"${first_leaves[-1]}"
+    episode_play 19 "$(member_series "$first_run")" "$season" "$episode" 99% $((3 * hour)) "$(people_of 1)"
+  fi
+
+  # The second person alone finished the last leaf the catalog holds of the
+  # story: the last film, or the last covered episode of the last series
+  # member. A thread past the last leaf offers nothing, so this person
+  # draws no marker.
+  IFS="$tab" read -r last_position last_kind <<<"$(catalog_query "
+    SELECT m.position, m.kind FROM franchise_members m
+    JOIN aliases a ON a.alias = m.alias
+    WHERE m.library = $(quoted "$franchise_library") AND m.franchise = $(quoted "$franchise")
+      AND ((m.kind = 'movie' AND EXISTS (SELECT 1 FROM movies mv
+             WHERE mv.library = a.library AND mv.id = a.item AND mv.duration > 0))
+        OR (m.kind = 'series' AND EXISTS (SELECT 1 FROM episodes e
+             WHERE e.library = a.library AND e.series = a.item AND e.duration > 0
+               AND $covers_run)))
+    ORDER BY m.position DESC LIMIT 1")"
+  if [ "$last_kind" = movie ]; then
+    IFS="$tab" read -r leaf_library leaf_id leaf_slug leaf_duration <<<"$(member_movie "$last_position")"
+    movie_row_play 19 "$leaf_library" "$leaf_id" "$leaf_slug" "$leaf_duration" 99% $((2 * hour)) "$(people_of 2)"
+  else
+    mapfile -t last_leaves < <(member_episodes "$last_position")
+    IFS="$tab" read -r season episode <<<"${last_leaves[-1]}"
+    episode_play 19 "$(member_series "$last_position")" "$season" "$episode" 99% $((2 * hour)) "$(people_of 2)"
+  fi
+fi
 
 # One batch of statements, posted and answered as a whole. An answer other
 # than 200, or one statement the agent refused, ends the run before anything

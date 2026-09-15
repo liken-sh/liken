@@ -105,6 +105,7 @@ fn read_through(value: &Value) -> Option<InFranchise> {
         library: value.get("library")?.as_str()?.to_string(),
         id: value.get("id")?.as_str()?.to_string(),
         position: value.get("position")?.as_i64()?,
+        runs: Vec::new(),
     })
 }
 
@@ -139,6 +140,7 @@ mod tests {
             library: "screening/orders".into(),
             id: "franchise:name:the-run".into(),
             position: 2,
+            runs: Vec::new(),
         }
     }
 

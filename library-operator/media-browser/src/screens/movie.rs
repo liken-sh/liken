@@ -463,7 +463,7 @@ impl Movie {
             library: self.library.clone(),
             selection,
             start,
-            next,
+            next: next.map(Box::new),
         }
     }
 

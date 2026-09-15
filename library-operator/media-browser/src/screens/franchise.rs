@@ -6,10 +6,18 @@
 // the way the set strip's press does, and a press on a gap opens
 // nothing. Story order is the one order the page draws, because it is
 // the one order a franchise has.
+// A column of circles beside the rows says where the room and each
+// person in it stand in the story, and a bar under every held member
+// says how far the room reached in it. The browser reads both with the
+// audience at every open and at every progress change.
 
 mod card;
+mod circles;
+pub mod leaves;
 mod metro;
 mod page;
+pub mod progress;
+mod runs;
 pub mod strips;
 mod wall;
 
@@ -24,6 +32,7 @@ use super::{InFranchise, Screen, Step, movie, series};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
+use crate::catalog::franchise::Entry;
 use crate::views::band;
 
 pub use metro::Run;
@@ -58,9 +67,20 @@ pub struct Franchise {
     pub caption: String,
     /// The eras, as the headings over the rows.
     pub headings: Vec<wall::Heading>,
-    // The story position of every row, in the wall's own order. It names
-    // the member a page opened from here continues from.
-    positions: Vec<i64>,
+    // The order the read answered, one entry per row in the wall's own
+    // order. It names the member a page opened from here continues from,
+    // and the progress read builds its leaves from it, so no second read
+    // of the franchise is needed.
+    entries: Vec<Entry>,
+    // The bars and the circles the progress read hung on the page. They
+    // are empty until the browser reads the progress, because only the
+    // browser holds the audience.
+    pub marks: progress::Marks,
+    // Whether focus has been placed, by the first progress read, by an
+    // open at a position, or by a press. Only the first read moves focus
+    // to the room's row, so a play in another room never moves focus
+    // while a person browses.
+    placed: bool,
     /// The row focus is on.
     pub focus: usize,
     /// How far the wall stood scrolled at the last frame. The scroll
@@ -88,17 +108,17 @@ impl Franchise {
         source: &mut dyn Source,
     ) -> Option<Self> {
         let mut page = Self::read(library, id, source)?;
-        if let Some(row) = page.positions.iter().position(|at| *at == position) {
+        if let Some(row) = page.entries.iter().position(|at| at.position == position) {
             page.focus = row;
+            page.placed = true;
         }
         Some(page)
     }
 
-    // The page with focus on the first row, and the story position of every
-    // row, so an entry by position finds its row.
+    // The page with focus on the first row, and the order the read
+    // answered, so an entry by position finds its row.
     fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let read = source.franchise(library, id)?;
-        let positions = read.entries.iter().map(|entry| entry.position).collect();
         let today = Date::today().iso();
         let universes = wall::columns(&read);
         let rows = wall::story(&read, &universes, &today);
@@ -118,7 +138,9 @@ impl Franchise {
             time,
             caption,
             headings,
-            positions,
+            entries: read.entries,
+            marks: progress::Marks::default(),
+            placed: false,
             focus: 0,
             scrolled: cell::Cell::new(0.0),
         };
@@ -134,9 +156,13 @@ impl Franchise {
         };
         let focus = self.focus;
         let scrolled = self.scrolled.get();
+        let marks = std::mem::take(&mut self.marks);
+        let placed = self.placed;
         *self = fresh;
         self.focus = self.hold(focus);
         self.scrolled.set(scrolled);
+        self.marks = marks;
+        self.placed = placed;
     }
 
     /// Fold one press in. Down walks forward in story order and up walks
@@ -154,6 +180,9 @@ impl Franchise {
         // reaches the browser's strip.
         if key == "up" && row == 0 {
             return Step::Still;
+        }
+        if matches!(key, "up" | "down" | "left" | "right") {
+            self.placed = true;
         }
         self.focus = match key {
             "up" => row.saturating_sub(1),
@@ -191,9 +220,9 @@ impl Franchise {
             .into()
     }
 
-    // The page one cell opens: the film's or the series' own. A member
-    // stands in the same story as the page, so it replaces the page and
-    // does not cover it, the way a sibling in a set strip does.
+    // The page one cell opens: the film's or the series' own. It covers
+    // this page, so back returns to the story at the row the press was
+    // on, and a person walks the story from one page.
     fn opened(&self, row: usize, source: &mut dyn Source) -> Step {
         let Some((library, kind, id)) = self.rows.get(row).and_then(|row| row.cell.opens()) else {
             return Step::Stay;
@@ -203,7 +232,16 @@ impl Franchise {
         let via = InFranchise {
             library: self.library.clone(),
             id: self.id.clone(),
-            position: self.positions.get(row).copied().unwrap_or_default(),
+            position: self
+                .entries
+                .get(row)
+                .map(|entry| entry.position)
+                .unwrap_or_default(),
+            runs: self
+                .rows
+                .get(row)
+                .map(|row| row.cell.runs.clone())
+                .unwrap_or_default(),
         };
         let opened = match kind {
             "movies" => movie::Movie::open(library, id, source).map(|mut page| {
@@ -216,7 +254,7 @@ impl Franchise {
             }),
         };
         match opened {
-            Some(screen) => Step::Replace(screen),
+            Some(screen) => Step::Open(screen),
             None => Step::Stay,
         }
     }

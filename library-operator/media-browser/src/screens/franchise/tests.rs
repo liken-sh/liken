@@ -3,9 +3,10 @@
 
 use super::*;
 use crate::catalog::franchise::{Calendar, Entry, Era, Held, MOVIE, Membership, SERIES};
+use crate::catalog::progress::finished;
 use crate::catalog::{
     Answer, Change, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
-    Person, PlayItem, Query, Selection, SeriesDetails, pool,
+    Person, PlayItem, Progress, Query, Resume, Selection, SeriesDetails, pool,
 };
 use crate::harness::Waker;
 
@@ -27,6 +28,61 @@ const MARSH: &str = "The Marsh";
 pub struct Orders {
     /// Whether the `Library` holds the order at all.
     pub empty: bool,
+    // Whether the fake answers the split order in place of the cycle: two
+    // films and one series cut into two members.
+    pub split: bool,
+    // The plays the fake's progress store holds.
+    pub nights: Vec<Night>,
+}
+
+// How long every work of the fake runs, in seconds.
+pub const RUNTIME: i64 = 1_000;
+
+// The seasons of the one series the fake's orders hold, and how many
+// episodes each one aired.
+pub const SEASONS: i64 = 2;
+pub const AIRED: i64 = 5;
+
+// The id of that series, and of the two films of the split order.
+pub const SHOW: &str = "series:5";
+pub const FIRST: &str = "movies:1";
+pub const SECOND: &str = "movies:3";
+
+// One play in the fake's store: the work it names, its aired numbers,
+// the people as one word of their names, the second it was recorded,
+// and how far into the work it reached.
+#[derive(Debug, Clone, Copy)]
+pub struct Night {
+    pub work: &'static str,
+    pub numbers: (i64, i64),
+    pub people: &'static str,
+    pub recorded: i64,
+    pub position: i64,
+}
+
+impl Night {
+    // Whether the play names every one of these people, and if so
+    // whether it names exactly them, which is what the store's read
+    // answers.
+    fn names(&self, people: &[String]) -> Option<bool> {
+        let every = people
+            .iter()
+            .all(|person| self.people.contains(person.as_str()));
+        every.then(|| self.people.chars().count() == people.len())
+    }
+
+    fn progress(&self) -> Progress {
+        Progress {
+            play: format!("{}-{}", self.people, self.recorded),
+            position: self.position,
+            duration: RUNTIME,
+            finished: finished(self.position, RUNTIME),
+            recorded: self.recorded,
+            season: self.numbers.0,
+            episode: self.numbers.1,
+            ..Progress::default()
+        }
+    }
 }
 
 fn held(number: i64, kind: &str) -> Held {
@@ -92,10 +148,30 @@ pub fn order() -> Vec<Entry> {
             kind: SERIES.into(),
             alias: "series:tvdb:1".into(),
             episodes: 9,
+            runs: vec![(2, 0), (3, 4)],
             held: Some(held(5, "series")),
             ..film(5, (2.0, 3.0), &[])
         },
         film(6, (10.0, 12.0), &[COPPICE, FEN, MARSH]),
+    ]
+}
+
+// The split order the progress tests read: a film, the first season of
+// a series, a second film, and the second season of that same series.
+pub fn split() -> Vec<Entry> {
+    let run = |position: i64, season: i64| Entry {
+        kind: SERIES.into(),
+        alias: "series:tvdb:1".into(),
+        episodes: AIRED,
+        runs: vec![(season, 0)],
+        held: Some(held(5, "series")),
+        ..film(position, (position as f64, position as f64), &[])
+    };
+    vec![
+        film(1, (1.0, 1.0), &[]),
+        run(2, 1),
+        film(3, (3.0, 3.0), &[]),
+        run(4, 2),
     ]
 }
 
@@ -128,7 +204,10 @@ impl Orders {
                     to: 40.0,
                 },
             ],
-            entries: order(),
+            entries: match self.split {
+                true => split(),
+                false => order(),
+            },
         })
     }
 }
@@ -177,8 +256,59 @@ impl Source for Orders {
         })
     }
 
-    fn episodes(&mut self, _library: &str, _series: &str) -> Vec<Episode> {
-        Vec::new()
+    fn episodes(&mut self, _library: &str, series: &str) -> Vec<Episode> {
+        if !series.starts_with("series:") {
+            return Vec::new();
+        }
+        (1..=SEASONS)
+            .flat_map(|season| {
+                (1..=AIRED).map(move |episode| Episode {
+                    id: format!("{series}:{season}:{episode}"),
+                    season,
+                    episode,
+                    title: format!("S{season}E{episode}"),
+                    duration: RUNTIME,
+                    ..Episode::default()
+                })
+            })
+            .collect()
+    }
+
+    fn plays_of(&mut self, library: &str, id: &str, people: &[String]) -> Vec<Resume> {
+        self.nights
+            .iter()
+            .filter(|night| night.work == id)
+            .filter_map(|night| {
+                Some(Resume {
+                    library: library.to_string(),
+                    id: id.to_string(),
+                    progress: night.progress(),
+                    exact: night.names(people)?,
+                    ..Resume::default()
+                })
+            })
+            .collect()
+    }
+
+    fn episode_progress(
+        &mut self,
+        _library: &str,
+        series: &str,
+        people: &[String],
+    ) -> Vec<Progress> {
+        let aired = self.episodes("", series);
+        aired
+            .iter()
+            .filter_map(|episode| {
+                self.nights
+                    .iter()
+                    .filter(|night| night.work == series)
+                    .filter(|night| night.numbers == (episode.season, episode.episode))
+                    .filter(|night| night.names(people).is_some())
+                    .max_by_key(|night| night.recorded)
+                    .map(Night::progress)
+            })
+            .collect()
     }
 
     fn set(&mut self, _library: &str, _id: &str) -> Option<MovieSet> {
@@ -247,7 +377,17 @@ fn page() -> Franchise {
 
 #[test]
 fn a_franchise_no_library_holds_opens_no_page() {
-    assert!(Franchise::open(ORDERS, CYCLE, &mut Orders { empty: true }).is_none());
+    assert!(
+        Franchise::open(
+            ORDERS,
+            CYCLE,
+            &mut Orders {
+                empty: true,
+                ..Orders::default()
+            }
+        )
+        .is_none()
+    );
     assert!(Franchise::open(ORDERS, "franchise:name:none", &mut Orders::default()).is_none());
 }
 
@@ -264,7 +404,18 @@ fn a_position_the_order_does_not_hold_opens_on_the_first_row() {
     let page = Franchise::open_at(ORDERS, CYCLE, 9, &mut Orders::default())
         .expect("the fake holds the order");
     assert_eq!(page.focus, 0);
-    assert!(Franchise::open_at(ORDERS, CYCLE, 1, &mut Orders { empty: true }).is_none());
+    assert!(
+        Franchise::open_at(
+            ORDERS,
+            CYCLE,
+            1,
+            &mut Orders {
+                empty: true,
+                ..Orders::default()
+            }
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -343,20 +494,27 @@ fn left_and_right_step_an_era_at_a_time_and_hold_at_the_ends() {
 }
 
 #[test]
-fn a_press_on_an_entry_opens_the_film_in_the_place_of_this_page() {
+fn a_press_on_an_entry_opens_the_film_over_this_page() {
     let mut page = page();
     let mut source = Orders::default();
     let step = page.key("enter", &mut source);
-    assert!(matches!(step, Step::Replace(Screen::Movie(_))));
+    assert!(matches!(step, Step::Open(Screen::Movie(_))));
 }
 
 #[test]
-fn a_press_on_a_series_entry_opens_the_series() {
+fn a_press_on_a_series_entry_opens_the_series_on_the_member_s_runs() {
     let mut page = page();
     let mut source = Orders::default();
     page.focus = 4;
-    let step = page.key("enter", &mut source);
-    assert!(matches!(step, Step::Replace(Screen::Series(_))));
+    let Step::Open(Screen::Series(opened)) = page.key("enter", &mut source) else {
+        panic!("a press on a series entry opens the series");
+    };
+    let via = opened
+        .via
+        .expect("the page carries the member it opened on");
+
+    assert_eq!(via.position, 5);
+    assert_eq!(via.runs, [(2, 0), (3, 4)]);
 }
 
 #[test]
@@ -385,7 +543,10 @@ fn a_reread_holds_the_rung_focus_was_on() {
 #[test]
 fn a_reread_that_finds_nothing_leaves_the_page_as_it_was() {
     let mut page = page();
-    page.reread(&mut Orders { empty: true });
+    page.reread(&mut Orders {
+        empty: true,
+        ..Orders::default()
+    });
     assert_eq!(page.rows.len(), 6);
 }
 

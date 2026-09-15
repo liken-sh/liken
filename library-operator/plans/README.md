@@ -108,6 +108,10 @@ they share, and plans 28 to 31 build them in order.
   stub. Nothing says where a work's story starts or ends. So a person
   skips an episode's recap and titles by hand, and a percentage of the
   runtime guesses where the credits start.
+* [63, Where the room is in a franchise](63-where-the-room-is-in-a-franchise.md).
+  A column of circles marks where the room and each person stand in
+  the story, every held member carries a bar, and a press on a split
+  series member opens inside its run.
 
 Plan 32 stands apart from the enrichment work.
 

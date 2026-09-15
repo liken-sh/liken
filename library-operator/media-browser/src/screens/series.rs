@@ -344,7 +344,8 @@ impl Series {
                 &self.title,
                 numbers,
                 self.via.as_ref(),
-            ),
+            )
+            .map(Box::new),
         }
     }
 
