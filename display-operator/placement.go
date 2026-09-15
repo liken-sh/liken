@@ -76,10 +76,13 @@ type screenPlacement struct {
 // placeSurfaces decides where every surface on one screen is drawn. A
 // nil layout is the screen that names none.
 //
-// A region shows the first surface to arrive whose labels match its
-// selector, and it shows one. A second matching surface stays
-// unplaced, because a region is one rectangle and the newer surface
-// would either hide the older one or fight it for the space.
+// A region shows one claim: the first claim to arrive whose labels
+// match its selector. Every surface of that claim is drawn in the
+// region's rectangle, oldest at the bottom, so a program that opens a
+// second window over its first, the way a player draws its overlay
+// over its video, keeps both on the screen. A second matching claim
+// stays unplaced, because a region is one rectangle and another
+// program would either hide the first one or fight it for the space.
 func placeSurfaces(surfaces []surface, layout *LayoutSpec) screenPlacement {
 	arrived := byArrival(surfaces)
 	if layout == nil {
@@ -95,31 +98,41 @@ func placeSurfaces(surfaces []surface, layout *LayoutSpec) screenPlacement {
 			// socket names no claim, so there are no holders and no
 			// labels to read, and an empty selector must not sweep it
 			// into a region a workload was meant to fill.
-			if taken[candidate.id] || candidate.claimKey == "" {
+			if taken[candidate.claimKey] || candidate.claimKey == "" {
 				continue
 			}
 			if !matchesSelector(region.Selector, candidate.labels) {
 				continue
 			}
-			taken[candidate.id] = true
-			shown.surface = candidate.id
-			decision.placed = append(decision.placed, placement{
-				surface: candidate.id,
-				region:  region.Name,
-				rect:    region.Rect,
-				// The region's position in the list is the stacking
+			taken[candidate.claimKey] = true
+			for _, held := range arrived {
+				if held.claimKey != candidate.claimKey {
+					continue
+				}
+				// The surfaces of one claim share the region's place
+				// in the list, and the order they are appended in,
+				// oldest first, is their order within it. The
+				// region's position in the list is the stacking
 				// order, so a small region written after a large one
 				// draws in the corner of it.
-				stack:      stack,
-				transition: transitionOf(region),
-			})
+				decision.placed = append(decision.placed, placement{
+					surface:    held.id,
+					region:     region.Name,
+					rect:       region.Rect,
+					stack:      stack,
+					transition: transitionOf(region),
+				})
+				// The region reports the surface on top, which is
+				// the newest of the claim's.
+				shown.surface = held.id
+			}
 			break
 		}
 		decision.regions = append(decision.regions, shown)
 	}
 
 	for _, candidate := range arrived {
-		if !taken[candidate.id] {
+		if !taken[candidate.claimKey] {
 			decision.unplaced = append(decision.unplaced, candidate.id)
 		}
 	}

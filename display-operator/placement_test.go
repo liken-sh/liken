@@ -1,8 +1,8 @@
 package main
 
 // These tests cover the one decision the layout engine makes: which
-// surface each region of a screen shows, where it is drawn, and which
-// surfaces no region took. The function reads no clock and opens
+// claim each region of a screen shows, where its surfaces are drawn,
+// and which surfaces no region took. The function reads no clock and opens
 // nothing, so the cases are tables.
 
 import (
@@ -116,7 +116,7 @@ func TestPlaceSurfaces(t *testing.T) {
 			},
 		},
 		{
-			name: "a region shows the first surface to arrive and leaves the second unplaced",
+			name: "a region shows the first claim to arrive and leaves a second claim unplaced",
 			surfaces: []surface{
 				claimedSurface("a-1", "notices/board", 0, map[string]string{"panel": "notices"}),
 				claimedSurface("b-2", "notices/second", 1, map[string]string{"panel": "notices"}),
@@ -130,6 +130,41 @@ func TestPlaceSurfaces(t *testing.T) {
 				},
 				unplaced: []string{"b-2"},
 				regions:  []placedRegion{{name: "notices", surface: "a-1"}},
+			},
+		},
+		{
+			name: "a region shows every surface of its claim with the newest on top",
+			surfaces: []surface{
+				claimedSurface("b-3", "notices/second", 2, map[string]string{"panel": "notices"}),
+				claimedSurface("a-2", "notices/board", 1, map[string]string{"panel": "notices"}),
+				claimedSurface("a-1", "notices/board", 0, map[string]string{"panel": "notices"}),
+			},
+			layout: &LayoutSpec{Regions: []LayoutRegion{
+				{
+					Name:     "notices",
+					Rect:     noticesRect,
+					Selector: LabelSelector{MatchLabels: map[string]string{"panel": "notices"}},
+					Transition: &LayoutTransition{
+						Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 600},
+						Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
+					},
+				},
+			}},
+			want: screenPlacement{
+				placed: []placement{
+					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0,
+						transition: LayoutTransition{
+							Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 600},
+							Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
+						}},
+					{surface: "a-2", region: "notices", rect: noticesRect, stack: 0,
+						transition: LayoutTransition{
+							Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 600},
+							Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
+						}},
+				},
+				unplaced: []string{"b-3"},
+				regions:  []placedRegion{{name: "notices", surface: "a-2"}},
 			},
 		},
 		{

@@ -161,16 +161,16 @@ The arrangement the screen is drawn to, and what each region shows.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statuslayout--name"></span>`name` | string | no | The Layout in force, or default for a screen that names none or names one that does not exist. |
-| <span id="statuslayout--regions"></span>`regions` | [\[\]object](#statuslayoutregions) | no | Each region in stacking order, with the window it shows. |
+| <span id="statuslayout--regions"></span>`regions` | [\[\]object](#statuslayoutregions) | no | Each region in stacking order, with the window on top of it. |
 
 #### status.layout.regions[]
 
-Each region in stacking order, with the window it shows.
+Each region in stacking order, with the window on top of it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statuslayoutregions--name"></span>`name` | string | yes | The region's name, as the Layout states it. |
-| <span id="statuslayoutregions--surface"></span>`surface` | string | no | The id of the window the region shows, or the word empty when no window matched it. |
+| <span id="statuslayoutregions--surface"></span>`surface` | string | no | The id of the window on top of the region, the newest of the claim it shows, or the word empty when no window matched it. |
 
 ### status.conditions[]
 

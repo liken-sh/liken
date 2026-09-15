@@ -54,7 +54,7 @@ spec:
               properties:
                 regions:
                   type: array
-                  description: "The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one window, the first to arrive from a pod whose labels match the selector, and reports the surface it shows on the Display's status.layout."
+                  description: "The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top, and the region reports the window on top on the Display's status.layout."
                   minItems: 1
                   # maxItems bounds the uniqueness rule below. The API
                   # server estimates a rule's worst-case cost from the

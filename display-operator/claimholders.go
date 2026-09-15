@@ -289,8 +289,8 @@ func (h *holderReader) onThisNode() (map[string]Pod, error) {
 // sharedLabels answers the labels two holders carry with the same
 // value.
 //
-// A region shows one surface, and a claim that several pods hold
-// draws one surface, so a label only one holder carries must not
+// A region shows one claim, and a claim that several pods hold is
+// still one claim, so a label only one holder carries must not
 // place it. The rule also makes the answer the same whichever order
 // the API server listed the holders in.
 func sharedLabels(held, also map[string]string) map[string]string {

@@ -49,8 +49,10 @@ picture sits in the corner of a large one.
 The selector matches labels the way a `Service` does, and any label
 counts. The candidates are only the pods that hold a claim on this
 screen, so a `panel` label on a pod elsewhere in the cluster matches
-nothing here. A region shows one window, the first to arrive from a
-matching pod. A second matching window stays off the screen and is
+nothing here. A region shows one program: the first claim to arrive
+from a matching pod. Every window of that claim is drawn in the
+region, newest on top, which is how a player keeps its overlay over
+its video. A second matching claim stays off the screen and is
 reported, and a region with no matching pod is empty and is reported.
 
 A `transition` has two halves, and each is `fade` over the stated

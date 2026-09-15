@@ -145,7 +145,7 @@ type SurfaceSize struct {
 
 // The layout this screen is drawn to. Name is the Layout in force, or
 // the word default for a screen that names none. The regions are in
-// stacking order, and each one names the surface it shows.
+// stacking order, and each one names the surface on top of it.
 type DisplayLayout struct {
 	Name    string          `json:"name,omitempty"`
 	Regions []DisplayRegion `json:"regions,omitempty"`

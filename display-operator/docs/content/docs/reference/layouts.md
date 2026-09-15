@@ -27,11 +27,11 @@ The regions, in stacking order.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--regions"></span>`regions` | [\[\]object](#specregions) | yes | The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one window, the first to arrive from a pod whose labels match the selector, and reports the surface it shows on the Display's status.layout. |
+| <span id="spec--regions"></span>`regions` | [\[\]object](#specregions) | yes | The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top, and the region reports the window on top on the Display's status.layout. |
 
 ### spec.regions[]
 
-The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one window, the first to arrive from a pod whose labels match the selector, and reports the surface it shows on the Display's status.layout.
+The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top, and the region reports the window on top on the Display's status.layout.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
