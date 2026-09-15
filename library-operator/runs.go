@@ -215,6 +215,27 @@ func runTime(seconds int64) time.Time {
 	return time.Unix(seconds, 0).UTC()
 }
 
+// An open run row whose Job is absent from the pass's Job list is a run whose
+// pod died before it wrote its finish. Only a pod of a Job that exists writes
+// a row, so a row that names a missing Job is always dead. Without this rule,
+// one node reboot mid-run left a library in phase Enriching for ever, with
+// every condition True and no Job ever scheduled again.
+func runAbandoned(run libraryRun, jobs []Job, namespace, library string) bool {
+	if !run.Finished.IsZero() {
+		return false
+	}
+	for index := range jobs {
+		job := &jobs[index]
+		if job.Metadata.Namespace != namespace || job.Metadata.Labels[libraryLabelKey] != library {
+			continue
+		}
+		if job.Metadata.Name == run.Job {
+			return false
+		}
+	}
+	return true
+}
+
 // runOf reads one worker's run out of a library's runs.
 func runOf(runs []libraryRun, worker string) (libraryRun, bool) {
 	for _, run := range runs {

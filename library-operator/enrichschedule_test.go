@@ -68,6 +68,7 @@ func TestEnrichSchedulesOneJobPerLibrary(t *testing.T) {
 			jobs: []Job{runningJob("movies-enrich", "house", enrichLabels)}},
 		{name: "a scan run is in flight",
 			gaps: map[string]int{factProbe: 4},
+			jobs: []Job{runningJob("movies-scan-2", "house", scanLabels)},
 			runs: []libraryRun{{Worker: workerScan, Job: "movies-scan-2", Started: testNow}}},
 		{name: "no scan has finished since the last enrich",
 			gaps: map[string]int{factProbe: 4},
@@ -97,6 +98,61 @@ func TestEnrichSchedulesOneJobPerLibrary(t *testing.T) {
 			boundHouse(cluster)
 			operator := testOperator(t, cluster)
 			report := &libraryReport{Gaps: one.gaps, Runs: one.runs}
+
+			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
+				report, one.jobs, providers); err != nil {
+				t.Fatal(err)
+			}
+
+			stood := cluster.heldJob("house", standingEnrichJobName("movies", one.runs)) != nil
+			if stood != one.want {
+				t.Errorf("the pass stood the enricher: %v, want %v", stood, one.want)
+			}
+		})
+	}
+}
+
+// A run row whose Job is gone is a run whose pod died before it wrote its
+// finish. It holds the scheduler no longer.
+func TestADeadRunDoesNotHoldTheScheduler(t *testing.T) {
+	walked := testNow.Add(-time.Hour)
+	scanLabels := workerLabels("movies", workerScan)
+	enrichLabels := workerLabels("movies", workerEnrich)
+	openEnrich := libraryRun{Worker: workerEnrich, Job: "movies-enrich-7", Started: walked}
+	openRescan := libraryRun{Worker: workerRescan, Job: "movies-rescan-7", Started: walked}
+	openWalk := libraryRun{Worker: workerScan, Job: "movies-scan-7", Started: walked}
+	rescanned := libraryRun{Worker: workerRescan, Job: "movies-rescan-1",
+		Started: walked.Add(-time.Minute), Finished: walked}
+
+	cases := []struct {
+		name string
+		runs []libraryRun
+		jobs []Job
+		want bool
+	}{
+		{name: "the Job of an open enrich run is gone",
+			runs: append(walkedRuns(walked), openEnrich), want: true},
+		{name: "the Job of an open enrich run is still listed",
+			runs: append(walkedRuns(walked), openEnrich),
+			jobs: []Job{finishedJob("movies-enrich-7", "house", enrichLabels, nil)}},
+		{name: "the Job of an open rescan run is gone",
+			runs: append(walkedRuns(walked), openRescan), want: true},
+		{name: "the Job of an open rescan run is still listed",
+			runs: append(walkedRuns(walked), openRescan),
+			jobs: []Job{finishedJob("movies-rescan-7", "house", scanLabels, nil)}},
+		{name: "the Job of an open walk is gone",
+			runs: []libraryRun{openWalk, rescanned}, want: true},
+		{name: "the Job of an open walk is still listed",
+			runs: []libraryRun{openWalk, rescanned},
+			jobs: []Job{finishedJob("movies-scan-7", "house", scanLabels, nil)}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library, providers := libraryWithProvider()
+			boundHouse(cluster)
+			operator := testOperator(t, cluster)
+			report := &libraryReport{Gaps: map[string]int{factIdentity: 7}, Runs: one.runs}
 
 			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
 				report, one.jobs, providers); err != nil {
@@ -371,25 +427,37 @@ func TestLibraryStatusCarriesTheGaps(t *testing.T) {
 
 // the phase reads Enriching while an enrich run is in flight, the way
 // it reads Scanning while a walk runs.
+//
+// A run row whose Job is gone leaves the phase Idle.
 func TestLibraryPhaseReadsEnriching(t *testing.T) {
+	openWalk := libraryReport{Walking: true, Runs: []libraryRun{{Worker: workerScan,
+		Job: "movies-scan-7", Started: testNow}}}
+	openEnrich := libraryReport{Runs: []libraryRun{{Worker: workerEnrich,
+		Job: "movies-enrich-7", Started: testNow}}}
+
 	cases := []struct {
 		name string
 		seen libraryReport
+		jobs []Job
 		want string
 	}{
-		{name: "a walk is running", seen: libraryReport{Walking: true}, want: phaseScanning},
-		{name: "an enricher is running", want: phaseEnriching,
-			seen: libraryReport{Runs: []libraryRun{{Worker: workerEnrich, Started: testNow}}}},
+		{name: "a walk is running", seen: openWalk, want: phaseScanning,
+			jobs: []Job{runningJob("movies-scan-7", "house", workerLabels("movies", workerScan))}},
+		{name: "the walk's Job is gone", seen: openWalk, want: phaseIdle},
+		{name: "an enricher is running", seen: openEnrich, want: phaseEnriching,
+			jobs: []Job{runningJob("movies-enrich-7", "house", workerLabels("movies", workerEnrich))}},
+		{name: "the enricher's Job is gone", seen: openEnrich, want: phaseIdle},
 		{name: "the enricher has finished", want: phaseIdle,
-			seen: libraryReport{Runs: []libraryRun{{Worker: workerEnrich,
+			seen: libraryReport{Runs: []libraryRun{{Worker: workerEnrich, Job: "movies-enrich-7",
 				Started: testNow, Finished: testNow.Add(time.Minute)}}}},
 		{name: "nothing is running", want: phaseIdle},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			ready := Condition{Type: conditionReady, Status: ConditionTrue, Reason: reasonReady}
+			seen := libraryObservation{report: &one.seen, jobs: one.jobs}
 
-			if got := libraryPhase(ready, &one.seen); got != one.want {
+			if got := libraryPhase(ready, studioMovies(), seen); got != one.want {
 				t.Errorf("phase = %q, want %q", got, one.want)
 			}
 		})

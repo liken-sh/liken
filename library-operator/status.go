@@ -29,6 +29,9 @@ type libraryObservation struct {
 	report            *libraryReport
 	online            bool
 	operatorNamespace string
+	// The Jobs the pass listed, which say which open run rows still have a Job
+	// behind them.
+	jobs []Job
 	// What the Library's ordered sources resolved to against the
 	// MetadataProviders this pass checked. An empty reason is a Library that
 	// names no source, and that Library carries no Sources condition.
@@ -89,7 +92,7 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 		conditions = SetCondition(conditions, sourcesCondition(seen.sources, generation), now)
 	}
 	status.Conditions = conditions
-	status.Phase = libraryPhase(ready, seen.report)
+	status.Phase = libraryPhase(ready, library, seen)
 	return status
 }
 
@@ -100,7 +103,13 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 // missing, Scanning while the report says a walk runs, Enriching while the
 // report carries an enrich run that has started and not finished, and Idle
 // otherwise.
-func libraryPhase(ready Condition, latest *libraryReport) string {
+//
+// A run row whose Job the pass did not list reads as no run at all, so a
+// library whose Job died mid-run reads Idle and not Scanning or Enriching for
+// ever.
+func libraryPhase(ready Condition, library *Library, seen libraryObservation) string {
+	latest := seen.report
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	switch {
 	case ready.Reason == reasonOffline:
 		return phaseOffline
@@ -108,9 +117,10 @@ func libraryPhase(ready Condition, latest *libraryReport) string {
 		return phasePending
 	case latest != nil && scanRunOf(latest).Failure != "":
 		return phaseFailed
-	case latest != nil && latest.Walking:
+	case latest != nil && latest.Walking &&
+		!runAbandoned(scanRunOf(latest), seen.jobs, namespace, name):
 		return phaseScanning
-	case latest != nil && enrichInFlight(latest.Runs):
+	case latest != nil && enrichInFlight(latest.Runs, seen.jobs, namespace, name):
 		return phaseEnriching
 	default:
 		return phaseIdle
@@ -129,9 +139,13 @@ func scanRunOf(latest *libraryReport) libraryRun {
 // Whether an enricher of this library is in flight, which the runs say: a row
 // for the enrich worker with a start and no finish. The reporter derives
 // Walking the same way from the scan row.
-func enrichInFlight(runs []libraryRun) bool {
+//
+// The Jobs the pass listed are read beside the row, because a row whose Job
+// is gone is a run that died and not a run in flight.
+func enrichInFlight(runs []libraryRun, jobs []Job, namespace, library string) bool {
 	run, held := runOf(runs, workerEnrich)
-	return held && !run.Started.IsZero() && run.Finished.IsZero()
+	return held && !run.Started.IsZero() && run.Finished.IsZero() &&
+		!runAbandoned(run, jobs, namespace, library)
 }
 
 // The Sources condition reports the providers a Library names: True when

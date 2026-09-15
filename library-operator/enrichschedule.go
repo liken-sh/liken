@@ -224,14 +224,17 @@ func buildChainScanJob(library *Library, chain chainRun,
 
 // Whether any work of this Library is in flight, by the Jobs the pass listed
 // and by the runs the reporter published. Both are read, because a Job the
-// controller has not started has written no run, and a run in flight can
-// outlive the Job list the pass read.
+// controller has not started has written no run.
+//
+// An open run row counts only while the Job that wrote it is still listed. A
+// Job that died mid-run holds nothing back.
 func libraryBusy(report *libraryReport, jobs []Job, namespace, library string) bool {
 	if scanUnfinished(jobs, namespace, library) || enrichUnfinished(jobs, namespace, library) {
 		return true
 	}
 	for _, worker := range []string{workerScan, workerRescan, workerEnrich} {
-		if run, held := runOf(report.Runs, worker); held && run.Finished.IsZero() {
+		run, held := runOf(report.Runs, worker)
+		if held && run.Finished.IsZero() && !runAbandoned(run, jobs, namespace, library) {
 			return true
 		}
 	}

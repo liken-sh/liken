@@ -229,6 +229,8 @@ func TestDepartWaitsForARunningEnricher(t *testing.T) {
 			jobs: []Job{{Metadata: ObjectMeta{Name: "movies-enrich-1", Namespace: "house",
 				Labels: workerLabels("movies", workerEnrich)}}}},
 		{name: "an enrich run the reporter has not seen finish",
+			jobs: []Job{finishedJob("movies-enrich-1", "house",
+				workerLabels("movies", workerEnrich), nil)},
 			runs: []libraryRun{{Worker: workerEnrich, Job: "movies-enrich-1", Started: testNow}}},
 	}
 	for _, one := range cases {
@@ -249,6 +251,24 @@ func TestDepartWaitsForARunningEnricher(t *testing.T) {
 				t.Errorf("Departing = %+v, want %s", stage, reasonEnrichRunning)
 			}
 		})
+	}
+}
+
+// An open enrich run whose Job is gone died with its pod, and the departure
+// carries on past it.
+func TestDepartPassesADeadEnrichRun(t *testing.T) {
+	cluster := newFakeCluster()
+	library := departingMovies(cluster)
+	operator := testOperator(t, cluster)
+	operator.reports.fold("house", "movies", libraryReport{
+		Runs: []libraryRun{{Worker: workerEnrich, Job: "movies-enrich-1", Started: testNow}}})
+
+	if err := operator.depart(t.Context(), library, standingCatalog(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldJob("house", "movies-cleanup") == nil {
+		t.Error("the pass stood no cleanup job")
 	}
 }
 

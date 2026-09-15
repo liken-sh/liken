@@ -96,6 +96,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		choice:            choice,
 		cronJob:           cronJob,
 		report:            report,
+		jobs:              jobs,
 		sources:           checkSources(library, providers),
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,

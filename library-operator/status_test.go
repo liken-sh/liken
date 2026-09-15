@@ -211,7 +211,9 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 // the phase takes the first of the four values that holds, read from
 // the Ready condition the same derivation built.
 func TestThePhaseSaysWhatTheLibraryIsDoing(t *testing.T) {
-	walking := &libraryReport{Titles: 412, Walking: true}
+	walking := &libraryReport{Titles: 412, Walking: true,
+		Runs: []libraryRun{{Worker: workerScan, Job: "movies-scan-7", Started: testNow}}}
+	walkJobs := []Job{runningJob("movies-scan-7", "house", workerLabels("movies", workerScan))}
 	between := &libraryReport{Titles: 412}
 
 	cases := []struct {
@@ -241,9 +243,16 @@ func TestThePhaseSaysWhatTheLibraryIsDoing(t *testing.T) {
 			phase: phaseOffline,
 		},
 		{
-			name:   "a walk in flight",
+			name: "a walk in flight",
+			change: func(seen *libraryObservation) {
+				seen.report, seen.jobs = walking, walkJobs
+			},
+			phase: phaseScanning,
+		},
+		{
+			name:   "a walk whose Job is gone",
 			change: func(seen *libraryObservation) { seen.report = walking },
-			phase:  phaseScanning,
+			phase:  phaseIdle,
 		},
 		{
 			name:   "between walks",
