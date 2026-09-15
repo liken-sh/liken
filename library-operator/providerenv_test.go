@@ -157,3 +157,45 @@ func TestTheSourceOrderOfALibrary(t *testing.T) {
 		})
 	}
 }
+
+// The address of the first Ready peertube source reaches every facts
+// container.
+func TestThePeerTubeEndpointOfALibrary(t *testing.T) {
+	tmdb := providerOfBlock("tmdb", providerBlockTMDb)
+	tube := providerOfBlock("tube", providerBlockPeerTube)
+	second := providerOfBlock("second-tube", providerBlockPeerTube)
+	second.Spec.PeerTube.Endpoint = "https://other.example"
+	refused := providerOfBlock("refused-tube", providerBlockPeerTube)
+	refused.Spec.PeerTube.Endpoint = "https://refused.example"
+	refused.Status.Conditions = []Condition{
+		{Type: conditionReady, Status: ConditionFalse, Reason: reasonUnreachable},
+	}
+
+	cases := []struct {
+		name    string
+		sources []string
+		want    string
+	}{
+		{name: "no source with a PeerTube instance", sources: []string{"tmdb"}},
+		{name: "the instance the source names", sources: []string{"tube"}, want: "https://tube.example"},
+		{name: "the first instance of the block wins",
+			sources: []string{"tube", "second-tube"}, want: "https://tube.example"},
+		{name: "an instance that is not Ready", sources: []string{"refused-tube"}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			env := providerEnv(libraryWithSources(one.sources...),
+				providersOf(tmdb, tube, second, refused))
+
+			endpoint := ""
+			for _, variable := range env {
+				if variable.Name == peertubeEndpointVariable {
+					endpoint = variable.Value
+				}
+			}
+			if endpoint != one.want {
+				t.Errorf("%s = %q, want %q", peertubeEndpointVariable, endpoint, one.want)
+			}
+		})
+	}
+}

@@ -15,9 +15,11 @@ fact the first provider in that list that serves it is the one
 asked.
 
 A `MetadataProvider` names exactly one provider block: `tmdb`,
-`omdb`, `fanart`, or `tvmaze`. TMDb, OMDb, and Fanart.tv take a key
-from a `Secret`; TVmaze takes none, so its block is empty. The
-`PROVIDER` column shows the block.
+`omdb`, `fanart`, `tvmaze`, or `peertube`. TMDb, OMDb, and Fanart.tv
+take a key from a `Secret`; TVmaze takes none, so its block is empty.
+PeerTube takes no key either, but it is software that many people
+run, so its block names the address of one instance. The `PROVIDER`
+column shows the block.
 
 `spec.facts` is optional. A provider that names none serves every
 fact the operator knows how to ask it for, and `status.facts`, shown
@@ -84,6 +86,7 @@ The provider this account is with, and the facts it may serve. A spec that names
 | <span id="spec--omdb"></span>`omdb` | [object](#specomdb) | no | The account is with OMDb. OMDb answers on an IMDb id, and it serves the plot, the US certification, and the ratings of IMDb, Rotten Tomatoes, and Metacritic. |
 | <span id="spec--fanart"></span>`fanart` | [object](#specfanart) | no | The account is with Fanart.tv, which serves art alone. It is the only provider of the clearart, the banner, the landscape, the discart, and the season banner. |
 | <span id="spec--tvmaze"></span>`tvmaze` | object | no | The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze. |
+| <span id="spec--peertube"></span>`peertube` | [object](#specpeertube) | no | The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address. |
 | <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator knows how to ask this provider for. Omit it to serve all of that. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
@@ -136,6 +139,14 @@ The Secret in this namespace that holds the Fanart.tv project key, and the key i
 | --- | --- | --- | --- |
 | <span id="specfanartsecretref--name"></span>`name` | string | yes | The Secret's name, in this provider's own namespace. |
 | <span id="specfanartsecretref--key"></span>`key` | string | no | The key inside that Secret. When omitted, token. Default: `token`. |
+
+### spec.peertube
+
+The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specpeertube--endpoint"></span>`endpoint` | string | yes | The address of the instance, such as https://tube.example. The operator checks it at /api/v1/config once per pass, and the trailer fact searches its videos by title. Pattern: `^https://`. |
 
 ## status
 

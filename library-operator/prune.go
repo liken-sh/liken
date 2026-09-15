@@ -77,6 +77,9 @@ const (
 	// A genre keys on the title and the rank joined, in a key space of its own,
 	// the way a credit does.
 	seenGenre = "genre:"
+	// A trailer keys on the title, the provider, and that provider's own key for
+	// the video, joined, in a key space of its own.
+	seenTrailer = "trailer:"
 )
 
 // The separator between a link key's two halves. A path and an item id can
@@ -229,6 +232,9 @@ func markKeys(result *walkResult) []string {
 	for _, row := range result.genres {
 		add(seenGenre, genreSeenKey(row))
 	}
+	for _, row := range result.trailers {
+		add(seenTrailer, trailerSeenKey(row))
+	}
 	for _, row := range result.franchises {
 		add(seenItem, row.Id)
 	}
@@ -378,6 +384,17 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
+	// The trailers of a title that left the volume are unmarked with it, and a
+	// provider that dropped a video leaves the row it wrote unmarked.
+	n, err = catalog.sweep(ctx, trailerPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteTrailers(ctx, library, trailerKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
 	n, err = catalog.sweep(ctx, contributorAliasPruneSQL(), []any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteContributorAliases(ctx, library, contributorAliasKeys(keys))
@@ -456,6 +473,65 @@ func fileItemKeys(keys []string) []fileItemKey {
 		links[i] = fileItemKey{Path: path, Item: item}
 	}
 	return links
+}
+
+// The three key columns after the library, as a sweep reads them back.
+type trailerKey struct {
+	Item     string
+	Provider string
+	Key      string
+}
+
+// The three keys travel through a sweep as one string, joined by the
+// separator no id or key holds, the way a credit key does.
+func trailerSeenKey(row trailerRow) string {
+	return row.Item + linkKeySeparator + row.Provider + linkKeySeparator + row.Key
+}
+
+func trailerKeys(keys []string) []trailerKey {
+	out := make([]trailerKey, len(keys))
+	for i, key := range keys {
+		parts := strings.SplitN(key, linkKeySeparator, 3)
+		for len(parts) < 3 {
+			parts = append(parts, "")
+		}
+		out[i] = trailerKey{Item: parts[0], Provider: parts[1], Key: parts[2]}
+	}
+	return out
+}
+
+// The trailers this library holds that the current epoch did not mark, one
+// bounded batch, joined the way the mark joined them.
+func trailerPruneSQL() string {
+	return `SELECT item || char(31) || provider || char(31) || key FROM trailers` +
+		` WHERE library = ?` +
+		` AND '` + seenTrailer + `' || item || char(31) || provider || char(31) || key` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` LIMIT ?`
+}
+
+// A rescan reaches one folder's trailers through the movie or series row the
+// folder holds, so this sweep runs before the item sweeps take that row, the
+// way the credit sweep does.
+func scopedTrailerPruneSQL() string {
+	scope := func(table string) string {
+		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
+	}
+	return `SELECT item || char(31) || provider || char(31) || key FROM trailers` +
+		` WHERE library = ?` +
+		` AND '` + seenTrailer + `' || item || char(31) || provider || char(31) || key` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND item IN (` + scope("movies") + ` UNION ` + scope("series") + `)` +
+		` LIMIT ?`
+}
+
+func scopedTrailerPruneParams(library, folder string, epoch int64) []any {
+	params := []any{library, epoch}
+	for range 2 {
+		params = append(params, library)
+		params = append(params, pathScopeParams(folder)...)
+	}
+	return append(params, pruneBatch)
 }
 
 // linkPruneSQL reads the links this library holds that the current
@@ -545,6 +621,18 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	n, err = catalog.sweep(ctx, scopedCreditPruneSQL(), scopedCreditPruneParams(library, folder, epoch),
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteCredits(ctx, library, creditKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The trailers of the folder's title, swept the way its credits are. A
+	// provider that dropped a video leaves the row unmarked, and a title that
+	// left the volume leaves every trailer it held.
+	n, err = catalog.sweep(ctx, scopedTrailerPruneSQL(), scopedTrailerPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteTrailers(ctx, library, trailerKeys(keys))
 		})
 	if err != nil {
 		return removed, err

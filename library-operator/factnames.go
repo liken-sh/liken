@@ -30,6 +30,11 @@ const (
 	factSeasonBanner = "season-banner"
 	factEpisodeThumb = "episode-thumb"
 
+	// The trailer group holds one fact: the trailers a provider names for a
+	// title. The fact records ids and links. It plays nothing and downloads
+	// nothing.
+	factTrailer = "trailer"
+
 	factContributorIDs       = "contributor.ids"
 	factContributorBiography = "contributor.biography"
 	factContributorHeadshot  = "contributor.headshot"
@@ -60,6 +65,7 @@ var factVocabulary = []string{
 	factSeasonPoster,
 	factSeasonBanner,
 	factEpisodeThumb,
+	factTrailer,
 	factContributorIDs,
 	factContributorBiography,
 	factContributorHeadshot,

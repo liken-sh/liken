@@ -1,0 +1,77 @@
+{
+  "id": 603,
+  "results": [
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Official Trailer",
+      "key": "vKQi3bBA1y8",
+      "site": "YouTube",
+      "size": 1080,
+      "type": "Trailer",
+      "official": true,
+      "published_at": "2026-03-18T15:00:00.000Z",
+      "id": "639d5326be6d88007f170f44"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Teaser",
+      "key": "m8e-FF8MsqU",
+      "site": "YouTube",
+      "size": 720,
+      "type": "Teaser",
+      "official": false,
+      "published_at": "2025-11-02T09:30:00.000Z",
+      "id": "5b58e5e9c3a3685dd50051d1"
+    },
+    {
+      "iso_639_1": "fr",
+      "iso_3166_1": "FR",
+      "name": "Bande-annonce",
+      "key": "76979871",
+      "site": "Vimeo",
+      "size": 1080,
+      "type": "Trailer",
+      "official": true,
+      "published_at": "2026-04-01T12:00:00.000Z",
+      "id": "5f7d2b1b4ea1d600368b5a1e"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Making The Matrix",
+      "key": "L0fw0WzFaBM",
+      "site": "YouTube",
+      "size": 480,
+      "type": "Featurette",
+      "official": true,
+      "published_at": "",
+      "id": "5c9294240e0a267cd516835f"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Lobby Scene",
+      "key": "Pi1FAdEQlmA",
+      "site": "YouTube",
+      "size": 480,
+      "type": "Clip",
+      "official": false,
+      "published_at": "2024-02-11T10:00:00.000Z",
+      "id": "6123f0b2a2ee1e0046ba5d7c"
+    },
+    {
+      "iso_639_1": "en",
+      "iso_3166_1": "US",
+      "name": "Red Pill Or Blue Pill",
+      "key": "x8k2lqp",
+      "site": "Dailymotion",
+      "size": 480,
+      "type": "Clip",
+      "official": false,
+      "published_at": "2023-07-04T08:15:00.000Z",
+      "id": "60f1c1e0b0c5a6002c0a6f21"
+    }
+  ]
+}

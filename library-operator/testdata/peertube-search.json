@@ -1,0 +1,82 @@
+{
+  "total": 7,
+  "data": [
+    {
+      "uuid": "6e1c2d78-2f3a-4b21-9f9a-0c1d2e3f4a5b",
+      "shortUUID": "uCGxtW81oT5vDUc1LoZUDk",
+      "name": "DUNE: PART THREE (2026) - IMAX Trailer [4K Ultra HD]",
+      "duration": 144,
+      "publishedAt": "2026-07-14T05:31:30.825Z",
+      "url": "https://trailers.example.net/videos/watch/6e1c2d78-2f3a-4b21-9f9a-0c1d2e3f4a5b",
+      "language": { "id": "en", "label": "English" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "trailers", "displayName": "Trailers" }
+    },
+    {
+      "uuid": "7f2d3e89-3a4b-4c32-8a0b-1d2e3f4a5b6c",
+      "shortUUID": "vDHyuX92pU6wEVd2MpAVEl",
+      "name": "DUNE: PART THREE (2026) - Official Trailer [4K Ultra HD]",
+      "duration": 151,
+      "publishedAt": "2026-06-02T11:02:07.410Z",
+      "url": "https://trailers.example.net/videos/watch/7f2d3e89-3a4b-4c32-8a0b-1d2e3f4a5b6c",
+      "language": { "id": "en", "label": "English" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "trailers", "displayName": "Trailers" }
+    },
+    {
+      "uuid": "8a3e4f90-4b5c-4d43-9b1c-2e3f4a5b6c7d",
+      "shortUUID": "wEIzvY03qV7xFWe3NqBWFm",
+      "name": "DUNE: PART THREE (2026) - Teaser Trailer [4K Ultra HD]",
+      "duration": 96,
+      "publishedAt": "2026-02-09T18:44:51.006Z",
+      "url": "https://trailers.example.net/videos/watch/8a3e4f90-4b5c-4d43-9b1c-2e3f4a5b6c7d",
+      "language": { "id": "en", "label": "English" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "trailers", "displayName": "Trailers" }
+    },
+    {
+      "uuid": "9b4f5a01-5c6d-4e54-8c2d-3f4a5b6c7d8e",
+      "shortUUID": "xFJawZ14rW8yGXf4OrCXGn",
+      "name": "DUNE: PART THREE (2026) - \"Awakening\" Teaser [4K Ultra HD]",
+      "duration": 62,
+      "publishedAt": "2025-12-20T07:15:12.338Z",
+      "url": "https://trailers.example.net/videos/watch/9b4f5a01-5c6d-4e54-8c2d-3f4a5b6c7d8e",
+      "language": { "id": "en", "label": "English" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "trailers", "displayName": "Trailers" }
+    },
+    {
+      "uuid": "0c5a6b12-6d7e-4f65-9d3e-4a5b6c7d8e9f",
+      "shortUUID": "yGKbxA25sX9zHYg5PsDYHo",
+      "name": "DUNE - PART TWO (2024) - Trailer #3 [4K Ultra HD]",
+      "duration": 158,
+      "publishedAt": "2024-01-08T14:20:45.912Z",
+      "url": "https://trailers.example.net/videos/watch/0c5a6b12-6d7e-4f65-9d3e-4a5b6c7d8e9f",
+      "language": { "id": "en", "label": "English" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "trailers", "displayName": "Trailers" }
+    },
+    {
+      "uuid": "1d6b7c23-7e8f-4a76-8e4f-5b6c7d8e9f01",
+      "shortUUID": "zHLcyB36tY0AIZh6QtEZIp",
+      "name": "DUNE: PART THREE (2026) - \"Sandworm\" TV Spot [4K Ultra HD]",
+      "duration": 31,
+      "publishedAt": "2026-08-01T22:05:33.774Z",
+      "url": "https://trailers.example.net/videos/watch/1d6b7c23-7e8f-4a76-8e4f-5b6c7d8e9f01",
+      "language": { "id": "en", "label": "English" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "spots", "displayName": "TV Spots" }
+    },
+    {
+      "uuid": "2e7c8d34-8f90-4b87-9f50-6c7d8e9f0123",
+      "shortUUID": "",
+      "name": "DUNE: PART THREE (2026) Trailer Song",
+      "duration": 205,
+      "publishedAt": "2026-07-19T03:48:19.560Z",
+      "url": "https://trailers.example.net/videos/watch/2e7c8d34-8f90-4b87-9f50-6c7d8e9f0123",
+      "language": { "id": null, "label": "Unknown" },
+      "licence": { "id": null, "label": "Unknown" },
+      "channel": { "name": "music", "displayName": "Trailer Music" }
+    }
+  ]
+}

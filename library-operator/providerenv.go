@@ -13,6 +13,11 @@ import "strings"
 // credential to read the Library itself.
 const librarySourcesVariable = "LIBRARY_SOURCES"
 
+// The variable that carries the address of the Library's PeerTube instance.
+// The peertube block names no Secret, so no token variable carries it, and
+// the address is the whole account.
+const peertubeEndpointVariable = "PEERTUBE_ENDPOINT"
+
 // The variable one provider block's key travels in: the block name in
 // capitals, then _TOKEN. TMDB_TOKEN, the one the identity fact reads, is that
 // rule for tmdb.
@@ -54,8 +59,27 @@ func providerKeyEnv(library *Library, providers providerSet) []EnvVar {
 // order the blocks are asked in. Both come from one walk of spec.sources, so
 // the container asks in the order a person wrote.
 func providerEnv(library *Library, providers providerSet) []EnvVar {
-	return append(providerKeyEnv(library, providers),
+	env := append(providerKeyEnv(library, providers),
 		EnvVar{Name: librarySourcesVariable, Value: strings.Join(sourceBlocks(library, providers), ",")})
+	if endpoint := peertubeEndpoint(library, providers); endpoint != "" {
+		env = append(env, EnvVar{Name: peertubeEndpointVariable, Value: endpoint})
+	}
+	return env
+}
+
+// The address of the first Ready peertube source a Library names, in
+// spec.sources order, or empty where it names none. The first one wins for
+// the same reason the first key of a block wins: one variable holds one
+// value.
+func peertubeEndpoint(library *Library, providers providerSet) string {
+	for _, name := range library.Spec.Sources {
+		provider, exists := providers[libraryKey(library.Metadata.Namespace, name)]
+		if !exists || !provider.ready() || provider.block() != providerBlockPeerTube {
+			continue
+		}
+		return provider.endpoint()
+	}
+	return ""
 }
 
 // Which blocks reach the container: the block of every Ready source the

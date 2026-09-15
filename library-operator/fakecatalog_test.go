@@ -49,11 +49,14 @@ type fakeCatalog struct {
 	contributorAliases map[string]fakeRow
 	credits            map[string]fakeRow
 	genres             map[string]fakeRow
-	aliases            map[string]string
-	fileItems          map[string]bool
-	seen               map[string]int64
-	statements         []capturedStatement
-	failStatus         int
+	// One row per trailer a provider named for a title, keyed by the title, the
+	// provider, and that provider's own key.
+	trailers   map[string]fakeRow
+	aliases    map[string]string
+	fileItems  map[string]bool
+	seen       map[string]int64
+	statements []capturedStatement
+	failStatus int
 	// seenLagReads models a real Corrosion agent right after CREATE
 	// TABLE seen: a query of seen can still miss the table for a short
 	// window. Each read of seen decrements it and answers "no such table"
@@ -92,6 +95,7 @@ func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 		contributorAliases: map[string]fakeRow{},
 		credits:            map[string]fakeRow{},
 		genres:             map[string]fakeRow{},
+		trailers:           map[string]fakeRow{},
 		aliases:            map[string]string{},
 		fileItems:          map[string]bool{},
 		seen:               map[string]int64{},
@@ -177,6 +181,10 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		f.genres[fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
 	case strings.HasPrefix(s.sql, "DELETE FROM genres"):
 		delete(f.genres, fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2])))
+	case strings.HasPrefix(s.sql, "INSERT INTO trailers"):
+		f.trailers[fakeKey(str(p[0]), str(p[1]), str(p[2]), str(p[3]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM trailers"):
+		f.deleteTrailers(p)
 	case strings.HasPrefix(s.sql, "INSERT INTO aliases"):
 		f.aliases[fakeKey(str(p[0]), str(p[1]))] = str(p[2])
 	case strings.HasPrefix(s.sql, "INSERT INTO seen"):
@@ -197,6 +205,21 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		delete(f.fileItems, fakeKey(str(p[0]), str(p[1]), str(p[2])))
 	case strings.HasPrefix(s.sql, "DELETE FROM seen"):
 		f.cleanSeen(num(p[0]))
+	}
+}
+
+// The two deletes the trailers table takes: the sweep names every key column,
+// and the replace of one item's set names the item alone.
+func (f *fakeCatalog) deleteTrailers(p []any) {
+	if len(p) >= 4 {
+		delete(f.trailers, fakeKey(str(p[0]), str(p[1]), str(p[2]), str(p[3])))
+		return
+	}
+	prefix := fakeKey(str(p[0]), str(p[1])) + "\x00"
+	for key := range f.trailers {
+		if strings.HasPrefix(key, prefix) {
+			delete(f.trailers, key)
+		}
 	}
 }
 
@@ -255,6 +278,10 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	// its scoped form holds a UNION of the item tables.
 	case strings.Contains(sql, "FROM credits"):
 		return f.unmarkedPairs(sql, p, f.credits)
+	// The trailer read routes here for the same reason the credit read does: its
+	// scoped form holds a UNION of the item tables.
+	case strings.Contains(sql, "FROM trailers"):
+		return f.unmarkedTrailers(sql, p)
 	case strings.Contains(sql, "UNION"):
 		return f.libraryKeys()
 	case strings.Contains(sql, "count(*) FROM seen"):
@@ -390,6 +417,25 @@ func (f *fakeCatalog) unmarkedPairs(sql string, p []any, table map[string]fakeRo
 			continue
 		}
 		key := parts[1] + linkKeySeparator + parts[2]
+		if f.seen[seenPrefix(sql)+key] == epoch {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// The trailers of this library the epoch did not mark, with the three key
+// columns joined the way the mark joined them.
+func (f *fakeCatalog) unmarkedTrailers(sql string, p []any) []any {
+	library, epoch := str(p[0]), num(p[1])
+	var keys []any
+	for composite, row := range f.trailers {
+		parts := strings.SplitN(composite, "\x00", 4)
+		if row.library != library || len(parts) != 4 {
+			continue
+		}
+		key := strings.Join(parts[1:], linkKeySeparator)
 		if f.seen[seenPrefix(sql)+key] == epoch {
 			continue
 		}

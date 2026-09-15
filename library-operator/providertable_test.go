@@ -22,6 +22,8 @@ func providerOfBlock(name, block string) *MetadataProvider {
 		provider.Spec.Fanart = &ProviderFanart{SecretRef: reference}
 	case providerBlockTVmaze:
 		provider.Spec.TVmaze = &ProviderTVmaze{}
+	case providerBlockPeerTube:
+		provider.Spec.PeerTube = &ProviderPeerTube{Endpoint: "https://tube.example"}
 	}
 	provider.Status.Conditions = []Condition{
 		{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
@@ -41,6 +43,7 @@ func TestTheBlockAndTheSecretOfOneSpec(t *testing.T) {
 		{name: "an account with OMDb", block: providerBlockOMDb, wantSecret: "one-key"},
 		{name: "an account with Fanart.tv", block: providerBlockFanart, wantSecret: "one-key"},
 		{name: "TVmaze, which takes no account", block: providerBlockTVmaze},
+		{name: "a PeerTube instance, which takes no account", block: providerBlockPeerTube},
 		{name: "a spec that names no block"},
 	}
 	for _, one := range cases {
@@ -104,11 +107,13 @@ func TestWhichProvidersServeEachFact(t *testing.T) {
 		{fact: factSeasonPoster, want: []string{providerBlockTMDb, providerBlockFanart}},
 		{fact: factSeasonBanner, want: []string{providerBlockFanart}},
 		{fact: factEpisodeThumb, want: []string{providerBlockTMDb}},
+		{fact: factTrailer, want: []string{providerBlockTMDb, providerBlockPeerTube}},
 		{fact: factContributorIDs, want: []string{providerBlockTMDb}},
 		{fact: factContributorBiography, want: []string{providerBlockTMDb}},
 		{fact: factContributorHeadshot, want: []string{providerBlockTMDb}},
 	}
-	blocks := []string{providerBlockTMDb, providerBlockOMDb, providerBlockFanart, providerBlockTVmaze}
+	blocks := []string{providerBlockTMDb, providerBlockOMDb, providerBlockFanart,
+		providerBlockTVmaze, providerBlockPeerTube}
 	for _, one := range cases {
 		t.Run(one.fact, func(t *testing.T) {
 			serving := []string{}

@@ -48,6 +48,9 @@ type enricher struct {
 	// The providers the art container can ask, built once and held here, so
 	// the settings one of them states are read once for the whole container.
 	art *artLine
+	// The providers the trailer container asks, built once and held here, as the
+	// art line is.
+	trailers *trailerLine
 }
 
 // A container with no API credential learns everything from its environment,

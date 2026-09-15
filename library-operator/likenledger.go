@@ -90,7 +90,12 @@ type likenLedger struct {
 	// per file it opened, with every stream ffprobe found. Only the probe
 	// fact writes it. The walk reads it for the technical columns and the
 	// stream rows, so a rebuilt catalog never opens the files again.
-	Probes   []probedFile   `yaml:"probes,omitempty"`
+	Probes []probedFile `yaml:"probes,omitempty"`
+	// The trailer fact's own list, in the file that is its ledger: one entry
+	// per trailer a provider named for the title, with the score the fact gave
+	// it. Only the trailer fact writes it. The walk reads it for the trailers
+	// table, so a rebuilt catalog never asks a provider again.
+	Trailers []trailerEntry `yaml:"trailers,omitempty"`
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 

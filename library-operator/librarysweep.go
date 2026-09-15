@@ -44,7 +44,8 @@ func (c *Catalog) SweepLibrary(ctx context.Context, library string) (int, error)
 }
 
 // librarySweepSteps is the sweep in the order it runs. The aliases, the
-// credits, and the links that point at an item go before the item rows,
+// credits, the trailers, and the links that point at an item go before the
+// item rows,
 // the files and the attempts follow, and the people go last, the
 // contributor aliases before the contributors they resolve to. No step
 // leaves a row whose parent is gone.
@@ -55,6 +56,9 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		}},
 		{librarySweepCreditSQL(), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteCredits(ctx, library, creditKeys(keys))
+		}},
+		{librarySweepTrailerSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteTrailers(ctx, library, trailerKeys(keys))
 		}},
 		{librarySweepSQL("movies", "id"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteMovies(ctx, library, keys)
@@ -112,6 +116,13 @@ func librarySweepSQL(table, column string) string {
 // columns joined the way every sweep of a two-column key joins them.
 func librarySweepAttemptSQL() string {
 	return `SELECT item || char(31) || ` + attemptFactColumn + ` FROM attempts WHERE library = ? LIMIT ?`
+}
+
+// One bounded batch of one library's trailers. The three key columns travel
+// joined by the separator every composite-key sweep uses.
+func librarySweepTrailerSQL() string {
+	return `SELECT item || char(31) || provider || char(31) || key FROM trailers` +
+		` WHERE library = ? LIMIT ?`
 }
 
 // librarySweepLinkSQL reads the link table's two key columns joined

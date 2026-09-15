@@ -53,10 +53,10 @@ spec:
               x-kubernetes-validations:
                 - rule: >-
                     [has(self.tmdb), has(self.omdb), has(self.fanart),
-                    has(self.tvmaze)].exists_one(block, block)
+                    has(self.tvmaze), has(self.peertube)].exists_one(block, block)
                   message: >-
                     A MetadataProvider names exactly one provider block:
-                    tmdb, omdb, fanart, or tvmaze.
+                    tmdb, omdb, fanart, tvmaze, or peertube.
               properties:
                 tmdb:
                   type: object
@@ -118,6 +118,16 @@ spec:
                 tvmaze:
                   type: object
                   description: "The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze."
+                peertube:
+                  type: object
+                  required: [endpoint]
+                  description: "The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address."
+                  properties:
+                    endpoint:
+                      type: string
+                      pattern: '^https://'
+                      maxLength: 253
+                      description: "The address of the instance, such as https://tube.example. The operator checks it at /api/v1/config once per pass, and the trailer fact searches its videos by title."
                 facts:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -152,6 +162,7 @@ spec:
                       - season-poster
                       - season-banner
                       - episode-thumb
+                      - trailer
                       - contributor.ids
                       - contributor.biography
                       - contributor.headshot

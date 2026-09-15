@@ -604,3 +604,28 @@ CREATE INDEX aliases_alias ON aliases (alias);
 --   WHERE m.library = ?1 AND m.franchise = ?2
 --   GROUP BY m.position
 --   ORDER BY m.position;
+
+-- One trailer a provider named for one title. The provider and that
+-- provider's own key for the video make the row unique beside the item,
+-- because two providers can name the same video. site says where the video
+-- plays from, and url is the page a person opens to watch it. kind is one
+-- of trailer, teaser, spot, clip, or other. score is how sure the trailer
+-- fact is that this video belongs to this title, from 0 to 100, and reason
+-- says why in one line. The rows are the projection of .liken/trailer.yaml,
+-- so the walk writes them again from the file.
+CREATE TABLE trailers (
+    library TEXT NOT NULL DEFAULT '',
+    item TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL DEFAULT '',
+    site TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT '',
+    official INTEGER NOT NULL DEFAULT 0,
+    published TEXT NOT NULL DEFAULT '',
+    score INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, item, provider, key)
+);

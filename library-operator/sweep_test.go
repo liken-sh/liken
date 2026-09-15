@@ -49,6 +49,14 @@ func walkOfOnePerson(library, item, slug string) *walkResult {
 	}
 }
 
+// The trailers one title holds, so the sweep reads a row in that table too.
+func walkOfOneTrailer(library, item string) *walkResult {
+	return &walkResult{trailers: []trailerRow{{
+		Library: library, Item: item, Provider: providerBlockTMDb, Key: "sJ9mvBJ1aTI",
+		Site: trailerSiteYouTube, Kind: trailerKindTrailer,
+	}}}
+}
+
 // seedTwoLibrariesInEveryTable writes a movie, a series, and a person
 // into two libraries at the same ids and paths, so every table the sweep
 // reaches holds rows of both.
@@ -59,6 +67,7 @@ func seedTwoLibrariesInEveryTable(t *testing.T, catalog *Catalog) {
 			walkOfOneTitle(library, "movie:tmdb:1", "One (2001)", "movie:path:one-2001"),
 			walkOfOneEpisode(library, "series:tvdb:5", "episode:tvdb:5:1:1", "A Show (2005)"),
 			walkOfOnePerson(library, "movie:tmdb:1", "someone-1"),
+			walkOfOneTrailer(library, "movie:tmdb:1"),
 		} {
 			if err := upsertWalk(t.Context(), catalog, walk); err != nil {
 				t.Fatal(err)
@@ -70,7 +79,7 @@ func seedTwoLibrariesInEveryTable(t *testing.T, catalog *Catalog) {
 // The tables a whole-library sweep deletes from, the item tables and
 // the people tables both.
 var everyCatalogTable = []string{"aliases", "movies", "series", "episodes", "file_items", "files", "genres",
-	"credits", "contributors", "contributor_aliases"}
+	"credits", "trailers", "contributors", "contributor_aliases"}
 
 // The sweep takes every row of the departing library in every table and
 // leaves the survivor whole.

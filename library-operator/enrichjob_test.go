@@ -457,7 +457,7 @@ func TestTheNFOContainerRunsAfterIdentityAndBeforeArt(t *testing.T) {
 		names = append(names, container.Name)
 	}
 	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity, nfoContainerName,
-		artContainerName, contributorsContainerName}
+		artContainerName, trailerContainerName, contributorsContainerName}
 	if len(names) != len(want) {
 		t.Fatalf("initContainers = %v, want %v", names, want)
 	}
@@ -548,4 +548,69 @@ func TestTheProbeContainerTakesAMemoryLineAboveTheScanners(t *testing.T) {
 		t.Errorf("memory limit = %q, want %q, above the scanner's %q",
 			probe.Resources.Limits["memory"], probeMemoryLimit, scannerMemoryLimit)
 	}
+}
+
+// The trailer container stands where a Ready source serves the fact,
+// whichever block that source names. It runs between the art container and
+// the people.
+func TestTheTrailerContainerStandsWhereASourceServesTheFact(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider *MetadataProvider
+		want     bool
+	}{
+		{
+			name:     "a provider that serves every fact",
+			provider: readyProvider("tmdb", "house"), want: true,
+		},
+		{
+			name:     "a provider narrowed to the identity",
+			provider: readyProvider("tmdb", "house", factIdentity),
+		},
+		{
+			name:     "an instance that holds videos alone",
+			provider: providerOfBlock("tube", providerBlockPeerTube), want: true,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			job := testEnrichJob(studioMovies(), "", test.provider)
+
+			var trailer *Container
+			for at, container := range job.Spec.Template.Spec.InitContainers {
+				if container.Name == trailerContainerName {
+					trailer = &job.Spec.Template.Spec.InitContainers[at]
+				}
+			}
+			if !test.want {
+				if trailer != nil {
+					t.Fatal("the pod holds a trailer container, want none")
+				}
+				return
+			}
+			if trailer == nil {
+				t.Fatalf("the pod holds no trailer container, initContainers = %+v",
+					job.Spec.Template.Spec.InitContainers)
+			}
+			if got := containerEnvironment(*trailer)[libraryFactsVariable]; got != factTrailer {
+				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, factTrailer)
+			}
+		})
+	}
+}
+
+// The address of a PeerTube instance reaches the container that asks it.
+func TestTheTrailerContainerReadsThePeerTubeAddress(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", providerOfBlock("tube", providerBlockPeerTube))
+
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		if container.Name != trailerContainerName {
+			continue
+		}
+		if got := containerEnvironment(container)[peertubeEndpointVariable]; got != "https://tube.example" {
+			t.Errorf("%s = %q, want the instance the source names", peertubeEndpointVariable, got)
+		}
+		return
+	}
+	t.Fatal("the pod holds no trailer container")
 }

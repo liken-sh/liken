@@ -199,3 +199,31 @@ func TestALedgerReadsBackTheProvidersThatAnswered(t *testing.T) {
 		})
 	}
 }
+
+// A trailer ledger reads back every field the trailer fact wrote.
+func TestATrailerLedgerReadsBackWhatItHolds(t *testing.T) {
+	folder := t.TempDir()
+	want := trailerEntry{
+		Path: likenSelfPath, Provider: providerBlockTMDb, Key: "sJ9mvBJ1aTI",
+		Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=sJ9mvBJ1aTI",
+		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en",
+		Official: true, Published: "2026-08-01", Score: 90, Reason: "official trailer",
+	}
+
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factTrailer,
+		func(ledger *likenLedger) { ledger.Trailers = []trailerEntry{want} })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ledger, err := readLikenLedger(folder, factTrailer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Trailers) != 1 {
+		t.Fatalf("read %+v, want the one trailer", ledger.Trailers)
+	}
+	if got := ledger.Trailers[0]; got != want {
+		t.Errorf("read %+v, want %+v", got, want)
+	}
+}

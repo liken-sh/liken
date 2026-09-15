@@ -1109,3 +1109,100 @@ func TestACancelledWalkLeavesTheReportAlone(t *testing.T) {
 		t.Errorf("movies = %v, want nothing written by a cancelled walk", fake.held(fake.movies))
 	}
 }
+
+// One movie with two trailers: the rows a walk writes for a title the trailer
+// fact has run over.
+func oneTitleOfTwoTrailers(library string) *walkResult {
+	return &walkResult{
+		movies: []movieRow{
+			{Id: "movie:tmdb:1", Library: library, Kind: libraryKindMovies, Path: "One (2001)", Title: "One"},
+			{Id: "movie:tmdb:2", Library: library, Kind: libraryKindMovies, Path: "Two (2002)", Title: "Two"},
+		},
+		trailers: []trailerRow{
+			{Library: library, Item: "movie:tmdb:1", Provider: providerBlockTMDb, Key: "aaa"},
+			{Library: library, Item: "movie:tmdb:1", Provider: providerBlockPeerTube, Key: "bbb"},
+			{Library: library, Item: "movie:tmdb:2", Provider: providerBlockTMDb, Key: "ccc"},
+		},
+	}
+}
+
+// The trailers of one title as one line per row, so a test states the whole
+// set it expects in one string.
+func trailerRowLines(t *testing.T, catalog *Catalog, library string) string {
+	t.Helper()
+	lines, err := catalog.queryStrings(t.Context(),
+		`SELECT item || '|' || provider || '|' || key FROM trailers WHERE library = ? `+
+			`ORDER BY item, provider`, []any{library})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(lines, ",")
+}
+
+// A title that left the volume marks none of its trailers, so they leave with
+// it.
+func TestTheTrailersOfATitleLeaveWithItAgainstTheRealSchema(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	ctx := t.Context()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	held := oneTitleOfTwoTrailers("house/movies")
+	if err := upsertWalk(ctx, catalog, held); err != nil {
+		t.Fatal(err)
+	}
+
+	epoch := int64(1000)
+	stayed := &walkResult{movies: held.movies[:1], trailers: held.trailers[:2]}
+	if _, err := catalog.markSeen(ctx, markKeys(stayed), epoch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pruneLibrary(ctx, catalog, "house/movies", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "movie:tmdb:1|peertube|bbb,movie:tmdb:1|tmdb|aaa"
+	if got := trailerRowLines(t, catalog, "house/movies"); got != want {
+		t.Errorf("trailers = %q, want %q", got, want)
+	}
+}
+
+// A rescan of one folder removes the trailers that folder's ledger no longer
+// names, and leaves another title's alone.
+func TestARescanTakesTheTrailersATitleLost(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	ctx := t.Context()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	held := oneTitleOfTwoTrailers("house/movies")
+	if err := upsertWalk(ctx, catalog, held); err != nil {
+		t.Fatal(err)
+	}
+
+	epoch := int64(2000)
+	reread := &walkResult{movies: held.movies[:1], trailers: held.trailers[:1]}
+	if err := flushWalk(ctx, catalog, reread, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pruneScope(ctx, catalog, "house/movies", "One (2001)", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "movie:tmdb:1|tmdb|aaa,movie:tmdb:2|tmdb|ccc"
+	if got := trailerRowLines(t, catalog, "house/movies"); got != want {
+		t.Errorf("trailers = %q, want %q", got, want)
+	}
+}
+
+// The three key columns a trailer sweep reads back.
+func TestTrailerKeysSplitBackIntoTheirColumns(t *testing.T) {
+	keys := trailerKeys([]string{
+		"movie:tmdb:1" + linkKeySeparator + providerBlockTMDb + linkKeySeparator + "sJ9mvBJ1aTI",
+	})
+
+	want := trailerKey{Item: "movie:tmdb:1", Provider: providerBlockTMDb, Key: "sJ9mvBJ1aTI"}
+	if len(keys) != 1 || keys[0] != want {
+		t.Errorf("trailerKeys = %+v, want %+v", keys, want)
+	}
+}

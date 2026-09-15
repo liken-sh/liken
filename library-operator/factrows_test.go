@@ -259,6 +259,13 @@ func TestAFactReportsTheRowsItsCatalogRefused(t *testing.T) {
 				Contributor: ".contributors/person", Name: "A Person", Part: creditPartActor,
 			}},
 		}},
+		{"the trailer fact's set", factTrailer, &walkResult{
+			movies: title,
+			trailers: []trailerRow{{
+				Library: contributorLibrary, Item: "movie:tmdb:1", Provider: providerBlockTMDb,
+				Key: "sJ9mvBJ1aTI", Site: trailerSiteYouTube, Kind: trailerKindTrailer,
+			}},
+		}},
 		{"an art fact's images and art column", factPoster, &walkResult{
 			movies: title,
 			files: []fileRow{{
@@ -285,5 +292,41 @@ func TestAFactReportsTheRowsItsCatalogRefused(t *testing.T) {
 				t.Error("the fact reported no error for rows the catalog refused")
 			}
 		})
+	}
+}
+
+// The trailer fact owns the whole set of one title, so a video a provider
+// dropped leaves the table with the write.
+func TestTheTrailerFactReplacesTheSetOfItsTitle(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	title := []movieRow{{
+		Id: "movie:tmdb:1", Library: contributorLibrary, Kind: libraryKindMovies,
+		Path: "One (2001)", Title: "One",
+	}}
+	if _, err := catalog.UpsertTrailers(t.Context(), []trailerRow{
+		{Library: contributorLibrary, Item: "movie:tmdb:1", Provider: providerBlockTMDb, Key: "gone"},
+		{Library: contributorLibrary, Item: "movie:tmdb:1", Provider: providerBlockTMDb, Key: "kept"},
+		{Library: contributorLibrary, Item: "movie:tmdb:2", Provider: providerBlockTMDb, Key: "other"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
+
+	err := work.writeOwnedRows(t.Context(), factTrailer, &walkResult{
+		movies: title,
+		trailers: []trailerRow{{
+			Library: contributorLibrary, Item: "movie:tmdb:1",
+			Provider: providerBlockTMDb, Key: "kept",
+		}},
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := catalogLines(t, catalog,
+		`SELECT item || '|' || key FROM trailers WHERE library = ? ORDER BY item, key`)
+	want := []string{"movie:tmdb:1|kept", "movie:tmdb:2|other"}
+	if strings.Join(rows, ",") != strings.Join(want, ",") {
+		t.Errorf("trailers = %v, want %v", rows, want)
 	}
 }

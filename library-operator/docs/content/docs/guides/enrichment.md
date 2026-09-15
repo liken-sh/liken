@@ -39,8 +39,9 @@ The providers, and the facts each one serves:
 
 * `tmdb`, The Movie Database: identity, overview, certification, its
   own rating, credits, poster, backdrop, logo, season posters, episode
-  stills, and the people's ids, biographies, and headshots. Every
-  library starts here, because identification happens through TMDb.
+  stills, trailers, and the people's ids, biographies, and headshots.
+  Every library starts here, because identification happens through
+  TMDb.
 * `omdb`, OMDb: overview, certification, and the IMDb, Rotten
   Tomatoes, and Metacritic ratings. It answers on an IMDb id, which
   TMDb supplies. The free tier allows a thousand calls a day.
@@ -48,6 +49,11 @@ The providers, and the facts each one serves:
   banners, landscapes, disc art, and season banners.
 * `tvmaze`, TVmaze: series only, and it needs no account. Declare it
   with an empty block, `tvmaze: {}`.
+* `peertube`, one PeerTube instance: trailers only, and it needs no
+  account. Declare it with the address of the instance,
+  `peertube: {endpoint: https://tube.example}`. The trailer fact
+  searches the instance by title, so pick an instance that publishes
+  trailers.
 
 The operator reads the `Secret` once per pass, to check the provider
 answers. The key reaches an enricher container through a
@@ -87,7 +93,8 @@ walk has finished and a fact still has an open gap. The `Job` runs its
 facts in order, each in a container of its own: `probe` reads each
 video's streams, `arrival` records when a file was first seen,
 `identity` names each title, `nfo` fills the sidecar, `art` downloads
-the images, and `contributors` fills the people.
+the images, `trailer` records where each title's trailers are, and
+`contributors` fills the people.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=enrich
     kubectl -n media logs job/movies-enrich -c nfo
@@ -144,6 +151,21 @@ them.
 
 An art file that already exists is never replaced. The fact records it
 as answered and downloads nothing.
+
+### Trailers
+
+The `trailer` fact records links, not files. It asks every source
+that serves it and writes what it finds to `.liken/trailer.yaml`
+beside the title, one entry per video: the provider, the provider's
+own key, the site the video plays from, the page to watch it on, its
+name, its kind (`trailer`, `teaser`, `spot`, `clip`, or `other`), and
+a score from 0 to 100 with a one-line reason. TMDb names a video by
+the title's own id, so its score is 100. A PeerTube instance answers a
+search by title, so a video scores only when its name carries the
+same title and year, and a trailer scores above a teaser or a TV
+spot. The catalog's `trailers` table holds the same rows. Nothing
+plays or downloads a trailer yet; a trailer file beside the title
+still plays as before.
 
 ### When a fact asks again
 

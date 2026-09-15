@@ -155,23 +155,47 @@ var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
 	factCredits,
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
-	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb}
+	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
+	factTrailer}
+
+// The rows one folder's trailer ledger becomes: one per trailer the providers
+// hold, keyed on the item its own entry names.
+func (s likenSidecar) trailerRows(entries []trailerEntry) []trailerRow {
+	rows := make([]trailerRow, 0, len(entries))
+	for _, entry := range entries {
+		item := s.itemOf(factTrailer, entry.Path)
+		if item == "" || entry.Key == "" {
+			continue
+		}
+		rows = append(rows, trailerRow{
+			Library: s.library, Item: item, Provider: entry.Provider, Key: entry.Key,
+			Site: entry.Site, URL: entry.URL, Name: entry.Name, Kind: entry.Kind,
+			Language: entry.Language, Official: entry.Official, Published: entry.Published,
+			Score: entry.Score, Reason: entry.Reason,
+		})
+	}
+	return rows
+}
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
 // holds none reads as no rows and not as an error, because most folders hold
 // none.
-// One pass answers for both kinds of row, because the credits ledger the
-// credits fact wrote is one of the files this pass already opens.
-func (s likenSidecar) read() ([]attemptRow, []creditRow, error) {
+// One pass answers for all three kinds of row, because the credits ledger and
+// the trailer ledger are files this pass already opens.
+func (s likenSidecar) read() ([]attemptRow, []creditRow, []trailerRow, error) {
 	var rows []attemptRow
 	var credits []creditRow
+	var trailers []trailerRow
 	for _, fact := range s.ledgerFacts() {
 		ledger, err := readLikenLedger(s.dir, fact)
 		if err != nil {
-			return rows, credits, err
+			return rows, credits, trailers, err
 		}
 		if fact == factCredits {
 			credits = append(credits, creditRows(s.library, s.item, ledger.Credits)...)
+		}
+		if fact == factTrailer {
+			trailers = append(trailers, s.trailerRows(ledger.Trailers)...)
 		}
 		for _, attempt := range ledger.Attempts {
 			item := s.itemOf(fact, attempt.Path)
@@ -188,7 +212,7 @@ func (s likenSidecar) read() ([]attemptRow, []creditRow, error) {
 			})
 		}
 	}
-	return rows, credits, nil
+	return rows, credits, trailers, nil
 }
 
 // How an entry's path resolves: a file fact names the file itself, and an
@@ -207,10 +231,11 @@ func (s likenSidecar) itemOf(fact, path string) string {
 // way an unreadable sidecar does, so the sweep never removes rows the volume
 // still holds.
 func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
-	rows, credits, err := sidecar.read()
+	rows, credits, trailers, err := sidecar.read()
 	result.noteReadError(err)
 	result.attempts = append(result.attempts, rows...)
 	result.credits = append(result.credits, credits...)
+	result.trailers = append(result.trailers, trailers...)
 }
 
 // The reporter counts a gap with the same query the container works from, so

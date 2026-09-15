@@ -59,7 +59,10 @@ type walkResult struct {
 	// The people, which no title folder holds. The credits of each title come off
 	// its own credits ledger, and the people themselves come off the walk of
 	// .contributors/ after the last title folder.
-	credits            []creditRow
+	credits []creditRow
+	// The trailers of each title, off the trailer ledger the fact wrote, the way
+	// the credits come off theirs.
+	trailers           []trailerRow
 	contributors       []contributorRow
 	contributorAliases []contributorAliasRow
 	// The genres of each movie and series, in the sidecar's order, derived
@@ -116,6 +119,7 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.aliases = append(buffer.aliases, folder.aliases...)
 	buffer.attempts = append(buffer.attempts, folder.attempts...)
 	buffer.credits = append(buffer.credits, folder.credits...)
+	buffer.trailers = append(buffer.trailers, folder.trailers...)
 	buffer.contributors = append(buffer.contributors, folder.contributors...)
 	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
 	buffer.genres = append(buffer.genres, folder.genres...)

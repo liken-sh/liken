@@ -38,11 +38,12 @@ type MetadataProviderList struct {
 // operator's table holds for the block, so a person who wants all of one
 // provider names the block alone.
 type MetadataProviderSpec struct {
-	TMDb   *ProviderTMDb   `json:"tmdb,omitempty"`
-	OMDb   *ProviderOMDb   `json:"omdb,omitempty"`
-	Fanart *ProviderFanart `json:"fanart,omitempty"`
-	TVmaze *ProviderTVmaze `json:"tvmaze,omitempty"`
-	Facts  []string        `json:"facts,omitempty"`
+	TMDb     *ProviderTMDb     `json:"tmdb,omitempty"`
+	OMDb     *ProviderOMDb     `json:"omdb,omitempty"`
+	Fanart   *ProviderFanart   `json:"fanart,omitempty"`
+	TVmaze   *ProviderTVmaze   `json:"tvmaze,omitempty"`
+	PeerTube *ProviderPeerTube `json:"peertube,omitempty"`
+	Facts    []string          `json:"facts,omitempty"`
 }
 
 // The TMDb block names the Secret alone. The endpoint is TMDb's own, and the
@@ -64,6 +65,14 @@ type ProviderFanart struct {
 // The TVmaze block is empty, because TVmaze serves its free tier with no
 // account. The block alone says that the operator may ask it.
 type ProviderTVmaze struct{}
+
+// The PeerTube block names one instance by its address. PeerTube is
+// software, not a service: every instance holds its own videos at its own
+// address, and the public API needs no account. The address is the whole
+// account.
+type ProviderPeerTube struct {
+	Endpoint string `json:"endpoint"`
+}
 
 // One key in one Secret of the provider's own namespace.
 type SecretKeyRef struct {

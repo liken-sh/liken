@@ -88,6 +88,8 @@ func (e *enricher) writeOwnedRows(ctx context.Context, fact string, result *walk
 			return err
 		}
 		return e.writeCreditRows(ctx, result)
+	case fact == factTrailer:
+		return e.writeTrailerRows(ctx, result)
 	case nfoFactSet[fact]:
 		return e.writeBodyRows(ctx, result)
 	case art:
@@ -189,6 +191,26 @@ func (e *enricher) writeCreditRows(ctx context.Context, result *walkResult) erro
 	}
 	for _, row := range result.series {
 		if _, err := e.catalog.ReplaceCredits(ctx, row.Library, row.Id, byItem[row.Id]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// The trailer fact owns the trailers rows of the title, as one set per item,
+// the way the credits fact owns its own.
+func (e *enricher) writeTrailerRows(ctx context.Context, result *walkResult) error {
+	byItem := map[string][]trailerRow{}
+	for _, row := range result.trailers {
+		byItem[row.Item] = append(byItem[row.Item], row)
+	}
+	for _, row := range result.movies {
+		if _, err := e.catalog.ReplaceTrailers(ctx, row.Library, row.Id, byItem[row.Id]); err != nil {
+			return err
+		}
+	}
+	for _, row := range result.series {
+		if _, err := e.catalog.ReplaceTrailers(ctx, row.Library, row.Id, byItem[row.Id]); err != nil {
 			return err
 		}
 	}

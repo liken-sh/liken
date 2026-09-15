@@ -281,6 +281,63 @@ func (c *Catalog) UpsertFileItems(ctx context.Context, rows []fileRow) (int, err
 	return c.apply(ctx, statements)
 }
 
+// The write of one trailer in place. The provider and that provider's own key
+// name the row beside the item, so a re-run updates the row and never adds a
+// second one for the same video.
+func (c *Catalog) UpsertTrailers(ctx context.Context, rows []trailerRow) (int, error) {
+	statements := make([]statement, len(rows))
+	for i, row := range rows {
+		statements[i] = statement{
+			sql: `INSERT INTO trailers (library, item, provider, key, site, url, name, kind, ` +
+				`language, official, published, score, reason) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+				`ON CONFLICT (library, item, provider, key) DO UPDATE SET ` +
+				`site = excluded.site, url = excluded.url, name = excluded.name, ` +
+				`kind = excluded.kind, language = excluded.language, ` +
+				`official = excluded.official, published = excluded.published, ` +
+				`score = excluded.score, reason = excluded.reason`,
+			params: []any{row.Library, row.Item, row.Provider, row.Key, row.Site, row.URL,
+				row.Name, row.Kind, row.Language, presentValue(row.Official), row.Published,
+				row.Score, row.Reason},
+		}
+	}
+	return c.apply(ctx, statements)
+}
+
+// The trailers of one item as a set: the old rows leave and the new ones land
+// in one apply. A provider that dropped a video would otherwise leave its row
+// behind.
+func (c *Catalog) ReplaceTrailers(ctx context.Context, library, item string, rows []trailerRow) (int, error) {
+	statements := []statement{{
+		sql:    `DELETE FROM trailers WHERE library = ? AND item = ?`,
+		params: []any{library, item},
+	}}
+	for _, row := range rows {
+		statements = append(statements, statement{
+			sql: `INSERT INTO trailers (library, item, provider, key, site, url, name, kind, ` +
+				`language, official, published, score, reason) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			params: []any{row.Library, row.Item, row.Provider, row.Key, row.Site, row.URL,
+				row.Name, row.Kind, row.Language, presentValue(row.Official), row.Published,
+				row.Score, row.Reason},
+		})
+	}
+	return c.apply(ctx, statements)
+}
+
+// The delete names every key column, so a sweep removes the rows it read and
+// nothing from another library.
+func (c *Catalog) DeleteTrailers(ctx context.Context, library string, keys []trailerKey) (int, error) {
+	statements := make([]statement, len(keys))
+	for i, key := range keys {
+		statements[i] = statement{
+			sql:    `DELETE FROM trailers WHERE library = ? AND item = ? AND provider = ? AND key = ?`,
+			params: []any{library, key.Item, key.Provider, key.Key},
+		}
+	}
+	return c.apply(ctx, statements)
+}
+
 // UpsertAliases writes alias rows in place, so every provider id and the folder
 // key resolve to the item.
 func (c *Catalog) UpsertAliases(ctx context.Context, rows []aliasRow) (int, error) {
@@ -345,7 +402,7 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 // every item row but whose last Job wrote a run is still a library the
 // reporter reports on.
 var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "streams", "runs", "attempts",
-	"contributors", "contributor_aliases", "credits", "genres",
+	"contributors", "contributor_aliases", "credits", "genres", "trailers",
 	"franchises", "franchise_members", "franchise_runs"}
 
 // DeleteFileItems names all three columns of the link row, because all

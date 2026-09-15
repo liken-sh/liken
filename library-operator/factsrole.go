@@ -46,6 +46,8 @@ var factRuns = map[string]factRun{
 	factSeasonBanner: artFactRun(factSeasonBanner),
 	factEpisodeThumb: artFactRun(factEpisodeThumb),
 
+	factTrailer: func(ctx context.Context, e *enricher) error { return e.trailerFact(ctx) },
+
 	factContributorIDs:       contributorFactRun(factContributorIDs),
 	factContributorBiography: contributorFactRun(factContributorBiography),
 	factContributorHeadshot:  contributorFactRun(factContributorHeadshot),

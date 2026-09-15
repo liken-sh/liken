@@ -551,3 +551,60 @@ func TestTheCheckSendsTheKeyInTheFormItsShapeNames(t *testing.T) {
 		})
 	}
 }
+
+// A PeerTube provider is checked at the instance its own block names, and
+// that address wins over the default map.
+func TestTheCheckOfAPeerTubeInstance(t *testing.T) {
+	cases := []struct {
+		name   string
+		suffix string
+	}{
+		{name: "the address the block names"},
+		{name: "an address with a trailing slash", suffix: "/"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			asked := ""
+			instance := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					asked = r.URL.Path
+					w.WriteHeader(http.StatusOK)
+				}))
+			t.Cleanup(instance.Close)
+			cluster := newFakeCluster()
+			provider := providerOfBlock("tube", providerBlockPeerTube)
+			provider.Spec.PeerTube.Endpoint = instance.URL + one.suffix
+			cluster.providers["tube"] = provider
+			operator := testOperator(t, cluster)
+			operator.providerBases[providerBlockPeerTube] = "http://127.0.0.1:1"
+
+			operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+			ready := conditionNamed(cluster.heldProvider("tube").Status.Conditions, conditionReady)
+			if ready.Status != ConditionTrue || ready.Reason != reasonReachable {
+				t.Errorf("Ready = %s/%s, want %s/%s",
+					ready.Status, ready.Reason, ConditionTrue, reasonReachable)
+			}
+			if asked != peertubeCheckPath {
+				t.Errorf("the check asked for %s, want %s", asked, peertubeCheckPath)
+			}
+		})
+	}
+}
+
+// An instance that answers nothing is Unreachable, the way every other block
+// is.
+func TestTheCheckOfAPeerTubeInstanceThatDoesNotAnswer(t *testing.T) {
+	cluster := newFakeCluster()
+	provider := providerOfBlock("tube", providerBlockPeerTube)
+	provider.Spec.PeerTube.Endpoint = "http://127.0.0.1:1"
+	cluster.providers["tube"] = provider
+
+	testOperator(t, cluster).checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+	ready := conditionNamed(cluster.heldProvider("tube").Status.Conditions, conditionReady)
+	if ready.Status != ConditionFalse || ready.Reason != reasonUnreachable {
+		t.Errorf("Ready = %s/%s, want %s/%s",
+			ready.Status, ready.Reason, ConditionFalse, reasonUnreachable)
+	}
+}

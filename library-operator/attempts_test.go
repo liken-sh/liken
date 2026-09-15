@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -348,5 +349,91 @@ func TestTheOldestAttemptPerFactAgainstTheRealSchema(t *testing.T) {
 		if !oldest[fact].Equal(at) {
 			t.Errorf("oldest[%s] = %v, want %v", fact, oldest[fact], at)
 		}
+	}
+}
+
+// The ledger the trailer fact writes, as one title's whole answer.
+const trailerLedger = `trailers:
+    - path: .
+      provider: tmdb
+      key: sJ9mvBJ1aTI
+      site: youtube
+      url: https://www.youtube.com/watch?v=sJ9mvBJ1aTI
+      name: Official Trailer
+      kind: trailer
+      language: en
+      official: true
+      published: "2026-08-01"
+      score: 90
+      reason: official trailer
+    - path: .
+      provider: peertube
+      key: e6b1-4c2f
+      site: peertube
+      url: https://tube.example/w/e6b1-4c2f
+      name: Teaser
+      kind: teaser
+      score: 40
+attempts:
+    - path: .
+      at: 2026-09-02T14:00:00Z
+      result: found
+      provider: [tmdb, peertube]
+`
+
+// The walk lifts one trailer row per entry, keyed on the title the folder
+// holds, beside the attempt of the same file.
+func TestATrailerLedgerYieldsTheTrailerRowsOfItsTitle(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Star Wars (1977)")
+	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factTrailer)), trailerLedger)
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.trailers) != 2 {
+		t.Fatalf("trailers = %+v, want one row per entry", result.trailers)
+	}
+	want := trailerRow{
+		Library: "house/movies", Item: "movie:path:star-wars-1977", Provider: providerBlockTMDb,
+		Key: "sJ9mvBJ1aTI", Site: trailerSiteYouTube,
+		URL:  "https://www.youtube.com/watch?v=sJ9mvBJ1aTI",
+		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en", Official: true,
+		Published: "2026-08-01", Score: 90, Reason: "official trailer",
+	}
+	if result.trailers[0] != want {
+		t.Errorf("trailers[0] = %+v, want %+v", result.trailers[0], want)
+	}
+	if len(result.attempts) != 1 || result.attempts[0].Fact != factTrailer {
+		t.Fatalf("attempts = %+v, want the trailer fact's own", result.attempts)
+	}
+	if result.attempts[0].Item != "movie:path:star-wars-1977" {
+		t.Errorf("attempt = %+v, want the title's own id", result.attempts[0])
+	}
+}
+
+// The full walk writes the trailers it read, so a catalog rebuilt from the
+// volume holds them again.
+func TestTheWalkWritesTheTrailersOfATitleAgainstTheRealSchema(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	dir := filepath.Join(root, "Star Wars (1977)")
+	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factTrailer)), trailerLedger)
+	result := walkMovies(root, "house/movies", nil)
+
+	if err := upsertWalk(t.Context(), catalog, result); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := catalog.queryStrings(t.Context(),
+		`SELECT provider || '|' || key || '|' || official || '|' || score FROM trailers `+
+			`WHERE library = ? ORDER BY provider`, []any{"house/movies"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "peertube|e6b1-4c2f|0|40,tmdb|sJ9mvBJ1aTI|1|90"
+	if got := strings.Join(rows, ","); got != want {
+		t.Errorf("the table holds %q, want %q", got, want)
 	}
 }

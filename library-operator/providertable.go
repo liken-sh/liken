@@ -22,6 +22,7 @@ var providerFacts = map[string][]string{
 		factLogo,
 		factSeasonPoster,
 		factEpisodeThumb,
+		factTrailer,
 		factContributorIDs,
 		factContributorBiography,
 		factContributorHeadshot,
@@ -60,6 +61,11 @@ var providerFacts = map[string][]string{
 		factBackdrop,
 		factBanner,
 	},
+	// A PeerTube instance holds videos alone, so it serves the trailer fact
+	// and nothing else.
+	providerBlockPeerTube: {
+		factTrailer,
+	},
 }
 
 // The block names of the table's rows, which are the field names of
@@ -69,6 +75,9 @@ const (
 	providerBlockOMDb   = "omdb"
 	providerBlockFanart = "fanart"
 	providerBlockTVmaze = "tvmaze"
+	// The peertube block is one instance, named by its address and not by an
+	// account.
+	providerBlockPeerTube = "peertube"
 )
 
 // The block this provider names. A provider that names none has no row in the
@@ -83,6 +92,8 @@ func (p *MetadataProvider) block() string {
 		return providerBlockFanart
 	case p.Spec.TVmaze != nil:
 		return providerBlockTVmaze
+	case p.Spec.PeerTube != nil:
+		return providerBlockPeerTube
 	}
 	return ""
 }

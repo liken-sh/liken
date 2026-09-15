@@ -188,7 +188,8 @@ func releaseDates(fact string) string {
 	if _, art := artTypes[fact]; art {
 		return artReleaseDates(fact)
 	}
-	if fact == factIdentity || fact == factCredits || slices.Contains(nfoFacts, fact) {
+	if fact == factIdentity || fact == factCredits || fact == factTrailer ||
+		slices.Contains(nfoFacts, fact) {
 		return titleReleaseDates("id")
 	}
 	return ""
@@ -261,6 +262,8 @@ var gapQueries = map[string]string{
 	factSeasonPoster:         seasonArtGapSQL(factSeasonPoster),
 	factSeasonBanner:         seasonArtGapSQL(factSeasonBanner),
 	factEpisodeThumb:         episodeThumbGapSQL(),
+
+	factTrailer: trailerGapQuery(),
 
 	factContributorIDs:       contributorIDsGapSQL(),
 	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),

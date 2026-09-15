@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -25,11 +26,16 @@ type providerReach struct {
 }
 
 var providerReaches = map[string]providerReach{
-	providerBlockTMDb:   {path: tmdbConfigurationPath, authorize: authorizeTMDb},
-	providerBlockOMDb:   {path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter)},
-	providerBlockFanart: {path: fanartCheckPath, authorize: authorizeParameter(fanartAPIKeyParam)},
-	providerBlockTVmaze: {path: tvmazeCheckPath},
+	providerBlockTMDb:     {path: tmdbConfigurationPath, authorize: authorizeTMDb},
+	providerBlockOMDb:     {path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter)},
+	providerBlockFanart:   {path: fanartCheckPath, authorize: authorizeParameter(fanartAPIKeyParam)},
+	providerBlockTVmaze:   {path: tvmazeCheckPath},
+	providerBlockPeerTube: {path: peertubeCheckPath},
 }
+
+// The call every PeerTube instance answers with no account. It is the
+// cheapest read an instance serves, so the check costs one small request.
+const peertubeCheckPath = "/api/v1/config"
 
 // The address of each provider the check calls, which a test replaces with a
 // server of its own.
@@ -174,7 +180,7 @@ func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider
 		return verdict, err
 	}
 
-	status, err := o.askProvider(ctx, block, key)
+	status, err := o.askProvider(ctx, provider, key)
 	if err != nil {
 		return providerVerdict{reason: reasonUnreachable, message: err.Error()}, nil
 	}
@@ -216,13 +222,14 @@ func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) 
 // The request carries a timeout of its own, so a provider that stops
 // answering costs the pass its check and no more. The key travels in the form
 // its shape names.
-func (o *operator) askProvider(ctx context.Context, block, key string) (int, error) {
+func (o *operator) askProvider(ctx context.Context, provider *MetadataProvider, key string) (int, error) {
 	asking, done := context.WithTimeout(ctx, providerCheckTimeout)
 	defer done()
 
+	block := provider.block()
 	reach := providerReaches[block]
 	request, err := http.NewRequestWithContext(asking, http.MethodGet,
-		o.providerBases[block]+reach.path, nil)
+		o.providerBase(provider)+reach.path, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -237,6 +244,27 @@ func (o *operator) askProvider(ctx context.Context, block, key string) (int, err
 	}
 	drain(response.Body)
 	return response.StatusCode, nil
+}
+
+// The address the check calls for one provider: the endpoint the block
+// names where it names one, and the fixed address of the service where it
+// does not. A test replaces the fixed addresses; an endpoint in the spec
+// stands as written.
+func (o *operator) providerBase(provider *MetadataProvider) string {
+	if endpoint := provider.endpoint(); endpoint != "" {
+		return endpoint
+	}
+	return o.providerBases[provider.block()]
+}
+
+// The address the provider's block names. Only the peertube block names
+// one, because a PeerTube instance is one server among many. Every other
+// block is one service at one fixed address, so this is empty for them.
+func (p *MetadataProvider) endpoint() string {
+	if p.Spec.PeerTube != nil {
+		return strings.TrimSuffix(p.Spec.PeerTube.Endpoint, "/")
+	}
+	return ""
 }
 
 // The Sources condition's reasons: every named provider resolves, one does

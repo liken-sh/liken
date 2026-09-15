@@ -7,9 +7,11 @@ fact the first provider in that list that serves it is the one
 asked.
 
 A `MetadataProvider` names exactly one provider block: `tmdb`,
-`omdb`, `fanart`, or `tvmaze`. TMDb, OMDb, and Fanart.tv take a key
-from a `Secret`; TVmaze takes none, so its block is empty. The
-`PROVIDER` column shows the block.
+`omdb`, `fanart`, `tvmaze`, or `peertube`. TMDb, OMDb, and Fanart.tv
+take a key from a `Secret`; TVmaze takes none, so its block is empty.
+PeerTube takes no key either, but it is software that many people
+run, so its block names the address of one instance. The `PROVIDER`
+column shows the block.
 
 `spec.facts` is optional. A provider that names none serves every
 fact the operator knows how to ask it for, and `status.facts`, shown
