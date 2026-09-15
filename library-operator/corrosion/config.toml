@@ -56,6 +56,16 @@ addr = "0.0.0.0:8787"
 # TLS needs a certificate per pod that nothing in this project mints.
 plaintext = true
 
+# How long, in seconds, an agent remembers a member that left. Foca
+# keeps announcing to a remembered member, and every announcement to a
+# pod that is gone is a QUIC connect attempt that ends in a five-second
+# timeout. A scan Job's agent leaves every hour and never returns under
+# the same identity, and the fork's default remembers it for two days.
+# Five minutes is longer than the thirty seconds foca takes to declare
+# a silent member down, so a member is never forgotten while it is
+# still suspect.
+remove_down_after_secs = 300
+
 # The bootstrap list names `catalog`, a short name with no namespace.
 # The pod's own search path resolves it to the `catalog` `Service` in
 # the pod's namespace. The operator creates that `Service` in every

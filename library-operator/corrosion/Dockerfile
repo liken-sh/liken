@@ -11,7 +11,7 @@
 # same bytes, and a move to a newer Corrosion is a change to this
 # line that a release carries. The fork's liken/README.md lists what
 # its stack holds at each release.
-FROM ghcr.io/liken-sh/corrosion:2026.09.09-003@sha256:a06db3afa62e35601b39765624be551afd71b44200c806b117f385e1486cc899
+FROM ghcr.io/liken-sh/corrosion:2026.09.15-001@sha256:6b438397d511769405e1f2c813cc4402899d15f6129ca517be3815349ff828eb
 
 # The configurations and the schemas arrive in the image because the
 # pod has no shell to render a file and no `ConfigMap` for the sidecar.
