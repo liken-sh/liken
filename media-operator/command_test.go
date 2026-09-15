@@ -469,8 +469,6 @@ func TestTheFirstLevelOfASessionAppliesSilently(t *testing.T) {
 	mustNoLine(t, lines, 100*time.Millisecond)
 }
 
-// mustNoLine fails when the sidecar writes anything to mpv inside this
-// window.
 // bridgeToMPV is a commander wired to a socket a test reads, so a message the
 // sidecar sends comes back as the line mpv would receive.
 func bridgeToMPV(t *testing.T) (*commander, <-chan string) {
@@ -499,6 +497,8 @@ func waitForLine(t *testing.T, lines <-chan string) string {
 	}
 }
 
+// mustNoLine fails when the sidecar writes anything to mpv inside this
+// window.
 func mustNoLine(t *testing.T, lines <-chan string, window time.Duration) {
 	t.Helper()
 	select {

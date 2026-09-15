@@ -600,7 +600,7 @@ func (c *commander) send(report playReport) error {
 //
 // A run that never reported publishes nothing, the same rule the reporter
 // follows: mpv has not said which item plays, so there are no numbers to
-// carry, and the pod's own death is what ends such a run. The art server
+// carry, and the pod's own death is what ends such a run. The block server
 // runs this same code with no bus, and it publishes nothing either.
 //
 // The answer is whether this call is the one that marked the run over. A
@@ -779,18 +779,13 @@ type reportSender func(playReport) error
 // like reportSender, so a test catches the forward with no mpv socket.
 type itemPresenter func(item int)
 
-// playlistReceiver is how mpv's playlist leaves the loop, a function like
-// itemPresenter. The playlist takes its own path out because it settles each
-// item's album art, and no field of the report carries it.
-type playlistReceiver func(playlist json.RawMessage)
-
 // runReporter is the whole reporting rule in one loop: fold the change,
 // send it now when it is one of the two that matter, and otherwise send
 // no more than one report per interval. A send that fails is logged and
 // the run goes on, because the loss is the operator's view of the film
 // and not a reason to stop playing.
 //
-// metrics is nil for the art server and for a test with no use for it;
+// metrics is nil for the block server and for a test with no use for it;
 // every call through it is guarded. It observes the four decode
 // properties that play no part in the report at all, alongside the
 // ones that do, because mpv delivers every property change on the

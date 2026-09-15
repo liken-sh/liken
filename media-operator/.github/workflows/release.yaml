@@ -16,8 +16,9 @@
 # The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The five images release together, always, and four Dockerfiles
-# build them: the sidecar image is the operator image under a second
+# The five images release together, always, and three Dockerfiles
+# build them: the idle image and the display image are two targets of
+# one file, and the sidecar image is the operator image under a second
 # name, tagged here and never built twice. The operator stamps the
 # player image into every playback pod, the idle image into every idle
 # pod, the display image into every display container, and the sidecar
@@ -150,7 +151,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.idle
+          file: Dockerfile.screen
+          target: idle
           load: true
           cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache
           cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache,mode=max
@@ -162,7 +164,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.display
+          file: Dockerfile.screen
+          target: display
           load: true
           cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache
           cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache,mode=max
@@ -192,6 +195,17 @@ jobs:
         run: |
           set -eu
           docker run --rm "ghcr.io/liken-sh/media-operator-idle:$VERSION" --help > /dev/null
+
+      # The gate on the display image. The binary takes no flag that prints
+      # and exits, so the loader in --list mode resolves the whole closure and
+      # exits non-zero when a library is missing. A library the toolkit opens
+      # by name at run time is not covered by this.
+      - name: Prove the display image
+        run: |
+          set -eu
+          docker run --rm --entrypoint /lib64/ld-linux-x86-64.so.2 \
+            "ghcr.io/liken-sh/media-operator-display:$VERSION" \
+            --list /media-display > /dev/null
 
       # The gate on the player image. The runner has no GPU, no
       # Wayland, and no PipeWire, so nothing here plays; what can

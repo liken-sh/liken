@@ -566,6 +566,13 @@ func testPodWithPreferences(t *testing.T, prefs resolvedPreferences) *Pod {
 		nil, prefs, "")
 }
 
+func TestThePlaybackPodMountsNoServiceAccountToken(t *testing.T) {
+	pod := testPod(t)
+
+	mustMatch(t, pod.Spec.AutomountServiceAccountToken != nil, true)
+	mustMatch(t, *pod.Spec.AutomountServiceAccountToken, false)
+}
+
 func TestBuildPodRunsThePlayerTheCommandSidecarAndTheDisplay(t *testing.T) {
 	pod := testPod(t)
 
@@ -576,6 +583,18 @@ func TestBuildPodRunsThePlayerTheCommandSidecarAndTheDisplay(t *testing.T) {
 	mustMatch(t, display.Image, testDisplayImage)
 	mustMatch(t, display.RestartPolicy, sidecarRestartPolicy)
 	mustMatchAll(t, display.Command, nil)
+}
+
+func TestAPlayerWithNoDisplayGetsNoDisplayContainer(t *testing.T) {
+	play := testPlay()
+	player := testPlayer()
+	player.Spec.Display = nil
+	pod := buildPod(play, buildClaim(play, player), testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
+		nil, resolvedPreferences{}, "")
+
+	mustMatch(t, len(pod.Spec.Containers), 1)
+	mustMatchAll(t, initContainerNames(pod), []string{commandContainer})
 }
 
 func TestTheDisplayContainerHoldsThePlayersRequests(t *testing.T) {
@@ -593,8 +612,8 @@ func TestTheDisplayContainerMountsTheIPCVolumeAndTheMedia(t *testing.T) {
 	display := initContainer(t, testPod(t), displayContainer)
 
 	mustMatchAll(t, display.VolumeMounts,
-		append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}}, testResolution(t).Mounts...))
-	for _, mount := range display.VolumeMounts[1:] {
+		append(testResolution(t).Mounts, VolumeMount{Name: "ipc", MountPath: "/ipc"}))
+	for _, mount := range display.VolumeMounts[:len(display.VolumeMounts)-1] {
 		mustMatch(t, mount.ReadOnly, true)
 	}
 }

@@ -5,7 +5,7 @@
 
 use iced::{Point, Rectangle, Size};
 
-use crate::canvas::{self, Anchor, Brush, Line};
+use crate::canvas::{Anchor, Brush, Line, clip};
 use crate::theme;
 
 const X: f32 = theme::MARGIN_X;
@@ -24,9 +24,6 @@ const MAX_ROWS: usize = 8;
 // padding. The toolkit measures the run.
 const MAX_WIDTH: f32 = W - 2.0 * PAD;
 
-/// The one mark a clipped row ends on.
-const ELLIPSIS: char = '\u{2026}';
-
 /// One panel of rows, and where each row draws.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Panel {
@@ -41,26 +38,6 @@ pub struct Row {
     pub label: String,
     pub y: f32,
     pub selected: bool,
-}
-
-// A row that does not fit the panel ends in an ellipsis, and the mark
-// itself has to fit inside the same width.
-pub fn clip(text: &str) -> String {
-    if canvas::measure(text, theme::type_scale::LABEL) <= MAX_WIDTH {
-        return text.to_string();
-    }
-    let mut kept = String::new();
-    for character in text.chars() {
-        let mut tried = kept.clone();
-        tried.push(character);
-        tried.push(ELLIPSIS);
-        if canvas::measure(&tried, theme::type_scale::LABEL) > MAX_WIDTH {
-            break;
-        }
-        kept.push(character);
-    }
-    kept.push(ELLIPSIS);
-    kept
 }
 
 /// The panel one list draws as, at the entry it stands on.
@@ -82,7 +59,7 @@ pub fn panel(entries: &[String], selected: usize) -> Panel {
         shape: Rectangle::new(Point::new(X, top), Size::new(W, height)),
         rows: (first..first + visible)
             .map(|at| Row {
-                label: clip(&entries[at]),
+                label: clip(&entries[at], theme::type_scale::LABEL, MAX_WIDTH),
                 y: row0 + (at - first) as f32 * ROW_H,
                 selected: at == selected,
             })
@@ -101,8 +78,7 @@ pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize) {
                     Size::new(W - PAD, ROW_H - 4.0),
                 ),
                 8.0,
-                theme::color::fill(),
-                theme::alpha::HIGHLIGHT,
+                theme::at(theme::color::fill(), theme::alpha::HIGHLIGHT),
             );
         }
         brush.text(Line::new(
@@ -175,18 +151,19 @@ mod tests {
     #[test]
     fn a_row_too_wide_for_the_panel_ends_in_an_ellipsis() {
         let long = "Director's commentary with the cast, the crew, every last one of their friends, and the caterers who fed them (ENG)";
-        let clipped = clip(long);
-        assert!(clipped.ends_with(ELLIPSIS));
+        let clipped = panel(&[long.to_string()], 0).rows[0].label.clone();
+        assert!(clipped.ends_with(crate::canvas::ELLIPSIS));
         assert!(clipped.chars().count() < long.chars().count());
-        assert!(canvas::measure(&clipped, theme::type_scale::LABEL) <= MAX_WIDTH);
-        assert!(canvas::measure(long, theme::type_scale::LABEL) > MAX_WIDTH);
+        assert!(crate::canvas::measure(&clipped, theme::type_scale::LABEL) <= MAX_WIDTH);
+        assert!(crate::canvas::measure(long, theme::type_scale::LABEL) > MAX_WIDTH);
     }
 
     /// A row that fits draws as it is, marks and all.
     #[test]
     fn a_row_that_fits_draws_as_it_is() {
-        assert_eq!(clip("English (ENG)"), "English (ENG)");
-        assert_eq!(clip(""), "");
-        assert_eq!(clip("\u{6771}\u{4EAC} (JPN)"), "\u{6771}\u{4EAC} (JPN)");
+        let row = |label: &str| panel(&[label.to_string()], 0).rows[0].label.clone();
+        assert_eq!(row("English (ENG)"), "English (ENG)");
+        assert_eq!(row(""), "");
+        assert_eq!(row("\u{6771}\u{4EAC} (JPN)"), "\u{6771}\u{4EAC} (JPN)");
     }
 }

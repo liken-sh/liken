@@ -246,8 +246,9 @@ spec:
                   # press reaches.
                   description: >-
                     The controllers this unit owns, each naming a
-                    Remote in the same namespace. The Play's pod builds
-                    one translator sidecar per entry.
+                    Remote in the same namespace. Each Remote runs a
+                    standing pod of its own, and the Play's command
+                    sidecar reads the events every entry publishes.
                   items:
                     type: object
                     required: [name]

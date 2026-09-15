@@ -12,9 +12,9 @@
 # wrong the day someone adds a file it does not name, and the push
 # that adds it would then land untested.
 #
-# The four test jobs are independent, so they run at once, and the
+# The three test jobs are independent, so they run at once, and the
 # gate takes as long as its slowest job. The publish job waits for all
-# four, so a red gate never reaches the site.
+# three, so a red gate never reaches the site.
 name: ci
 
 on:
@@ -153,8 +153,8 @@ jobs:
         run: rustup show
 
       # The cache holds the cargo registry and target/, keyed on
-      # Cargo.lock. The two crates are one workspace at the repository
-      # root, so one entry covers both. Almost all of the build is
+      # Cargo.lock. The three crates are one workspace at the repository
+      # root, so one entry covers them all. Almost all of the build is
       # dependencies, and they change only when the lock file changes.
       - uses: Swatinem/rust-cache@v2
         with:
@@ -169,13 +169,13 @@ jobs:
           tool: cargo-llvm-cov
 
       # The same target a workstation runs: the format, the lints,
-      # and the tests under the coverage gates. idle/Makefile holds
-      # the two floors.
+      # and the tests under the coverage gates. The root Makefile holds
+      # the three floors.
       - run: make test-rust
 
       # One Cobertura file per crate, written beside each gate, for
-      # the publish job to draw the report from. Both go under one
-      # artifact name, and the publish job takes the pair as it is.
+      # the publish job to draw the report from. All three go under one
+      # artifact name, and the publish job takes them as they are.
       - uses: actions/upload-artifact@v6
         with:
           name: coverage-rust
@@ -214,9 +214,11 @@ jobs:
           - image: media-operator-player
             file: Dockerfile.player
           - image: media-operator-idle
-            file: Dockerfile.idle
+            file: Dockerfile.screen
+            target: idle
           - image: media-operator-display
-            file: Dockerfile.display
+            file: Dockerfile.screen
+            target: display
     steps:
       # The idle image compiles liken-iced out of the brand submodule
       # at docs/themes/brand, so the context needs it checked out.
@@ -237,6 +239,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
 

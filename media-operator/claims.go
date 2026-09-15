@@ -166,6 +166,29 @@ func claimRequests(claim *ResourceClaim) []string {
 	return names
 }
 
+// claimEntries lists the claim's requests as the entries a container's
+// resources.claims repeats.
+func claimEntries(claim *ResourceClaim) []ContainerClaim {
+	var entries []ContainerClaim
+	for _, request := range claimRequests(claim) {
+		entries = append(entries, ContainerClaim{Name: podClaimName, Request: request})
+	}
+	return entries
+}
+
+// claimHasScreen says whether the claim carries the screen request. The
+// claim asks for a screen only for a Player that states a display, and
+// the pod builder reads this to decide whether the display container
+// travels: a unit with nothing to see gets no display container.
+func claimHasScreen(claim *ResourceClaim) bool {
+	for _, request := range claim.Spec.Devices.Requests {
+		if request.Name == screenRequest {
+			return true
+		}
+	}
+	return false
+}
+
 // claimHasSink reports whether this claim requests a speaker. The
 // claim carries one request per sink the Player states, and none for
 // a Player that states no sink, so it is the speaker gate the pod

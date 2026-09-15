@@ -1,14 +1,13 @@
 # The root Makefile names the checks a change must pass, and delegates
 # each one to the domain that owns it. `make test` runs every check CI
 # runs, in the same commands, so a change that passes here passes
-# there. The Go operator is the module at the root, so its checks are
-# here; the Rust crates and the docs are their own domains with
-# their own Makefiles.
+# there. The Go operator is the module at the root and the Rust crates
+# are the workspace at the root, so their checks are here; the docs are
+# their own domain with their own Makefile.
 #
 # The coverage floors are the one number each gate enforces: the Go
-# floor is in .testcoverage.yml, and the three Rust floors are in
-# idle/Makefile. CI reads the same files, so a floor moves in one
-# place.
+# floor is in .testcoverage.yml, and the three Rust floors are below.
+# CI reads the same files, so a floor moves in one place.
 
 .PHONY: test
 test: test-go test-rust test-docs
@@ -53,11 +52,67 @@ test-go:
 
 # The Rust half is a cargo workspace with three members: the media-screen
 # library, the idle screen that draws with it, and the display a playback
-# pod draws over the film. idle/Makefile holds every gate and runs cargo
-# at the workspace root.
+# pod draws over the film.
+#
+# The Rust checks: the format, the lints, and the tests under a coverage
+# gate. cargo-llvm-cov runs the tests itself and measures every line they
+# reach, so one command is both the test run and the gate. The unit tests
+# cover the parsers, the rules, the measurements, and the timeline; the
+# integration test runs the binary under cage on the headless backend, so
+# the frame loop and the graphics setup count too. That test needs cage,
+# wlr-randr, and a Vulkan device, and Mesa's lavapipe is enough of one.
+#
+# The three crates share a lock file and a target tree, so one invocation
+# covers them all. Each crate keeps a floor of its own, because they earn
+# different numbers: media-screen is rules plus one thread over a socket,
+# the idle screen carries a window, and the display's own window half
+# needs a compositor no unit test has.
+
+# The floor on line coverage, as a percentage, one per crate. CI enforces the
+# same numbers through this file. Raise one when the tests earn it; never
+# lower it.
+IDLE_COVERAGE_FLOOR := 95
+SCREEN_COVERAGE_FLOOR := 99
+DISPLAY_COVERAGE_FLOOR := 90
+
 .PHONY: test-rust
 test-rust:
-	$(MAKE) -C idle test
+	cargo fmt --check
+	cargo clippy --workspace --all-targets -- -D warnings
+# The image builds with `measure` off, so the lints run over that build
+# too. The pass is the library and the binary alone, because the test
+# targets reach the flags and the measurements the feature carries.
+	cargo clippy -p idle-screen --no-default-features --lib --bins -- -D warnings
+# The three gates share one instrumented target tree, and the idle test
+# binary links media-screen, so its profiles count media-screen lines
+# the idle tests never reach. Each gate starts from no profiles, so it
+# measures its own tests alone. The first gate also starts from no
+# objects: llvm-cov reads every test binary left in the target tree,
+# and the idle binaries from an earlier run carry a second copy of
+# media-screen that the media-screen tests never run, which reads as
+# half the crate uncovered.
+#
+# Each gate is followed by a report of the same run, as a Cobertura
+# file at the workspace root. `cargo llvm-cov report` reads the
+# profiles the gate wrote, so it must run before the next clean
+# deletes them. A report after every gate would measure one crate
+# under another's tests. The three files are inputs to
+# `make coverage-report`, which draws the page the site publishes.
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov -p media-screen --all-targets \
+		--fail-under-lines $(SCREEN_COVERAGE_FLOOR)
+	cargo llvm-cov report -p media-screen \
+		--cobertura --output-path coverage-media-screen.xml
+	cargo llvm-cov clean --workspace --profraw-only
+	cargo llvm-cov -p idle-screen --all-targets \
+		--fail-under-lines $(IDLE_COVERAGE_FLOOR)
+	cargo llvm-cov report -p idle-screen \
+		--cobertura --output-path coverage-idle-screen.xml
+	cargo llvm-cov clean --workspace --profraw-only
+	cargo llvm-cov -p media-display --all-targets \
+		--fail-under-lines $(DISPLAY_COVERAGE_FLOOR)
+	cargo llvm-cov report -p media-display \
+		--cobertura --output-path coverage-display.xml
 
 .PHONY: test-docs
 test-docs:

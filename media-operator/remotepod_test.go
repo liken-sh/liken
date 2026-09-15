@@ -143,6 +143,15 @@ func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
 // it tolerates the taint that keeps unrelated work off that machine. It
 // tolerates that key alone, and for scheduling alone, so a NoExecute
 // taint still moves it away.
+func TestBuildRemotePodMountsNoServiceAccountToken(t *testing.T) {
+	remote := standingRemote()
+	pod := buildRemotePod(remote, buildRemoteClaim(remote),
+		testSidecarImage, testBusAddress, testTopicBase)
+
+	mustMatch(t, pod.Spec.AutomountServiceAccountToken != nil, true)
+	mustMatch(t, *pod.Spec.AutomountServiceAccountToken, false)
+}
+
 func TestBuildRemotePodToleratesThePlayerNodeTaint(t *testing.T) {
 	remote := standingRemote()
 	pod := buildRemotePod(remote, buildRemoteClaim(remote), testSidecarImage, testBusAddress, testTopicBase)

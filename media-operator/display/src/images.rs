@@ -23,7 +23,7 @@ pub fn lines(canvas: &Canvas, film: &Film) -> Vec<Line> {
     let count = film.playlist_count.unwrap_or(1);
     vec![Line::new(
         format!("{at} of {count}"),
-        Point::new(canvas.width / 2.0, theme::BAR_Y),
+        Point::new(canvas.centre_x(), theme::BAR_Y),
         Anchor::Centre,
         theme::type_scale::SMALL,
         theme::color::muted(),

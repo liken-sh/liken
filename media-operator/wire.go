@@ -117,8 +117,8 @@ const (
 	// sets it on neither, and a pod that reads none offers nothing.
 	nextVariable = "MEDIA_NEXT"
 
-	// Carries a Play's trickplayInterval to the bridge. The tile width, the
-	// grid, and the tile height are on the sheets, so the bridge reads them.
+	// Carries a Play's trickplayInterval to the display. The tile width, the
+	// grid, and the tile height are on the sheets, so the display reads them.
 	// The interval is not on the sheets, so the Play declares it and the pod
 	// passes it here.
 	trickplayIntervalVariable = "MEDIA_TRICKPLAY_INTERVAL"

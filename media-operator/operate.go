@@ -1361,9 +1361,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if err != nil {
 		return nil, false, err
 	}
-	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.displayImage,
-		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)
-	if !claimChanged && sameRemoteSet(running, desired) {
+	if !claimChanged && sameRemoteSet(running, remotes) {
 		return running, false, nil
 	}
 	pod, err := o.recreate(play, claim, resolved, prefs, remotes, claimChanged)

@@ -4,7 +4,7 @@
 //! mpv delivers a `script-message` to every client and an IPC client cannot
 //! be named.
 
-use std::hash::{Hash, Hasher};
+use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -34,19 +34,16 @@ pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 /// The two delays are observed here. An IPC client reads a property over the
 /// same socket it draws from, so the display holds every value it draws and
 /// asks for nothing inside a frame.
-pub const OBSERVED: [&str; 19] = [
+pub const OBSERVED: [&str; 16] = [
     "duration",
     "time-pos",
-    "percent-pos",
     "chapter",
     "chapter-list",
     "chapter-metadata/by-key/title",
     "metadata",
     "track-list",
-    "aid",
     "media-title",
     "path",
-    "sid",
     "playlist-pos",
     "playlist-count",
     "pause",
@@ -116,7 +113,13 @@ pub enum Event {
 /// One line mpv wrote.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Incoming {
-    Reply { id: u64, data: Value },
+    /// One answer to a command, and what mpv made of it. `success` is the
+    /// word for a command mpv ran.
+    Reply {
+        id: u64,
+        data: Value,
+        error: String,
+    },
     Event(Event),
 }
 
@@ -148,20 +151,28 @@ pub fn get_property(id: u64, name: &str) -> String {
 /// One line mpv wrote, as the display reads it. A line that is not JSON, and
 /// an event this display has no case for, read as nothing.
 pub fn decode(line: &str) -> Option<Incoming> {
-    let message: Value = serde_json::from_str(line).ok()?;
-    match message.get("event").and_then(Value::as_str) {
+    // The line is this reader's own, so every field is taken out of it
+    // rather than copied: a `track-list` push carries the whole list.
+    let Value::Object(mut message) = serde_json::from_str::<Value>(line).ok()? else {
+        return None;
+    };
+    let event = message.remove("event");
+    match event.as_ref().and_then(Value::as_str) {
         Some("property-change") => {
-            let name = message.get("name")?.as_str()?.to_string();
-            let value = message.get("data").cloned().unwrap_or(Value::Null);
+            let Some(Value::String(name)) = message.remove("name") else {
+                return None;
+            };
+            let value = message.remove("data").unwrap_or(Value::Null);
             Some(Incoming::Event(Event::Property { name, value }))
         }
         Some("client-message") => {
-            let arguments = message
-                .get("args")?
-                .as_array()?
-                .iter()
+            let Some(Value::Array(arguments)) = message.remove("args") else {
+                return None;
+            };
+            let arguments = arguments
+                .into_iter()
                 .map(|argument| match argument {
-                    Value::String(word) => word.clone(),
+                    Value::String(word) => word,
                     other => other.to_string(),
                 })
                 .collect();
@@ -170,11 +181,19 @@ pub fn decode(line: &str) -> Option<Incoming> {
         Some(_) => None,
         None => {
             let id = message.get("request_id")?.as_u64()?;
-            let data = message.get("data").cloned().unwrap_or(Value::Null);
-            Some(Incoming::Reply { id, data })
+            let data = message.remove("data").unwrap_or(Value::Null);
+            let error = match message.remove("error") {
+                Some(Value::String(error)) => error,
+                _ => String::new(),
+            };
+            Some(Incoming::Reply { id, data, error })
         }
     }
 }
+
+/// The word mpv answers a command it ran with. Every other word is a command
+/// it refused.
+const RAN: &str = "success";
 
 /// The mpv socket the display reads.
 #[derive(Debug, Clone)]
@@ -255,21 +274,6 @@ impl Ipc {
     }
 }
 
-// The socket and the channel the frame loop writes its commands to, as one
-// subscription. The path alone names the subscription, so a redraw that
-// rebuilds it attaches to the same socket instead of dialing again.
-#[derive(Debug, Clone)]
-pub struct Wire {
-    pub path: PathBuf,
-    pub commands: broadcast::Sender<String>,
-}
-
-impl Hash for Wire {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-    }
-}
-
 /// One attachment: observe every property, then read lines until the socket
 /// closes.
 ///
@@ -295,15 +299,28 @@ where
         .write_all(line(&vec![json!("script-message"), json!(PRESENTATION_REQUEST)]).as_bytes())
         .await?;
 
+    // Every command the display sends carries one request id, so a refusal
+    // cannot be traced back to the press that made it. The kind of refusal
+    // can, and one line per kind says what mpv would not do without a line
+    // per frame of a held press.
+    let mut refused: HashSet<String> = HashSet::new();
     let mut lines = BufReader::new(reader).lines();
     loop {
         tokio::select! {
             read = lines.next_line() => {
                 let Some(read) = read? else { return Ok(()) };
-                if let Some(Incoming::Event(event)) = decode(&read)
-                    && events.send(event).await.is_err()
-                {
-                    return Ok(());
+                match decode(&read) {
+                    Some(Incoming::Event(event)) => {
+                        if events.send(event).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Some(Incoming::Reply { error, .. })
+                        if error != RAN && refused.insert(error.clone()) =>
+                    {
+                        eprintln!("media-display: mpv refused a command: {error}");
+                    }
+                    _ => {}
                 }
             }
             written = commands.recv() => {
@@ -332,10 +349,10 @@ where
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
         match decode(&line) {
-            Some(Incoming::Reply { id, data }) if id == GATE[0].0 => {
+            Some(Incoming::Reply { id, data, .. }) if id == GATE[0].0 => {
                 playing = Some(data.is_number());
             }
-            Some(Incoming::Reply { id, data }) if id == GATE[1].0 => {
+            Some(Incoming::Reply { id, data, .. }) if id == GATE[1].0 => {
                 configured = Some(data == Value::Bool(true));
             }
             _ => continue,
@@ -415,6 +432,7 @@ mod tests {
             Some(Incoming::Reply {
                 id: 1,
                 data: json!(42.0),
+                error: "success".to_string(),
             })
         );
         assert_eq!(
@@ -422,6 +440,7 @@ mod tests {
             Some(Incoming::Reply {
                 id: 1,
                 data: Value::Null,
+                error: "property unavailable".to_string(),
             })
         );
     }

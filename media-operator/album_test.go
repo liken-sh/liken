@@ -5,8 +5,6 @@ package main
 // no video.
 
 import (
-	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -14,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/media-operator/edl"
+	"github.com/liken-sh/media-operator/edl/edltest"
 )
 
 // useAlbumDir moves the directory the shim writes timelines into for the
@@ -25,53 +24,13 @@ func useAlbumDir(t *testing.T, path string) {
 	albumTimelineDir = path
 }
 
-// id3Frame is one frame of the fixture tag: the four-character name and the
-// bytes that follow the frame header.
-type id3Frame struct {
-	name    string
-	payload []byte
-}
-
-// textFrame builds one ISO-8859-1 text frame, the encoding byte and the text.
-func textFrame(name, value string) id3Frame {
-	return id3Frame{name: name, payload: append([]byte{0}, value...)}
-}
-
-// writeMedia writes one media file with an ID3v2.3 tag: the ten-byte header,
-// the frames, and a few 0xFF bytes where the audio would start. The tag is the
-// whole of what a reader takes, so the fixture needs no audio.
-func writeMedia(t *testing.T, path string, frames ...id3Frame) string {
-	t.Helper()
-	var body bytes.Buffer
-	for _, frame := range frames {
-		body.WriteString(frame.name)
-		mustSucceed(t, binary.Write(&body, binary.BigEndian, uint32(len(frame.payload))))
-		body.Write([]byte{0, 0})
-		body.Write(frame.payload)
-	}
-
-	var file bytes.Buffer
-	file.WriteString("ID3")
-	file.Write([]byte{3, 0, 0})
-	size := 10 + body.Len()
-	file.Write([]byte{
-		byte(size>>21) & 0x7f, byte(size>>14) & 0x7f,
-		byte(size>>7) & 0x7f, byte(size) & 0x7f,
-	})
-	file.Write(body.Bytes())
-	file.Write(bytes.Repeat([]byte{0xff}, 8))
-
-	mustSucceed(t, os.WriteFile(path, file.Bytes(), 0o644))
-	return path
-}
-
 // albumFixture writes one album folder: two tracks, one tagged and one not,
 // and a cover file that is no track.
 func albumFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeMedia(t, filepath.Join(dir, "02 - Masterswarm.mp3"))
-	writeMedia(t, filepath.Join(dir, "01 - first.mp3"), textFrame("TIT2", "Oh No"))
+	edltest.WriteTrack(t, filepath.Join(dir, "02 - Masterswarm.mp3"))
+	edltest.WriteTrack(t, filepath.Join(dir, "01 - first.mp3"), edltest.TextFrame("TIT2", "Oh No"))
 	mustSucceed(t, os.WriteFile(filepath.Join(dir, "cover.jpg"), []byte("not a track"), 0o644))
 	return dir
 }

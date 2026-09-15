@@ -38,37 +38,37 @@ const TILE_H: f32 = 220.0;
 /// label and the bar, and grows upward from this line.
 const TILE_BOTTOM_Y: f32 = 836.0;
 
-// The tile gate still holds a deadline although the decode runs in this
-// process. Every task answers, so the deadline stands only for a task the
-// frame loop never hears from, and without it one such task would stop
-// every later tile for the rest of the item.
-// this process: every task answers, so this stands only for a task the frame
-// loop never hears from, and without it one such task would stop every later
-// tile for the rest of the item.
-const REPLY_TIMEOUT: f64 = 1.0;
-
 /// The region the cover fits in: between the left margin and the right one,
 /// and from under the header block to above the scrubber.
-const REGION_X: f32 = theme::MARGIN_X;
 const REGION_TOP: f32 = 300.0;
 const REGION_BOTTOM: f32 = 832.0;
 const BOX_H: f32 = REGION_BOTTOM - REGION_TOP;
 const CENTER_Y: f32 = REGION_TOP + BOX_H / 2.0;
 
-/// The offer's art box: the card's own width, and the height the picture takes
-/// at the top of it.
-const CARD_W: f32 = 440.0;
-const ART_H: f32 = 248.0;
-
 /// One canvas length in real pixels, the way every request and every placement
 /// rounds one.
 fn pixels(length: f32, canvas: &Canvas) -> i32 {
-    (length * canvas.scale + 0.5).floor() as i32
+    canvas.to_pixels(length) as i32
 }
 
-/// The pixel box a request asks for, as the key that names it.
-fn box_key(width: i32, height: i32) -> Option<String> {
-    (width > 0 && height > 0).then(|| format!("{width}x{height}"))
+/// The pixel box a request asks for, and nothing for a screen that gives no
+/// box at all.
+fn pixel_box(width: i32, height: i32) -> Option<(i32, i32)> {
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+/// What one request asks for, as the name an answer carries back. A slot
+/// takes an answer only for the key it asks for now, so a decode the state
+/// outran lands on nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Key {
+    /// The logo and the cover, which the pixel box alone names.
+    Box(i32, i32),
+    /// The offer's picture. The reference names it as well as the box,
+    /// because every offer of a Play draws its own picture in the same box.
+    Picture(String, i32, i32),
+    /// One tile, at the whole second the scan previews.
+    Tile(i64, i32, i32),
 }
 
 /// The four pictures the display decodes, one name per consumer.
@@ -101,7 +101,7 @@ enum Source {
 pub struct Job {
     kind: Kind,
     item: u64,
-    key: String,
+    key: Key,
     source: Source,
     width: u32,
     height: u32,
@@ -122,6 +122,31 @@ impl Job {
                 .and_then(|tier| cover::read(&tier))
                 .and_then(|bytes| decode::fit(&bytes, width, height)),
         };
+        // A reference that reads back no picture is worth a line: a logo that
+        // never appears reads on screen exactly like a logo the item never
+        // declared.
+        if bitmap.is_none() {
+            eprintln!("media-display: no picture in {}", self.reference());
+        }
+        self.answer(bitmap)
+    }
+
+    /// The answer for a decode that never ran. It is an answer like any
+    /// other, so the slot it names stops waiting on it.
+    pub fn empty(self) -> Answer {
+        self.answer(None)
+    }
+
+    /// What this decode reads, as the line about it names it.
+    pub fn reference(&self) -> &str {
+        match &self.source {
+            Source::Picture(reference) => reference,
+            Source::Tile { dir, .. } => dir,
+            Source::Cover { art, file } => art.as_deref().or(file.as_deref()).unwrap_or_default(),
+        }
+    }
+
+    fn answer(self, bitmap: Option<Bitmap>) -> Answer {
         Answer {
             kind: self.kind,
             item: self.item,
@@ -139,7 +164,7 @@ impl Job {
 pub struct Answer {
     kind: Kind,
     item: u64,
-    key: String,
+    key: Key,
     bitmap: Option<Bitmap>,
 }
 
@@ -147,9 +172,9 @@ pub struct Answer {
 /// what came back.
 #[derive(Debug, Default)]
 struct Slot {
-    /// The pixel size last asked for, so an unchanged size is not asked for
-    /// again.
-    want: Option<String>,
+    /// What was last asked for, so the same request is not made twice and an
+    /// answer for anything else is dropped.
+    want: Option<Key>,
     /// The decoded picture. It is nothing until an answer arrives, and a swap
     /// clears it.
     bitmap: Option<Bitmap>,
@@ -159,7 +184,7 @@ struct Slot {
 /// pixel box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Wanted {
-    key: String,
+    key: Key,
     ms: i64,
     width: i32,
     height: i32,
@@ -183,15 +208,12 @@ pub struct Art {
     /// answer is for the newest position. Without the gate a hold starts about
     /// thirty decodes a second and the tile keeps moving after the hand lifts.
     /// An unchanged second and box are not asked for again.
-    inflight: Option<String>,
+    inflight: Option<Key>,
     tile_want: Option<Wanted>,
-    // The gate reopens at a deadline the next turn reads, because this client
-    // holds no timer of its own.
-    deadline: Option<f64>,
     cover: Slot,
     /// The box already answered for. A redraw then asks once, and an answer of
     /// no cover ends the asking instead of starting it again.
-    answered: Option<String>,
+    answered: Option<Key>,
     next: Slot,
     /// The offer's art reference while an offer with a picture stands, so an
     /// answer for an offer that no longer stands is dropped.
@@ -252,7 +274,7 @@ impl Art {
         self.logo = Slot::default();
         self.tile = Slot::default();
         self.tile_want = None;
-        self.clear_inflight();
+        self.inflight = None;
         self.cover = Slot::default();
         self.answered = None;
         if let Ok(mut sheets) = self.sheets.lock() {
@@ -273,21 +295,18 @@ impl Art {
         canvas: &Canvas,
         preview: Option<f64>,
         offer: Option<&str>,
-        now: f64,
     ) -> Vec<Job> {
-        self.offer = offer.map(str::to_string);
+        if self.offer.as_deref() != offer {
+            self.offer = offer.map(str::to_string);
+        }
         let mut jobs = Vec::new();
         self.on_resize(canvas);
         jobs.extend(self.logo_request(canvas));
-        if self.deadline.is_some_and(|deadline| now >= deadline) {
-            self.clear_inflight();
-            self.tile_want = None;
-        }
         if presentation.is_music() {
             jobs.extend(self.cover_request(presentation, film, canvas));
         }
         if let Some(time) = preview {
-            jobs.extend(self.tile_request(time, canvas, now));
+            jobs.extend(self.tile_request(time, canvas));
         }
         if offer.is_some() {
             jobs.extend(self.next_request(canvas));
@@ -309,7 +328,7 @@ impl Art {
         self.canvas = Some(*canvas);
         self.logo.want = None;
         self.tile_want = None;
-        self.clear_inflight();
+        self.inflight = None;
         self.next.want = None;
     }
 
@@ -317,13 +336,14 @@ impl Art {
     /// nothing when the item has no logo, when the screen size gives no box,
     /// or when this item's logo was already asked for at that size.
     fn logo_request(&mut self, canvas: &Canvas) -> Option<Job> {
-        let reference = self.logo_uri.clone()?;
-        let (width, height) = (pixels(LOGO_MAX_W, canvas), pixels(LOGO_MAX_H, canvas));
-        let key = box_key(width, height)?;
-        if self.logo.want.as_deref() == Some(key.as_str()) {
+        self.logo_uri.as_ref()?;
+        let (width, height) = pixel_box(pixels(LOGO_MAX_W, canvas), pixels(LOGO_MAX_H, canvas))?;
+        let key = Key::Box(width, height);
+        if self.logo.want.as_ref() == Some(&key) {
             return None;
         }
         self.logo.want = Some(key.clone());
+        let reference = self.logo_uri.clone()?;
         Some(self.job(Kind::Logo, key, Source::Picture(reference), width, height))
     }
 
@@ -342,23 +362,20 @@ impl Art {
         film: &Film,
         canvas: &Canvas,
     ) -> Option<Job> {
-        let art = presentation.art().map(str::to_string);
-        if art.is_none() && film.path.is_none() {
+        if presentation.art().is_none() && film.path.is_none() {
             return None;
         }
-        let (width, height) = (
-            pixels(canvas.width - 2.0 * REGION_X, canvas),
+        let (width, height) = pixel_box(
+            pixels(canvas.width() - 2.0 * theme::MARGIN_X, canvas),
             pixels(BOX_H, canvas),
-        );
-        let key = box_key(width, height)?;
-        if self.cover.want.as_deref() == Some(key.as_str())
-            || self.answered.as_deref() == Some(key.as_str())
-        {
+        )?;
+        let key = Key::Box(width, height);
+        if self.cover.want.as_ref() == Some(&key) || self.answered.as_ref() == Some(&key) {
             return None;
         }
         self.cover.want = Some(key.clone());
         let source = Source::Cover {
-            art,
+            art: presentation.art().map(str::to_string),
             file: film.path.clone(),
         };
         Some(self.job(Kind::Album, key, source, width, height))
@@ -368,11 +385,10 @@ impl Art {
     /// to a whole second, so a scrub within one second asks for nothing. A new
     /// second, or a new box, asks again. While a decode is in flight, a new
     /// want is recorded and not started; the answer starts it when it arrives.
-    fn tile_request(&mut self, time: f64, canvas: &Canvas, now: f64) -> Option<Job> {
+    fn tile_request(&mut self, time: f64, canvas: &Canvas) -> Option<Job> {
         self.trickplay.as_ref()?;
-        let (width, height) = (pixels(TILE_W, canvas), pixels(TILE_H, canvas));
-        let box_key = box_key(width, height)?;
-        let key = format!("{}:{box_key}", (time + 0.5).floor() as i64);
+        let (width, height) = pixel_box(pixels(TILE_W, canvas), pixels(TILE_H, canvas))?;
+        let key = Key::Tile((time + 0.5).floor() as i64, width, height);
         if self.tile_want.as_ref().is_some_and(|want| want.key == key) {
             return None;
         }
@@ -385,7 +401,7 @@ impl Art {
         self.tile_want = Some(wanted.clone());
         match self.inflight {
             Some(_) => None,
-            None => Some(self.send_tile(&wanted, now)),
+            None => Some(self.send_tile(&wanted)),
         }
     }
 
@@ -393,24 +409,27 @@ impl Art {
     /// screen, once per size. The picture fits inside the box and keeps its
     /// ratio, so a poster comes back letterboxed.
     fn next_request(&mut self, canvas: &Canvas) -> Option<Job> {
-        let reference = self.offer.clone()?;
-        let (width, height) = (pixels(CARD_W, canvas), pixels(ART_H, canvas));
-        let key = box_key(width, height)?;
-        if self.next.want.as_deref() == Some(key.as_str()) {
+        let (width, height) = pixel_box(
+            pixels(crate::upnext::CARD_W, canvas),
+            pixels(crate::upnext::ART_H, canvas),
+        )?;
+        let asked = matches!(
+            (self.offer.as_deref(), &self.next.want),
+            (Some(reference), Some(Key::Picture(had, wide, high)))
+                if had == reference && *wide == width && *high == height
+        );
+        if asked {
             return None;
         }
+        let reference = self.offer.clone()?;
+        let key = Key::Picture(reference.clone(), width, height);
         self.next.want = Some(key.clone());
         Some(self.job(Kind::Next, key, Source::Picture(reference), width, height))
     }
 
-    /// Start one tile decode and mark it in flight. The deadline clears the
-    /// mark, and the want with it, when no answer arrives within the timeout.
-    /// It clears the want as well, so the next turn asks again even at the same
-    /// second; the tile that answered nothing is otherwise never asked for
-    /// until the cursor moves.
-    fn send_tile(&mut self, wanted: &Wanted, now: f64) -> Job {
+    /// Start one tile decode and mark it in flight.
+    fn send_tile(&mut self, wanted: &Wanted) -> Job {
         self.inflight = Some(wanted.key.clone());
-        self.deadline = Some(now + REPLY_TIMEOUT);
         let source = Source::Tile {
             dir: self.trickplay.clone().unwrap_or_default(),
             ms: wanted.ms,
@@ -426,7 +445,7 @@ impl Art {
 
     /// One decode, for the item that stands now and the sheet this display
     /// holds.
-    fn job(&self, kind: Kind, key: String, source: Source, width: i32, height: i32) -> Job {
+    fn job(&self, kind: Kind, key: Key, source: Source, width: i32, height: i32) -> Job {
         Job {
             kind,
             item: self.item,
@@ -438,18 +457,11 @@ impl Art {
         }
     }
 
-    /// Forget the decode in flight and its deadline, so the next want starts at
-    /// once.
-    fn clear_inflight(&mut self) {
-        self.inflight = None;
-        self.deadline = None;
-    }
-
-    /// One answer. Each consumer takes its own kind, so a misrouted answer
-    /// draws nothing. The return says whether anything the display draws
-    /// changed, and the answer the tile's gate holds open may start the next
-    /// decode.
-    pub fn on_answer(&mut self, answer: Answer, now: f64) -> (bool, Vec<Job>) {
+    /// One answer. Each consumer takes its own kind and only the key it asks
+    /// for now, so a misrouted answer and a decode the state outran both draw
+    /// nothing. The return says whether anything the display draws changed,
+    /// and the answer the tile's gate holds open may start the next decode.
+    pub fn on_answer(&mut self, answer: Answer) -> (bool, Vec<Job>) {
         // An answer for an item that is no longer playing lands on nothing, so
         // the last item's art never draws over the new one. The offer's
         // picture serves the whole run, so it is the one kind an item swap
@@ -458,24 +470,31 @@ impl Art {
             return (false, Vec::new());
         }
         match answer.kind {
-            // An answer for an item that no longer has a logo is dropped.
-            Kind::Logo if self.logo_uri.is_some() => self.logo.bitmap = answer.bitmap,
+            // An answer for an item that no longer has a logo is dropped, and
+            // so is one for a box the screen no longer asks for.
+            Kind::Logo
+                if self.logo_uri.is_some() && self.logo.want.as_ref() == Some(&answer.key) =>
+            {
+                self.logo.bitmap = answer.bitmap;
+            }
             // Either answer marks the box answered, so the display asks once
             // for a box, and a missing cover ends the asking.
-            Kind::Album => {
+            Kind::Album if self.cover.want.as_ref() == Some(&answer.key) => {
                 self.answered = self.cover.want.clone();
                 self.cover.bitmap = answer.bitmap;
             }
-            Kind::Next if self.offer.is_some() => self.next.bitmap = answer.bitmap,
+            Kind::Next if self.offer.is_some() && self.next.want.as_ref() == Some(&answer.key) => {
+                self.next.bitmap = answer.bitmap;
+            }
             // The answer names the tile it carries. When the want names a
             // different tile, it starts here: this is the one decode per
             // answer.
             Kind::Trickplay => {
-                self.clear_inflight();
+                self.inflight = None;
                 self.tile.bitmap = answer.bitmap;
                 let wanted = self.tile_want.clone().filter(|want| want.key != answer.key);
                 return match wanted {
-                    Some(wanted) => (true, vec![self.send_tile(&wanted, now)]),
+                    Some(wanted) => (true, vec![self.send_tile(&wanted)]),
                     None => (true, Vec::new()),
                 };
             }
@@ -485,36 +504,35 @@ impl Art {
     }
 }
 
-/// Where the logo sits, in real pixels.
+/// Where the logo sits, in canvas units on the output pixel grid. Every
+/// picture is placed in whole output pixels, because it is decoded to the
+/// pixel size it draws at and a half pixel would resample it.
 pub fn logo_at(canvas: &Canvas) -> Point {
-    Point::new(
-        pixels(theme::MARGIN_X, canvas) as f32,
-        pixels(theme::MARGIN_Y, canvas) as f32,
-    )
+    Point::new(canvas.snap(theme::MARGIN_X), canvas.snap(theme::MARGIN_Y))
 }
 
-/// Where the tile sits, in real pixels: centered on the playhead x, above the
-/// bar. It is clamped, so it stays on screen at both ends.
+/// Where the tile sits: centered on the playhead x, above the bar. It is
+/// clamped, so it stays on screen at both ends.
 pub fn tile_at(canvas: &Canvas, tile: &Bitmap, cursor_x: f32) -> Point {
     let width = tile.width as i32;
     let mut x = pixels(cursor_x, canvas) - width / 2;
-    if x + width > pixels(canvas.width, canvas) {
-        x = pixels(canvas.width, canvas) - width;
+    if x + width > pixels(canvas.width(), canvas) {
+        x = pixels(canvas.width(), canvas) - width;
     }
+    let y = (pixels(TILE_BOTTOM_Y, canvas) - tile.height as i32).max(0);
     Point::new(
-        x.max(0) as f32,
-        (pixels(TILE_BOTTOM_Y, canvas) - tile.height as i32).max(0) as f32,
+        canvas.to_canvas(x.max(0) as f32),
+        canvas.to_canvas(y as f32),
     )
 }
 
-/// Where the cover sits, in real pixels: centered in the region between the
-/// header block and the scrubber.
+/// Where the cover sits: centered in the region between the header block and
+/// the scrubber.
 pub fn cover_at(canvas: &Canvas, cover: &Bitmap) -> Point {
-    let centre = REGION_X + (canvas.width - 2.0 * REGION_X) / 2.0;
-    Point::new(
-        (pixels(centre, canvas) - cover.width as i32 / 2).max(0) as f32,
-        (pixels(CENTER_Y, canvas) - cover.height as i32 / 2).max(0) as f32,
-    )
+    let centre = theme::MARGIN_X + (canvas.width() - 2.0 * theme::MARGIN_X) / 2.0;
+    let x = (pixels(centre, canvas) - cover.width as i32 / 2).max(0);
+    let y = (pixels(CENTER_Y, canvas) - cover.height as i32 / 2).max(0);
+    Point::new(canvas.to_canvas(x as f32), canvas.to_canvas(y as f32))
 }
 
 #[cfg(test)]
@@ -562,7 +580,7 @@ mod tests {
 
     /// One picture of the stated size, as a decode answers with.
     fn picture(width: u32, height: u32) -> Option<Bitmap> {
-        Bitmap::from_rgba(width, height, &vec![0; (width * height * 4) as usize])
+        Bitmap::from_rgba(width, height, vec![0; (width * height * 4) as usize])
     }
 
     /// One answer for a decode, carrying the picture the test states.
@@ -586,7 +604,6 @@ mod tests {
             &canvas(),
             None,
             None,
-            0.0,
         );
         assert_eq!(boxes(&jobs), [(Kind::Logo, 760, 110)]);
 
@@ -597,7 +614,6 @@ mod tests {
             &canvas(),
             None,
             None,
-            0.0,
         );
         assert_eq!(boxes(&cover), [(Kind::Album, 1728, 532)]);
 
@@ -607,7 +623,6 @@ mod tests {
             &canvas(),
             Some(12.0),
             None,
-            0.0,
         );
         assert_eq!(boxes(&tile), []);
         art.on_item(&block(r#"{"trickplay":"/art/tiles"}"#), &canvas());
@@ -617,7 +632,6 @@ mod tests {
             &canvas(),
             Some(12.0),
             None,
-            0.0,
         );
         assert_eq!(boxes(&tile), [(Kind::Trickplay, 360, 220)]);
         assert_eq!(at(&tile[0]), 12_000);
@@ -628,7 +642,6 @@ mod tests {
             &canvas(),
             None,
             Some("/art/next.jpg"),
-            0.0,
         );
         assert_eq!(boxes(&next), [(Kind::Next, 440, 248)]);
     }
@@ -644,19 +657,11 @@ mod tests {
             &wide(),
             None,
             None,
-            0.0,
         );
         assert_eq!(boxes(&logo), [(Kind::Logo, 1520, 220)]);
 
         let mut art = Art::default();
-        let cover = art.sync(
-            &block(r#"{"type":"music"}"#),
-            &film(),
-            &wide(),
-            None,
-            None,
-            0.0,
-        );
+        let cover = art.sync(&block(r#"{"type":"music"}"#), &film(), &wide(), None, None);
         assert_eq!(boxes(&cover), [(Kind::Album, 3456, 1064)]);
     }
 
@@ -667,7 +672,7 @@ mod tests {
         for text in [r#"{"type":"music","logo":"/art/logo.png"}"#, "{}"] {
             let mut art = Art::default();
             art.on_item(&block(text), &canvas());
-            let jobs = art.sync(&block(text), &film(), &canvas(), None, None, 0.0);
+            let jobs = art.sync(&block(text), &film(), &canvas(), None, None);
             let logos: Vec<_> = jobs.iter().filter(|job| job.kind == Kind::Logo).collect();
             assert!(logos.is_empty(), "{text}");
         }
@@ -679,21 +684,15 @@ mod tests {
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
-        let jobs = art.sync(&item, &film(), &canvas(), None, None, 0.0);
+        let jobs = art.sync(&item, &film(), &canvas(), None, None);
         assert_eq!(jobs.len(), 1);
-        assert!(
-            art.sync(&item, &film(), &canvas(), None, None, 0.0)
-                .is_empty()
-        );
+        assert!(art.sync(&item, &film(), &canvas(), None, None).is_empty());
 
-        art.on_answer(answer(&jobs[0], picture(1, 1)), 0.0);
+        art.on_answer(answer(&jobs[0], picture(1, 1)));
         assert!(art.logo().is_some());
         art.on_item(&item, &canvas());
         assert!(art.logo().is_none());
-        assert_eq!(
-            art.sync(&item, &film(), &canvas(), None, None, 0.0).len(),
-            1
-        );
+        assert_eq!(art.sync(&item, &film(), &canvas(), None, None).len(), 1);
     }
 
     /// The cover asks once for a box, and an answer of no cover ends the
@@ -702,19 +701,13 @@ mod tests {
     fn an_empty_cover_answer_ends_the_asking() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
-        let jobs = art.sync(&item, &film(), &canvas(), None, None, 0.0);
+        let jobs = art.sync(&item, &film(), &canvas(), None, None);
         assert_eq!(jobs.len(), 1);
-        assert!(
-            art.sync(&item, &film(), &canvas(), None, None, 0.0)
-                .is_empty()
-        );
+        assert!(art.sync(&item, &film(), &canvas(), None, None).is_empty());
 
-        assert!(art.on_answer(answer(&jobs[0], None), 0.0).0);
+        assert!(art.on_answer(answer(&jobs[0], None)).0);
         assert!(art.cover().is_none());
-        assert!(
-            art.sync(&item, &film(), &canvas(), None, None, 0.0)
-                .is_empty()
-        );
+        assert!(art.sync(&item, &film(), &canvas(), None, None).is_empty());
     }
 
     /// A cover request is held while mpv has named no file and the block names
@@ -725,18 +718,15 @@ mod tests {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
         assert!(
-            art.sync(&item, &Film::default(), &canvas(), None, None, 0.0)
+            art.sync(&item, &Film::default(), &canvas(), None, None)
                 .is_empty()
         );
-        assert_eq!(
-            art.sync(&item, &film(), &canvas(), None, None, 0.0).len(),
-            1
-        );
+        assert_eq!(art.sync(&item, &film(), &canvas(), None, None).len(), 1);
 
         let mut art = Art::default();
         let named = block(r#"{"type":"music","art":"/art/cover.jpg"}"#);
         assert_eq!(
-            art.sync(&named, &Film::default(), &canvas(), None, None, 0.0)
+            art.sync(&named, &Film::default(), &canvas(), None, None)
                 .len(),
             1
         );
@@ -748,16 +738,13 @@ mod tests {
     fn a_new_item_drops_the_cover_and_asks_again() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
-        let jobs = art.sync(&item, &film(), &canvas(), None, None, 0.0);
-        art.on_answer(answer(&jobs[0], picture(1, 1)), 0.0);
+        let jobs = art.sync(&item, &film(), &canvas(), None, None);
+        art.on_answer(answer(&jobs[0], picture(1, 1)));
         assert!(art.cover().is_some());
 
         art.on_item(&block("{}"), &canvas());
         assert!(art.cover().is_none());
-        assert_eq!(
-            art.sync(&item, &film(), &canvas(), None, None, 0.0).len(),
-            1
-        );
+        assert_eq!(art.sync(&item, &film(), &canvas(), None, None).len(), 1);
     }
 
     /// The offer's picture is named by its box alone and serves the whole run,
@@ -766,14 +753,14 @@ mod tests {
     fn the_offers_picture_asks_once_and_outlives_an_item() {
         let mut art = Art::default();
         let offer = Some("/art/next.jpg");
-        let jobs = art.sync(&block("{}"), &film(), &canvas(), None, offer, 0.0);
+        let jobs = art.sync(&block("{}"), &film(), &canvas(), None, offer);
         assert_eq!(jobs.len(), 1);
         assert!(
-            art.sync(&block("{}"), &film(), &canvas(), None, offer, 0.0)
+            art.sync(&block("{}"), &film(), &canvas(), None, offer)
                 .is_empty()
         );
 
-        assert!(art.on_answer(answer(&jobs[0], picture(1, 1)), 0.0).0);
+        assert!(art.on_answer(answer(&jobs[0], picture(1, 1))).0);
         assert!(art.next().is_some());
         art.on_item(&block("{}"), &canvas());
         assert!(art.next().is_some());
@@ -790,19 +777,87 @@ mod tests {
             &canvas(),
             None,
             Some("/art/next.jpg"),
-            0.0,
         );
-        let _ = art.sync(&block("{}"), &film(), &canvas(), None, None, 0.0);
-        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1)), 0.0).0);
+        let _ = art.sync(&block("{}"), &film(), &canvas(), None, None);
+        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1))).0);
         assert!(art.next().is_none());
 
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
-        let jobs = art.sync(&item, &film(), &canvas(), None, None, 0.0);
+        let jobs = art.sync(&item, &film(), &canvas(), None, None);
         art.on_item(&block("{}"), &canvas());
-        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1)), 0.0).0);
+        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1))).0);
         assert!(art.logo().is_none());
+    }
+
+    /// A decode the screen size outran lands on nothing. Two decodes of one
+    /// picture run at once after a resize, and the answer for the box the
+    /// screen no longer draws must not take the slot.
+    #[test]
+    fn an_answer_for_a_box_the_screen_no_longer_asks_for_is_dropped() {
+        let mut art = Art::default();
+        let item = block(r#"{"logo":"/art/logo.png"}"#);
+        art.on_item(&item, &canvas());
+        let small = art.sync(&item, &film(), &canvas(), None, None);
+        let large = art.sync(&item, &film(), &wide(), None, None);
+        assert_eq!(boxes(&large), [(Kind::Logo, 1520, 220)]);
+
+        // The answer for the old box lands after the new one was asked for.
+        assert!(!art.on_answer(answer(&small[0], picture(760, 110))).0);
+        assert!(art.logo().is_none());
+        assert!(art.on_answer(answer(&large[0], picture(1520, 220))).0);
+        assert_eq!(art.logo().map(|logo| logo.width), Some(1520));
+    }
+
+    /// The cover's own late answer marks no box answered, so the box the
+    /// screen asks for now is still asked for.
+    #[test]
+    fn a_late_cover_answer_leaves_the_new_box_asked_for() {
+        let mut art = Art::default();
+        let item = block(r#"{"type":"music"}"#);
+        let small = art.sync(&item, &film(), &canvas(), None, None);
+        let large = art.sync(&item, &film(), &wide(), None, None);
+        assert_eq!(large.len(), 1);
+
+        assert!(!art.on_answer(answer(&small[0], picture(1, 1))).0);
+        assert!(art.cover().is_none());
+        assert!(art.on_answer(answer(&large[0], picture(1, 1))).0);
+        assert!(art.cover().is_some());
+    }
+
+    /// Every offer of a Play draws its picture in the same box, so the offer's
+    /// slot is named by the reference as well: a second offer decodes its own
+    /// picture, and the first offer's answer does not land on it.
+    #[test]
+    fn a_second_offer_decodes_its_own_picture() {
+        let mut art = Art::default();
+        let first = art.sync(&block("{}"), &film(), &canvas(), None, Some("/art/one.jpg"));
+        assert_eq!(first.len(), 1);
+
+        let second = art.sync(&block("{}"), &film(), &canvas(), None, Some("/art/two.jpg"));
+        assert_eq!(second.len(), 1);
+        assert!(
+            art.sync(&block("{}"), &film(), &canvas(), None, Some("/art/two.jpg"))
+                .is_empty()
+        );
+
+        assert!(!art.on_answer(answer(&first[0], picture(2, 2))).0);
+        assert!(art.next().is_none());
+        assert!(art.on_answer(answer(&second[0], picture(4, 4))).0);
+        assert_eq!(art.next().map(|next| next.width), Some(4));
+    }
+
+    /// A decode that never ran answers with no picture, so the slot it names
+    /// stops waiting on it and the display asks again only for a new box.
+    #[test]
+    fn a_decode_that_never_ran_answers_with_no_picture() {
+        let mut art = Art::default();
+        let item = block(r#"{"type":"music"}"#);
+        let jobs = art.sync(&item, &film(), &canvas(), None, None);
+        assert!(art.on_answer(jobs[0].clone().empty()).0);
+        assert!(art.cover().is_none());
+        assert!(art.sync(&item, &film(), &canvas(), None, None).is_empty());
     }
 
     /// An answer the item swap outran lands on nothing, so the last item's art
@@ -812,9 +867,9 @@ mod tests {
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
-        let jobs = art.sync(&item, &film(), &canvas(), None, None, 0.0);
+        let jobs = art.sync(&item, &film(), &canvas(), None, None);
         art.on_item(&item, &canvas());
-        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1)), 0.0).0);
+        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1))).0);
         assert!(art.logo().is_none());
     }
 
@@ -827,12 +882,12 @@ mod tests {
         art.on_item(&item, &canvas());
         let mut started = Vec::new();
         for time in [10.0, 10.2, 12.0] {
-            started.extend(art.sync(&item, &film(), &canvas(), Some(time), None, 0.0));
+            started.extend(art.sync(&item, &film(), &canvas(), Some(time), None));
         }
         assert_eq!(started.len(), 1);
         assert_eq!(at(&started[0]), 10_000);
 
-        let (changed, more) = art.on_answer(answer(&started[0], picture(1, 1)), 0.0);
+        let (changed, more) = art.on_answer(answer(&started[0], picture(1, 1)));
         assert!(changed);
         assert_eq!(more.len(), 1);
         assert_eq!(at(&more[0]), 12_000);
@@ -847,33 +902,11 @@ mod tests {
         art.on_item(&item, &canvas());
         let mut started = Vec::new();
         for time in [10.0, 10.2, 10.4, 10.49] {
-            started.extend(art.sync(&item, &film(), &canvas(), Some(time), None, 0.0));
+            started.extend(art.sync(&item, &film(), &canvas(), Some(time), None));
         }
         assert_eq!(started.len(), 1);
-        let (_, more) = art.on_answer(answer(&started[0], picture(1, 1)), 0.0);
+        let (_, more) = art.on_answer(answer(&started[0], picture(1, 1)));
         assert!(more.is_empty());
-    }
-
-    /// The timeout reopens the gate when no answer arrives, and the next turn
-    /// asks again at the second it stands on.
-    #[test]
-    fn the_timeout_reopens_the_gate() {
-        let mut art = Art::default();
-        let item = block(r#"{"trickplay":"/art/tiles"}"#);
-        art.on_item(&item, &canvas());
-        assert_eq!(
-            art.sync(&item, &film(), &canvas(), Some(10.0), None, 0.0)
-                .len(),
-            1
-        );
-        assert!(
-            art.sync(&item, &film(), &canvas(), Some(12.0), None, 0.5)
-                .is_empty()
-        );
-
-        let started = art.sync(&item, &film(), &canvas(), Some(12.0), None, 1.0);
-        assert_eq!(started.len(), 1);
-        assert_eq!(at(&started[0]), 12_000);
     }
 
     /// A new item reopens the gate, so the new item's first tile goes out even
@@ -884,13 +917,12 @@ mod tests {
         let item = block(r#"{"trickplay":"/art/tiles"}"#);
         art.on_item(&item, &canvas());
         assert_eq!(
-            art.sync(&item, &film(), &canvas(), Some(10.0), None, 0.0)
-                .len(),
+            art.sync(&item, &film(), &canvas(), Some(10.0), None).len(),
             1
         );
         art.on_item(&item, &canvas());
 
-        let started = art.sync(&item, &film(), &canvas(), Some(20.0), None, 0.1);
+        let started = art.sync(&item, &film(), &canvas(), Some(20.0), None);
         assert_eq!(started.len(), 1);
         assert_eq!(at(&started[0]), 20_000);
     }
@@ -903,9 +935,9 @@ mod tests {
         let item = block(r#"{"logo":"/art/logo.png","trickplay":"/art/tiles"}"#);
         let offer = Some("/art/next.jpg");
         art.on_item(&item, &canvas());
-        let _ = art.sync(&item, &film(), &canvas(), Some(10.0), offer, 0.0);
+        let _ = art.sync(&item, &film(), &canvas(), Some(10.0), offer);
 
-        let jobs = art.sync(&item, &film(), &wide(), Some(10.0), offer, 0.1);
+        let jobs = art.sync(&item, &film(), &wide(), Some(10.0), offer);
         assert_eq!(
             boxes(&jobs),
             [
@@ -916,28 +948,12 @@ mod tests {
         );
     }
 
-    /// A surface with no size gives no box, so nothing is asked for.
-    #[test]
-    fn a_surface_with_no_box_asks_for_nothing() {
-        let flat = Canvas {
-            width: 0.0,
-            height: 1080.0,
-            scale: 0.0,
-        };
-        let mut art = Art::default();
-        let item = block(r#"{"type":"music","logo":"/art/logo.png","trickplay":"/art/tiles"}"#);
-        art.on_item(&item, &flat);
-        assert!(
-            art.sync(&item, &film(), &flat, Some(1.0), Some("/art/next.jpg"), 0.0)
-                .is_empty()
-        );
-    }
-
-    /// The logo sits at the title's own corner, in real pixels.
+    /// The logo sits at the title's own corner, in canvas units, so a larger
+    /// surface puts it at the same place in the layout.
     #[test]
     fn the_logo_sits_at_the_title_corner() {
         assert_eq!(logo_at(&canvas()), Point::new(96.0, 90.0));
-        assert_eq!(logo_at(&wide()), Point::new(192.0, 180.0));
+        assert_eq!(logo_at(&wide()), Point::new(96.0, 90.0));
     }
 
     /// The tile centres on the playhead and stands on its own bottom line, and

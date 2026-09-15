@@ -338,10 +338,7 @@ func buildIdlePod(
 
 	// The idle container holds every request the claim carries,
 	// because the pod's one job is to draw.
-	for _, request := range claimRequests(claim) {
-		container.Resources.Claims = append(container.Resources.Claims,
-			ContainerClaim{Name: podClaimName, Request: request})
-	}
+	container.Resources.Claims = claimEntries(claim)
 
 	return &Pod{
 		APIVersion: podAPIVersion,
@@ -357,7 +354,8 @@ func buildIdlePod(
 			OwnerReferences: []OwnerReference{playerOwner(player)},
 		},
 		Spec: PodSpec{
-			RestartPolicy: "Always",
+			RestartPolicy:                "Always",
+			AutomountServiceAccountToken: noServiceAccountToken(),
 			ResourceClaims: []PodResourceClaim{{
 				Name:              podClaimName,
 				ResourceClaimName: claim.Metadata.Name,

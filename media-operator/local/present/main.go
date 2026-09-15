@@ -127,7 +127,7 @@ func findNFO(media string) (string, bool) {
 
 // findLogo returns the logo art beside the media, as an absolute path. A file
 // named for the media wins over a folder-wide one, so an item with its own
-// logo keeps it. The bridge opens this path and decodes it.
+// logo keeps it. The display opens this path and decodes it.
 func findLogo(media string) string {
 	parent := filepath.Dir(media)
 	stem := stemOf(media)
@@ -147,7 +147,7 @@ func findLogo(media string) string {
 
 // findTrickplay returns the trickplay directory beside the media, as an
 // absolute path. Jellyfin names it for the media file, so `X.mkv` has a
-// sibling `X.trickplay` directory of sprite sheets. The bridge reads the
+// sibling `X.trickplay` directory of sprite sheets. The display reads the
 // sheets and crops one tile per scrub position.
 func findTrickplay(media string) string {
 	trickplay := filepath.Join(filepath.Dir(media), stemOf(media)+".trickplay")

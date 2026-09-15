@@ -91,7 +91,7 @@ pub fn scale(source: &DynamicImage, box_w: u32, box_h: u32) -> Option<Bitmap> {
             pixel[channel] = straight(pixel[channel], alpha);
         }
     }
-    Bitmap::from_rgba(width, height, &scaled.into_raw())
+    Bitmap::from_rgba(width, height, scaled.into_raw())
 }
 
 /// One picture with every channel scaled by its own alpha.

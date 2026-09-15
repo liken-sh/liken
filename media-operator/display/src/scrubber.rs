@@ -61,7 +61,6 @@ pub enum Axis {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Segment {
     pub x0: f32,
-    pub x1: f32,
     pub w: f32,
 }
 
@@ -173,7 +172,7 @@ impl Scrubber {
                 .filter(|_| axis == Some(Axis::Chapter) && !film.chapters.is_empty()),
             time: Line::new(
                 fmt(at),
-                Point::new(head.clamp(LEFT, right(canvas)), TOP_Y),
+                Point::new(head.clamp(LEFT, canvas.right()), TOP_Y),
                 Anchor::BottomCentre,
                 theme::type_scale::LABEL,
                 theme::color::text(),
@@ -196,7 +195,7 @@ impl Scrubber {
                     crate::header::BETWEEN,
                     fmt(duration)
                 ),
-                Point::new(right(canvas), BELOW_Y),
+                Point::new(canvas.right(), BELOW_Y),
                 Anchor::TopRight,
                 theme::type_scale::SMALL,
                 theme::color::text(),
@@ -207,11 +206,10 @@ impl Scrubber {
         })
     }
 
-    pub fn draw(&self, brush: &mut Brush<'_>, film: &Film, axis: Option<Axis>) {
+    /// Draw the bar the caller already built, so one press or one second
+    /// builds it once.
+    pub fn draw(&self, brush: &mut Brush<'_>, bar: &Bar) {
         let canvas = brush.canvas();
-        let Some(bar) = self.bar(&canvas, film, axis) else {
-            return;
-        };
         let top = BAR_Y - BAR_H / 2.0;
 
         for (index, segment) in bar.segments.iter().enumerate() {
@@ -222,18 +220,16 @@ impl Scrubber {
             brush.rounded(
                 Rectangle::new(Point::new(segment.x0, top), Size::new(segment.w, BAR_H)),
                 SEG_R,
-                theme::color::track(),
-                theme::alpha::TRACK,
+                theme::at(theme::color::track(), theme::alpha::TRACK),
             );
             // The fill ends at the playhead, so it moves on the same pixel grid
             // and its width holds still between two frames of the same pixel.
             let filled = bar.head.clamp(segment.x0, segment.x0 + segment.w) - segment.x0;
-            if filled >= 1.0 {
+            if filled >= canvas.to_canvas(1.0) {
                 brush.rounded(
                     Rectangle::new(Point::new(segment.x0, top), Size::new(filled, BAR_H)),
                     SEG_R,
-                    theme::color::fill(),
-                    bar.position,
+                    theme::at(theme::color::fill(), bar.position),
                 );
             }
             // The chapter axis marks the current chapter by filling its whole
@@ -242,8 +238,7 @@ impl Scrubber {
                 brush.rounded(
                     Rectangle::new(Point::new(segment.x0, top), Size::new(segment.w, BAR_H)),
                     SEG_R,
-                    theme::color::fill(),
-                    bar.chapter_alpha,
+                    theme::at(theme::color::fill(), bar.chapter_alpha),
                 );
             }
         }
@@ -257,8 +252,7 @@ impl Scrubber {
                     Point::new(live - 1.0, top - 6.0),
                     Size::new(2.0, BAR_H + 12.0),
                 ),
-                theme::color::text(),
-                theme::alpha::SUBDUED,
+                theme::at(theme::color::text(), theme::alpha::SUBDUED),
             );
         }
 
@@ -267,22 +261,21 @@ impl Scrubber {
         brush.hexagon(
             Point::new(bar.head - KNOB_R, BAR_Y - KNOB_R),
             KNOB_R,
-            theme::color::playhead(),
-            bar.position,
+            theme::at(theme::color::playhead(), bar.position),
             KNOB_BORDER,
-            theme::color::SHADOW,
+            theme::at(theme::color::SHADOW, bar.position),
         );
 
         // The current time rides above the playhead and moves with it, so the
         // eye reads the position where it is already looking. The x is clamped
         // to the bar, so the label stays on screen at either end.
-        brush.text(bar.time);
+        brush.text(bar.time.clone());
         // Below the bar on the left, the chapter title and position. Below on
         // the right, the plain-language time left and the exact total length.
-        if let Some(chapter) = bar.chapter {
+        if let Some(chapter) = bar.chapter.clone() {
             brush.text(chapter);
         }
-        brush.text(bar.remaining);
+        brush.text(bar.remaining.clone());
     }
 }
 
@@ -299,8 +292,8 @@ pub struct Bar {
     pub time: Line,
     pub chapter: Option<Line>,
     pub remaining: Line,
-    pub position: u8,
-    pub chapter_alpha: u8,
+    pub position: f32,
+    pub chapter_alpha: f32,
 }
 
 /// The fine stop shows for a film with a length.
@@ -335,21 +328,22 @@ pub fn chapter_step(dir: i64, film: &Film) -> Vec<Command> {
 /// The output pixel column a position lands on, and nothing with no duration.
 /// The frame loop reads it to tell whether a new position moves the bar at all.
 pub fn position_pixel(canvas: &Canvas, film: &Film, at: Option<f64>) -> Option<i32> {
-    let duration = length(film)?;
-    let at = at?.clamp(0.0, duration);
-    Some((position_x(canvas, duration, at) * canvas.scale + 0.5).floor() as i32)
+    Some(pixel_at(canvas, length(film)?, at?))
+}
+
+/// The same column, for a caller that holds the length itself. The socket
+/// reader reads it to tell whether one position push moves the bar at all.
+pub fn pixel_at(canvas: &Canvas, duration: f64, at: f64) -> i32 {
+    let at = at.clamp(0.0, duration);
+    canvas.to_pixels(position_x(canvas, duration, at)) as i32
 }
 
 fn length(film: &Film) -> Option<f64> {
     film.duration.filter(|duration| *duration > 0.0)
 }
 
-fn right(canvas: &Canvas) -> f32 {
-    canvas.width - theme::MARGIN_X
-}
-
 fn bar_width(canvas: &Canvas) -> f32 {
-    right(canvas) - LEFT
+    canvas.right() - LEFT
 }
 
 fn position_x(canvas: &Canvas, duration: f64, at: f64) -> f32 {
@@ -362,7 +356,6 @@ pub fn segments(canvas: &Canvas, film: &Film, duration: f64) -> Vec<Segment> {
     if film.chapters.is_empty() {
         return vec![Segment {
             x0: LEFT,
-            x1: right(canvas),
             w: bar_width(canvas),
         }];
     }
@@ -378,8 +371,9 @@ pub fn segments(canvas: &Canvas, film: &Film, duration: f64) -> Vec<Segment> {
             let x1 = position_x(canvas, duration, finish);
             Segment {
                 x0,
-                x1,
-                w: (x1 - x0 - SEG_GAP).max(2.0),
+                // A chapter too short to draw still marks its division, so
+                // the narrowest segment is two output pixels wide.
+                w: (x1 - x0 - SEG_GAP).max(canvas.to_canvas(2.0)),
             }
         })
         .collect()
@@ -389,7 +383,7 @@ pub fn segments(canvas: &Canvas, film: &Film, duration: f64) -> Vec<Segment> {
 /// playhead, its time, and the progress fill. The chapter group is the current
 /// chapter segment and the title. The axis argument brightens one group and
 /// subdues the other, and no axis subdues both.
-fn brightness(axis: Option<Axis>) -> (u8, u8) {
+fn brightness(axis: Option<Axis>) -> (f32, f32) {
     match axis {
         Some(Axis::Fine) => (theme::alpha::OPAQUE, theme::alpha::SUBDUED),
         Some(Axis::Chapter) => (theme::alpha::SUBDUED, theme::alpha::OPAQUE),
@@ -466,11 +460,11 @@ mod tests {
     fn the_first_press_of_a_gesture_taps_five_seconds() {
         let mut scrubber = Scrubber::default();
         scrubber.seek(1.0, 10.0, &film());
-        assert_eq!(scrubber.cursor, Some(1205.0));
+        assert_eq!(scrubber.cursor_time(&film()), Some(1205.0));
 
         let mut back = Scrubber::default();
         back.seek(-1.0, 10.0, &film());
-        assert_eq!(back.cursor, Some(1195.0));
+        assert_eq!(back.cursor_time(&film()), Some(1195.0));
     }
 
     /// A press after a longer gap than the gesture allows starts a new
@@ -480,7 +474,7 @@ mod tests {
         let mut scrubber = Scrubber::default();
         scrubber.seek(1.0, 10.0, &film());
         scrubber.seek(1.0, 10.3, &film());
-        assert_eq!(scrubber.cursor, Some(1210.0));
+        assert_eq!(scrubber.cursor_time(&film()), Some(1210.0));
     }
 
     /// A turn moves one tap in the new direction, however fast the presses
@@ -490,7 +484,7 @@ mod tests {
         let mut scrubber = Scrubber::default();
         scrubber.seek(1.0, 10.0, &film());
         scrubber.seek(-1.0, 10.1, &film());
-        assert_eq!(scrubber.cursor, Some(1200.0));
+        assert_eq!(scrubber.cursor_time(&film()), Some(1200.0));
     }
 
     /// A hold ramps from thirty seconds of film a second to three hundred over
@@ -503,9 +497,14 @@ mod tests {
             scrubber.seek(1.0, 100.0, &film());
             let mut moved = 0.0;
             for step in 1..=(held * 10.0) as i64 {
-                let before = scrubber.cursor.expect("the scan holds a cursor");
+                let before = scrubber
+                    .cursor_time(&film())
+                    .expect("the scan holds a cursor");
                 scrubber.seek(1.0, 100.0 + step as f64 / 10.0, &film());
-                moved = scrubber.cursor.expect("the hold moves the cursor") - before;
+                moved = scrubber
+                    .cursor_time(&film())
+                    .expect("the hold moves the cursor")
+                    - before;
             }
             assert!(
                 (moved - rate / 10.0).abs() < 0.05,
@@ -521,13 +520,13 @@ mod tests {
         near_the_start.apply("time-pos", &json!(2.0));
         let mut scrubber = Scrubber::default();
         scrubber.seek(-1.0, 10.0, &near_the_start);
-        assert_eq!(scrubber.cursor, Some(0.0));
+        assert_eq!(scrubber.cursor_time(&near_the_start), Some(0.0));
 
         let mut near_the_end = film();
         near_the_end.apply("time-pos", &json!(5998.0));
         let mut forward = Scrubber::default();
         forward.seek(1.0, 10.0, &near_the_end);
-        assert_eq!(forward.cursor, Some(6000.0));
+        assert_eq!(forward.cursor_time(&near_the_end), Some(6000.0));
     }
 
     #[test]
@@ -596,7 +595,6 @@ mod tests {
             segments,
             vec![Segment {
                 x0: 96.0,
-                x1: 1824.0,
                 w: 1728.0
             }]
         );
@@ -608,19 +606,11 @@ mod tests {
     fn one_segment_per_chapter_stops_short_of_the_next() {
         let segments = segments(&Canvas::default(), &chaptered(), 6000.0);
         assert_eq!(segments.len(), 3);
-        assert_eq!(
-            segments[0],
-            Segment {
-                x0: 96.0,
-                x1: 528.0,
-                w: 428.0
-            }
-        );
+        assert_eq!(segments[0], Segment { x0: 96.0, w: 428.0 });
         assert_eq!(
             segments[1],
             Segment {
                 x0: 528.0,
-                x1: 1392.0,
                 w: 860.0
             }
         );
@@ -628,7 +618,6 @@ mod tests {
             segments[2],
             Segment {
                 x0: 1392.0,
-                x1: 1824.0,
                 w: 428.0
             }
         );
@@ -704,14 +693,14 @@ mod tests {
         assert_eq!(bar.time.at, Point::new(442.0, 886.0));
         assert_eq!(bar.time.anchor, Anchor::BottomCentre);
         assert_eq!(bar.time.size, 40.0);
-        assert_eq!(bar.time.alpha, theme::alpha::OPAQUE);
+        assert_eq!(bar.time.color.a, theme::alpha::OPAQUE);
 
         let chapter = bar.chapter.expect("a chaptered film names its chapter");
         assert_eq!(chapter.content, "The road   \u{00B7}   2 of 3");
         assert_eq!(chapter.at, Point::new(96.0, 922.0));
         assert_eq!(chapter.anchor, Anchor::TopLeft);
         assert_eq!(chapter.size, 34.0);
-        assert_eq!(chapter.alpha, theme::alpha::SUBDUED);
+        assert_eq!(chapter.color.a, theme::alpha::SUBDUED);
 
         assert_eq!(
             bar.remaining.content,
@@ -719,7 +708,7 @@ mod tests {
         );
         assert_eq!(bar.remaining.at, Point::new(1824.0, 922.0));
         assert_eq!(bar.remaining.anchor, Anchor::TopRight);
-        assert_eq!(bar.remaining.alpha, theme::alpha::OPAQUE);
+        assert_eq!(bar.remaining.color.a, theme::alpha::OPAQUE);
     }
 
     /// A frame of playback that moves the playhead less than one output pixel
@@ -821,7 +810,7 @@ mod tests {
         let mut film = film();
         film.apply("time-pos", &json!(1234.5));
         let bar = Scrubber::default().bar(&half, &film, None).unwrap();
-        assert_eq!((bar.head * half.scale).fract(), 0.0);
+        assert_eq!((bar.head * half.scale()).fract(), 0.0);
 
         assert_eq!(
             position_pixel(&Canvas::default(), &film, Some(1234.5)),

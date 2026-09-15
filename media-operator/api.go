@@ -880,7 +880,11 @@ type PodList struct {
 // with restartPolicy Always starts before the ordinary containers,
 // runs beside them, and restarts alone, without ending the pod.
 type PodSpec struct {
-	RestartPolicy                 string             `json:"restartPolicy,omitempty"`
+	RestartPolicy string `json:"restartPolicy,omitempty"`
+	// AutomountServiceAccountToken set to false keeps the namespace's default
+	// ServiceAccount token out of the pod. Every pod this operator builds
+	// sets it.
+	AutomountServiceAccountToken  *bool              `json:"automountServiceAccountToken,omitempty"`
 	TerminationGracePeriodSeconds *int64             `json:"terminationGracePeriodSeconds,omitempty"`
 	ResourceClaims                []PodResourceClaim `json:"resourceClaims,omitempty"`
 	InitContainers                []Container        `json:"initContainers,omitempty"`
@@ -983,12 +987,7 @@ type PersistentVolumeClaimVolumeSource struct {
 // An emptyDir is a directory the kubelet creates with the pod and
 // deletes with it, which is all two containers need to share one
 // socket.
-//
-// SizeLimit caps the volume. The IPC volume leaves it empty, so it marshals as
-// {}.
-type EmptyDirVolumeSource struct {
-	SizeLimit string `json:"sizeLimit,omitempty"`
-}
+type EmptyDirVolumeSource struct{}
 
 // The pod status fields the phase derivation reads. The container's
 // terminated state is the specific half of a failure message,

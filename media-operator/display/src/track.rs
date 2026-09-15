@@ -50,7 +50,7 @@ impl Track {
     /// track, like an alternate angle. Most files carry one, so it stays
     /// hidden.
     pub fn available(self, film: &Film) -> bool {
-        let count = film.tracks_of(self.kind()).len();
+        let count = film.tracks_of(self.kind()).count();
         match self {
             Track::Video => count > 1,
             _ => count >= 1,
@@ -60,11 +60,7 @@ impl Track {
     /// The cell's word. A subtitle cell reads the language alone, because the
     /// strip holds one line for it.
     pub fn value(self, film: &Film) -> String {
-        let Some(track) = film
-            .tracks_of(self.kind())
-            .into_iter()
-            .find(|track| track.selected)
-        else {
+        let Some(track) = film.tracks_of(self.kind()).find(|track| track.selected) else {
             return OFF.to_string();
         };
         match (self, track.lang.as_ref()) {
@@ -75,8 +71,7 @@ impl Track {
 
     /// The chooser's entries, in the order the list carries them.
     pub fn entries(self, film: &Film) -> Vec<String> {
-        let tracks = film.tracks_of(self.kind());
-        let labels = tracks.into_iter().map(|track| track.label());
+        let labels = film.tracks_of(self.kind()).map(|track| track.label());
         match self {
             Track::Subtitles => std::iter::once(OFF_ENTRY.to_string())
                 .chain(labels)
@@ -87,10 +82,7 @@ impl Track {
 
     /// The entry a chooser opens on, which is the track that plays now.
     pub fn opens_on(self, film: &Film) -> usize {
-        let at = film
-            .tracks_of(self.kind())
-            .into_iter()
-            .position(|track| track.selected);
+        let at = film.tracks_of(self.kind()).position(|track| track.selected);
         match (self, at) {
             (Track::Subtitles, Some(at)) => at + 1,
             (Track::Subtitles, None) => 0,
@@ -112,12 +104,12 @@ impl Track {
             if selected == 0 {
                 return write("no".to_string());
             }
-            return match film.tracks_of(self.kind()).get(selected - 1) {
+            return match film.tracks_of(self.kind()).nth(selected - 1) {
                 Some(track) => write(track.id.to_string()),
                 None => Vec::new(),
             };
         }
-        match film.tracks_of(self.kind()).get(selected) {
+        match film.tracks_of(self.kind()).nth(selected) {
             Some(track) => write(track.id.to_string()),
             None => Vec::new(),
         }

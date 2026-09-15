@@ -103,10 +103,7 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 	}
 	// The one container holds the claim's one request, the controller
 	// this Remote selects.
-	for _, request := range claimRequests(claim) {
-		container.Resources.Claims = append(container.Resources.Claims,
-			ContainerClaim{Name: podClaimName, Request: request})
-	}
+	container.Resources.Claims = claimEntries(claim)
 
 	return &Pod{
 		APIVersion: podAPIVersion,
@@ -117,7 +114,8 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 			OwnerReferences: []OwnerReference{remoteOwner(remote)},
 		},
 		Spec: PodSpec{
-			RestartPolicy: "Always",
+			RestartPolicy:                "Always",
+			AutomountServiceAccountToken: noServiceAccountToken(),
 			ResourceClaims: []PodResourceClaim{{
 				Name:              podClaimName,
 				ResourceClaimName: claim.Metadata.Name,

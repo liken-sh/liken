@@ -83,6 +83,15 @@ const sidecarRestartPolicy = "Always"
 // state to flush.
 const playbackGracePeriod = 5
 
+// Every pod this operator builds turns the ServiceAccount token mount
+// off. Kubernetes would otherwise mount the namespace's default account's
+// token into a pod that decodes media from the network, and no pod here
+// reads the API.
+func noServiceAccountToken() *bool {
+	off := false
+	return &off
+}
+
 func podName(play string) string {
 	return play + "-playback"
 }
@@ -157,10 +166,7 @@ func buildPod(
 	}
 	// The player container holds every request the claim asks for,
 	// because the playback claim holds the player's roles alone.
-	for _, request := range claimRequests(claim) {
-		container.Resources.Claims = append(container.Resources.Claims,
-			ContainerClaim{Name: podClaimName, Request: request})
-	}
+	container.Resources.Claims = claimEntries(claim)
 
 	volumes := make([]Volume, 0, len(resolved.Volumes)+1)
 	volumes = append(volumes, resolved.Volumes...)
@@ -171,7 +177,14 @@ func buildPod(
 	// off the pod to tell whether a Player reshaped this pod.
 	initContainers := []Container{
 		commandSidecar(play, claim, blocks, next, sidecarImage, busAddress, topicBase, remotes),
-		displaySidecar(play, claim, resolved.Mounts, displayImage, prefs),
+	}
+	// The display container travels only for a unit that has a screen, and
+	// the claim answers that. An audio-only Player's pod would otherwise
+	// carry a display that finds no compositor socket, waits out its grace
+	// period, and restarts for the life of the run.
+	if claimHasScreen(claim) {
+		initContainers = append(initContainers,
+			displaySidecar(play, claim, mounts, displayImage, prefs))
 	}
 
 	return &Pod{
@@ -185,6 +198,7 @@ func buildPod(
 		},
 		Spec: PodSpec{
 			RestartPolicy:                 "Never",
+			AutomountServiceAccountToken:  noServiceAccountToken(),
 			TerminationGracePeriodSeconds: &grace,
 			ResourceClaims: []PodResourceClaim{{
 				Name:              podClaimName,
@@ -268,14 +282,15 @@ func commandSidecar(
 	// subscribes to no controller at all.
 	env = append(env, EnvVar{Name: playerNameVariable, Value: playerName(play)})
 	if len(remotes) > 0 {
-		events := make([]string, len(remotes))
 		focuses := make([]string, len(remotes))
 		for index, remote := range remotes {
-			events[index] = remote.EventsTopic
 			focuses[index] = remote.FocusTopic
 		}
 		env = append(env,
-			EnvVar{Name: remoteEventsTopicsVariable, Value: strings.Join(events, "\n")},
+			EnvVar{
+				Name:  remoteEventsTopicsVariable,
+				Value: strings.Join(remoteEventsTopics(remotes), "\n"),
+			},
 			EnvVar{Name: remoteFocusTopicsVariable, Value: strings.Join(focuses, "\n")})
 	}
 	// The volume topic travels only for a unit that has speakers, and
@@ -333,7 +348,7 @@ func commandSidecar(
 // The mounts are the resolution's own, which are read-only, and a logo the
 // Play names by https URL is a fetch the pod's network already allows.
 func displaySidecar(
-	play *Play, claim *ResourceClaim, mediaMounts []VolumeMount,
+	play *Play, claim *ResourceClaim, mounts []VolumeMount,
 	displayImage string, prefs resolvedPreferences,
 ) Container {
 	interval := play.Spec.TrickplayInterval
@@ -346,7 +361,7 @@ func displaySidecar(
 		// starts, so the container names no command.
 		Image:         displayImage,
 		Env:           []EnvVar{{Name: trickplayIntervalVariable, Value: interval}},
-		VolumeMounts:  append([]VolumeMount{ipcMount()}, mediaMounts...),
+		VolumeMounts:  mounts,
 		RestartPolicy: sidecarRestartPolicy,
 	}
 	// The display clock reads TZ against the image's tz database. Set it only
@@ -356,10 +371,7 @@ func displaySidecar(
 		container.Env = append(container.Env,
 			EnvVar{Name: timeZoneVariable, Value: prefs.TimeZone})
 	}
-	for _, request := range claimRequests(claim) {
-		container.Resources.Claims = append(container.Resources.Claims,
-			ContainerClaim{Name: podClaimName, Request: request})
-	}
+	container.Resources.Claims = claimEntries(claim)
 	return container
 }
 
@@ -423,13 +435,28 @@ func ipcMount() VolumeMount {
 	return VolumeMount{Name: ipcVolumeName, MountPath: ipcMountPath}
 }
 
-// sameRemoteSet reports whether two pods carry the same controllers,
-// by the events topics the command sidecar subscribes to. It reads no
-// keymap, so a Keymap edit is bus state and not a shape change and
-// recreates no pod. Only what the Player controls, the claim and the
-// set of controllers, reshapes a running film.
-func sameRemoteSet(current, desired *Pod) bool {
-	return slices.Equal(podRemoteTopics(current), podRemoteTopics(desired))
+// sameRemoteSet reports whether a running pod carries the controllers a
+// Play's bound remotes name, by the events topics the command sidecar
+// subscribes to. It reads no keymap, so a Keymap edit is bus state and
+// not a shape change and recreates no pod. Only what the Player
+// controls, the claim and the set of controllers, reshapes a running
+// film.
+func sameRemoteSet(current *Pod, remotes []boundRemote) bool {
+	return slices.Equal(podRemoteTopics(current), remoteEventsTopics(remotes))
+}
+
+// remoteEventsTopics lists the events topics in the order the command
+// sidecar's own list carries them, so the comparison above and the
+// container's environment read one rule.
+func remoteEventsTopics(remotes []boundRemote) []string {
+	if len(remotes) == 0 {
+		return nil
+	}
+	topics := make([]string, len(remotes))
+	for index, remote := range remotes {
+		topics[index] = remote.EventsTopic
+	}
+	return topics
 }
 
 // podRemoteTopics reads the events topics the command sidecar

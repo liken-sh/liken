@@ -325,6 +325,14 @@ has decided yet what work they become.
   topic, so the trust boundary is the whole cluster. Acceptable for one
   home the owner controls, and it owes broker ACLs once a cluster runs
   a workload the owner does not trust.
+* [Nothing reports a crashed display](open-problems/nothing-reports-a-crashed-display.md).
+  The display restarts alone inside a pod that stays `Running`, so the
+  `Play`'s phase and the bus report a healthy run while the screen
+  carries no display. The only report is one container's restart count.
+* [No container states resource requests](open-problems/no-container-states-resource-requests.md).
+  No container this operator builds states cpu or memory, so every pod
+  is `BestEffort`. A third container with a Vulkan closure on a 1GB
+  machine is the reason to decide it once, for every pod.
 
 ## Rejected
 

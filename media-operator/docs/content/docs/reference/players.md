@@ -57,7 +57,7 @@ The devices that form the unit, each selected from what a hardware operator publ
 | <span id="spec--display"></span>`display` | [object](#specdisplay) | no | The display this Player shows video on. Omit it for an audio-only Player. |
 | <span id="spec--sinks"></span>`sinks` | [\[\]object](#specsinks) | no | The audio outputs this Player plays sound through. |
 | <span id="spec--render"></span>`render` | [object](#specrender) | no | The GPU render node the player program decodes and draws with. Omit it only for an audio-only Player; mpv needs a GPU to put video on a display. |
-| <span id="spec--remotes"></span>`remotes` | [\[\]object](#specremotes) | no | The controllers this unit owns, each naming a Remote in the same namespace. The Play's pod builds one translator sidecar per entry. |
+| <span id="spec--remotes"></span>`remotes` | [\[\]object](#specremotes) | no | The controllers this unit owns, each naming a Remote in the same namespace. Each Remote runs a standing pod of its own, and the Play's command sidecar reads the events every entry publishes. |
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Player override of the audio language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Player override of the subtitle language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Player override of when subtitles show; omit it to inherit the default MediaPreferences. One of: `on`, `off`, `auto`. |
@@ -115,7 +115,7 @@ The GPU render node the player program decodes and draws with. Omit it only for 
 
 ### spec.remotes[]
 
-The controllers this unit owns, each naming a Remote in the same namespace. The Play's pod builds one translator sidecar per entry.
+The controllers this unit owns, each naming a Remote in the same namespace. Each Remote runs a standing pod of its own, and the Play's command sidecar reads the events every entry publishes.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

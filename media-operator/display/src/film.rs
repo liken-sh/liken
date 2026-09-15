@@ -90,12 +90,10 @@ impl Film {
         }
     }
 
-    // The tracks of one kind, in the order track-list carries them.
-    pub fn tracks_of(&self, kind: &str) -> Vec<&Track> {
-        self.tracks
-            .iter()
-            .filter(|track| track.kind == kind)
-            .collect()
+    // The tracks of one kind, in the order track-list carries them. Every
+    // caller counts, finds, or walks them, so none of them takes a list.
+    pub fn tracks_of<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Track> + 'a {
+        self.tracks.iter().filter(move |track| track.kind == kind)
     }
 
     /// A standalone track plays as a plain file, so mpv reads its tags. An
@@ -214,9 +212,9 @@ mod tests {
         assert_eq!(film.chapters[1].title.as_deref(), Some("The road"));
         assert_eq!(film.chapters[2].title, None);
         assert_eq!(film.tracks.len(), 4);
-        assert_eq!(film.tracks_of("audio").len(), 2);
-        assert_eq!(film.tracks_of("sub").len(), 1);
-        assert_eq!(film.tracks_of("video").len(), 1);
+        assert_eq!(film.tracks_of("audio").count(), 2);
+        assert_eq!(film.tracks_of("sub").count(), 1);
+        assert_eq!(film.tracks_of("video").count(), 1);
     }
 
     #[test]

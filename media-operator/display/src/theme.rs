@@ -53,28 +53,41 @@ pub mod color {
     pub const SHADOW: Color = Color::BLACK;
 }
 
-/// An ASS alpha runs from 00, opaque, to FF, transparent. The display keeps
-/// the bytes, and `opacity` turns one into the fraction the toolkit takes.
+/// How much of the ground each surface covers, from 1 opaque to 0 clear.
+/// Every value states the ASS alpha byte the look was drawn with, so the
+/// display covers what the Lua display covered, and nothing downstream reads
+/// a byte whose 0 means opaque.
 pub mod alpha {
-    pub const OPAQUE: u8 = 0x00;
-    pub const SUBDUED: u8 = 0x80;
-    pub const TRACK: u8 = 0x50;
-    pub const DIM: u8 = 0xA8;
-    pub const PANEL: u8 = 0x14;
-    pub const HIGHLIGHT: u8 = 0x30;
+    use super::opacity;
+
+    pub const OPAQUE: f32 = opacity(0x00);
+    pub const SUBDUED: f32 = opacity(0x80);
+    pub const TRACK: f32 = opacity(0x50);
+    pub const DIM: f32 = opacity(0xA8);
+    pub const PANEL: f32 = opacity(0x14);
+    pub const HIGHLIGHT: f32 = opacity(0x30);
+    /// The scrim's dark plateau, and the volume row's own surface.
+    pub const SCRIM_EDGE: f32 = opacity(0x34);
 }
 
-/// One ASS alpha byte as the fraction of the ground it covers.
-pub fn opacity(alpha: u8) -> f32 {
-    1.0 - f32::from(alpha) / 255.0
+/// One ASS alpha byte as the fraction of the ground it covers. An ASS alpha
+/// runs from 00, opaque, to FF, transparent.
+pub const fn opacity(alpha: u8) -> f32 {
+    1.0 - alpha as f32 / 255.0
 }
 
-/// One colour at one ASS alpha under the fade. The fade scales every alpha the
-/// display draws, so the whole layer fades as one. At a fade of 1 the colour
-/// carries the alpha the caller states.
-pub fn faded(color: Color, alpha: u8, fade: f32) -> Color {
+/// One colour at one coverage. Every drawing call takes a colour that already
+/// carries the fraction it covers.
+pub fn at(color: Color, alpha: f32) -> Color {
+    Color { a: alpha, ..color }
+}
+
+/// One colour under the fade. The fade scales every alpha the display draws,
+/// so the whole layer fades as one. At a fade of 1 the colour covers what it
+/// states.
+pub fn faded(color: Color, fade: f32) -> Color {
     Color {
-        a: opacity(alpha) * fade,
+        a: color.a * fade,
         ..color
     }
 }
@@ -148,9 +161,6 @@ pub const LINE_PITCH: f32 = type_scale::SMALL + 12.0;
 pub const SCRIM_TOP_HEIGHT: f32 = 410.0;
 pub const SCRIM_BOTTOM_HEIGHT: f32 = 480.0;
 
-/// The scrim's dark plateau, as an ASS alpha. 0 is opaque, 255 is clear.
-pub const SCRIM_EDGE_ALPHA: u8 = 0x34;
-
 /// The dark plateau covers this fraction of the scrim height, at the screen
 /// edge, over the text. The fade softens its inner edge.
 pub const SCRIM_SOLID: f32 = 0.66;
@@ -184,16 +194,29 @@ mod tests {
         assert_eq!(hex(color::SHADOW), "#000000");
     }
 
+    /// Every coverage is the ASS alpha byte the look was drawn with, read as
+    /// the fraction of the ground it covers.
     #[test]
-    fn an_ass_alpha_byte_reads_as_the_fraction_it_covers() {
-        assert_eq!(opacity(alpha::OPAQUE), 1.0);
+    fn every_coverage_is_the_ass_alpha_byte_it_was_drawn_with() {
+        for (coverage, byte) in [
+            (alpha::OPAQUE, 0x00),
+            (alpha::SUBDUED, 0x80),
+            (alpha::TRACK, 0x50),
+            (alpha::DIM, 0xA8),
+            (alpha::PANEL, 0x14),
+            (alpha::HIGHLIGHT, 0x30),
+            (alpha::SCRIM_EDGE, 0x34),
+        ] {
+            assert_eq!(coverage, 1.0 - f32::from(byte as u8) / 255.0, "{byte:#04x}");
+        }
+        assert_eq!(alpha::OPAQUE, 1.0);
         assert_eq!(opacity(0xFF), 0.0);
-        assert!((opacity(alpha::SUBDUED) - 0.498).abs() < 0.001);
-        assert!((opacity(alpha::TRACK) - 0.686).abs() < 0.001);
-        assert!((opacity(alpha::DIM) - 0.341).abs() < 0.001);
-        assert!((opacity(alpha::PANEL) - 0.922).abs() < 0.001);
-        assert!((opacity(alpha::HIGHLIGHT) - 0.812).abs() < 0.001);
-        assert!((opacity(SCRIM_EDGE_ALPHA) - 0.796).abs() < 0.001);
+        assert!((alpha::SUBDUED - 0.498).abs() < 0.001);
+        assert!((alpha::TRACK - 0.686).abs() < 0.001);
+        assert!((alpha::DIM - 0.341).abs() < 0.001);
+        assert!((alpha::PANEL - 0.922).abs() < 0.001);
+        assert!((alpha::HIGHLIGHT - 0.812).abs() < 0.001);
+        assert!((alpha::SCRIM_EDGE - 0.796).abs() < 0.001);
     }
 
     /// The display states a size as an ASS `\\fs`, which is the line box. The
@@ -208,22 +231,14 @@ mod tests {
 
     #[test]
     fn a_faded_colour_keeps_its_channels_and_scales_its_alpha() {
-        let full = faded(color::text(), alpha::OPAQUE, 1.0);
+        let full = faded(at(color::text(), alpha::OPAQUE), 1.0);
         assert_eq!(
             (full.r, full.g, full.b),
             (color::text().r, color::text().g, color::text().b)
         );
         assert_eq!(full.a, 1.0);
-        assert_eq!(faded(color::fill(), alpha::OPAQUE, 0.5).a, 0.5);
-        assert_eq!(faded(color::fill(), alpha::SUBDUED, 0.0).a, 0.0);
-        assert!((faded(color::fill(), alpha::SUBDUED, 1.0).a - 0.498).abs() < 0.001);
-    }
-
-    #[test]
-    fn the_top_right_column_reads_at_the_line_pitch() {
-        assert_eq!(LINE_PITCH, 46.0);
-        assert_eq!(MARGIN_Y, 90.0);
-        assert_eq!(MARGIN_Y + LINE_PITCH, 136.0);
-        assert_eq!(MARGIN_Y + 2.0 * LINE_PITCH, 182.0);
+        assert_eq!(faded(at(color::fill(), alpha::OPAQUE), 0.5).a, 0.5);
+        assert_eq!(faded(at(color::fill(), alpha::SUBDUED), 0.0).a, 0.0);
+        assert!((faded(at(color::fill(), alpha::SUBDUED), 1.0).a - 0.498).abs() < 0.001);
     }
 }

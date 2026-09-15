@@ -10,23 +10,25 @@ use crate::theme;
 pub mod brush;
 pub mod shape;
 
-pub use brush::{Anchor, Brush, Line, measure};
+pub use brush::{Anchor, Brush, ELLIPSIS, Line, clip, forget_measurements, measure};
 
 /// How the layout space maps to the real surface. `scale` maps a canvas
 /// length to output pixels, and the two axes share it because the width
 /// follows the surface's own ratio.
+///
+/// The fields are private and [`Canvas::for_output`] is the one constructor,
+/// because a scale of nothing divides through every conversion below and
+/// turns every position it touches into NaN.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Canvas {
-    pub width: f32,
-    pub height: f32,
-    pub scale: f32,
+    width: f32,
+    scale: f32,
 }
 
 impl Default for Canvas {
     fn default() -> Self {
         Self {
             width: theme::CANVAS_WIDTH,
-            height: theme::CANVAS_HEIGHT,
             scale: 1.0,
         }
     }
@@ -48,15 +50,51 @@ impl Canvas {
         }
         Self {
             width: (theme::CANVAS_HEIGHT * output.width / output.height + 0.5).floor(),
-            height: theme::CANVAS_HEIGHT,
             scale: output.height / theme::CANVAS_HEIGHT,
         }
+    }
+
+    /// The canvas the surface gives: as wide as its ratio makes it, and always
+    /// [`theme::CANVAS_HEIGHT`] rows tall.
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    pub fn height(&self) -> f32 {
+        theme::CANVAS_HEIGHT
+    }
+
+    /// How many output pixels one canvas length covers.
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// One canvas length in whole output pixels. Every request, every
+    /// placement, and every snap rounds one this way, so the two halves of a
+    /// position never disagree by a pixel.
+    pub fn to_pixels(&self, value: f32) -> f32 {
+        (value * self.scale + 0.5).floor()
+    }
+
+    /// One length in output pixels as the canvas length it covers.
+    pub fn to_canvas(&self, pixels: f32) -> f32 {
+        pixels / self.scale
     }
 
     /// One canvas value on the output pixel grid, so what the display draws
     /// stands still between two frames that land on the same pixel.
     pub fn snap(&self, value: f32) -> f32 {
-        (value * self.scale).round() / self.scale
+        self.to_canvas(self.to_pixels(value))
+    }
+
+    /// The column every flush-right element ends on.
+    pub fn right(&self) -> f32 {
+        self.width - theme::MARGIN_X
+    }
+
+    /// The middle of the screen, which a centred element measures from.
+    pub fn centre_x(&self) -> f32 {
+        self.width / 2.0
     }
 }
 
@@ -118,7 +156,7 @@ impl Scrim {
         Self {
             near,
             far,
-            peak: theme::opacity(theme::SCRIM_EDGE_ALPHA),
+            peak: theme::alpha::SCRIM_EDGE,
             sigma: (blur * EDGE_SIGMA_PER_BLUR).min(EDGE_SIGMA_LIMIT),
             edge,
         }
@@ -171,14 +209,14 @@ impl Scrim {
         }
     }
 
-    /// The gradient bands the scrim is drawn as, at one fade factor. The
+    /// The gradient bands the scrim is drawn as, at full strength. The
     /// band splits in two at the rectangle's inner edge, because eight stops
     /// over the whole span would leave the profile up to two parts in a
     /// hundred off the blurred shape's own, and eight over each half hold it
     /// inside seven parts in a thousand, which is under two steps of an
     /// eight-bit channel. The split lands on a whole output pixel, so the two
     /// fills meet with no row drawn twice.
-    pub fn bands(&self, canvas: &Canvas, fade: f32) -> Vec<Band> {
+    pub fn bands(&self, canvas: &Canvas) -> Vec<Band> {
         let (start, end) = self.span();
         let split = canvas.snap(self.half());
         [(start, split), (split, end)]
@@ -188,45 +226,61 @@ impl Scrim {
                 let mut stops = [0.0; STOPS];
                 for (stop, alpha) in stops.iter_mut().enumerate() {
                     let offset = stop as f32 / (STOPS - 1) as f32;
-                    *alpha = self.opacity_at(from + offset * (to - from)) * fade;
+                    *alpha = self.opacity_at(from + offset * (to - from));
                 }
                 Band { from, to, stops }
             })
             .collect()
     }
+}
 
-    /// Draw the scrim at one fade factor, in canvas units.
-    pub fn draw(&self, frame: &mut Frame, canvas: &Canvas, fade: f32) {
-        for band in self.bands(canvas, fade) {
-            let mut ramp =
-                gradient::Linear::new(Point::new(0.0, band.from), Point::new(0.0, band.to));
-            for (stop, alpha) in band.stops.iter().enumerate() {
-                ramp = ramp.add_stop(
-                    stop as f32 / (STOPS - 1) as f32,
-                    Color {
-                        a: *alpha,
-                        ..theme::color::SHADOW
-                    },
-                );
-            }
-            frame.fill(
-                &Path::rectangle(
-                    Point::new(0.0, band.from),
-                    Size::new(canvas.width, band.to - band.from),
-                ),
-                ramp,
-            );
+/// The bands of both scrims, for one canvas. Each stop is a pair of
+/// Gaussians, and only the fade changes between two frames, so the profile is
+/// evaluated once per surface and the fade multiplies it at draw time.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Scrims {
+    pub top: Vec<Band>,
+    pub bottom: Vec<Band>,
+}
+
+impl Scrims {
+    pub fn for_canvas(canvas: &Canvas) -> Self {
+        Self {
+            top: Scrim::top().bands(canvas),
+            bottom: Scrim::bottom().bands(canvas),
         }
     }
 }
 
-/// One gradient the scrim draws as: the rows it covers, and the alpha at
-/// each of its evenly spaced stops.
+/// One gradient the scrim draws as: the rows it covers, and the fraction of
+/// the ground it covers at each of its evenly spaced stops.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Band {
     pub from: f32,
     pub to: f32,
     pub stops: [f32; STOPS],
+}
+
+impl Band {
+    /// The colour one stop draws, at one fade factor.
+    pub fn color(&self, stop: usize, fade: f32) -> Color {
+        theme::faded(theme::at(theme::color::SHADOW, self.stops[stop]), fade)
+    }
+
+    /// Draw the band at one fade factor, in canvas units.
+    pub fn draw(&self, frame: &mut Frame, canvas: &Canvas, fade: f32) {
+        let mut ramp = gradient::Linear::new(Point::new(0.0, self.from), Point::new(0.0, self.to));
+        for stop in 0..STOPS {
+            ramp = ramp.add_stop(stop as f32 / (STOPS - 1) as f32, self.color(stop, fade));
+        }
+        frame.fill(
+            &Path::rectangle(
+                Point::new(0.0, self.from),
+                Size::new(canvas.width(), self.to - self.from),
+            ),
+            ramp,
+        );
+    }
 }
 
 /// The normal distribution's cumulative function, which is the profile one
@@ -261,19 +315,28 @@ mod tests {
     /// 1080 rows.
     #[test]
     fn the_canvas_width_follows_the_surface_ratio() {
-        assert_eq!(Canvas::for_output(Size::new(1920.0, 1080.0)).width, 1920.0);
-        assert_eq!(Canvas::for_output(Size::new(3840.0, 2160.0)).width, 1920.0);
-        assert_eq!(Canvas::for_output(Size::new(2560.0, 1080.0)).width, 2560.0);
-        assert_eq!(Canvas::for_output(Size::new(1280.0, 720.0)).width, 1920.0);
-        assert_eq!(Canvas::for_output(Size::new(1024.0, 768.0)).width, 1440.0);
+        assert_eq!(
+            Canvas::for_output(Size::new(1920.0, 1080.0)).width(),
+            1920.0
+        );
+        assert_eq!(
+            Canvas::for_output(Size::new(3840.0, 2160.0)).width(),
+            1920.0
+        );
+        assert_eq!(
+            Canvas::for_output(Size::new(2560.0, 1080.0)).width(),
+            2560.0
+        );
+        assert_eq!(Canvas::for_output(Size::new(1280.0, 720.0)).width(), 1920.0);
+        assert_eq!(Canvas::for_output(Size::new(1024.0, 768.0)).width(), 1440.0);
     }
 
     #[test]
     fn the_scale_maps_a_canvas_length_to_output_pixels() {
-        assert_eq!(Canvas::for_output(Size::new(1920.0, 1080.0)).scale, 1.0);
-        assert_eq!(Canvas::for_output(Size::new(3840.0, 2160.0)).scale, 2.0);
+        assert_eq!(Canvas::for_output(Size::new(1920.0, 1080.0)).scale(), 1.0);
+        assert_eq!(Canvas::for_output(Size::new(3840.0, 2160.0)).scale(), 2.0);
         assert_eq!(
-            Canvas::for_output(Size::new(1280.0, 720.0)).scale,
+            Canvas::for_output(Size::new(1280.0, 720.0)).scale(),
             2.0 / 3.0
         );
     }
@@ -289,8 +352,8 @@ mod tests {
             Canvas::for_output(Size::new(-1.0, 1080.0)),
             Canvas::default()
         );
-        assert_eq!(Canvas::default().width, 1920.0);
-        assert_eq!(Canvas::default().scale, 1.0);
+        assert_eq!(Canvas::default().width(), 1920.0);
+        assert_eq!(Canvas::default().scale(), 1.0);
     }
 
     #[test]
@@ -302,7 +365,7 @@ mod tests {
         let half = Canvas::for_output(Size::new(1280.0, 720.0));
         assert_eq!(half.snap(270.6), 270.0);
         assert_eq!(half.snap(271.0), 271.5);
-        assert_eq!((half.snap(271.0) * half.scale).fract(), 0.0);
+        assert_eq!((half.snap(271.0) * half.scale()).fract(), 0.0);
     }
 
     /// The scrim rows: the top scrim's rectangle runs from -123 to 270.6, and
@@ -374,7 +437,7 @@ mod tests {
     fn eight_stops_over_each_half_hold_the_profile() {
         let canvas = Canvas::default();
         for scrim in [Scrim::top(), Scrim::bottom()] {
-            for band in scrim.bands(&canvas, 1.0) {
+            for band in scrim.bands(&canvas) {
                 for step in 0..=400 {
                     let offset = step as f32 / 400.0;
                     let row = band.from + offset * (band.to - band.from);
@@ -398,7 +461,7 @@ mod tests {
     fn the_two_bands_meet_on_a_whole_output_pixel() {
         let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
         for scrim in [Scrim::top(), Scrim::bottom()] {
-            let bands = scrim.bands(&canvas, 1.0);
+            let bands = scrim.bands(&canvas);
             assert_eq!(bands.len(), 2);
             assert_eq!(bands[0].to, bands[1].from);
             assert_eq!(bands[0].to.fract(), 0.0);
@@ -406,21 +469,36 @@ mod tests {
         }
     }
 
-    /// The fade scales every stop, and a scrim at nothing carries nothing.
+    /// The bands carry the profile at full strength, and the fade scales
+    /// every stop as the band draws, so a scrim at a fade of nothing covers
+    /// nothing.
     #[test]
-    fn the_fade_scales_every_stop() {
+    fn the_fade_scales_every_stop_as_the_band_draws() {
         let canvas = Canvas::default();
-        let scrim = Scrim::top();
-        let full = scrim.bands(&canvas, 1.0);
-        let half = scrim.bands(&canvas, 0.5);
-        for (whole, part) in full.iter().zip(half.iter()) {
-            for (a, b) in whole.stops.iter().zip(part.stops.iter()) {
-                assert!((a / 2.0 - b).abs() < 1e-6);
+        for band in Scrim::top().bands(&canvas) {
+            for stop in 0..STOPS {
+                assert!((band.color(stop, 1.0).a - band.stops[stop]).abs() < 1e-6);
+                assert!((band.color(stop, 0.5).a - band.stops[stop] / 2.0).abs() < 1e-6);
+                assert_eq!(band.color(stop, 0.0).a, 0.0);
+                assert_eq!(band.color(stop, 1.0).r, theme::color::SHADOW.r);
             }
         }
-        for band in scrim.bands(&canvas, 0.0) {
-            assert!(band.stops.iter().all(|alpha| *alpha == 0.0));
-        }
+    }
+
+    /// Both scrims carry the same bands for one surface, however many times
+    /// they are asked for.
+    #[test]
+    fn the_scrims_of_one_surface_are_the_bands_it_draws() {
+        let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
+        let scrims = Scrims::for_canvas(&canvas);
+        assert_eq!(scrims.top, Scrim::top().bands(&canvas));
+        assert_eq!(scrims.bottom, Scrim::bottom().bands(&canvas));
+        assert!(
+            scrims
+                .top
+                .iter()
+                .any(|band| band.stops.iter().any(|alpha| *alpha > 0.0))
+        );
     }
 
     /// A band with no rows in it is left out, so a scrim whose plateau falls
@@ -429,6 +507,6 @@ mod tests {
     fn a_band_with_no_rows_is_left_out() {
         let canvas = Canvas::default();
         let scrim = Scrim::new(0.0, 0.0, Edge::Top);
-        assert!(scrim.bands(&canvas, 1.0).len() < 2);
+        assert!(scrim.bands(&canvas).len() < 2);
     }
 }

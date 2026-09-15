@@ -57,7 +57,7 @@ impl Offset {
         }
         match self {
             Offset::Audio => true,
-            Offset::Subtitle => !film.tracks_of("sub").is_empty(),
+            Offset::Subtitle => film.tracks_of("sub").next().is_some(),
         }
     }
 

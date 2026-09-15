@@ -4,7 +4,7 @@
 
 use serde_json::json;
 
-use crate::fade::Fade;
+use crate::fade::{Clock, Fade, Hide};
 use crate::film::Film;
 use crate::images;
 use crate::ipc::Command;
@@ -74,16 +74,6 @@ const EXIT: &str = "liken-exit";
 /// commands topic, and the browser starts the next work.
 const NEXT: &str = "liken-next";
 
-/// What the idle window does after a press. A summon arms one, a dismiss
-/// cancels it, and a press while paused leaves the display standing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Hide {
-    #[default]
-    Keep,
-    Arm,
-    Cancel,
-}
-
 /// The modules one press reaches, and the film they read.
 pub struct Parts<'a> {
     pub presentation: &'a Presentation,
@@ -97,14 +87,19 @@ pub struct Parts<'a> {
 
 /// Whether the display stands summoned, where the focus is, and how far the
 /// fade has moved.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Focus {
     summoned: bool,
     focused: Option<Stop>,
     paused: bool,
     first_pause: bool,
-    fade: Fade,
-    hide: Hide,
+    clock: Clock,
+}
+
+impl Default for Focus {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Focus {
@@ -112,8 +107,11 @@ impl Focus {
     /// state mpv is already in.
     pub fn new() -> Self {
         Self {
+            summoned: false,
+            focused: None,
+            paused: false,
             first_pause: true,
-            ..Self::default()
+            clock: Clock::default(),
         }
     }
 
@@ -128,11 +126,11 @@ impl Focus {
     /// The fade factor, so the frame loop draws the layout while it is above 0
     /// and draws nothing once it reaches 0.
     pub fn fade(&self) -> &Fade {
-        &self.fade
+        self.clock.fade()
     }
 
     pub fn fade_mut(&mut self) -> &mut Fade {
-        &mut self.fade
+        self.clock.fade_mut()
     }
 
     pub fn paused(self) -> bool {
@@ -142,7 +140,7 @@ impl Focus {
     /// The idle window this press asks for, which the frame loop arms and
     /// cancels because it owns the timer.
     pub fn take_hide(&mut self) -> Hide {
-        std::mem::take(&mut self.hide)
+        self.clock.take_hide()
     }
 
     /// Which axis of the bar has focus, and none when the focus is elsewhere.
@@ -180,8 +178,12 @@ impl Focus {
             self.summoned = true;
             self.reset_focus(parts);
         }
-        self.fade.to(1.0);
-        self.arm_hide();
+        // A summon while paused arms nothing, so the display stands for as
+        // long as the film does.
+        self.clock.show(match self.paused {
+            true => Hide::Cancel,
+            false => Hide::Arm,
+        });
     }
 
     /// Clear the display and cancel the idle window.
@@ -189,8 +191,8 @@ impl Focus {
         self.summoned = false;
         parts.upnext.collapse();
         parts.strip.close();
-        self.hide = Hide::Cancel;
-        self.fade.to(0.0);
+        self.clock.ask(Hide::Cancel);
+        self.clock.hide();
     }
 
     /// A summon lands on the first stop below the offer, so the main button
@@ -199,12 +201,6 @@ impl Focus {
         self.focused = Self::present(parts)
             .into_iter()
             .find(|stop| *stop != Stop::Next);
-    }
-
-    /// A summon while paused arms nothing, so the display stands for as long as
-    /// the film does.
-    fn arm_hide(&mut self) {
-        self.hide = if self.paused { Hide::Cancel } else { Hide::Arm };
     }
 
     /// The frame loop observes pause and reports it here. A pause summons the
@@ -221,7 +217,7 @@ impl Focus {
         }
         if paused {
             self.summon(parts);
-            self.hide = Hide::Cancel;
+            self.clock.ask(Hide::Cancel);
         } else if self.summoned {
             self.dismiss(parts);
         }
@@ -927,6 +923,13 @@ mod tests {
             display.press(Action::Back),
             vec![vec![json!("script-message"), json!("liken-exit")]]
         );
+    }
+
+    /// A focus built either way holds the same state, so one built through
+    /// the derive never summons the display on mpv's first pause report.
+    #[test]
+    fn a_focus_reads_the_same_whichever_way_it_is_built() {
+        assert_eq!(Focus::default(), Focus::new());
     }
 
     #[test]

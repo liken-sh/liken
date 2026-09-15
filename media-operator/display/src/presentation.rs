@@ -6,11 +6,27 @@ use serde_json::{Map, Value};
 
 use crate::film::Film;
 
-/// The current item's declared fields. An empty block means the item declared
-/// nothing, so every field falls through to its next tier.
+/// What kind of item the block declares, which the scrubber, the strip, and
+/// the header each ask about on every rebuild.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Kind {
+    #[default]
+    Other,
+    /// A still photo, which has no timeline.
+    Image,
+    /// An album, which is one audio stream with nothing to choose.
+    Music,
+}
+
+/// The current item's declared fields, and the two readings that do not
+/// change between two blocks: what kind of item it is, and the season line a
+/// series draws. Both are resolved when the block arrives, because the layer
+/// is rebuilt many times for one item and the block is read once.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Presentation {
     block: Map<String, Value>,
+    kind: Kind,
+    second: Option<String>,
 }
 
 impl Presentation {
@@ -20,8 +36,17 @@ impl Presentation {
     pub fn receive(&mut self, text: &str) {
         self.block = serde_json::from_str::<Value>(text)
             .ok()
-            .and_then(|parsed| parsed.as_object().cloned())
+            .and_then(|parsed| match parsed {
+                Value::Object(block) => Some(block),
+                _ => None,
+            })
             .unwrap_or_default();
+        self.kind = match self.word("type") {
+            Some("image") => Kind::Image,
+            Some("music") => Kind::Music,
+            _ => Kind::Other,
+        };
+        self.second = crate::header::second_line(self);
     }
 
     /// The title resolves in three tiers: the block's own title, then mpv's
@@ -35,19 +60,26 @@ impl Presentation {
 
     /// The item's type. The block names this field `type`, which Rust keeps
     /// for itself.
-    pub fn kind(&self) -> Option<&str> {
-        self.word("type")
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 
     /// A still photo has no timeline, so it shows no scrubber and no strip.
     pub fn is_image(&self) -> bool {
-        self.kind() == Some("image")
+        self.kind == Kind::Image
     }
 
     /// An album is one audio stream with nothing to choose, so it shows no
     /// strip.
     pub fn is_music(&self) -> bool {
-        self.kind() == Some("music")
+        self.kind == Kind::Music
+    }
+
+    /// The line under the title of a series: the season, the episode, and the
+    /// date the block names. Every part of it comes from the block, so it is
+    /// resolved once for the item.
+    pub fn second(&self) -> Option<&str> {
+        self.second.as_deref()
     }
 
     pub fn hint(&self) -> Option<&str> {
@@ -163,7 +195,7 @@ mod tests {
                 Some("the-file.mkv"),
                 "{text}"
             );
-            assert_eq!(presentation.kind(), None, "{text}");
+            assert_eq!(presentation.kind(), Kind::Other, "{text}");
             assert_eq!(presentation.year(), None, "{text}");
             assert_eq!(presentation.logo(), None, "{text}");
         }
@@ -201,7 +233,7 @@ mod tests {
                 "episodeTitle":"The One","date":"2017-03-05","year":2014,
                 "logo":"/art/logo.png","trickplay":"/art/tiles","art":"/art/cover.jpg"}"#,
         );
-        assert_eq!(presentation.kind(), Some("series"));
+        assert_eq!(presentation.kind(), Kind::Other);
         assert_eq!(presentation.hint(), Some("series"));
         assert_eq!(presentation.series(), Some("A Show"));
         assert_eq!(presentation.season(), Some(&json!(2)));

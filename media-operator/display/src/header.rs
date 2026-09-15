@@ -88,8 +88,10 @@ fn format_date(date: &str) -> String {
 }
 
 /// The second line joins the season, the episode number, and the episode
-/// title, and shows only the parts the item declared.
-fn second_line(presentation: &Presentation) -> Option<String> {
+/// title, and shows only the parts the item declared. The presentation
+/// resolves it when the block arrives, because none of its parts changes
+/// while the item plays.
+pub fn second_line(presentation: &Presentation) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(season) = presentation.season() {
         parts.push(format!("Season {}", num(season)));
@@ -183,8 +185,8 @@ pub fn lines(presentation: &Presentation, film: &Film, logo: Option<f32>) -> Vec
         {
             lines.push(title(series, TOP_Y));
         }
-        if let Some(line) = second_line(presentation) {
-            lines.push(under(line, second_y(logo)));
+        if let Some(line) = presentation.second() {
+            lines.push(under(line.to_string(), second_y(logo)));
         }
     } else {
         let name = presentation.title(film);

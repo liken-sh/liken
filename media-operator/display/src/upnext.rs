@@ -6,24 +6,23 @@
 use iced::{Color, Point, Rectangle, Size};
 use serde_json::Value;
 
-use crate::canvas::{Anchor, Brush, Canvas, Line, measure};
-use crate::fade::Fade;
+use crate::canvas::{Anchor, Brush, Canvas, Line, clip, measure};
+use crate::fade::{Clock, Fade, Hide};
 use crate::film::Film;
-use crate::focus::Hide;
 use crate::theme;
 
 /// The card's box in canvas pixels. It is 440 wide with its right edge on the
 /// margin, and its bottom edge stays above the row where the scrubber draws
 /// the time label, so the card never covers the scrubber.
-const CARD_W: f32 = 440.0;
+pub const CARD_W: f32 = 440.0;
 const CARD_TOP: f32 = 380.0;
-const ART_H: f32 = 248.0;
+pub const ART_H: f32 = 248.0;
 const PAD_X: f32 = 22.0;
 const PAD_Y: f32 = 16.0;
 const CARD_R: f32 = 14.0;
 /// The unfocused card's fill, dark enough to read the three lines over a
 /// bright frame. The focused card takes the chooser panel.
-const CARD_ALPHA: u8 = 0x54;
+const CARD_ALPHA: f32 = theme::opacity(0x54);
 /// The drop from each line of the card to the next, at the type size each
 /// line draws in.
 const REASON_PITCH: f32 = 40.0;
@@ -59,9 +58,6 @@ const WAIT_FADE: f32 = 0.6;
 const CHIP_WORD: &str = "UP NEXT";
 const WAIT_WORD: &str = "Starting";
 
-/// The ellipsis a clipped line ends on, U+2026.
-const ELLIPSIS: &str = "\u{2026}";
-
 // The seam the decode fills. The card asks for the offer's picture where
 // it draws the art plate, the decode answers with the size it draws at, and
 // the card hands back the box to draw it in.
@@ -84,7 +80,16 @@ pub struct Offer {
 impl Offer {
     fn parse(text: &str) -> Option<Self> {
         let block = serde_json::from_str::<Value>(text).ok()?;
-        let word = |name: &str| block.get(name).and_then(Value::as_str).map(str::to_string);
+        // A field the sidecar sent empty is a field the block does not
+        // carry, the way every presentation field reads, so a block of empty
+        // strings is no offer.
+        let word = |name: &str| {
+            block
+                .get(name)
+                .and_then(Value::as_str)
+                .filter(|word| !word.is_empty())
+                .map(str::to_string)
+        };
         let offer = Self {
             reason: word("reason"),
             title: word("title"),
@@ -107,8 +112,7 @@ pub struct UpNext {
     /// stop or the OSD hides.
     expanded: bool,
     waiting: bool,
-    fade: Fade,
-    hide: Hide,
+    clock: Clock,
     /// The last playlist position mpv reported. A change of item clears the
     /// offer, and the first report is not a change.
     at_item: Option<i64>,
@@ -117,22 +121,22 @@ pub struct UpNext {
 impl UpNext {
     /// The card's own fade, which the frame loop steps while it is moving.
     pub fn fade(&self) -> &Fade {
-        &self.fade
+        self.clock.fade()
     }
 
     pub fn fade_mut(&mut self) -> &mut Fade {
-        &mut self.fade
+        self.clock.fade_mut()
     }
 
     /// The hide window this state asks for, which the frame loop arms and
     /// cancels because it owns the timer.
     pub fn take_hide(&mut self) -> Hide {
-        std::mem::take(&mut self.hide)
+        self.clock.take_hide()
     }
 
     /// The hide window ran out, so the card leaves on its own fade.
     pub fn hide(&mut self) {
-        self.fade.to(0.0);
+        self.clock.hide();
     }
 
     /// Take the block as one JSON string. A block with none of the three lines
@@ -179,8 +183,7 @@ impl UpNext {
             return false;
         }
         self.risen = true;
-        self.fade.to(1.0);
-        self.hide = Hide::Arm;
+        self.clock.show(Hide::Arm);
         true
     }
 
@@ -224,7 +227,7 @@ impl UpNext {
             return;
         }
         self.waiting = true;
-        self.hide = Hide::Cancel;
+        self.clock.ask(Hide::Cancel);
     }
 
     /// A new offer, or the loss of one, drops every state the last one had.
@@ -232,8 +235,8 @@ impl UpNext {
         self.risen = false;
         self.expanded = false;
         self.waiting = false;
-        self.fade = Fade::default();
-        self.hide = Hide::Cancel;
+        self.clock = Clock::default();
+        self.clock.ask(Hide::Cancel);
     }
 
     /// The label the chip reads: the two words and the offer's own title.
@@ -250,7 +253,7 @@ impl UpNext {
     fn chip_panel(&self, canvas: &Canvas) -> Rectangle {
         let width = measure(&self.label(), theme::type_scale::TINY) + 2.0 * CHIP_PAD_X;
         Rectangle::new(
-            Point::new(right(canvas) + CHIP_PAD_X - width, CHIP_Y - CHIP_PAD_Y),
+            Point::new(canvas.right() + CHIP_PAD_X - width, CHIP_Y - CHIP_PAD_Y),
             Size::new(width, CHIP_H + 2.0 * CHIP_PAD_Y),
         )
     }
@@ -258,7 +261,7 @@ impl UpNext {
     fn chip_line(&self, canvas: &Canvas, focused: bool) -> Line {
         Line::new(
             self.label(),
-            Point::new(right(canvas), CHIP_Y),
+            Point::new(canvas.right(), CHIP_Y),
             Anchor::TopRight,
             theme::type_scale::TINY,
             if focused {
@@ -363,12 +366,11 @@ impl UpNext {
         if focused {
             brush.panel(box_);
         } else {
-            brush.rounded(box_, CARD_R, theme::color::SHADOW, CARD_ALPHA);
+            brush.rounded(box_, CARD_R, theme::at(theme::color::SHADOW, CARD_ALPHA));
         }
         brush.rect(
             self.art_plate(&canvas),
-            theme::color::SHADOW,
-            theme::alpha::PANEL,
+            theme::at(theme::color::SHADOW, theme::alpha::PANEL),
         );
         if let Some(size) = art.next() {
             art.draw(brush, self.art_bounds(&canvas, size));
@@ -404,7 +406,7 @@ impl UpNext {
         let (fade, detail, color) = if self.waiting {
             (WAIT_FADE, Some(WAIT_WORD), theme::color::fill())
         } else {
-            (self.fade.value(), self.detail(), theme::color::muted())
+            (self.fade().value(), self.detail(), theme::color::muted())
         };
         brush.at_fade(fade, |brush| {
             self.card(brush, false, detail, color, art);
@@ -420,7 +422,7 @@ impl UpNext {
         if self.waiting {
             return true;
         }
-        !osd_visible && self.risen && self.fade.value() > 0.0
+        !osd_visible && self.risen && self.fade().value() > 0.0
     }
 
     fn detail(&self) -> Option<&str> {
@@ -430,42 +432,14 @@ impl UpNext {
     }
 }
 
-fn right(canvas: &Canvas) -> f32 {
-    canvas.width - theme::MARGIN_X
-}
-
 fn card_x(canvas: &Canvas) -> f32 {
-    right(canvas) - CARD_W
-}
-
-/// Drop the glyphs a line has no room for and mark the cut with an ellipsis,
-/// so a long title stays inside the card.
-///
-/// The toolkit shapes the same face and measures the run itself, so each
-/// prefix is measured as it draws, and a pair of glyphs the face kerns
-/// measures as the face kerns it.
-fn clip(content: &str, size: f32, room: f32) -> String {
-    if measure(content, size) <= room {
-        return content.to_string();
-    }
-    let room = room - measure(ELLIPSIS, size);
-    let mut cut = 0;
-    for at in content
-        .char_indices()
-        .map(|(at, _)| at)
-        .chain(std::iter::once(content.len()))
-    {
-        if measure(&content[..at], size) > room {
-            break;
-        }
-        cut = at;
-    }
-    format!("{}{ELLIPSIS}", &content[..cut])
+    canvas.right() - CARD_W
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::ELLIPSIS;
     use serde_json::json;
 
     /// The block the sidecar sends for an episode, with the three lines the
@@ -519,6 +493,25 @@ mod tests {
             upnext.receive(text);
             assert!(!upnext.available(), "{text} offered a stop");
         }
+    }
+
+    /// A field the sidecar sent empty is a field the block does not carry, so
+    /// a block of empty strings is no offer and adds no focus stop.
+    #[test]
+    fn a_block_of_empty_fields_is_no_offer() {
+        for text in [
+            r#"{"title":""}"#,
+            r#"{"reason":"","title":"","detail":"","art":""}"#,
+        ] {
+            let mut upnext = UpNext::default();
+            upnext.receive(text);
+            assert!(!upnext.available(), "{text} offered a stop");
+        }
+
+        let mut upnext = UpNext::default();
+        upnext.receive(r#"{"title":"","detail":"45 min"}"#);
+        assert!(upnext.available());
+        assert_eq!(upnext.label(), "UP NEXT  ");
     }
 
     /// Any one of the four fields makes a block an offer.
@@ -916,8 +909,8 @@ mod tests {
         let upnext = risen();
         assert_eq!(
             upnext.card_box(&wide).x + CARD_W,
-            wide.width - theme::MARGIN_X
+            wide.width() - theme::MARGIN_X
         );
-        assert_eq!(upnext.chip_line(&wide, false).at.x, wide.width - 96.0);
+        assert_eq!(upnext.chip_line(&wide, false).at.x, wide.width() - 96.0);
     }
 }

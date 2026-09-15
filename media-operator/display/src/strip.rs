@@ -193,21 +193,16 @@ impl Strip {
 
     /// The present groups, each with its available members. A group with no
     /// present member is left out, so a file with no subtitles draws no
-    /// subtitle group.
-    fn present_groups(
-        presentation: &Presentation,
-        film: &Film,
-    ) -> Vec<(&'static str, Vec<Control>)> {
-        if presentation.is_music() {
-            return Vec::new();
-        }
+    /// subtitle group. It reads the present controls the caller already
+    /// resolved, so one rebuild asks each control once whether it is there.
+    fn present_groups(present: &[Control]) -> Vec<(&'static str, Vec<Control>)> {
         GROUPS
             .into_iter()
             .filter_map(|(heading, members)| {
                 let members: Vec<Control> = members
                     .iter()
                     .copied()
-                    .filter(|control| control.available(presentation, film))
+                    .filter(|control| present.contains(control))
                     .collect();
                 (!members.is_empty()).then_some((heading, members))
             })
@@ -230,9 +225,8 @@ impl Strip {
             return Vec::new();
         }
         let here = focused.then(|| present[self.index.min(present.len() - 1)]);
-        let groups = Self::present_groups(presentation, film);
-        let start =
-            canvas.width - theme::MARGIN_X - GROUP_INK - (groups.len() as f32 - 1.0) * GROUP_PITCH;
+        let groups = Self::present_groups(&present);
+        let start = canvas.right() - GROUP_INK - (groups.len() as f32 - 1.0) * GROUP_PITCH;
 
         let mut lines = Vec::new();
         for (at, (heading, members)) in groups.into_iter().enumerate() {
@@ -406,15 +400,20 @@ mod tests {
     fn the_focused_control_reads_bright() {
         let strip = Strip::default();
         let lines = strip.lines(&Canvas::default(), &block("{}"), &film(), true);
-        let value = |at: usize| (lines[at].color, lines[at].alpha);
-        assert_eq!(value(1), (theme::color::fill(), theme::alpha::OPAQUE));
-        assert_eq!(value(2), (theme::color::text(), theme::alpha::SUBDUED));
-        assert_eq!(lines[0].color, theme::color::muted());
+        assert_eq!(
+            lines[1].color,
+            theme::at(theme::color::fill(), theme::alpha::OPAQUE)
+        );
+        assert_eq!(
+            lines[2].color,
+            theme::at(theme::color::text(), theme::alpha::SUBDUED)
+        );
+        assert_eq!(lines[0].color.r, theme::color::muted().r);
 
         let unfocused = strip.lines(&Canvas::default(), &block("{}"), &film(), false);
         assert_eq!(
-            (unfocused[1].color, unfocused[1].alpha),
-            (theme::color::text(), theme::alpha::SUBDUED)
+            unfocused[1].color,
+            theme::at(theme::color::text(), theme::alpha::SUBDUED)
         );
     }
 

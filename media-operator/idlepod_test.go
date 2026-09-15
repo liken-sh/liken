@@ -242,6 +242,15 @@ func TestBuildIdlePodToleratesThePlayerNodeTaint(t *testing.T) {
 // timers, the focus gate, the shade, the volume step, and the panel
 // desire in its own process, so no unit's client pod carries a second
 // container.
+func TestBuildIdlePodMountsNoServiceAccountToken(t *testing.T) {
+	player := standingIdlePlayer()
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testBusAddress, testTopicBase, "America/New_York")
+
+	mustMatch(t, pod.Spec.AutomountServiceAccountToken != nil, true)
+	mustMatch(t, *pod.Spec.AutomountServiceAccountToken, false)
+}
+
 func TestBuildIdlePodCarriesNoSecondContainer(t *testing.T) {
 	player := standingIdlePlayer()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),

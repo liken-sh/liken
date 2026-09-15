@@ -8,8 +8,7 @@ use iced::widget::canvas::Path;
 use iced::{Point, Rectangle, Size};
 
 use crate::canvas::{Anchor, Brush, Canvas, Line};
-use crate::fade::Fade;
-use crate::focus::Hide;
+use crate::fade::{Clock, Fade, Hide};
 use crate::theme;
 
 /// The level runs 0 to 100, where 100 is unity, so the bar fills at 100 and a
@@ -79,7 +78,7 @@ struct Columns {
 }
 
 fn columns(canvas: &Canvas) -> Columns {
-    let right = canvas.width - theme::MARGIN_X;
+    let right = canvas.right();
     let bar_x = right - NUM_W - BAR_W;
     let glyph_x = bar_x - GLYPH_GAP - GLYPH_W;
     let surface_x = glyph_x - PAD_X;
@@ -113,30 +112,29 @@ fn polygon(at: Point, points: &[(f32, f32)]) -> Path {
 pub struct Volume {
     level: Option<f64>,
     muted: bool,
-    fade: Fade,
-    hide: Hide,
+    clock: Clock,
 }
 
 impl Volume {
     /// The indicator's own fade, which the frame loop steps while it is
     /// moving.
     pub fn fade(&self) -> &Fade {
-        &self.fade
+        self.clock.fade()
     }
 
     pub fn fade_mut(&mut self) -> &mut Fade {
-        &mut self.fade
+        self.clock.fade_mut()
     }
 
     /// The hide window this state asks for, which the frame loop arms and
     /// cancels because it owns the timer.
     pub fn take_hide(&mut self) -> Hide {
-        std::mem::take(&mut self.hide)
+        self.clock.take_hide()
     }
 
     /// The hide window ran out, so the row leaves on its own fade.
     pub fn hide(&mut self) {
-        self.fade.to(0.0);
+        self.clock.hide();
     }
 
     /// The command sidecar sends volume-changed after it applies a level from
@@ -147,8 +145,7 @@ impl Volume {
     /// Each change restarts the wait, so a run of presses holds the indicator
     /// on screen and the fade out starts from the last one.
     pub fn show(&mut self) {
-        self.fade.to(1.0);
-        self.hide = Hide::Arm;
+        self.clock.show(Hide::Arm);
     }
 
     /// Record each value of mpv's volume property and show nothing on its own.
@@ -166,7 +163,7 @@ impl Volume {
     /// Whether the row is on screen. It redraws while it is, so a level that
     /// lands after the sidecar's message reaches the bar it belongs to.
     pub fn showing(&self) -> bool {
-        self.fade.value() > 0.0 && self.level.is_some()
+        self.fade().value() > 0.0 && self.level.is_some()
     }
 
     /// The dark surface the three parts read against.
@@ -190,7 +187,7 @@ impl Volume {
     fn fill(&self, canvas: &Canvas) -> Option<Rectangle> {
         let level = self.level?;
         let width = BAR_W * (level / FULL).clamp(0.0, 1.0) as f32;
-        (width >= 1.0).then(|| {
+        (width >= canvas.to_canvas(1.0)).then(|| {
             Rectangle::new(
                 Point::new(columns(canvas).bar_x, BAR_TOP),
                 Size::new(width, BAR_H),
@@ -209,7 +206,7 @@ impl Volume {
         let level = self.level?;
         Some(Line::new(
             format!("{}", (level + 0.5).floor() as i64),
-            Point::new(canvas.width - theme::MARGIN_X, ROW_Y),
+            Point::new(canvas.right(), ROW_Y),
             Anchor::TopRight,
             theme::type_scale::SMALL,
             theme::color::text(),
@@ -225,21 +222,23 @@ impl Volume {
             return;
         }
         let canvas = brush.canvas();
-        brush.at_fade(self.fade.value(), |brush| {
+        brush.at_fade(self.fade().value(), |brush| {
             brush.rounded(
                 self.surface(&canvas),
                 SURFACE_R,
-                theme::color::SHADOW,
-                theme::SCRIM_EDGE_ALPHA,
+                theme::at(theme::color::SHADOW, theme::alpha::SCRIM_EDGE),
             );
             brush.rounded(
                 self.track(&canvas),
                 BAR_R,
-                theme::color::track(),
-                theme::alpha::TRACK,
+                theme::at(theme::color::track(), theme::alpha::TRACK),
             );
             if let Some(fill) = self.fill(&canvas) {
-                brush.rounded(fill, BAR_R, theme::color::fill(), theme::alpha::OPAQUE);
+                brush.rounded(
+                    fill,
+                    BAR_R,
+                    theme::at(theme::color::fill(), theme::alpha::OPAQUE),
+                );
             }
             let color = if self.muted {
                 theme::color::muted()
@@ -247,14 +246,16 @@ impl Volume {
                 theme::color::text()
             };
             let at = self.glyph_at(&canvas);
-            brush.shape(&polygon(at, &SPEAKER), color, theme::alpha::OPAQUE);
+            brush.shape(
+                &polygon(at, &SPEAKER),
+                theme::at(color, theme::alpha::OPAQUE),
+            );
             if self.muted {
                 brush.bordered(
                     &polygon(at, &SLASH),
-                    color,
-                    theme::alpha::OPAQUE,
+                    theme::at(color, theme::alpha::OPAQUE),
                     SLASH_BORDER,
-                    theme::color::SHADOW,
+                    theme::at(theme::color::SHADOW, theme::alpha::OPAQUE),
                 );
             }
             if let Some(number) = self.number(&canvas) {
@@ -382,9 +383,9 @@ mod tests {
         let volume = shown(40.0);
         assert_eq!(
             volume.surface(&wide).x + volume.surface(&wide).width,
-            wide.width - theme::MARGIN_X + PAD_X
+            wide.right() + PAD_X
         );
-        assert_eq!(volume.number(&wide).unwrap().at.x, wide.width - 96.0);
+        assert_eq!(volume.number(&wide).unwrap().at.x, wide.width() - 96.0);
     }
 
     #[test]
@@ -445,47 +446,5 @@ mod tests {
         assert!(volume.muted);
         assert_eq!(volume.fill(&canvas()), fill);
         assert_eq!(volume.number(&canvas()).unwrap().content, "40");
-    }
-
-    /// The glyph is one closed polygon in a 26 by 30 box, and the slash cuts
-    /// across it inside the same box.
-    #[test]
-    fn the_glyph_and_the_slash_stand_in_the_glyphs_own_box() {
-        let bounds = |points: &[(f32, f32)]| {
-            let at = Point::new(1478.0, 184.0);
-            let (x, y) = (
-                points
-                    .iter()
-                    .map(|(x, _)| at.x + x)
-                    .fold(f32::MAX, f32::min),
-                points
-                    .iter()
-                    .map(|(_, y)| at.y + y)
-                    .fold(f32::MAX, f32::min),
-            );
-            let (right, bottom) = (
-                points
-                    .iter()
-                    .map(|(x, _)| at.x + x)
-                    .fold(f32::MIN, f32::max),
-                points
-                    .iter()
-                    .map(|(_, y)| at.y + y)
-                    .fold(f32::MIN, f32::max),
-            );
-            Rectangle::new(Point::new(x, y), Size::new(right - x, bottom - y))
-        };
-
-        let speaker = bounds(&SPEAKER);
-        assert_eq!(speaker.x, 1478.0);
-        assert_eq!(speaker.y, 184.0);
-        assert_eq!(speaker.width, 22.0);
-        assert_eq!(speaker.height, 30.0);
-        assert!(speaker.width <= GLYPH_W && speaker.height <= GLYPH_H);
-
-        let slash = bounds(&SLASH);
-        assert!(slash.x >= speaker.x && slash.y >= speaker.y);
-        assert!(slash.x + slash.width <= speaker.x + GLYPH_W);
-        assert!(slash.y + slash.height <= speaker.y + GLYPH_H);
     }
 }

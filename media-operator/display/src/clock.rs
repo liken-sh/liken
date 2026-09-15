@@ -54,7 +54,7 @@ pub fn reading(at: &Zoned) -> String {
 /// a glance. The current time draws bright and the end time draws dim, so the
 /// two tell apart.
 pub fn lines(canvas: &Canvas, film: &Film, now: &Zoned) -> Vec<Line> {
-    let right = canvas.width - theme::MARGIN_X;
+    let right = canvas.right();
     let mut lines = vec![Line::new(
         reading(now),
         Point::new(right, TOP_Y),
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(lines[0].at, Point::new(1824.0, 90.0));
         assert_eq!(lines[0].anchor, Anchor::TopRight);
         assert_eq!(lines[0].size, 34.0);
-        assert_eq!(lines[0].alpha, theme::alpha::OPAQUE);
+        assert_eq!(lines[0].color.a, theme::alpha::OPAQUE);
         assert_eq!(lines[0].content, "3:01 pm");
     }
 
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].at, Point::new(1824.0, 90.0));
         assert_eq!(lines[1].at, Point::new(1824.0, 136.0));
-        assert_eq!(lines[1].alpha, theme::alpha::SUBDUED);
+        assert_eq!(lines[1].color.a, theme::alpha::SUBDUED);
         // 4801 seconds are left, so the film ends one hour and twenty
         // minutes after the reading.
         assert_eq!(lines[1].content, "ends 4:21 pm");

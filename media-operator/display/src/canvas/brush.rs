@@ -2,6 +2,8 @@
 // maps to, and the fade every alpha passes through, so a module states a
 // shape or a line and nothing else.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Once;
 
 use iced::advanced::graphics::text::Paragraph;
@@ -11,7 +13,7 @@ use iced::alignment::Vertical;
 use iced::widget::canvas::{Fill, Frame, Path, Stroke, Style, Text};
 use iced::{Color, Pixels, Point, Rectangle, Size};
 
-use super::{Canvas, Scrim, shape};
+use super::{Band, Canvas, shape};
 use crate::theme;
 
 /// Where a line's position falls on the line, in the ASS anchors the display
@@ -32,7 +34,8 @@ pub enum Anchor {
 }
 
 /// One line of text: an anchor, a position in canvas units, a size from the
-/// type scale, a colour, and an ASS alpha.
+/// type scale, and a colour that carries the fraction of the ground it
+/// covers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
     pub content: String,
@@ -41,7 +44,6 @@ pub struct Line {
     /// The line box, which is the number the display states as an ASS `\fs`.
     pub size: f32,
     pub color: Color,
-    pub alpha: u8,
 }
 
 impl Line {
@@ -59,14 +61,16 @@ impl Line {
             at,
             anchor,
             size,
-            color,
-            alpha: theme::alpha::OPAQUE,
+            color: theme::at(color, theme::alpha::OPAQUE),
         }
     }
 
-    /// The same line at one ASS alpha.
-    pub fn alpha(self, alpha: u8) -> Self {
-        Self { alpha, ..self }
+    /// The same line at one coverage.
+    pub fn alpha(self, alpha: f32) -> Self {
+        Self {
+            color: theme::at(self.color, alpha),
+            ..self
+        }
     }
 }
 
@@ -96,9 +100,88 @@ fn shaped(content: &str, size: f32) -> text::Text<&str> {
 
 // How wide one run draws, in canvas units. The toolkit shapes the same face
 // and answers itself.
+//
+// Every layer rebuild measures the same runs again: the header, the clock,
+// the strip, the chooser's rows, and the chip's label. A fade rebuilds the
+// layer sixty times a second, so the measurements are held by their run and
+// their size, and a new item drops them.
 pub fn measure(content: &str, size: f32) -> f32 {
-    faces();
-    Paragraph::with_text(shaped(content, size)).min_width()
+    MEASURED.with_borrow_mut(|held| {
+        let runs = held.entry(size.to_bits()).or_default();
+        if let Some(width) = runs.get(content) {
+            return *width;
+        }
+        faces();
+        let width = Paragraph::with_text(shaped(content, size)).min_width();
+        runs.insert(content.to_string(), width);
+        width
+    })
+}
+
+// Drop every held measurement, which a new item does: its lines are not the
+// last item's.
+pub fn forget_measurements() {
+    MEASURED.with_borrow_mut(HashMap::clear);
+    CLIPPED.with_borrow_mut(HashMap::clear);
+}
+
+// The measurements and the cuts, each held under the size, and the cuts
+// under the room they were cut to as well.
+thread_local! {
+    static MEASURED: RefCell<HashMap<u32, HashMap<String, f32>>> = RefCell::new(HashMap::new());
+    static CLIPPED: RefCell<HashMap<(u32, u32), HashMap<String, String>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// The one mark a clipped run ends on, U+2026.
+pub const ELLIPSIS: &str = "\u{2026}";
+
+/// Drop the glyphs a run has no room for and mark the cut with an ellipsis,
+/// so a long title stays inside the box it draws in.
+///
+/// The toolkit shapes the same face and measures the run itself, so the cut
+/// is measured as it draws, and a pair of glyphs the face kerns measures as
+/// the face kerns it. The cut is found by halving the run rather than walking
+/// it, which measures a sixty character label six times instead of sixty, and
+/// the answer is held until the item changes.
+pub fn clip(content: &str, size: f32, room: f32) -> String {
+    let box_ = (size.to_bits(), room.to_bits());
+    if let Some(held) =
+        CLIPPED.with_borrow(|held| held.get(&box_).and_then(|cuts| cuts.get(content)).cloned())
+    {
+        return held;
+    }
+    let cut = cut(content, size, room);
+    CLIPPED.with_borrow_mut(|held| {
+        held.entry(box_)
+            .or_default()
+            .insert(content.to_string(), cut.clone());
+    });
+    cut
+}
+
+fn cut(content: &str, size: f32, room: f32) -> String {
+    if measure(content, size) <= room {
+        return content.to_string();
+    }
+    let room = room - measure(ELLIPSIS, size);
+    // Every prefix of a run is at least as wide as the one before it, so the
+    // widest prefix that fits is found by halving the run.
+    let ends: Vec<usize> = content
+        .char_indices()
+        .map(|(at, _)| at)
+        .chain(std::iter::once(content.len()))
+        .collect();
+    let (mut low, mut high) = (0, ends.len() - 1);
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if measure(&content[..ends[middle]], size) > room {
+            high = middle - 1;
+        } else {
+            low = middle;
+        }
+    }
+    format!("{}{ELLIPSIS}", &content[..ends[low]])
 }
 
 // The frame, the canvas, and the fade, as the modules draw through them.
@@ -125,11 +208,14 @@ impl<'a> Brush<'a> {
         self.canvas
     }
 
-    // One scrim. It draws a gradient of its own rather than a fill of one
-    // color, because a blurred shape is a gradient once it is drawn.
-    pub fn scrim(&mut self, scrim: &Scrim) {
+    // One scrim, as the bands the canvas resolved it into. It draws a
+    // gradient of its own rather than a fill of one color, because a blurred
+    // shape is a gradient once it is drawn.
+    pub fn scrim(&mut self, bands: &[Band]) {
         let (canvas, fade) = (self.canvas, self.fade);
-        scrim.draw(self.frame, &canvas, fade);
+        for band in bands {
+            band.draw(self.frame, &canvas, fade);
+        }
     }
 
     // How far the fade has moved, from 0 clear to 1 full.
@@ -149,18 +235,18 @@ impl<'a> Brush<'a> {
         draw(&mut inner);
     }
 
-    pub fn rect(&mut self, shape: Rectangle, color: Color, alpha: u8) {
+    pub fn rect(&mut self, shape: Rectangle, color: Color) {
         self.frame.fill_rectangle(
             Point::new(shape.x, shape.y),
             Size::new(shape.width, shape.height),
-            theme::faded(color, alpha, self.fade),
+            theme::faded(color, self.fade),
         );
     }
 
-    pub fn rounded(&mut self, shape: Rectangle, radius: f32, color: Color, alpha: u8) {
+    pub fn rounded(&mut self, shape: Rectangle, radius: f32, color: Color) {
         self.frame.fill(
             &shape::rounded(shape, radius),
-            theme::faded(color, alpha, self.fade),
+            theme::faded(color, self.fade),
         );
     }
 
@@ -171,7 +257,6 @@ impl<'a> Brush<'a> {
         at: Point,
         radius: f32,
         color: Color,
-        alpha: u8,
         border: f32,
         border_color: Color,
     ) {
@@ -181,15 +266,13 @@ impl<'a> Brush<'a> {
                 &shape::hexagon(outline, grown),
                 Stroke {
                     width: border,
-                    style: Style::Solid(theme::faded(border_color, alpha, self.fade)),
+                    style: Style::Solid(theme::faded(border_color, self.fade)),
                     ..Stroke::default()
                 },
             );
         }
-        self.frame.fill(
-            &shape::hexagon(at, radius),
-            theme::faded(color, alpha, self.fade),
-        );
+        self.frame
+            .fill(&shape::hexagon(at, radius), theme::faded(color, self.fade));
     }
 
     /// A menu panel: a faint dark fill inside a solid green border, so a
@@ -204,8 +287,7 @@ impl<'a> Brush<'a> {
             Stroke {
                 width: PANEL_BORDER,
                 style: Style::Solid(theme::faded(
-                    theme::color::fill(),
-                    theme::alpha::OPAQUE,
+                    theme::at(theme::color::fill(), theme::alpha::OPAQUE),
                     self.fade,
                 )),
                 ..Stroke::default()
@@ -214,8 +296,7 @@ impl<'a> Brush<'a> {
         self.frame.fill(
             &shape::rounded(shape, PANEL_RADIUS),
             Fill::from(theme::faded(
-                theme::color::SHADOW,
-                theme::alpha::PANEL,
+                theme::at(theme::color::SHADOW, theme::alpha::PANEL),
                 self.fade,
             )),
         );
@@ -224,31 +305,24 @@ impl<'a> Brush<'a> {
     /// One path the caller states, for a mark the named shapes above do not
     /// cover, such as the volume glyph. The path is already where it stands,
     /// and the mark takes the same fade every other shape takes.
-    pub fn shape(&mut self, path: &Path, color: Color, alpha: u8) {
-        self.frame.fill(path, theme::faded(color, alpha, self.fade));
+    pub fn shape(&mut self, path: &Path, color: Color) {
+        self.frame.fill(path, theme::faded(color, self.fade));
     }
 
     /// The same mark inside a border, so a mark over another mark in the same
     /// color reads apart from it. libass draws a border outside the shape and
     /// the toolkit centers a stroke on its path, so the stroke runs at twice
     /// the width and the fill covers the half that falls inside.
-    pub fn bordered(
-        &mut self,
-        path: &Path,
-        color: Color,
-        alpha: u8,
-        border: f32,
-        border_color: Color,
-    ) {
+    pub fn bordered(&mut self, path: &Path, color: Color, border: f32, border_color: Color) {
         self.frame.stroke(
             path,
             Stroke {
                 width: border * 2.0,
-                style: Style::Solid(theme::faded(border_color, alpha, self.fade)),
+                style: Style::Solid(theme::faded(border_color, self.fade)),
                 ..Stroke::default()
             },
         );
-        self.shape(path, color, alpha);
+        self.shape(path, color);
     }
 
     // One decoded picture over the ground it covers. The display decodes every
@@ -274,7 +348,7 @@ impl<'a> Brush<'a> {
         self.frame.fill_text(Text {
             content: line.content,
             position: line.at,
-            color: theme::faded(line.color, line.alpha, self.fade),
+            color: theme::faded(line.color, self.fade),
             size: Pixels(theme::type_size(line.size)),
             line_height: LineHeight::Absolute(Pixels(line.size)),
             font: liken_iced::font::REGULAR,
@@ -311,16 +385,6 @@ const PANEL_BORDER: f32 = 2.0;
 mod tests {
     use super::*;
 
-    /// The face's own advances, through the toolkit. One unit of ASS size is
-    /// 0.7541 em, and the middle dot and the ellipsis measure 0.2490 and
-    /// 0.9480 of an em.
-    #[test]
-    fn a_run_measures_by_the_faces_own_advances() {
-        let em = 28.0 * 0.754_1;
-        assert!((measure("\u{00B7}", 28.0) - em * 0.249).abs() < 0.5);
-        assert!((measure("\u{2026}", 28.0) - em * 0.948).abs() < 0.5);
-    }
-
     /// A longer run measures wider, and an empty one measures nothing.
     #[test]
     fn a_measurement_grows_with_the_run() {
@@ -328,6 +392,62 @@ mod tests {
         assert!(measure("Off", 40.0) > 0.0);
         assert!(measure("English (EN)", 40.0) > measure("Off", 40.0));
         assert!(measure("Off", 64.0) > measure("Off", 40.0));
+    }
+
+    /// A run measures the same whether or not it was measured before, and a
+    /// new item drops what was held.
+    #[test]
+    fn a_held_measurement_reads_as_the_run_measures() {
+        let fresh = measure("English (EN)", 40.0);
+        assert_eq!(measure("English (EN)", 40.0), fresh);
+        forget_measurements();
+        assert_eq!(measure("English (EN)", 40.0), fresh);
+    }
+
+    /// A run that fits keeps every glyph, and one that does not ends on the
+    /// ellipsis inside the room it was given.
+    #[test]
+    fn a_clipped_run_ends_on_the_ellipsis_inside_its_room() {
+        let long = "The Hobbit: The Desolation of Smaug, Extended Edition";
+        let room = 396.0;
+        let clipped = clip(long, 40.0, room);
+        assert!(clipped.ends_with(ELLIPSIS));
+        assert!(long.starts_with(clipped.trim_end_matches(ELLIPSIS)));
+        assert!(measure(&clipped, 40.0) <= room);
+        assert_eq!(clip("E05", 40.0, room), "E05");
+        assert_eq!(clip("", 40.0, room), "");
+    }
+
+    /// A cut lands on a whole glyph, and a room narrower than the ellipsis
+    /// leaves the ellipsis alone.
+    #[test]
+    fn a_cut_lands_on_a_whole_glyph() {
+        let dots = "\u{b7}\u{b7}\u{b7}\u{b7}\u{b7}\u{b7}\u{b7}\u{b7}\u{b7}\u{b7}";
+        let clipped = clip(dots, 40.0, 40.0);
+        assert!(clipped.ends_with(ELLIPSIS));
+        assert!(
+            clipped
+                .chars()
+                .all(|glyph| glyph == '\u{b7}' || glyph == '\u{2026}')
+        );
+        assert_eq!(clip("E05 the Long Tide", 40.0, 1.0), ELLIPSIS);
+    }
+
+    /// The cut the halving finds is the widest prefix that fits, which is the
+    /// cut a walk of the run finds.
+    #[test]
+    fn the_cut_is_the_widest_prefix_that_fits() {
+        let long = "Director's commentary with the cast and the crew (ENG)";
+        for room in [60.0, 120.0, 240.0, 480.0] {
+            let clipped = clip(long, 40.0, room);
+            let kept = clipped.trim_end_matches(ELLIPSIS);
+            let one_more = long[..long.len().min(kept.len() + 1)].to_string();
+            assert!(measure(&clipped, 40.0) <= room, "{room} clipped too wide");
+            assert!(
+                one_more == kept || measure(&one_more, 40.0) + measure(ELLIPSIS, 40.0) > room,
+                "{room} cut a glyph it had room for"
+            );
+        }
     }
 
     /// A picture takes the brush's own fade, so a logo, a tile, and the
@@ -353,11 +473,12 @@ mod tests {
             34.0,
             theme::color::text(),
         );
-        assert_eq!(line.alpha, theme::alpha::OPAQUE);
+        assert_eq!(line.color.a, theme::alpha::OPAQUE);
         assert_eq!(
-            line.clone().alpha(theme::alpha::SUBDUED).alpha,
+            line.clone().alpha(theme::alpha::SUBDUED).color.a,
             theme::alpha::SUBDUED
         );
+        assert_eq!(line.color.r, theme::color::text().r);
         assert_eq!(line.at, Point::new(1824.0, 90.0));
     }
 }

@@ -68,7 +68,7 @@ var observedProperties = []string{
 
 // propertyChangeEvent carries an observed property's new value.
 // clientMessageEvent carries a script-message any client broadcast, which is
-// how the display asks the bridge to decode a logo. mpv sends many other
+// how the display reaches the command sidecar. mpv sends many other
 // events through the same socket, and readEvents drops them.
 const (
 	propertyChangeEvent = "property-change"
@@ -93,8 +93,8 @@ type mpvMessage struct {
 }
 
 // clientMessage is one script-message the display broadcast, as its arguments
-// reach the bridge over the socket. The first argument names the request, so
-// the bridge tells its own requests from any other script's traffic.
+// reach the sidecar over the socket. The first argument names the request, so
+// the sidecar tells its own requests from any other script's traffic.
 type clientMessage struct {
 	Args []string
 }

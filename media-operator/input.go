@@ -29,8 +29,8 @@ const (
 	actionInfo       = "info"
 	actionCycleFocus = "cycle-focus"
 
-	// The navigation words are what the playback pod sends the display
-	// script. The key table in keybindings.go is what reaches them.
+	// The navigation words are what the playback pod sends the display.
+	// The key table in keybindings.go is what reaches them.
 	actionUp     = "up"
 	actionDown   = "down"
 	actionLeft   = "left"
@@ -208,8 +208,8 @@ const nextMessage = "next"
 const presentationRequestMessage = "liken-presentation-request"
 
 // isExitMessage reads a client-message as the display's exit press. The
-// first argument names the request, the same shape an art request takes,
-// so another client's broadcast is not an ending.
+// first argument names the request, the same shape the display's other
+// requests take, so another client's broadcast is not an ending.
 func isExitMessage(args []string) bool {
 	return len(args) > 0 && args[0] == exitMessage
 }
