@@ -255,6 +255,8 @@ func (s *scanner) runJob(ctx context.Context) error {
 	if read {
 		s.echo.expect(counts.items, counts.files)
 	}
+	s.echo.log = s.log
+	s.echo.nudge = s.renewRun(run)
 	if err := s.echo.wait(ctx, s.bus, s.echoTimeout); err != nil {
 		return err
 	}

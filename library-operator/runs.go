@@ -235,6 +235,11 @@ type echoWaiter struct {
 	// The counts the report has to carry beside the run, or nil
 	// where the Job could not read them and waits on the run alone.
 	counts *echoCounts
+	// The write the wait repeats every echoNudge while no echo has come,
+	// and nil for a wait that repeats nothing. See runsnudge.go.
+	nudge func(context.Context) error
+	// Where a failed repeat is reported, and nil to report nowhere.
+	log io.Writer
 
 	once   sync.Once
 	echoed chan struct{}
@@ -304,12 +309,18 @@ func (w *echoWaiter) wait(ctx context.Context, bus *Bus, timeout time.Duration) 
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	select {
-	case <-w.echoed:
-		return nil
-	case <-timer.C:
-		return fmt.Errorf("the catalog did not report the %s run of %s within %s", w.worker, w.job, timeout)
-	case <-ctx.Done():
-		return ctx.Err()
+	nudges := time.NewTicker(echoNudge)
+	defer nudges.Stop()
+	for {
+		select {
+		case <-w.echoed:
+			return nil
+		case <-nudges.C:
+			w.renew(ctx)
+		case <-timer.C:
+			return fmt.Errorf("the catalog did not report the %s run of %s within %s", w.worker, w.job, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
