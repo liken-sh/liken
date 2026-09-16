@@ -21,6 +21,16 @@ func finishedJob(name, namespace string, labels, annotations map[string]string) 
 	}
 }
 
+// a Job the controller ended on the backoff limit, which is what a pass
+// reads as a standing Job that failed.
+func failedJob(name, namespace string, labels map[string]string) Job {
+	return Job{
+		Metadata: ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+		Status: JobStatus{Failed: scanBackoffLimit + 1,
+			Conditions: []JobCondition{failedJobCondition()}},
+	}
+}
+
 // a Job the controller has not ended.
 func runningJob(name, namespace string, labels map[string]string) Job {
 	return Job{

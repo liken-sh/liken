@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // The stage a chain's trickplay Job carries, which is the worker it runs, as
@@ -46,7 +47,7 @@ func trickplayGapOpen(library *Library, report *libraryReport) bool {
 // The trickplay step of one Library's pass. It creates at most one Job, because
 // every trickplay Job of a Library runs on the one claim its agent keeps.
 func (o *operator) trickplay(ctx context.Context, library *Library, catalog *NamespaceCatalog,
-	report *libraryReport, jobs []Job) error {
+	report *libraryReport, jobs []Job, now time.Time) error {
 	if report == nil || !trickplayGapOpen(library, report) {
 		return nil
 	}
@@ -59,8 +60,11 @@ func (o *operator) trickplay(ctx context.Context, library *Library, catalog *Nam
 	if lastScanFinish(report.Runs).IsZero() {
 		return nil
 	}
-	return o.createTrickplayJob(ctx, library, catalog,
-		standingTrickplayJobName(name, report.Runs), "", nil)
+	standing := standingTrickplayJobName(name, report.Runs)
+	if held := jobNamed(jobs, namespace, standing); held != nil {
+		return o.retireFailedJob(ctx, held, libraryKey(namespace, name)+"/"+workerTrickplay, now)
+	}
+	return o.createTrickplayJob(ctx, library, catalog, standing, "", nil)
 }
 
 // The trickplay Job and the claim it runs on. The claim stands first, because a

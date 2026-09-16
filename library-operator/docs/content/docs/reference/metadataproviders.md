@@ -71,9 +71,11 @@ empty while the provider is not `Ready`.
 
 The operator checks each provider once per pass with one call to the
 provider, and reports the answer in the
-`Ready` condition: `Reachable`, `NoSecret`, `Refused`, or
-`Unreachable`, where the last is a check that got no answer at all and
-carries the error as its message. The key
+`Ready` condition: `Reachable`, `NoSecret`, `Refused`, `Unreachable`, or
+`Unavailable`. `Unreachable` is a check that got no answer at all and
+carries the error as its message. `Unavailable` is a check the provider
+answered with a status that says nothing about the account, and its
+message names that status code. The key
 reaches an enricher container through a `secretKeyRef` that the
 kubelet resolves. It never passes through a status, a log, or the
 catalog.
@@ -162,11 +164,11 @@ What the operator's own check found, written only by the library operator.
 | <span id="status--provider"></span>`provider` | string | no | The provider block this account names. The PROVIDER column reads it here, because no printer column can read which block a spec holds. |
 | <span id="status--facts"></span>`facts` | []string | no | The facts this provider serves right now: what the operator knows how to ask this provider for, narrowed by spec.facts. The list is empty while the Ready condition is not True, because a provider the operator cannot reach serves nothing. |
 | <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. It stands after the key works again, so a person reads that it once failed. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, or Unreachable. Unreachable is a check that got no answer at all, and its message is the error the check read. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. |
 
 ### status.conditions[]
 
-Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, or Unreachable. Unreachable is a check that got no answer at all, and its message is the error the check read.
+Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

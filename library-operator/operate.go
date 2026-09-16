@@ -131,6 +131,11 @@ type operator struct {
 	// names no server.
 	backfillStands map[string]cleanupStand
 
+	// The restand backoff of each Library worker whose standing Job failed,
+	// keyed by the Library and the worker, so the curve survives the Job
+	// renaming that a new walk brings.
+	failedStands map[string]cleanupStand
+
 	// Which of the classes this pass has read are served by the per-node
 	// driver, by class name. The pass clears it when it starts, so an
 	// answer is one pass old at most and the operator watches no
@@ -173,6 +178,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
 		backfillStands: map[string]cleanupStand{},
+		failedStands:   map[string]cleanupStand{},
 		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
@@ -520,6 +526,13 @@ func (o *operator) pass() {
 	for key := range o.cleanupStands {
 		if !live[key] {
 			delete(o.cleanupStands, key)
+		}
+	}
+	// A restand key names a Library and a worker, so the Library it names is
+	// the part before the last separator.
+	for key := range o.failedStands {
+		if !live[key[:strings.LastIndex(key, "/")]] {
+			delete(o.failedStands, key)
 		}
 	}
 

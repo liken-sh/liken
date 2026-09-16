@@ -61,6 +61,22 @@ func (s providerSet) serving(namespace string, sources []string, fact string) *M
 	return nil
 }
 
+// Whether every source this Library names has a verdict. A provider the pass
+// has listed but not checked yet reaches a Job as no block at all, and that
+// Job answers a refresh entry with a partial source list and closes it, so the
+// pass stands no Job of this Library until every verdict is written. A
+// provider the check refused has its verdict and blocks nothing. A name that
+// no MetadataProvider answers blocks nothing either, because no pass will ever
+// write a verdict on an object that does not exist.
+func (s providerSet) everySourceChecked(namespace string, sources []string) bool {
+	for _, name := range sources {
+		if provider, held := s[libraryKey(namespace, name)]; held && !provider.checked() {
+			return false
+		}
+	}
+	return true
+}
+
 // A group of facts resolves to the first provider that serves any one of
 // them, which is what stands the container that runs the group.
 func (s providerSet) servingAny(namespace string, sources, facts []string) *MetadataProvider {
@@ -149,9 +165,11 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 	return status
 }
 
-// What each answer means: 200 is the account working, 401 is the provider
-// refusing the key, no answer at all is Unreachable, and every other status
-// leaves the last verdict.
+// What each answer means. 200 is the account working, 401 is the provider
+// refusing the key, no HTTP answer at all is Unreachable, and every other
+// status is Unavailable. A provider that is down says nothing about the
+// account, and the check still writes a verdict, because every Job of a
+// Library that names this provider waits for one.
 func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider) (providerVerdict, error) {
 	block := provider.block()
 	if block == "" {
@@ -177,7 +195,8 @@ func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider
 		return providerVerdict{reason: reasonRefused,
 			message: "the provider refused the key of " + block}, nil
 	}
-	return providerVerdict{}, fmt.Errorf("the provider answered %d", status)
+	return providerVerdict{reason: reasonUnavailable,
+		message: fmt.Sprintf("the provider answered %d", status)}, nil
 }
 
 // The key of one provider, out of the Secret its block names. An empty key

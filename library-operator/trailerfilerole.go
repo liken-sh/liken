@@ -34,12 +34,16 @@ const trailerFileWorkers = 2
 // The line is built once for the container, so the settings a site states
 // are read once.
 func (e *enricher) trailerFileFact(ctx context.Context) error {
+	sources := os.Getenv(librarySourcesVariable)
 	if e.trailerFiles == nil {
-		e.trailerFiles = newTrailerFetchLine(commaNames(os.Getenv(librarySourcesVariable)),
-			os.Getenv, e.tallies)
+		e.trailerFiles = newTrailerFetchLine(commaNames(sources), os.Getenv, e.tallies)
 	}
 	if len(e.trailerFiles.sources) == 0 {
-		return fmt.Errorf("no site this fact can fetch from reached this container, and the %s fact cannot pull without one", factTrailerFile)
+		// The error names the sources the container received, because the
+		// fact cannot say which provider is missing and a person reading the
+		// log can.
+		return fmt.Errorf("no site this fact can fetch from reached this container, and the %s fact cannot pull without one; %s is %q",
+			factTrailerFile, librarySourcesVariable, sources)
 	}
 	e.sweepOldTallies(ctx, time.Now().UTC())
 	return e.trailerFileGap(ctx, e.trailerFiles)

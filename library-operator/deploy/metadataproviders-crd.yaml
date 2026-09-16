@@ -190,7 +190,7 @@ spec:
                   description: "When the provider last refused the key. It stands after the key works again, so a person reads that it once failed."
                 conditions:
                   type: array
-                  description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, or Unreachable. Unreachable is a check that got no answer at all, and its message is the error the check read."
+                  description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

@@ -79,6 +79,16 @@ func trailerFetchSites() []string {
 	return slices.Sorted(maps.Keys(trailerFetchers))
 }
 
+// The provider blocks that serve the table's sites. A Library's sources have
+// to name one of them before this fact can pull anything.
+func trailerFetchBlocks() map[string]bool {
+	blocks := make(map[string]bool, len(trailerFetchers))
+	for _, entry := range trailerFetchers {
+		blocks[entry.block] = true
+	}
+	return blocks
+}
+
 // The sources one container holds, by site.
 type trailerFetchLine struct {
 	sources map[string]trailerSource

@@ -250,9 +250,11 @@ func TestTheTrailerFileFactSkipsATitleOutsideTheJobsScope(t *testing.T) {
 	}
 }
 
-// A container no site reached is a manifest to repair.
+// A container that no site reached has a manifest to repair, so the error
+// names the sources that did reach it.
 func TestTheTrailerFileFactNeedsASiteItCanFetchFrom(t *testing.T) {
-	t.Setenv(librarySourcesVariable, providerBlockTMDb)
+	sources := providerBlockTMDb + "," + providerBlockOMDb
+	t.Setenv(librarySourcesVariable, sources)
 	t.Setenv(tmdbTokenVariable, "a-key")
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), nil)
 
@@ -260,6 +262,9 @@ func TestTheTrailerFileFactNeedsASiteItCanFetchFrom(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), factTrailerFile) {
 		t.Errorf("err = %v, want the one that names the fact", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), sources) {
+		t.Errorf("err = %v, want the sources that reached the container named", err)
 	}
 }
 

@@ -111,11 +111,15 @@ type MetadataProviderStatus struct {
 
 // The reasons the Ready condition takes, one per answer the check can get.
 // Unreachable is the answer where the provider gave no HTTP answer at all.
+// Unavailable is the answer where the provider answered a status other than
+// 200 or 401. That status says nothing about the account, so the verdict
+// records that the provider is down and keeps the status code in its message.
 const (
 	reasonReachable   = "Reachable"
 	reasonNoSecret    = "NoSecret"
 	reasonRefused     = "Refused"
 	reasonUnreachable = "Unreachable"
+	reasonUnavailable = "Unavailable"
 )
 
 // A provider serves a fact when the table's row for its block holds that fact
@@ -125,25 +129,35 @@ func (p *MetadataProvider) serves(fact string) bool {
 	return slices.Contains(p.servedFacts(), fact)
 }
 
+// The Ready condition the last check wrote, or nil when no check has written
+// one. The three reads below take their answers from this one condition.
+func (p *MetadataProvider) readyCondition() *Condition {
+	for index := range p.Status.Conditions {
+		if p.Status.Conditions[index].Type == conditionReady {
+			return &p.Status.Conditions[index]
+		}
+	}
+	return nil
+}
+
 // A provider is ready when its last check reached it. A provider no check has
 // reported on yet is not ready.
 func (p *MetadataProvider) ready() bool {
-	for _, condition := range p.Status.Conditions {
-		if condition.Type == conditionReady {
-			return condition.Status == ConditionTrue
-		}
-	}
-	return false
+	condition := p.readyCondition()
+	return condition != nil && condition.Status == ConditionTrue
 }
+
+// Whether any check has written a verdict on this provider, which is a Ready
+// condition of either value. A provider no check has reached yet has none,
+// and every Job of a Library that names it waits for that verdict.
+func (p *MetadataProvider) checked() bool { return p.readyCondition() != nil }
 
 // The reason of the Ready condition, which the Library's Sources condition
 // repeats, so a person reads one answer on the Library and not two objects. A
 // provider no check has reported on yet has no reason.
 func (p *MetadataProvider) readyReason() string {
-	for _, condition := range p.Status.Conditions {
-		if condition.Type == conditionReady {
-			return condition.Reason
-		}
+	if condition := p.readyCondition(); condition != nil {
+		return condition.Reason
 	}
 	return ""
 }

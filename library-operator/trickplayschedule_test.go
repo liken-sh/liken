@@ -61,7 +61,7 @@ func TestTrickplaySchedulesOneJobPerLibrary(t *testing.T) {
 				OldestAttempts: map[string]time.Time{factTrickplay: walked}}
 
 			if err := operator.trickplay(t.Context(), library, testNamespaceCatalog(),
-				report, test.jobs); err != nil {
+				report, test.jobs, testNow); err != nil {
 				t.Fatal(err)
 			}
 
@@ -90,7 +90,7 @@ func TestTheTrickplayJobAndTheEnricherStandTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := operator.trickplay(t.Context(), library, testNamespaceCatalog(),
-		report, nil); err != nil {
+		report, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,6 +102,36 @@ func TestTheTrickplayJobAndTheEnricherStandTogether(t *testing.T) {
 	}
 	if cluster.heldClaim("movies-trickplay-catalog") == nil {
 		t.Error("the pass stood the trickplay Job without its claim")
+	}
+}
+
+// A standing trickplay Job that failed is deleted, so the next pass stands
+// the work again under the same name instead of waiting out the Job's TTL.
+func TestAFailedTrickplayJobStandsAgain(t *testing.T) {
+	cluster := newFakeCluster()
+	library := libraryWithTrickplay()
+	boundHouse(cluster)
+	operator := testOperator(t, cluster)
+	report := &libraryReport{Gaps: map[string]int{factTrickplay: 4},
+		Runs: walkedRuns(testNow)}
+	name := standingTrickplayJobName("movies", report.Runs)
+	failed := failedJob(name, "house", workerLabels("movies", workerTrickplay))
+	cluster.holdJob(&failed)
+
+	if err := operator.trickplay(t.Context(), library, testNamespaceCatalog(),
+		report, []Job{failed}, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.heldJob("house", name) != nil {
+		t.Fatal("the failed trickplay Job stands, want it deleted")
+	}
+
+	if err := operator.trickplay(t.Context(), library, testNamespaceCatalog(),
+		report, nil, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.heldJob("house", name) == nil {
+		t.Errorf("the next pass stood no trickplay Job, jobs = %v", cluster.heldJobs())
 	}
 }
 

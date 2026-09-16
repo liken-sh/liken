@@ -208,8 +208,9 @@ func TestProviderStatusReportsTheFactsItServesNow(t *testing.T) {
 	}
 }
 
-// a provider that answers neither 200 nor 401 keeps the verdict it
-// carried, because the operator learned nothing.
+// A check the operator could not make keeps the verdict the provider had,
+// because the failure is the operator's own Secret read and says nothing
+// about the provider.
 func TestProviderCheckKeepsTheLastVerdictOnAFailure(t *testing.T) {
 	cluster := newFakeCluster()
 	provider := seedProvider(cluster, "tmdb", "house", factIdentity)
@@ -217,8 +218,8 @@ func TestProviderCheckKeepsTheLastVerdictOnAFailure(t *testing.T) {
 		Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable,
 	}}
 	cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
-	operator := providerOperator(t, cluster,
-		tokenServer(t, http.StatusInternalServerError, "the-key"))
+	cluster.broken[secretPath("house", "tmdb-key")] = http.StatusInternalServerError
+	operator := providerOperator(t, cluster, tokenServer(t, http.StatusOK, "the-key"))
 
 	set := operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 
@@ -694,5 +695,84 @@ func TestResolvedSourcesAnswerForEveryNameInOrder(t *testing.T) {
 				t.Errorf("resolved[%d] = %+v, want %+v", index, resolved[index], one.want)
 			}
 		})
+	}
+}
+
+// A source with no verdict yet blocks every Job of the pass, so no Job is
+// ever built with a partial source list. A source the check refused blocks
+// none, because its verdict is written and the pass reads it.
+func TestASourceNoCheckHasReachedHoldsEveryJob(t *testing.T) {
+	cases := []struct {
+		name       string
+		conditions []Condition
+		want       bool
+	}{
+		{name: "no check has written a verdict yet"},
+		{name: "the check reached the provider", want: true, conditions: []Condition{
+			{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable}}},
+		{name: "the check was refused", want: true, conditions: []Condition{
+			{Type: conditionReady, Status: ConditionFalse, Reason: reasonRefused}}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library := boundHouse(cluster)
+			library.Spec.Sources = []string{"tmdb"}
+			library.Spec.Trickplay.Enabled = true
+			provider := readyProvider("tmdb", "house", factIdentity)
+			provider.Status.Conditions = test.conditions
+			providers := providerSet{libraryKey("house", "tmdb"): provider}
+			operator := testOperator(t, cluster)
+			operator.reports.fold("house", "movies", libraryReport{
+				Gaps: map[string]int{factProbe: 4, factTrickplay: 4},
+				Runs: walkedRuns(testNow)})
+
+			if err := operator.reconcile(t.Context(), library, standingCatalog(),
+				nil, providers, testNow); err != nil {
+				t.Fatal(err)
+			}
+
+			enricher := cluster.heldJob("house", standingEnrichJobName("movies", testNow)) != nil
+			tiles := cluster.heldJob("house",
+				standingTrickplayJobName("movies", walkedRuns(testNow))) != nil
+			if enricher != test.want || tiles != test.want {
+				t.Errorf("the pass stood the enricher: %v and the trickplay Job: %v, want %v",
+					enricher, tiles, test.want)
+			}
+		})
+	}
+}
+
+// A provider that answers a status other than 200 or 401 is Unavailable, so a
+// provider that is only down still has a condition, and the Jobs of the
+// Libraries that name it stand on the next pass.
+func TestProviderCheckOnAProviderThatIsDown(t *testing.T) {
+	cluster := newFakeCluster()
+	provider := seedProvider(cluster, "tmdb", "house", factIdentity)
+	cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
+	library := boundHouse(cluster)
+	library.Spec.Sources = []string{"tmdb"}
+	operator := providerOperator(t, cluster,
+		tokenServer(t, http.StatusInternalServerError, "the-key"))
+	operator.reports.fold("house", "movies", libraryReport{
+		Gaps: map[string]int{factProbe: 4}, Runs: walkedRuns(testNow)})
+
+	providers := operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+	got := conditionNamed(cluster.heldProvider("tmdb").Status.Conditions, conditionReady)
+	if got.Status != ConditionFalse || got.Reason != reasonUnavailable {
+		t.Errorf("Ready = %s/%s, want %s/%s", got.Status, got.Reason,
+			ConditionFalse, reasonUnavailable)
+	}
+	if !strings.Contains(got.Message, "500") {
+		t.Errorf("message = %q, want the status the provider answered", got.Message)
+	}
+
+	if err := operator.reconcile(t.Context(), library, standingCatalog(),
+		nil, providers, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.heldJob("house", standingEnrichJobName("movies", testNow)) == nil {
+		t.Errorf("the pass stood no enricher, jobs = %v", cluster.heldJobs())
 	}
 }

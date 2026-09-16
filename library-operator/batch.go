@@ -111,6 +111,9 @@ func (j *Job) gaveUp() bool {
 // stays for its TTL, because a person reads its logs.
 func (j *Job) succeeded() bool { return j.holds(jobComplete) }
 
+// failed is true when the controller ended the Job on the backoff limit.
+func (j *Job) failed() bool { return j.holds(jobFailed) }
+
 // holds is true when the Job carries one condition of the given type with
 // status True. That is how batch/v1 writes a verdict it stands behind. A
 // condition with status False or Unknown is not a verdict.
@@ -243,6 +246,36 @@ func (o *operator) retireSucceededJobs(ctx context.Context, jobs []Job, now time
 				job.Metadata.Namespace, job.Metadata.Name, err)
 		}
 	}
+}
+
+// A standing Job that failed is deleted, so the scheduler that names it stands
+// the work again on the next pass. Nothing else frees the name before the
+// Job's own TTL. Any other Job, running, succeeded, or already being deleted,
+// is left as it is.
+func (o *operator) retireFailedJob(ctx context.Context, job *Job, key string, now time.Time) error {
+	if !job.failed() || job.Metadata.DeletionTimestamp != "" {
+		return nil
+	}
+	if !o.mayRestandFailed(key, now) {
+		return nil
+	}
+	return DeleteJob(ctx, o.client, job.Metadata.Namespace, job.Metadata.Name)
+}
+
+// The delete that stands the work again waits on the same backoff curve a
+// cleanup Job uses, so a cause nobody has repaired costs one Job per delay.
+// Without the curve it would cost one Job per pass. The first delete is
+// immediate, and the wait after it grows to the cap, which is the shape
+// mayStandCleanup has.
+func (o *operator) mayRestandFailed(key string, now time.Time) bool {
+	state := o.failedStands[key]
+	if now.Before(state.next) {
+		return false
+	}
+	state.count++
+	state.next = now.Add(cleanupBackoffDelay(state.count))
+	o.failedStands[key] = state
+	return true
 }
 
 func GetCronJob(ctx context.Context, c *Client, namespace, name string) (*CronJob, error) {

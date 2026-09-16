@@ -166,6 +166,19 @@ func jobsOf(jobs []Job, namespace, library, worker string) []Job {
 	return held
 }
 
+// The Job with one name, out of every Job the pass listed, or nil when no Job
+// has that name. A scheduler that names the Job it would stand reads the
+// standing one this way.
+func jobNamed(jobs []Job, namespace, name string) *Job {
+	for index := range jobs {
+		job := &jobs[index]
+		if job.Metadata.Namespace == namespace && job.Metadata.Name == name {
+			return job
+		}
+	}
+	return nil
+}
+
 // Whether a full walk of this Library has a pod running. A full
 // walk is a Job the CronJob created, which is the ownerReference the
 // CronJob controller writes, so a folder scan is never mistaken for

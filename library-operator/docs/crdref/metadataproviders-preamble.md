@@ -63,9 +63,11 @@ empty while the provider is not `Ready`.
 
 The operator checks each provider once per pass with one call to the
 provider, and reports the answer in the
-`Ready` condition: `Reachable`, `NoSecret`, `Refused`, or
-`Unreachable`, where the last is a check that got no answer at all and
-carries the error as its message. The key
+`Ready` condition: `Reachable`, `NoSecret`, `Refused`, `Unreachable`, or
+`Unavailable`. `Unreachable` is a check that got no answer at all and
+carries the error as its message. `Unavailable` is a check the provider
+answered with a status that says nothing about the account, and its
+message names that status code. The key
 reaches an enricher container through a `secretKeyRef` that the
 kubelet resolves. It never passes through a status, a log, or the
 catalog.
