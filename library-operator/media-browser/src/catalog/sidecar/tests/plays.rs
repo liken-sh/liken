@@ -269,6 +269,7 @@ fn a_trailer_plays_the_trailer_file_and_carries_no_trickplay() {
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
+                role: "trailer".into(),
                 title: "Film one".into(),
                 year: 1994,
                 art: "one.jpg".into(),
@@ -306,6 +307,7 @@ fn a_series_trailer_plays_the_trailer_file_under_the_series_row() {
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "series".into(),
+                role: "trailer".into(),
                 title: "Serial series:tvdb:1".into(),
                 year: 2004,
                 art: "series:tvdb:1.jpg".into(),

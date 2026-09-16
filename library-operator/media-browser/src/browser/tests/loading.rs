@@ -385,6 +385,67 @@ fn a_press_during_the_state_reaches_no_screen() {
     assert_eq!(showing_page(&browser).focus, Focus::Buttons(0));
 }
 
+// The playback pod answers a remote's home press by asking for home on
+// the commands topic and then ending the film, so the press arrives while
+// the film still covers the browser.
+#[test]
+fn a_home_press_under_the_film_lands_on_the_home_page() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Press("KEY_HOMEPAGE".into())];
+    browser.pump(PRESS + 2.0);
+
+    assert!(browser.stack.is_empty());
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
+}
+
+// The loading state is the return path's to end, so the curtain the
+// select raised leaves over the home page, on frames a person sees.
+#[test]
+fn the_return_after_a_home_press_ends_the_state_over_the_home_page() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 1.0);
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Press("KEY_HOMEPAGE".into())];
+    browser.pump(PRESS + 2.0);
+
+    assert!(!browser.loading.expect("the state holds").leaving());
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(PRESS + 3.0);
+    browser.tick(PRESS + 3.0);
+
+    assert!(browser.loading.expect("the state is leaving").leaving());
+    browser.tick(PRESS + 3.0 + look::RETURN);
+    assert!(browser.loading.is_none());
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
+}
+
+// Home is the one press the browser answers under a film. Every other
+// press ends there.
+#[test]
+fn a_press_other_than_home_under_the_film_is_still_swallowed() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 1.0);
+    let asked = requests(&bus).len();
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Press("KEY_SELECT".into())];
+    browser.pump(PRESS + 2.0);
+
+    assert_eq!(requests(&bus).len(), asked);
+    assert_eq!(browser.stack.len(), 2);
+    assert!(matches!(browser.top(), screens::Screen::Movie(_)));
+}
+
 #[test]
 fn the_loop_draws_the_state_and_goes_quiet_after_it() {
     let (mut browser, bus) = on_a_movie();

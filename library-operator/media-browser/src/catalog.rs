@@ -673,6 +673,9 @@ pub struct Presentation {
     pub kind: String,
     /// What the item is, `movie` or `series`.
     pub hint: String,
+    /// The part the file plays in the work: `trailer`, or empty for the
+    /// work itself.
+    pub role: String,
     /// The movie's title. An episode carries none.
     pub title: String,
     /// The series' title, from the series row.

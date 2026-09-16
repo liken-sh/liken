@@ -81,6 +81,7 @@ pub fn trailer(
             presentation: Presentation {
                 kind: "video".into(),
                 hint: hint.into(),
+                role: "trailer".into(),
                 title: row.get(0)?,
                 year: year(&released),
                 art: row.get(2)?,

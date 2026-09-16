@@ -696,8 +696,11 @@ type PlayItem struct {
 // media-operator's own field names. Every field is optional, because
 // the catalog holds what the volume holds and no more.
 type PlayPresentation struct {
-	Type         string `json:"type,omitempty"`
-	Hint         string `json:"hint,omitempty"`
+	Type string `json:"type,omitempty"`
+	Hint string `json:"hint,omitempty"`
+	// Role says what the item is to the work it presents: trailer, or empty
+	// for the work itself. The browser sets it and the display reads it.
+	Role         string `json:"role,omitempty"`
 	Title        string `json:"title,omitempty"`
 	Series       string `json:"series,omitempty"`
 	Season       int    `json:"season,omitempty"`

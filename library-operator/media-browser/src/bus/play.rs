@@ -100,6 +100,7 @@ fn presentation(presentation: &Presentation) -> Value {
     for (name, text) in [
         ("type", &presentation.kind),
         ("hint", &presentation.hint),
+        ("role", &presentation.role),
         ("title", &presentation.title),
         ("series", &presentation.series),
         ("episodeTitle", &presentation.episode_title),
@@ -173,6 +174,27 @@ mod tests {
                         "trickplay": "Some Film (1999)/Some Film (1999).trickplay",
                     },
                 }],
+            })
+        );
+    }
+
+    /// A trailer names the part it plays in the work, and the request
+    /// carries that word beside the title's own fields.
+    #[test]
+    fn a_trailer_request_names_the_role() {
+        let mut item = movie();
+        item.presentation.role = "trailer".into();
+        item.presentation.trickplay = String::new();
+
+        assert_eq!(
+            decoded("default/films", &[item])["items"][0]["presentation"],
+            serde_json::json!({
+                "type": "video",
+                "hint": "movie",
+                "role": "trailer",
+                "title": "Some Film",
+                "year": 1999,
+                "art": "Some Film (1999)/poster.jpg",
             })
         );
     }

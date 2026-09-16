@@ -216,6 +216,43 @@ fn a_press_after_the_idle_hours_asks_again_and_moves_no_focus_under_it() {
     assert_eq!(showing_page(&browser).focus, Focus::Buttons(0));
 }
 
+// A home press under a film is answered ahead of the picker. The picker
+// the press cleared is asked again over the home page.
+#[test]
+fn a_home_press_under_the_film_lands_on_the_home_page_under_a_new_ask() {
+    let (mut browser, bus) = watching(&["first", "second"], &["first"]);
+    open_the_film(&mut browser);
+    browser.pump(IDLE_SECONDS + 1.0);
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(IDLE_SECONDS + 2.0);
+    browser.key("right");
+    let stood = browser.picker.clone().expect("the picker stands");
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Press("KEY_HOMEPAGE".into())];
+    browser.pump(IDLE_SECONDS + 3.0);
+
+    assert!(browser.stack.is_empty());
+    assert_ne!(browser.picker, Some(stood));
+}
+
+// With no film over the page, the picker takes the home press the way it
+// takes every other press.
+#[test]
+fn a_home_press_with_no_film_over_the_page_is_taken_by_the_picker() {
+    let (mut browser, bus) = watching(&["first", "second"], &["first"]);
+    open_the_film(&mut browser);
+    browser.pump(IDLE_SECONDS + 1.0);
+    assert!(browser.picker.is_some());
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Press("KEY_HOMEPAGE".into())];
+    browser.pump(IDLE_SECONDS + 2.0);
+
+    assert!(browser.picker.is_some());
+    assert_eq!(browser.stack.len(), 2);
+}
+
 // The browser over two people whose display names differ from the names
 // the records key on, both of them in the room.
 fn a_room_of_two() -> Browser<Fake, NoArt> {

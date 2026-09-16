@@ -801,6 +801,16 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // Every press holds the audience's answer open, whatever the press
         // then does, because a person at the remote is a person in the room.
         self.pressed();
+        // A home press is answered ahead of the loading gate and the picker
+        // gate, so a film that covered the browser ends over the home page
+        // and not over the page a person chose it from. The playback pod
+        // sends the press just before the film ends, and the loading state
+        // stays for the return path to end.
+        if name == "home" && (self.loading.is_some() || self.activity != Activity::Idle) {
+            self.picker = None;
+            self.home();
+            return true;
+        }
         // A press during the loading state reaches no screen under it.
         // Back exits the state here and now, and cancels nothing: the
         // `Play` this browser asked for is the operator's to run.
@@ -810,9 +820,8 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             }
             return true;
         }
-        // The picker takes every press while it stands, and the press that
-        // raises it does nothing else, so a room that answered hours ago
-        // never plays under the last room's name.
+        // The press that raises the picker does nothing else, so a room
+        // that answered hours ago never plays under the last room's name.
         if self.ask() {
             return true;
         }

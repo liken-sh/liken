@@ -134,6 +134,21 @@ func TestTheArtAndTheTrickplayAreStampedOntoTheSameClaim(t *testing.T) {
 	}
 }
 
+// The role travels through the request untouched, because the browser
+// names a trailer with it and the display reads the word off the Play.
+func TestTheRoleTravelsThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Role = "trailer"
+	publishPlay(operator, filmRequest(item))
+
+	operator.pass()
+
+	if role := cluster.heldPlays()[0].Spec.Items[0].Presentation.Role; role != "trailer" {
+		t.Errorf("role = %q, want trailer", role)
+	}
+}
+
 func TestAnItemWithNoArtCarriesNone(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	publishPlay(operator, filmRequest(film(testFilmPath)))
