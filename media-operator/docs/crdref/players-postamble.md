@@ -10,7 +10,7 @@ every topic follows and lists every writer and reader of each.
 | `players/{namespace}/{name}/volume` | the operator, the pod that handles a press, and the equipment operator | yes | the listening level |
 | `players/{namespace}/{name}/volume/owner` | the equipment operator | yes | who applies the level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
-| `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
+| `players/{namespace}/{name}/commands` | the playback pod | no | a command for the idle pod |
 
 ### `status`
 
@@ -139,8 +139,11 @@ One program writes here. The playback pod's command sidecar publishes
 `play-next` when a person takes the up-next offer on the scrubber, and
 its `request` is the `Play`'s own `spec.next.request`, byte for byte.
 The client that wrote the `Play` reads that ask and creates the next
-`Play`.
+`Play`. The same sidecar publishes `home` when a person presses home
+during a film, just before the `Play` ends, and the client reads that
+ask as a press of the home key.
 
 | Message | Writer | What it says |
 |---|---|---|
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |
+| `{"action": "home"}` | the playback pod | A person pressed home during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. |

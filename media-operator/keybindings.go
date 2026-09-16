@@ -29,9 +29,12 @@ type keyBinding struct {
 // names a keyboard and a media remote report for play and pause, the
 // four names a shell sends for OK, and the three it sends for back.
 // KEY_CYCLEWINDOWS asks the operator to move the focus mark and
-// reaches no player program. The reserved keys, KEY_HOMEPAGE,
-// KEY_WWW, KEY_POWER, and BTN_MODE, are absent on purpose: they belong
-// to a home surface this operator does not own.
+// reaches no player program. The reserved keys, KEY_POWER and BTN_MODE,
+// are absent on purpose: they belong to a home surface this operator
+// does not own.
+//
+// The two home names, KEY_HOMEPAGE and KEY_WWW, end the film and ask the
+// client under it for its home page.
 var playbackKeys = map[string]keyBinding{
 	"KEY_PLAYPAUSE": {command: mediaCommand{Action: actionPause}},
 	"KEY_PLAY":      {command: mediaCommand{Action: actionPause}},
@@ -65,6 +68,9 @@ var playbackKeys = map[string]keyBinding{
 	"KEY_BACK": {command: mediaCommand{Action: actionBack}},
 	"KEY_ESC":  {command: mediaCommand{Action: actionBack}},
 	"KEY_EXIT": {command: mediaCommand{Action: actionBack}},
+
+	"KEY_HOMEPAGE": {command: mediaCommand{Action: actionHome}},
+	"KEY_WWW":      {command: mediaCommand{Action: actionHome}},
 
 	"KEY_CYCLEWINDOWS": {command: mediaCommand{Action: actionCycleFocus}},
 }

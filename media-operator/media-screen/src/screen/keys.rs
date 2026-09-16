@@ -28,6 +28,12 @@ pub const MUTE: &str = "KEY_MUTE";
 /// [`super::Screen::sleep`].
 pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
 
+/// The key name a home ask reaches the client under. The playback pod
+/// publishes the ask on the `Player`'s commands topic during a film, and
+/// this crate turns it into a press, so a client binds one name for home
+/// whether the press came off a remote or out of an ask.
+pub const HOME: &str = "KEY_HOMEPAGE";
+
 /// Whether this crate acts on the key itself. This is the one check
 /// that keeps a key from the client; every key it refuses passes
 /// through.

@@ -85,6 +85,7 @@ func TestListPlaysCarriesItemPresentations(t *testing.T) {
 	full := &Presentation{
 		Type:         "video",
 		Hint:         "series",
+		Role:         "trailer",
 		Title:        "The Pilot",
 		Series:       "Example Series",
 		Season:       2,

@@ -156,9 +156,12 @@ Set these variables on your container. Each value comes from
 * `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The playback
   pod publishes `{"action": "play-next"}` there when a person takes the
   up-next offer on the scrubber, for a client that starts what follows.
-  When a `Play` ends, the client's own surface is on the screen again
-  without it asking, and the retained status is the cue. Nothing else
-  arrives, and the client publishes nothing back.
+  It publishes `{"action": "home"}` there when a person presses home
+  during a film, just before the `Play` ends, and the client reads that
+  ask as a press of the home key. When a `Play` ends, the client's own
+  surface is on the screen again without it asking, and the retained
+  status is the cue. Nothing else arrives, and the client publishes
+  nothing back.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
   publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
   The operator turns the desire into an override on the screen's

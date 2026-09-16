@@ -148,6 +148,14 @@ spec:
                               one timeline of the audio files it holds. The
                               directory must hold at least one audio file, or
                               the run fails.
+                          role:
+                            type: string
+                            enum: [trailer]
+                            description: >-
+                              The item's part in the work. The one value is
+                              trailer, and the display marks a trailer on the
+                              line under the title. Omit it for the work
+                              itself.
                           title:
                             type: string
                             description: >-

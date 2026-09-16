@@ -221,10 +221,13 @@ func playCommandsTopic(base, namespace, name string) string {
 // playerCommandsTopic carries the ask a person makes on the up-next
 // offer, which the playback pod's command sidecar publishes. It is not
 // retained, because an ask is an event and not a state. The program
-// that wrote the Play reads it there and creates the next Play. No
-// press is forwarded on it. It stays off the plays tree because it
-// belongs to the standing unit, not to a Play, and a controller sends
-// nothing on it directly.
+// that wrote the Play reads it there and creates the next Play. It
+// stays off the plays tree because it belongs to the standing unit, not
+// to a Play, and a controller sends nothing on it directly.
+//
+// The home ask travels on the same topic. The client under the film
+// reads it as a press of the home key, so it is on its home page when
+// the film ends.
 func playerCommandsTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/commands"
 }

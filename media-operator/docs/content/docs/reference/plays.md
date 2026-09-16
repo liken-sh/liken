@@ -98,6 +98,7 @@ How the item should look, for the fields the display cannot read from the file. 
 | --- | --- | --- | --- |
 | <span id="specitemspresentation--type"></span>`type` | string | no | The media type the display tunes its layout by. mpv cannot infer this, and the display does not read it from the file name. One of: `video`, `music`, `image`. |
 | <span id="specitemspresentation--hint"></span>`hint` | string | no | The finer kind within the type. A video is a movie or a series, and music is an album. It selects the layout the display draws. An album also declares that the item's URI names a directory, which the playback pod expands into one timeline of the audio files it holds. The directory must hold at least one audio file, or the run fails. One of: `movie`, `series`, `album`. |
+| <span id="specitemspresentation--role"></span>`role` | string | no | The item's part in the work. The one value is trailer, and the display marks a trailer on the line under the title. Omit it for the work itself. One of: `trailer`. |
 | <span id="specitemspresentation--title"></span>`title` | string | no | The item's name, which overrides the file's own tag. Set it when the tag is wrong or absent. |
 | <span id="specitemspresentation--series"></span>`series` | string | no | The series this episode belongs to. |
 | <span id="specitemspresentation--season"></span>`season` | integer | no | The season number of the episode. |
@@ -191,6 +192,7 @@ direction: seconds for `seek`, a step for `volume` and `chapter`.
 | `audio` | cycles the audio track |
 | `info` | shows the file name and position for a few seconds |
 | `up`, `down`, `left`, `right`, `select`, `back` | drive the on-screen display |
+| `home` | asks the unit's client for its home page, then ends the run |
 
 A `volume` or `mute` command changes no player directly: the pod
 computes the unit's next state and publishes it on the

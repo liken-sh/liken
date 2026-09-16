@@ -25,11 +25,15 @@ use crate::wiring::{Remote, Wiring};
 /// needs no second topic list.
 const CYCLE_SUFFIX: &str = "/cycle";
 
-/// The one command this crate answers on the `Player`'s commands topic: the
-/// ask the playback pod's command sidecar publishes when a person takes the
-/// up-next offer on the scrubber. The client that wrote the `Play` reads it
-/// and starts what follows.
+/// The ask the playback pod's command sidecar publishes when a person takes
+/// the up-next offer on the scrubber. The client that wrote the `Play` reads
+/// it and starts what follows.
 const PLAY_NEXT: &str = "play-next";
+
+/// The ask the same sidecar publishes when a person presses home during a
+/// film. The client reads it as a press of the home key, just before the
+/// `Play` ends.
+const HOME: &str = "home";
 
 /// One thing the client draws.
 ///
@@ -507,17 +511,21 @@ impl Screen {
 
     /// Fold one message off the commands topic. The ask a person makes on the
     /// up-next offer acts whether or not the unit is idle, because the unit is
-    /// never idle when it arrives. Every other action does nothing.
+    /// never idle when it arrives.
+    ///
+    /// A home ask reaches the client as a press of the home key, so the
+    /// client binds one name for home.
     fn on_command(&mut self, payload: &[u8]) -> Vec<Effect> {
         let Some(command) = crate::object::<Command>(payload) else {
             return Vec::new();
         };
-        if command.action != PLAY_NEXT {
-            return Vec::new();
+        match command.action.as_str() {
+            PLAY_NEXT => vec![Effect::Moment(Moment::PlayNext(request_bytes(
+                command.request,
+            )))],
+            HOME => vec![Effect::Moment(Moment::Press(keys::HOME.into()))],
+            _ => Vec::new(),
         }
-        vec![Effect::Moment(Moment::PlayNext(request_bytes(
-            command.request,
-        )))]
     }
 
     /// The cycle request the operator arbitrates, on the controller's own

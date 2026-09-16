@@ -108,6 +108,23 @@ pub fn second_line(presentation: &Presentation) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(BETWEEN))
 }
 
+/// The word the line under a trailer's title carries.
+const TRAILER: &str = "Trailer";
+
+/// A trailer's mark joins the line under the title with the separator.
+/// Where the item declared none of that line's parts, the mark is the whole
+/// line. An item with no role, or a role other than `trailer`, keeps its
+/// line as it is.
+fn marked(line: Option<String>, presentation: &Presentation) -> Option<String> {
+    if presentation.role() != Some("trailer") {
+        return line;
+    }
+    Some(match line {
+        Some(line) => format!("{line}{BETWEEN}{TRAILER}"),
+        None => TRAILER.to_string(),
+    })
+}
+
 /// The lines under a music title: the artist on one, then the album and the
 /// year together on the next. A field the block and the tags both leave empty
 /// draws nothing.
@@ -185,8 +202,8 @@ pub fn lines(presentation: &Presentation, film: &Film, logo: Option<f32>) -> Vec
         {
             lines.push(title(series, TOP_Y));
         }
-        if let Some(line) = presentation.second() {
-            lines.push(under(line.to_string(), second_y(logo)));
+        if let Some(line) = marked(presentation.second().map(str::to_string), presentation) {
+            lines.push(under(line, second_y(logo)));
         }
     } else {
         let name = presentation.title(film);
@@ -196,9 +213,9 @@ pub fn lines(presentation: &Presentation, film: &Film, logo: Option<f32>) -> Vec
             lines.push(title(name, TOP_Y));
         }
         if (logo.is_some() || name.is_some())
-            && let Some(year) = presentation.year()
+            && let Some(line) = marked(presentation.year().map(num), presentation)
         {
-            lines.push(under(num(year), second_y(logo)));
+            lines.push(under(line, second_y(logo)));
         }
     }
     lines
@@ -291,6 +308,48 @@ mod tests {
         assert_eq!(
             shown(r#"{"hint":"series","series":"A Show"}"#, &Film::default()).len(),
             1
+        );
+    }
+
+    /// A trailer marks the line under the title in the movie layout and in
+    /// the series layout, beside whatever else that line holds.
+    #[test]
+    fn a_trailer_says_so_under_the_title() {
+        let cases = [
+            (
+                r#"{"title":"A Film","year":2014,"role":"trailer"}"#,
+                "2014  \u{00B7}  Trailer",
+            ),
+            (r#"{"title":"A Film","role":"trailer"}"#, "Trailer"),
+            (
+                r#"{"hint":"series","series":"A Show","role":"trailer"}"#,
+                "Trailer",
+            ),
+            (
+                r#"{"hint":"series","series":"A Show","episode":7,"role":"trailer"}"#,
+                "Episode 7  \u{00B7}  Trailer",
+            ),
+        ];
+        for (block, want) in cases {
+            assert_eq!(
+                shown(block, &Film::default()).get(1),
+                Some(&(want.to_string(), Point::new(96.0, 172.0), 34.0)),
+                "{block}"
+            );
+        }
+    }
+
+    /// A logo carries the trailer mark under it, where the title's own line
+    /// would be.
+    #[test]
+    fn a_trailer_with_a_logo_marks_the_line_under_the_logo() {
+        assert_eq!(
+            with_logo(
+                r#"{"title":"A Film","role":"trailer"}"#,
+                &Film::default(),
+                Some(110.0)
+            ),
+            vec![("Trailer".to_string(), Point::new(96.0, 226.0), 34.0)]
         );
     }
 

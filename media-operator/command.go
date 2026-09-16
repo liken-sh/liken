@@ -347,6 +347,12 @@ func (c *commander) apply(command mediaCommand) {
 		c.pressVolume(command)
 		return
 	}
+	// A home command publishes the ask on the Player's commands topic
+	// and then runs the ending path.
+	if command.Action == actionHome {
+		c.home()
+		return
+	}
 	mpv := commandFor(command)
 	if mpv == nil {
 		return

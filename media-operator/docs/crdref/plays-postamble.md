@@ -36,6 +36,7 @@ direction: seconds for `seek`, a step for `volume` and `chapter`.
 | `audio` | cycles the audio track |
 | `info` | shows the file name and position for a few seconds |
 | `up`, `down`, `left`, `right`, `select`, `back` | drive the on-screen display |
+| `home` | asks the unit's client for its home page, then ends the run |
 
 A `volume` or `mute` command changes no player directly: the pod
 computes the unit's next state and publishes it on the

@@ -1126,6 +1126,35 @@ fn a_play_next_with_no_request_states_no_bytes() {
     );
 }
 
+/// The ask the sidecar publishes on a home press during a film.
+const HOME_ASK: &[u8] = br#"{"action":"home"}"#;
+
+#[test]
+fn a_home_ask_reaches_the_client_as_the_home_key_whether_or_not_a_play_runs() {
+    let now = Instant::now();
+    let mut idle = idling(&wiring(), now);
+    let mut playing = focused(&wiring());
+    playing.deliver(STATUS, &status("Playing"), true, now);
+
+    for screen in [&mut idle, &mut playing] {
+        assert_eq!(
+            moments(screen.deliver(COMMANDS, HOME_ASK, false, now)),
+            [Moment::Press(keys::HOME.into())]
+        );
+    }
+}
+
+#[test]
+fn a_home_press_while_nothing_plays_reaches_the_client_and_publishes_nothing() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+
+    let effects = screen.deliver(SOFA_EVENTS, &key(keys::HOME, 1), false, now);
+
+    assert_eq!(moments(effects.clone()), [Moment::Press(keys::HOME.into())]);
+    assert!(publishes(effects).is_empty());
+}
+
 #[test]
 fn every_other_action_and_a_payload_that_does_not_decode_state_nothing() {
     let now = Instant::now();

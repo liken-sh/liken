@@ -332,6 +332,7 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 			Presentation: &Presentation{
 				Type:         "video",
 				Hint:         "series",
+				Role:         "trailer",
 				Series:       "The Show",
 				Season:       2,
 				Episode:      5,
@@ -344,7 +345,7 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 
 	command := initContainer(t, pod, commandContainer)
 	got := envValue(command, presentationsVariable)
-	want := `[{},{"type":"video","hint":"series","series":"The Show","season":2,"episode":5,"episodeTitle":"The Pilot"}]`
+	want := `[{},{"type":"video","hint":"series","role":"trailer","series":"The Show","season":2,"episode":5,"episodeTitle":"The Pilot"}]`
 	if got != want {
 		t.Errorf("%s = %s, want %s", presentationsVariable, got, want)
 	}

@@ -37,6 +37,8 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_BACK", want: mediaCommand{Action: actionBack}},
 		{key: "KEY_ESC", want: mediaCommand{Action: actionBack}},
 		{key: "KEY_EXIT", want: mediaCommand{Action: actionBack}},
+		{key: "KEY_HOMEPAGE", want: mediaCommand{Action: actionHome}},
+		{key: "KEY_WWW", want: mediaCommand{Action: actionHome}},
 		{key: "KEY_CYCLEWINDOWS", want: mediaCommand{Action: actionCycleFocus}},
 	}
 
@@ -69,6 +71,7 @@ func TestTheFourHeldKindsActOnARepeat(t *testing.T) {
 		{key: "KEY_ENTER"},
 		{key: "KEY_BACK"},
 		{key: "KEY_INFO"},
+		{key: "KEY_HOMEPAGE"},
 		{key: "KEY_CYCLEWINDOWS"},
 	}
 
@@ -80,16 +83,15 @@ func TestTheFourHeldKindsActOnARepeat(t *testing.T) {
 	}
 }
 
-// A release does nothing, and so does a key this pod has no row for,
-// the reserved keys of a home surface among them.
+// A release does nothing, and so does a key this pod has no row for.
 func TestAReleaseAndAnUnboundKeyDoNothing(t *testing.T) {
 	cases := []struct {
 		name  string
 		event keyEvent
 	}{
 		{name: "the release of a bound key", event: keyEvent{Key: "KEY_PLAYPAUSE", Value: 0}},
-		{name: "a key of the home surface", event: keyEvent{Key: "KEY_HOMEPAGE", Value: 1}},
 		{name: "the power key", event: keyEvent{Key: "KEY_POWER", Value: 1}},
+		{name: "the mode button", event: keyEvent{Key: "BTN_MODE", Value: 1}},
 		{name: "a letter on a keyboard remote", event: keyEvent{Key: "KEY_Q", Value: 1}},
 		{name: "a value no kernel reports", event: keyEvent{Key: "KEY_PLAYPAUSE", Value: 7}},
 	}

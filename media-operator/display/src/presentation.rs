@@ -86,6 +86,12 @@ impl Presentation {
         self.word("hint")
     }
 
+    /// The item's part in the work: `trailer`, or nothing for the work
+    /// itself.
+    pub fn role(&self) -> Option<&str> {
+        self.word("role")
+    }
+
     pub fn series(&self) -> Option<&str> {
         self.word("series")
     }
@@ -211,11 +217,13 @@ mod tests {
 
     #[test]
     fn an_empty_field_falls_through_to_the_tier_below() {
-        let presentation =
-            block(r#"{"title":"","artist":"","album":"","logo":"","trickplay":"","art":""}"#);
+        let presentation = block(
+            r#"{"title":"","artist":"","album":"","logo":"","trickplay":"","art":"","role":""}"#,
+        );
         assert_eq!(presentation.title(&film()).as_deref(), Some("the-file.mkv"));
         assert_eq!(presentation.artist(&film()).as_deref(), Some("The Band"));
         assert_eq!(presentation.album(&film()).as_deref(), Some("The Record"));
+        assert_eq!(presentation.role(), None);
         assert_eq!(presentation.logo(), None);
         assert_eq!(presentation.trickplay(), None);
         assert_eq!(presentation.art(), None);
@@ -229,12 +237,14 @@ mod tests {
     #[test]
     fn the_declared_fields_read_as_the_block_wrote_them() {
         let presentation = block(
-            r#"{"type":"series","hint":"series","series":"A Show","season":2,"episode":7,
+            r#"{"type":"series","hint":"series","role":"trailer","series":"A Show","season":2,
+                "episode":7,
                 "episodeTitle":"The One","date":"2017-03-05","year":2014,
                 "logo":"/art/logo.png","trickplay":"/art/tiles","art":"/art/cover.jpg"}"#,
         );
         assert_eq!(presentation.kind(), Kind::Other);
         assert_eq!(presentation.hint(), Some("series"));
+        assert_eq!(presentation.role(), Some("trailer"));
         assert_eq!(presentation.series(), Some("A Show"));
         assert_eq!(presentation.season(), Some(&json!(2)));
         assert_eq!(presentation.episode(), Some(&json!(7)));

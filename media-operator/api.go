@@ -472,8 +472,14 @@ type PlayItem struct {
 // media URI, so an nfs reference or a claim reference shares the media's
 // mount and an https reference stays a URL.
 type Presentation struct {
-	Type         string `json:"type,omitempty"`
-	Hint         string `json:"hint,omitempty"`
+	Type string `json:"type,omitempty"`
+	Hint string `json:"hint,omitempty"`
+
+	// Role is the item's part in the work: `trailer`, or empty for the
+	// work itself. The display marks a trailer on the line under the
+	// title.
+	Role string `json:"role,omitempty"`
+
 	Title        string `json:"title,omitempty"`
 	Series       string `json:"series,omitempty"`
 	Season       int    `json:"season,omitempty"`
