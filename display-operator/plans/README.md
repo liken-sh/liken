@@ -23,6 +23,18 @@ The manual at [display.liken.sh](https://display.liken.sh) says how
 to deploy the operator and how to claim an output. These documents
 say why it is built the way it is.
 
+## Planned
+
+* [22, The screen over HTTP](22-the-screen-over-http.md). A
+  `display-api` `Deployment` and a capture sidecar in the operator's
+  pod serve a `Display`'s screen over HTTPS: one frame as PNG or
+  JPEG, a clip as H.264 in fragmented MP4, or an MJPEG stream, cut by
+  W3C Media Fragments `t=` and `xywh=`, encoded on the node's GPU,
+  and stored nowhere. The layout module opens the one capture socket
+  the compositor's screenshot authority admits. The display instance
+  of the shape audio-operator's plan 09 and media-operator's plan 34
+  share.
+
 ## Designs
 
 * [01, The compositor image](completed/01-the-compositor-image.md). Built. The
