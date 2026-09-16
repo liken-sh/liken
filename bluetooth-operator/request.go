@@ -109,7 +109,7 @@ func (i *inventory) runWindow(adapter *Adapter, request *PairingRequest, snapsho
 		return true
 	}
 
-	status.Seen = seenDevices(status.Seen, snapshot, now)
+	status.Seen, status.SeenTruncated = seenDevices(status.Seen, snapshot, now)
 	if request.Spec.Device != "" {
 		i.approve(adapter, request, &status, snapshot, pass)
 	}
@@ -139,10 +139,12 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 
 	if !device.Paired {
 		if err := i.radio.Pair(address); err != nil {
+			i.metrics.countPairAttempt(resultRefused)
 			status.Message = fmt.Sprintf("pairing with %s: %v", address, err)
 			fmt.Fprintf(os.Stderr, "request %s: %s\n", name, status.Message)
 			return
 		}
+		i.metrics.countPairAttempt(resultPaired)
 		fmt.Printf("request %s: paired with %s\n", name, address)
 	}
 	// Trusting the device lets it reconnect on its own afterwards.
@@ -154,7 +156,7 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 
 	// The bond now exists, so the device's state differs from the
 	// snapshot this pass read.
-	device.Paired, device.Trusted = true, true
+	device.Paired, device.Bonded, device.Trusted = true, true, true
 	peripheral, err := i.createPeripheral(adapter, device, name)
 	if err != nil {
 		status.Message = fmt.Sprintf("recording the pairing with %s: %v", address, err)
@@ -193,7 +195,11 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 // A device the radio already holds a bond with is left out. It has a
 // Peripheral of its own, and the list exists to name the devices that
 // do not.
-func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) []SeenDevice {
+//
+// The second value is true when the cap stopped a device from reaching
+// the list. status.seenTruncated reports it, so the devices a busy room
+// kept off the list are visible on the request.
+func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) ([]SeenDevice, bool) {
 	first := make(map[string]string, len(seen))
 	for _, device := range seen {
 		first[device.Address] = device.FirstSeen
@@ -210,7 +216,7 @@ func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) []See
 			continue
 		}
 		if len(merged) >= maxSeenDevices {
-			break
+			return merged, true
 		}
 		merged = append(merged, SeenDevice{
 			Address:   address,
@@ -219,7 +225,7 @@ func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) []See
 		})
 		first[address] = timestamp(now)
 	}
-	return merged
+	return merged, false
 }
 
 // collectRequest deletes a finished request once its time is up. A
@@ -303,6 +309,7 @@ func (i *inventory) writeRequestStatus(request *PairingRequest, status PairingRe
 func sameRequestStatus(current, next PairingRequestStatus) bool {
 	if current.Phase != next.Phase ||
 		current.WindowClosesAt != next.WindowClosesAt ||
+		current.SeenTruncated != next.SeenTruncated ||
 		current.Peripheral != next.Peripheral ||
 		current.FinishedAt != next.FinishedAt ||
 		current.Message != next.Message ||

@@ -244,6 +244,16 @@ type BondStatus struct {
 	// reports that gap and never acts on it.
 	Held bool `json:"held"`
 
+	// Paired, Bonded, Trusted, and Connected are BlueZ's own Device1
+	// properties for this device, read on every pass. When a remote will
+	// not pair or reconnect, this object states what bluetoothd holds for
+	// it, and a person reads that here rather than through bluetoothctl
+	// in the pod.
+	Paired    bool `json:"paired"`
+	Bonded    bool `json:"bonded"`
+	Trusted   bool `json:"trusted"`
+	Connected bool `json:"connected"`
+
 	Secret   string `json:"secret,omitempty"`
 	PairedAt string `json:"pairedAt,omitempty"`
 	Request  string `json:"request,omitempty"`
@@ -329,7 +339,13 @@ type PairingRequestStatus struct {
 	Phase          string       `json:"phase,omitempty"`
 	WindowClosesAt string       `json:"windowClosesAt,omitempty"`
 	Seen           []SeenDevice `json:"seen,omitempty"`
-	Peripheral     string       `json:"peripheral,omitempty"`
+
+	// SeenTruncated is true when this window's seen list was cut at
+	// maxSeenDevices. The radio observed more devices than the list
+	// holds, so the room was too busy to report in full.
+	SeenTruncated bool `json:"seenTruncated"`
+
+	Peripheral string `json:"peripheral,omitempty"`
 
 	// FinishedAt is when the request reached Paired or Expired, and the
 	// TTL counts from it. Job has the same field for the same reason: a
@@ -438,12 +454,17 @@ func createObject[T any](c *Client, collection string, object *T) (*T, error) {
 // Every caller states the object's apiVersion and kind before it calls
 // this. An object read out of a list does not always have them, and
 // the API server refuses a write that includes neither.
+//
+// The server's copy of the object is decoded back over the caller's,
+// for the reason patchFinalizers returns a version: a write produces a
+// new resourceVersion, and the server refuses a second write in the
+// same pass that still states the old one.
 func replaceStatus[T any](c *Client, path string, object *T) error {
 	body, err := json.Marshal(object)
 	if err != nil {
 		return err
 	}
-	return c.RequestJSON(http.MethodPut, statusPath(path), body, nil)
+	return c.RequestJSON(http.MethodPut, statusPath(path), body, object)
 }
 
 // deleteObject removes one object. An object that is already gone

@@ -284,10 +284,13 @@ func TestSeenListIsCappedAndItsNamesAreCut(t *testing.T) {
 		})
 	}
 
-	seen := seenDevices(nil, snapshot, testNow)
+	seen, truncated := seenDevices(nil, snapshot, testNow)
 
 	if len(seen) != maxSeenDevices {
 		t.Fatalf("seen holds %d devices, want %d", len(seen), maxSeenDevices)
+	}
+	if !truncated {
+		t.Error("seenDevices reported no cut for a room of 20 devices")
 	}
 	for _, device := range seen {
 		if len(device.Name) > maxSeenNameBytes {
@@ -303,7 +306,7 @@ func TestSeenListKeepsTheFirstSighting(t *testing.T) {
 	seen := []SeenDevice{{Address: testDevice, Name: "DualSense Wireless Controller", FirstSeen: earlier}}
 	snapshot := radioSnapshot{Devices: []deviceState{seenDevice(t, testDevice, "DualSense Wireless Controller")}}
 
-	merged := seenDevices(seen, snapshot, testNow)
+	merged, _ := seenDevices(seen, snapshot, testNow)
 
 	if len(merged) != 1 || merged[0].FirstSeen != earlier {
 		t.Fatalf("seen = %+v, want the first sighting kept", merged)
@@ -315,7 +318,7 @@ func TestSeenListKeepsTheFirstSighting(t *testing.T) {
 func TestSeenListLeavesOutTheDevicesAlreadyPaired(t *testing.T) {
 	snapshot := radioSnapshot{Devices: []deviceState{pairedDevice(t, testDevice)}}
 
-	if seen := seenDevices(nil, snapshot, testNow); len(seen) != 0 {
+	if seen, _ := seenDevices(nil, snapshot, testNow); len(seen) != 0 {
 		t.Fatalf("seen = %+v, want nothing", seen)
 	}
 }
@@ -371,4 +374,93 @@ func bondsAddress(t *testing.T, index int) (address [6]byte) {
 	t.Helper()
 	address[5] = byte(index)
 	return address
+}
+
+// Every Pair call counts once, under the result bluetoothd gave.
+func TestPairAttemptsCountUnderTheirResult(t *testing.T) {
+	cases := []struct {
+		name    string
+		pairErr error
+		result  string
+	}{
+		{name: "bluetoothd completed the bond", result: resultPaired},
+		{name: "bluetoothd refused the pairing", pairErr: errors.New("org.bluez.Error.AuthenticationFailed"), result: resultRefused},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newAPIFixture()
+			fixture.put(t, testRequestPath(), openRequest(testDevice))
+			radio := testRadio(t, seenDevice(t, testDevice, "DualSense Wireless Controller"))
+			radio.pairErr = c.pairErr
+			inventory := testInventory(t, fixture, radio)
+
+			inventory.reconcile()
+
+			count, found := metricValue(t, inventory.metrics.registry,
+				"bluetooth_pair_attempts_total", map[string]string{"result": c.result})
+			if !found || count != 1 {
+				t.Fatalf("bluetooth_pair_attempts_total{result=%q} = %v (found: %v), want 1", c.result, count, found)
+			}
+		})
+	}
+}
+
+// crowdedRadio is one adapter and the number of unpaired devices a
+// test names, each on an address of its own.
+func crowdedRadio(t *testing.T, devices int) *fakeRadio {
+	t.Helper()
+	radio := testRadio(t)
+	for index := range devices {
+		radio.snapshot.Devices = append(radio.snapshot.Devices, deviceState{
+			Address: bondsAddress(t, index),
+			Name:    "controller",
+		})
+	}
+	return radio
+}
+
+// The request reports whether its own seen list was cut at the cap.
+func TestTheRequestReportsACutSeenList(t *testing.T) {
+	cases := []struct {
+		name    string
+		devices int
+		want    bool
+	}{
+		{name: "a room the list holds", devices: 3, want: false},
+		{name: "a room larger than the cap", devices: maxSeenDevices + 4, want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newAPIFixture()
+			fixture.put(t, testRequestPath(), openRequest(""))
+			inventory := testInventory(t, fixture, crowdedRadio(t, c.devices))
+
+			inventory.reconcile()
+
+			request := read[PairingRequest](t, fixture, testRequestPath())
+			if request.Status.SeenTruncated != c.want {
+				t.Fatalf("status.seenTruncated = %t, want %t for %d devices", request.Status.SeenTruncated, c.want, c.devices)
+			}
+		})
+	}
+}
+
+// The mark stays on the request that closed, so a person who reads it
+// afterwards sees that the room was too busy.
+func TestACutSeenListStandsOnAClosedRequest(t *testing.T) {
+	fixture := newAPIFixture()
+	fixture.put(t, testRequestPath(), openRequest(""))
+	inventory := testInventory(t, fixture, crowdedRadio(t, maxSeenDevices+4))
+	inventory.reconcile()
+
+	inventory.now = func() time.Time { return testNow.Add(4 * time.Minute) }
+	inventory.reconcile()
+
+	request := read[PairingRequest](t, fixture, testRequestPath())
+	if request.Status.Phase != phaseExpired {
+		t.Fatalf("phase = %q, want the window closed", request.Status.Phase)
+	}
+	if !request.Status.SeenTruncated {
+		t.Fatalf("status.seenTruncated = false once the window closed, want the mark kept")
+	}
 }

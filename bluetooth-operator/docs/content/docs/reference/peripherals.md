@@ -53,6 +53,10 @@ What the operator observes about the bond.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusbond--held"></span>`held` | boolean | no | Whether bluetoothd still holds this bond. It goes false when the keys are gone from the daemon, which the operator reports and never acts on. |
+| <span id="statusbond--paired"></span>`paired` | boolean | no | Whether BlueZ reports this device as paired, from Device1.Paired, read on every pass the operator makes over the devices. |
+| <span id="statusbond--bonded"></span>`bonded` | boolean | no | Whether BlueZ reports a stored link key for this device, from Device1.Bonded. Paired alone does not state that the key is stored. |
+| <span id="statusbond--trusted"></span>`trusted` | boolean | no | Whether BlueZ reports this device as trusted, from Device1.Trusted. This is the property spec.trusted reconciles into. |
+| <span id="statusbond--connected"></span>`connected` | boolean | no | Whether BlueZ reports this device as connected, from Device1.Connected. It is the same reading the Connected condition reports. |
 | <span id="statusbond--secret"></span>`secret` | string | no | The namespace and name of the Secret that holds this bond's keys. The Secret is owned by this object, so deleting the Peripheral collects it. |
 | <span id="statusbond--pairedat"></span>`pairedAt` | string | no | When the operator first recorded this bond, which is the pairing for a bond it made and the adoption for one it discovered. |
 | <span id="statusbond--request"></span>`request` | string | no | The namespace and name of the PairingRequest that produced this bond. It is empty for a bond the operator adopted. A finished request is collected after its TTL, and this field outlasts it. |

@@ -86,8 +86,9 @@ func TestReconcileReportsABondThatLeftBluetoothd(t *testing.T) {
 	inventory.reconcile()
 
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
-	if peripheral.Status.Bond.Held {
-		t.Errorf("status.bond = %+v", peripheral.Status.Bond)
+	bond := peripheral.Status.Bond
+	if bond.Held || bond.Paired || bond.Bonded || bond.Trusted || bond.Connected {
+		t.Errorf("status.bond = %+v", bond)
 	}
 	if reason(peripheral, conditionConnected) != reasonNotBonded {
 		t.Errorf("conditions = %+v", peripheral.Status.Conditions)
@@ -363,5 +364,53 @@ func TestConnectedConditionKeepsTheTimeOfTheLastChange(t *testing.T) {
 	changed := connectedCondition([]Condition{asleep}, device, true, later)
 	if changed.LastTransitionTime != timestamp(later) {
 		t.Errorf("lastTransitionTime = %q, want the moment the link came up", changed.LastTransitionTime)
+	}
+}
+
+// status.bond copies BlueZ's Paired, Bonded, Trusted, and Connected for
+// the device.
+func TestPeripheralBondReportsTheDevicePropertiesBlueZHolds(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*deviceState)
+		want   BondStatus
+	}{
+		{
+			name: "a bonded controller on the air",
+			want: BondStatus{Held: true, Paired: true, Bonded: true, Trusted: true, Connected: true},
+		},
+		{
+			name:   "the same controller with its link down",
+			change: func(device *deviceState) { device.Connected = false },
+			want:   BondStatus{Held: true, Paired: true, Bonded: true, Trusted: true},
+		},
+		{
+			name:   "a controller BlueZ does not trust",
+			change: func(device *deviceState) { device.Trusted = false },
+			want:   BondStatus{Held: true, Paired: true, Bonded: true, Connected: true},
+		},
+		{
+			name:   "a pairing that stored no link key",
+			change: func(device *deviceState) { device.Bonded = false },
+			want:   BondStatus{Held: true, Paired: true, Trusted: true, Connected: true},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newAPIFixture()
+			device := pairedDevice(t, testDevice)
+			if c.change != nil {
+				c.change(&device)
+			}
+			inventory := testInventory(t, fixture, testRadio(t, device))
+
+			inventory.reconcile()
+
+			bond := read[Peripheral](t, fixture, testPeripheralPath()).Status.Bond
+			bond.Secret, bond.PairedAt, bond.Request = "", "", ""
+			if bond != c.want {
+				t.Errorf("status.bond = %+v, want %+v", bond, c.want)
+			}
+		})
 	}
 }

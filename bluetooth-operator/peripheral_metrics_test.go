@@ -142,3 +142,24 @@ func TestPeripheralClaimedGaugeFollowsAPreparedClaim(t *testing.T) {
 		t.Errorf("bluetooth_peripheral_claimed = %v (found: %v), want 0 once the claim released", claimed, found)
 	}
 }
+
+// The bonded gauge follows status.bond.bonded, which is what BlueZ
+// reports about the stored link key.
+func TestPeripheralBondedGaugeFollowsTheStoredKeys(t *testing.T) {
+	fixture := newAPIFixture()
+	radio := testRadio(t, pairedDevice(t, testDevice))
+	inventory := testInventory(t, fixture, radio)
+
+	inventory.reconcile()
+	if bonded, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_peripheral_bonded", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); !found || bonded != 1 {
+		t.Errorf("bluetooth_peripheral_bonded = %v (found: %v), want 1", bonded, found)
+	}
+
+	radio.update(testAddress(t, testDevice), func(d *deviceState) { d.Bonded = false })
+	inventory.reconcile()
+	if bonded, found := metricValue(t, inventory.metrics.registry,
+		"bluetooth_peripheral_bonded", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); !found || bonded != 0 {
+		t.Errorf("bluetooth_peripheral_bonded = %v (found: %v), want 0 once the keys are gone", bonded, found)
+	}
+}

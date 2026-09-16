@@ -63,6 +63,14 @@ const sourceBlueZ = "bluez"
 // per-device metric carries.
 var peripheralLabel = []string{"peripheral"}
 
+// resultPaired and resultRefused are the two results a Device1.Pair
+// call reaches, and the result label bluetooth_pair_attempts_total
+// counts under.
+const (
+	resultPaired  = "paired"
+	resultRefused = "refused"
+)
+
 // metrics holds the registry and every collector this operator
 // writes to. A nil *metrics records nothing, which is what every
 // test that has no reason to check a metric constructs by leaving the
@@ -76,7 +84,9 @@ type metrics struct {
 	peripheralConnected *prometheus.GaugeVec
 	peripheralClaimed   *prometheus.GaugeVec
 	peripheralBattery   *prometheus.GaugeVec
+	peripheralBonded    *prometheus.GaugeVec
 	disconnects         *prometheus.CounterVec
+	pairAttempts        *prometheus.CounterVec
 	adapterPresent      prometheus.Gauge
 	inputEvents         *prometheus.CounterVec
 	observationValid    *prometheus.GaugeVec
@@ -113,10 +123,18 @@ func newMetrics() *metrics {
 		Name: "bluetooth_peripheral_battery_percent",
 		Help: "The charge the Peripheral last reported. Absent when no source reports a level.",
 	}, peripheralLabel)
+	m.peripheralBonded = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bluetooth_peripheral_bonded",
+		Help: "One while BlueZ reports a stored link key for the Peripheral, zero while it reports none.",
+	}, peripheralLabel)
 	m.disconnects = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "bluetooth_disconnects_total",
 		Help: "Observed transitions of a Peripheral from connected to disconnected.",
 	}, peripheralLabel)
+	m.pairAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "bluetooth_pair_attempts_total",
+		Help: "Device1.Pair calls, counted as paired when bluetoothd made the bond and as refused when it did not.",
+	}, []string{"result"})
 	m.adapterPresent = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "bluetooth_adapter_present",
 		Help: "One while bluetoothd publishes this node's adapter, zero while it reports none.",
@@ -139,7 +157,8 @@ func newMetrics() *metrics {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		buildInfo, m.reconcileDuration, m.reconcileErrors,
-		m.peripheralConnected, m.peripheralClaimed, m.peripheralBattery, m.disconnects,
+		m.peripheralConnected, m.peripheralClaimed, m.peripheralBattery, m.peripheralBonded,
+		m.disconnects, m.pairAttempts,
 		m.adapterPresent, m.inputEvents, m.observationValid, m.observationSuccess)
 	return m
 }
@@ -216,6 +235,25 @@ func (m *metrics) setPeripheralConnected(peripheral string, connected, wasConnec
 	}
 }
 
+// setPeripheralBonded records whether BlueZ holds a link key for this
+// Peripheral, as of the pass that just read it. That is the same rule
+// the hardware triple states for every other gauge here.
+func (m *metrics) setPeripheralBonded(peripheral string, bonded bool) {
+	if m == nil {
+		return
+	}
+	m.peripheralBonded.WithLabelValues(peripheral).Set(gauge(bonded))
+}
+
+// countPairAttempt counts one Device1.Pair call under the result
+// bluetoothd gave it.
+func (m *metrics) countPairAttempt(result string) {
+	if m == nil {
+		return
+	}
+	m.pairAttempts.WithLabelValues(result).Inc()
+}
+
 // setPeripheralBattery records the charge a Peripheral's status
 // reports, and clears the series for one that reports none. Deleting
 // the series rather than writing zero keeps an empty battery, which
@@ -262,6 +300,7 @@ func (m *metrics) forgetPeripheral(peripheral string) {
 	m.peripheralConnected.DeleteLabelValues(peripheral)
 	m.peripheralClaimed.DeleteLabelValues(peripheral)
 	m.peripheralBattery.DeleteLabelValues(peripheral)
+	m.peripheralBonded.DeleteLabelValues(peripheral)
 	m.disconnects.DeleteLabelValues(peripheral)
 	m.inputEvents.DeleteLabelValues(peripheral)
 }

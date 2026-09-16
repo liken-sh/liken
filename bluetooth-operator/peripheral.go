@@ -182,10 +182,14 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 		Adapter: adapter.Status.Address,
 		Node:    adapter.Status.Node,
 		Bond: BondStatus{
-			Held:     present && device.Paired,
-			Secret:   i.namespace + "/" + bonds.BondSecretName(address),
-			PairedAt: peripheral.Status.Bond.PairedAt,
-			Request:  peripheral.Status.Bond.Request,
+			Held:      present && device.Paired,
+			Paired:    present && device.Paired,
+			Bonded:    present && device.Bonded,
+			Trusted:   present && device.Trusted,
+			Connected: present && device.Connected,
+			Secret:    i.namespace + "/" + bonds.BondSecretName(address),
+			PairedAt:  peripheral.Status.Bond.PairedAt,
+			Request:   peripheral.Status.Bond.Request,
 		},
 		Conditions: []Condition{
 			connectedCondition(peripheral.Status.Conditions, device, present, i.now()),
@@ -220,6 +224,7 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 	connected := status.Conditions[0].Status == conditionTrue
 	i.metrics.setPeripheralConnected(name, connected, wasConnected, first)
 	i.metrics.setPeripheralClaimed(name, claimed)
+	i.metrics.setPeripheralBonded(name, status.Bond.Bonded)
 	if status.Battery != nil {
 		i.metrics.setPeripheralBattery(name, &status.Battery.Percentage)
 	} else {

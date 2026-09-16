@@ -11,6 +11,13 @@ The voice rules imported above govern all prose in this repository,
 comments included. They arrive with the brand theme submodule at
 `docs/themes/brand`.
 
+## Errors
+
+An error that wraps a tool, a daemon socket, a bus answer, or a
+provider includes that source's own stderr, body, or error word for
+word. The wrapped error includes it, and so does the status or record
+the failure writes.
+
 ## Releases and development builds
 
 A pushed tag is a release. It names a version in liken's calendar

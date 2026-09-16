@@ -160,6 +160,10 @@ spec:
           type: integer
           description: The charge the device reports, if it reports one.
           jsonPath: .status.battery.percentage
+        - name: Paired
+          type: boolean
+          description: Whether BlueZ reports this device as paired.
+          jsonPath: .status.bond.paired
         - name: Connected
           type: string
           description: Whether the device holds a connection now.
@@ -245,6 +249,30 @@ spec:
                         goes false when the keys are gone from the
                         daemon, which the operator reports and never
                         acts on.
+                    paired:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports this device as paired,
+                        from Device1.Paired, read on every pass the
+                        operator makes over the devices.
+                    bonded:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports a stored link key for
+                        this device, from Device1.Bonded. Paired alone
+                        does not state that the key is stored.
+                    trusted:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports this device as trusted,
+                        from Device1.Trusted. This is the property
+                        spec.trusted reconciles into.
+                    connected:
+                      type: boolean
+                      description: >-
+                        Whether BlueZ reports this device as connected,
+                        from Device1.Connected. It is the same reading
+                        the Connected condition reports.
                     secret:
                       type: string
                       description: >-
@@ -486,6 +514,13 @@ spec:
                         type: string
                         format: date-time
                         description: When the radio first observed this device.
+                seenTruncated:
+                  type: boolean
+                  description: >-
+                    Whether the cap of 16 entries stopped a device
+                    from reaching status.seen. True means the room held
+                    more devices than the list reports; false means the
+                    whole list fit.
                 peripheral:
                   type: string
                   description: The name of the Peripheral this request produced.

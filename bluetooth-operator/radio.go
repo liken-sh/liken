@@ -119,10 +119,15 @@ type deviceState struct {
 	Icon        string
 	AddressType string
 	Paired      bool
-	Connected   bool
-	Trusted     bool
-	UUIDs       []string
-	Battery     *deviceBattery
+
+	// Bonded is BlueZ's report that the link key is stored. Paired alone
+	// does not state that.
+	Bonded bool
+
+	Connected bool
+	Trusted   bool
+	UUIDs     []string
+	Battery   *deviceBattery
 }
 
 // deviceBattery is one device's org.bluez.Battery1 interface.
@@ -286,6 +291,7 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 		icon, _ := properties["Icon"].Value().(string)
 		addressType, _ := properties["AddressType"].Value().(string)
 		paired, _ := properties["Paired"].Value().(bool)
+		bonded, _ := properties["Bonded"].Value().(bool)
 		connected, _ := properties["Connected"].Value().(bool)
 		trusted, _ := properties["Trusted"].Value().(bool)
 		uuids, _ := properties["UUIDs"].Value().([]string)
@@ -296,6 +302,7 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 			Icon:        icon,
 			AddressType: addressType,
 			Paired:      paired,
+			Bonded:      bonded,
 			Connected:   connected,
 			Trusted:     trusted,
 			UUIDs:       uuids,

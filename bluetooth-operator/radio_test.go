@@ -38,6 +38,7 @@ func TestSnapshotReadsTheAdapterAndItsDevices(t *testing.T) {
 			"Name":      "DualSense Wireless Controller",
 			"Alias":     "player-one-pad",
 			"Paired":    true,
+			"Bonded":    true,
 			"Connected": true,
 			"Trusted":   true,
 			"UUIDs":     []string{fullUUID("1124")},
@@ -71,7 +72,7 @@ func TestSnapshotReadsTheAdapterAndItsDevices(t *testing.T) {
 	if !found {
 		t.Fatalf("the paired device is not in the snapshot: %+v", snapshot.Devices)
 	}
-	if !paired.Paired || !paired.Connected || !paired.Trusted {
+	if !paired.Paired || !paired.Bonded || !paired.Connected || !paired.Trusted {
 		t.Errorf("device = %+v", paired)
 	}
 	if paired.Name != "DualSense Wireless Controller" || paired.Alias != "player-one-pad" {
@@ -255,7 +256,7 @@ func (r *fakeRadio) Pair(device bonds.Address) error {
 	if r.pairErr != nil {
 		return r.pairErr
 	}
-	r.update(device, func(state *deviceState) { state.Paired = true })
+	r.update(device, func(state *deviceState) { state.Paired, state.Bonded = true, true })
 	return nil
 }
 
@@ -321,6 +322,7 @@ func pairedDevice(t *testing.T, address string) deviceState {
 		Name:      "DualSense Wireless Controller",
 		Alias:     "DualSense Wireless Controller",
 		Paired:    true,
+		Bonded:    true,
 		Connected: true,
 		Trusted:   true,
 	}
