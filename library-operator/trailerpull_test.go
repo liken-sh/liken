@@ -71,7 +71,7 @@ func TestAFailedTrailerFilePullLandsNothing(t *testing.T) {
 			heights: []int{1080}, videos: 1, seconds: 120, want: attemptError,
 		},
 		{
-			name: "the file is shorter than a trailer", body: "video bytes",
+			name: "the file is shorter than a spot", body: "video bytes",
 			heights: []int{1080}, videos: 1, seconds: 4, want: attemptError,
 		},
 		{

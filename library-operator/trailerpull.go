@@ -22,9 +22,11 @@ import (
 var trailerRemuxTimeout = 10 * time.Minute
 
 // The bounds a pulled file's length must fall inside, so a whole film and a
-// still frame both fail the check.
+// still frame both fail the check. The floor is under a TV spot's length,
+// because a spot is a kind the trailer fact records, and a title whose best
+// fetchable video is a spot gets the spot.
 const (
-	trailerShortest = 30 * time.Second
+	trailerShortest = 10 * time.Second
 	trailerLongest  = 8 * time.Minute
 )
 

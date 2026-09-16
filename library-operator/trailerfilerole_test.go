@@ -107,6 +107,26 @@ func trailersFolderHolds(t *testing.T, root string) []string {
 
 // The whole run of one title: the file lands under the trailer's own name,
 // the ledger records it, and the attempt says it was found.
+// A thirty-second file passes the check, because a TV spot is one of the
+// kinds the trailer fact records and this fact pulls.
+func TestATVSpotLandsLikeATrailer(t *testing.T) {
+	standInFFmpegRemux(t)
+	standInProbe(t, 1, 30)
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrailerFileRun(t, catalog, root)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	line := trailerFetchLineOf(t, "video bytes", []int{1080}, nil)
+
+	if err := work.trailerFileGap(t.Context(), line); err != nil {
+		t.Fatal(err)
+	}
+
+	if held := trailersFolderHolds(t, root); !slices.Equal(held, []string{"Official Trailer.mp4"}) {
+		t.Errorf("the folder holds %v, want the spot the pull landed", held)
+	}
+}
+
 func TestTheTrailerFileFactWritesTheFileAndTheLedger(t *testing.T) {
 	standInFFmpegRemux(t)
 	standInProbe(t, 1, 120)

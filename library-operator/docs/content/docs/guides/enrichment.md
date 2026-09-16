@@ -209,8 +209,8 @@ never pulled for. A trailer a person placed by hand stays, and the fact
 records nothing.
 
 Every pull is remuxed to MP4 and checked with `ffprobe` before it
-lands. The check requires a video stream and a length between 30
-seconds and 8 minutes. A file that fails the check never reaches a name
+lands. The check requires a video stream and a length between 10
+seconds and 8 minutes, so a TV spot passes and a whole film does not. A file that fails the check never reaches a name
 the walk reads, and the attempt records the error.
 
 **A trailer is tens of megabytes per title, so a library of any size
