@@ -11,3 +11,11 @@ manifests and the tests are the documentation.
 calls for it.
 
 `make test` runs every check CI runs.
+
+## Errors carry their source's words
+
+An error that wraps a tool, a daemon socket, a bus answer, or a
+provider carries that source's own text: the stderr, the body, or the
+error string, verbatim. It goes in the wrapped error and in whatever
+status field or record the failure writes, so a person reads the cause
+from the log or the status and never needs a shell to find it.
