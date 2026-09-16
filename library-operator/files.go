@@ -123,6 +123,33 @@ func extrasFolderName(name string) string {
 	return ""
 }
 
+// isExtrasFolder reports whether a directory is an extras folder of the title
+// beside it: it carries one of the names above and holds video files of its
+// own. A directory with one of those names that holds no video file is a
+// grouping folder, and a directory the scanner cannot read is neither, so the
+// walk reads it and marks the pass incomplete.
+//
+// The extras of a title are the videos in the folder itself, so the videos
+// are what tell an extras folder from a genre folder a person named Shorts.
+func isExtrasFolder(dir string) bool {
+	if extrasFolderName(filepath.Base(dir)) == "" {
+		return false
+	}
+	videos, err := listVideoFiles(dir)
+	return err == nil && len(videos) > 0
+}
+
+// fileRoleAt reads which one of its kind the file at a path is, from the
+// file's own name and the name of the directory that holds it. It opens
+// nothing and stats nothing.
+//
+// The season flag is left out, because it changes the role of an image alone,
+// and this answer is read for videos.
+func fileRoleAt(kind, absolute string) string {
+	place := filePlace{kind: kind, extras: extrasFolderName(filepath.Base(filepath.Dir(absolute)))}
+	return classifyFile(filepath.Base(absolute), place).Role
+}
+
 // filePlace is what a role depends on beyond the file's own name: the
 // library's kind, whether the directory is a season folder, and the extras
 // folder that holds the file.

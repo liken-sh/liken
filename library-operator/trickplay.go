@@ -25,13 +25,18 @@ const (
 	trickplayCPURequest  = "500m"
 )
 
-// The gap. A video the probe gave a length to, with no trickplay directory
+// The gap. A feature the probe gave a length to, with no trickplay directory
 // beside it in the catalog, outside the retry window. The scanner writes the
 // column from the directory it finds, so the tiles this fact writes close the
 // gap on the next walk.
+//
+// A video whose role is not the feature is no gap, because a player reads a
+// thumbnail track while a person scrubs a title, and a trailer, an extra, a
+// sample, or a theme is not a title.
 func trickplayGapSQL() string {
 	return `SELECT path, duration_ms FROM files ` +
 		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
+		`AND role = '` + fileRolePrimary + `' ` +
 		`AND duration_ms > 0 AND video_codec != '' ` +
 		`AND ` + gapClause(factTrickplay, "path", `trickplay = ''`)
 }

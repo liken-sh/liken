@@ -81,6 +81,7 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 // The record is the truth, so it is written first and the sidecar follows
 // from it. An audio file gets a record and no sidecar, because no player
 // reads an .nfo beside a music file.
+// A video whose role is not the feature also gets a record and no sidecar.
 func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
 	output, err := probe(ctx, absolute)
 	if err != nil {
@@ -105,7 +106,11 @@ func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute s
 	if err != nil {
 		return err
 	}
-	if fileTypeOf(absolute) != fileTypeVideo {
+	// A sidecar beside a trailer, an extra, a sample, or a theme is a movie to
+	// Jellyfin and to this scanner, so the record is the whole answer for a
+	// video that is not the feature. The walk reads the streams off the
+	// ledger either way.
+	if fileTypeOf(absolute) != fileTypeVideo || fileRoleAt(e.kind, absolute) != fileRolePrimary {
 		return nil
 	}
 	return e.writeStreamDetails(absolute, record)

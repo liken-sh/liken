@@ -87,7 +87,18 @@ func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 		// media anywhere, and the ignore set, the folders this Library
 		// names. Neither one is read, so neither one marks the pass
 		// incomplete.
-		if !entry.IsDir() || skipName(entry.Name()) || r.ignore.skips(entry.Name()) {
+		//
+		// An extras folder is the third case, and this one costs a directory
+		// read. A folder with an extras name that holds video files of its
+		// own is the extras folder of the title beside it, wherever it is,
+		// and the walk catalogues nothing under it as a title, so a trailers
+		// folder at the root is never read as a title. A folder with an
+		// extras name that holds only subfolders is a grouping folder, and
+		// the walk descends into it, so the walk still reads a genre folder
+		// named Shorts. A person with the 2016 film Trailers names its folder
+		// Trailers (2016), which is not the bare word.
+		if !entry.IsDir() || skipName(entry.Name()) || r.ignore.skips(entry.Name()) ||
+			isExtrasFolder(filepath.Join(dir.path, entry.Name())) {
 			continue
 		}
 		children = append(children, walkDirectory{

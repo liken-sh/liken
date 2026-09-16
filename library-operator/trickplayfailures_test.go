@@ -174,7 +174,8 @@ func TestEveryAttemptKindGatesTheTrickplayGapAgainstTheRealSchema(t *testing.T) 
 			catalog, _ := newSQLiteCatalog(t)
 			seed := &walkResult{
 				files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
-					Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"}},
+					Type: fileTypeVideo, Role: fileRolePrimary, DurationMs: 6540000,
+					VideoCodec: "h264"}},
 				attempts: []attemptRow{{Library: trickplayLibrary, Item: "A/a.mkv",
 					Fact: factTrickplay, At: ledgerTime.Add(-test.age).Unix(), Result: test.result}},
 			}
@@ -199,7 +200,7 @@ func TestAFileWithNoVideoStreamIsNoTrickplayGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
 		files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
-			Type: fileTypeVideo, DurationMs: 200585000}},
+			Type: fileTypeVideo, Role: fileRolePrimary, DurationMs: 200585000}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)

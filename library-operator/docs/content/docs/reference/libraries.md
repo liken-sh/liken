@@ -113,7 +113,7 @@ The thumbnail sheets a scrub bar reads, built beside each video from the file al
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass reads every video of the library end to end, which is hours of CPU for a library of any size, and writes a directory of sheets beside every one of them. Turned on, the operator stands a trickplay Job beside the enricher, and that Job fills the gap one video after another. Default: `false`. |
+| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, the operator stands a trickplay Job beside the enricher, and that Job fills the gap one feature after another. Default: `false`. |
 | <span id="spectrickplay--render"></span>`render` | [object](#spectrickplayrender) | no | The render node the trickplay Job decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the Job's pod claims one device of the class. Unset, the Job decodes in software. |
 
 #### spec.trickplay.render

@@ -128,9 +128,13 @@ func quotedSites(sites []string) string {
 }
 
 // Every identified title of one library, with the folder that holds its files.
+// A title whose path is the library root is left out, because the pull writes
+// a trailers folder inside the title's own folder, and a title at the root has
+// no folder of its own.
 const identifiedTitleFolders = `SELECT library, id, path FROM movies ` +
-	`WHERE id NOT LIKE 'movie:path:%' ` +
-	`UNION ALL SELECT library, id, path FROM series WHERE id NOT LIKE 'series:path:%'`
+	`WHERE id NOT LIKE 'movie:path:%' AND path NOT IN ('', '.') ` +
+	`UNION ALL SELECT library, id, path FROM series ` +
+	`WHERE id NOT LIKE 'series:path:%' AND path NOT IN ('', '.')`
 
 // The titles that already hold a present trailer file under their own folder.
 // The query reads the folder off a join by library and never off the outer

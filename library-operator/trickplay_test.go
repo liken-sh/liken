@@ -120,7 +120,8 @@ func seedTrickplayGap(t *testing.T, catalog *Catalog, root string, duration time
 		movies: []movieRow{{Id: "movie:path:x", Library: trickplayLibrary, Kind: libraryKindMovies,
 			Path: trickplayFolder, Title: trickplayFolder}},
 		files: []fileRow{{Path: filepath.Join(trickplayFolder, trickplayFile), Library: trickplayLibrary,
-			Present: true, Type: fileTypeVideo, DurationMs: duration.Milliseconds(), VideoCodec: "h264",
+			Present: true, Type: fileTypeVideo, Role: fileRolePrimary,
+			DurationMs: duration.Milliseconds(), VideoCodec: "h264",
 			Items: []string{"movie:path:x"}}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -134,17 +135,22 @@ func trickplayTilesUnder(root string) string {
 		strings.TrimSuffix(trickplayFile, ".mkv")+trickplayExtension, trickplayTilesFolder())
 }
 
-// A video with a length and no tiles is the gap. A video the probe has not
-// reached, one that already carries tiles, and a file that is not a video are
-// none of them.
+// A feature with a length and no tiles is the gap. A video the probe has not
+// reached, one that already carries tiles, a file that is not a video, and a
+// video that is no feature are none of them.
+// Tiles beside a trailer are a thumbnail track for a title that does not
+// exist, so the gap reads the primary role alone.
 func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{files: []fileRow{
-		{Path: "A/a.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"},
-		{Path: "B/b.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo},
+		{Path: "A/a.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264",
+			Role: fileRolePrimary},
+		{Path: "B/b.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, Role: fileRolePrimary},
 		{Path: "C/c.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 100, VideoCodec: "h264",
-			Trickplay: "C/c.trickplay"},
+			Trickplay: "C/c.trickplay", Role: fileRolePrimary},
 		{Path: "D/d.srt", Library: trickplayLibrary, Present: true, Type: fileTypeSubtitle, DurationMs: 100},
+		{Path: "A/trailers/Official Trailer.mp4", Library: trickplayLibrary, Present: true,
+			Type: fileTypeVideo, DurationMs: 120000, VideoCodec: "h264", Role: fileRoleTrailer},
 	}}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)
@@ -168,7 +174,7 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
 		files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
-			Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"}},
+			Type: fileTypeVideo, Role: fileRolePrimary, DurationMs: 6540000, VideoCodec: "h264"}},
 		attempts: []attemptRow{{Library: trickplayLibrary, Item: "A/a.mkv", Fact: factTrickplay,
 			At: ledgerTime.Unix(), Result: attemptFound}},
 	}

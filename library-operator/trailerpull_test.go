@@ -309,3 +309,27 @@ func TestTheTrailerDoorRefusesAPathWithNoTemporaryMark(t *testing.T) {
 		t.Errorf("landed = %v, err = %v, want the refusal that names the mark", landed, err)
 	}
 }
+
+// A title whose folder is the library root gets no trailer, because the pull
+// writes a trailers folder inside the title's own folder, and a title at the
+// root has none.
+func TestNoTrailerPullsToTheLibraryRoot(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	work, log := testEnricher(t, libraryKindMovies, root, catalog)
+
+	entry, result := work.pullTrailerFile(t.Context(), trailerSource{},
+		identityItem{id: trailerFileItem, path: "."},
+		trailerRow{Name: "Official Trailer", Site: trailerSiteArchive},
+		trailerFile{Height: 1080}, root)
+
+	if entry != nil || result != attemptNothing {
+		t.Errorf("entry, result = %+v, %q, want no file and %q", entry, result, attemptNothing)
+	}
+	if _, err := os.Stat(filepath.Join(root, trailersFolderName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the root holds a %s folder, want none", trailersFolderName)
+	}
+	if !strings.Contains(log.String(), "no folder of its own") {
+		t.Errorf("log = %q, want the line that says the title has no folder of its own", log)
+	}
+}

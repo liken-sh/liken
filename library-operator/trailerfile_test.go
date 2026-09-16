@@ -292,6 +292,51 @@ func TestTheTrailerFileGapAgainstTheRealSchema(t *testing.T) {
 	}
 }
 
+// A title whose folder is the library root is not in the gap, because the
+// pull writes a trailers folder inside the title's own folder, and a title at
+// the root has none.
+func TestTheTrailerFileGapLeavesOutATitleAtTheLibraryRoot(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{name: "a title in its own folder", path: trailerFileFolder, want: []string{trailerFileItem}},
+		{name: "a title whose folder is the root", path: "."},
+		{name: "a title with no folder at all", path: ""},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seed := &walkResult{
+				movies: []movieRow{{
+					Id: trailerFileItem, Library: trailerFileLibrary, Kind: libraryKindMovies,
+					Path: test.path, Title: "The Signal", Released: "2014-06-13",
+				}},
+				trailers: []trailerRow{{
+					Library: trailerFileLibrary, Item: trailerFileItem, Provider: trailerSiteArchive,
+					Key: "k", Site: trailerSiteArchive, URL: "https://archive.example/k",
+					Name: "Official Trailer", Kind: trailerKindTrailer, Score: 90,
+				}},
+			}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailerFile],
+				gapParams(factTrailerFile, trailerFileLibrary, now, time.Time{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
 // Two titles whose folder names differ by one character, the first of them a
 // LIKE metacharacter, with a trailer beside the second alone.
 func seedTrailerFileSiblings(t *testing.T, catalog *Catalog, folder, sibling string) {

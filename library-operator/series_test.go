@@ -587,3 +587,35 @@ func TestAVideoThatIsNoEpisodeReadsTheSidecarBesideIt(t *testing.T) {
 		})
 	}
 }
+
+// A folder at the root with an extras name is no series, and an extras folder
+// inside a series folder is no season, so a trailer that carries an episode
+// marker is a trailer of the series and never an episode.
+func TestWalkSeriesReadsNoSeriesOrSeasonFromAnExtrasFolder(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	writeFile(t, filepath.Join(show, "tvshow.nfo"), `<tvshow><title>Show</title><uniqueid type="tvdb">9</uniqueid></tvshow>`)
+	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(show, "Trailers", "Show S01E01-trailer.mkv"), "video")
+	writeFile(t, filepath.Join(root, "trailers", "Official Trailer.mp4"), "video")
+
+	result := walkSeries(root, "house/series", nil)
+
+	if result.titles != 1 || len(result.series) != 1 || result.series[0].Title != "Show" {
+		t.Errorf("series = %+v, want the one series the root holds", result.series)
+	}
+	if len(result.episodes) != 1 {
+		t.Errorf("episodes = %+v, want the one the season folder holds", result.episodes)
+	}
+	files := filesByPath(result)
+	if _, held := files[filepath.Join("trailers", "Official Trailer.mp4")]; held {
+		t.Errorf("the walk cataloged the root's own trailers folder: %v", files)
+	}
+	row, held := files[filepath.Join("Show", "Trailers", "Show S01E01-trailer.mkv")]
+	if !held {
+		t.Fatalf("the walk read no row for the series' trailer: %v", files)
+	}
+	if row.Role != fileRoleTrailer || row.Items[0] != "series:tvdb:9" {
+		t.Errorf("row = %s/%v, want a trailer of the series", row.Role, row.Items)
+	}
+}

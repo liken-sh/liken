@@ -151,6 +151,13 @@ func trailerFileHolds(ctx context.Context, path string) error {
 // defense.
 func (e *enricher) pullTrailerFile(ctx context.Context, source trailerSource,
 	item identityItem, row trailerRow, file trailerFile, folder string) (*trailerFileEntry, string) {
+	// A trailers folder is made inside a title's own folder alone, because a
+	// title at the library root has no folder to hold one, and a trailers
+	// folder at the root belongs to no title.
+	if relativePath(e.root, folder) == "." {
+		e.logf("%s has no folder of its own, so this fact pulls no trailer for it", item.id)
+		return nil, attemptNothing
+	}
 	directory := filepath.Join(folder, trailersFolderName)
 	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
 		e.logf("could not make %s: %v", relativePath(e.root, directory), err)

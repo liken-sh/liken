@@ -578,3 +578,73 @@ func TestASidecarWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
 		t.Errorf("the sidecar reads %q, want the bytes it held", got)
 	}
 }
+
+// The probe reads every video the gap holds and records its streams, and it
+// writes a sidecar beside the feature alone, because a sidecar beside a
+// trailer is a second movie to Jellyfin and to the walk.
+func TestTheProbeWritesNoSidecarBesideAVideoThatIsNotTheFeature(t *testing.T) {
+	cases := []struct {
+		name        string
+		file        string
+		wantSidecar string
+	}{
+		{
+			name: "the feature", file: "The Thing (1982).mkv",
+			wantSidecar: movieSidecarName,
+		},
+		{
+			name: "a pulled trailer", file: filepath.Join(trailersFolderName, "Official Trailer.mp4"),
+			wantSidecar: "",
+		},
+		{
+			name: "an extra", file: filepath.Join("Extras", "Making Of.mkv"),
+			wantSidecar: "",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			root := t.TempDir()
+			// The feature is on the volume in every case and in the gap in the
+			// first case alone, so the walk reads the folder as a title folder
+			// and the probe reads the case's own file.
+			writeFile(t, filepath.Join(root, "The Thing (1982)", "The Thing (1982).mkv"), "video")
+			seedProbeGap(t, catalog, root, "The Thing (1982)", test.file)
+			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+
+			if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
+				t.Fatal(err)
+			}
+
+			folder := filepath.Join(root, "The Thing (1982)")
+			ledger, err := readLikenLedger(folder, factProbe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ledger.Probes) != 1 || len(ledger.Probes[0].Streams) == 0 {
+				t.Errorf("probes = %+v, want the record of the one file it read", ledger.Probes)
+			}
+			if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
+				t.Errorf("attempts = %+v, want the one attempt that found the streams", ledger.Attempts)
+			}
+			row, held := filesByPath(walkMovies(root, "house/movies", nil))[filepath.Join("The Thing (1982)", test.file)]
+			if !held || row.VideoCodec != "h264" {
+				t.Errorf("row = %+v, want the walk reading the streams off the ledger", row)
+			}
+
+			beside := strings.TrimSuffix(test.file, filepath.Ext(test.file)) + metadataExtension
+			for _, sidecar := range []string{movieSidecarName, beside} {
+				_, err := os.Stat(filepath.Join(folder, sidecar))
+				if sidecar == test.wantSidecar {
+					if err != nil {
+						t.Errorf("the probe wrote no %s: %v", sidecar, err)
+					}
+					continue
+				}
+				if err == nil {
+					t.Errorf("the probe wrote %s beside a video that is not the feature", sidecar)
+				}
+			}
+		})
+	}
+}

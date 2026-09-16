@@ -72,6 +72,15 @@ scenes`, `deleted scenes`, `interviews`, `scenes`, `shorts`, `clips`,
 or `other` beside a feature or a season is read one level deep. Videos
 under `trailers` are trailers, and the rest are extras.
 
+A folder with one of those names that holds video files is an extras
+folder wherever it is, at the library root or inside a grouping folder.
+The scanner reads no title from it, and nothing under it is cataloged.
+A folder with one of those names that holds only folders is a grouping
+folder, so a genre folder named `Shorts` is read and the titles under
+it are cataloged. A title whose own name is one of those words carries
+its year in its folder name, `Trailers (2016)`, which is not the bare
+word.
+
 Every file gets a row. The scanner classifies each one as `video`,
 `audio`, `subtitle`, `image`, `metadata`, `trickplay`, or `other`
 from its name, its folder, and one `stat`. It opens no file to

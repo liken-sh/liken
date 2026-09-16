@@ -22,7 +22,8 @@ func seedTiledVideo(t *testing.T, catalog *Catalog, root string) string {
 		movies: []movieRow{{Id: "movie:path:x", Library: trickplayLibrary, Kind: libraryKindMovies,
 			Path: trickplayFolder, Title: trickplayFolder}},
 		files: []fileRow{{Path: filepath.Join(trickplayFolder, trickplayFile), Library: trickplayLibrary,
-			Present: true, Type: fileTypeVideo, DurationMs: 100000, VideoCodec: "h264",
+			Present: true, Type: fileTypeVideo, Role: fileRolePrimary,
+			DurationMs: 100000, VideoCodec: "h264",
 			Items: []string{"movie:path:x"}, Trickplay: filepath.Join(trickplayFolder,
 				strings.TrimSuffix(trickplayFile, ".mkv")+trickplayExtension)}},
 	}

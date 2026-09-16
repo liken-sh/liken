@@ -295,6 +295,15 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 		if err != nil {
 			return files, err
 		}
+		// A folder with an extras name that holds videos of its own is an
+		// extras folder and no season, so a trailer that carries an episode
+		// marker in its name is a file of the series and never an episode of
+		// it. The test reads the videos this pass already listed, so the
+		// folder costs one directory read. The file pass reads that folder,
+		// one level deep, and rows what it holds.
+		if len(videos) > 0 && extrasFolderName(entry.Name()) != "" {
+			continue
+		}
 		for _, file := range videos {
 			files = append(files, episodeFile{dir: seasonDir, file: file})
 		}

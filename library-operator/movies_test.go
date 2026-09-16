@@ -541,3 +541,108 @@ func TestAnUnreadablePerFileSidecarMarksTheWalkIncomplete(t *testing.T) {
 		})
 	}
 }
+
+// A folder with an extras name that holds video files is an extras folder
+// wherever it is, so the walk reads no title from it and nothing under it. A
+// person with the 2016 film Trailers names its folder Trailers (2016), which
+// is not the bare word.
+func TestWalkMoviesReadsNoTitleFromAnExtrasFolderAtTheRoot(t *testing.T) {
+	cases := []struct {
+		name   string
+		folder string
+	}{
+		{name: "the folder a trailer pull writes", folder: "trailers"},
+		{name: "the same name in Jellyfin's own case", folder: "Trailers"},
+		{name: "an extras folder", folder: "Extras"},
+		{name: "a featurettes folder", folder: "featurettes"},
+		{name: "a title whose name carries its year", folder: "Trailers (2016)"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, test.folder, "Official Trailer.mp4"), "video")
+			writeFile(t, filepath.Join(root, "Solaris (1972)", "Solaris.mkv"), "video")
+
+			result := walkMovies(root, "house/movies", nil)
+
+			wantTitles := 1
+			if test.folder == "Trailers (2016)" {
+				wantTitles = 2
+			}
+			if result.titles != wantTitles {
+				t.Errorf("titles = %d, want %d", result.titles, wantTitles)
+			}
+			_, held := filesByPath(result)[filepath.Join(test.folder, "Official Trailer.mp4")]
+			if held != (wantTitles == 2) {
+				t.Errorf("the walk cataloged %s under %s, want %v",
+					"Official Trailer.mp4", test.folder, wantTitles == 2)
+			}
+		})
+	}
+}
+
+// The sidecar and the tiles an earlier run left beside a pulled trailer are
+// rows of the title that holds them, and the walk removes neither.
+func TestWalkMoviesReadsTheSidecarAndTheTilesBesideAPulledTrailer(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "Solaris.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "trailers", "Official Trailer.mp4"), "video")
+	writeFile(t, filepath.Join(dir, "trailers", "Official Trailer.nfo"), "<movie><title>Official Trailer</title></movie>")
+	writeFile(t, filepath.Join(dir, "trailers", "Official Trailer.trickplay", "0.jpg"), "tile")
+
+	files := filesByPath(walkMovies(root, "house/movies", nil))
+
+	cases := []struct {
+		path     string
+		wantType string
+		wantRole string
+	}{
+		{path: "Official Trailer.mp4", wantType: fileTypeVideo, wantRole: fileRoleTrailer},
+		{path: "Official Trailer.nfo", wantType: fileTypeMetadata, wantRole: fileRoleMovie},
+		{path: "Official Trailer.trickplay", wantType: fileTypeTrickplay, wantRole: fileRoleTiles},
+	}
+	for _, test := range cases {
+		t.Run(test.path, func(t *testing.T) {
+			row, held := files[filepath.Join("Solaris (1972)", "trailers", test.path)]
+			if !held {
+				t.Fatalf("the walk read no row for %s", test.path)
+			}
+			if row.Type != test.wantType || row.Role != test.wantRole {
+				t.Errorf("class = %s/%s, want %s/%s", row.Type, row.Role, test.wantType, test.wantRole)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "trailers", test.path)); err != nil {
+				t.Errorf("the walk did not leave %s on the volume: %v", test.path, err)
+			}
+		})
+	}
+}
+
+// A folder with an extras name that holds no video file of its own is a
+// grouping folder, so a volume that groups by genre keeps its Shorts and its
+// Extras, and the walk reads the titles under them.
+func TestWalkMoviesDescendsIntoAGroupingFolderWithAnExtrasName(t *testing.T) {
+	cases := []struct {
+		name   string
+		folder string
+	}{
+		{name: "a genre of short films", folder: "Shorts"},
+		{name: "a folder of the extras of a collection", folder: "Extras"},
+		{name: "the name a trailer pull writes", folder: "trailers"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, test.folder, "The Beacon (2019)", "The Beacon.mkv"), "video")
+
+			result := walkMovies(root, "house/movies", nil)
+
+			if result.titles != 1 {
+				t.Fatalf("titles = %d, want the title under the grouping folder", result.titles)
+			}
+			if result.movies[0].Path != filepath.Join(test.folder, "The Beacon (2019)") {
+				t.Errorf("path = %q, want the title under %s", result.movies[0].Path, test.folder)
+			}
+		})
+	}
+}
