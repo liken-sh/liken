@@ -24,8 +24,18 @@ becomes a new plan or an open problem.
 
 ## Planned
 
-Nothing is planned right now. A new plan keeps its number and moves
-to [`completed/`](completed/) when it is built.
+A plan keeps its number and moves to [`completed/`](completed/) when
+it is built.
+
+* [09, The sound over HTTP](09-the-sound-over-http.md). An HTTP API
+  that taps what a `Sink` plays and what a `Source` hears, as WAV,
+  FLAC, or Ogg Opus, with a W3C Media Fragments `t=` for the span. A
+  small `audio-api` `Deployment` authenticates the caller with a
+  `TokenReview`, authorizes a `get` on `sinks/audio` with a
+  `SubjectAccessReview`, reads `status.node`, and forwards to a fifth
+  container in the `DaemonSet` pod that runs `pw-record` on the pod's
+  socket and encodes. The audio instance of a design the display and
+  media operators share.
 
 ## Designs
 
