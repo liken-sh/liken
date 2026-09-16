@@ -309,3 +309,56 @@ func unservedVerdict(namespace string, sources []string, providers providerSet, 
 		message: "no source serves the " + fact + " fact",
 	}
 }
+
+// The reason an entry of status.sources reports when the namespace holds no
+// MetadataProvider of that name at all. A missing object has no Ready
+// condition, so this reason is the operator's own. Every other reason in the
+// list is the provider's.
+const reasonMissing = "Missing"
+
+// What one name in spec.sources resolved to on this pass: the block of the
+// MetadataProvider that answers for it, whether the provider passed its last
+// check, and the reason its Ready condition reports. The list is written to
+// status.sources so a person reads which providers the Jobs receive without
+// opening a pod's environment.
+type librarySource struct {
+	Name   string `json:"name"`
+	Block  string `json:"block,omitempty"`
+	Ready  bool   `json:"ready"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// One entry per name in spec.sources, in spec order, from the same providerSet
+// the pass resolves the blocks and the endpoints from, so the status reports
+// the sources the Jobs of this pass receive. A name that spec.sources repeats
+// gets one entry per repeat, which is why the list is atomic and not keyed by
+// name.
+func resolveSources(library *Library, providers providerSet) []librarySource {
+	var resolved []librarySource
+	for _, name := range library.Spec.Sources {
+		entry := librarySource{Name: name, Reason: reasonMissing}
+		if provider, held := providers[libraryKey(library.Metadata.Namespace, name)]; held {
+			entry.Block = provider.block()
+			entry.Ready = provider.ready()
+			entry.Reason = provider.readyReason()
+		}
+		resolved = append(resolved, entry)
+	}
+	return resolved
+}
+
+// The ready sources counted against the sources named, in the form 6/6. The
+// SOURCES column of kubectl get prints only this string, so a library that
+// asks four of the six sources it names shows 4/6 there.
+func sourcesSummary(resolved []librarySource) string {
+	if len(resolved) == 0 {
+		return ""
+	}
+	ready := 0
+	for _, source := range resolved {
+		if source.Ready {
+			ready++
+		}
+	}
+	return fmt.Sprintf("%d/%d", ready, len(resolved))
+}

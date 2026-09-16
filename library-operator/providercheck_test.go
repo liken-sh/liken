@@ -643,3 +643,56 @@ func TestTheCheckOfAPeerTubeInstanceThatDoesNotAnswer(t *testing.T) {
 			ready.Status, ready.Reason, ConditionFalse, reasonUnreachable)
 	}
 }
+
+// A PeerTube instance as a pass leaves it: a source whose block names an
+// address and no Secret, with the Ready condition the check wrote.
+func checkedInstance(name, endpoint, reason string) *MetadataProvider {
+	provider := &MetadataProvider{
+		Metadata: ObjectMeta{Name: name, Namespace: "house"},
+		Spec:     MetadataProviderSpec{PeerTube: &ProviderPeerTube{Endpoint: endpoint}},
+	}
+	status := ConditionFalse
+	if reason == reasonReachable {
+		status = ConditionTrue
+	}
+	provider.Status.Conditions = []Condition{{Type: conditionReady, Status: status, Reason: reason}}
+	return provider
+}
+
+// Every name in spec.sources resolves to one entry, in spec order, whether
+// the MetadataProvider is ready, refused, or missing.
+func TestResolvedSourcesAnswerForEveryNameInOrder(t *testing.T) {
+	set := providerSet{
+		libraryKey("house", "tmdb"):   checkedProvider("tmdb", []string{factIdentity}, reasonReachable),
+		libraryKey("house", "second"): checkedProvider("second", []string{factIdentity}, reasonRefused),
+		libraryKey("house", "videos"): checkedInstance("videos", "https://tube.example", reasonReachable),
+	}
+	library := studioMovies()
+	library.Spec.Sources = []string{"tmdb", "tvdb", "second", "videos"}
+
+	resolved := resolveSources(library, set)
+
+	cases := []struct {
+		name string
+		want librarySource
+	}{
+		{name: "a ready source", want: librarySource{
+			Name: "tmdb", Block: providerBlockTMDb, Ready: true, Reason: reasonReachable}},
+		{name: "a source no MetadataProvider exists for",
+			want: librarySource{Name: "tvdb", Reason: reasonMissing}},
+		{name: "a source that refused the key", want: librarySource{
+			Name: "second", Block: providerBlockTMDb, Reason: reasonRefused}},
+		{name: "a ready source of another block", want: librarySource{
+			Name: "videos", Block: providerBlockPeerTube, Ready: true, Reason: reasonReachable}},
+	}
+	if len(resolved) != len(cases) {
+		t.Fatalf("resolved = %+v, want one entry per name in spec.sources", resolved)
+	}
+	for index, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if resolved[index] != one.want {
+				t.Errorf("resolved[%d] = %+v, want %+v", index, resolved[index], one.want)
+			}
+		})
+	}
+}

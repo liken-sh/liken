@@ -80,6 +80,9 @@ spec:
         - name: Waiting
           type: integer
           jsonPath: .status.waiting
+        - name: Sources
+          type: string
+          jsonPath: .status.sourcesSummary
         - name: Status
           type: string
           jsonPath: .status.phase
@@ -520,6 +523,29 @@ spec:
                       failure:
                         type: string
                         description: "Why that run failed, in one sentence. It is empty for a run that finished its work, and status.phase reads Failed while the scan run carries one."
+                sources:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: "One entry per name in spec.sources, in the order the spec names them, so you read which providers this library asks and which it drops. A name that spec.sources repeats appears once per repeat."
+                  items:
+                    type: object
+                    required: [name, ready]
+                    properties:
+                      name:
+                        type: string
+                        description: "The MetadataProvider this entry reports, as spec.sources spells it."
+                      block:
+                        type: string
+                        description: "The provider block that MetadataProvider declares, such as tmdb, peertube, or archive. It is empty where no MetadataProvider of this name exists."
+                      ready:
+                        type: boolean
+                        description: "Whether the provider passed its last check, which decides whether the enricher's containers ask it at all."
+                      reason:
+                        type: string
+                        description: "The reason of that provider's Ready condition, or Missing where the namespace holds no MetadataProvider of this name."
+                sourcesSummary:
+                  type: string
+                  description: "How many of the sources are ready against how many names spec.sources holds, in the form 6/6. The SOURCES column of kubectl get reads this field."
                 webhook:
                   type: string
                   description: "The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog."

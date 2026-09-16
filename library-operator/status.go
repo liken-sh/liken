@@ -36,6 +36,9 @@ type libraryObservation struct {
 	// MetadataProviders this pass checked. An empty reason is a Library that
 	// names no source, and that Library carries no Sources condition.
 	sources sourcesVerdict
+	// One entry per name in spec.sources, resolved against the same providers
+	// the verdict above read.
+	resolved []librarySource
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
@@ -43,7 +46,11 @@ type libraryObservation struct {
 // schedule does not stand, and a nil report is one the reporter has
 // said nothing about yet.
 func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Time) LibraryStatus {
-	status := LibraryStatus{Volume: seen.bound.volume}
+	status := LibraryStatus{
+		Volume:         seen.bound.volume,
+		Sources:        seen.resolved,
+		SourcesSummary: sourcesSummary(seen.resolved),
+	}
 
 	// The webhook address names the operator's own Service and this
 	// Library, so it holds for the whole life of the Library. It is

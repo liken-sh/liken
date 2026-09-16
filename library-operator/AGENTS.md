@@ -19,6 +19,10 @@ plans that build it. Code exists only where a plan calls for it. The
 plans state contracts and leave the shape of the code to the person or
 agent who builds each one.
 
+An error that wraps a tool, a daemon socket, a bus answer, or a provider
+includes that source's own stderr, body, or error text word for word, in
+the wrapped error and in whatever status or record the failure writes.
+
 ## Releases and development builds
 
 A pushed tag is a release. It names a version in liken's calendar

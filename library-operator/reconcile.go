@@ -102,6 +102,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		report:            report,
 		jobs:              jobs,
 		sources:           checkSources(library, providers),
+		resolved:          resolveSources(library, providers),
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,
 	}, now))

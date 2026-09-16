@@ -153,6 +153,8 @@ What the volume resolved to and what the namespace's reporter says about this li
 | <span id="status--lastwalk"></span>`lastWalk` | string | no | When the scanner last finished a full walk of the volume. |
 | <span id="status--lastchange"></span>`lastChange` | string | no | When the scanner last wrote a change to the catalog. A walk that finds nothing new moves lastWalk and leaves this alone. |
 | <span id="status--runs"></span>`runs` | [\[\]object](#statusruns) | no | The last run of each worker of this library, as the namespace's reporter published it. |
+| <span id="status--sources"></span>`sources` | [\[\]object](#statussources) | no | One entry per name in spec.sources, in the order the spec names them, so you read which providers this library asks and which it drops. A name that spec.sources repeats appears once per repeat. |
+| <span id="status--sourcessummary"></span>`sourcesSummary` | string | no | How many of the sources are ready against how many names spec.sources holds, in the form 6/6. The SOURCES column of kubectl get reads this field. |
 | <span id="status--webhook"></span>`webhook` | string | no | The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, the schedule stands, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScanPending, Offline, or NoReport. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition. |
 
@@ -180,6 +182,17 @@ The last run of each worker of this library, as the namespace's reporter publish
 | <span id="statusruns--unidentified"></span>`unidentified` | integer | no | How many folders that run could not identify. |
 | <span id="statusruns--removed"></span>`removed` | integer | no | How many rows that run removed. |
 | <span id="statusruns--failure"></span>`failure` | string | no | Why that run failed, in one sentence. It is empty for a run that finished its work, and status.phase reads Failed while the scan run carries one. |
+
+### status.sources[]
+
+One entry per name in spec.sources, in the order the spec names them, so you read which providers this library asks and which it drops. A name that spec.sources repeats appears once per repeat.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussources--name"></span>`name` | string | yes | The MetadataProvider this entry reports, as spec.sources spells it. |
+| <span id="statussources--block"></span>`block` | string | no | The provider block that MetadataProvider declares, such as tmdb, peertube, or archive. It is empty where no MetadataProvider of this name exists. |
+| <span id="statussources--ready"></span>`ready` | boolean | yes | Whether the provider passed its last check, which decides whether the enricher's containers ask it at all. |
+| <span id="statussources--reason"></span>`reason` | string | no | The reason of that provider's Ready condition, or Missing where the namespace holds no MetadataProvider of this name. |
 
 ### status.conditions[]
 

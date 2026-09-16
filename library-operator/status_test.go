@@ -6,6 +6,7 @@ package main
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 )
@@ -444,5 +445,86 @@ func TestDeriveStatusReadsFailedWhileTheScanRunCarriesAFailure(t *testing.T) {
 
 	if status.Phase != phaseFailed {
 		t.Errorf("phase = %q, want %q", status.Phase, phaseFailed)
+	}
+}
+
+// The providers these two tests resolve against: one that answered its check,
+// and one that refused the key.
+func checkedSources() providerSet {
+	return providerSet{
+		libraryKey("house", "tmdb"):   checkedProvider("tmdb", []string{factIdentity}, reasonReachable),
+		libraryKey("house", "second"): checkedProvider("second", []string{factIdentity}, reasonRefused),
+	}
+}
+
+// The status names every source the spec names, in spec order, and the
+// summary counts the ready ones against them.
+func TestDeriveStatusReportsWhatEachSourceResolvedTo(t *testing.T) {
+	cases := []struct {
+		name    string
+		sources []string
+		summary string
+		want    []librarySource
+	}{
+		{name: "a library that names no source"},
+		{name: "one ready source of the three named",
+			sources: []string{"tmdb", "second", "tvdb"}, summary: "1/3",
+			want: []librarySource{
+				{Name: "tmdb", Block: providerBlockTMDb, Ready: true, Reason: reasonReachable},
+				{Name: "second", Block: providerBlockTMDb, Reason: reasonRefused},
+				{Name: "tvdb", Reason: reasonMissing},
+			}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			library := studioMovies()
+			library.Spec.Sources = one.sources
+			seen := scanning()
+			seen.resolved = resolveSources(library, checkedSources())
+
+			status := deriveLibraryStatus(library, seen, testNow)
+
+			if !slices.Equal(status.Sources, one.want) {
+				t.Errorf("sources = %+v, want %+v", status.Sources, one.want)
+			}
+			if status.SourcesSummary != one.summary {
+				t.Errorf("sourcesSummary = %q, want %q", status.SourcesSummary, one.summary)
+			}
+		})
+	}
+}
+
+// The resolved sources take part in the comparison that decides whether the
+// status is written, so a pass that resolves the same sources writes nothing,
+// and a pass that resolves a changed one writes.
+func TestWriteLibraryStatusWritesOnlyASourceThatChanged(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	library.Spec.Sources = []string{"tmdb"}
+	client := testOperator(t, cluster).client
+	seen := scanning()
+	seen.resolved = resolveSources(library, checkedSources())
+
+	if err := writeLibraryStatus(t.Context(), client, library,
+		deriveLibraryStatus(library, seen, testNow)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLibraryStatus(t.Context(), client, library,
+		deriveLibraryStatus(library, seen, testNow)); err != nil {
+		t.Fatal(err)
+	}
+	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 1 {
+		t.Fatalf("status writes = %d, want one", got)
+	}
+
+	refused := scanning()
+	refused.resolved = resolveSources(library, providerSet{
+		libraryKey("house", "tmdb"): checkedProvider("tmdb", []string{factIdentity}, reasonRefused)})
+	if err := writeLibraryStatus(t.Context(), client, library,
+		deriveLibraryStatus(library, refused, testNow)); err != nil {
+		t.Fatal(err)
+	}
+	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 2 {
+		t.Errorf("status writes = %d, want two", got)
 	}
 }

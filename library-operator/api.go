@@ -391,8 +391,13 @@ type LibraryStatus struct {
 	// Webhook is the URL of this Library's webhook endpoint on the
 	// operator, the address a person gives to Radarr, Sonarr, or
 	// Jellyfin.
-	Webhook    string      `json:"webhook,omitempty"`
-	Conditions []Condition `json:"conditions,omitempty"`
+	Webhook string `json:"webhook,omitempty"`
+	// Sources is one entry per name in spec.sources, in spec order, and
+	// SourcesSummary is the count of the ready ones against the count named,
+	// in the form 6/6, which the SOURCES printer column reads.
+	Sources        []librarySource `json:"sources,omitempty"`
+	SourcesSummary string          `json:"sourcesSummary,omitempty"`
+	Conditions     []Condition     `json:"conditions,omitempty"`
 }
 
 // LibraryVolume is the PersistentVolume the claim is bound to,
