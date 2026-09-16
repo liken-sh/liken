@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A pass with no module serving does nothing. The module keeps the
@@ -17,11 +18,15 @@ import (
 // connection that follows reports every surface again.
 func TestAPassWithNoModuleServingPlacesNothing(t *testing.T) {
 	fixture := newPlacementFixture(t)
-	pass := newPlacementPass(fixture.client, "liken-1",
+	fixture.screen(labMonitor(), DisplaySpec{})
+	pass := newPlacementPass(fixture.client, "liken-1", servingSocket(t, t.TempDir()),
 		newLayoutLink(t.TempDir()+"/layout.sock"), newClaimIndex(fixture.client), fixture.outputs)
 
 	if err := pass.pass(); err != nil {
 		t.Fatalf("a pass with no module serving failed: %v", err)
+	}
+	if status := fixture.status(labMonitor()); status.Conditions != nil {
+		t.Errorf("a pass with no module serving wrote %+v", status.Conditions)
 	}
 }
 
@@ -321,5 +326,99 @@ func TestTheSurfaceIDCarriesTheClaimAndTheModulesID(t *testing.T) {
 		if got := surfaceID(drill.claim, drill.id); got != drill.want {
 			t.Errorf("surfaceID(%q, %d) = %q, want %q", drill.claim, drill.id, got, drill.want)
 		}
+	}
+}
+
+// A screen whose compositor stopped answering reports no surfaces,
+// because the Display would otherwise name programs that nobody can
+// see.
+func TestAScreenReportsNoSurfacesWhileTheCompositorDoesNotServe(t *testing.T) {
+	cases := []struct {
+		name   string
+		live   compositorLiveness
+		reason string
+	}{
+		{
+			name:   "a socket nothing answers on",
+			live:   compositorLiveness{reason: CompositorDownReason, detail: "connect: connection refused"},
+			reason: CompositorDownReason,
+		},
+		{
+			name:   "a compositor that accepts and never answers",
+			live:   compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"},
+			reason: CompositorHungReason,
+		},
+	}
+	for _, drill := range cases {
+		t.Run(drill.name, func(t *testing.T) {
+			fixture := newPlacementFixture(t)
+			fixture.screen(labMonitor(), DisplaySpec{})
+			film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+			fixture.pod("living-room", "film-0", nil)
+			fixture.surface(film, 1920, 1080)
+			fixture.run()
+			fixture.sent()
+			if len(fixture.status(labMonitor()).Surfaces) != 1 {
+				t.Fatal("the screen reported no surface while the compositor served")
+			}
+
+			fixture.probes(drill.live)
+			fixture.run()
+
+			status := fixture.status(labMonitor())
+			if status.Surfaces != nil {
+				t.Errorf("the screen reports %+v under a compositor that serves nobody", status.Surfaces)
+			}
+			if status.Layout != nil {
+				t.Errorf("the screen reports the layout %+v under a compositor that serves nobody", status.Layout)
+			}
+			condition := conditionByType(status, CompositorServingCondition)
+			if condition.Status != conditionFalse || condition.Reason != drill.reason {
+				t.Errorf("%s is %s/%s, want %s/%s", CompositorServingCondition,
+					condition.Status, condition.Reason, conditionFalse, drill.reason)
+			}
+			if !strings.Contains(condition.Message, drill.live.detail) {
+				t.Errorf("the condition says %q, and it drops the socket's own words %q",
+					condition.Message, drill.live.detail)
+			}
+			if sent := fixture.sent(); len(sent) != 0 {
+				t.Errorf("the pass sent %q to a compositor that serves nobody", sent)
+			}
+		})
+	}
+}
+
+// The condition reports the compositor of every screen on the node,
+// and its lastTransitionTime moves only when the answer changes.
+func TestTheCompositorConditionMovesItsTimeOnlyOnAChange(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.screen(labMonitor(), DisplaySpec{})
+	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("living-room", "film-0", nil)
+	fixture.surface(film, 1920, 1080)
+	clock := time.Unix(0, 0).UTC()
+	fixture.pass.now = func() time.Time { return clock }
+
+	fixture.run()
+
+	serving := conditionByType(fixture.status(labMonitor()), CompositorServingCondition)
+	if serving.Status != conditionTrue || serving.Reason != CompositorServingReason {
+		t.Fatalf("%s is %s/%s under a compositor that answers",
+			CompositorServingCondition, serving.Status, serving.Reason)
+	}
+
+	clock = clock.Add(time.Minute)
+	fixture.run()
+	if again := conditionByType(fixture.status(labMonitor()), CompositorServingCondition); again != serving {
+		t.Errorf("a pass that changed nothing wrote %+v, want %+v", again, serving)
+	}
+
+	clock = clock.Add(time.Minute)
+	fixture.probes(compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"})
+	fixture.run()
+
+	down := conditionByType(fixture.status(labMonitor()), CompositorServingCondition)
+	if down.LastTransitionTime != clock.Format(time.RFC3339) {
+		t.Errorf("the condition turned at %s, want %s", down.LastTransitionTime, clock.Format(time.RFC3339))
 	}
 }

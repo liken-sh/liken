@@ -188,24 +188,22 @@ func TestWatchSocketWakesWhenTheCompositorComesAndGoes(t *testing.T) {
 
 	dir := t.TempDir()
 	socket := filepath.Join(dir, socketName)
-	out := watchSocket(ctx, socket)
+	out := watchSocket(ctx, socket, nil)
 
 	// The compositor's container started and the socket answers.
-	listener := listenOnSocket(t, socket)
+	compositor := westonBenchOn(t, socket, nil)
 	waitForWake(t, out, 2*socketWatchInterval)
 
 	// The compositor died and left its socket file behind. Nothing
 	// answers on it, so the watch reports the compositor gone.
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
+	compositor.stop()
 	waitForWake(t, out, 2*socketWatchInterval)
 
 	// The kubelet restarted the container, which binds the path again.
 	if err := os.Remove(socket); err != nil {
 		t.Fatal(err)
 	}
-	listenOnSocket(t, socket)
+	westonBenchOn(t, socket, nil)
 	waitForWake(t, out, 2*socketWatchInterval)
 }
 

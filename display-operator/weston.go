@@ -34,6 +34,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -78,11 +79,10 @@ const filePollInterval = 100 * time.Millisecond
 // second is not serving anybody.
 const socketDialTimeout = 500 * time.Millisecond
 
-// socketWatchInterval is how often the operator connects to the
-// compositor's socket. A connect and a close once a second costs the
-// compositor what any Wayland tool costs it, and the watch runs for
-// the life of the pod, so it stays gentle where the config wait is
-// quick.
+// socketWatchInterval is how often the operator probes the
+// compositor's socket. One exchange a second costs the compositor
+// what any Wayland tool costs it, and the watch runs for the life of
+// the pod, so it stays gentle where the config wait is quick.
 const socketWatchInterval = 1 * time.Second
 
 // declareMode and compositorMode are the arguments that select the
@@ -331,12 +331,28 @@ func compositorProcesses(procRoot string) []int {
 // that waited for a mode change nothing started would hold the pod
 // until its timeout with no reason a person can read.
 func endCompositor(procRoot string) error {
+	return signalCompositor(procRoot, syscall.SIGTERM)
+}
+
+// KillCompositor sends SIGKILL to a compositor that accepts on its
+// socket and answers nothing, and lets the kubelet restart it.
+//
+// SIGTERM does not reach a frozen process. A stopped process runs no
+// signal handler until something continues it, so SIGTERM waits with
+// it. The kernel ends a process on SIGKILL whatever the process is
+// doing, so the compositor exits, the container exits with it, and
+// the kubelet starts the container again.
+func killCompositor(procRoot string) error {
+	return signalCompositor(procRoot, syscall.SIGKILL)
+}
+
+func signalCompositor(procRoot string, signal syscall.Signal) error {
 	pids := compositorProcesses(procRoot)
 	if len(pids) == 0 {
 		return fmt.Errorf("no process under %s runs %s", procRoot, westonBinary)
 	}
 	for _, pid := range pids {
-		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if err := syscall.Kill(pid, signal); err != nil {
 			return fmt.Errorf("signaling %s at pid %d: %w", westonBinary, pid, err)
 		}
 	}
@@ -470,20 +486,163 @@ func waitForFile(ctx context.Context, path string, timeout time.Duration) error 
 	}
 }
 
-// compositorServing reports whether a compositor accepts connections
-// on the socket.
+// The bound on the compositor's answer to the probe. A running event
+// loop answers a sync in microseconds, so the whole two seconds is
+// margin for a loaded machine. It is a variable so a test can shorten
+// it.
+var compositorReplyTimeout = 2 * time.Second
+
+// What one probe found. The reason is the reason the CompositorServing
+// condition carries, and the detail is the socket's own words for a
+// failure.
+type compositorLiveness struct {
+	serving bool
+	reason  string
+	detail  string
+}
+
+// compositorServing reports whether a compositor serves the socket.
 //
-// The check connects and closes rather than stats. A compositor
-// that died uncleanly leaves its socket file behind, and a file
-// nothing listens on refuses every client, so the refused connect is
-// the truth a stat would miss. The socket is the whole delivery, so
-// what a client would meet is what the operator answers prepare
-// calls and taints the slice by.
+// The socket is the whole delivery, so what a client would meet is
+// what the operator answers prepare calls and taints the slice by.
+//
+// It is probeCompositor read as one bit, for the two callers that act
+// on serving alone: the socket watch and the pass that publishes the
+// slice.
 func compositorServing(socketPath string) bool {
-	connection, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
+	return probeCompositor(socketPath).serving
+}
+
+// probeCompositor dials the socket and runs the first exchange of the
+// Wayland protocol on it: it sends wl_display.sync on object 1 and
+// waits for any event. Only a running event loop answers.
+//
+// The connect alone proves nothing. The kernel accepts a connect on a
+// listening socket whether or not the process behind it runs, so a
+// check that only connects and closes reads a weston stopped with
+// SIGSTOP as serving until the listen backlog of 128 fills with the
+// operator's own once-a-second connects. On the testbed that took
+// 124 s, and the screen did not change for any of it.
+//
+// Two failures need two repairs, so the probe reports two reasons.
+// Down is a socket that refuses the connect or ends it under the probe,
+// and the kubelet starts that container again. Hung is a socket that
+// accepts and answers nothing, and that process is still running.
+func probeCompositor(socketPath string) compositorLiveness {
+	socket, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
 	if err != nil {
+		return compositorLiveness{reason: CompositorDownReason, detail: err.Error()}
+	}
+	defer func() { _ = socket.Close() }()
+	if err := socket.SetDeadline(time.Now().Add(compositorReplyTimeout)); err != nil {
+		return compositorLiveness{reason: CompositorDownReason, detail: err.Error()}
+	}
+
+	client := newWaylandClient(socket)
+	var words waylandWords
+	words.putUint(client.newID())
+	if err := client.request(displayObject, displaySync, words); err != nil {
+		return failedProbe(err)
+	}
+	if _, err := client.event(); err != nil {
+		return failedProbe(err)
+	}
+	return compositorLiveness{serving: true, reason: CompositorServingReason}
+}
+
+// failedProbe names the reason one failed exchange carries. A deadline
+// that ran out is a frozen compositor. Every other failure is the
+// socket ending under the probe, which is a compositor that exited.
+func failedProbe(err error) compositorLiveness {
+	reason := CompositorDownReason
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		reason = CompositorHungReason
+	}
+	return compositorLiveness{reason: reason, detail: err.Error()}
+}
+
+// CompositorHungLimit is how long the probe must read Hung before the
+// operator sends SIGKILL to the compositor. A compositor under load
+// answers late and then answers. One that has answered nothing for
+// 10 s is frozen, and nothing else in the pod ends it: the kubelet
+// restarts a process that exits, and a frozen process does not exit.
+// It is a variable so a test can shorten it.
+var compositorHungLimit = 10 * time.Second
+
+// HungCompositor is one outage as the socket watch reads it: when the
+// probe first read Hung, and whether the kill for this outage has run.
+// Any reading other than Hung ends the outage.
+type hungCompositor struct {
+	since  time.Time
+	killed bool
+}
+
+// Due reports whether the probe has read Hung for the whole of
+// compositorHungLimit and no kill has run in this outage. Any other
+// reading ends the outage and resets the clock: a socket that refuses
+// the connect is a compositor that is already gone, and one that
+// answers needs no repair.
+func (h *hungCompositor) due(live compositorLiveness, now time.Time) bool {
+	if live.reason != CompositorHungReason {
+		h.since, h.killed = time.Time{}, false
 		return false
 	}
-	_ = connection.Close()
-	return true
+	if h.since.IsZero() {
+		h.since = now
+	}
+	return !h.killed && now.Sub(h.since) >= compositorHungLimit
+}
+
+// Done records that the kill for this outage ran. A second kill in
+// the same outage would end the compositor the kubelet is starting in
+// its place.
+func (h *hungCompositor) done() {
+	h.killed = true
+}
+
+// westonRestarts reads how often the kubelet has started the
+// compositor's container again. The count is on this pod's own status,
+// because the compositor is a native sidecar of the pod the operator
+// runs in, and the kubelet is the only party that counts a restart
+// nobody ordered.
+//
+// A reader with no pod to name is an operator a person runs by hand,
+// and it counts nothing.
+type westonRestarts struct {
+	client    *Client
+	namespace string
+	pod       string
+	// The count of the last read, and whether there was one. The first
+	// read is the baseline: an operator container that restarted alone
+	// finds a compositor whose count is already above zero, and none
+	// of those restarts happened while this process ran.
+	seen  int
+	known bool
+}
+
+func newWestonRestarts(client *Client, namespace, pod string) *westonRestarts {
+	if client == nil || namespace == "" || pod == "" {
+		return nil
+	}
+	return &westonRestarts{client: client, namespace: namespace, pod: pod}
+}
+
+// growth reports how many times the kubelet started the compositor
+// again since the last read. A count that went backwards is a pod that
+// was replaced, and it reports zero, because a counter never falls.
+func (r *westonRestarts) growth() (int, error) {
+	if r == nil {
+		return 0, nil
+	}
+	pod, err := getPod(r.client, r.namespace, r.pod)
+	if err != nil {
+		return 0, err
+	}
+	count := pod.Status.restarts(compositorMode)
+	grew := count - r.seen
+	if !r.known || grew < 0 {
+		grew = 0
+	}
+	r.seen, r.known = count, true
+	return grew, nil
 }

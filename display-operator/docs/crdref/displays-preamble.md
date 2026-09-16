@@ -33,6 +33,9 @@ status:
       status: "True"
     - type: Responsive
       status: "True"
+    - type: CompositorServing
+      status: "True"
+      reason: Serving
 ```
 
 The [devices reference](/docs/reference/devices/) describes the

@@ -44,6 +44,14 @@ func (m *metrics) newDisplayMetrics() {
 		Name: "display_compositor_restarts_total",
 		Help: "Times this operator ended the compositor, by why.",
 	}, []string{"reason"})
+	m.compositorServing = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "display_compositor_serving",
+		Help: "1 while the compositor answers the handshake on its socket, 0 while it refuses or answers nothing.",
+	})
+	m.compositorContainerRestarts = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "display_compositor_container_restarts_total",
+		Help: "Times the kubelet started the compositor's container again, from this pod's own status.",
+	})
 	m.surfaces = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_surfaces",
 		Help: "Surfaces the compositor holds on the output.",
@@ -124,10 +132,11 @@ func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 
 // compositorRestarted counts one restart this operator ordered. mode
 // is a claim's prepare changing the resolution. heal is the canvas
-// repair after the compositor re-creates an output. A third case is
-// the compositor exiting on its own, between two passes. No call
-// counts that case, because nothing today tells it apart from a
-// restart this operator ordered.
+// repair after the compositor re-creates an output. hung is the kill
+// the socket watch orders after the probe has read Hung for
+// compositorHungLimit. A compositor that exited on its own is none of
+// them: display_compositor_container_restarts_total counts that one,
+// from the kubelet's own restart count.
 func (m *metrics) compositorRestarted(reason string) {
 	if m == nil {
 		return
@@ -143,6 +152,36 @@ func (m *metrics) recordSurfaces(output string, count int) {
 		return
 	}
 	m.surfaces.WithLabelValues(output).Set(float64(count))
+}
+
+// forgetSurfaces drops the count of every output. A compositor that
+// serves nobody holds no surface, and the last count it reported is a
+// fact about a compositor that is gone.
+func (m *metrics) forgetSurfaces() {
+	if m == nil {
+		return
+	}
+	m.surfaces.Reset()
+}
+
+// recordCompositorServing states what the probe found on the
+// compositor's socket, which is the same answer that taints every
+// output in the slice.
+func (m *metrics) recordCompositorServing(serving bool) {
+	if m == nil {
+		return
+	}
+	m.compositorServing.Set(boolValue(serving))
+}
+
+// recordCompositorRestarts counts the restarts the kubelet made since
+// the last read. It takes the growth since that read, because the
+// total on a pod's status starts from zero with a new pod.
+func (m *metrics) recordCompositorRestarts(growth int) {
+	if m == nil || growth <= 0 {
+		return
+	}
+	m.compositorContainerRestarts.Add(float64(growth))
 }
 
 // recordPanel states the panel's last DDC/CI reading for power and

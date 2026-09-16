@@ -55,7 +55,9 @@ rules:
   # what a region's selector matches, so a pod that gains or loses a
   # label restacks the screen, and the watch is what makes that
   # prompt. Read-only across every namespace, because a screen serves
-  # whichever namespace claims it.
+  # whichever namespace claims it. The get has a second use: the
+  # operator reads its own pod, whose status carries how often the
+  # kubelet started the compositor's container again.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch]

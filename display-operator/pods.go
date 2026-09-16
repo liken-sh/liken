@@ -12,7 +12,10 @@ package main
 //
 // The operator reads a pod's name, namespace, and labels, and nothing
 // else. It never reads a pod's spec or its containers: where a pod is
-// drawn is the Layout's business, and what it draws is its own.
+// drawn is the Layout's business, and what it draws is its own. The
+// one exception is the operator's own pod, whose
+// status.initContainerStatuses it reads for the restart count of the
+// compositor's container.
 
 import (
 	"context"
@@ -20,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -36,7 +40,8 @@ const (
 // what status.surfaces reports beside them. The operator never writes
 // a pod.
 type Pod struct {
-	Metadata PodMeta `json:"metadata"`
+	Metadata PodMeta   `json:"metadata"`
+	Status   PodStatus `json:"status,omitempty"`
 }
 
 type PodList struct {
@@ -47,6 +52,30 @@ type PodMeta struct {
 	Name      string            `json:"name"`
 	Namespace string            `json:"namespace"`
 	Labels    map[string]string `json:"labels,omitempty"`
+}
+
+// PodStatus is what the kubelet reports about one pod's containers. A
+// native sidecar is an init container whose restartPolicy is Always,
+// so the compositor's count is in initContainerStatuses.
+type PodStatus struct {
+	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
+	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
+}
+
+type ContainerStatus struct {
+	Name         string `json:"name"`
+	RestartCount int    `json:"restartCount"`
+}
+
+// restarts reports the restart count of one container, and zero for a
+// name the kubelet reports nothing for.
+func (s PodStatus) restarts(container string) int {
+	for _, status := range slices.Concat(s.InitContainerStatuses, s.ContainerStatuses) {
+		if status.Name == container {
+			return status.RestartCount
+		}
+	}
+	return 0
 }
 
 // The pod as status names it, namespace and name, which is how a

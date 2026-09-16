@@ -290,8 +290,11 @@ func operate() {
 	go panels.run(ctx)
 
 	// The placement pass reads the surfaces the module reports and
-	// draws each screen to the Layout its Display names.
-	places := newPlacementPass(client, nodeName, layout, plugin.claims, screensOf)
+	// draws each screen to the Layout its Display names. It probes the
+	// same socket the slice publisher taints by, so one pass taints a
+	// screen whose compositor stopped answering and reports it with no
+	// surfaces.
+	places := newPlacementPass(client, nodeName, socketPath, layout, plugin.claims, screensOf)
 	places.metrics = readings
 
 	// The pod and the Layout watches share one channel, because a
@@ -313,6 +316,14 @@ func operate() {
 		resourceWake()
 	}, readings)
 
+	// How often the kubelet has started the compositor's container
+	// again, read from this pod's own status on the passes that publish
+	// the slice. A restart lands on one of those passes, because the
+	// socket that ended with it wakes the loop. A pod reads which pod
+	// it is from the downward API, and an operator run by hand names
+	// no pod and counts nothing.
+	restarts := newWestonRestarts(client, os.Getenv("POD_NAMESPACE"), os.Getenv("POD_NAME"))
+
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses. The retry costs the loop no
 	// time and takes the same settle window.
@@ -332,6 +343,11 @@ func operate() {
 				default:
 				}
 			})
+		}
+		if growth, err := restarts.growth(); err != nil {
+			fmt.Fprintf(os.Stderr, "reading how often the compositor restarted: %v\n", err)
+		} else {
+			readings.recordCompositorRestarts(growth)
 		}
 		// Hardware that moved reaches the Display controller
 		// through the same settled pass, so one burst of uevents costs
@@ -367,7 +383,7 @@ func operate() {
 	// is silent when nothing changed, so the prompt path costs nothing
 	// on a wake that carried no news.
 	settled := settle(ctx,
-		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath), nil, nil),
+		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath, plugin.killHungCompositor), nil, nil),
 		settleWindow, settleLimit)
 	prompt := wakes(ctx, nil, nil, nil, layout.reports, resources)
 
@@ -504,11 +520,14 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 	// hardware sends nothing on any i2c wire, and a panel that refuses
 	// DDC/CI publishes no control attribute and no control device.
 	devices := sliceDevices(withLinks(withControls(withModes, controls), links))
-	// The compositor source is this dial: the same check that decides
-	// the NoExecute taint below. A dial that fails is the compositor
-	// socket not answering, in this operator's one word for it.
+	// The compositor source is this handshake: the same check that
+	// decides the NoExecute taint below. A socket that refuses the
+	// connect and a socket that accepts and answers nothing are both a
+	// compositor that does not serve, which is the one fact the slice
+	// states.
 	serving := compositorServing(socketPath)
 	readings.recordObservation("compositor", serving, now)
+	readings.recordCompositorServing(serving)
 	if !serving {
 		// No compositor holds the screens, so every output says it
 		// serves nobody, and the NoExecute taint is what ends the
@@ -522,15 +541,26 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 // socket and when it stops.
 //
 // A compositor that comes or goes raises no event a program can
-// wait on, so the watch connects on a tick, and the change from one
+// wait on, so the watch probes on a tick, and the change from one
 // reading to the next is the whole signal. The pass it wakes is what
 // taints or frees the screens.
-func watchSocket(ctx context.Context, socketPath string) <-chan struct{} {
+//
+// The watch also repairs a compositor that accepts on its socket and
+// answers nothing. It is the one reader that probes on a clock, so it
+// is the one reader that measures how long a freeze has lasted. Once
+// the probe has read Hung for compositorHungLimit, the watch calls
+// repair, which sends SIGKILL to the compositor, once per outage. A
+// nil repair ends nothing, which is what every test that drives the
+// watch alone passes.
+func watchSocket(ctx context.Context, socketPath string, repair func() error) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	// The first reading is taken before the ticker starts, so it is
 	// the same state the caller's first pass publishes, and no change
 	// falls between the two.
-	serving := compositorServing(socketPath)
+	live := probeCompositor(socketPath)
+	serving := live.serving
+	frozen := &hungCompositor{}
+	frozen.due(live, time.Now())
 	go func() {
 		defer close(out)
 		tick := time.NewTicker(socketWatchInterval)
@@ -539,12 +569,15 @@ func watchSocket(ctx context.Context, socketPath string) <-chan struct{} {
 			select {
 			case <-ctx.Done():
 				return
-			case <-tick.C:
-				now := compositorServing(socketPath)
-				if now == serving {
+			case at := <-tick.C:
+				live := probeCompositor(socketPath)
+				if frozen.due(live, at) && repair != nil {
+					endHungCompositor(socketPath, frozen, repair)
+				}
+				if live.serving == serving {
 					continue
 				}
-				serving = now
+				serving = live.serving
 				fmt.Printf("the compositor's socket at %s: serving=%v\n", socketPath, serving)
 				select {
 				case out <- struct{}{}:
@@ -554,6 +587,20 @@ func watchSocket(ctx context.Context, socketPath string) <-chan struct{} {
 		}
 	}()
 	return out
+}
+
+// EndHungCompositor runs the kill for a compositor that has answered
+// nothing for compositorHungLimit. A kill that failed is logged and
+// left to the next tick, because the outage is still running and
+// nothing else ends it.
+func endHungCompositor(socketPath string, frozen *hungCompositor, repair func() error) {
+	if err := repair(); err != nil {
+		fmt.Fprintf(os.Stderr, "ending the compositor that answers nothing on %s: %v\n", socketPath, err)
+		return
+	}
+	frozen.done()
+	fmt.Printf("the compositor answered nothing on %s for %s: ended, and the kubelet starts it again\n",
+		socketPath, compositorHungLimit)
 }
 
 // wakes turns the kernel's drm events, the write retries, the

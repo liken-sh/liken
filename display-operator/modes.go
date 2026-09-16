@@ -513,7 +513,43 @@ func (p *draPlugin) compositorOutputs() servedOutputs {
 	return p.served()
 }
 
-// ReleaseModes takes the connectors of one ended claim out of
+// restartCompositor ends the compositor with no config change,
+// the restart half of the path a mode prepare takes. It holds the
+// same lock, so a restart and a mode switch never run at once: a
+// restart in the middle of a switch would end the compositor the
+// switch is waiting on and fail the prepare.
+func (p *draPlugin) restartCompositor() error {
+	return p.restart("heal", p.endCompositor)
+}
+
+// KillHungCompositor is the restart for a compositor that accepts on
+// its socket and answers nothing. The socket watch orders it after the
+// probe has read Hung for compositorHungLimit. The compositor exits on
+// SIGKILL, the probe reads Down until the kubelet starts the container
+// again, and that Down is the path the taint and the clients already
+// take.
+func (p *draPlugin) killHungCompositor() error {
+	return p.restart("hung", p.killCompositor)
+}
+
+// Restart ends the compositor and counts the restart under the reason
+// this operator ordered it for. It holds the mode switches' lock for
+// the reason a mode switch holds it: a restart in the middle of a
+// switch would end the compositor the switch is waiting on. An end
+// that found no compositor returns before the count, so it counts
+// nothing.
+func (p *draPlugin) restart(reason string, end func() error) error {
+	p.modeSwitches.Lock()
+	defer p.modeSwitches.Unlock()
+
+	if err := end(); err != nil {
+		return err
+	}
+	p.metrics.compositorRestarted(reason)
+	return nil
+}
+
+// releaseModes takes the connectors of one ended claim out of
 // the record and regenerates the config.
 //
 // Nothing restarts. The device allocates to one claim at a
@@ -521,22 +557,6 @@ func (p *draPlugin) compositorOutputs() servedOutputs {
 // serve nobody. The screen keeps the mode until the next compositor
 // start, which comes up at the mode the monitor prefers, and the
 // slice's currentMode says what it runs meanwhile.
-// restartCompositor ends the compositor with no config change,
-// the restart half of the path a mode prepare takes. It holds the
-// same lock, so a restart and a mode switch never run at once: a
-// restart in the middle of a switch would end the compositor the
-// switch is waiting on and fail the prepare.
-func (p *draPlugin) restartCompositor() error {
-	p.modeSwitches.Lock()
-	defer p.modeSwitches.Unlock()
-
-	if err := p.endCompositor(); err != nil {
-		return err
-	}
-	p.metrics.compositorRestarted("heal")
-	return nil
-}
-
 func (p *draPlugin) releaseModes(devices []string) error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()

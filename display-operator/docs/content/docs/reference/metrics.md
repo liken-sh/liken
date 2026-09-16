@@ -20,6 +20,8 @@ the base, which holds a `PodMonitor` for the port.
 | display-operator | `display_observation_valid{source}`, `display_observation_last_success_timestamp_seconds{source}` | gauge | the card or the compositor socket stopped answering |
 | display-operator | `display_output_mode_info{output, mode, refresh}` | gauge, info | what is actuated on each panel |
 | display-operator | `display_compositor_restarts_total{reason}` | counter | mode prepare vs crash; the unbounded-restart problem as a rate |
+| display-operator | `display_compositor_serving` | gauge | the compositor answers the handshake, refuses the connect, or answers nothing |
+| display-operator | `display_compositor_container_restarts_total` | counter | the kubelet's own count, which includes the restarts nobody ordered |
 | display-operator | `display_surfaces{output}` | gauge | what the compositor holds; a stuck surface |
 | display-operator | `display_panel_power{output}`, `display_panel_brightness{output}` | gauge | the DDC state the idle screen drives |
 

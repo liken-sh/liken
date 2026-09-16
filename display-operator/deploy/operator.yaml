@@ -89,11 +89,14 @@ spec:
       # it drives is black.
       terminationGracePeriodSeconds: 5
       # One process namespace for the pod, so the operator
-      # container can find the compositor's process and send it
-      # SIGTERM. That signal is how a mode a claim states takes
-      # effect: weston parses weston.ini once at startup, so the
-      # operator rewrites the file and ends the compositor, and the
-      # kubelet starts it again on the new config.
+      # container can find the compositor's process and signal it.
+      # SIGTERM is how a mode a claim states takes effect: weston
+      # parses weston.ini once at startup, so the operator rewrites
+      # the file and ends the compositor, and the kubelet starts it
+      # again on the new config. SIGKILL is how the operator ends a
+      # compositor that accepts on its socket and answers nothing: a
+      # stopped process takes no SIGTERM, and it never exits for the
+      # kubelet to restart.
       shareProcessNamespace: true
       # Three containers from one image, ordered by the kubelet: the
       # declare container writes weston.ini and exits, the weston
@@ -187,6 +190,18 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # The pod this operator runs in. The kubelet counts the
+            # restarts of the compositor's container on this pod's own
+            # status, and that count is the only one that includes a
+            # compositor that exited on its own.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             # Milestone 65 gives every process this port. An owner who
             # runs no Prometheus still gets the port: the base states
             # it here so a scrape needs nothing from this manifest but

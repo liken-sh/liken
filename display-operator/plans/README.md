@@ -231,6 +231,17 @@ say why it is built the way it is.
   ending, and the surface was gone at the 500 ms grace. The `theater`
   `Layout` is named on that panel and on the house's `Display`s.
 
+* [21, The compositor handshake](completed/21-the-compositor-handshake.md).
+  Built on 2026-09-16. The liveness probe sends `wl_display.sync` and
+  reads the reply, so a frozen compositor reads as not serving within
+  the probe's 2 s bound, where a check that only connected read it as
+  serving for 124 s. A screen whose compositor serves nobody reports
+  no surfaces and no layout, and carries the `CompositorServing`
+  condition with the socket's own words as its message.
+  A freeze that holds for 10 s ends with `SIGKILL`, because nothing
+  else in the pod ends a process that does not exit, and the kubelet
+  starts the compositor again.
+
 ## Open problems
 
 [`open-problems/`](open-problems/) holds the questions this operator

@@ -35,6 +35,17 @@ const (
 	NoDDCReplyReason    = "NoDDCReply"
 )
 
+// The condition that reports the compositor behind this screen, and
+// its three reasons. Serving is a compositor that answered the probe.
+// Down is a socket that refuses the connect or ends under the probe.
+// Hung is a socket that accepts and answers nothing.
+const (
+	CompositorServingCondition = "CompositorServing"
+	CompositorServingReason    = "Serving"
+	CompositorDownReason       = "Down"
+	CompositorHungReason       = "Hung"
+)
+
 // The one value each override field takes. The block states
 // what the panel is held at, and its absence is what lifts it.
 const overrideOff = "off"

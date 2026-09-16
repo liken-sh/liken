@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // configEntry is one resolved config block of this driver's own, from
@@ -367,5 +369,43 @@ func TestReadModeRecordRefusesAFileItCannotParse(t *testing.T) {
 
 	if _, err := readModeRecord(path); err == nil {
 		t.Fatal("the read accepted a file it cannot parse")
+	}
+}
+
+func TestEndingAHungCompositorKillsItAndCountsItAsHung(t *testing.T) {
+	killed := 0
+	readings := newMetrics(componentName, "dev")
+	plugin := &draPlugin{
+		killCompositor: func() error {
+			killed++
+			return nil
+		},
+		metrics: readings,
+	}
+
+	if err := plugin.killHungCompositor(); err != nil {
+		t.Fatal(err)
+	}
+
+	if killed != 1 {
+		t.Errorf("the repair killed the compositor %d times, want 1", killed)
+	}
+	if got := testutil.ToFloat64(readings.compositorRestarts.WithLabelValues("hung")); got != 1 {
+		t.Errorf("display_compositor_restarts_total{reason=\"hung\"} = %v, want 1", got)
+	}
+}
+
+func TestAKillThatFoundNoCompositorCountsNothing(t *testing.T) {
+	readings := newMetrics(componentName, "dev")
+	plugin := &draPlugin{
+		killCompositor: func() error { return fmt.Errorf("no process under /proc runs %s", westonBinary) },
+		metrics:        readings,
+	}
+
+	if err := plugin.killHungCompositor(); err == nil {
+		t.Fatal("a kill that found no compositor reported no error")
+	}
+	if got := testutil.ToFloat64(readings.compositorRestarts.WithLabelValues("hung")); got != 0 {
+		t.Errorf("display_compositor_restarts_total{reason=\"hung\"} = %v, want 0", got)
 	}
 }

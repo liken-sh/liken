@@ -164,3 +164,37 @@ func TestEveryDisplayMetricRecorderIsNilSafe(t *testing.T) {
 	readings.recordSurfaces("HDMI-A-1", 1)
 	readings.recordPanel("HDMI-A-1", panelFacts{Observed: map[byte]uint16{vcpPowerMode: powerModeOn}})
 }
+
+func TestTheCompositorServingGaugeFollowsTheProbe(t *testing.T) {
+	cases := []struct {
+		name    string
+		serving bool
+		want    float64
+	}{
+		{"a compositor that answers", true, 1},
+		{"a compositor that serves nobody", false, 0},
+	}
+	for _, drill := range cases {
+		t.Run(drill.name, func(t *testing.T) {
+			readings := newMetrics("display-operator", "dev")
+
+			readings.recordCompositorServing(drill.serving)
+
+			if got := testutil.ToFloat64(readings.compositorServing); got != drill.want {
+				t.Errorf("display_compositor_serving = %v, want %v", got, drill.want)
+			}
+		})
+	}
+}
+
+func TestTheContainerRestartCounterTakesTheGrowth(t *testing.T) {
+	readings := newMetrics("display-operator", "dev")
+
+	readings.recordCompositorRestarts(2)
+	readings.recordCompositorRestarts(0)
+	readings.recordCompositorRestarts(1)
+
+	if got := testutil.ToFloat64(readings.compositorContainerRestarts); got != 3 {
+		t.Errorf("display_compositor_container_restarts_total = %v, want 3", got)
+	}
+}

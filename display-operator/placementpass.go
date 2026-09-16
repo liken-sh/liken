@@ -3,12 +3,14 @@ package main
 // The placement pass: the surfaces the compositor's module reports
 // become rectangles on each screen.
 //
-// One pass reads three things and writes two. It reads the module's
-// store, which is every surface on this node's screens with the
-// socket each one arrived on; the claim behind each socket and the
-// labels its holders share; and each screen's Display and the Layout
-// it names. It writes placements to the module, and it writes what it
-// decided to the Display's status.
+// One pass reads four things and writes two. It reads the compositor's
+// own socket; the module's store, which is every surface on this
+// node's screens with the socket each one arrived on; the claim behind
+// each socket and the labels its holders share; and each screen's
+// Display and the Layout it names. It writes placements to the module,
+// and it writes what it decided to the Display's status. A compositor
+// that answers nothing on its socket empties every screen's report,
+// and the pass places nothing.
 //
 // The decision is placeSurfaces, which is a pure function, and this
 // file is what executes its result. Keeping the two apart is the seam
@@ -86,7 +88,12 @@ type placementPass struct {
 	// prepared claim holds. It is a field so a test drives a pass with
 	// no CDI directory of its own.
 	sockets func() (map[string]preparedSocket, error)
-	now     func() time.Time
+	// Compositor is the probe of the compositor's own socket, the same
+	// handshake the slice publisher taints by. It is a field so a test
+	// drives a pass against a compositor it states rather than one it
+	// runs.
+	compositor func() compositorLiveness
+	now        func() time.Time
 
 	// Generation is the module connection the memo below belongs to.
 	generation int
@@ -102,29 +109,39 @@ type placementPass struct {
 	metrics *metrics
 }
 
-func newPlacementPass(client *Client, node string, link *layoutLink, claims *claimIndex,
+func newPlacementPass(client *Client, node, socketPath string, link *layoutLink, claims *claimIndex,
 	outputs func() []Output) *placementPass {
 	return &placementPass{
-		client:  client,
-		node:    node,
-		link:    link,
-		claims:  claims,
-		outputs: outputs,
-		sockets: preparedSocketClaims,
-		now:     time.Now,
-		placed:  map[int]placedSurface{},
-		ordered: map[string][]int{},
+		client:     client,
+		node:       node,
+		link:       link,
+		claims:     claims,
+		outputs:    outputs,
+		sockets:    preparedSocketClaims,
+		compositor: func() compositorLiveness { return probeCompositor(socketPath) },
+		now:        time.Now,
+		placed:     map[int]placedSurface{},
+		ordered:    map[string][]int{},
 	}
 }
 
 // pass places every surface the module reports and reports every
 // screen.
 //
+// A pass whose compositor does not answer the probe reports every
+// screen with no surfaces and places nothing. Every surface ended with
+// the compositor, so a status that still named them would tell the
+// screen's owner that programs are on a screen that does not change.
+//
 // A pass with no module serving does nothing. The module keeps the
 // last layout it committed while nothing is connected to it, and the
 // connection that follows reports every surface again, so there is
 // nothing to read and nowhere to send in the meantime.
 func (p *placementPass) pass() error {
+	live := p.compositor()
+	if !live.serving {
+		return p.dark(live)
+	}
 	state := p.link.state()
 	if !state.Serving {
 		return nil
@@ -164,7 +181,7 @@ func (p *placementPass) pass() error {
 		}
 		on := surfacesOn(held)
 		p.metrics.recordSurfaces(connector, len(on))
-		sent, err := p.screen(state.Outputs[connector], on, outputs)
+		sent, err := p.screen(state.Outputs[connector], on, outputs, live)
 		stated = stated || sent
 		if err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", connector, err))
@@ -184,6 +201,43 @@ func (p *placementPass) pass() error {
 func (p *placementPass) forget() {
 	p.placed = map[int]placedSurface{}
 	p.ordered = map[string][]int{}
+}
+
+// dark reports every screen of this node while the compositor serves
+// nobody: no surfaces, no layout, and the condition that states which
+// of the two failures it is.
+//
+// It reads the Display resources and not the connectors, because a
+// Display whose monitor also left is as wrong about its surfaces as
+// one whose monitor is still on the wire.
+//
+// The memo goes with the surfaces, because the compositor that comes
+// back holds nothing this pass sent and assigns its ids from the start
+// again.
+func (p *placementPass) dark(live compositorLiveness) error {
+	p.forget()
+	p.metrics.forgetSurfaces()
+	displays, err := listDisplays(p.client)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, display := range displays {
+		if display.Status.Node != p.node {
+			continue
+		}
+		status := display.Status
+		status.Surfaces = nil
+		status.Layout = nil
+		status.Conditions = setCondition(status.Conditions, p.serving(live))
+		if reflect.DeepEqual(display.Status, status) {
+			continue
+		}
+		if _, err := writeDisplayStatus(p.client, &display, status); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // The surfaces of one screen, and whether every one of them
@@ -265,7 +319,8 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 // screen decides the layout of one screen, states what changed to the
 // module, and writes the status. It answers whether anything reached
 // the module, which is what earns the commit.
-func (p *placementPass) screen(output layoutOutput, on []screenSurface, outputs []Output) (bool, error) {
+func (p *placementPass) screen(output layoutOutput, on []screenSurface, outputs []Output,
+	live compositorLiveness) (bool, error) {
 	display, err := p.display(output.Connector, outputs)
 	if err != nil {
 		return false, err
@@ -286,7 +341,8 @@ func (p *placementPass) screen(output layoutOutput, on []screenSurface, outputs 
 		// reports what it shows.
 		return stated, failure
 	}
-	return stated, errors.Join(failure, p.report(display, on, decision, layoutName(named, layout), resolved))
+	return stated, errors.Join(failure,
+		p.report(display, on, decision, layoutName(named, layout), resolved, p.serving(live)))
 }
 
 // The resource of the panel on one connector, and nothing at all for
@@ -421,11 +477,12 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 // status it read, so neither drops what the other wrote, and a write
 // the two raced costs one pass.
 func (p *placementPass) report(display *Display, on []screenSurface, decision screenPlacement,
-	name string, resolved DisplayCondition) error {
+	name string, resolved, serving DisplayCondition) error {
 	status := display.Status
 	status.Surfaces = surfaceStatus(on, decision)
 	status.Layout = &DisplayLayout{Name: name, Regions: regionStatus(decision)}
 	status.Conditions = setCondition(status.Conditions, resolved)
+	status.Conditions = setCondition(status.Conditions, serving)
 	if reflect.DeepEqual(display.Status, status) {
 		return nil
 	}
@@ -434,12 +491,23 @@ func (p *placementPass) report(display *Display, on []screenSurface, decision sc
 }
 
 func (p *placementPass) condition(met bool, reason, message string) DisplayCondition {
+	return p.stated(LayoutResolvedCondition, met, reason, message)
+}
+
+// serving is the condition that reports the compositor. Its message is
+// the socket's own words for the failure, so a person reads the cause
+// from the resource.
+func (p *placementPass) serving(live compositorLiveness) DisplayCondition {
+	return p.stated(CompositorServingCondition, live.serving, live.reason, live.detail)
+}
+
+func (p *placementPass) stated(kind string, met bool, reason, message string) DisplayCondition {
 	status := conditionFalse
 	if met {
 		status = conditionTrue
 	}
 	return DisplayCondition{
-		Type:               LayoutResolvedCondition,
+		Type:               kind,
 		Status:             status,
 		Reason:             reason,
 		Message:            message,

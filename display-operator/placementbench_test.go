@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,10 +66,11 @@ type placementFixture struct {
 	// one holder by name answers for.
 	elsewhere map[string]bool
 	// What the API server was asked for, and what it refuses.
-	claimLists int
-	podLists   int
-	podGets    int
-	refuse     map[string]int
+	claimLists   int
+	podLists     int
+	podGets      int
+	displayLists int
+	refuse       map[string]int
 
 	ids     int
 	version int
@@ -109,14 +111,29 @@ func newPlacementBench(t *testing.T, refuse map[string]string, wired ...wiredScr
 	fixture.module = newFakeModule(t, moduleScript{greeting: greeting, refuse: refuse})
 	fixture.client = testClient(t, fixture.handler())
 	fixture.link = servedLayoutLink(t, fixture.module)
-	fixture.pass = newPlacementPass(fixture.client, "liken-1",
+	fixture.pass = newPlacementPass(fixture.client, "liken-1", filepath.Join(t.TempDir(), socketName),
 		fixture.link, newClaimIndex(fixture.client), fixture.outputs)
+	// Every drill runs against a compositor that answers the probe. A
+	// drill of a compositor that does not answer states its own
+	// answer.
+	fixture.serves()
 	// The condition's timestamp moves only when the condition does, so
 	// the clock stands still and a pass that changes nothing writes
 	// nothing.
 	fixture.pass.now = func() time.Time { return time.Unix(0, 0).UTC() }
 	fixture.read = len(fixture.module.read())
 	return fixture
+}
+
+// serves makes the compositor answer the probe.
+func (f *placementFixture) serves() {
+	f.probes(compositorLiveness{serving: true, reason: CompositorServingReason})
+}
+
+// probes sets what the probe finds on the compositor's socket from
+// here on.
+func (f *placementFixture) probes(live compositorLiveness) {
+	f.pass.compositor = func() compositorLiveness { return live }
 }
 
 func (f *placementFixture) outputs() []Output {
@@ -277,6 +294,13 @@ func (f *placementFixture) handler() http.Handler {
 			return
 		}
 		switch {
+		case r.URL.Path == DisplaysPath:
+			f.displayLists++
+			list := DisplayList{}
+			for _, display := range f.displays {
+				list.Items = append(list.Items, *display)
+			}
+			f.serve(w, &list)
 		case strings.HasPrefix(r.URL.Path, DisplaysPath):
 			f.serveDisplay(w, r)
 		case strings.HasPrefix(r.URL.Path, LayoutsPath+"/"):
@@ -378,8 +402,14 @@ func (f *placementFixture) serve(w http.ResponseWriter, object any) {
 // The condition of the pass, which is the only report of a name that
 // resolved to nothing.
 func conditionOf(status DisplayStatus) DisplayCondition {
+	return conditionByType(status, LayoutResolvedCondition)
+}
+
+// conditionByType returns one condition of a status, and an empty one
+// for a condition the status does not carry.
+func conditionByType(status DisplayStatus, kind string) DisplayCondition {
 	for _, condition := range status.Conditions {
-		if condition.Type == LayoutResolvedCondition {
+		if condition.Type == kind {
 			return condition
 		}
 	}

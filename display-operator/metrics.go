@@ -62,9 +62,14 @@ type metrics struct {
 	observationSuccess *prometheus.GaugeVec
 	outputMode         *prometheus.GaugeVec
 	compositorRestarts *prometheus.CounterVec
-	surfaces           *prometheus.GaugeVec
-	panelPower         *prometheus.GaugeVec
-	panelBrightness    *prometheus.GaugeVec
+	// The compositor's own two series carry no label. One pod runs one
+	// compositor, and the PodMonitor's relabeling puts the node on
+	// every series this process serves.
+	compositorServing           prometheus.Gauge
+	compositorContainerRestarts prometheus.Counter
+	surfaces                    *prometheus.GaugeVec
+	panelPower                  *prometheus.GaugeVec
+	panelBrightness             *prometheus.GaugeVec
 }
 
 // newMetrics builds the registry and states this build's identity on
@@ -103,7 +108,8 @@ func newMetrics(component, version string) *metrics {
 
 	registry.MustRegister(buildInfo, m.reconcileDuration, m.reconcileErrors, m.watchRestarts,
 		m.outputConnected, m.outputClaimed, m.observationValid, m.observationSuccess,
-		m.outputMode, m.compositorRestarts, m.surfaces, m.panelPower, m.panelBrightness)
+		m.outputMode, m.compositorRestarts, m.compositorServing, m.compositorContainerRestarts,
+		m.surfaces, m.panelPower, m.panelBrightness)
 	return m
 }
 

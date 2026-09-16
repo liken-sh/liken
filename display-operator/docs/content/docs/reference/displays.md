@@ -41,6 +41,9 @@ status:
       status: "True"
     - type: Responsive
       status: "True"
+    - type: CompositorServing
+      status: "True"
+      reason: Serving
 ```
 
 The [devices reference](/docs/reference/devices/) describes the
@@ -97,7 +100,7 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator. |
 | <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids. |
 | <span id="status--layout"></span>`layout` | [object](#statuslayout) | no | The arrangement the screen is drawn to, and what each region shows. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. |
 
 ### status.mode
 
@@ -174,7 +177,7 @@ Each region in stacking order, with the window on top of it.
 
 ### status.conditions[]
 
-Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does.
+Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

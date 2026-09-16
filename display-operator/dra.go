@@ -94,6 +94,10 @@ type draPlugin struct {
 	currentModes   func() (map[string]string, error)
 	connectorModes func() (map[string][]drmMode, error)
 	endCompositor  func() error
+	// KillCompositor is the same restart for a compositor that
+	// answers nothing. It sends SIGKILL, because a stopped process
+	// takes no SIGTERM.
+	killCompositor func() error
 	// What the compositor itself reports about the outputs it
 	// serves, which is what a mode switch reads back. It is nil until
 	// the operator wires the standing Wayland connection, and a nil
@@ -153,6 +157,7 @@ func newDRAPlugin(client *Client, card, socketDir string, layout *layoutLink) *d
 			return readConnectorModes(filepath.Join(driRoot, card))
 		},
 		endCompositor:  func() error { return endCompositor(procRoot) },
+		killCompositor: func() error { return killCompositor(procRoot) },
 		switchTimeout:  modeSwitchTimeout,
 		switchInterval: modeSwitchInterval,
 	}
@@ -251,8 +256,8 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	// with nothing behind it. The kubelet holds the pod in
 	// ContainerCreating and asks again, and the retry is the wait.
 	socketPath := filepath.Join(p.socketDir, socketName)
-	if !compositorServing(socketPath) {
-		return fail("no compositor is serving %s right now", socketPath)
+	if live := probeCompositor(socketPath); !live.serving {
+		return fail("no compositor is serving %s right now (%s: %s)", socketPath, live.reason, live.detail)
 	}
 	// The module is the other half of the delivery: it opens the
 	// claim's own socket in that same directory. A prepare that ran

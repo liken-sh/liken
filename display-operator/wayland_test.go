@@ -40,6 +40,9 @@ type westonBench struct {
 	t       *testing.T
 	path    string
 	version uint32
+	// The listener, so a test can end the compositor and leave its
+	// socket file behind.
+	listener *net.UnixListener
 
 	mu      sync.Mutex
 	outputs map[uint32]westonOutput
@@ -66,18 +69,27 @@ func labWestonModes() [][]uint32 {
 
 func newWestonBench(t *testing.T, connectors map[uint32]string) *westonBench {
 	t.Helper()
+	return westonBenchOn(t, filepath.Join(t.TempDir(), socketName), connectors)
+}
+
+// westonBenchOn is the same compositor on a path the caller names,
+// which is how a test puts one in a runtime directory it already
+// holds.
+func westonBenchOn(t *testing.T, path string, connectors map[uint32]string) *westonBench {
+	t.Helper()
 	outputs := map[uint32]westonOutput{}
 	for global, connector := range connectors {
 		outputs[global] = westonOutput{connector: connector, modes: labWestonModes()}
 	}
 	server := &westonBench{
 		t:       t,
-		path:    filepath.Join(t.TempDir(), socketName),
+		path:    path,
 		version: outputVersion,
 		outputs: outputs,
 		arrived: make(chan *compositorSession, 8),
 	}
 	listener := listenOnSocket(t, server.path)
+	server.listener = listener
 	go func() {
 		for {
 			connection, err := listener.Accept()
@@ -156,6 +168,15 @@ func (f *westonBench) restate(session *compositorSession, global uint32, modes [
 // from the operator's end of the socket.
 func (f *westonBench) end(session *compositorSession) {
 	_ = session.wire.socket.Close()
+}
+
+// stop ends the compositor's whole process, and the socket file it
+// created stays on the host.
+func (f *westonBench) stop() {
+	f.t.Helper()
+	if err := f.listener.Close(); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 type compositorSession struct {
