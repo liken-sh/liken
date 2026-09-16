@@ -115,15 +115,38 @@ func parseTrailerName(name string) trailerName {
 	}
 }
 
-// The kind the words after the year name. Song and spot are read before
-// trailer, because a "Trailer Song" is not a trailer and a "TV Spot" is
-// its own kind.
+// A bracketed tag in a trailer's name, where a trailer channel states
+// the height, as in `[4K Ultra HD]` or `[1080p]`.
+var trailerTagPattern = regexp.MustCompile(`\[([^\]]*)\]`)
+
+// The height a name's bracketed tag states, or 0 when no tag names one.
+// 4K is read before HD, and 1080 before HD, because `[4K Ultra HD]` and
+// `[HD 1080p]` each name one height.
+func trailerNameResolution(name string) int {
+	for _, tag := range trailerTagPattern.FindAllStringSubmatch(name, -1) {
+		switch inside := strings.ToLower(tag[1]); {
+		case strings.Contains(inside, "4k"), strings.Contains(inside, "2160"):
+			return 2160
+		case strings.Contains(inside, "1080"), strings.Contains(inside, "full hd"):
+			return 1080
+		case strings.Contains(inside, "720"), strings.Contains(inside, "hd"):
+			return 720
+		case strings.Contains(inside, "480"), strings.Contains(inside, "sd"):
+			return 480
+		}
+	}
+	return 0
+}
+
+// The kind the words after the year name. Song, music, and spot are read
+// before trailer, because a "Trailer Song" is not a trailer and a "TV Spot"
+// is its own kind.
 // The second answer is whether a word named a kind at all. A provider whose
 // whole collection is trailers reads it and takes trailer where no word did.
 func trailerNameKind(rest string) (string, bool) {
 	rest = strings.ToLower(rest)
 	switch {
-	case strings.Contains(rest, "song"):
+	case strings.Contains(rest, "song"), strings.Contains(rest, "music"):
 		return trailerKindOther, true
 	case strings.Contains(rest, "spot"):
 		return trailerKindSpot, true

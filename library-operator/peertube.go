@@ -81,8 +81,8 @@ func peertubeWatchURL(base string, video peertubeVideo) string {
 
 // The trailer answerer of one instance. It keys on the title's own name,
 // because an instance holds no provider ids.
-// A search answer states no resolution, so every entry this answerer makes
-// carries none.
+// A search answer carries no files and states no resolution, so each
+// entry takes the height the video's own name states.
 type peertubeTrailerAnswerer struct {
 	client *peertubeClient
 }
@@ -113,15 +113,16 @@ func (a peertubeTrailerAnswerer) trailers(ctx context.Context, title trailerTitl
 			continue
 		}
 		entry := trailerEntry{
-			Path:      likenSelfPath,
-			Provider:  providerBlockPeerTube,
-			Key:       video.UUID,
-			Site:      trailerSitePeerTube,
-			URL:       peertubeWatchURL(a.client.base, video),
-			Name:      video.Name,
-			Kind:      parsed.kind,
-			Language:  video.Language.ID,
-			Published: trailerDate(video.PublishedAt),
+			Path:       likenSelfPath,
+			Provider:   providerBlockPeerTube,
+			Key:        video.UUID,
+			Site:       trailerSitePeerTube,
+			URL:        peertubeWatchURL(a.client.base, video),
+			Name:       video.Name,
+			Kind:       parsed.kind,
+			Language:   video.Language.ID,
+			Published:  trailerDate(video.PublishedAt),
+			Resolution: trailerNameResolution(video.Name),
 		}
 		entry.Score, entry.Reason = scoreTrailer(entry, trailerMatch{
 			title:     foldTitle(parsed.title) == foldTitle(title.title),

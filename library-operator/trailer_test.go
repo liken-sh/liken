@@ -121,11 +121,46 @@ func TestWhatATrailerNameStates(t *testing.T) {
 			want: trailerName{title: "THE THING (1982)", year: 2011, kind: trailerKindTrailer}},
 		{name: "An Interview With The Director",
 			want: trailerName{title: "An Interview With The Director", year: 0, kind: trailerKindOther}},
+		{name: "KUNG FU PANDA 4 (2024) Trailer Music [Music Only Trailer]",
+			want: trailerName{title: "KUNG FU PANDA 4", year: 2024, kind: trailerKindOther}},
+		{name: "NOBODY 2 (2025) - Music From The Trailer [4K Ultra HD]",
+			want: trailerName{title: "NOBODY 2", year: 2025, kind: trailerKindOther}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			if got := parseTrailerName(test.name); got != test.want {
 				t.Errorf("the name states %+v, want %+v", got, test.want)
+			}
+		})
+	}
+}
+
+// The height a trailer name's bracketed tag states, and 0 when no tag
+// names one.
+func TestWhatResolutionATrailerNameStates(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+	}{
+		{name: "DUNE: PART THREE (2026) - IMAX Trailer [4K Ultra HD]", want: 2160},
+		{name: `DON'T MOVE (2026) - "Horror" TV Spot [Original 4K Ultra HD]`, want: 2160},
+		{name: "WONKA (2023) - Trailer #2 [2160p]", want: 2160},
+		{name: "WONKA (2023) - Trailer #2 [1080p]", want: 1080},
+		{name: "WONKA (2023) - Trailer #2 [Full HD]", want: 1080},
+		{name: "WONKA (2023) - Trailer #2 [HD 1080p]", want: 1080},
+		{name: "WONKA (2023) - Trailer #2 [720p]", want: 720},
+		{name: "WONKA (2023) - Trailer #2 [HD]", want: 720},
+		{name: "WONKA (2023) - Trailer #2 [480p]", want: 480},
+		{name: "WONKA (2023) - Trailer #2 [SD]", want: 480},
+		{name: "WONKA (2023) - Trailer #2", want: 0},
+		{name: "WONKA (2023) - Trailer #2 [Music Only Trailer]", want: 0},
+		{name: "THE MATRIX (1999) 1080p - Lobby Clip", want: 0},
+		{name: "THE MATRIX (1999) - Lobby Clip [Extended] [720p]", want: 720},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := trailerNameResolution(test.name); got != test.want {
+				t.Errorf("the name states the resolution %d, want %d", got, test.want)
 			}
 		})
 	}
