@@ -31,6 +31,18 @@ becomes a new plan or an open problem.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built.
 
+* [34, The player over HTTP](34-the-player-over-http.md). A
+  `media-api` Deployment answers HTTP for a `Player`: `screen.*` and
+  `audio.*` redirect with 307 to the display and audio APIs, and
+  `media.mp4` composes the screen's video with each sink's audio into
+  one fragmented MP4 through an ffmpeg `-c copy` mux, one second
+  behind now. The operator publishes `status.sinks[]`, the `Sink`
+  name each `spec.sinks` selection resolved to, and the API corrects
+  the two upstreams' clock offset from their header instants behind
+  that lead-in. It is the media instance
+  of the capture API design that display-operator plan 22 and
+  audio-operator plan 09 share.
+
 ## Completed
 
 * [33, The run reports its
