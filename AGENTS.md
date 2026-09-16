@@ -27,6 +27,14 @@ decision that spans several files, or a survey of alternatives. Put
 these explanations in a markdown document next to the thing they
 describe, organized by domain.
 
+## Errors carry their source's words
+
+An error that wraps a tool, a daemon socket, a bus answer, or a
+provider carries that source's own text: the stderr, the body, or the
+error string, verbatim. It goes in the wrapped error and in whatever
+status field or record the failure writes, so a person reads the cause
+from the log or the status and never needs a shell to find it.
+
 ## Commit messages
 
 A comment says what the system is now. A commit message says what one
