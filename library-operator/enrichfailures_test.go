@@ -87,7 +87,7 @@ func TestAFolderThatWillNotTakeALedgerLogsTheFailure(t *testing.T) {
 }
 
 func TestTheEnrichJobTakesItsOwnStartWhereItCannotReadTheRuns(t *testing.T) {
-	run, _ := enrichJob(t, writeOnlyCatalog(t))
+	run := enrichJob(t, writeOnlyCatalog(t))
 
 	if got := run.startedAt(t.Context()); got.IsZero() {
 		t.Error("the container read no start at all, want its own")

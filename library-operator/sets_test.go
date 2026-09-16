@@ -249,7 +249,6 @@ func sqliteScanner(t *testing.T, root string) (*scanner, *sqliteAgent) {
 		kind:    libraryKindMovies,
 		catalog: catalog,
 		report:  libraryReport{LastWalk: time.Now().UTC(), LastChange: time.Now().UTC()},
-		bus:     newBus("", "test", nil, nil, nil),
 	}
 	return scan, agent
 }

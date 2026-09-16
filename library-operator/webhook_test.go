@@ -24,7 +24,6 @@ func testScanner(t *testing.T, root, kind string) (*scanner, *catalogRecorder) {
 		library: "house/library",
 		kind:    kind,
 		catalog: catalog,
-		bus:     newBus("", "test", nil, nil, nil),
 	}
 	return scan, recorder
 }

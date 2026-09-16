@@ -50,7 +50,7 @@ func testScanPod(library *Library) *Pod {
 
 func scanPodOf(library *Library, path string) *Pod {
 	template := scanPodTemplate(library, path,
-		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testCorrosionImage)
 	return &Pod{Metadata: template.Metadata, Spec: template.Spec}
 }
 
@@ -142,9 +142,9 @@ func TestScanPodDeclaresNoPortOnTheScanner(t *testing.T) {
 	}
 }
 
-// the Job's own name reaches the scanner through the downward API,
-// because the scanner writes that name into the runs row the reporter
-// echoes back.
+// The Job's own name reaches the scanner through the downward API,
+// because the scanner writes that name into the runs row a catalog pod
+// confirms.
 func TestScannerContainerReadsItsJobName(t *testing.T) {
 	scanner := testScanPod(studioMovies()).Spec.Containers[0]
 
@@ -191,8 +191,6 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		libraryNameVariable:      "movies",
 		libraryKindVariable:      libraryKindMovies,
 		libraryRootVariable:      "/movies",
-		busAddressVariable:       testBusAddress,
-		topicBaseVariable:        defaultTopicBase,
 		catalogAPIVariable:       defaultCatalogAPI,
 		libraryIgnoreVariable:    "null",
 		libraryArtVariable:       "",

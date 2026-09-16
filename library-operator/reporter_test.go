@@ -64,7 +64,7 @@ func seededReporter(t *testing.T) (*reporter, *Catalog) {
 func TestTheReportCarriesTheCountsAndTheRuns(t *testing.T) {
 	report, catalog := seededReporter(t)
 	walked := time.Unix(1_700_000_000, 0).UTC()
-	if err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
 		Worker: workerScan, Job: "scan-1", Started: walked.Add(-time.Minute), Finished: walked,
 		Unidentified: 4, Removed: 9,
 	}); err != nil {
@@ -103,7 +103,7 @@ func TestTheReportCarriesTheCountsAndTheRuns(t *testing.T) {
 // flight, which is how the operator's phase follows a Job.
 func TestAScanRunThatHasNotFinishedIsAWalkInFlight(t *testing.T) {
 	report, catalog := seededReporter(t)
-	if err := catalog.UpsertRun(t.Context(), "house/movies",
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies",
 		libraryRun{Worker: workerScan, Job: "scan-2", Started: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +127,13 @@ func TestAScanRunThatHasNotFinishedIsAWalkInFlight(t *testing.T) {
 func TestARescanRunLeavesTheWalksNumbersAlone(t *testing.T) {
 	report, catalog := seededReporter(t)
 	walked := time.Unix(1_700_000_000, 0).UTC()
-	if err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
 		Worker: workerScan, Job: "scan-1", Started: walked.Add(-time.Minute), Finished: walked,
 		Unidentified: 2, Removed: 9,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
 		Worker: workerRescan, Job: "rescan-1", Started: walked.Add(time.Hour), Finished: walked.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestARescanRunLeavesTheWalksNumbersAlone(t *testing.T) {
 // reporter reads the walk in flight off the scan run alone.
 func TestARunningRescanIsNotAWalkInFlight(t *testing.T) {
 	report, catalog := seededReporter(t)
-	if err := catalog.UpsertRun(t.Context(), "house/movies",
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies",
 		libraryRun{Worker: workerRescan, Job: "rescan-2", Started: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatal(err)
 	}
@@ -346,8 +346,9 @@ func TestTheReporterPublishesOnlineAndEveryLibrary(t *testing.T) {
 	waitForTopic(t, broker, libraryStatusTopic(defaultTopicBase, "house", "series"))
 }
 
-// A run that lands republishes that library's report, so a Job
-// hears its own echo within the stream's latency and nothing polls.
+// A run that lands republishes that library's report, so a
+// Library's status follows a walk within the stream's latency and nothing
+// polls.
 func TestTheReporterRepublishesOnARun(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedTwoLibrariesInEveryTable(t, catalog)
@@ -356,7 +357,7 @@ func TestTheReporterRepublishesOnARun(t *testing.T) {
 	topic := libraryStatusTopic(defaultTopicBase, "house", "movies")
 	waitForTopic(t, broker, topic)
 
-	if err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
 		Worker: workerScan, Job: "scan-7",
 		Started: time.Unix(10, 0), Finished: time.Unix(20, 0),
 	}); err != nil {

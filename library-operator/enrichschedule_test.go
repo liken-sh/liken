@@ -367,7 +367,7 @@ func TestWebhookChainStopsWhenNoGapIsOpen(t *testing.T) {
 // reads it knows which folder it covered and how far the chain reached.
 func TestFolderScanJobOpensTheChain(t *testing.T) {
 	job := buildFolderScanJob(studioMovies(), "/library/movies/Arrival (2016)", testNow,
-		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testCorrosionImage)
 
 	marks := job.Metadata.Annotations
 	if marks[chainStageAnnotation] != chainStageScan {

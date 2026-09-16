@@ -80,12 +80,23 @@ life.
 ## How a `Job` confirms its rows landed
 
 Every worker `Job` writes a `runs` row when it starts and one when it
-finishes, then subscribes to its `Library`'s report and waits until the
-reporter echoes that run back with the counts the `Job` itself held.
-The echo is the proof, because a version can apply before the rows
-behind it finish replicating. A `Job` that waits more than two minutes
-fails, and Kubernetes retries it. The rows stay safe on the `Job`'s
-own claim.
+finishes. The write of the finished row answers with the writing
+agent's id and the db version of that write, and the `Job` writes the
+row once more with both of them in it. Every catalog pod runs a
+`confirmer` container beside its agent. The `confirmer` follows the
+finished runs, and for each one it reads `crsql_db_versions` and
+`__corro_bookkeeping_gaps` on its own copy to learn whether that copy
+holds every version of that agent up to the one the run names. When
+it does, it writes a row into the `confirmations` table under its own
+pod name, and the `Job` exits on the first row that names its run at
+that version. The version is the proof, because a receiving agent
+applies versions out of order and records the ones behind as gaps, so
+the newest version alone says nothing about the versions under it.
+While it waits, the `Job` writes its `runs` row again every ten
+seconds with a later finish time, so each write is a new broadcast
+with fresh peers. A `Job` that waits more than two minutes fails,
+which `HANDOFF_TIMEOUT` sets, and Kubernetes retries it. The rows stay
+safe on the `Job`'s own claim.
 
 ## How a screen syncs
 

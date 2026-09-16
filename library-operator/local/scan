@@ -30,11 +30,7 @@ image="library-operator:local"
 # so a read against any of them shows the walk.
 catalog_api="http://127.0.0.1:20081"
 
-# The broker the harness reporter publishes over. The Job hears its own
-# run come back on it.
-bus_address="127.0.0.1:20883"
-
-# The cap on the run. The walk and the echo end the run, so this number
+# The cap on the run. The walk and the confirmation end the run, so this number
 # bounds only a Job that never reaches its last line.
 run_seconds="${RUN_SECONDS:-600}"
 
@@ -90,13 +86,6 @@ if ! curl --silent --fail --max-time 2 \
   exit 1
 fi
 
-# The Job waits for the reporter's message before it exits, so the
-# broker has to be up as well as the agents.
-if ! (exec 3<>"/dev/tcp/${bus_address%:*}/${bus_address##*:}") 2>/dev/null; then
-  echo "local/scan: no broker answers on $bus_address; run 'local/catalog up' first" >&2
-  exit 1
-fi
-
 # A missing image is built here rather than reported, and the build is
 # the same one CI runs.
 if [ -z "$(docker images --quiet "$image")" ]; then
@@ -105,8 +94,8 @@ if [ -z "$(docker images --quiet "$image")" ]; then
 fi
 
 # `--network host` puts the Job on loopback, where the catalog API
-# port and the broker port are the addresses it uses. --user runs it as the
-# person at the keyboard, so it reads a media directory they own.
+# port is the address it uses. --user runs it as the person at the
+# keyboard, so it reads a media directory they own.
 #
 # The Job runs detached, because this script reads its log while it runs.
 echo "local/scan: walking $media as a $kind library into $catalog_api" >&2
@@ -121,10 +110,8 @@ docker run --detach --name "$container" \
   --env LIBRARY_KIND="$kind" \
   --env LIBRARY_ROOT=/ \
   --env LIBRARY_CATALOG_API="$catalog_api" \
-  --env LIBRARY_BUS_ADDRESS="$bus_address" \
-  --env LIBRARY_TOPIC_BASE= \
   --env JOB_NAME="$container" \
-  --env ECHO_TIMEOUT=2m \
+  --env HANDOFF_TIMEOUT=2m \
   "$image" scan >/dev/null
 
 # The Job exits on its own, and every way out of this script removes
@@ -136,7 +123,7 @@ trap cleanup EXIT
 
 # The Job logs one line for the end of its walk, and that line
 # reports the prune as well. The log runs to the end of the container,
-# because the Job holds the container open until it hears its own run.
+# because the Job holds the container open until its run is confirmed.
 walk="capped"
 while IFS= read -r line; do
   printf '%s\n' "$line" >&2
@@ -155,8 +142,8 @@ done < <(timeout --signal=TERM "$run_seconds" docker logs --follow "$container" 
 
 # A container still running at the cap is a Job that did not finish,
 # and one that left carries the exit code the Job ended with: zero once the
-# reporter has echoed its run, and non-zero on a failed walk or an echo
-# that never came.
+# a catalog pod has confirmed its run, and non-zero on a failed walk or a
+# confirmation that never came.
 job=1
 if [ -n "$(docker ps --quiet --filter "name=^${container}\$")" ]; then
   echo "local/scan: the job did not finish within the RUN_SECONDS cap of ${run_seconds}s" >&2
@@ -194,5 +181,5 @@ count="$(curl --silent --fail --max-time 5 \
 echo "local/scan: the $kind table holds ${count:-an unknown number of} rows" >&2
 
 # The script ends with what the Job ended with, so a failed walk or
-# an echo that never came fails the run here too.
+# a confirmation that never came fails the run here too.
 exit "$job"

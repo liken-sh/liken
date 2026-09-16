@@ -158,8 +158,16 @@ const subscriptionsPath = "/v1/subscriptions"
 // the projection and a reader that counts cells would read the wrong one.
 // onReady is called once the snapshot ends. The call returns when the
 // stream ends, which a cancelled context is one way to do.
-func (c *Catalog) subscribe(ctx context.Context, sql string, onReady func(), onRow func(columns []string, cells []any)) error {
-	payload, _ := json.Marshal(sql)
+//
+// A statement with parameters travels as the [sql, [params]] pair
+// the read side sends, because a subscription binds them the same way.
+func (c *Catalog) subscribe(ctx context.Context, sql string, params []any,
+	onReady func(), onRow func(columns []string, cells []any)) error {
+	var statement any = sql
+	if len(params) > 0 {
+		statement = []any{sql, params}
+	}
+	payload, _ := json.Marshal(statement)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+subscriptionsPath, bytes.NewReader(payload))
 	if err != nil {

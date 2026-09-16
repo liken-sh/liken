@@ -1,13 +1,10 @@
 package main
 
 // What these tests prove: the runs table against the shipped
-// schema, the run stream a reporter follows, and the echo a Job waits for
-// on the bus.
+// schema, and the run stream a reporter follows.
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,28 +14,6 @@ import (
 	"time"
 )
 
-// The wait a Job gives the echo, read out of the environment, with
-// the default for every value it cannot use.
-func TestEchoTimeout(t *testing.T) {
-	cases := []struct {
-		name string
-		raw  string
-		want time.Duration
-	}{
-		{name: "an empty value is the default", raw: "", want: defaultEchoTimeout},
-		{name: "a duration", raw: "45s", want: 45 * time.Second},
-		{name: "an unreadable value is the default", raw: "soon", want: defaultEchoTimeout},
-		{name: "a negative value is the default", raw: "-1m", want: defaultEchoTimeout},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if got := echoTimeout(testCase.raw); got != testCase.want {
-				t.Errorf("echoTimeout(%q) = %s, want %s", testCase.raw, got, testCase.want)
-			}
-		})
-	}
-}
-
 // A run written twice is one row, so the finished write replaces
 // the started one and every library's runs read back sorted by worker.
 func TestUpsertRunAgainstTheRealSchema(t *testing.T) {
@@ -47,17 +22,17 @@ func TestUpsertRunAgainstTheRealSchema(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0).UTC()
 	finished := started.Add(time.Minute)
 
-	if err := catalog.UpsertRun(ctx, "house/movies",
+	if _, _, err := catalog.UpsertRun(ctx, "house/movies",
 		libraryRun{Worker: workerScan, Job: "scan-1", Started: started}); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.UpsertRun(ctx, "house/movies", libraryRun{
+	if _, _, err := catalog.UpsertRun(ctx, "house/movies", libraryRun{
 		Worker: workerScan, Job: "scan-1", Started: started, Finished: finished,
 		Unidentified: 3, Removed: 7,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.UpsertRun(ctx, "house/movies",
+	if _, _, err := catalog.UpsertRun(ctx, "house/movies",
 		libraryRun{Worker: workerCleanup, Job: "cleanup-1", Started: started}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +63,7 @@ func TestARunningRunHasNoFinishTime(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	started := time.Unix(1_700_000_000, 0).UTC()
 
-	if err := catalog.UpsertRun(t.Context(), "house/movies",
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies",
 		libraryRun{Worker: workerScan, Job: "scan-1", Started: started}); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +88,7 @@ func TestDeleteRunsTakesOneLibrary(t *testing.T) {
 	ctx := t.Context()
 	for _, library := range []string{"house/movies", "house/series"} {
 		for _, worker := range []string{workerScan, workerCleanup} {
-			if err := catalog.UpsertRun(ctx, library,
+			if _, _, err := catalog.UpsertRun(ctx, library,
 				libraryRun{Worker: worker, Job: "job-1", Started: time.Unix(10, 0)}); err != nil {
 				t.Fatal(err)
 			}
@@ -162,6 +137,7 @@ func TestSubscribeRunsNamesTheLibraryOfEveryRowAndChange(t *testing.T) {
 		`{"eoq":{"time":0.1,"change_id":4}}` + "\n" +
 		`{"change":["update",1,["house/series","scan","scan-2",30,40,1,2],5]}` + "\n" +
 		`{"change":["delete",2,["house/departed","cleanup","cleanup-1",30,40,0,0],6]}` + "\n"
+
 	catalog := subscriptionServer(t, http.StatusOK, body)
 
 	var named []string
@@ -277,198 +253,6 @@ func TestSubscribeReadsWhatItCanAndSurfacesTheRest(t *testing.T) {
 	}
 }
 
-// A Job's wait, wired to the test broker, so the subscription and
-// the report that ends it travel a real connection.
-func waitingJob(t *testing.T, worker, job string) (*echoWaiter, <-chan *fakeBroker, *Bus) {
-	t.Helper()
-	address, accepted := testBroker(t)
-	shorterBackoff(t)
-	wait := newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), worker, job)
-	bus := newBus(address, "scan-house-movies", nil, nil, wait.note)
-	return wait, accepted, bus
-}
-
-// A report that names this Job's finished run ends the wait, which
-// is what lets the Job exit knowing the standing pod holds its rows.
-func TestTheEchoEndsTheWait(t *testing.T) {
-	wait, accepted, bus := waitingJob(t, workerScan, "scan-1")
-	done := make(chan error, 1)
-	go func() { done <- wait.wait(t.Context(), bus, scanTestTimeout) }()
-
-	broker := waitForBroker(t, accepted)
-	if got := waitForString(t, broker.subs); got != wait.topic {
-		t.Fatalf("the Job subscribed to %q, want %q", got, wait.topic)
-	}
-	broker.push(wait.topic, reportOf(t, libraryRun{
-		Worker: workerScan, Job: "scan-1",
-		Started: time.Unix(10, 0), Finished: time.Unix(20, 0),
-	}))
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("the wait ended with %v, want the echo", err)
-		}
-	case <-time.After(scanTestTimeout):
-		t.Fatal("the echo never ended the wait")
-	}
-}
-
-// A report that names no run of this Job leaves the wait standing,
-// so a Job never reads another worker's echo as its own.
-func TestTheWaitStandsOnAReportThatIsNotItsOwn(t *testing.T) {
-	cases := []struct {
-		name    string
-		topic   string
-		payload []byte
-	}{
-		{
-			name:    "another worker's run",
-			payload: reportOf(t, libraryRun{Worker: workerCleanup, Job: "scan-1", Finished: time.Unix(20, 0)}),
-		},
-		{
-			name:    "another Job's run",
-			payload: reportOf(t, libraryRun{Worker: workerScan, Job: "scan-0", Finished: time.Unix(20, 0)}),
-		},
-		{
-			name:    "a run that has not finished",
-			payload: reportOf(t, libraryRun{Worker: workerScan, Job: "scan-1", Started: time.Unix(10, 0)}),
-		},
-		{
-			name:    "a report with no runs",
-			payload: []byte(`{"titles":3}`),
-		},
-		{
-			name:    "a payload that is not a report",
-			payload: []byte("3 titles"),
-		},
-		{
-			name:    "another library's topic",
-			topic:   libraryStatusTopic(defaultTopicBase, "house", "series"),
-			payload: reportOf(t, libraryRun{Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0)}),
-		},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			wait := newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), workerScan, "scan-1")
-			topic := testCase.topic
-			if topic == "" {
-				topic = wait.topic
-			}
-
-			wait.note(topic, testCase.payload)
-
-			select {
-			case <-wait.echoed:
-				t.Error("the wait ended on a report that names no run of this Job")
-			default:
-			}
-		})
-	}
-}
-
-// One whole report, as the reporter publishes it.
-func mustMarshal(t *testing.T, report libraryReport) []byte {
-	t.Helper()
-	payload, err := json.Marshal(report)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return payload
-}
-
-// A Job that expects counts waits until the report carries them,
-// because the run row reaches the standing pod before the rows the Job
-// wrote ahead of it.
-func TestTheWaitStandsUntilTheCountsMatch(t *testing.T) {
-	cases := []struct {
-		name  string
-		items int
-		files int
-		want  bool
-	}{
-		{name: "the counts the Job wrote", items: 1415, files: 2830, want: true},
-		{name: "fewer items than the Job wrote", items: 1149, files: 2830},
-		{name: "fewer files than the Job wrote", items: 1415, files: 2000},
-		{name: "an empty library", items: 0, files: 0},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			wait := newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), workerScan, "scan-1")
-			wait.expect(1415, 2830)
-
-			wait.note(wait.topic, mustMarshal(t, libraryReport{
-				Items: testCase.items, Files: testCase.files,
-				Runs: []libraryRun{{Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0)}},
-			}))
-
-			echoed := false
-			select {
-			case <-wait.echoed:
-				echoed = true
-			default:
-			}
-			if echoed != testCase.want {
-				t.Errorf("the wait ended: %v, want %v", echoed, testCase.want)
-			}
-		})
-	}
-}
-
-// A Job that could not read its counts waits on the run alone, so a
-// walk that failed still holds its agent open until its rows land.
-func TestAWaitWithNoCountsEndsOnTheRunAlone(t *testing.T) {
-	wait := newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), workerScan, "scan-1")
-
-	wait.note(wait.topic, mustMarshal(t, libraryReport{
-		Items: 1149, Files: 2000,
-		Runs: []libraryRun{{Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0)}},
-	}))
-
-	select {
-	case <-wait.echoed:
-	default:
-		t.Error("the wait stands on a report that names the run, with no counts expected")
-	}
-}
-
-// An echo that never arrives fails the Job, so its rows stay on its
-// own claim and the retry carries them.
-func TestTheWaitFailsOnItsTimeout(t *testing.T) {
-	wait, _, bus := waitingJob(t, workerScan, "scan-1")
-
-	err := wait.wait(t.Context(), bus, 10*time.Millisecond)
-
-	if err == nil {
-		t.Fatal("the wait ended with no error, want the timeout")
-	}
-	if !strings.Contains(err.Error(), "scan-1") {
-		t.Errorf("error = %v, want the Job named", err)
-	}
-}
-
-// A cancelled context ends the wait, so a Job the kubelet stops
-// does not hold the pod open for the whole timeout.
-func TestTheWaitEndsOnACancelledContext(t *testing.T) {
-	wait, _, bus := waitingJob(t, workerScan, "scan-1")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := wait.wait(ctx, bus, scanTestTimeout); err == nil {
-		t.Error("the wait ended with no error, want the cancelled context")
-	}
-}
-
-// One report carrying one run, as the reporter publishes it.
-func reportOf(t *testing.T, runs ...libraryRun) []byte {
-	t.Helper()
-	payload, err := json.Marshal(libraryReport{Runs: runs})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return payload
-}
-
 // An agent that answers everything the catalog it fronts answers,
 // except the requests the test refuses, so a test drives one failed write
 // in the middle of a Job.
@@ -480,17 +264,66 @@ func proxyCatalog(t *testing.T, catalog *Catalog, refuse func(path string, body 
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		answer, err := http.Post(catalog.base+r.URL.Path, "application/json", bytes.NewReader(body))
+		// The forwarded request carries the caller's own context, so a
+		// caller that gives up ends the request behind the proxy too. Without
+		// it, a subscription the caller dropped holds this server open for
+		// ever and the test's own shutdown waits on it.
+		forward, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+			catalog.base+r.URL.Path, bytes.NewReader(body))
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		forward.Header.Set("Content-Type", "application/json")
+		answer, err := http.DefaultClient.Do(forward)
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
 		defer answer.Body.Close()
 		w.WriteHeader(answer.StatusCode)
-		_, _ = io.Copy(w, answer.Body)
+		streamBack(w, answer.Body)
 	}))
 	t.Cleanup(server.Close)
 	return NewCatalog(server.URL, server.Client())
+}
+
+// Copies an answer back as it arrives and flushes each piece, so a
+// subscription that stays open reaches the caller through the proxy the
+// way it reaches it from the agent.
+func streamBack(w http.ResponseWriter, body io.Reader) {
+	flusher, _ := w.(http.Flusher)
+	buffer := make([]byte, 4096)
+	for {
+		read, err := body.Read(buffer)
+		if read > 0 {
+			if _, err := w.Write(buffer[:read]); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// A catalog that records every statement a Job posts and forwards
+// every request to a real agent, so one test reads the writes and the
+// subscription both.
+func recordingProxy(t *testing.T, catalog *Catalog) (*Catalog, *catalogRecorder) {
+	t.Helper()
+	recorder := &catalogRecorder{}
+	return proxyCatalog(t, catalog, func(path string, body []byte) bool {
+		if strings.HasSuffix(path, transactionsPath) {
+			recorder.mu.Lock()
+			recorder.requests = append(recorder.requests, parseStatements(body))
+			recorder.mu.Unlock()
+		}
+		return false
+	}), recorder
 }
 
 // A row the read cannot make a run of is skipped, so one row of a
@@ -502,13 +335,13 @@ func TestRunsSkipsARowItCannotRead(t *testing.T) {
 		row  string
 	}{
 		{name: "a row shorter than the columns", row: `{"row":[1,["house/movies","scan"]]}`},
-		{name: "a library that is not a string", row: `{"row":[1,[7,"scan","scan-1",10,20,0,0,""]]}`},
+		{name: "a library that is not a string", row: `{"row":[1,[7,"scan","scan-1",10,20,0,0,"","",0]]}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			body := `{"columns":["library","worker","job","started","finished","unidentified","removed","failure"]}` + "\n" +
+			body := `{"columns":["library","worker","job","started","finished","unidentified","removed","failure","actor","version"]}` + "\n" +
 				testCase.row + "\n" +
-				`{"row":[2,["house/series","scan","scan-2",10,20,0,0,""]]}` + "\n" +
+				`{"row":[2,["house/series","scan","scan-2",10,20,0,0,"","",0]]}` + "\n" +
 				`{"eoq":{"time":0.1}}` + "\n"
 			catalog := subscriptionServer(t, http.StatusOK, body)
 

@@ -3,38 +3,27 @@ package main
 import (
 	"bytes"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 )
 
-// enrichJob builds the enricher Job's closing container over the test broker
-// and one catalog, so the runs row and the echo both travel a real
-// connection.
-func enrichJob(t *testing.T, catalog *Catalog) (*enrichRun, <-chan *fakeBroker) {
+// EnrichJob builds the enricher Job's closing container over one
+// catalog, so the runs row and the hand-off both travel a real connection.
+func enrichJob(t *testing.T, catalog *Catalog) *enrichRun {
 	t.Helper()
-	address, accepted := testBroker(t)
-	shorterBackoff(t)
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
 	work.job = "movies-enrich-1"
-	work.statusTopic = libraryStatusTopic(defaultTopicBase, "house", "movies")
 
-	run := &enrichRun{
-		enricher:    work,
-		echoTimeout: scanTestTimeout,
-	}
-	run.echo = newEchoWaiter(run.statusTopic, workerEnrich, run.job)
-	run.bus = newBus(address, "enrich-house-movies", nil, nil, run.echo.note)
-	return run, accepted
+	return &enrichRun{enricher: work, handoffTimeout: scanTestTimeout}
 }
 
-func TestTheEnrichJobWritesItsRunAndWaitsForTheEcho(t *testing.T) {
+func TestTheEnrichJobWritesItsRunAndWaitsToBeConfirmed(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
-	run, accepted := enrichJob(t, catalog)
+	run := enrichJob(t, catalog)
 	done := make(chan error, 1)
 	go func() { done <- run.runJob(t.Context()) }()
 
-	echoTheRun(t, accepted, run.echo)
+	confirmTheRun(t, catalog, workerEnrich, run.job)
 	if err := <-done; err != nil {
 		t.Fatalf("the job failed: %v", err)
 	}
@@ -53,7 +42,7 @@ func TestTheEnrichJobWritesItsRunAndWaitsForTheEcho(t *testing.T) {
 
 func TestTheEnrichJobKeepsTheStartTheProbeContainerWrote(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	run, accepted := enrichJob(t, catalog)
+	run := enrichJob(t, catalog)
 	if err := run.markRunStarted(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +50,7 @@ func TestTheEnrichJobKeepsTheStartTheProbeContainerWrote(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- run.runJob(t.Context()) }()
-	echoTheRun(t, accepted, run.echo)
+	confirmTheRun(t, catalog, workerEnrich, run.job)
 	if err := <-done; err != nil {
 		t.Fatalf("the job failed: %v", err)
 	}
@@ -73,8 +62,8 @@ func TestTheEnrichJobKeepsTheStartTheProbeContainerWrote(t *testing.T) {
 
 func TestTheStartOfAnotherJobIsNotThisOnes(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	run, _ := enrichJob(t, catalog)
-	err := catalog.UpsertRun(t.Context(), run.library, libraryRun{
+	run := enrichJob(t, catalog)
+	_, _, err := catalog.UpsertRun(t.Context(), run.library, libraryRun{
 		Worker: workerEnrich, Job: "another-job", Started: time.Unix(10, 0),
 	})
 	if err != nil {
@@ -87,42 +76,28 @@ func TestTheStartOfAnotherJobIsNotThisOnes(t *testing.T) {
 }
 
 func TestTheEnrichJobFailsWhereItCannotReachItsAgent(t *testing.T) {
-	run, _ := enrichJob(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+	run := enrichJob(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
 
 	if err := run.runJob(t.Context()); err == nil {
 		t.Error("the job reported no error, want the unreachable agent's")
 	}
 }
 
-func TestAnEnrichJobWithNoBrokerRefusesToStart(t *testing.T) {
-	t.Setenv(busAddressVariable, "")
-	log := &bytes.Buffer{}
-
-	if _, err := newEnrichRun(log); err == nil {
-		t.Fatal("the container started, want a refusal")
-	}
-	if !strings.Contains(log.String(), busAddressVariable) {
-		t.Errorf("log = %q, want the variable the pod is missing", log.String())
-	}
-}
-
-func TestAnEnrichJobReadsItsTopicOutOfTheEnvironment(t *testing.T) {
-	t.Setenv(busAddressVariable, "127.0.0.1:1883")
+// The container reads the Job it closes and the wait it makes out of
+// the environment, because it holds no credential to look a Library up with.
+func TestAnEnrichJobReadsItsJobOutOfTheEnvironment(t *testing.T) {
 	t.Setenv(libraryNamespaceVariable, "house")
 	t.Setenv(libraryNameVariable, "movies")
-	t.Setenv(topicBaseVariable, "")
 	t.Setenv(jobNameVariable, "movies-enrich-1")
+	t.Setenv(handoffTimeoutVariable, "")
 
-	run, err := newEnrichRun(&bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	run := newEnrichRun(&bytes.Buffer{})
 
-	if run.statusTopic != libraryStatusTopic(defaultTopicBase, "house", "movies") {
-		t.Errorf("topic = %q, want the Library's status topic", run.statusTopic)
+	if run.job != "movies-enrich-1" {
+		t.Errorf("job = %q, want the Job the environment names", run.job)
 	}
-	if run.echoTimeout != defaultEchoTimeout {
-		t.Errorf("timeout = %s, want the default", run.echoTimeout)
+	if run.handoffTimeout != defaultHandoffTimeout {
+		t.Errorf("timeout = %s, want the default", run.handoffTimeout)
 	}
 }
 

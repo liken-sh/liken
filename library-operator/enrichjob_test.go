@@ -28,7 +28,7 @@ func testEnrichJob(library *Library, path string, providers ...*MetadataProvider
 		library.Spec.Sources = append(library.Spec.Sources, provider.Metadata.Name)
 	}
 	return buildEnrichJob(library, set, nil, enrichJobName(library.Metadata.Name), path,
-		testScannerImage, testFFmpegImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testFFmpegImage, testCorrosionImage)
 }
 
 // the pod holds the catalog agent, then the two facts that edit the
@@ -202,11 +202,11 @@ func TestEnrichJobCarriesTheJobEnvironment(t *testing.T) {
 				if got[libraryNameVariable] != "movies" || got[libraryKindVariable] != libraryKindMovies {
 					t.Errorf("%s reads %v, want the Library it serves", container.Name, got)
 				}
-				if got[busAddressVariable] != testBusAddress || got[topicBaseVariable] != defaultTopicBase {
-					t.Errorf("%s reads %v, want the broker and the topic base", container.Name, got)
+				if _, held := got[busAddressVariable]; held {
+					t.Errorf("%s reads %s, and no enricher container uses the bus", container.Name, busAddressVariable)
 				}
-				if got[echoTimeoutVariable] != defaultEchoTimeout.String() {
-					t.Errorf("%s reads %s = %q", container.Name, echoTimeoutVariable, got[echoTimeoutVariable])
+				if got[handoffTimeoutVariable] != defaultHandoffTimeout.String() {
+					t.Errorf("%s reads %s = %q", container.Name, handoffTimeoutVariable, got[handoffTimeoutVariable])
 				}
 				if got[syncTimeoutVariable] != defaultSyncTimeout.String() {
 					t.Errorf("%s reads %s = %q", container.Name, syncTimeoutVariable, got[syncTimeoutVariable])
@@ -390,7 +390,7 @@ func TestTheArtContainerNamesItsFactsAndItsMemory(t *testing.T) {
 }
 
 // The enrich container is still the last container of the Job, because it
-// writes the runs row and waits for the echo.
+// Writes the runs row and waits to be confirmed.
 func TestTheEnrichContainerStillRunsLast(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
 
@@ -627,7 +627,7 @@ func TestEveryFactsContainerCarriesTheLanguages(t *testing.T) {
 
 	job := buildEnrichJob(library, set, []string{"en-US", "ko"},
 		enrichJobName(library.Metadata.Name), "",
-		testScannerImage, testFFmpegImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testFFmpegImage, testCorrosionImage)
 
 	for _, container := range job.Spec.Template.Spec.InitContainers[1:] {
 		if got := containerEnvironment(container)[libraryLanguagesVariable]; got != "en-US,ko" {

@@ -18,17 +18,12 @@ import (
 func TestNewSweeperReadsItsLibraryFromTheEnvironment(t *testing.T) {
 	t.Setenv(libraryNamespaceVariable, "house")
 	t.Setenv(libraryNameVariable, "movies")
-	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv(catalogAPIVariable, "")
-	t.Setenv(topicBaseVariable, "")
 	t.Setenv(jobNameVariable, "movies-cleanup-1")
-	t.Setenv(echoTimeoutVariable, "90s")
+	t.Setenv(handoffTimeoutVariable, "90s")
 	var logged bytes.Buffer
 
-	sweep, err := newSweeper(&logged)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sweep := newSweeper(&logged)
 
 	if sweep.library != "house/movies" {
 		t.Errorf("library = %q, want house/movies", sweep.library)
@@ -39,13 +34,9 @@ func TestNewSweeperReadsItsLibraryFromTheEnvironment(t *testing.T) {
 	if !strings.Contains(logged.String(), "house/movies") {
 		t.Errorf("log = %q, want the library it sweeps", logged.String())
 	}
-	if sweep.job != "movies-cleanup-1" || sweep.echoTimeout != 90*time.Second {
+	if sweep.job != "movies-cleanup-1" || sweep.handoffTimeout != 90*time.Second {
 		t.Errorf("job = %q with a %s wait, want the Job and the wait the environment names",
-			sweep.job, sweep.echoTimeout)
-	}
-	if sweep.echo.worker != workerCleanup || sweep.echo.topic != libraryStatusTopic(defaultTopicBase, "house", "movies") {
-		t.Errorf("the echo waits on %s of %s, want this library's cleanup run",
-			sweep.echo.worker, sweep.echo.topic)
+			sweep.job, sweep.handoffTimeout)
 	}
 }
 
@@ -54,57 +45,26 @@ func TestNewSweeperReadsItsLibraryFromTheEnvironment(t *testing.T) {
 func TestNewSweeperTakesTheCatalogAddressItIsGiven(t *testing.T) {
 	t.Setenv(libraryNamespaceVariable, "house")
 	t.Setenv(libraryNameVariable, "movies")
-	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv(catalogAPIVariable, "http://127.0.0.1:9999")
 
-	sweep, err := newSweeper(&bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	sweep := newSweeper(&bytes.Buffer{})
 
 	if sweep.catalog.base != "http://127.0.0.1:9999" {
 		t.Errorf("catalog = %q, want the address the environment named", sweep.catalog.base)
 	}
 }
 
-// A cleanup container with no broker address starts no sweep. It names
-// the variable in the pod log and fails the Job before it writes the
-// catalog.
-func TestNewSweeperRefusesWithNoBus(t *testing.T) {
-	t.Setenv(libraryNamespaceVariable, "house")
-	t.Setenv(libraryNameVariable, "movies")
-	t.Setenv(busAddressVariable, "")
-	var logged bytes.Buffer
-
-	sweep, err := newSweeper(&logged)
-
-	if err == nil {
-		t.Fatal("err = nil, want the refusal of a job with no bus")
-	}
-	if sweep != nil {
-		t.Errorf("sweeper = %+v, want none", sweep)
-	}
-	if !strings.Contains(logged.String(), busAddressVariable) {
-		t.Errorf("log = %q, want the variable it names", logged.String())
-	}
-}
-
-// One cleanup Job over a catalog loaded with the shipped schema,
-// wired to the test broker, so the sweep and the echo run with no pod.
-func cleanupJob(t *testing.T, catalog *Catalog) (*sweeper, <-chan *fakeBroker) {
+// One cleanup Job over a catalog loaded with the shipped schema, so
+// the sweep and the hand-off run with no pod.
+func cleanupJob(t *testing.T, catalog *Catalog) *sweeper {
 	t.Helper()
-	address, accepted := testBroker(t)
-	shorterBackoff(t)
-	sweep := &sweeper{
-		library:     "house/movies",
-		job:         "cleanup-1",
-		catalog:     catalog,
-		echoTimeout: scanTestTimeout,
-		log:         &syncLog{},
+	return &sweeper{
+		library:        "house/movies",
+		job:            "cleanup-1",
+		catalog:        catalog,
+		handoffTimeout: scanTestTimeout,
+		log:            &syncLog{},
 	}
-	sweep.echo = newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), workerCleanup, sweep.job)
-	sweep.bus = newBus(address, "cleanup-house-movies", nil, nil, sweep.echo.note)
-	return sweep, accepted
 }
 
 // a log written from the job's goroutine and read by the test, with the
@@ -126,23 +86,31 @@ func (l *syncLog) String() string {
 	return l.text.String()
 }
 
-// The Job takes every row the departing library holds, the runs of
-// every other worker with them, writes its own run last, and exits on the
-// echo. The surviving library is untouched.
-func TestTheCleanupJobSweepsAndWaitsForItsEcho(t *testing.T) {
+// The Job takes every row the departing library holds, the runs and
+// confirmations of every other worker with them, writes its own run last,
+// and exits on the confirmation. The surviving library is untouched.
+func TestTheCleanupJobSweepsAndWaitsToBeConfirmed(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	seedTwoLibrariesInEveryTable(t, catalog)
-	if err := catalog.UpsertRun(t.Context(), "house/movies",
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies",
 		libraryRun{Worker: workerScan, Job: "scan-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	sweep, accepted := cleanupJob(t, catalog)
+	if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-1",
+		"movies-catalog-0", 1, time.Unix(20, 0)); err != nil {
+		t.Fatal(err)
+	}
+	sweep := cleanupJob(t, catalog)
 
 	done := make(chan error, 1)
 	go func() { done <- sweep.runJob(t.Context()) }()
-	echoTheCleanup(t, accepted, sweep.echo)
+	confirmTheRun(t, catalog, workerCleanup, "cleanup-1")
 	if err := <-done; err != nil {
 		t.Fatalf("the job failed: %v", err)
+	}
+
+	if got := agent.rowsFor(t, "confirmations", "house/movies"); got != 1 {
+		t.Errorf("the departed library holds %d confirmations, want the cleanup's alone", got)
 	}
 
 	if got := agent.rowsFor(t, "movies", "house/movies"); got != 0 {
@@ -164,74 +132,26 @@ func TestTheCleanupJobSweepsAndWaitsForItsEcho(t *testing.T) {
 	}
 }
 
-// Answers the Job's subscription with the report the reporter
-// would publish once it holds the deletes.
-func echoTheCleanup(t *testing.T, accepted <-chan *fakeBroker, wait *echoWaiter) {
-	t.Helper()
-	broker := waitForBroker(t, accepted)
-	if got := waitForString(t, broker.subs); got != wait.topic {
-		t.Fatalf("the Job subscribed to %q, want %q", got, wait.topic)
-	}
-	broker.push(wait.topic, reportOf(t, libraryRun{
-		Worker: wait.worker, Job: wait.job,
-		Started: time.Unix(10, 0), Finished: time.Unix(20, 0),
-	}))
-}
-
-// The cleanup waits for a report that counts no item and no file
-// for the library, because a report that still counts either is one
-// whose deletes have not reached the standing pod.
-func TestTheCleanupJobWaitsUntilTheLibraryIsEmpty(t *testing.T) {
+// A confirmation that never arrives fails the Job, so the rows stay
+// on its own claim and the retry carries them.
+func TestTheCleanupJobFailsWithNoConfirmation(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	seedTwoLibrariesInEveryTable(t, catalog)
-	sweep, accepted := cleanupJob(t, catalog)
-	done := make(chan error, 1)
-	go func() { done <- sweep.runJob(t.Context()) }()
-
-	broker := waitForBroker(t, accepted)
-	if got := waitForString(t, broker.subs); got != sweep.echo.topic {
-		t.Fatalf("the Job subscribed to %q, want %q", got, sweep.echo.topic)
-	}
-	run := libraryRun{Worker: workerCleanup, Job: "cleanup-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}
-	broker.push(sweep.echo.topic, mustMarshal(t, libraryReport{Items: 3, Files: 2, Runs: []libraryRun{run}}))
-	select {
-	case err := <-done:
-		t.Fatalf("the job exited on a report that still counts the rows it deleted: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	broker.push(sweep.echo.topic, mustMarshal(t, libraryReport{Runs: []libraryRun{run}}))
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("the job failed: %v", err)
-		}
-	case <-time.After(scanTestTimeout):
-		t.Fatal("the job never exited on the report of an empty library")
-	}
-}
-
-// An echo that never arrives fails the Job, so the rows stay on
-// its own claim and the retry carries them.
-func TestTheCleanupJobFailsWithNoEcho(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	sweep, _ := cleanupJob(t, catalog)
-	sweep.echoTimeout = 20 * time.Millisecond
+	sweep := cleanupJob(t, catalog)
+	sweep.handoffTimeout = 20 * time.Millisecond
 
 	err := sweep.runJob(t.Context())
 
 	if err == nil {
-		t.Fatal("the job returned no error, want the echo timeout")
+		t.Fatal("the job returned no error, want the timeout")
 	}
 	if !strings.Contains(err.Error(), "cleanup-1") {
 		t.Errorf("error = %v, want the Job named", err)
 	}
 }
 
-// a failed sweep names the failure in the log and fails the Job, because
-// a Job that waited on an echo of rows it never deleted would time out
-// with nothing to show.
+// A failed sweep names the failure in the log and fails the Job,
+// because a Job that waited to be confirmed for rows it never deleted would
+// time out with nothing to show.
 func TestTheSweepLogsAFailureAndFailsTheJob(t *testing.T) {
 	unwell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -290,8 +210,8 @@ func refusingRunDeletes(t *testing.T, catalog *Catalog) *Catalog {
 }
 
 // A catalog that refuses the cleanup's own run fails the Job,
-// because a Job whose run never landed waits for an echo that cannot
-// come.
+// because a Job whose run never landed waits for a confirmation that
+// cannot come.
 func TestTheCleanupJobFailsWhenItCannotWriteItsRun(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedTwoLibrariesInEveryTable(t, catalog)

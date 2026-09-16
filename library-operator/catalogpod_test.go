@@ -86,17 +86,17 @@ func TestCatalogPodToleratesNoTaint(t *testing.T) {
 	}
 }
 
-// the reporter runs this operator's own image in its report role, and
-// it learns the namespace, the broker, and the catalog API from its
-// environment alone.
+// The reporter runs this operator's own image in its report role,
+// and it learns the namespace, the broker, and the catalog API from its
+// environment alone. The confirmer stands beside it.
 func TestCatalogPodRunsTheReporterBesideTheAgent(t *testing.T) {
 	pod := testCatalogPod(housekeepingCatalog(), 0)
 
 	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != catalogContainer {
 		t.Fatalf("initContainers = %+v, want the catalog agent alone", pod.Spec.InitContainers)
 	}
-	if len(pod.Spec.Containers) != 1 {
-		t.Fatalf("containers = %+v, want the reporter alone", pod.Spec.Containers)
+	if len(pod.Spec.Containers) != 2 {
+		t.Fatalf("containers = %+v, want the reporter and the confirmer", pod.Spec.Containers)
 	}
 	reporter := pod.Spec.Containers[0]
 	if reporter.Name != reporterContainer || reporter.Image != testScannerImage {

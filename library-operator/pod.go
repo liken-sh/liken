@@ -18,6 +18,8 @@ const (
 	catalogContainer  = "catalog"
 	cleanupContainer  = "cleanup"
 	reporterContainer = "reporter"
+	// The container that confirms a Job's run against one copy.
+	confirmerContainer = "confirmer"
 
 	libraryVolumeName = "library"
 	catalogVolumeName = "catalog"
@@ -108,9 +110,9 @@ const (
 // read-only. It is a function of the Library, the scan path, and the
 // operator's own settings alone, so two passes build the same template,
 // which is what makes the template hash mean anything.
-func scanPodTemplate(library *Library, scanPath, scannerImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
+func scanPodTemplate(library *Library, scanPath, scannerImage, corrosionImage string) PodTemplateSpec {
 	template := workerPodTemplate(library, workerScan,
-		scannerSidecar(library, scanPath, scannerImage, busAddress, topicBase), corrosionImage)
+		scannerSidecar(library, scanPath, scannerImage), corrosionImage)
 	// The library volume is the scanner's alone; the cleanup worker
 	// reads no media, so it mounts none.
 	//
@@ -202,9 +204,9 @@ func libraryOwner(library *Library) OwnerReference {
 //
 // An empty scan path is a full walk, and a path names the one
 // folder to rescan; the Job's own name arrives through the downward
-// API, because the scanner writes it into the runs row the reporter
-// echoes back.
-func scannerSidecar(library *Library, scanPath, image, busAddress, topicBase string) Container {
+// API, because the scanner writes it into the runs row a catalog pod
+// confirms.
+func scannerSidecar(library *Library, scanPath, image string) Container {
 	if settings := library.Spec.settings(); settings != nil && settings.Image != "" {
 		image = settings.Image
 	}
@@ -217,8 +219,6 @@ func scannerSidecar(library *Library, scanPath, image, busAddress, topicBase str
 			{Name: libraryNameVariable, Value: library.Metadata.Name},
 			{Name: libraryKindVariable, Value: library.Spec.Kind},
 			{Name: libraryRootVariable, Value: library.Spec.Storage.Root},
-			{Name: busAddressVariable, Value: busAddress},
-			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
 			{Name: libraryArtVariable, Value: artPathOf(library)},

@@ -13,7 +13,7 @@ import (
 
 // the schedule the operator would stand for one Library.
 func testScanCronJob(library *Library) *CronJob {
-	return buildScanCronJob(library, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	return buildScanCronJob(library, testScannerImage, testCorrosionImage)
 }
 
 // the schedule is named for the Library, owned by it, and carries the
@@ -89,7 +89,7 @@ func TestFolderScanJobCarriesItsPath(t *testing.T) {
 	path := "/library/movies/Arrival (2016)"
 
 	job := buildFolderScanJob(studioMovies(), path, testNow,
-		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testCorrosionImage)
 
 	if !strings.HasPrefix(job.Metadata.Name, "movies-scan-") {
 		t.Errorf("name = %q, want a name under the Library's scan prefix", job.Metadata.Name)

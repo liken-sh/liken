@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -10,9 +9,9 @@ import (
 	"time"
 )
 
-// These tests run one fact container against the test broker and a real
-// catalog, so the wait for the copy runs over a real connection and real
-// rows.
+// These tests run one fact container against a catalog loaded with
+// the shipped schema, so the wait for the copy runs over real rows and the
+// cr-sqlite bookkeeping a real agent holds.
 
 // The poll of the local copy runs in milliseconds here, so a test proves the
 // wait in the time a tick takes.
@@ -23,210 +22,169 @@ func shorterSyncInterval(t *testing.T) {
 	catalogSyncInterval = 5 * time.Millisecond
 }
 
-// syncingEnricher builds one fact container with the environment the
-// operator gives it: the broker it subscribes on, the Library's status topic,
-// and the bound on the wait.
-func syncingEnricher(t *testing.T, catalog *Catalog) (*enricher, <-chan *fakeBroker) {
+// SyncingEnricher builds one fact container with the bound on its
+// wait the operator gives it.
+func syncingEnricher(t *testing.T, catalog *Catalog) *enricher {
 	t.Helper()
-	address, accepted := testBroker(t)
-	shorterBackoff(t)
 	shorterSyncInterval(t)
-	t.Setenv(busAddressVariable, address)
 
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
-	work.statusTopic = libraryStatusTopic(defaultTopicBase, "house", "movies")
 	work.syncTimeout = scanTestTimeout
-	return work, accepted
+	return work
 }
 
-// The report the standing pod publishes retained, in the two counts the
-// container compares its own copy against.
-func syncReport(t *testing.T, items, files int) []byte {
+// Writes the finished scan run a synced copy has to hold, naming the
+// write the walking agent made.
+func walkLanded(t *testing.T, catalog *Catalog, library string, at time.Time) {
 	t.Helper()
-	payload, err := json.Marshal(libraryReport{Items: items, Files: files})
+	run := libraryRun{Worker: workerScan, Job: "movies-scan-1", Started: at.Add(-time.Minute), Finished: at}
+	actor, version, err := catalog.UpsertRun(t.Context(), library, run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return payload
-}
-
-// The report the standing pod publishes after a walk: the two counts, and
-// the run of the walk that finished at this second.
-func syncReportWalked(t *testing.T, items, files int, walked time.Time) []byte {
-	t.Helper()
-	payload, err := json.Marshal(libraryReport{
-		Items: items,
-		Files: files,
-		Runs:  []libraryRun{{Worker: workerScan, Job: "movies-scan-1", Finished: walked}},
-	})
-	if err != nil {
+	run.Actor, run.Version = actor, version
+	if _, _, err := catalog.UpsertRun(t.Context(), library, run); err != nil {
 		t.Fatal(err)
 	}
-	return payload
-}
-
-// reportTheCounts answers the container's subscription with the report the
-// standing pod holds for the library.
-func reportTheCounts(t *testing.T, accepted <-chan *fakeBroker, topic string, items, files int) {
-	t.Helper()
-	report(t, accepted, topic, syncReport(t, items, files))
-}
-
-// report answers the container's subscription with this payload.
-func report(t *testing.T, accepted <-chan *fakeBroker, topic string, payload []byte) {
-	t.Helper()
-	broker := waitForBroker(t, accepted)
-	if got := waitForString(t, broker.subs); got != topic {
-		t.Fatalf("the container subscribed to %q, want %q", got, topic)
-	}
-	broker.push(topic, payload)
 }
 
 // A walk that changes no count still has to reach the copy before the
 // container reads its gap, and the runs row is what says it has.
-func TestAContainerWaitsUntilItsCopyHoldsTheWalkTheReportNames(t *testing.T) {
+func TestAContainerWaitsUntilItsCopyHoldsTheWalk(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	work, accepted := syncingEnricher(t, catalog)
+	work := syncingEnricher(t, catalog)
 	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
-	walked := time.Date(2026, 9, 3, 23, 0, 0, 0, time.UTC)
 	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
+	go func() { done <- work.awaitCatalogSync(t.Context()) }()
 
-	report(t, accepted, work.statusTopic, syncReportWalked(t, 1, 1, walked))
 	select {
 	case err := <-done:
 		t.Fatalf("the wait ended on a copy that had not seen the walk: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	run := libraryRun{Worker: workerScan, Job: "movies-scan-1", Started: walked.Add(-time.Minute), Finished: walked}
-	if err := catalog.UpsertRun(t.Context(), work.library, run); err != nil {
-		t.Fatal(err)
-	}
+	walkLanded(t, catalog, work.library, time.Date(2026, 9, 3, 23, 0, 0, 0, time.UTC))
 
 	if err := <-done; err != nil {
 		t.Fatalf("the wait failed after the walk's row landed: %v", err)
 	}
 }
 
-func TestACopyThatHoldsALaterWalkThanTheReportNamesIsSynced(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work, accepted := syncingEnricher(t, catalog)
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
-	walked := time.Date(2026, 9, 3, 23, 0, 0, 0, time.UTC)
-	run := libraryRun{Worker: workerRescan, Job: "movies-rescan-1", Finished: walked.Add(time.Hour)}
-	if err := catalog.UpsertRun(t.Context(), work.library, run); err != nil {
+// What the wait reads off the runs table: the row it needs, the
+// rows it stands on, and the row from before the confirmation existed,
+// which carries no version and is taken as it is.
+func TestWhichScanRunEndsTheWait(t *testing.T) {
+	cases := []struct {
+		name string
+		run  libraryRun
+		want bool
+	}{
+		{
+			name: "no scan run at all",
+			run:  libraryRun{Worker: workerRescan, Job: "movies-rescan-1", Finished: time.Unix(20, 0)},
+		},
+		{
+			name: "a walk that has not finished",
+			run:  libraryRun{Worker: workerScan, Job: "movies-scan-1", Started: time.Unix(10, 0)},
+		},
+		{
+			// A walk written before the confirmation existed names no
+			// version, and there is nothing about it to prove.
+			name: "a finished walk written before this build",
+			run:  libraryRun{Worker: workerScan, Job: "movies-scan-1", Finished: time.Unix(20, 0)},
+			want: true,
+		},
+		{
+			name: "a walk whose version this copy does not hold",
+			run: libraryRun{Worker: workerScan, Job: "movies-scan-1", Finished: time.Unix(20, 0),
+				Actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", Version: 99},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", testCase.run); err != nil {
+				t.Fatal(err)
+			}
+
+			synced, err := catalogSynced(t.Context(), catalog, "house/movies")
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if synced != testCase.want {
+				t.Errorf("catalogSynced = %v, want %v", synced, testCase.want)
+			}
+		})
+	}
+}
+
+// A walk written before the confirmation existed still has to reach
+// this copy whole, so a copy with a hole anywhere stands unsynced whatever
+// version its runs row names.
+func TestAWalkFromBeforeThisBuildStillNeedsAWholeCopy(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	work := syncingEnricher(t, catalog)
+	if _, _, err := catalog.UpsertRun(t.Context(), work.library, libraryRun{
+		Worker: workerScan, Job: "movies-scan-1", Finished: time.Unix(20, 0),
+	}); err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
-
-	report(t, accepted, work.statusTopic, syncReportWalked(t, 1, 1, walked))
-
-	if err := <-done; err != nil {
-		t.Fatalf("the wait failed on a copy past the walk: %v", err)
-	}
-}
-
-func TestAContainerWaitsUntilItsCopyHoldsWhatTheReportCounts(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work, accepted := syncingEnricher(t, catalog)
-	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
-
-	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
-	select {
-	case err := <-done:
-		t.Fatalf("the wait ended on an empty copy: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
-
-	if err := <-done; err != nil {
-		t.Fatalf("the wait failed after the rows landed: %v", err)
-	}
-}
-
-func TestAContainerWhoseCopyAlreadyMatchesReadsItsGapAtOnce(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work, accepted := syncingEnricher(t, catalog)
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
-	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
-
-	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
-
-	if err := <-done; err != nil {
-		t.Fatalf("the wait failed on a copy that already matched: %v", err)
-	}
-}
-
-func TestAContainerThatHearsNoReportFails(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work, _ := syncingEnricher(t, catalog)
+	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 4, 6)
 	work.syncTimeout = 100 * time.Millisecond
 
-	if err := work.awaitCatalogSync(t.Context(), factProbe); err == nil {
-		t.Error("the wait ended with no report, want a failure")
+	if err := work.awaitCatalogSync(t.Context()); err == nil {
+		t.Error("the wait ended on a copy that knows it is missing a range")
 	}
 }
 
-func TestOnlyThisLibrarysReportEndsTheWait(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	sync := newCatalogSync(libraryStatusTopic(defaultTopicBase, "house", "movies"))
+// A copy that holds the walk's version but knows of a hole anywhere
+// is a copy whose gap read would report work that is already done.
+func TestACopyWithAHoleIsNotSynced(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	work := syncingEnricher(t, catalog)
+	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
+	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 4, 6)
+	work.syncTimeout = 100 * time.Millisecond
 
-	sync.note(libraryStatusTopic(defaultTopicBase, "house", "series"), syncReport(t, 0, 0))
-	sync.note(sync.topic, []byte("not a report"))
-
-	synced, err := sync.synced(t.Context(), catalog, "house/movies")
-	if err != nil {
-		t.Fatal(err)
+	if err := work.awaitCatalogSync(t.Context()); err == nil {
+		t.Error("the wait ended on a copy that knows it is missing a range")
 	}
-	if synced {
-		t.Error("the wait ended on a message that is not this library's report")
+}
+
+func TestAContainerWhoseCopyAlreadyHoldsTheWalkReadsItsGapAtOnce(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	work := syncingEnricher(t, catalog)
+	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
+	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
+
+	if err := work.awaitCatalogSync(t.Context()); err != nil {
+		t.Fatalf("the wait failed on a copy that already held the walk: %v", err)
 	}
 }
 
 func TestAContainerThatCannotReachItsAgentFailsTheWait(t *testing.T) {
-	work, accepted := syncingEnricher(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
-	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
+	work := syncingEnricher(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
 
-	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
-
-	if err := <-done; err == nil {
-		t.Error("the wait ended with no count of its own, want the unreachable agent's error")
+	if err := work.awaitCatalogSync(t.Context()); err == nil {
+		t.Error("the wait ended with no read of its own, want the unreachable agent's error")
 	}
 }
 
 func TestAStoppedContainerEndsItsWait(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	work, _ := syncingEnricher(t, catalog)
+	work := syncingEnricher(t, catalog)
 	ctx, stop := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(ctx, factProbe) }()
-
 	stop()
 
-	if err := <-done; err == nil {
+	if err := work.awaitCatalogSync(ctx); err == nil {
 		t.Error("the wait ended cleanly on a stopped container, want a failure")
-	}
-}
-
-func TestAContainerWithNoBrokerRefusesToWait(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work, _ := syncingEnricher(t, catalog)
-	t.Setenv(busAddressVariable, "")
-
-	if err := work.awaitCatalogSync(t.Context(), factProbe); err == nil {
-		t.Error("the wait started with no broker, want a refusal")
 	}
 }
 
 func TestAFactContainerFailsWhereTheCopyNeverSyncs(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	work, _ := syncingEnricher(t, catalog)
+	work := syncingEnricher(t, catalog)
 	work.syncTimeout = 100 * time.Millisecond
 
 	if err := work.runFacts(t.Context(), likenFacts); err == nil {
@@ -244,18 +202,16 @@ func answering(t *testing.T, probe mediaProbe) {
 
 func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	work, accepted := syncingEnricher(t, catalog)
+	work := syncingEnricher(t, catalog)
 	folder := "The Thing (1982)"
 	seedProbeGap(t, catalog, work.root, folder, "The Thing (1982).mkv")
+	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
 	answering(t, answeringProbe(ffprobeOfOneFile))
-	done := make(chan error, 1)
-	go func() { done <- work.runFacts(t.Context(), []string{factProbe}) }()
 
-	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
-
-	if err := <-done; err != nil {
+	if err := work.runFacts(t.Context(), []string{factProbe}); err != nil {
 		t.Fatalf("the probe container failed: %v", err)
 	}
+
 	sidecar := readFileString(t, filepath.Join(work.root, folder, movieSidecarName))
 	if !strings.Contains(sidecar, "<codec>h264</codec>") {
 		t.Errorf("the sidecar holds no stream details:\n%s", sidecar)
@@ -274,23 +230,21 @@ func answeringTMDb(t *testing.T, client *tmdbClient) {
 
 func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	work, accepted := syncingEnricher(t, catalog)
+	work := syncingEnricher(t, catalog)
 	folder := "The Thing (1982)"
 	writeFile(t, filepath.Join(work.root, folder, "thing.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
+	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
 	client, _ := newFakeTMDb(t, map[string]string{
 		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
 			tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
 	})
 	answeringTMDb(t, client)
-	done := make(chan error, 1)
-	go func() { done <- work.runFacts(t.Context(), []string{factIdentity}) }()
 
-	reportTheCounts(t, accepted, work.statusTopic, 1, 0)
-
-	if err := <-done; err != nil {
+	if err := work.runFacts(t.Context(), []string{factIdentity}); err != nil {
 		t.Fatalf("the identity container failed: %v", err)
 	}
+
 	sidecar := readFileString(t, filepath.Join(work.root, folder, movieSidecarName))
 	if !strings.Contains(sidecar, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
 		t.Errorf("the sidecar holds no id:\n%s", sidecar)

@@ -214,9 +214,9 @@ func TestMarkKeysReadsEveryIdPathAndAliasInItsOwnKeySpace(t *testing.T) {
 	}
 }
 
-// fakeScanner builds a scanner over a root wired to the stateful fake
-// catalog and a bus that never connects, so a full walk runs the whole
-// mark-and-sweep with no cluster and no broker.
+// FakeScanner builds a scanner over a root wired to the stateful
+// fake catalog, so a full walk runs the whole mark-and-sweep with no
+// cluster.
 func fakeScanner(t *testing.T, root, kind string) (*scanner, *fakeCatalog) {
 	t.Helper()
 	catalog, fake := newFakeCatalog(t)
@@ -226,7 +226,6 @@ func fakeScanner(t *testing.T, root, kind string) (*scanner, *fakeCatalog) {
 		kind:    kind,
 		catalog: catalog,
 		report:  libraryReport{LastWalk: time.Now().UTC(), LastChange: time.Now().UTC()},
-		bus:     newBus("", "test", nil, nil, nil),
 	}
 	return scan, fake
 }

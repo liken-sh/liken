@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Local/catalog runs a three-agent Corrosion cluster, a broker, and
 # the reporter on this workstation, so a schema change, a scan Job, or a
-# media browser can be seen without a cluster. The reporter is what a Job
+# media browser can be seen without a cluster. A confirmer runs beside each
+# agent, as one runs beside each catalog pod. The reporter is what a Job
 # waits for: it publishes the runs table back over the broker, and a Job
 # exits on that message.
 #
@@ -151,8 +152,20 @@ start_broker() {
     eclipse-mosquitto:2 >/dev/null
 }
 
+# One confirmer per agent, each keyed by the name of the container
+# it reads, so a scan Job hands off to whichever copy holds its versions
+# first. Every agent carries one, as every catalog pod does.
+start_confirmer() {
+  docker run --detach --rm \
+    --name "$name_prefix-confirmer-$1" \
+    --network host \
+    --env LIBRARY_CATALOG_API="http://127.0.0.1:${api_ports[$(($1 - 1))]}" \
+    --env POD_NAME="$name_prefix-$1" \
+    "$operator_image" confirm >/dev/null
+}
+
 # One reporter for the local namespace, reading the first agent and
-# publishing over the broker, which is the one process a scan Job waits on.
+# publishing over the broker.
 start_reporter() {
   docker run --detach --rm \
     --name "$name_prefix-reporter" \
@@ -181,7 +194,7 @@ api_answers() {
 
 up() {
   local n
-  for n in 1 2 3 broker reporter; do
+  for n in 1 2 3 broker reporter confirmer-1 confirmer-2 confirmer-3; do
     if running "$n"; then
       echo "local/catalog: $name_prefix-$n is already running; run 'local/catalog down' first" >&2
       exit 1
@@ -217,9 +230,12 @@ up() {
       fi
     done
     if [ "$ready" -eq 3 ] && broker_answers; then
-      # The reporter starts once the agents answer, because it reads
-      # the first agent the moment it comes up.
+      # The reporter and the confirmers start once the agents answer,
+      # because each one reads its agent the moment it comes up.
       start_reporter
+      for n in 1 2 3; do
+        start_confirmer "$n"
+      done
       local port
       for port in "${api_ports[@]}"; do
         echo "127.0.0.1:$port"
@@ -237,7 +253,7 @@ up() {
 
 down() {
   local n
-  for n in reporter broker 1 2 3; do
+  for n in confirmer-1 confirmer-2 confirmer-3 reporter broker 1 2 3; do
     running "$n" || continue
     # A busy agent flushes its database on the way out, so the stop gives it
     # thirty seconds before docker sends the kill.
@@ -264,6 +280,13 @@ status() {
   else
     echo "$name_prefix-reporter down"
   fi
+  for n in 1 2 3; do
+    if running "confirmer-$n"; then
+      echo "$name_prefix-confirmer-$n up on agent $n"
+    else
+      echo "$name_prefix-confirmer-$n down"
+    fi
+  done
 }
 
 case "${1:-}" in

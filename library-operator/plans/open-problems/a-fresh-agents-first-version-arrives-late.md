@@ -53,3 +53,22 @@ minutes of their own. And the Corrosion fork takes a knob for how long
 a member that left is remembered, because a pod never returns under
 the same identity and foca announces to remembered members for two
 days by default.
+
+
+## Closed by the confirmation, 2026-09-16
+
+The echo is gone. A `Job` no longer compares two copies' item and file
+counts. It writes its finished `runs` row, writes it again naming the
+agent that applied that write and the db version it was given, and
+waits for a `confirmations` row from a `confirmer` container in a
+catalog pod. That container reads `crsql_db_versions` and
+`__corro_bookkeeping_gaps` on its own copy, so it confirms the run only
+once it holds every version of the writing agent up to the one the run
+names.
+
+This closes both causes above. A `Job` whose agent joins late is
+confirmed as soon as its versions arrive, not when two counts happen to
+agree. A `Job` whose copy started cold is confirmed at all, where before
+its own low counts could never match any report. The repeated write
+every ten seconds stays, because it is what gives a lost broadcast a
+fresh set of peers.

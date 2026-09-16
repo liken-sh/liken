@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -49,6 +50,57 @@ type sqliteAgent struct {
 	// a test sets to stop a walk or a sweep at one of its steps.
 	queriesLeft      int
 	transactionsLeft int
+	// The agent's own identity and the db version of its last
+	// write, which the transaction response carries and the confirmer
+	// reads back out of the cr-sqlite bookkeeping tables.
+	actor   string
+	siteID  []byte
+	version int64
+}
+
+// The one agent identity every test writes under, in the dashed
+// form the transaction response gives and the packed form hex() reads.
+const (
+	sqliteAgentActor  = "d98bd6b3-1f2e-4c5a-8b90-1234567890ab"
+	sqliteAgentSiteID = "D98BD6B31F2E4C5A8B901234567890AB"
+)
+
+// The two cr-sqlite tables a confirmer reads: the newest version
+// held per writer, and the ranges known missing. The shipped schema does
+// not name them, because the agent's own extension creates them.
+const crsqlBookkeeping = `
+CREATE TABLE crsql_db_versions (site_id BLOB NOT NULL PRIMARY KEY, db_version INTEGER NOT NULL);
+CREATE TABLE __corro_bookkeeping_gaps (actor_id BLOB NOT NULL, start INTEGER NOT NULL, "end" INTEGER NOT NULL);
+`
+
+// Records a range of one writer's versions as missing, so a test
+// drives a copy that holds a later version with a hole behind it.
+func (a *sqliteAgent) recordGap(t *testing.T, actor string, start, end int64) {
+	t.Helper()
+	id, err := hex.DecodeString(actorHex(actor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`INSERT INTO __corro_bookkeeping_gaps (actor_id, start, "end") VALUES (?, ?, ?)`,
+		id, start, end); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Records another writer's newest version, so a test drives a copy
+// that holds versions of an agent that never wrote through it.
+func (a *sqliteAgent) holdVersion(t *testing.T, actor string, version int64) {
+	t.Helper()
+	id, err := hex.DecodeString(actorHex(actor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(
+		`INSERT INTO crsql_db_versions (site_id, db_version) VALUES (?, ?) `+
+			`ON CONFLICT (site_id) DO UPDATE SET db_version = excluded.db_version`,
+		id, version); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // newSQLiteCatalog opens a database with the shipped schema, serves it
@@ -74,8 +126,15 @@ func newSQLiteCatalog(t *testing.T) (*Catalog, *sqliteAgent) {
 	if _, err := db.Exec(string(schema)); err != nil {
 		t.Fatalf("loading the schema: %v", err)
 	}
+	if _, err := db.Exec(crsqlBookkeeping); err != nil {
+		t.Fatalf("loading the cr-sqlite bookkeeping: %v", err)
+	}
 
-	agent := &sqliteAgent{db: db}
+	siteID, err := hex.DecodeString(sqliteAgentSiteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &sqliteAgent{db: db, actor: sqliteAgentActor, siteID: siteID}
 	server := httptest.NewServer(agent)
 	t.Cleanup(server.Close)
 	return NewCatalog(server.URL, server.Client()), agent
@@ -101,11 +160,11 @@ func (a *sqliteAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // rows the query holds now, the end of that snapshot, and then one change
 // per row that appears or moves after it, until the caller goes away.
 func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) {
-	query, _ := parseQuery(readBody(r))
+	query, params := parseQuery(readBody(r))
 	enc := json.NewEncoder(w)
 	flusher, _ := w.(http.Flusher)
 
-	columns, rows, err := a.readAll(query)
+	columns, rows, err := a.readAll(query, params...)
 	if err != nil {
 		_ = enc.Encode(map[string]any{"error": err.Error()})
 		return
@@ -121,7 +180,7 @@ func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) 
 
 	for r.Context().Err() == nil {
 		time.Sleep(time.Millisecond)
-		_, rows, err := a.readAll(query)
+		_, rows, err := a.readAll(query, params...)
 		if err != nil {
 			return
 		}
@@ -138,8 +197,8 @@ func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) 
 }
 
 // Reads one query into its columns and every row's cells.
-func (a *sqliteAgent) readAll(query string) ([]string, [][]any, error) {
-	rows, err := a.db.Query(query)
+func (a *sqliteAgent) readAll(query string, params ...any) ([]string, [][]any, error) {
+	rows, err := a.db.Query(query, params...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -172,6 +231,7 @@ func (a *sqliteAgent) serveTransaction(w http.ResponseWriter, r *http.Request) {
 	a.largestBatch = max(a.largestBatch, len(statements))
 	a.mutex.Unlock()
 	defer a.notifyWatchers(statements)
+	changed := int64(0)
 	results := make([]map[string]any, len(statements))
 	for i, s := range statements {
 		outcome, err := a.db.Exec(s.sql, s.params...)
@@ -180,9 +240,35 @@ func (a *sqliteAgent) serveTransaction(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		affected, _ := outcome.RowsAffected()
+		changed += affected
 		results[i] = map[string]any{"rows_affected": affected}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"results":  results,
+		"version":  a.wrote(changed),
+		"actor_id": a.actor,
+	})
+}
+
+// The db version this write left, and null where it changed
+// nothing, which is what the agent answers. A write that changed rows
+// also moves the version this agent holds of its own writes, because a
+// writer's own copy holds everything it wrote.
+func (a *sqliteAgent) wrote(changed int64) any {
+	if changed == 0 {
+		return nil
+	}
+	a.mutex.Lock()
+	a.version++
+	version := a.version
+	a.mutex.Unlock()
+	if _, err := a.db.Exec(
+		`INSERT INTO crsql_db_versions (site_id, db_version) VALUES (?, ?) `+
+			`ON CONFLICT (site_id) DO UPDATE SET db_version = excluded.db_version`,
+		a.siteID, version); err != nil {
+		return nil
+	}
+	return version
 }
 
 // serveQuery runs one read and streams the events the agent streams:

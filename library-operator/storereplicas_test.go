@@ -78,10 +78,12 @@ func TestEveryDurableCopyKeepsTwoCopiesOfOneStoreApart(t *testing.T) {
 	}
 }
 
-// The first copy of each store carries the role beside its agent, and
-// every copy after it is the agent alone: one namespace has one
-// reporter and one recorder, and the copies are there to hold the rows.
-func TestOnlyTheFirstCopyOfAStoreRunsTheRoleBesideItsAgent(t *testing.T) {
+// The first copy of each store carries the reporting role beside
+// its agent, and every copy after it holds the rows alone: one namespace
+// has one reporter and one recorder. Every catalog copy carries a
+// confirmer, because every copy is a copy a Job can hand off to, and its
+// agent is a native sidecar so the confirmer starts behind it.
+func TestWhichRolesEachCopyOfAStoreRuns(t *testing.T) {
 	catalog := housekeepingCatalog()
 
 	cases := []struct {
@@ -92,9 +94,12 @@ func TestOnlyTheFirstCopyOfAStoreRunsTheRoleBesideItsAgent(t *testing.T) {
 	}{
 		{
 			name: "the first catalog copy", pod: testCatalogPod(catalog, 0),
-			sidecars: catalogContainer, containers: reporterContainer,
+			sidecars: catalogContainer, containers: reporterContainer + " " + confirmerContainer,
 		},
-		{name: "a later catalog copy", pod: testCatalogPod(catalog, 1), containers: catalogContainer},
+		{
+			name: "a later catalog copy", pod: testCatalogPod(catalog, 1),
+			sidecars: catalogContainer, containers: confirmerContainer,
+		},
 		{
 			name: "the first progress copy", pod: testProgressPod(catalog, 0),
 			sidecars: progressContainer, containers: recorderContainer,

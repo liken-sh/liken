@@ -14,10 +14,10 @@ import (
 	"time"
 )
 
-// The roles the enricher Job runs. Every fact container runs facts, which
-// runs the facts its container names, in order, in one process. The one
-// regular container runs enrich, which writes the runs row last and waits for
-// the echo.
+// The roles the enricher Job runs. Every fact container runs facts,
+// which runs the facts its container names, in order, in one process. The
+// one regular container runs enrich, which writes the runs row last and
+// waits for a catalog pod to confirm it.
 const (
 	factsMode  = "facts"
 	enrichMode = "enrich"

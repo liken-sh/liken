@@ -45,8 +45,15 @@ type statement struct {
 
 // transactionResponse is the agent's answer: one result per statement, each
 // with the rows it changed or the error that stopped it.
+//
+// Version is the db version this write left on the writing agent,
+// and null where the write changed nothing. ActorID is that agent's own
+// id. Together they name the write a standing copy has to hold, which is
+// how a Job proves its rows landed.
 type transactionResponse struct {
 	Results []transactionResult `json:"results"`
+	Version *int64              `json:"version"`
+	ActorID string              `json:"actor_id"`
 }
 
 type transactionResult struct {
@@ -54,26 +61,47 @@ type transactionResult struct {
 	Error        string `json:"error"`
 }
 
+// What one write left behind: the rows it applied, the agent that
+// applied them, and the db version that agent gave the last request of the
+// batch. A caller that only counts rows reads the count and drops the rest.
+type writeMade struct {
+	applied int
+	actor   string
+	version int64
+}
+
 // apply chunks the statements into requests of at most maxBatch and posts each.
 // It returns the rows applied so far and stops at the first failure, so a caller
 // sees both what landed and what broke.
 func (c *Catalog) apply(ctx context.Context, statements []statement) (int, error) {
-	applied := 0
+	made, err := c.applyMade(ctx, statements)
+	return made.applied, err
+}
+
+// ApplyMade is apply with the write's own identity kept: the actor
+// and the newest version the batch made. A Job writes its run through this
+// one, because the two values are what a confirmer proves it holds.
+func (c *Catalog) applyMade(ctx context.Context, statements []statement) (writeMade, error) {
+	made := writeMade{}
 	for start := 0; start < len(statements); start += maxBatch {
 		end := min(start+maxBatch, len(statements))
-		n, err := c.post(ctx, statements[start:end])
-		applied += n
+		chunk, err := c.post(ctx, statements[start:end])
+		made.applied += chunk.applied
+		if chunk.actor != "" {
+			made.actor = chunk.actor
+		}
+		made.version = max(made.version, chunk.version)
 		if err != nil {
-			return applied, err
+			return made, err
 		}
 	}
-	return applied, nil
+	return made, nil
 }
 
 // post sends one batch as a JSON array of [sql, [params...]] entries and reads
 // the count applied. A non-2xx status or a per-statement error is a failure the
 // caller sees.
-func (c *Catalog) post(ctx context.Context, statements []statement) (int, error) {
+func (c *Catalog) post(ctx context.Context, statements []statement) (writeMade, error) {
 	body := make([]any, len(statements))
 	for i, s := range statements {
 		params := s.params
@@ -88,40 +116,43 @@ func (c *Catalog) post(ctx context.Context, statements []statement) (int, error)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+transactionsPath, bytes.NewReader(payload))
 	if err != nil {
-		return 0, err
+		return writeMade{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, err
+		return writeMade{}, err
 	}
 	defer drain(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return 0, fmt.Errorf("catalog transaction: %s: %s", resp.Status, message)
+		return writeMade{}, fmt.Errorf("catalog transaction: %s: %s", resp.Status, message)
 	}
 
 	var result transactionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("catalog transaction: decoding response: %w", err)
+		return writeMade{}, fmt.Errorf("catalog transaction: decoding response: %w", err)
 	}
 	// One result per statement is the contract, so a short answer is a
 	// failure and never a batch that applied.
 	if len(result.Results) != len(statements) {
-		return 0, fmt.Errorf("catalog transaction: %d results for %d statements",
+		return writeMade{}, fmt.Errorf("catalog transaction: %d results for %d statements",
 			len(result.Results), len(statements))
 	}
-	applied := 0
+	made := writeMade{actor: result.ActorID}
+	if result.Version != nil {
+		made.version = *result.Version
+	}
 	for _, r := range result.Results {
 		if r.Error != "" {
-			return applied, fmt.Errorf("catalog transaction: %s", r.Error)
+			return made, fmt.Errorf("catalog transaction: %s", r.Error)
 		}
-		applied += r.RowsAffected
+		made.applied += r.RowsAffected
 	}
-	return applied, nil
+	return made, nil
 }
 
 // plainItemUpsert is the upsert for an item table that carries only the shared
@@ -402,7 +433,7 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 // entry here. The runs table is one of them, so a library that has lost
 // every item row but whose last Job wrote a run is still a library the
 // reporter reports on.
-var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "streams", "runs", "attempts",
+var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "streams", "runs", "confirmations", "attempts",
 	"contributors", "contributor_aliases", "credits", "genres", "trailers",
 	"franchises", "franchise_members", "franchise_runs"}
 

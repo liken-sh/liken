@@ -318,10 +318,9 @@ func TestDepartStandsTheCleanupJob(t *testing.T) {
 	}
 }
 
-// The cleanup container carries the broker address and the topic base
-// the operator was given, because the report it waits for arrives on
-// the bus.
-func TestTheCleanupJobCarriesTheBus(t *testing.T) {
+// The cleanup container reads the catalog over loopback and reaches
+// no broker, because the confirmation it waits for is a row in the catalog.
+func TestTheCleanupJobReadsItsAgentAndNoBroker(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 
@@ -334,11 +333,11 @@ func TestTheCleanupJobCarriesTheBus(t *testing.T) {
 		t.Fatal("the pass stood no cleanup job")
 	}
 	environment := containerEnvironment(job.Spec.Template.Spec.Containers[0])
-	if got := environment[busAddressVariable]; got != testBusAddress {
-		t.Errorf("%s = %q, want %q", busAddressVariable, got, testBusAddress)
+	if got := environment[catalogAPIVariable]; got != defaultCatalogAPI {
+		t.Errorf("%s = %q, want %q", catalogAPIVariable, got, defaultCatalogAPI)
 	}
-	if got := environment[topicBaseVariable]; got != defaultTopicBase {
-		t.Errorf("%s = %q, want %q", topicBaseVariable, got, defaultTopicBase)
+	if _, held := environment[busAddressVariable]; held {
+		t.Errorf("%s reaches the sweep, and the sweep uses no bus", busAddressVariable)
 	}
 }
 

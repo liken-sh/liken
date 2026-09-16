@@ -311,7 +311,12 @@ CREATE INDEX aliases_library_item ON aliases (library, item);
 
 -- One row per library and worker, holding the Job that ran, when
 -- it started and finished, and what it left behind; a Job writes it last
--- and waits for the reporter to echo it.
+-- and waits for a catalog pod to confirm it.
+--
+-- Actor and version name the write a confirmer has to hold: the
+-- writing agent's own id, and the db version of the finished-run write.
+-- Both are zero until that write answers, and a row with version 0 is a
+-- run no confirmer acts on.
 --
 -- Nothing reads or writes commit_id. Corrosion refuses to remove a
 -- column, so the column stays, and every insert leaves it at its default.
@@ -325,7 +330,32 @@ CREATE TABLE runs (
     removed INTEGER NOT NULL DEFAULT 0,
     commit_id TEXT NOT NULL DEFAULT '',
     failure TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, worker)
+);
+
+-- One row per catalog pod that holds every version a finished run
+-- wrote. The confirmer in each pod writes its own row, keyed by its pod
+-- name, and the Job exits on the first row that names its own run at the
+-- version that run carries. The key carries the confirmer rather than a
+-- count, because three agents that each raised one counter cell would
+-- merge to one.
+--
+-- Version is the run version this row proves. A retried pod of one
+-- Job carries the Job's name and writes a version of its own, so a row
+-- that proves the version before it must never end the retry's wait. The
+-- version is a cell and not a key column, because one confirmer holds one
+-- row per Job, and cr-sqlite reads a change to a key column as a delete
+-- and a create.
+CREATE TABLE confirmations (
+    library TEXT NOT NULL DEFAULT '',
+    worker TEXT NOT NULL DEFAULT '',
+    job TEXT NOT NULL DEFAULT '',
+    confirmer TEXT NOT NULL DEFAULT '',
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, worker, job, confirmer)
 );
 
 -- One row per library, item, and fact: the last attempt an enricher

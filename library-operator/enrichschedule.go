@@ -187,7 +187,7 @@ func (o *operator) createEnrichJob(ctx context.Context, library *Library, catalo
 		return err
 	}
 	job := buildEnrichJob(library, providers, o.languages, name, path,
-		o.scannerImage, o.ffmpegImage, o.corrosionImage, o.busAddress, o.topicBase)
+		o.scannerImage, o.ffmpegImage, o.corrosionImage)
 	job.Metadata.Annotations = marks
 
 	if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {
@@ -199,7 +199,7 @@ func (o *operator) createEnrichJob(ctx context.Context, library *Library, catalo
 // The last stage of a chain: a scan of the same folder, which reads into the
 // catalog what the enricher wrote onto the volume.
 func (o *operator) createChainScan(ctx context.Context, library *Library, chain chainRun) error {
-	job := buildChainScanJob(library, chain, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
+	job := buildChainScanJob(library, chain, o.scannerImage, o.corrosionImage)
 	if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {
 		return fmt.Errorf("creating the rescan job for %s: %w", chain.path, err)
 	}
@@ -209,7 +209,7 @@ func (o *operator) createChainScan(ctx context.Context, library *Library, chain 
 // The chain's rescan Job. It runs the scanner the webhook's own Job ran, on
 // the same folder, and it carries the marks that say the chain is over.
 func buildChainScanJob(library *Library, chain chainRun,
-	scannerImage, corrosionImage, busAddress, topicBase string) *Job {
+	scannerImage, corrosionImage string) *Job {
 	return &Job{
 		APIVersion: batchAPIVersion,
 		Kind:       "Job",
@@ -220,7 +220,7 @@ func buildChainScanJob(library *Library, chain chainRun,
 			Annotations:     chainMarks(chain.id, chain.path, chainStageRescan),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
-		Spec: scanJobSpec(library, chain.path, scannerImage, corrosionImage, busAddress, topicBase),
+		Spec: scanJobSpec(library, chain.path, scannerImage, corrosionImage),
 	}
 }
 

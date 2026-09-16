@@ -499,7 +499,7 @@ spec:
                       finished:
                         type: string
                         format: date-time
-                        description: "When that Job wrote its last row, which is what a Job waits to see echoed before it exits."
+                        description: "When that Job wrote its last row, which is what a catalog pod confirms before the Job exits."
                       unidentified:
                         type: integer
                         minimum: 0

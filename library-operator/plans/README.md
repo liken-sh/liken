@@ -423,9 +423,9 @@ that took a hearing-impaired flag for Hindi.
   cases is drilled.
 * [A fresh agent's first version arrives
   late](open-problems/a-fresh-agents-first-version-arrives-late.md).
-  A `Job` on a fresh claim pays one echo timeout on its first run,
-  because its first write reaches the catalog pod minutes after the
-  rest.
+  A `Job` on a fresh claim paid one two-minute timeout on its first
+  run, because its first write reached the catalog pod minutes after
+  the rest. The confirmation of 2026-09-16 closes it.
 
 ## Rejected
 

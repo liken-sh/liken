@@ -105,26 +105,23 @@ const artMountPath = "/art"
 var catalogWriteTimeout = 2 * time.Minute
 
 // One scan Job's scanner: the root it walks, the catalog it
-// writes, the run it records, and the echo it waits for. The walk's own
-// counts are held under a mutex, because the walk and the run row that
-// reads them are written in different steps.
+// writes, and the run it records. The walk's own numbers are held under a
+// mutex, because the walk and the run row that reads them are written in
+// different steps.
 type scanner struct {
-	statusTopic string
-	root        string
-	library     string
-	kind        string
-	ignore      ignoreSet
+	root    string
+	library string
+	kind    string
+	ignore  ignoreSet
 	// art is the mount a franchises scan writes its art into, and empty
 	// for every other kind.
 	art     string
 	catalog *Catalog
-	bus     *Bus
-	echo    *echoWaiter
 	// The Job this container runs, the folder it rescans, and how
-	// long it waits for the reporter to publish its run back.
-	job         string
-	scanPath    string
-	echoTimeout time.Duration
+	// long it waits for a catalog pod to confirm its run.
+	job            string
+	scanPath       string
+	handoffTimeout time.Duration
 	// log is where the scanner writes a walk that could not finish a catalog
 	// step, so a swallowed error shows in the pod log instead of a gap in
 	// the report. A scanner built without one writes nowhere.
@@ -134,10 +131,6 @@ type scanner struct {
 	// publishes.
 	mutex  sync.Mutex
 	report libraryReport
-	// What this Job's own agent held for the library when the
-	// walk ended, and whether the walk could read it.
-	counts     libraryCounts
-	countsRead bool
 
 	// One walk runs at a time, so the reconciliation reads a
 	// settled catalog whichever caller drives the walk.
@@ -155,11 +148,7 @@ func runScan() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	scan, err := newScanner(time.Now().UTC(), os.Stdout)
-	if err != nil {
-		stop()
-		os.Exit(1)
-	}
+	scan := newScanner(time.Now().UTC(), os.Stdout)
 	if err := scan.runJob(stopped); err != nil {
 		scan.logf("the scan job failed: %v", err)
 		stop()
@@ -170,21 +159,10 @@ func runScan() {
 // NewScanner reads the container's environment and builds the
 // client that speaks for this Library. started is the time the walk's own
 // record carries before it reads anything.
-//
-// It refuses to build a scanner when the environment names no broker,
-// before anything is written.
-func newScanner(started time.Time, log io.Writer) (*scanner, error) {
-	address, err := echoBusAddress(log)
-	if err != nil {
-		return nil, err
-	}
+func newScanner(started time.Time, log io.Writer) *scanner {
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
 	kind := os.Getenv(libraryKindVariable)
-	base := os.Getenv(topicBaseVariable)
-	if base == "" {
-		base = defaultTopicBase
-	}
 	root := os.Getenv(libraryRootVariable)
 	if root == "" {
 		root = "/"
@@ -202,38 +180,30 @@ func newScanner(started time.Time, log io.Writer) (*scanner, error) {
 	fmt.Fprintf(log, "library.liken.sh: %s/%s is a %s library at %s\n",
 		namespace, name, kind, mountRoot)
 
-	scan := &scanner{
-		statusTopic: libraryStatusTopic(base, namespace, name),
-		root:        mountRoot,
-		library:     libraryKey(namespace, name),
-		kind:        kind,
-		ignore:      ignore,
-		art:         os.Getenv(libraryArtVariable),
-		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
-		log:         log,
-		report:      libraryReport{LastWalk: started, LastChange: started},
-		job:         os.Getenv(jobNameVariable),
-		scanPath:    os.Getenv(scanPathVariable),
-		echoTimeout: echoTimeout(os.Getenv(echoTimeoutVariable)),
+	return &scanner{
+		root:           mountRoot,
+		library:        libraryKey(namespace, name),
+		kind:           kind,
+		ignore:         ignore,
+		art:            os.Getenv(libraryArtVariable),
+		catalog:        NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
+		log:            log,
+		report:         libraryReport{LastWalk: started, LastChange: started},
+		job:            os.Getenv(jobNameVariable),
+		scanPath:       os.Getenv(scanPathVariable),
+		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
 	}
-	// The Job holds no will and publishes nothing. Its one use of
-	// the bus is the subscription that carries the reporter's echo back.
-	scan.echo = newEchoWaiter(scan.statusTopic, scan.worker(), scan.job)
-	scan.bus = newBus(address, "scan-"+namespace+"-"+name, nil, nil, scan.echo.note)
-	return scan, nil
 }
 
 // The whole of a scan Job: write the run with no finish, walk,
-// write the run again with what the walk left, and wait for the
-// namespace's reporter to publish that run back with the counts this
-// Job's own agent holds.
+// write the run again with what the walk left, and hand off to the
+// standing catalog pods.
 //
-// The first write says a walk is running. The echo of the last
-// write, carrying the counts, is what proves the standing pod holds
-// every row this Job wrote.
+// The first write says a walk is running. The hand-off is what proves a
+// standing pod holds every row this Job wrote.
 func (s *scanner) runJob(ctx context.Context) error {
 	run := libraryRun{Worker: s.worker(), Job: s.job, Started: time.Now().UTC()}
-	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
+	if _, _, err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
 
@@ -246,27 +216,18 @@ func (s *scanner) runJob(ctx context.Context) error {
 	s.mutex.Lock()
 	run.Unidentified = s.report.Unidentified
 	run.Removed = s.report.RemovedLastSweep
-	counts, read := s.counts, s.countsRead
 	s.mutex.Unlock()
-	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
-		return fmt.Errorf("writing the finished run of %s: %w", s.library, err)
-	}
 
-	if read {
-		s.echo.expect(counts.items, counts.files)
-	}
-	s.echo.log = s.log
-	s.echo.nudge = s.renewRun(run)
-	if err := s.echo.wait(ctx, s.bus, s.echoTimeout); err != nil {
+	if err := handOff(ctx, s.catalog, s.library, run, s.log, s.handoffTimeout); err != nil {
 		return err
 	}
 	return walked
 }
 
-// The worker whose runs row this Job writes and whose echo it
-// waits for. A Job that names a folder is the rescan worker, so its
-// row stands beside the full walk's row and never over it, and the
-// reporter reads the walk's own numbers off the scan row alone.
+// The worker whose runs row this Job writes. A Job that names a folder
+// is the rescan worker, so its row stands beside the full walk's row and
+// never over it, and the reporter reads the walk's own numbers off the
+// scan row alone.
 //
 // A folder scan that falls back to the whole root keeps the
 // rescan worker, because the Job it runs is the one the webhook asked
@@ -511,10 +472,6 @@ func (s *scanner) settleWalk(ctx context.Context, epoch int64, before, folders, 
 	if countedFiles {
 		s.report.Files = files
 	}
-	if countedItems && countedFiles {
-		s.counts = libraryCounts{items: after, files: files}
-		s.countsRead = true
-	}
 	s.mutex.Unlock()
 
 	s.logWalkComplete(titles, folders, unidentified, removed, unidentifiedNames, time.Since(started))
@@ -620,18 +577,6 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	if err != nil {
 		return s.walkFailed("rescan "+relative, err)
 	}
-
-	// A rescan moves the counts, so the Job's echo compares
-	// against what the agent holds after it and never against a full
-	// walk's counts.
-	counts, err := s.catalog.countsOf(ctx, s.library)
-	if err != nil {
-		return s.walkFailed("count the catalog after a rescan", err)
-	}
-	s.mutex.Lock()
-	s.counts = counts
-	s.countsRead = true
-	s.mutex.Unlock()
 
 	if written == 0 && removed == 0 {
 		s.logf("rescanned %s: no change", relative)

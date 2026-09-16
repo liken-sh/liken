@@ -56,7 +56,7 @@ func (o *operator) standTrickplayClaim(ctx context.Context, library *Library, ca
 // standing Job under the walk's name and a webhook's folder runs under the
 // chain's.
 func buildTrickplayJob(library *Library, name, path string,
-	ffmpegImage, corrosionImage, busAddress, topicBase string) *Job {
+	ffmpegImage, corrosionImage string) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	return &Job{
 		APIVersion: batchAPIVersion,
@@ -71,7 +71,7 @@ func buildTrickplayJob(library *Library, name, path string,
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
 			Template: trickplayPodTemplate(library, path,
-				ffmpegImage, corrosionImage, busAddress, topicBase),
+				ffmpegImage, corrosionImage),
 		},
 	}
 }
@@ -82,14 +82,14 @@ func buildTrickplayJob(library *Library, name, path string,
 // reads rows, and it runs on the ffmpeg image, because a VA-API driver is a
 // shared library the operator's own image carries none of.
 func trickplayPodTemplate(library *Library, path,
-	ffmpegImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
+	ffmpegImage, corrosionImage string) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
 	// A trickplay container holds no Kubernetes credential. It reads its work
 	// through the agent beside it, so nothing in this pod reads the API server.
 	noToken := false
 
 	tiles := factsContainer(library, trickplayContainerName, []string{factTrickplay},
-		path, ffmpegImage, busAddress, topicBase)
+		path, ffmpegImage)
 	tiles.Resources.Requests["cpu"] = trickplayCPURequest
 	tiles.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
 

@@ -52,7 +52,7 @@ since the last pass, because those rows are already in the pod's own
 catalog. It stops when nfo's mark is there and a pass finds nothing.
 
 The closer waits for every mark the Job named in its environment, then
-writes the runs row and waits for the echo, as today. The marks are
+writes the runs row and hands off to a catalog pod, as today. The marks are
 files and not rows because a file on the pod is instant and needs no
 poll of the catalog.
 

@@ -10,7 +10,7 @@ import (
 // The trickplay Job of one Library, built the way a pass builds it.
 func testTrickplayJob(library *Library, path string) *Job {
 	return buildTrickplayJob(library, trickplayJobName(library.Metadata.Name), path,
-		testFFmpegImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testFFmpegImage, testCorrosionImage)
 }
 
 // The pod holds the catalog agent and the one container that runs the trickplay

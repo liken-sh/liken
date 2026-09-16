@@ -36,10 +36,8 @@ type enricher struct {
 	// The folder this Job was narrowed to, relative to the library root, and
 	// empty where the Job covers the whole library.
 	scope string
-	// The status topic and the bound are what the wait for the synced copy
-	// needs: the topic the standing pod reports the library on, and how long a
-	// container waits for its own copy to hold what that report counts.
-	statusTopic string
+	// How long a container waits for its own copy to hold the walk
+	// the standing pods hold.
 	syncTimeout time.Duration
 	// The providers a container can ask, built once and held here, so a provider
 	// that spends its day in one fact is not asked again in the next fact of the
@@ -68,10 +66,6 @@ func newEnricher(log io.Writer) *enricher {
 	}
 	mountRoot := path.Join(libraryMountPath, root)
 	job := os.Getenv(jobNameVariable)
-	base := os.Getenv(topicBaseVariable)
-	if base == "" {
-		base = defaultTopicBase
-	}
 
 	work := &enricher{
 		library:     libraryKey(namespace, name),
@@ -84,7 +78,6 @@ func newEnricher(log io.Writer) *enricher {
 		log:         log,
 		ignore:      parseIgnore(os.Getenv(libraryIgnoreVariable)),
 		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable)),
-		statusTopic: libraryStatusTopic(base, namespace, name),
 		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
 	}
 	work.scope = work.narrowedScope()
@@ -131,7 +124,7 @@ func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]stri
 // looking idle until the end.
 func (e *enricher) markRunStarted(ctx context.Context) error {
 	run := libraryRun{Worker: workerEnrich, Job: e.job, Started: time.Now().UTC()}
-	if err := e.catalog.UpsertRun(ctx, e.library, run); err != nil {
+	if _, _, err := e.catalog.UpsertRun(ctx, e.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", e.library, err)
 	}
 	return nil

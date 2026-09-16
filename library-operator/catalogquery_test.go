@@ -139,7 +139,7 @@ func TestLibraryKeysReadsEveryLibraryTheCatalogHolds(t *testing.T) {
 // reports on, so the runs table is one of the tables the read covers.
 func TestLibraryKeysNamesALibraryThatOnlyHasARun(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	if err := catalog.UpsertRun(t.Context(), "house/departed",
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/departed",
 		libraryRun{Worker: workerCleanup, Job: "cleanup-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}); err != nil {
 		t.Fatal(err)
 	}

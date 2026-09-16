@@ -317,9 +317,9 @@ func TestTemplateHashFollowsTheSchedule(t *testing.T) {
 		cronJob *CronJob
 	}{
 		{"the scanner image", buildScanCronJob(studioMovies(), testScannerImage+"-next",
-			testCorrosionImage, testBusAddress, defaultTopicBase)},
+			testCorrosionImage)},
 		{"the catalog image", buildScanCronJob(studioMovies(), testScannerImage,
-			testCorrosionImage+"-next", testBusAddress, defaultTopicBase)},
+			testCorrosionImage+"-next")},
 		{"the root", testScanCronJob(newRoot)},
 		{"a scanner of one's own", testScanCronJob(ownScanner)},
 		{"the schedule", testScanCronJob(newSchedule)},

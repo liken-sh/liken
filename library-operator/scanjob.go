@@ -44,7 +44,7 @@ func scanCronJobName(library string) string {
 // The schedule the Library's full walk runs on, built from the
 // Library and the operator's own settings alone, so two passes over an
 // unchanged Library build the same object.
-func buildScanCronJob(library *Library, scannerImage, corrosionImage, busAddress, topicBase string) *CronJob {
+func buildScanCronJob(library *Library, scannerImage, corrosionImage string) *CronJob {
 	successes, failures := int32(successfulJobsKept), int32(failedJobsKept)
 	return &CronJob{
 		APIVersion: batchAPIVersion,
@@ -62,7 +62,7 @@ func buildScanCronJob(library *Library, scannerImage, corrosionImage, busAddress
 			FailedJobsHistoryLimit:     &failures,
 			JobTemplate: JobTemplateSpec{
 				Metadata: ObjectMeta{Labels: workerLabels(library.Metadata.Name, workerScan)},
-				Spec:     scanJobSpec(library, "", scannerImage, corrosionImage, busAddress, topicBase),
+				Spec:     scanJobSpec(library, "", scannerImage, corrosionImage),
 			},
 		},
 	}
@@ -72,7 +72,7 @@ func buildScanCronJob(library *Library, scannerImage, corrosionImage, busAddress
 // collector takes it with the Library. It opens a chain: it carries the chain
 // marks, and the enricher and the rescan of the same folder follow it under
 // the same chain.
-func buildFolderScanJob(library *Library, path string, now time.Time, scannerImage, corrosionImage, busAddress, topicBase string) *Job {
+func buildFolderScanJob(library *Library, path string, now time.Time, scannerImage, corrosionImage string) *Job {
 	chain := newChain(path, now)
 	return &Job{
 		APIVersion: batchAPIVersion,
@@ -84,19 +84,19 @@ func buildFolderScanJob(library *Library, path string, now time.Time, scannerIma
 			Annotations:     chainMarks(chain, path, chainStageScan),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
-		Spec: scanJobSpec(library, path, scannerImage, corrosionImage, busAddress, topicBase),
+		Spec: scanJobSpec(library, path, scannerImage, corrosionImage),
 	}
 }
 
 // The spec both scan Jobs share, which differ in the scan path
 // alone: empty is the full walk, and a path is the one folder to
 // rescan.
-func scanJobSpec(library *Library, path, scannerImage, corrosionImage, busAddress, topicBase string) JobSpec {
+func scanJobSpec(library *Library, path, scannerImage, corrosionImage string) JobSpec {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	return JobSpec{
 		BackoffLimit:            &backoff,
 		TTLSecondsAfterFinished: &ttl,
-		Template:                scanPodTemplate(library, path, scannerImage, corrosionImage, busAddress, topicBase),
+		Template:                scanPodTemplate(library, path, scannerImage, corrosionImage),
 	}
 }
 
@@ -105,7 +105,7 @@ func scanJobSpec(library *Library, path, scannerImage, corrosionImage, busAddres
 // changed image reaches the cluster. The stamped hash is what tells the
 // two apart, the rule standPod follows for a pod.
 func (o *operator) standScanCronJob(ctx context.Context, library *Library) (*CronJob, error) {
-	desired := buildScanCronJob(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
+	desired := buildScanCronJob(library, o.scannerImage, o.corrosionImage)
 	if err := stampTemplateHash(&desired.Metadata, desired.Spec); err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (o *operator) serveHeldPaths(ctx context.Context, library *Library, jobs []
 	}
 	for _, path := range o.paths.held(namespace, name) {
 		job := buildFolderScanJob(library, path, now,
-			o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
+			o.scannerImage, o.corrosionImage)
 		if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {
 			return fmt.Errorf("creating the scan job for %s: %w", path, err)
 		}

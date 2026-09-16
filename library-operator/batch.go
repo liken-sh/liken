@@ -31,6 +31,10 @@ const jobNameLabel = "batch.kubernetes.io/job-name"
 // The field path the downward API reads that label from.
 const jobNameFieldPath = "metadata.labels['" + jobNameLabel + "']"
 
+// The pod's own name, through the downward API. A confirmer keys
+// its row by it, because the row says which copy holds the versions.
+const podNameFieldPath = "metadata.name"
+
 // One run of one worker. The operator writes the spec and reads
 // the status, which is the count of pods in each state.
 type Job struct {

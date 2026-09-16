@@ -71,7 +71,7 @@ func (o *operator) createTrickplayJob(ctx context.Context, library *Library, cat
 		return err
 	}
 	job := buildTrickplayJob(library, name, path,
-		o.ffmpegImage, o.corrosionImage, o.busAddress, o.topicBase)
+		o.ffmpegImage, o.corrosionImage)
 	job.Metadata.Annotations = marks
 
 	if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {

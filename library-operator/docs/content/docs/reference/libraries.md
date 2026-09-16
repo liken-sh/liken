@@ -167,7 +167,7 @@ The last run of each worker of this library, as the namespace's reporter publish
 | <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan, rescan, enrich, or cleanup. |
 | <span id="statusruns--job"></span>`job` | string | no | The name of the Job that ran, for kubectl describe and logs. |
 | <span id="statusruns--started"></span>`started` | string | no | When that Job started its work. |
-| <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a Job waits to see echoed before it exits. |
+| <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a catalog pod confirms before the Job exits. |
 | <span id="statusruns--unidentified"></span>`unidentified` | integer | no | How many folders that run could not identify. |
 | <span id="statusruns--removed"></span>`removed` | integer | no | How many rows that run removed. |
 | <span id="statusruns--failure"></span>`failure` | string | no | Why that run failed, in one sentence. It is empty for a run that finished its work, and status.phase reads Failed while the scan run carries one. |

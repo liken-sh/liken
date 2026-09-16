@@ -93,7 +93,7 @@ func (e *enricher) runFacts(ctx context.Context, facts []string) error {
 	// claim, so its two ends are logged.
 	e.logf("waiting for the catalog to sync onto this claim")
 	started := time.Now()
-	if err := e.awaitCatalogSync(ctx, facts[0]); err != nil {
+	if err := e.awaitCatalogSync(ctx); err != nil {
 		return err
 	}
 	e.logf("the catalog synced in %s", time.Since(started).Round(time.Second))

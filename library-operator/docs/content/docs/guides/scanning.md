@@ -128,9 +128,9 @@ runs a one-off `Job` that rescans one folder.
     kubectl -n media create job movies-scan-now --from=cronjob/movies-scan
 
 A scan `Job` writes a `runs` row when it starts and another when it
-finishes, then waits until the namespace's reporter echoes that run
-back over the bus before it exits. So a `Job` that completed is a
-`Job` whose counts reached the `Library`'s status.
+finishes, then waits until a catalog pod confirms that run before it
+exits. So a `Job` that completed is a `Job` whose rows reached a
+standing copy of the catalog.
 
 ## Mark and sweep
 
@@ -160,7 +160,7 @@ that removes its rows from the namespace's catalog. The operator
 deletes the `CronJob`, waits for any scan or enrich `Job` to finish,
 then runs a cleanup `Job` named `<library>-cleanup` that deletes the
 rows in batches through its own catalog agent. The finalizer clears
-once the cleanup `Job` succeeded and the reporter echoed its run back.
+once the cleanup `Job` succeeded and a catalog pod confirmed its run.
 
 While this runs, the phase is `Departing`, and the `Departing`
 condition names the step: `ScanRunning`, `EnrichRunning`, `Sweeping`,

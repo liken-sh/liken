@@ -211,27 +211,26 @@ func TestTheFranchiseScanPrunesNothingOnACheckoutItCouldNotRead(t *testing.T) {
 	}
 }
 
-// franchiseScanJob is one franchises scan Job on the test broker and the
-// recording catalog. The run rows it writes are read back as statements.
-func franchiseScanJob(t *testing.T, checkout string) (*scanner, *catalogRecorder, <-chan *fakeBroker) {
+// FranchiseScanJob is one franchises scan Job over a catalog loaded
+// with the shipped schema, writing through a recorder, so the run rows it
+// writes are read back as statements.
+func franchiseScanJob(t *testing.T, checkout string) (*scanner, *catalogRecorder, *Catalog) {
 	t.Helper()
-	address, accepted := testBroker(t)
-	shorterBackoff(t)
-	catalog, recorder := recordingCatalog(t)
-	scan := &scanner{
-		statusTopic: libraryStatusTopic(defaultTopicBase, "house", "franchises"),
-		root:        checkout,
-		art:         t.TempDir(),
-		library:     "house/franchises",
-		kind:        libraryKindFranchises,
-		catalog:     catalog,
-		log:         io.Discard,
-		job:         "franchises-scan-1",
-		echoTimeout: scanTestTimeout,
+	catalog, _ := newSQLiteCatalog(t)
+	if err := catalog.ensureSeen(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	scan.echo = newEchoWaiter(scan.statusTopic, scan.worker(), scan.job)
-	scan.bus = newBus(address, "scan-house-franchises", nil, nil, scan.echo.note)
-	return scan, recorder, accepted
+	recording, recorder := recordingProxy(t, catalog)
+	return &scanner{
+		root:           checkout,
+		art:            t.TempDir(),
+		library:        "house/franchises",
+		kind:           libraryKindFranchises,
+		catalog:        recording,
+		log:            io.Discard,
+		job:            "franchises-scan-1",
+		handoffTimeout: scanTestTimeout,
+	}, recorder, catalog
 }
 
 // lastRunPosted is the parameters of the last runs row a Job posted.
@@ -244,15 +243,15 @@ func lastRunPosted(t *testing.T, recorder *catalogRecorder) []any {
 	return posted[len(posted)-1].params
 }
 
-// A Job that walked its checkout writes a finished run with no failure, the
-// run the reporter echoes back.
+// A Job that walked its checkout writes a finished run with no
+// failure, the run a catalog pod confirms.
 func TestTheFranchiseScanJobWritesItsRun(t *testing.T) {
 	checkout := franchiseCheckout(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
-	scan, recorder, accepted := franchiseScanJob(t, checkout)
+	scan, recorder, catalog := franchiseScanJob(t, checkout)
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
 
-	echoTheRun(t, accepted, scan.echo)
+	confirmTheRunOf(t, catalog, "house/franchises", scan.worker(), scan.job)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -266,11 +265,11 @@ func TestTheFranchiseScanJobWritesItsRun(t *testing.T) {
 // A Job whose checkout is not there writes a run that names the failure,
 // which the operator reads as the Failed phase.
 func TestTheFranchiseScanJobReportsACheckoutItCouldNotRead(t *testing.T) {
-	scan, recorder, accepted := franchiseScanJob(t, filepath.Join(t.TempDir(), "no-such-checkout"))
+	scan, recorder, catalog := franchiseScanJob(t, filepath.Join(t.TempDir(), "no-such-checkout"))
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
 
-	echoTheRun(t, accepted, scan.echo)
+	confirmTheRunOf(t, catalog, "house/franchises", scan.worker(), scan.job)
 	if err := <-done; err == nil {
 		t.Fatal("the job succeeded, want it failed on a checkout it could not read")
 	}

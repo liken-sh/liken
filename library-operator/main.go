@@ -27,6 +27,9 @@ func main() {
 		case reportMode:
 			runReport()
 			return
+		case confirmMode:
+			runConfirm()
+			return
 		case factsMode:
 			runFacts()
 			return

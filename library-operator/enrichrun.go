@@ -1,12 +1,11 @@
 package main
 
-// enrichrun.go is the enricher Job's one regular container. It writes the
-// runs row and waits for the standing pod to echo it, which is what proves
-// the rows the init containers left have reached the catalog.
+// Enrichrun.go is the enricher Job's one regular container. It
+// writes the runs row and waits for a catalog pod to confirm it, which is
+// what proves the rows the init containers left have reached the catalog.
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -14,26 +13,20 @@ import (
 	"time"
 )
 
-// The container that closes an enricher Job: the enricher's own environment,
-// and the bus the echo arrives on.
+// The container that closes an enricher Job: the enricher's own
+// environment, and how long it waits to be confirmed.
 type enrichRun struct {
 	*enricher
-	bus         *Bus
-	echo        *echoWaiter
-	echoTimeout time.Duration
+	handoffTimeout time.Duration
 }
 
-// The role's whole program. A Job that never hears its echo fails, so its
-// rows stay on its claim and the retry carries them.
+// The role's whole program. A Job no catalog pod confirms fails, so
+// its rows stay on its claim and the retry carries them.
 func runEnrich() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	run, err := newEnrichRun(os.Stdout)
-	if err != nil {
-		stop()
-		os.Exit(1)
-	}
+	run := newEnrichRun(os.Stdout)
 	if err := run.runJob(stopped); err != nil {
 		run.logf("the enrich job failed: %v", err)
 		stop()
@@ -41,46 +34,26 @@ func runEnrich() {
 	}
 }
 
-// A container with no broker refuses to start, before it writes anything,
-// because it could never hear its echo.
-func newEnrichRun(log io.Writer) (*enrichRun, error) {
-	address, err := echoBusAddress(log)
-	if err != nil {
-		return nil, err
+// The container reads everything it needs from its environment, as
+// every other enricher container does.
+func newEnrichRun(log io.Writer) *enrichRun {
+	return &enrichRun{
+		enricher:       newEnricher(log),
+		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
 	}
-	namespace := os.Getenv(libraryNamespaceVariable)
-	name := os.Getenv(libraryNameVariable)
-
-	run := &enrichRun{
-		enricher:    newEnricher(log),
-		echoTimeout: echoTimeout(os.Getenv(echoTimeoutVariable)),
-	}
-	run.echo = newEchoWaiter(run.statusTopic, workerEnrich, run.job)
-	run.bus = newBus(address, "enrich-"+namespace+"-"+name, nil, nil, run.echo.note)
-	return run, nil
 }
 
-// The counts this container expects are the ones its own agent holds now. An
-// enricher Job writes to the volume and changes no item or file row, so the
-// numbers stand where the last scan left them.
+// The container writes the finished run and hands off. An enricher
+// Job writes to the volume and changes no item or file row, so the run row
+// is the only write this container makes.
 func (r *enrichRun) runJob(ctx context.Context) error {
-	counts, err := r.catalog.countsOf(ctx, r.library)
-	if err != nil {
-		return fmt.Errorf("counting the catalog of %s: %w", r.library, err)
-	}
-
 	run := libraryRun{
 		Worker:   workerEnrich,
 		Job:      r.job,
 		Started:  r.startedAt(ctx),
 		Finished: time.Now().UTC(),
 	}
-	if err := r.catalog.UpsertRun(ctx, r.library, run); err != nil {
-		return fmt.Errorf("writing the finished run of %s: %w", r.library, err)
-	}
-
-	r.echo.expect(counts.items, counts.files)
-	return r.echo.wait(ctx, r.bus, r.echoTimeout)
+	return handOff(ctx, r.catalog, r.library, run, r.log, r.handoffTimeout)
 }
 
 // The start time comes off the row the probe container wrote. A row that

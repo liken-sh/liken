@@ -3,10 +3,10 @@ package main
 // The reporter is the container beside the standing catalog agent. It
 // is the one process in the namespace that reads the catalog and
 // publishes what it holds: one retained report per library, rebuilt
-// whenever the runs table changes and while any replicated table
-// keeps changing. It holds no Kubernetes credentials,
-// it answers on no port, and it never exits on its own, because every
-// Job in the namespace waits on this process to echo its run.
+// Whenever the runs table changes and while any replicated table
+// keeps changing. It holds no Kubernetes credentials, it answers on no
+// port, and it never exits on its own, because the operator reads a
+// Library's whole status off this process.
 
 import (
 	"context"

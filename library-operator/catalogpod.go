@@ -76,16 +76,41 @@ func buildCatalogPod(catalog *NamespaceCatalog, index int, scannerImage, corrosi
 	}
 }
 
-// The containers one copy of the catalog runs, as the native sidecars and
-// the containers beside them. The first copy carries the reporter over
-// its agent. Every copy after it is the agent alone, because one namespace
-// publishes one report.
+// The containers one copy of the catalog runs, as the native
+// sidecars and the containers beside them. Every copy carries the confirmer
+// over its agent, because every copy is a copy a Job can hand off to. The
+// first copy carries the reporter as well, because one namespace publishes
+// one report.
 func catalogPodContainers(catalog *NamespaceCatalog, index int, scannerImage, corrosionImage, busAddress, topicBase string) ([]Container, []Container) {
 	agent := catalogSidecar(corrosionImage)
+	confirm := confirmerSidecar(scannerImage)
 	if index > 0 {
-		return nil, []Container{replicaAgent(agent)}
+		return []Container{agent}, []Container{confirm}
 	}
-	return []Container{agent}, []Container{reporterSidecar(catalog, scannerImage, busAddress, topicBase)}
+	return []Container{agent}, []Container{reporterSidecar(catalog, scannerImage, busAddress, topicBase), confirm}
+}
+
+// The container that confirms a Job's run against this copy. It runs
+// this operator's own image in its confirm role, it reads the agent beside
+// it over loopback, and it learns the pod it speaks for from the downward
+// API, because the confirmations row is keyed by that name.
+func confirmerSidecar(image string) Container {
+	return Container{
+		Name:    confirmerContainer,
+		Image:   image,
+		Command: []string{"/library-operator", confirmMode},
+		Env: []EnvVar{
+			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
+			{Name: podNameVariable, ValueFrom: &EnvVarSource{
+				FieldRef: &ObjectFieldSelector{FieldPath: podNameFieldPath},
+			}},
+		},
+		Resources: ResourceRequirements{
+			Requests: map[string]string{"cpu": scannerCPURequest, "memory": scannerMemoryRequest},
+			Limits:   map[string]string{"memory": scannerMemoryLimit},
+		},
+		SecurityContext: unprivileged(),
+	}
 }
 
 // The container that reads the loopback catalog API and
