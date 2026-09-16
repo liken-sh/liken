@@ -10,23 +10,26 @@ const SERIES_BODY: &str = r#"{"plot":"A plot.","tagline":"One line.","contentRat
     "cast":[{"name":"A Player","role":"The Part"}]}"#;
 
 #[test]
-fn a_series_file_of_a_role_the_page_does_not_draw_is_left_out() {
+fn a_series_reads_its_trailer_by_role_and_takes_one_of_several() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_series(&path, "default/shows", "series:path:one", "One", "one");
-    insert_file(
-        &path,
-        "default/shows",
-        "one/trailer.mkv",
-        "series:path:one",
-        "video",
-        "trailer",
-    );
+    for file in ["one/trailers/second.mkv", "one/trailers/first.mkv"] {
+        insert_file(
+            &path,
+            "default/shows",
+            file,
+            "series:path:one",
+            "video",
+            "trailer",
+        );
+    }
     let mut source = SidecarSource::new(&path, NO_AGENT);
 
     let page = source
         .series("default/shows", "series:path:one")
         .expect("the series is there");
+    assert_eq!(page.trailer, "one/trailers/first.mkv");
     assert_eq!(page.backdrop, "");
     assert_eq!(page.logo, "");
 }
@@ -71,6 +74,14 @@ fn a_series_page_reads_its_body_its_seasons_and_its_art_by_role() {
         "image",
         "poster",
     );
+    insert_file(
+        &path,
+        "default/shows",
+        "Serial one/trailers/one.mkv",
+        "one",
+        "video",
+        "trailer",
+    );
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
     let details = source
@@ -95,6 +106,7 @@ fn a_series_page_reads_its_body_its_seasons_and_its_art_by_role() {
             ratings: vec![("imdb".into(), 8.3), ("tomatometerallcritics".into(), 95.0)],
             backdrop: "Serial one/fanart.jpg".into(),
             logo: "Serial one/clearlogo.png".into(),
+            trailer: "Serial one/trailers/one.mkv".into(),
             seasons: 2,
         }
     );
@@ -118,6 +130,7 @@ fn a_series_with_an_empty_body_reads_as_a_page_of_its_columns() {
     assert!(details.ratings.is_empty());
     assert!(details.backdrop.is_empty());
     assert!(details.logo.is_empty());
+    assert!(details.trailer.is_empty());
     assert_eq!(details.seasons, 0);
 }
 

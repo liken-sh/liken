@@ -250,6 +250,9 @@ impl Layout {
             // The page passes the still a bar's select lands on instead
             // of the bar, because the layout does not read the rail.
             Focus::Rail(..) => return 0.0,
+            // The button row is in the header, which never scrolls, so
+            // the wall stays at its top while the row holds focus.
+            Focus::Buttons(..) => return 0.0,
             Focus::Franchise(strip, _) => match self.franchises.get(strip) {
                 Some(top) => {
                     // A franchise strip is never the last block, because

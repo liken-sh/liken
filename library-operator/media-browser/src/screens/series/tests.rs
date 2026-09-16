@@ -102,6 +102,102 @@ fn a_still_leads_with_its_name_and_carries_the_facts_the_header_draws() {
     assert_eq!(page.stills[1].art, "s1e2.jpg");
 }
 
+// A page of a series the library holds a trailer file for.
+fn with_a_trailer() -> (Series, Serials) {
+    page(Serials {
+        trailer: true,
+        ..Serials::default()
+    })
+}
+
+#[test]
+fn only_a_series_with_a_trailer_file_draws_the_button() {
+    let (bare, _) = page(Serials::default());
+    assert!(bare.buttons().is_empty());
+
+    let (held, _) = with_a_trailer();
+    assert_eq!(held.buttons(), [row::Button::Trailer]);
+}
+
+#[test]
+fn up_from_the_first_row_reaches_the_button_and_down_returns_to_the_wall() {
+    let (mut page, mut source) = with_a_trailer();
+    assert_eq!(pressed(&mut page, &mut source, "up"), Focus::Buttons(0));
+    assert_eq!(pressed(&mut page, &mut source, "right"), Focus::Buttons(0));
+    assert_eq!(pressed(&mut page, &mut source, "down"), Focus::Still(0));
+}
+
+#[test]
+fn left_from_the_button_returns_to_the_still_the_wall_last_held() {
+    let (mut page, mut source) = with_a_trailer();
+    page.focus = Focus::Still(2);
+    assert_eq!(pressed(&mut page, &mut source, "up"), Focus::Buttons(0));
+    assert_eq!(pressed(&mut page, &mut source, "left"), Focus::Still(2));
+}
+
+#[test]
+fn the_button_is_the_top_rung_of_the_page() {
+    let (mut page, mut source) = with_a_trailer();
+    page.focus = Focus::Buttons(0);
+    assert!(matches!(page.key("up", &mut source), Step::Still));
+    assert_eq!(page.focus, Focus::Buttons(0));
+}
+
+#[test]
+fn a_press_on_the_button_plays_the_series_trailer_and_offers_nothing_after_it() {
+    let (mut page, mut source) = with_a_trailer();
+    page.focus = Focus::Buttons(0);
+    let Step::Play {
+        library,
+        selection,
+        start,
+        next,
+    } = page.key("enter", &mut source)
+    else {
+        panic!("a select on the button plays the trailer");
+    };
+    assert_eq!(library, "screening/serials");
+    assert_eq!(selection, Selection::Trailer { id: SERIES.into() });
+    assert_eq!(start, None);
+    assert!(next.is_none());
+}
+
+#[test]
+fn down_from_the_button_of_a_series_with_no_episodes_reaches_the_stripes() {
+    let (mut page, mut source) = credited(Serials {
+        empty: true,
+        trailer: true,
+        ..Serials::default()
+    });
+    page.focus = Focus::Buttons(0);
+    assert_eq!(pressed(&mut page, &mut source, "down"), Focus::Stripe(0, 0));
+}
+
+#[test]
+fn a_press_past_the_button_row_plays_nothing() {
+    let (mut page, mut source) = with_a_trailer();
+    page.focus = Focus::Buttons(9);
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
+fn a_reread_whose_trailer_left_returns_focus_to_the_wall() {
+    let (mut page, mut source) = with_a_trailer();
+    page.focus = Focus::Buttons(0);
+    source.trailer = false;
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Still(0));
+    assert!(page.buttons().is_empty());
+}
+
+#[test]
+fn a_reread_that_kept_the_trailer_keeps_focus_on_the_button() {
+    let (mut page, mut source) = with_a_trailer();
+    page.focus = Focus::Buttons(0);
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
+}
+
 #[test]
 fn left_and_right_stay_inside_one_season() {
     let (mut page, mut source) = page(Serials::default());

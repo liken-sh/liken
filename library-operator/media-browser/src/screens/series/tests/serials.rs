@@ -29,6 +29,7 @@ pub struct Serials {
     // Whether the series belongs to a franchise, which puts a strip
     // between the last season and the stripes.
     pub franchise: bool,
+    pub trailer: bool,
     // The episode count of each season, or the three of SEASONS where the
     // test names none.
     pub seasons: Vec<i64>,
@@ -154,6 +155,10 @@ impl Source for Serials {
             studios: vec!["A Studio".into()],
             ratings: vec![("imdb".into(), 8.3), ("tomatometerallcritics".into(), 95.0)],
             backdrop: "backdrop.jpg".into(),
+            trailer: match self.trailer {
+                true => "trailers/one.mkv".into(),
+                false => String::new(),
+            },
             seasons: self.counts().len() as i64,
             ..SeriesDetails::default()
         })
@@ -308,7 +313,7 @@ pub fn pressed(page: &mut Series, source: &mut Serials, key: &str) -> Focus {
 pub fn still(focus: Focus) -> usize {
     match focus {
         Focus::Still(index) => index,
-        Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => {
+        Focus::Buttons(..) | Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => {
             panic!("focus left the wall")
         }
     }

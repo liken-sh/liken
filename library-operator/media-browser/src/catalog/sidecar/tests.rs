@@ -332,8 +332,8 @@ fn insert_series_page(path: &Path, library: &str, id: &str, released: &str, body
     let connection = Connection::open(path).unwrap();
     connection
         .execute(
-            "INSERT INTO series (library, id, kind, title, sort_key, released, art, body) \
-             VALUES (?, ?, 'series', ?, ?, ?, ?, ?)",
+            "INSERT INTO series (library, id, kind, title, sort_key, released, art, slug, body) \
+             VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?)",
             (
                 library,
                 id,
@@ -341,6 +341,7 @@ fn insert_series_page(path: &Path, library: &str, id: &str, released: &str, body
                 format!("serial {id}"),
                 released,
                 format!("{id}.jpg"),
+                format!("serial-{id}"),
                 body,
             ),
         )

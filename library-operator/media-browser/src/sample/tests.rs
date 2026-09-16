@@ -259,6 +259,18 @@ fn every_library_draws_as_a_mosaic_of_its_newest_added_posters() {
 }
 
 #[test]
+fn a_serial_carries_a_page_with_a_backdrop_and_a_trailer() {
+    let mut catalog = Catalog;
+    let details = catalog
+        .series("sample/serials", "series:sample:01")
+        .expect("the sample holds this serial");
+    assert_eq!(details.title, "Serial 01");
+    assert!(!details.backdrop.is_empty());
+    assert!(!details.trailer.is_empty());
+    assert_eq!(details.cast.len(), 6);
+}
+
+#[test]
 fn a_serial_the_sample_never_invented_has_no_page() {
     let mut catalog = Catalog;
     assert_eq!(catalog.series("sample/serials", "series:sample:99"), None);

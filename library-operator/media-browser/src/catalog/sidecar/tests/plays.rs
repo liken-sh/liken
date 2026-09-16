@@ -1,5 +1,5 @@
-// The play lists a choice resolves to: a movie's main file, a movie's
-// trailer, and one episode.
+// The play lists a choice resolves to: a movie's main file, a trailer of
+// a movie or of a series, and one episode.
 
 use super::*;
 
@@ -275,6 +275,62 @@ fn a_trailer_plays_the_trailer_file_and_carries_no_trickplay() {
                 ..Presentation::default()
             },
         }]
+    );
+}
+
+#[test]
+fn a_series_trailer_plays_the_trailer_file_under_the_series_row() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series_page(&path, "default/shows", "series:tvdb:1", "2004", "{}");
+    insert_file(
+        &path,
+        "default/shows",
+        "Serial one/trailers/one.mkv",
+        "series:tvdb:1",
+        "video",
+        "trailer",
+    );
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    assert_eq!(
+        source.play(
+            "default/shows",
+            &Selection::Trailer {
+                id: "series:tvdb:1".into()
+            }
+        ),
+        vec![PlayItem {
+            path: "Serial one/trailers/one.mkv".into(),
+            slug: "serial-series:tvdb:1".into(),
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "series".into(),
+                title: "Serial series:tvdb:1".into(),
+                year: 2004,
+                art: "series:tvdb:1.jpg".into(),
+                ..Presentation::default()
+            },
+        }]
+    );
+}
+
+#[test]
+fn a_series_with_no_trailer_file_plays_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series_page(&path, "default/shows", "series:tvdb:1", "2004", "{}");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    assert!(
+        source
+            .play(
+                "default/shows",
+                &Selection::Trailer {
+                    id: "series:tvdb:1".into()
+                }
+            )
+            .is_empty()
     );
 }
 

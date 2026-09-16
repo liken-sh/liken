@@ -2,9 +2,8 @@
 // backdrop, and under it a wall of episode stills in aired order, with a
 // divider before each season's first row, a strip for each franchise the
 // series belongs to after the last season, and the stripes of credited
-// people after those. Focus is on a still or on a headshot, and the
-// header stays at the top of the frame, because it shows the focused
-// episode's facts and plot.
+// people after those. The header stays at the top of the frame, because
+// it shows the focused episode's facts and plot.
 
 mod layout;
 mod page;
@@ -18,7 +17,7 @@ use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
-use super::movie::franchise_press;
+use super::movie::{franchise_press, row};
 use super::{InFranchise, Screen, Step, facts, foot, person, stripes, upnext};
 use crate::art::Art;
 use crate::catalog::draw::Date;
@@ -34,6 +33,8 @@ pub const COLUMNS: usize = 4;
 /// Where focus is on the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
+    /// One button of the row.
+    Buttons(usize),
     /// One still of the episode wall.
     Still(usize),
     /// One bar of the seasons rail.
@@ -132,6 +133,9 @@ pub struct Series {
     pub logo: String,
     /// The path of the backdrop file, empty where the series has none.
     pub backdrop: String,
+    /// Whether the series holds a trailer file. That is what puts the
+    /// button row over the wall.
+    pub trailer: bool,
     /// The year, the season count, and the content rating, on one line.
     pub facts: String,
     /// The scores the ratings line draws, in the order it draws them. They
@@ -211,6 +215,7 @@ impl Series {
     // The page before its foot is read, with focus on the first episode.
     fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.series(library, id)?;
+        let trailer = !details.trailer.is_empty();
         let (stills, seasons) =
             seasons::wall_of(source.episodes(library, id), &Date::today().iso());
         let bars = seasons::bars(&seasons, layout::rail_region());
@@ -220,6 +225,7 @@ impl Series {
             title: details.title.clone(),
             logo: details.logo.clone(),
             backdrop: details.backdrop.clone(),
+            trailer,
             facts: facts_of(&details),
             ratings: ratings::scores(&details.ratings),
             tagline: details.tagline.clone(),
@@ -267,6 +273,8 @@ impl Series {
     // wall or the stripe it was on grew shorter.
     fn hold(&self, focus: Focus) -> Focus {
         match focus {
+            Focus::Buttons(..) if !self.trailer => Focus::Still(0),
+            Focus::Buttons(..) => Focus::Buttons(0),
             Focus::Still(index) => Focus::Still(index.min(self.stills.len().saturating_sub(1))),
             Focus::Rail(..) if self.bars.is_empty() => Focus::Still(0),
             Focus::Rail(bar) => Focus::Rail(bar.min(self.bars.len() - 1)),
@@ -287,7 +295,16 @@ impl Series {
     pub fn focused(&self) -> Option<&Still> {
         match self.focus {
             Focus::Still(index) => self.stills.get(index),
-            Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => None,
+            Focus::Buttons(..) | Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => None,
+        }
+    }
+
+    /// The buttons this page draws: Trailer where the `files` table holds
+    /// a trailer for the series, and no button at all where it holds none.
+    pub fn buttons(&self) -> &'static [row::Button] {
+        match self.trailer {
+            true => &[row::Button::Trailer],
+            false => &[],
         }
     }
 
@@ -298,6 +315,7 @@ impl Series {
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         let held = self.focus;
         let step = match self.focus {
+            Focus::Buttons(index) => self.on_button(index, key, source),
             Focus::Still(index) => self.on_still(index, key, source),
             Focus::Rail(bar) => self.on_rail(bar, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
@@ -308,6 +326,41 @@ impl Series {
         match key == "up" && self.focus == held && matches!(step, Step::Stay) {
             true => Step::Still,
             false => step,
+        }
+    }
+
+    // One press while the button row holds focus. The row is beside the
+    // header's text column, over the first row of stills. Up moves no
+    // focus, so the press reaches the browser's strip. Down and left
+    // return to the still the wall last held, or to the block under the
+    // wall where the series has no episodes.
+    fn on_button(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
+        match key {
+            "enter" => match self.buttons().get(index) {
+                // A trailer is in no order, so it offers nothing after it.
+                Some(row::Button::Trailer) => Step::Play {
+                    library: self.library.clone(),
+                    selection: Selection::Trailer {
+                        id: self.id.clone(),
+                    },
+                    start: None,
+                    next: None,
+                },
+                _ => Step::Stay,
+            },
+            "up" => Step::Still,
+            "down" | "left" => {
+                self.focus = match self.stills.is_empty() {
+                    true => self.under_wall(0),
+                    false => Focus::Still(self.entered.min(self.stills.len() - 1)),
+                };
+                self.refoot(source);
+                Step::Stay
+            }
+            _ => {
+                self.focus = Focus::Buttons(focus::row(index, self.buttons().len(), key));
+                Step::Stay
+            }
         }
     }
 
@@ -356,7 +409,17 @@ impl Series {
         let moved = focus::sectioned(index, &runs, COLUMNS, key);
         match (key, moved == index) {
             ("down", true) => self.under_wall(moved),
+            ("up", true) => self.over_wall(moved),
             _ => Focus::Still(moved),
+        }
+    }
+
+    // The rung over the first row of stills: the button row where the
+    // series holds a trailer, and the still itself where it holds none.
+    fn over_wall(&self, index: usize) -> Focus {
+        match self.trailer {
+            true => Focus::Buttons(0),
+            false => Focus::Still(index),
         }
     }
 

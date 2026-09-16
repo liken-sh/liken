@@ -21,7 +21,7 @@ use crate::art::Art;
 use crate::look;
 use crate::views::stack::Stack;
 use crate::views::{
-    area, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
+    area, buttons, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
 };
 
 // The share of the width the column of text takes. The column ends inside
@@ -60,7 +60,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
-        self.header(&mut frame, store, bounds, layout::header(bounds));
+        self.header(&mut frame, store, bounds, layout::header(bounds), focus);
 
         // The rail takes the right edge of the region, and the wall keeps
         // the rest.
@@ -238,6 +238,12 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     }
 }
 
+// The left edge of the button row: one gap past the right edge of the
+// header's text column, in the room beside the column.
+fn buttons_left(region: Rectangle, column: f32) -> f32 {
+    region.x + column + layout::GAP
+}
+
 /// The box the series' logo draws in at these bounds, which is where the
 /// loading state starts the logo's move. The header stands at the top of
 /// the frame whatever the wall under it has scrolled to.
@@ -263,6 +269,7 @@ impl<A: Art> Page<'_, A> {
         store: &mut A,
         bounds: Rectangle,
         region: Rectangle,
+        focus: Option<Focus>,
     ) {
         let series = self.series;
         // The column is a share of the whole frame's width, and not of the
@@ -317,7 +324,7 @@ impl<A: Art> Page<'_, A> {
         // The episode's name is cut to one line with an ellipsis, and the
         // runtime and the air date take a line of their own under it, so
         // a long name never pushes the date out of the header.
-        let taken = text::block(
+        text::block(
             frame,
             &text::cut(line, look::FACTS, column),
             stack.at(),
@@ -326,8 +333,8 @@ impl<A: Art> Page<'_, A> {
             column,
             1,
         );
-        stack.add(taken);
-        let taken = text::block(
+        stack.add(text::height(1, look::FACTS));
+        text::block(
             frame,
             aired,
             stack.at(),
@@ -336,8 +343,8 @@ impl<A: Art> Page<'_, A> {
             column,
             1,
         );
-        stack.add(taken);
-        let taken = text::block(
+        stack.add(text::height(1, look::FACTS));
+        text::block(
             frame,
             plot,
             stack.at(),
@@ -346,6 +353,28 @@ impl<A: Art> Page<'_, A> {
             column,
             layout::PLOT_LINES,
         );
-        stack.add(taken);
+        // The button row draws beside the text column, level with the top
+        // of the plot, so the header keeps the height it has on a series
+        // that holds no trailer.
+        let beside = Point::new(buttons_left(region, column), stack.at().y);
+        // Every block under the ratings adds the height it is cut to, and
+        // not the lines one episode's text filled, so the plot and the
+        // button row keep their place whatever holds focus.
+        stack.add(text::height(layout::PLOT_LINES, look::PLOT));
+
+        let words: Vec<&'static str> = series
+            .buttons()
+            .iter()
+            .map(|button| button.word())
+            .collect();
+        buttons::draw(
+            frame,
+            &words,
+            beside,
+            match focus {
+                Some(Focus::Buttons(index)) => Some(index),
+                _ => None,
+            },
+        );
     }
 }

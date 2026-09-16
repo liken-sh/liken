@@ -175,6 +175,7 @@ impl Source for Catalog {
             ratings: ratings(number),
             backdrop: format!("backdrops/serial-{number:02}.jpg"),
             logo: String::new(),
+            trailer: format!("Serial {number:02}/trailers/one.mkv"),
             seasons: seasons(number),
         })
     }

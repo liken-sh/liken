@@ -310,6 +310,13 @@ fn the_rail_reaches_this_measure_as_the_still_its_bar_lands_on() {
 }
 
 #[test]
+fn the_wall_stands_at_its_top_while_the_button_row_holds_focus() {
+    let layout = layout();
+    let height = region(frame()).height;
+    assert_eq!(layout.scroll(Focus::Buttons(0), &seasons(), height), 0.0);
+}
+
+#[test]
 fn the_rail_is_counted_against_the_region_the_page_draws_in() {
     let drawn = region(area(0.0, 0.0, 1920.0, 1080.0));
     assert_eq!(rail_region().height, drawn.height);

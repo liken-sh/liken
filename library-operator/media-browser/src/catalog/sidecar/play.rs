@@ -51,17 +51,25 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
     })
 }
 
-/// One movie's trailer: the trailer file's path, the movie's own
+/// One title's trailer: the trailer file's path, the title's own
 /// presentation, and no trickplay, because a trailer has none. The
-/// film's display then shows the movie the person was looking at.
+/// film's display then shows the title the person was looking at.
 pub fn trailer(
     connection: &Connection,
     library: &str,
     id: &str,
 ) -> rusqlite::Result<Vec<PlayItem>> {
+    // An item's id starts with its kind, so the prefix says which table
+    // holds the row. The table name and the hint are literals of this
+    // file and never a slice of the id, so the id reaches the SQL only as
+    // a bound parameter.
+    let (table, hint) = match id.starts_with("series:") {
+        true => ("series", "series"),
+        false => ("movies", "movie"),
+    };
     let sql = format!(
         "SELECT item.title, item.released, item.art, MIN(files.path), item.slug \
-         FROM movies item {} \
+         FROM {table} item {} \
          WHERE item.library = ? AND item.id = ? GROUP BY item.id",
         video("trailer")
     );
@@ -72,7 +80,7 @@ pub fn trailer(
             slug: row.get(4)?,
             presentation: Presentation {
                 kind: "video".into(),
-                hint: "movie".into(),
+                hint: hint.into(),
                 title: row.get(0)?,
                 year: year(&released),
                 art: row.get(2)?,

@@ -45,17 +45,16 @@ pub fn series(
             seasons: row.get(11)?,
             backdrop: String::new(),
             logo: String::new(),
+            trailer: String::new(),
         })
     })?;
 
-    // A series page draws no trailer button, so the two image roles are
-    // all it keeps of the read by role.
     if let Some(details) = found.first_mut() {
         for (role, path) in item::art(connection, library, id)? {
             match role.as_str() {
                 "backdrop" => details.backdrop = path,
                 "logo" => details.logo = path,
-                _ => {}
+                _ => details.trailer = path,
             }
         }
     }

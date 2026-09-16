@@ -232,8 +232,8 @@ pub fn library_name(library: &str) -> &str {
 }
 
 /// What a series' page draws: the item's own columns, the fields of its
-/// body, the two files it reads by role, and how many seasons its
-/// episodes fall into.
+/// body, the files it reads by role, and how many seasons its episodes
+/// fall into.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SeriesDetails {
     /// The name a person reads.
@@ -265,6 +265,9 @@ pub struct SeriesDetails {
     /// The path of the logo file, relative to the library root, or empty
     /// where the item has none.
     pub logo: String,
+    /// The path of the trailer file, relative to the library root, or
+    /// empty where the item has none.
+    pub trailer: String,
     /// How many seasons the series' episodes fall into.
     pub seasons: i64,
 }
@@ -604,7 +607,7 @@ pub trait Source {
 }
 
 /// What a person chose, as the three things that resolve to a play
-/// list: a movie by its id, a movie's trailer by the movie's id, and an
+/// list: a movie by its id, a trailer by its title's id, and an
 /// episode by its series, season, and aired number. The library is not in here because every read
 /// takes it beside the choice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -614,9 +617,9 @@ pub enum Selection {
         /// The movie's id inside its library.
         id: String,
     },
-    /// One movie's trailer, named by the movie's own id.
+    /// One title's trailer, named by the title's own id.
     Trailer {
-        /// The movie's id inside its library.
+        /// The movie's or the series' id inside its library.
         id: String,
     },
     // One episode, which is one work.
