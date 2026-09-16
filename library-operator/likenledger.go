@@ -96,7 +96,10 @@ type likenLedger struct {
 	// it. Only the trailer fact writes it. The walk reads it for the trailers
 	// table, so a rebuilt catalog never asks a provider again.
 	Trailers []trailerEntry `yaml:"trailers,omitempty"`
-	Attempts []likenAttempt `yaml:"attempts,omitempty"`
+	// The trailerfile fact's own record: the one file it pulled beside the
+	// title, and nothing where it has pulled none.
+	TrailerFile *trailerFileEntry `yaml:"trailerfile,omitempty"`
+	Attempts    []likenAttempt    `yaml:"attempts,omitempty"`
 }
 
 // The provider blocks that answered one fact: one name for a single value,

@@ -85,6 +85,9 @@ func (e *enricher) arrivalWork(paths []string) []arrivalWork {
 func (e *enricher) stampArrivals(ctx context.Context, work arrivalWork) int {
 	now := time.Now().UTC()
 	stamped := 0
+	// The attempts are counted after the write lands, because a write that
+	// fails records an error attempt for every entry instead.
+	found, failed := 0, 0
 	err := e.writer.updateLikenLedger(work.folder, factArrival, func(ledger *likenLedger) {
 		held := map[string]bool{}
 		for _, entry := range ledger.Files {
@@ -97,11 +100,15 @@ func (e *enricher) stampArrivals(ctx context.Context, work arrivalWork) int {
 				if err != nil {
 					e.logf("could not read the change time of %s: %v", entry, err)
 					result = attemptError
+					failed++
 				} else {
 					ledger.Files = append(ledger.Files, arrivalEntry{Path: entry, At: time.Unix(at, 0).UTC()})
 					held[entry] = true
 					stamped++
+					found++
 				}
+			} else {
+				found++
 			}
 			ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result})
 		}
@@ -110,6 +117,12 @@ func (e *enricher) stampArrivals(ctx context.Context, work arrivalWork) int {
 		e.logf("could not write the arrival ledger at %s: %v", relativePath(e.root, work.folder), err)
 		e.writeArrivalErrors(ctx, work, now)
 		return 0
+	}
+	if found > 0 {
+		e.tallies.add(tallyAttempts, float64(found), "fact", factArrival, "result", attemptFound)
+	}
+	if failed > 0 {
+		e.tallies.add(tallyAttempts, float64(failed), "fact", factArrival, "result", attemptError)
 	}
 	e.writeRows(factArrival, work.folder, true)
 	return stamped
@@ -123,6 +136,7 @@ func (e *enricher) writeArrivalErrors(ctx context.Context, work arrivalWork, at 
 	}
 	var rows []attemptRow
 	for _, entry := range work.entries {
+		e.tallies.add(tallyAttempts, 1, "fact", factArrival, "result", attemptError)
 		rows = append(rows, attemptRow{
 			Library: e.library,
 			Item:    relativePath(e.root, filepath.Join(work.folder, entry)),

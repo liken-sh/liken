@@ -69,17 +69,33 @@ type metrics struct {
 	// Layer 3: the rows plans/37-prometheus-metrics.md states for this
 	// operator. Each reads a fact that already reaches this operator over
 	// the bus and already feeds a Library's status.
-	scanDuration    *prometheus.HistogramVec
-	scanLastSuccess *prometheus.GaugeVec
-	items           *prometheus.GaugeVec
+	runDuration    *prometheus.HistogramVec
+	runLastSuccess *prometheus.GaugeVec
+	items          *prometheus.GaugeVec
+	// factGap is the rows each fact has left to fill, from the same gap
+	// counts the operator schedules the enricher on.
+	factGap *prometheus.GaugeVec
+	// tallyCounters is the counters the Jobs' own counts feed, by tally
+	// metric name.
+	tallyCounters map[string]*prometheus.CounterVec
 
-	// lastScan is the newest scan run this operator has already turned
-	// into a duration observation, by library name. The pass reads the
-	// same report on every backstop tick between two scans, and without
-	// this a ten-second tick would observe one finished scan's duration
+	// lastRun is the newest run this operator has already turned into a
+	// duration observation, by library and worker. The pass reads the
+	// same report on every backstop tick between two runs, and without
+	// this a ten-second tick would observe one finished run's duration
 	// dozens of times.
-	mutex    sync.Mutex
-	lastScan map[string]time.Time
+	mutex   sync.Mutex
+	lastRun map[runKey]time.Time
+	// lastTally is the value this operator last read for one tally row, so a
+	// report read again adds nothing and a grown row adds its delta.
+	lastTally map[tallyStateKey]float64
+}
+
+// runKey is one worker of one library, which is what a run is observed
+// under.
+type runKey struct {
+	library string
+	worker  string
 }
 
 // newMetrics builds the registry and every series on it, and sets
@@ -113,20 +129,26 @@ func newMetrics(version string) *metrics {
 			Name: "library_watch_restarts_total",
 			Help: "Watches the API server closed that this operator reopened, by resource kind.",
 		}, []string{"kind"}),
-		scanDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "library_scan_duration_seconds",
-			Help:    "How long a library's full walk took, from its scan run's start to its finish.",
+		runDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "library_run_duration_seconds",
+			Help:    "How long one worker's run over a library took, from its start to its finish.",
 			Buckets: []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600},
-		}, []string{"library"}),
-		scanLastSuccess: factory.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "library_scan_last_success_timestamp_seconds",
-			Help: "When a library's last full walk finished.",
-		}, []string{"library"}),
+		}, []string{"library", "worker"}),
+		runLastSuccess: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "library_run_last_success_timestamp_seconds",
+			Help: "When one worker's last run over a library finished.",
+		}, []string{"library", "worker"}),
 		items: factory.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "library_items",
 			Help: "Item rows the catalog holds for a library, by kind.",
 		}, []string{"library", "kind"}),
-		lastScan: map[string]time.Time{},
+		factGap: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "library_fact_gap",
+			Help: "Rows one fact has left to fill in a library.",
+		}, []string{"library", "fact"}),
+		tallyCounters: newTallyCounters(factory),
+		lastRun:       map[runKey]time.Time{},
+		lastTally:     map[tallyStateKey]float64{},
 	}
 }
 
@@ -153,38 +175,69 @@ func (m *metrics) recordWatchRestart(kind string) {
 }
 
 // observeLibraryReport folds the newest report a Library's namespace
-// published into the layer 3 rows: the items by kind, always, and the
-// scan's last success and duration where the report carries a finished
-// scan run. A nil report is a Library no reporter has spoken for yet, and
-// leaves every series absent rather than a false zero: an absent series
-// reads as unknown, and a zero would read as an empty library.
-func (m *metrics) observeLibraryReport(library string, report *libraryReport) {
-	if m == nil || report == nil {
+// published into the layer 3 rows. A nil report is a Library no reporter
+// has spoken for yet, and leaves every series absent rather than a false
+// zero: an absent series reads as unknown, and a zero would read as an
+// empty library.
+//
+// The rows are the items by kind, the gap of every fact whose Job this
+// Library runs, one run per worker for every finished run the report holds,
+// and the counters the report's tallies feed.
+func (m *metrics) observeLibraryReport(library *Library, report *libraryReport) {
+	if m == nil || library == nil || report == nil {
 		return
 	}
+	name := library.Metadata.Name
 	for kind, count := range report.ItemsByKind {
-		m.items.WithLabelValues(library, kind).Set(float64(count))
+		m.items.WithLabelValues(name, kind).Set(float64(count))
 	}
-	if !report.LastWalk.IsZero() {
-		m.scanLastSuccess.WithLabelValues(library).Set(float64(report.LastWalk.Unix()))
+	for fact, count := range report.Gaps {
+		// A gap no Job of this Library fills is not published, and the series
+		// a switch turned off leaves behind is deleted with it.
+		if !libraryRunsFact(library, fact) {
+			m.factGap.DeleteLabelValues(name, fact)
+			continue
+		}
+		m.factGap.WithLabelValues(name, fact).Set(float64(count))
 	}
+	for _, run := range report.Runs {
+		m.observeRun(name, run)
+	}
+	m.observeTallies(name, report.Tallies)
+}
 
-	run, held := runOf(report.Runs, workerScan)
-	if !held || run.Started.IsZero() || run.Finished.IsZero() {
+// libraryRunsFact reports whether the Library runs the Job that fills one
+// fact. The trickplay sheets and the trailer files each have a switch of their
+// own, and every other fact runs in the enricher, which every Library runs.
+func libraryRunsFact(library *Library, fact string) bool {
+	switch fact {
+	case factTrickplay:
+		return library.Spec.Trickplay.Enabled
+	case factTrailerFile:
+		return library.Spec.Trailers.Enabled
+	}
+	return true
+}
+
+// observeRun records one finished run: the worker's last success, and its
+// duration once. A run this operator has already observed changes nothing, so
+// a report read again on the next backstop tick costs nothing here.
+func (m *metrics) observeRun(library string, run libraryRun) {
+	if run.Started.IsZero() || run.Finished.IsZero() {
 		return
 	}
+	key := runKey{library: library, worker: run.Worker}
 	m.mutex.Lock()
-	changed := run.Finished.After(m.lastScan[library])
+	changed := run.Finished.After(m.lastRun[key])
 	if changed {
-		m.lastScan[library] = run.Finished
+		m.lastRun[key] = run.Finished
 	}
 	m.mutex.Unlock()
-	// Only a scan this operator has not already turned into an
-	// observation moves the histogram, so a report read again on the next
-	// backstop tick, before the next scan finishes, costs nothing here.
-	if changed {
-		m.scanDuration.WithLabelValues(library).Observe(run.Finished.Sub(run.Started).Seconds())
+	if !changed {
+		return
 	}
+	m.runLastSuccess.WithLabelValues(library, run.Worker).Set(float64(run.Finished.Unix()))
+	m.runDuration.WithLabelValues(library, run.Worker).Observe(run.Finished.Sub(run.Started).Seconds())
 }
 
 // dropLibrary removes every series this operator holds for a Library the
@@ -195,13 +248,28 @@ func (m *metrics) dropLibrary(library string) {
 	if m == nil {
 		return
 	}
-	m.scanDuration.DeleteLabelValues(library)
-	m.scanLastSuccess.DeleteLabelValues(library)
-	for _, kind := range itemKinds {
-		m.items.DeleteLabelValues(library, kind)
+	// The label sets a Library has are its workers, its kinds, its facts, and
+	// whatever labels its Jobs counted under, so each series is deleted by its
+	// library label and not by a list this operator keeps.
+	held := prometheus.Labels{"library": library}
+	m.runDuration.DeletePartialMatch(held)
+	m.runLastSuccess.DeletePartialMatch(held)
+	m.items.DeletePartialMatch(held)
+	m.factGap.DeletePartialMatch(held)
+	for _, counter := range m.tallyCounters {
+		counter.DeletePartialMatch(held)
 	}
 	m.mutex.Lock()
-	delete(m.lastScan, library)
+	for key := range m.lastRun {
+		if key.library == library {
+			delete(m.lastRun, key)
+		}
+	}
+	for key := range m.lastTally {
+		if key.library == library {
+			delete(m.lastTally, key)
+		}
+	}
 	m.mutex.Unlock()
 }
 

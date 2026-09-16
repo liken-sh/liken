@@ -46,9 +46,11 @@ func (c *Catalog) SweepLibrary(ctx context.Context, library string) (int, error)
 // librarySweepSteps is the sweep in the order it runs. The aliases, the
 // credits, the trailers, and the links that point at an item go before the
 // item rows,
-// the files and the attempts follow, and the people go last, the
-// contributor aliases before the contributors they resolve to. No step
+// the files and the attempts follow, and the
+// contributor aliases go before the contributors they resolve to. No step
 // leaves a row whose parent is gone.
+//
+// The tallies go last, because no other row points at them.
 func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 	return []librarySweepStep{
 		{librarySweepSQL("aliases", "alias"), func(ctx context.Context, keys []string) (int, error) {
@@ -101,6 +103,9 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		}},
 		{librarySweepSQL("franchises", "id"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteFranchises(ctx, library, keys)
+		}},
+		{librarySweepTallySQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteTallies(ctx, library, tallyKeys(keys))
 		}},
 	}
 }

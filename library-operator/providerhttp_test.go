@@ -203,3 +203,99 @@ func TestThePaceEachProviderBlockHoldsTo(t *testing.T) {
 		})
 	}
 }
+
+// Every request counts under the provider that answered and the class of its
+// answer, so a provider that starts refusing is a line on a graph.
+func TestEveryRequestCountsUnderItsStatusClass(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		class    string
+		requests float64
+	}{
+		{name: "an answer", status: http.StatusOK, class: "2xx", requests: 1},
+		{name: "a provider that asks for a slower pace",
+			status: http.StatusTooManyRequests, class: "429", requests: providerAttempts},
+		{name: "a key the provider refused", status: http.StatusUnauthorized, class: "4xx", requests: 1},
+		{name: "a provider that is down", status: http.StatusBadGateway, class: "5xx", requests: 1},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			requests, _ := newFakeProvider(t, func(int) (int, string) { return one.status, `{}` })
+			requests.wait = func(context.Context, time.Duration) error { return nil }
+			record := newTallies(nil, "house/movies", workerEnrich, "enrich-1", nfoContainerName, time.Now())
+			requests.recordTo(record)
+
+			answer := map[string]any{}
+			_ = requests.get(t.Context(), "/one", nil, &answer)
+
+			held := record.totals()
+			counted := tallyCell{metric: tallyProviderRequests,
+				labels: "provider=tmdb,status=" + one.class}
+			if held[counted] != one.requests {
+				t.Errorf("%v = %v, want %v", counted, held[counted], one.requests)
+			}
+			seconds := tallyCell{metric: tallyProviderRequestSeconds, labels: "provider=tmdb"}
+			if _, timed := held[seconds]; !timed {
+				t.Errorf("the recorder holds %v, want the seconds of every request", held)
+			}
+		})
+	}
+}
+
+// A request that never got an answer counts as an error, because a provider
+// that cannot be reached is the same fault to a reader.
+func TestARequestWithNoAnswerCountsAsAnError(t *testing.T) {
+	requests := newProviderRequests(providerBlockTMDb, "http://127.0.0.1:1", nil)
+	record := newTallies(nil, "house/movies", workerEnrich, "enrich-1", nfoContainerName, time.Now())
+	requests.recordTo(record)
+
+	answer := map[string]any{}
+	err := requests.get(t.Context(), "/one", nil, &answer)
+
+	if err == nil {
+		t.Fatal("the request answered no error, want the refused connection")
+	}
+	held := record.totals()
+	counted := tallyCell{metric: tallyProviderRequests, labels: "provider=tmdb,status=error"}
+	if held[counted] != 1 {
+		t.Errorf("%v = %v, want 1", counted, held[counted])
+	}
+}
+
+// A file fetch counts the same way, because both sends share one round trip.
+func TestAFileFetchCountsItsRequest(t *testing.T) {
+	requests, _ := newFakeProvider(t, func(int) (int, string) { return http.StatusOK, "a picture" })
+	record := newTallies(nil, "house/movies", workerEnrich, "enrich-1", nfoContainerName, time.Now())
+	requests.recordTo(record)
+
+	if _, err := requests.fetchFile(t.Context(), requests.base+"/poster.jpg"); err != nil {
+		t.Fatal(err)
+	}
+
+	held := record.totals()
+	counted := tallyCell{metric: tallyProviderRequests, labels: "provider=tmdb,status=2xx"}
+	if held[counted] != 1 {
+		t.Errorf("%v = %v, want 1", counted, held[counted])
+	}
+}
+
+// A status outside the classes counts as an error. The operator's own
+// provider check never reaches this, because it names no recorder.
+func TestAStatusOutsideTheClassesCountsAsAnError(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   string
+	}{
+		{name: "a redirect the client did not follow", status: http.StatusMultipleChoices, want: "error"},
+		{name: "an answer", status: http.StatusNoContent, want: "2xx"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if got := providerStatusClass(one.status); got != one.want {
+				t.Errorf("providerStatusClass(%d) = %q, want %q", one.status, got, one.want)
+			}
+		})
+	}
+}

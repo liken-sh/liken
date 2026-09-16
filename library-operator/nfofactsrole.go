@@ -33,23 +33,29 @@ type answerLine struct {
 
 // The answerer of each block the nfo facts can ask. TVmaze is built with no
 // key, because it takes no account.
-var nfoAnswerers = map[string]func(base, token string) answerer{
-	providerBlockTMDb: func(base, token string) answerer {
-		return tmdbAnswerer{client: newTMDbClient(base, token)}
+var nfoAnswerers = map[string]func(base, token string, record *tallies) answerer{
+	providerBlockTMDb: func(base, token string, record *tallies) answerer {
+		client := newTMDbClient(base, token)
+		client.recordTo(record)
+		return tmdbAnswerer{client: client}
 	},
-	providerBlockOMDb: func(base, token string) answerer {
-		return newOMDbAnswerer(newOMDbClient(base, token))
+	providerBlockOMDb: func(base, token string, record *tallies) answerer {
+		client := newOMDbClient(base, token)
+		client.recordTo(record)
+		return newOMDbAnswerer(client)
 	},
-	providerBlockTVmaze: func(base, _ string) answerer {
-		return newTVmazeAnswerer(newTVmazeClient(base))
+	providerBlockTVmaze: func(base, _ string, record *tallies) answerer {
+		client := newTVmazeClient(base)
+		client.recordTo(record)
+		return newTVmazeAnswerer(client)
 	},
 }
 
 // The line the two rules for who answers read, in the order the Library's own
 // spec.sources names the blocks.
-func newAnswerLine(blocks []string, value func(string) string) *answerLine {
+func newAnswerLine(blocks []string, value func(string) string, record *tallies) *answerLine {
 	return &answerLine{
-		answerers: answerersOf(blocks, value, nfoAnswerers),
+		answerers: recordingAnswerers(blocks, value, record, nfoAnswerers),
 		spent:     map[string]bool{},
 	}
 }
@@ -96,7 +102,7 @@ func (l *answerLine) ask(ctx context.Context, fact string, title titleRef) ([]pr
 // only where a source serves one of its facts.
 func (e *enricher) nfoFact(ctx context.Context, fact string) error {
 	if e.providers == nil {
-		e.providers = newAnswerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv)
+		e.providers = newAnswerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
 	}
 	if len(e.providers.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)
@@ -290,6 +296,7 @@ func (e *enricher) groupHeldByAnother(folder, fact string, group elementGroup, d
 // The item entry and the attempt are one write of one file, as the identity
 // fact writes them, so a reader never sees an answer without its attempt.
 func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result string, names providerNames) {
+	e.tallies.add(tallyAttempts, 1, "fact", fact, "result", result)
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		if entry != nil {
 			ledger.noteItem(*entry)

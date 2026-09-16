@@ -402,7 +402,7 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Scan duration p50 / p99 by library",
+      "title": "Run duration p50 / p99 by library and worker",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -463,25 +463,25 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le, library) (rate(library_scan_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le, library, worker) (rate(library_run_duration_seconds_bucket[5m])))",
           "refId": "A",
-          "legendFormat": "p50 {{library}}"
+          "legendFormat": "p50 {{library}}/{{worker}}"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, library) (rate(library_scan_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, library, worker) (rate(library_run_duration_seconds_bucket[5m])))",
           "refId": "B",
-          "legendFormat": "p99 {{library}}"
+          "legendFormat": "p99 {{library}}/{{worker}}"
         }
       ]
     },
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Scan last success age by library",
+      "title": "Time since each worker last finished, by library",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -546,9 +546,9 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "time() - library_scan_last_success_timestamp_seconds",
+          "expr": "time() - library_run_last_success_timestamp_seconds",
           "refId": "A",
-          "legendFormat": "{{library}}"
+          "legendFormat": "{{library}}/{{worker}}"
         }
       ]
     },

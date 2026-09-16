@@ -90,9 +90,13 @@ func TestAnEnrichJobReadsItsJobOutOfTheEnvironment(t *testing.T) {
 	t.Setenv(libraryNameVariable, "movies")
 	t.Setenv(jobNameVariable, "movies-enrich-1")
 	t.Setenv(handoffTimeoutVariable, "")
+	t.Setenv(libraryWorkerVariable, workerEnrich)
 
-	run := newEnrichRun(&bytes.Buffer{})
+	run, err := newEnrichRun(&bytes.Buffer{})
 
+	if err != nil {
+		t.Fatal(err)
+	}
 	if run.job != "movies-enrich-1" {
 		t.Errorf("job = %q, want the Job the environment names", run.job)
 	}

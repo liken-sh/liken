@@ -27,6 +27,10 @@ type enricher struct {
 	catalog  *Catalog
 	writer   *volumeWriter
 	log      io.Writer
+	// The worker whose run this container belongs to, and the counts it
+	// raises under that run.
+	worker  string
+	tallies *tallies
 	// The folder names the walk skips. A fact reads its folder through the
 	// scan's reader after each write, and that reader takes the same set.
 	ignore ignoreSet
@@ -49,11 +53,18 @@ type enricher struct {
 	// The providers the trailer container asks, built once and held here, as the
 	// art line is.
 	trailers *trailerLine
+	// The sites the trailers container downloads from, built once and held
+	// here, as the trailer line is.
+	trailerFiles *trailerFetchLine
 }
 
 // A container with no API credential learns everything from its environment,
 // as the scanner does.
-func newEnricher(log io.Writer) *enricher {
+//
+// A container whose environment names no worker is a manifest to repair, so
+// it fails here. It never counts under a worker it does not belong to, and it
+// never sweeps that worker's rows.
+func newEnricher(log io.Writer) (*enricher, error) {
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
 	root := os.Getenv(libraryRootVariable)
@@ -66,6 +77,11 @@ func newEnricher(log io.Writer) *enricher {
 	}
 	mountRoot := path.Join(libraryMountPath, root)
 	job := os.Getenv(jobNameVariable)
+	worker := os.Getenv(libraryWorkerVariable)
+	if worker == "" {
+		return nil, fmt.Errorf("%s names no worker", libraryWorkerVariable)
+	}
+	container := os.Getenv(libraryContainerVariable)
 
 	work := &enricher{
 		library:     libraryKey(namespace, name),
@@ -79,9 +95,11 @@ func newEnricher(log io.Writer) *enricher {
 		ignore:      parseIgnore(os.Getenv(libraryIgnoreVariable)),
 		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable)),
 		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
+		worker:      worker,
 	}
+	work.tallies = newTallies(work.catalog, work.library, worker, job, container, time.Now().UTC())
 	work.scope = work.narrowedScope()
-	return work
+	return work, nil
 }
 
 // A Job that names a folder the volume does not hold covers the whole library
@@ -127,7 +145,17 @@ func (e *enricher) markRunStarted(ctx context.Context) error {
 	if _, _, err := e.catalog.UpsertRun(ctx, e.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", e.library, err)
 	}
+	e.sweepOldTallies(ctx, run.Started)
 	return nil
+}
+
+// sweepOldTallies deletes this worker's old tally rows where the Job marks
+// its start, so the table holds the retention and no more. A sweep that fails
+// is logged and never ends the run, because a count is not the work.
+func (e *enricher) sweepOldTallies(ctx context.Context, now time.Time) {
+	if err := e.catalog.sweepTallies(ctx, e.library, e.worker, now.Add(-tallyRetention)); err != nil {
+		e.logf("could not sweep the tallies of %s: %v", e.library, err)
+	}
 }
 
 // An attempt is recorded whatever the outcome, so a miss is a fact with a
@@ -135,6 +163,7 @@ func (e *enricher) markRunStarted(ctx context.Context) error {
 // relative to the folder that holds the .liken directory, which is how the
 // scanner keys it.
 func (e *enricher) recordAttempt(folder, fact, entryPath, result string, at time.Time) {
+	e.tallies.add(tallyAttempts, 1, "fact", fact, "result", result)
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		ledger.noteAttempt(likenAttempt{Path: entryPath, At: at, Result: result})
 	})

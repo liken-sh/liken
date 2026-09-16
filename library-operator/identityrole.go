@@ -19,7 +19,9 @@ func (e *enricher) identityFact(ctx context.Context) error {
 	if token == "" {
 		return fmt.Errorf("%s is empty, and the identity fact cannot ask a provider without it", tmdbTokenVariable)
 	}
-	return e.identityGap(ctx, newTMDbClient(tmdbAPIBase, token))
+	client := newTMDbClient(tmdbAPIBase, token)
+	client.recordTo(e.tallies)
+	return e.identityGap(ctx, client)
 }
 
 // A catalog read that fails ends the container, because the gap list is the
@@ -133,6 +135,7 @@ func (e *enricher) writeUniqueID(sidecar, rootElement, title, provider, id strin
 // The item entry and the attempt are one write of one file, so a reader never
 // sees an answer without its attempt.
 func (e *enricher) recordIdentity(folder string, entry *likenItem, result string) {
+	e.tallies.add(tallyAttempts, 1, "fact", factIdentity, "result", result)
 	err := e.writer.updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
 		if entry != nil {
 			ledger.noteItem(*entry)

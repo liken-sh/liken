@@ -156,7 +156,7 @@ var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 	factCredits,
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
 	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
-	factTrailer}
+	factTrailer, factTrailerFile}
 
 // The rows one folder's trailer ledger becomes: one per trailer the providers
 // hold, keyed on the item its own entry names.

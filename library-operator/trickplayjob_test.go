@@ -123,3 +123,16 @@ func TestTheTrickplayPodHoldsTheRenderClaim(t *testing.T) {
 		})
 	}
 }
+
+// The trickplay Job is its own worker, so its counts are separate from the
+// enricher's and its own next run sweeps them.
+func TestTheTrickplayContainerNamesItsOwnWorker(t *testing.T) {
+	tiles := testTrickplayJob(studioMovies(), "").Spec.Template.Spec.Containers[0]
+
+	if got := containerEnvironment(tiles)[libraryWorkerVariable]; got != workerTrickplay {
+		t.Errorf("%s = %q, want %q", libraryWorkerVariable, got, workerTrickplay)
+	}
+	if got := containerEnvironment(tiles)[libraryContainerVariable]; got != trickplayContainerName {
+		t.Errorf("%s = %q, want %q", libraryContainerVariable, got, trickplayContainerName)
+	}
+}

@@ -94,25 +94,35 @@ func TestRecordWatchRestartCounts(t *testing.T) {
 	}
 }
 
-// A finished scan run's fields, for a report that names a library. The
-// report also carries the counts library_items sums.
+// libraryNamed builds the Library whose name the series hold, with every
+// fact's Job off.
+func libraryNamed(name string) *Library {
+	return &Library{Metadata: ObjectMeta{Namespace: "house", Name: name}}
+}
+
+// scannedReport builds a finished scan run's fields, for a report that names
+// a library. The report also holds the counts library_items sums, and one gap
+// count, which library_fact_gap reads.
 func scannedReport(started, finished time.Time) *libraryReport {
 	return &libraryReport{
 		LastWalk:    finished,
 		ItemsByKind: map[string]int{libraryKindMovies: 3, libraryKindSeries: 1},
+		Gaps:        map[string]int{factProbe: 7},
 		Runs:        []libraryRun{{Worker: workerScan, Started: started, Finished: finished}},
 	}
 }
 
-// The items gauge and the scan gauges read straight off the report a
-// Library's namespace published, the same report that already feeds
-// that Library's status.
+// The items gauge and the run gauges read straight off the report a
+// Library's namespace published, the same report that already feeds that
+// Library's status.
+//
+// The gap gauge reads the same report's gap counts.
 func TestObserveLibraryReportSetsTheLayerThreeGauges(t *testing.T) {
 	m := newMetrics("test")
 	finished := time.Unix(1_700_000_000, 0).UTC()
 	report := scannedReport(finished.Add(-time.Minute), finished)
 
-	m.observeLibraryReport("movies", report)
+	m.observeLibraryReport(libraryNamed("movies"), report)
 
 	if got := testutil.ToFloat64(m.items.WithLabelValues("movies", libraryKindMovies)); got != 3 {
 		t.Errorf("items[movies] = %v, want 3", got)
@@ -120,50 +130,135 @@ func TestObserveLibraryReportSetsTheLayerThreeGauges(t *testing.T) {
 	if got := testutil.ToFloat64(m.items.WithLabelValues("movies", libraryKindSeries)); got != 1 {
 		t.Errorf("items[series] = %v, want 1", got)
 	}
-	if got := testutil.ToFloat64(m.scanLastSuccess.WithLabelValues("movies")); got != float64(finished.Unix()) {
-		t.Errorf("scan_last_success = %v, want %v", got, finished.Unix())
+	if got := testutil.ToFloat64(m.factGap.WithLabelValues("movies", factProbe)); got != 7 {
+		t.Errorf("fact_gap[probe] = %v, want 7", got)
+	}
+	if got := testutil.ToFloat64(m.runLastSuccess.WithLabelValues("movies", workerScan)); got != float64(finished.Unix()) {
+		t.Errorf("run_last_success = %v, want %v", got, finished.Unix())
 	}
 	body := scrape(t, m)
-	if want := `library_scan_duration_seconds_count{library="movies"} 1`; !strings.Contains(body, want) {
+	if want := `library_run_duration_seconds_count{library="movies",worker="scan"} 1`; !strings.Contains(body, want) {
 		t.Errorf("scrape did not contain %q:\n%s", want, body)
 	}
 }
 
-// The backstop tick reads the same report between two scans, on every
-// pass. The duration histogram observes the finished scan once, not once
+// libraryWithFacts builds one Library with the trickplay and the trailers
+// switches a test names.
+func libraryWithFacts(trickplay, trailers bool) *Library {
+	library := libraryNamed("movies")
+	library.Spec.Trickplay.Enabled = trickplay
+	library.Spec.Trailers.Enabled = trailers
+	return library
+}
+
+// The gap of a fact whose Job the Library has turned off is in no scrape.
+func TestTheGapOfAFactWithNoJobIsNotPublished(t *testing.T) {
+	cases := []struct {
+		name      string
+		library   *Library
+		fact      string
+		published bool
+	}{
+		{name: "trickplay on", library: libraryWithFacts(true, false),
+			fact: factTrickplay, published: true},
+		{name: "trickplay off", library: libraryWithFacts(false, false),
+			fact: factTrickplay, published: false},
+		{name: "trailer files on", library: libraryWithFacts(false, true),
+			fact: factTrailerFile, published: true},
+		{name: "trailer files off", library: libraryWithFacts(false, false),
+			fact: factTrailerFile, published: false},
+		{name: "a fact every library runs", library: libraryWithFacts(false, false),
+			fact: factProbe, published: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			m := newMetrics("test")
+
+			m.observeLibraryReport(one.library, &libraryReport{Gaps: map[string]int{one.fact: 7}})
+
+			body := scrape(t, m)
+			series := `library_fact_gap{fact="` + one.fact + `",library="movies"} 7`
+			if strings.Contains(body, series) != one.published {
+				t.Errorf("the scrape carries %q = %v, want %v:\n%s",
+					series, !one.published, one.published, body)
+			}
+		})
+	}
+}
+
+// Turning a fact's Job off clears the series the fact left behind while its
+// Job was on.
+func TestTurningAFactsJobOffClearsItsGap(t *testing.T) {
+	m := newMetrics("test")
+	report := &libraryReport{Gaps: map[string]int{factTrickplay: 7}}
+	m.observeLibraryReport(libraryWithFacts(true, false), report)
+
+	m.observeLibraryReport(libraryWithFacts(false, false), report)
+
+	body := scrape(t, m)
+	if strings.Contains(body, "library_fact_gap{") {
+		t.Errorf("the scrape still carries the gap of a fact with no Job:\n%s", body)
+	}
+}
+
+// Every worker that finished a run is observed under its own name, so one
+// library has a duration for its scan and one for its enricher.
+func TestObserveLibraryReportObservesEveryWorkersRun(t *testing.T) {
+	m := newMetrics("test")
+	finished := time.Unix(1_700_000_000, 0).UTC()
+	report := scannedReport(finished.Add(-time.Minute), finished)
+	report.Runs = append(report.Runs, libraryRun{
+		Worker: workerEnrich, Started: finished.Add(-2 * time.Minute), Finished: finished,
+	})
+
+	m.observeLibraryReport(libraryNamed("movies"), report)
+
+	body := scrape(t, m)
+	for _, want := range []string{
+		`library_run_duration_seconds_count{library="movies",worker="scan"} 1`,
+		`library_run_duration_seconds_count{library="movies",worker="enrich"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("scrape did not contain %q:\n%s", want, body)
+		}
+	}
+}
+
+// The backstop tick reads the same report between two runs, on every
+// pass. The duration histogram observes the finished run once, not once
 // per tick, because a run this operator has already turned into an
 // observation moves nothing on a later pass that reads it again.
-func TestObserveLibraryReportObservesEachScanOnce(t *testing.T) {
+func TestObserveLibraryReportObservesEachRunOnce(t *testing.T) {
 	m := newMetrics("test")
 	finished := time.Unix(1_700_000_000, 0).UTC()
 	report := scannedReport(finished.Add(-time.Minute), finished)
 
-	m.observeLibraryReport("movies", report)
-	m.observeLibraryReport("movies", report)
-	m.observeLibraryReport("movies", report)
+	m.observeLibraryReport(libraryNamed("movies"), report)
+	m.observeLibraryReport(libraryNamed("movies"), report)
+	m.observeLibraryReport(libraryNamed("movies"), report)
 
 	body := scrape(t, m)
-	if want := `library_scan_duration_seconds_count{library="movies"} 1`; !strings.Contains(body, want) {
+	if want := `library_run_duration_seconds_count{library="movies",worker="scan"} 1`; !strings.Contains(body, want) {
 		t.Errorf("scrape did not contain %q:\n%s", want, body)
 	}
 }
 
-// A later scan's finish moves the gauge and observes a second duration,
+// A later run's finish moves the gauge and observes a second duration,
 // because it is a run this operator has not already turned into an
 // observation.
-func TestObserveLibraryReportObservesALaterScan(t *testing.T) {
+func TestObserveLibraryReportObservesALaterRun(t *testing.T) {
 	m := newMetrics("test")
 	first := time.Unix(1_700_000_000, 0).UTC()
-	m.observeLibraryReport("movies", scannedReport(first.Add(-time.Minute), first))
+	m.observeLibraryReport(libraryNamed("movies"), scannedReport(first.Add(-time.Minute), first))
 
 	second := first.Add(time.Hour)
-	m.observeLibraryReport("movies", scannedReport(second.Add(-time.Minute), second))
+	m.observeLibraryReport(libraryNamed("movies"), scannedReport(second.Add(-time.Minute), second))
 
-	if got := testutil.ToFloat64(m.scanLastSuccess.WithLabelValues("movies")); got != float64(second.Unix()) {
-		t.Errorf("scan_last_success = %v, want the later scan's finish %v", got, second.Unix())
+	if got := testutil.ToFloat64(m.runLastSuccess.WithLabelValues("movies", workerScan)); got != float64(second.Unix()) {
+		t.Errorf("run_last_success = %v, want the later scan's finish %v", got, second.Unix())
 	}
 	body := scrape(t, m)
-	if want := `library_scan_duration_seconds_count{library="movies"} 2`; !strings.Contains(body, want) {
+	if want := `library_run_duration_seconds_count{library="movies",worker="scan"} 2`; !strings.Contains(body, want) {
 		t.Errorf("scrape did not contain %q:\n%s", want, body)
 	}
 }
@@ -174,8 +269,8 @@ func TestObserveLibraryReportObservesALaterScan(t *testing.T) {
 func TestObserveLibraryReportLeavesAbsentSeriesAlone(t *testing.T) {
 	m := newMetrics("test")
 
-	m.observeLibraryReport("new", nil)
-	m.observeLibraryReport("scanning", &libraryReport{
+	m.observeLibraryReport(libraryNamed("new"), nil)
+	m.observeLibraryReport(libraryNamed("scanning"), &libraryReport{
 		Runs: []libraryRun{{Worker: workerScan, Started: time.Now()}},
 	})
 
@@ -193,7 +288,7 @@ func TestObserveLibraryReportLeavesAbsentSeriesAlone(t *testing.T) {
 func TestDropLibraryRemovesItsSeries(t *testing.T) {
 	m := newMetrics("test")
 	finished := time.Unix(1_700_000_000, 0).UTC()
-	m.observeLibraryReport("gone", scannedReport(finished.Add(-time.Minute), finished))
+	m.observeLibraryReport(libraryNamed("gone"), scannedReport(finished.Add(-time.Minute), finished))
 
 	m.dropLibrary("gone")
 
@@ -212,7 +307,7 @@ func TestNilMetricsRecordingMethodsAreNoOps(t *testing.T) {
 
 	m.observeReconcile(kindLibrary, time.Second, errors.New("a reconcile problem"))
 	m.recordWatchRestart(kindLibrary)
-	m.observeLibraryReport("library", &libraryReport{
+	m.observeLibraryReport(libraryNamed("library"), &libraryReport{
 		ItemsByKind: map[string]int{libraryKindMovies: 1},
 		Runs:        []libraryRun{{Worker: workerScan, Started: time.Now(), Finished: time.Now()}},
 	})

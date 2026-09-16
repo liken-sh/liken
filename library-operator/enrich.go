@@ -28,6 +28,17 @@ const (
 // name is the phase, so kubectl get pod reads as the sequence.
 const libraryFactsVariable = "LIBRARY_FACTS"
 
+// The variable that names the worker whose run this container belongs to.
+// That name is the key its tally rows hold and the key its Job sweeps. Every
+// Job that runs a container sets it, and a container that reads none fails.
+const libraryWorkerVariable = "LIBRARY_WORKER"
+
+// The variable that names the container itself, which is the pod's own name
+// for it. One Job runs its facts as a sequence of containers, each its own
+// process counting from zero, so the name is part of the key every tally row
+// holds.
+const libraryContainerVariable = "LIBRARY_CONTAINER"
+
 // The variable every enricher container reads the refresh times from:
 // The Library's spec.refresh as one JSON object, fact name to an
 // RFC 3339 time. The container holds no API credential, so the
@@ -264,6 +275,8 @@ var gapQueries = map[string]string{
 	factEpisodeThumb:         episodeThumbGapSQL(),
 
 	factTrailer: trailerGapQuery(),
+	// A title with a trailer this fact can fetch and no trailer file of its own.
+	factTrailerFile: trailerFileGapQuery(),
 
 	factContributorIDs:       contributorIDsGapSQL(),
 	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),

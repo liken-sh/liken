@@ -99,7 +99,7 @@ func TestTheTrailerLineTakesTheBlocksThatCanAnswer(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			line := newTrailerLine(test.blocks, func(name string) string { return test.env[name] })
+			line := newTrailerLine(test.blocks, func(name string) string { return test.env[name] }, nil)
 
 			var blocks []string
 			for _, one := range line.answerers {

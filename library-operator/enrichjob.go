@@ -147,10 +147,16 @@ func enrichPodTemplate(library *Library, providers providerSet, languages []stri
 	// The languages travel in the same environment, so every container ranks by
 	// one list.
 	keys := providerEnv(library, providers, languages)
+	// Every container of this Job records its counts under the enricher's own
+	// worker, because the Job's runs row is the enricher's.
+	worker := EnvVar{Name: libraryWorkerVariable, Value: workerEnrich}
 	for index := range facts {
 		facts[index].Env = append(facts[index].Env, keys...)
+		facts[index].Env = append(facts[index].Env, worker)
 	}
 	sequence := append([]Container{catalogSidecar(corrosionImage)}, facts...)
+	closing := enrichContainer(library, enrichMode, enrichMode, path, scannerImage)
+	closing.Env = append(closing.Env, worker)
 
 	return PodTemplateSpec{
 		Metadata: ObjectMeta{
@@ -161,9 +167,7 @@ func enrichPodTemplate(library *Library, providers providerSet, languages []stri
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
 			InitContainers:                sequence,
-			Containers: []Container{
-				enrichContainer(library, enrichMode, enrichMode, path, scannerImage),
-			},
+			Containers:                    []Container{closing},
 			Volumes: []Volume{
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
 					ClaimName: enrichCatalogClaimName(library.Metadata.Name),
@@ -190,6 +194,7 @@ func enrichContainer(library *Library, name, role, path, image string) Container
 		Image:   image,
 		Command: []string{"/library-operator", role},
 		Env: []EnvVar{
+			{Name: libraryContainerVariable, Value: name},
 			{Name: libraryNamespaceVariable, Value: library.Metadata.Namespace},
 			{Name: libraryNameVariable, Value: library.Metadata.Name},
 			{Name: libraryKindVariable, Value: library.Spec.Kind},

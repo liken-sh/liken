@@ -29,21 +29,27 @@ type trailerLine struct {
 // built on the address that reached the container. The archive takes no key
 // and no address of its own, so the block's presence in the source order is
 // the whole account.
-var trailerAnswerers = map[string]func(base, token string) trailerAnswerer{
-	providerBlockTMDb: func(base, token string) trailerAnswerer {
-		return newTMDbTrailerAnswerer(newTMDbClient(base, token))
+var trailerAnswerers = map[string]func(base, token string, record *tallies) trailerAnswerer{
+	providerBlockTMDb: func(base, token string, record *tallies) trailerAnswerer {
+		client := newTMDbClient(base, token)
+		client.recordTo(record)
+		return newTMDbTrailerAnswerer(client)
 	},
-	providerBlockPeerTube: func(base, _ string) trailerAnswerer {
-		return newPeertubeTrailerAnswerer(newPeertubeClient(base))
+	providerBlockPeerTube: func(base, _ string, record *tallies) trailerAnswerer {
+		client := newPeertubeClient(base)
+		client.recordTo(record)
+		return newPeertubeTrailerAnswerer(client)
 	},
-	providerBlockArchive: func(base, _ string) trailerAnswerer {
-		return newArchiveTrailerAnswerer(newArchiveClient(base))
+	providerBlockArchive: func(base, _ string, record *tallies) trailerAnswerer {
+		client := newArchiveClient(base)
+		client.recordTo(record)
+		return newArchiveTrailerAnswerer(client)
 	},
 }
 
 // The line, in the order the Library's own spec.sources names the blocks.
-func newTrailerLine(blocks []string, value func(string) string) *trailerLine {
-	return &trailerLine{answerers: answerersOf(blocks, value, trailerAnswerers)}
+func newTrailerLine(blocks []string, value func(string) string, record *tallies) *trailerLine {
+	return &trailerLine{answerers: recordingAnswerers(blocks, value, record, trailerAnswerers)}
 }
 
 // One title's ask: every answerer, because the trailers of a title are the
@@ -96,7 +102,7 @@ func (l *trailerLine) ask(ctx context.Context, title trailerTitle) ([]trailerEnt
 // because the operator creates it only where a source serves the fact.
 func (e *enricher) trailerFact(ctx context.Context) error {
 	if e.trailers == nil {
-		e.trailers = newTrailerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv)
+		e.trailers = newTrailerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
 	}
 	if len(e.trailers.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", factTrailer)
@@ -151,30 +157,23 @@ func (r *trailerRun) fail(err error) {
 	close(r.stopped)
 }
 
-// A catalog read that fails ends the container, because the gap list is the
-// work. One title that fails records an error attempt, and the run carries on
-// to the next.
-// A catalog read that fails ends the container, because the gap list is the
-// work. One title that fails records an error attempt, and the run carries on
-// to the next. trailerWorkers titles are asked about at once; the ids of one
-// gap are unique, so no two workers write one title's folder.
-func (e *enricher) trailerGap(ctx context.Context, line *trailerLine) error {
-	ids, err := e.gaps(ctx, factTrailer, time.Now().UTC())
-	if err != nil {
-		return err
-	}
+// The titles of one gap, fed to a pool of workers. The ids of one gap are
+// unique, so no two workers write one title's folder, and the first failure
+// closes the feed so no worker takes another title.
+func (e *enricher) titlePool(ctx context.Context, ids []string, workers int,
+	work func(ctx context.Context, run *trailerRun, id string)) *trailerRun {
 	if e.log != nil {
 		e.log = &serialLog{to: e.log}
 	}
 	run := &trailerRun{stopped: make(chan struct{})}
 	titles := make(chan string)
-	var workers sync.WaitGroup
-	for range trailerWorkers {
-		workers.Add(1)
+	var pool sync.WaitGroup
+	for range workers {
+		pool.Add(1)
 		go func() {
-			defer workers.Done()
+			defer pool.Done()
 			for id := range titles {
-				e.trailerGapTitle(ctx, line, run, id)
+				work(ctx, run, id)
 			}
 		}()
 	}
@@ -187,7 +186,22 @@ feeding:
 		}
 	}
 	close(titles)
-	workers.Wait()
+	pool.Wait()
+	return run
+}
+
+// A catalog read that fails ends the container, because the gap list is the
+// work. One title that fails records an error attempt, and the run carries on
+// to the next. trailerWorkers titles are asked about at once.
+func (e *enricher) trailerGap(ctx context.Context, line *trailerLine) error {
+	ids, err := e.gaps(ctx, factTrailer, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	run := e.titlePool(ctx, ids, trailerWorkers,
+		func(ctx context.Context, run *trailerRun, id string) {
+			e.trailerGapTitle(ctx, line, run, id)
+		})
 	if run.failure != nil {
 		return run.failure
 	}
@@ -332,6 +346,7 @@ func sortedTrailers(entries []trailerEntry) []trailerEntry {
 // it is, because a failed ask says nothing about which trailers the title
 // has.
 func (e *enricher) recordTrailers(folder string, entries []trailerEntry, blocks []string, result string) {
+	e.tallies.add(tallyAttempts, 1, "fact", factTrailer, "result", result)
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, factTrailer, func(ledger *likenLedger) {
 		if result != attemptError {

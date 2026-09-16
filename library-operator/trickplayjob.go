@@ -92,6 +92,9 @@ func trickplayPodTemplate(library *Library, path,
 		path, ffmpegImage)
 	tiles.Resources.Requests["cpu"] = trickplayCPURequest
 	tiles.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
+	// This Job is its own worker, so its tally rows are separate from the
+	// enricher's and its own next run sweeps them.
+	tiles.Env = append(tiles.Env, EnvVar{Name: libraryWorkerVariable, Value: workerTrickplay})
 
 	spec := PodSpec{
 		RestartPolicy:                 "Never",

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +19,7 @@ func testEnricher(t *testing.T, kind, root string, catalog *Catalog) (*enricher,
 		kind:    kind,
 		root:    root,
 		job:     "movies-enrich",
+		worker:  workerEnrich,
 		catalog: catalog,
 		writer:  newVolumeWriter("movies-enrich"),
 		log:     log,
@@ -33,9 +35,13 @@ func TestAnEnricherReadsItsWholeWiringOutOfTheEnvironment(t *testing.T) {
 	t.Setenv(jobNameVariable, "movies-enrich")
 	t.Setenv(scanPathVariable, "")
 	t.Setenv(syncTimeoutVariable, "90s")
+	t.Setenv(libraryWorkerVariable, workerEnrich)
 
-	work := newEnricher(&bytes.Buffer{})
+	work, err := newEnricher(&bytes.Buffer{})
 
+	if err != nil {
+		t.Fatal(err)
+	}
 	if work.library != "house/movies" || work.kind != libraryKindMovies {
 		t.Errorf("enricher = %+v, want the Library the environment names", work)
 	}
@@ -56,9 +62,13 @@ func TestAnEnricherWithNoEnvironmentTakesTheDefaults(t *testing.T) {
 		syncTimeoutVariable} {
 		t.Setenv(name, "")
 	}
+	t.Setenv(libraryWorkerVariable, workerEnrich)
 
-	work := newEnricher(&bytes.Buffer{})
+	work, err := newEnricher(&bytes.Buffer{})
 
+	if err != nil {
+		t.Fatal(err)
+	}
 	if work.root != libraryMountPath {
 		t.Errorf("root = %q, want the mount itself", work.root)
 	}
@@ -178,5 +188,97 @@ func TestAnEnricherThatCannotReachItsSidecarFails(t *testing.T) {
 	}
 	if err := work.markRunStarted(t.Context()); err == nil {
 		t.Error("the run mark reported no error, want one")
+	}
+}
+
+// Every container of the enricher Job counts under the enricher's own worker.
+func TestAnEnricherReadsItsWorkerOutOfTheEnvironment(t *testing.T) {
+	cases := []struct {
+		name  string
+		named string
+		want  string
+	}{
+		{name: "a container of the enricher Job", named: workerEnrich, want: workerEnrich},
+		{name: "a container of the trickplay Job", named: workerTrickplay, want: workerTrickplay},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			t.Setenv(libraryWorkerVariable, one.named)
+			t.Setenv(libraryContainerVariable, factProbe)
+
+			work, err := newEnricher(&bytes.Buffer{})
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if work.worker != one.want {
+				t.Errorf("worker = %q, want %q", work.worker, one.want)
+			}
+			if work.tallies.worker != one.want {
+				t.Errorf("the recorder's worker = %q, want %q", work.tallies.worker, one.want)
+			}
+			if work.tallies.container != factProbe {
+				t.Errorf("the recorder's container = %q, want %q",
+					work.tallies.container, factProbe)
+			}
+		})
+	}
+}
+
+// A container whose environment names no worker is a manifest to repair, and
+// never a run under the enricher's name.
+func TestAnEnricherWithNoWorkerFails(t *testing.T) {
+	t.Setenv(libraryWorkerVariable, "")
+
+	_, err := newEnricher(&bytes.Buffer{})
+
+	if err == nil || !strings.Contains(err.Error(), libraryWorkerVariable) {
+		t.Errorf("newEnricher = %v, want an error naming %s", err, libraryWorkerVariable)
+	}
+}
+
+// seedOldTallies writes one row this worker left more than the retention ago,
+// so a test can prove the Job that follows deletes it.
+func seedOldTallies(t *testing.T, catalog *Catalog, library, worker string) {
+	t.Helper()
+	old := newTallies(catalog, library, worker, "a-run-that-ended", factProbe,
+		time.Now().UTC().Add(-tallyRetention-time.Hour))
+	old.add(tallyAttempts, 1, "fact", factProbe, "result", attemptFound)
+	if err := old.flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A Job deletes its own worker's old rows where it marks its run's start, so
+// the table holds the retention and no more.
+func TestMarkRunStartedSweepsTheOldTallies(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
+	seedOldTallies(t, catalog, work.library, workerEnrich)
+
+	if err := work.markRunStarted(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if held := talliesHeld(t, agent, work.library); len(held) != 0 {
+		t.Errorf("the table holds %v, want the old run's rows gone", held)
+	}
+}
+
+// A sweep the catalog refuses is logged and never ends the run, because a
+// count is not the work.
+func TestASweepTheCatalogRefusesNeverEndsTheRun(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	work, log := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
+	seedOldTallies(t, catalog, work.library, workerEnrich)
+	agent.transactionsLeft = 2
+
+	err := work.markRunStarted(t.Context())
+
+	if err != nil {
+		t.Fatalf("markRunStarted = %v, want no error", err)
+	}
+	if !strings.Contains(log.String(), "could not sweep the tallies") {
+		t.Errorf("log = %q, want the refused sweep", log.String())
 	}
 }

@@ -635,3 +635,30 @@ func TestEveryFactsContainerCarriesTheLanguages(t *testing.T) {
 		}
 	}
 }
+
+// Every container of the enricher Job counts under the enricher's own worker,
+// because the Job's runs row is the enricher's.
+func TestEveryEnricherContainerNamesTheEnrichWorker(t *testing.T) {
+	spec := testEnrichJob(studioMovies(), "").Spec.Template.Spec
+
+	containers := append(append([]Container{}, spec.InitContainers[1:]...), spec.Containers...)
+	for _, container := range containers {
+		if got := containerEnvironment(container)[libraryWorkerVariable]; got != workerEnrich {
+			t.Errorf("%s of %s = %q, want %q", libraryWorkerVariable, container.Name, got, workerEnrich)
+		}
+	}
+}
+
+// Every container names itself, because one Job runs its facts as a sequence
+// of containers and each counts from zero under its own name.
+func TestEveryEnricherContainerNamesItself(t *testing.T) {
+	spec := testEnrichJob(studioMovies(), "").Spec.Template.Spec
+
+	containers := append(append([]Container{}, spec.InitContainers[1:]...), spec.Containers...)
+	for _, container := range containers {
+		if got := containerEnvironment(container)[libraryContainerVariable]; got != container.Name {
+			t.Errorf("%s of %s = %q, want %q",
+				libraryContainerVariable, container.Name, got, container.Name)
+		}
+	}
+}

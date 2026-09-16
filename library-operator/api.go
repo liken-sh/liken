@@ -194,6 +194,15 @@ type LibrarySpec struct {
 	// Whether this library builds the thumbnail sheets a scrub bar reads, which
 	// costs hours of CPU over a whole library on the first run.
 	Trickplay LibraryTrickplay `json:"trickplay,omitzero"`
+
+	// Whether this library pulls one trailer file beside each title from the
+	// links the trailer fact recorded.
+	Trailers LibraryTrailers `json:"trailers,omitzero"`
+}
+
+// The trailers block of the spec, off unless the owner turns it on.
+type LibraryTrailers struct {
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // The trickplay block of the spec, off unless the owner turns it on.

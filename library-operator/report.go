@@ -62,6 +62,9 @@ type libraryReport struct {
 	// The count of titles a fact left because another writer holds the element
 	// group it writes. The operator folds it into Library status.
 	Fights int `json:"fights"`
+	// The counts the Jobs raised inside containers that have exited. The
+	// operator turns them into Prometheus counters.
+	Tallies []libraryTally `json:"tallies,omitempty"`
 }
 
 // reports holds the newest report per Library and the wake the loop

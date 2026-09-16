@@ -1,0 +1,33 @@
+{
+  "uuid": "7f2d3e89-3a4b-4c32-8a0b-1d2e3f4a5b6c",
+  "shortUUID": "vDHyuX92pU6wEVd2MpAVEl",
+  "name": "DUNE: PART THREE (2026) - Official Trailer [4K Ultra HD]",
+  "duration": 151,
+  "downloadEnabled": false,
+  "files": [
+    {
+      "resolution": { "id": 720, "label": "720p" },
+      "size": 41234567,
+      "fileDownloadUrl": "https://trailers.example.net/download/videos/7f2d3e89-720.mp4"
+    },
+    {
+      "resolution": { "id": 1080, "label": "1080p" },
+      "size": 91234567,
+      "fileDownloadUrl": "https://trailers.example.net/download/videos/7f2d3e89-1080.mp4"
+    }
+  ],
+  "streamingPlaylists": [
+    {
+      "id": 41,
+      "type": 1,
+      "playlistUrl": "https://trailers.example.net/static/streaming-playlists/hls/7f2d3e89/master.m3u8",
+      "files": [
+        {
+          "resolution": { "id": 2160, "label": "2160p" },
+          "size": 251234567,
+          "fileDownloadUrl": "https://trailers.example.net/download/streaming-playlists/hls/videos/7f2d3e89-2160-fragmented.mp4"
+        }
+      ]
+    }
+  ]
+}

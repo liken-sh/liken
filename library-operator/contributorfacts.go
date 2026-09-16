@@ -43,7 +43,9 @@ func (e *enricher) contributorFact(ctx context.Context, fact string) error {
 		return fmt.Errorf("%s is empty, and the %s fact cannot ask a provider without it",
 			tmdbTokenVariable, fact)
 	}
-	return e.contributorGap(ctx, fact, newTMDbClient(tmdbAPIBase, token))
+	client := newTMDbClient(tmdbAPIBase, token)
+	client.recordTo(e.tallies)
+	return e.contributorGap(ctx, fact, client)
 }
 
 // A catalog read that fails ends the container, because the gap list is the
@@ -289,6 +291,7 @@ func (e *enricher) createContributorFile(folder, name, fact string, gap contribu
 // person's ledger sits in the .liken directory of the person's own directory,
 // and its one entry is the person.
 func (e *enricher) recordContributor(folder, fact, provider, result, wrote string) {
+	e.tallies.add(tallyAttempts, 1, "fact", fact, "result", result)
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		if provider != "" {

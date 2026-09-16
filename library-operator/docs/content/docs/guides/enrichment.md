@@ -186,8 +186,39 @@ The preferred languages are the library's `spec.languages`, then the
 household's `audioLanguages` from the media operator's
 `MediaPreferences`, and `en` when neither names any.
 
-Nothing plays or downloads a trailer yet; a trailer file beside the
-title still plays as before.
+A trailer file beside the title still plays as before.
+
+### Trailer files
+
+The `trailerfile` fact pulls one video file per title. It is off unless
+`spec.trailers.enabled` is `true`, and it pulls nothing until the
+`trailer` fact has recorded links.
+
+The file lands at `<title>/trailers/<name>.mp4`. The name is the
+trailer's own name with every character a file name cannot carry taken
+out, and its length is capped.
+
+The fact takes the highest-scored trailer whose site the operator can
+fetch from. Today those sites are the Internet Archive and PeerTube,
+never YouTube. From that trailer's files it takes the tallest file that
+is no taller than the title's own feature, or the shortest above it
+where none fits.
+
+A title that already holds a trailer file anywhere under its folder is
+never pulled for. A trailer a person placed by hand stays, and the fact
+records nothing.
+
+Every pull is remuxed to MP4 and checked with `ffprobe` before it
+lands. The check requires a video stream and a length between 30
+seconds and 8 minutes. A file that fails the check never reaches a name
+the walk reads, and the attempt records the error.
+
+**A trailer is tens of megabytes per title, so a library of any size
+adds gigabytes to the volume the first time this fact runs.**
+
+The operator stands a `<library>-trailers-<walk>` `Job` beside the
+enricher, on a catalog claim of its own, and two titles pull at once
+inside it. The fact takes no `spec.refresh`.
 
 ### When a fact asks again
 

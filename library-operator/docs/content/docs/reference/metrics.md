@@ -16,9 +16,15 @@ beside the base, which holds a `PodMonitor` for each of the three.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
-| library-operator | `library_scan_duration_seconds{library}` | histogram | a scan that got slow |
-| library-operator | `library_scan_last_success_timestamp_seconds{library}` | gauge | a scan that stopped finishing |
+| library-operator | `library_run_duration_seconds{library, worker}` | histogram | a worker whose run got slow |
+| library-operator | `library_run_last_success_timestamp_seconds{library, worker}` | gauge | a worker that stopped finishing |
 | library-operator | `library_items{library, kind}` | gauge | catalog size over time |
+| library-operator | `library_fact_gap{library, fact}` | gauge | a fact whose gap never closes |
+| library-operator | `library_attempts_total{library, fact, result}` | counter | a fact that stopped finding anything |
+| library-operator | `library_provider_requests_total{library, provider, status}` | counter | a provider that started refusing |
+| library-operator | `library_provider_request_seconds_total{library, provider}` | counter | the time one provider costs a run |
+| library-operator | `library_trailer_fetches_total{library, site, result}` | counter | a site whose downloads started failing |
+| library-operator | `library_trailer_fetch_bytes_total{library, site}` | counter | what a library's trailers cost the volume |
 | media-browser | `library_browser_frame_seconds` | histogram | the covered-spin problem as a graph |
 | media-browser | `library_browser_art_cache_bytes` | gauge | the RSS problem as a graph |
 | catalog | upstream `corro_*` | upstream | sync and change health |

@@ -20,7 +20,7 @@ import (
 // only where a source serves one of its facts.
 func (e *enricher) artFact(ctx context.Context, fact string) error {
 	if e.art == nil {
-		e.art = newArtLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv)
+		e.art = newArtLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
 	}
 	if len(e.art.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)
@@ -132,6 +132,7 @@ func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artTy
 // sees an answer without its attempt. A provider name of nothing is a miss or
 // an error, which the attempt itself states.
 func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
+	e.tallies.add(tallyAttempts, 1, "fact", fact, "result", result)
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		if provider != "" {

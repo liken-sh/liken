@@ -662,3 +662,27 @@ CREATE TABLE trailers (
     reason TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, item, provider, key)
 );
+
+-- tallies holds one row per library, worker, job, run, container, metric,
+-- and label set. Each row is a count a Job raised inside a container that
+-- exits before a scrape can read it.
+-- container is part of the key because one Job runs its facts as a sequence
+-- of containers, each its own process counting from zero, and one row per Job
+-- would let the later container overwrite the earlier one.
+-- started is the Unix second the run began. It is part of the key because a
+-- retried pod and a Job created again have the same name, so two runs under
+-- that name would otherwise overwrite each other.
+-- The next run of the same worker sweeps every row older than the retention.
+-- labels is the metric's label pairs, sorted by name, as name=value joined by
+-- commas, and empty for a metric with none.
+CREATE TABLE tallies (
+    library TEXT NOT NULL DEFAULT '',
+    worker TEXT NOT NULL DEFAULT '',
+    job TEXT NOT NULL DEFAULT '',
+    container TEXT NOT NULL DEFAULT '',
+    started INTEGER NOT NULL DEFAULT 0,
+    metric TEXT NOT NULL DEFAULT '',
+    labels TEXT NOT NULL DEFAULT '',
+    value REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, worker, job, started, container, metric, labels)
+);

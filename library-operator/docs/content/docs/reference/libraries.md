@@ -52,6 +52,7 @@ The storage this library covers, the kind of media it holds, and the settings fo
 | <span id="spec--sources"></span>`sources` | []string | no | The MetadataProviders in this namespace to ask about a title, by name, in the order they are asked: for each fact, the first provider in the list that serves it and is Ready is the one asked. The Sources condition reports a name that resolves to no provider, or a list where none serves a fact this library needs. A library that omits the list runs only the facts that need no provider. |
 | <span id="spec--scan"></span>`scan` | [object](#specscan) | no | When the full walk of this library runs. |
 | <span id="spec--trickplay"></span>`trickplay` | [object](#spectrickplay) | no | The thumbnail sheets a scrub bar reads, built beside each video from the file alone, with no provider, in the folder layout Jellyfin reads and writes. |
+| <span id="spec--trailers"></span>`trailers` | [object](#spectrailers) | no | The trailer files this library pulls beside its titles, from the links the trailer fact recorded. |
 | <span id="spec--languages"></span>`languages` | []string | no | The languages this library prefers, most preferred first, as tags such as en or en-US. Enrichment ranks a trailer in one of these languages above one in another. The list goes before the household's audio languages from MediaPreferences, and a library that names none takes the household's list alone. |
 | <span id="spec--ignore"></span>`ignore` | []string | no | Path components to skip. The scanner leaves out any folder whose name matches an entry, and everything under it, so a volume's non-media folders such as a recycle bin or a staging directory stay out of the catalog. |
 | <span id="spec--refresh"></span>`refresh` | map[string]string | no | One time per fact, by the names status.gaps uses. For that fact, an attempt whose time is before the refresh does not count: the title is in that fact's gap again although its file and its rows are there, the fact asks a provider again, and it rewrites its own files and rows in place. Nothing is deleted, and a fact this map does not name is untouched. A time that has not come yet waits, and the fact runs once when it arrives. |
@@ -123,6 +124,14 @@ The render node the trickplay Job decodes on. Set, the operator keeps a Resource
 | --- | --- | --- | --- |
 | <span id="spectrickplayrender--class"></span>`class` | string | yes | The name of the DeviceClass the render node is allocated from. |
 | <span id="spectrickplayrender--selector"></span>`selector` | string | no | A CEL expression over device.attributes, for a class that offers more than one render node. |
+
+### spec.trailers
+
+The trailer files this library pulls beside its titles, from the links the trailer fact recorded.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrailers--enabled"></span>`enabled` | boolean | no | Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the operator stands a trailers Job beside the enricher, and that Job pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder. Default: `false`. |
 
 ## status
 

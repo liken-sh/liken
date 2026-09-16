@@ -314,6 +314,15 @@ spec:
                           type: string
                           minLength: 1
                           description: "A CEL expression over device.attributes, for a class that offers more than one render node."
+                trailers:
+                  type: object
+                  default: {}
+                  description: "The trailer files this library pulls beside its titles, from the links the trailer fact recorded."
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the operator stands a trailers Job beside the enricher, and that Job pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder."
                 languages:
                   type: array
                   x-kubernetes-list-type: atomic

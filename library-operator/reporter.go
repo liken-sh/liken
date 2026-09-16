@@ -305,6 +305,10 @@ func (r *reporter) publishLibrary(ctx context.Context, library string) {
 // gaps come from the same queries the enricher containers work from, so
 // the count the operator schedules on is the count of rows a container
 // finds.
+//
+// The tallies come last. They are in the report because the operator is the
+// one process Prometheus scrapes and the containers that wrote them have
+// exited.
 func (r *reporter) buildReport(ctx context.Context, library string) (libraryReport, error) {
 	runs, err := r.catalog.Runs(ctx)
 	if err != nil {
@@ -350,6 +354,10 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 		return libraryReport{}, err
 	}
 	report.Fights, err = r.catalog.fightCount(ctx, library)
+	if err != nil {
+		return libraryReport{}, err
+	}
+	report.Tallies, err = r.catalog.Tallies(ctx, library)
 	if err != nil {
 		return libraryReport{}, err
 	}

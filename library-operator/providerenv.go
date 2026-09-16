@@ -160,6 +160,19 @@ func answerersOf[A any](blocks []string, value func(string) string,
 	return line
 }
 
+// recordingAnswerers builds the same line from a table whose entries take the
+// recorder their client counts requests into. The selection rules are the
+// ones answerersOf applies, so a table of either shape reaches the container
+// the same way.
+func recordingAnswerers[A any](blocks []string, value func(string) string, record *tallies,
+	answerers map[string]func(base, token string, record *tallies) A) []A {
+	built := make(map[string]func(base, token string) A, len(answerers))
+	for name, build := range answerers {
+		built[name] = func(base, token string) A { return build(base, token, record) }
+	}
+	return answerersOf(blocks, value, built)
+}
+
 // Which blocks reach the container: the block of every Ready source the
 // Library names, in order, with the first account of a block winning, as the
 // keys do. A block that takes no account is named here too, because a

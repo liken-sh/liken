@@ -74,6 +74,7 @@ func (c *Catalog) trickplayGaps(ctx context.Context, library string,
 // the run carries on to the next file. The files run one at a time, so one
 // ffmpeg holds the container's memory line.
 func (e *enricher) trickplayFact(ctx context.Context) error {
+	e.sweepOldTallies(ctx, time.Now().UTC())
 	if err := e.sweepTrickplayMaps(ctx); err != nil {
 		return err
 	}

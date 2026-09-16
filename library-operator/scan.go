@@ -206,6 +206,13 @@ func (s *scanner) runJob(ctx context.Context) error {
 	if _, _, err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
+	// This worker's old tally rows are deleted where the run's start is
+	// written, so the table holds the retention and no more. A sweep that
+	// fails never ends the walk, because a count is not the work.
+	if err := s.catalog.sweepTallies(ctx, s.library, run.Worker,
+		run.Started.Add(-tallyRetention)); err != nil {
+		s.logf("could not sweep the tallies of %s: %v", s.library, err)
+	}
 
 	walked := s.walkOnce(ctx)
 

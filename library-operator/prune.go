@@ -541,7 +541,15 @@ func itemPruneSQL(table, key, space string) string {
 // over the path rather than a LIKE, so a folder name that holds a LIKE
 // metacharacter still scopes correctly and needs no escape.
 func pathScopeClause(column string) string {
-	return `(` + column + ` = ? OR (` + column + ` >= ? AND ` + column + ` < ?))`
+	return pathScopeBounds(column, "?", "?", "?")
+}
+
+// pathScopeBounds renders the same range against three bounds the query
+// states itself, so a join reads them off the row it scopes to instead of off
+// a parameter.
+func pathScopeBounds(column, folder, under, past string) string {
+	return `(` + column + ` = ` + folder + ` OR (` + column + ` >= ` + under +
+		` AND ` + column + ` < ` + past + `))`
 }
 
 // pathScopeParams renders the three bounds pathScopeClause reads: the

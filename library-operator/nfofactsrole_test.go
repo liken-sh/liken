@@ -460,7 +460,7 @@ func TestTheAnswerLineHoldsTheBlocksWithAKey(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			line := newAnswerLine(test.blocks,
-				func(name string) string { return test.keys[name] })
+				func(name string) string { return test.keys[name] }, nil)
 
 			if len(line.answerers) != test.want {
 				t.Fatalf("answerers = %d, want %d", len(line.answerers), test.want)
@@ -476,7 +476,7 @@ func TestTheAnswerLineHoldsTheBlocksWithAKey(t *testing.T) {
 // carries on with the blocks it can.
 func TestAnUnknownBlockAddsNoAnswerer(t *testing.T) {
 	line := newAnswerLine([]string{"fanart", providerBlockTMDb},
-		func(name string) string { return map[string]string{tmdbTokenVariable: "a-token"}[name] })
+		func(name string) string { return map[string]string{tmdbTokenVariable: "a-token"}[name] }, nil)
 
 	if len(line.answerers) != 1 || line.answerers[0].providerBlock() != providerBlockTMDb {
 		t.Errorf("answerers = %+v, want the one block this image asks", line.answerers)
@@ -666,7 +666,7 @@ func TestTheAnswerLineTakesTheOrderOfTheSources(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			line := newAnswerLine(commaNames(test.sources),
-				func(name string) string { return map[string]string{tmdbTokenVariable: "a-token"}[name] })
+				func(name string) string { return map[string]string{tmdbTokenVariable: "a-token"}[name] }, nil)
 
 			blocks := []string{}
 			for _, one := range line.answerers {

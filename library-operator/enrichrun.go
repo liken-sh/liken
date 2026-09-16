@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -26,7 +27,12 @@ func runEnrich() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	run := newEnrichRun(os.Stdout)
+	run, err := newEnrichRun(os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "library.liken.sh: %v\n", err)
+		stop()
+		os.Exit(1)
+	}
 	if err := run.runJob(stopped); err != nil {
 		run.logf("the enrich job failed: %v", err)
 		stop()
@@ -36,11 +42,15 @@ func runEnrich() {
 
 // The container reads everything it needs from its environment, as
 // every other enricher container does.
-func newEnrichRun(log io.Writer) *enrichRun {
-	return &enrichRun{
-		enricher:       newEnricher(log),
-		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
+func newEnrichRun(log io.Writer) (*enrichRun, error) {
+	work, err := newEnricher(log)
+	if err != nil {
+		return nil, err
 	}
+	return &enrichRun{
+		enricher:       work,
+		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
+	}, nil
 }
 
 // The container writes the finished run and hands off. An enricher

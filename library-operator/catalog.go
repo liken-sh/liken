@@ -435,7 +435,7 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 // reporter reports on.
 var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "streams", "runs", "confirmations", "attempts",
 	"contributors", "contributor_aliases", "credits", "genres", "trailers",
-	"franchises", "franchise_members", "franchise_runs"}
+	"franchises", "franchise_members", "franchise_runs", "tallies"}
 
 // DeleteFileItems names all three columns of the link row, because all
 // three are the primary key. A delete by fewer would take every other

@@ -61,6 +61,79 @@ type providerRequests struct {
 	authorize func(*http.Request)
 	interval  time.Duration
 	slot      *providerSlot
+	// The counts of this client's requests, recorded for the enricher that
+	// built it. A caller with no enricher records none.
+	tallies *tallies
+}
+
+// recordTo names the recorder every request of this client counts into. The
+// operator's provider check builds no enricher and names none.
+func (r *providerRequests) recordTo(record *tallies) {
+	r.tallies = record
+}
+
+// count records one request under this provider and the class of its answer,
+// with the seconds it took.
+func (r *providerRequests) count(status string, took time.Duration) {
+	r.tallies.add(tallyProviderRequests, 1, "provider", r.provider, "status", status)
+	r.tallies.add(tallyProviderRequestSeconds, took.Seconds(), "provider", r.provider)
+}
+
+// providerStatusClass is the class one answer counts under. A request that
+// never got an answer counts as an error, and so does a status outside these
+// ranges.
+func providerStatusClass(status int) string {
+	switch {
+	case status == http.StatusTooManyRequests:
+		return "429"
+	case status >= 200 && status <= 299:
+		return "2xx"
+	case status >= 400 && status <= 499:
+		return "4xx"
+	case status >= 500 && status <= 599:
+		return "5xx"
+	}
+	return providerStatusErrorClass
+}
+
+// providerStatusErrorClass is the class a request with no answer counts under.
+const providerStatusErrorClass = "error"
+
+// roundTrip is the whole round trip every send shares: the answer's status,
+// the cooldown its header names, and the body, which the caller reads as bytes
+// or streams onto the volume. Every answer counts under this provider, so a
+// send that reads the body either way is one request.
+func (r *providerRequests) roundTrip(request *http.Request,
+	take func(status int, body io.Reader) error) (int, time.Duration, error) {
+	started := time.Now()
+	response, err := r.http.Do(request)
+	if err != nil {
+		r.count(providerStatusErrorClass, time.Since(started))
+		return 0, 0, err
+	}
+	defer drain(response.Body)
+
+	takeErr := take(response.StatusCode, response.Body)
+	r.count(providerStatusClass(response.StatusCode), time.Since(started))
+	if takeErr != nil {
+		return 0, 0, takeErr
+	}
+	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), nil
+}
+
+// roundTripBytes reads the answer into memory, up to the caller's own bound.
+// Both JSON sends and the file fetch read their answer this way.
+func (r *providerRequests) roundTripBytes(request *http.Request, limit int64) (int, time.Duration, []byte, error) {
+	var body []byte
+	status, cooldown, err := r.roundTrip(request, func(_ int, from io.Reader) error {
+		read, readErr := io.ReadAll(io.LimitReader(from, limit))
+		body = read
+		return readErr
+	})
+	if err != nil {
+		return status, cooldown, nil, err
+	}
+	return status, cooldown, body, nil
 }
 
 // The requests one account makes. A provider that needs no key authorizes
@@ -172,18 +245,7 @@ func (r *providerRequests) send(ctx context.Context, path string, query url.Valu
 	if r.authorize != nil {
 		r.authorize(request)
 	}
-
-	response, err := r.http.Do(request)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	defer drain(response.Body)
-
-	body, err := io.ReadAll(io.LimitReader(response.Body, providerAnswerLimit))
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
+	return r.roundTripBytes(request, providerAnswerLimit)
 }
 
 // One file, by the retry rule the JSON calls follow. It carries no credential
@@ -224,17 +286,77 @@ func (r *providerRequests) sendFile(ctx context.Context, address string) (int, t
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	response, err := r.http.Do(request)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	defer drain(response.Body)
+	return r.roundTripBytes(request, providerFileLimit)
+}
 
-	body, err := io.ReadAll(io.LimitReader(response.Body, providerFileLimit))
-	if err != nil {
-		return 0, 0, nil, err
+// fetchInto streams one file straight onto the volume, by the retry rule the
+// other sends follow, because a video is larger than any answer this image
+// holds in memory. The client's own request timeout bounds an answer and not
+// a file, so the caller names the timeout the whole stream runs inside, and
+// the bytes it may read.
+func (r *providerRequests) fetchInto(ctx context.Context, address string, into io.Writer,
+	timeout time.Duration, limit int64) (int64, error) {
+	timed, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// The copy keeps the slot and the recorder of the client it was made
+	// from, and gets an HTTP client of its own so no other request gets this
+	// one's timeout.
+	puller := *r
+	client := *r.http
+	client.Timeout = timeout
+	puller.http = &client
+
+	for attempt := 1; ; attempt++ {
+		written, status, cooldown, err := puller.sendInto(timed, address, into, limit)
+		if err != nil {
+			return written, err
+		}
+		if status == http.StatusTooManyRequests && attempt < providerAttempts {
+			if err := r.wait(timed, cooldown); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if status < 200 || status > 299 {
+			return 0, providerStatusError{provider: r.provider, path: address, status: status}
+		}
+		return written, nil
 	}
-	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
+}
+
+// sendInto is the send that writes the answer out instead of holding it. The
+// body reaches the writer on a 2xx alone, so a refusal and a cooldown leave
+// the writer unchanged.
+func (r *providerRequests) sendInto(ctx context.Context, address string, into io.Writer,
+	limit int64) (int64, int, time.Duration, error) {
+	if err := r.pace(ctx); err != nil {
+		return 0, 0, 0, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if r.authorize != nil {
+		r.authorize(request)
+	}
+	written := int64(0)
+	status, cooldown, err := r.roundTrip(request, func(status int, body io.Reader) error {
+		if status < 200 || status > 299 {
+			return nil
+		}
+		copied, copyErr := io.Copy(into, io.LimitReader(body, limit+1))
+		written = copied
+		if copyErr != nil {
+			return copyErr
+		}
+		if copied > limit {
+			return fmt.Errorf("%s answered more than %d bytes for %s",
+				r.provider, limit, address)
+		}
+		return nil
+	})
+	return written, status, cooldown, err
 }
 
 // An unreadable or absent header takes the fixed cooldown.

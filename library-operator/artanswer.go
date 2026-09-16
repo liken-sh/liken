@@ -36,22 +36,28 @@ type artLine struct {
 }
 
 // The answerer of each block the art facts can ask.
-var artAnswerers = map[string]func(base, token string) artAnswerer{
-	providerBlockTMDb: func(base, token string) artAnswerer {
-		return newTMDbArtAnswerer(newTMDbClient(base, token))
+var artAnswerers = map[string]func(base, token string, record *tallies) artAnswerer{
+	providerBlockTMDb: func(base, token string, record *tallies) artAnswerer {
+		client := newTMDbClient(base, token)
+		client.recordTo(record)
+		return newTMDbArtAnswerer(client)
 	},
-	providerBlockFanart: func(base, token string) artAnswerer {
-		return fanartArtAnswerer{client: newFanartClient(base, token)}
+	providerBlockFanart: func(base, token string, record *tallies) artAnswerer {
+		client := newFanartClient(base, token)
+		client.recordTo(record)
+		return fanartArtAnswerer{client: client}
 	},
-	providerBlockTVmaze: func(base, _ string) artAnswerer {
-		return newTVmazeArtAnswerer(newTVmazeClient(base))
+	providerBlockTVmaze: func(base, _ string, record *tallies) artAnswerer {
+		client := newTVmazeClient(base)
+		client.recordTo(record)
+		return newTVmazeArtAnswerer(client)
 	},
 }
 
 // The line the rule for who answers reads, in the order the Library's own
 // spec.sources names the blocks.
-func newArtLine(blocks []string, value func(string) string) *artLine {
-	return &artLine{answerers: answerersOf(blocks, value, artAnswerers)}
+func newArtLine(blocks []string, value func(string) string, record *tallies) *artLine {
+	return &artLine{answerers: recordingAnswerers(blocks, value, record, artAnswerers)}
 }
 
 // A fact with no answerer left has nothing to ask, so the titles that remain

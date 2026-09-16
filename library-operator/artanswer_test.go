@@ -95,7 +95,7 @@ func TestTheArtLineFollowsTheSourceOrder(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			line := newArtLine(test.blocks, func(name string) string { return test.keys[name] })
+			line := newArtLine(test.blocks, func(name string) string { return test.keys[name] }, nil)
 
 			blocks := []string{}
 			for _, one := range line.answerers {

@@ -297,9 +297,9 @@ func lastScanFinish(runs []libraryRun) time.Time {
 // nothing to ask.
 func gapOpen(library *Library, report *libraryReport, providers providerSet) bool {
 	for fact, count := range report.Gaps {
-		// The trickplay gap is the trickplay Job's own, and an enricher that
-		// counted it would run for ever with nothing to do.
-		if fact == factTrickplay {
+		// The trickplay gap and the trailerfile gap are their own Jobs', and an
+		// enricher that counted one would run for ever with nothing to do.
+		if fact == factTrickplay || fact == factTrailerFile {
 			continue
 		}
 		if count <= 0 && !refreshHasWork(library, report, fact) {

@@ -35,14 +35,20 @@ const (
 	// nothing.
 	factTrailer = "trailer"
 
+	// The trailerfile fact pulls one of those links into a file beside the
+	// title. Its Job runs beside the enricher, so it is out of factVocabulary,
+	// out of spec.refresh, and served by no provider.
+	factTrailerFile = "trailerfile"
+
 	factContributorIDs       = "contributor.ids"
 	factContributorBiography = "contributor.biography"
 	factContributorHeadshot  = "contributor.headshot"
 )
 
-// Every fact, in the order the groups run. The CRD's spec.facts enum holds
-// the same names, and a test reads the two against each other, so a person
-// cannot name a fact the operator does not hold.
+// Every fact spec.refresh and a MetadataProvider may name, in the order the
+// groups run. The CRD's spec.facts enum holds the same names, and a test reads
+// the two against each other, so a person cannot name a fact the operator
+// does not hold.
 var factVocabulary = []string{
 	factProbe,
 	factArrival,

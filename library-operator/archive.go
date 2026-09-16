@@ -243,6 +243,8 @@ type archiveFile struct {
 	Format string
 	Length string
 	Height string
+	// The size in bytes the item states, which the pull reads.
+	Size string
 }
 
 // The same file as the metadata answers it, each field raw, because a number
@@ -252,6 +254,7 @@ type archiveFileFields struct {
 	Format json.RawMessage `json:"format"`
 	Length json.RawMessage `json:"length"`
 	Height json.RawMessage `json:"height"`
+	Size   json.RawMessage `json:"size"`
 }
 
 func (f *archiveFile) UnmarshalJSON(body []byte) error {
@@ -264,6 +267,7 @@ func (f *archiveFile) UnmarshalJSON(body []byte) error {
 		Format: archiveText(held.Format),
 		Length: archiveText(held.Length),
 		Height: archiveText(held.Height),
+		Size:   archiveText(held.Size),
 	}
 	return nil
 }

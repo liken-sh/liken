@@ -46,7 +46,8 @@ var factRuns = map[string]factRun{
 	factSeasonBanner: artFactRun(factSeasonBanner),
 	factEpisodeThumb: artFactRun(factEpisodeThumb),
 
-	factTrailer: func(ctx context.Context, e *enricher) error { return e.trailerFact(ctx) },
+	factTrailer:     func(ctx context.Context, e *enricher) error { return e.trailerFact(ctx) },
+	factTrailerFile: func(ctx context.Context, e *enricher) error { return e.trailerFileFact(ctx) },
 
 	factContributorIDs:       contributorFactRun(factContributorIDs),
 	factContributorBiography: contributorFactRun(factContributorBiography),
@@ -59,7 +60,12 @@ func runFacts() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	work := newEnricher(os.Stdout)
+	work, err := newEnricher(os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "library.liken.sh: %v\n", err)
+		stop()
+		os.Exit(1)
+	}
 	if err := work.runFacts(stopped, namedFacts(os.Getenv(libraryFactsVariable))); err != nil {
 		work.logf("the facts container failed: %v", err)
 		stop()
@@ -89,6 +95,10 @@ func (e *enricher) runFacts(ctx context.Context, facts []string) error {
 			return fmt.Errorf("%s names %s, which this image does not run", libraryFactsVariable, name)
 		}
 	}
+	// The recorder runs for the life of the container and flushes once more
+	// when the facts end, because no scrape reaches a container that has
+	// exited.
+	defer e.tallies.recording(ctx)()
 	// The wait is silent otherwise, and it can run for minutes on a fresh
 	// claim, so its two ends are logged.
 	e.logf("waiting for the catalog to sync onto this claim")

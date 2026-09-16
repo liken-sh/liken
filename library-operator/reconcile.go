@@ -56,7 +56,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	report := o.reports.latestFor(namespace, name)
-	o.metrics.observeLibraryReport(name, report)
+	o.metrics.observeLibraryReport(library, report)
 
 	// A Library with no volume, or in a namespace with no single
 	// Catalog, gets no schedule. There would be nothing to mount, or no
@@ -85,6 +85,10 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		// The trickplay Job stands beside the enricher and waits on none of its
 		// work.
 		if err := o.trickplay(ctx, library, choice.catalog, report, jobs); err != nil {
+			return err
+		}
+		// The trailers Job stands beside both of them, for the same reason.
+		if err := o.trailers(ctx, library, choice.catalog, report, jobs, providers); err != nil {
 			return err
 		}
 	} else if err := o.stopScanCronJob(ctx, library); err != nil {
