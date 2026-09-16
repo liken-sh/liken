@@ -18,6 +18,14 @@ plans that build it. Code exists only where a plan calls for it. A
 plan states contracts and leaves the shape of the code to the person
 or agent who builds it.
 
+## Errors carry their source's words
+
+An error that wraps a tool, a daemon socket, a bus answer, or a
+provider carries that source's own text: the stderr, the body, or the
+error string, verbatim. It goes in the wrapped error and in whatever
+status field or record the failure writes, so a person reads the cause
+from the log or the status and never needs a shell to find it.
+
 ## The lab
 
 Nothing in this repository is installed on a real cluster until a
