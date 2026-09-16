@@ -1,16 +1,19 @@
 package main
 
 // Every status this operator writes comes from the one derivation in
-// this file, and the derivation reads nothing but its arguments. The
-// shape matters because the loop is level-triggered: a pass must
-// reach the same status from the same facts, whatever order the
-// events arrived in, and a function of its arguments cannot do
-// otherwise.
+// this file. The shape matters because the loop is level-triggered: a
+// pass must reach the same status from the same facts, whatever order
+// the events arrived in.
+//
+// The condition stamp is the one clock the derivation reads, and it
+// moves only when the condition's status changes, so two passes over
+// the same facts still produce the same status.
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // derivePlayStatus builds the phase-and-numbers status and stamps
@@ -82,6 +85,18 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		status.Phase = phaseRunning
 		foldReport(&status, latest)
 		status.Paused = latest != nil && latest.Paused
+		// A display that keeps crashing leaves the film with no on-screen
+		// display, so the run ends here the way a finished film ends,
+		// and the unit returns to its idle screen.
+		if condition, reported := displayAlive(pod); reported {
+			status.Conditions = []PlayCondition{
+				foldPlayCondition(play.Status.Conditions, condition),
+			}
+			if displayKeepsDying(pod) {
+				status.Phase = phaseFinished
+				status.Message = condition.Message
+			}
+		}
 	case podSucceeded:
 		// The last item ended: mpv exited zero and the pod
 		// succeeded. The numbers stay as the last report left them,
@@ -107,6 +122,24 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		}
 	}
 	return status
+}
+
+// foldPlayCondition keeps the held stamp while the status is unchanged
+// and stamps the moment the status changed, so lastTransitionTime
+// answers how long the run has been in the state it reports.
+func foldPlayCondition(held []PlayCondition, condition PlayCondition) PlayCondition {
+	for _, one := range held {
+		if one.Type != condition.Type {
+			continue
+		}
+		if one.Status == condition.Status {
+			condition.LastTransitionTime = one.LastTransitionTime
+			return condition
+		}
+		break
+	}
+	condition.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
+	return condition
 }
 
 // podConditionMessage is the scheduler's word on a pod it cannot place:

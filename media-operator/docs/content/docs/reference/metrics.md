@@ -21,6 +21,7 @@ carries a `PodMonitor` for each of these pods, beside the base.
 | media-operator | `media_players{zone, state}` | gauge | idle, playing, paused |
 | media-operator | `media_playback_starts_total` | counter | plays over time |
 | media-operator | `media_playback_failures_total{reason}` | counter | the film did not start |
+| media-operator | `media_display_restarts_total{player}` | counter | the film plays with no on-screen display |
 | media-operator, idle-screen | `media_bus_connected` | gauge | the MQTT bus is up |
 | command sidecar | `media_decode_info{codec, hardware}` | gauge, info | a software decode is a 1300 millicore line |
 | command sidecar | `media_dropped_frames_total` | counter | stutter |

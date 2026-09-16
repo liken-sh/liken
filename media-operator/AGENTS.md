@@ -17,6 +17,13 @@ comments included, and they arrive with the brand theme submodule at
 `plans/00-design.md` is the design, and `plans/README.md` indexes
 the plans that build it. Code exists only where a plan calls for it.
 
+## When you write code
+
+An error that wraps a tool, a daemon socket, a bus answer, or a
+provider includes that source's own text, its `stderr`, its body, or
+its error, word for word in the wrapped error and in the status or
+record the failure writes.
+
 ## Releases and development builds
 
 A pushed tag is a release. It names a version in liken's calendar

@@ -403,6 +403,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]bool{},
 		positionWrites:   map[string]time.Time{},
+		displayRestarts:  map[string]int{},
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
 		wake:             wake,

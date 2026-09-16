@@ -153,6 +153,19 @@ What the playback pod reports, written only by the media operator. The playback 
 | <span id="status--subtitles"></span>`subtitles` | string | no | The resolved subtitle setting this run applied, one of on, off, or auto. |
 | <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file carries it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
 | <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language of the subtitle track mpv chose; empty when none plays. The value is the track's own tag as the file carries it, the way audioLanguage reports its track. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The run's conditions. There is one, DisplayAlive, and it reports the playback pod's display container, the native sidecar that draws the on-screen display. True with reason Running means the container runs and the kubelet has restarted it at most once. False with reason Restarting means the kubelet has restarted it two or more times, or it exited and has not started again. The message states the restart count and the last termination's reason and exit code. More than two restarts in one run set the phase to Finished with the same message, and the run retires the way a finished film does. The condition is absent while the pod reports no display container or the container has not started yet. lastTransitionTime moves only when the status does. |
+
+### status.conditions[]
+
+The run's conditions. There is one, DisplayAlive, and it reports the playback pod's display container, the native sidecar that draws the on-screen display. True with reason Running means the container runs and the kubelet has restarted it at most once. False with reason Restarting means the kubelet has restarted it two or more times, or it exited and has not started again. The message states the restart count and the last termination's reason and exit code. More than two restarts in one run set the phase to Finished with the same message, and the run retires the way a finished film does. The condition is absent while the pod reports no display container or the container has not started yet. lastTransitionTime moves only when the status does.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, DisplayAlive. |
+| <span id="statusconditions--status"></span>`status` | string | yes | The condition's status. One of: `True`, `False`, `Unknown`. |
+| <span id="statusconditions--reason"></span>`reason` | string | no | One word for the status: Running or Restarting. |
+| <span id="statusconditions--message"></span>`message` | string | no | The restart count, with the reason and exit code of the last termination the kubelet recorded. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | no | When the status last changed, so a reader can tell how long the display has been down or up. |
 
 ## On the bus
 

@@ -33,6 +33,16 @@ These plans are designed. Each keeps its number and moves to
 
 ## Completed
 
+* [33, The run reports its
+  display](completed/33-the-run-reports-its-display.md). Built on
+  2026-09-16. The on-hardware drill on `liken-1` runs with the next
+  release. A `Play` reports the liveness of its display sidecar as a
+  `DisplayAlive` condition, `kubectl get plays` shows the condition's
+  reason in a `Display` column, the unit's bus status includes the
+  condition, and `media_display_restarts_total` counts the restarts.
+  A display that restarts more than twice in one run ends the run the
+  way a finished film ends, so the unit returns to its idle screen.
+  It closes the open problem "nothing reports a crashed display".
 * [32, The display in its own
   process](completed/32-the-display-in-its-own-process.md). Built and
   drilled on `liken-1` on 2026-09-14 in release 2026.09.14-002. The
@@ -328,10 +338,6 @@ has decided yet what work they become.
   topic, so the trust boundary is the whole cluster. Acceptable for one
   home the owner controls, and it owes broker ACLs once a cluster runs
   a workload the owner does not trust.
-* [Nothing reports a crashed display](open-problems/nothing-reports-a-crashed-display.md).
-  The display restarts alone inside a pod that stays `Running`, so the
-  `Play`'s phase and the bus report a healthy run while the screen
-  carries no display. The only report is one container's restart count.
 * [No container states resource requests](open-problems/no-container-states-resource-requests.md).
   No container this operator builds states cpu or memory, so every pod
   is `BestEffort`. A third container with a Vulkan closure on a 1GB

@@ -123,6 +123,7 @@ type mediaMetrics struct {
 	players          *prometheus.GaugeVec
 	playbackStarts   prometheus.Counter
 	playbackFailures *prometheus.CounterVec
+	displayRestarts  *prometheus.CounterVec
 	busConnected     prometheus.Gauge
 }
 
@@ -157,6 +158,10 @@ func newMediaMetrics(version string) *mediaMetrics {
 			Name: "media_playback_failures_total",
 			Help: "Plays that reached the Failed phase, by reason.",
 		}, []string{"reason"}),
+		displayRestarts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "media_display_restarts_total",
+			Help: "Times the kubelet restarted a playback pod's display container, by player.",
+		}, []string{"player"}),
 		busConnected: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "media_bus_connected",
 			Help: "Whether the operator's own MQTT client holds a live session.",
@@ -169,6 +174,7 @@ func newMediaMetrics(version string) *mediaMetrics {
 		m.players,
 		m.playbackStarts,
 		m.playbackFailures,
+		m.displayRestarts,
 		m.busConnected,
 	)
 	return m

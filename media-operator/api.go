@@ -538,6 +538,21 @@ type PlayStatus struct {
 	// code that matched no track shows plainly.
 	AudioLanguage    string `json:"audioLanguage,omitempty"`
 	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
+
+	// The run's conditions. Each one reports a part of the pod the phase
+	// alone does not, because the phase follows the pod's phase and a
+	// native sidecar restarts under a pod that stays Running.
+	Conditions []PlayCondition `json:"conditions,omitempty"`
+}
+
+// PlayCondition is one condition on a run, in the same shape a Player's
+// conditions take.
+type PlayCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason,omitempty"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
 }
 
 // The four phases, in the words Jobs and Pods use so nobody learns a
@@ -998,12 +1013,17 @@ type EmptyDirVolumeSource struct{}
 // The pod status fields the phase derivation reads. The container's
 // terminated state is the specific half of a failure message,
 // because it carries the exit code.
+//
+// The kubelet reports a native sidecar, the command sidecar and the
+// display, under initContainerStatuses, because a native sidecar is an
+// init container with restartPolicy Always.
 type PodStatus struct {
-	Phase             string            `json:"phase,omitempty"`
-	Reason            string            `json:"reason,omitempty"`
-	Message           string            `json:"message,omitempty"`
-	Conditions        []PodCondition    `json:"conditions,omitempty"`
-	ContainerStatuses []ContainerStatus `json:"containerStatuses,omitempty"`
+	Phase                 string            `json:"phase,omitempty"`
+	Reason                string            `json:"reason,omitempty"`
+	Message               string            `json:"message,omitempty"`
+	Conditions            []PodCondition    `json:"conditions,omitempty"`
+	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
+	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
 }
 
 // The scheduler explains a pod it cannot place on the PodScheduled
@@ -1015,14 +1035,24 @@ type PodCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
+// restartCount and lastState are the fields a restarting sidecar
+// reports about its exits, because its current state says nothing
+// about the exit.
 type ContainerStatus struct {
-	Name  string         `json:"name"`
-	State ContainerState `json:"state"`
+	Name         string         `json:"name"`
+	State        ContainerState `json:"state"`
+	LastState    ContainerState `json:"lastState"`
+	RestartCount int            `json:"restartCount,omitempty"`
 }
 
 type ContainerState struct {
+	Running    *ContainerStateRunning    `json:"running,omitempty"`
 	Terminated *ContainerStateTerminated `json:"terminated,omitempty"`
 }
+
+// ContainerStateRunning has no fields, because the presence of the
+// block is the whole fact this operator reads.
+type ContainerStateRunning struct{}
 
 type ContainerStateTerminated struct {
 	ExitCode int    `json:"exitCode"`

@@ -50,6 +50,9 @@ spec:
         - name: Activity
           type: string
           jsonPath: .status.activity
+        - name: Display
+          type: string
+          jsonPath: .status.conditions[?(@.type=="DisplayAlive")].reason
         - name: Item
           type: integer
           jsonPath: .status.item
@@ -455,3 +458,49 @@ spec:
                     empty when none plays. The value is the track's
                     own tag as the file carries it, the way
                     audioLanguage reports its track.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  description: >-
+                    The run's conditions. There is one, DisplayAlive,
+                    and it reports the playback pod's display container,
+                    the native sidecar that draws the on-screen display.
+                    True with reason Running means the container runs
+                    and the kubelet has restarted it at most once. False
+                    with reason Restarting means the kubelet has
+                    restarted it two or more times, or it exited and has
+                    not started again. The message states the restart
+                    count and the last termination's reason and exit
+                    code. More than two restarts in one run set the phase
+                    to Finished with the same message, and the run
+                    retires the way a finished film does. The condition
+                    is absent while the pod reports no display container
+                    or the container has not started yet.
+                    lastTransitionTime moves only when the status does.
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        description: The condition's name, DisplayAlive.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: The condition's status.
+                      reason:
+                        type: string
+                        description: "One word for the status: Running or Restarting."
+                      message:
+                        type: string
+                        description: >-
+                          The restart count, with the reason and exit
+                          code of the last termination the kubelet
+                          recorded.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the status last changed, so a reader can
+                          tell how long the display has been down or up.

@@ -247,9 +247,39 @@ type playerBusStatus struct {
 // playerBusPlay names the Play that runs or starts on the unit. Name is
 // the object a person finds with kubectl, and Title is the one line the
 // screen draws.
+//
+// DisplayAlive is the run's own condition, included here so a client
+// reads a crashed display off the bus and sends no request to the API
+// server.
 type playerBusPlay struct {
-	Name  string `json:"name"`
-	Title string `json:"title"`
+	Name         string              `json:"name"`
+	Title        string              `json:"title"`
+	DisplayAlive *playerBusCondition `json:"displayAlive,omitempty"`
+}
+
+// playerBusCondition is one condition in the shape the bus publishes.
+// The condition's type is the key the block arrives under, so the body
+// holds the status, the reason, and the message alone.
+type playerBusCondition struct {
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// busDisplayAlive returns the run's DisplayAlive condition in the bus
+// shape, or nil where the run reports none.
+func busDisplayAlive(play *Play) *playerBusCondition {
+	for _, condition := range play.Status.Conditions {
+		if condition.Type != displayAliveCondition {
+			continue
+		}
+		return &playerBusCondition{
+			Status:  condition.Status,
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		}
+	}
+	return nil
 }
 
 // playerBusComponent is one part of the unit: its friendly name, its kind,
@@ -294,7 +324,11 @@ func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, 
 		Activity:    activity.Activity,
 	}
 	if play := findPlay(plays, player.Metadata.Namespace, activity.Play); play != nil {
-		status.Play = &playerBusPlay{Name: play.Metadata.Name, Title: playTitle(play)}
+		status.Play = &playerBusPlay{
+			Name:         play.Metadata.Name,
+			Title:        playTitle(play),
+			DisplayAlive: busDisplayAlive(play),
+		}
 	}
 	if player.Spec.Display != nil {
 		status.Components = append(status.Components, playerBusComponent{

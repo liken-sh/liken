@@ -26,7 +26,9 @@ deleted.
     {
       "displayName": "Studio Lab",
       "activity": "Playing",
-      "play": {"name": "evening-film", "title": "An Evening Film"},
+      "play": {"name": "evening-film", "title": "An Evening Film",
+               "displayAlive": {"status": "False", "reason": "Restarting",
+                                "message": "the display restarted 2 times: Error (exit code 1)"}},
       "components": [
         {"name": "Portable Screen", "kind": "display"},
         {"name": "Built-in Speakers", "kind": "sink"},
@@ -46,6 +48,17 @@ reports, from 0 to 100, and a device that reports none omits the key.
 [focus mark](/docs/reference/remotes/#focus-and-focuscycle) names
 this `Player`, and the idle screen draws a small hexagon beside that
 controller in its parts list. Every other component omits the key.
+
+`play.displayAlive` is the run's
+[`DisplayAlive` condition](/docs/reference/plays/#statusconditions)
+with its `status`, `reason`, and `message`, and the key is absent
+while the run reports none. The operator derives it from the playback
+pod, so a client reads a crashed display off the topic it already
+holds for the unit and sends no request to the API server. A client
+that draws the unit's state can show the `message` while `status` is
+`False`. It needs no repair of its own: once the display has
+restarted more than twice in one run, the operator ends the run, and
+this topic reads `Idle` as it does after any film.
 
 ### `volume`
 
