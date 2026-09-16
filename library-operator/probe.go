@@ -276,9 +276,23 @@ func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 		"-v", "error", "-print_format", "json", "-show_format", "-show_streams", path)
 	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("ffprobe %s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("ffprobe %s: %w%s", filepath.Base(path), err, commandStderr(err))
 	}
 	return output, nil
+}
+
+// What a failed command wrote to stderr, as a suffix for its error, because
+// an exit status alone says nothing about why the file would not open. The
+// answer is empty for an error that carries no output.
+func commandStderr(err error) string {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return ""
+	}
+	if words := strings.TrimSpace(string(exit.Stderr)); words != "" {
+		return ": " + words
+	}
+	return ""
 }
 
 // An absent sidecar becomes a minimal one and not an error, because the

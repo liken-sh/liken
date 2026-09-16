@@ -510,16 +510,22 @@ func TestTheRealCommandRunsAndAnswers(t *testing.T) {
 	}
 }
 
+// The error carries what ffprobe wrote to stderr, because "exit status 1"
+// alone says nothing about which file it could not read or why.
 func TestACommandThatFailsIsAnError(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "ffprobe"), "#!/bin/sh\nexit 1\n")
+	writeFile(t, filepath.Join(dir, "ffprobe"), "#!/bin/sh\necho 'moov atom not found' >&2\nexit 1\n")
 	if err := os.Chmod(filepath.Join(dir, "ffprobe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
 
-	if _, err := ffprobeFile(t.Context(), filepath.Join(dir, "a.mkv")); err == nil {
-		t.Error("the command reported no error, want one")
+	_, err := ffprobeFile(t.Context(), filepath.Join(dir, "a.mkv"))
+	if err == nil {
+		t.Fatal("the command reported no error, want one")
+	}
+	if !strings.Contains(err.Error(), "moov atom not found") {
+		t.Errorf("error = %q, want ffprobe's own words in it", err)
 	}
 }
 
