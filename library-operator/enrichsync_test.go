@@ -119,10 +119,9 @@ func TestWhichScanRunEndsTheWait(t *testing.T) {
 	}
 }
 
-// A walk written before the confirmation existed still has to reach
-// this copy whole, so a copy with a hole anywhere stands unsynced whatever
-// version its runs row names.
-func TestAWalkFromBeforeThisBuildStillNeedsAWholeCopy(t *testing.T) {
+// A walk written before the confirmation existed names no version, so
+// it is synced on its own, gaps or not.
+func TestAWalkFromBeforeThisBuildIsSyncedWithGapsPresent(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
 	if _, _, err := catalog.UpsertRun(t.Context(), work.library, libraryRun{
@@ -130,25 +129,37 @@ func TestAWalkFromBeforeThisBuildStillNeedsAWholeCopy(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 4, 6)
-	work.syncTimeout = 100 * time.Millisecond
+	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 110)
 
-	if err := work.awaitCatalogSync(t.Context()); err == nil {
-		t.Error("the wait ended on a copy that knows it is missing a range")
+	if err := work.awaitCatalogSync(t.Context()); err != nil {
+		t.Fatalf("the wait held on a run from before this build: %v", err)
 	}
 }
 
-// A copy that holds the walk's version but knows of a hole anywhere
-// is a copy whose gap read would report work that is already done.
-func TestACopyWithAHoleIsNotSynced(t *testing.T) {
+// Ranges left by agents that died with versions unsent never fill, and
+// they say nothing about the walk.
+func TestAnotherWritersHoleDoesNotBlockTheWait(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
 	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
-	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 4, 6)
+	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 136)
+
+	if err := work.awaitCatalogSync(t.Context()); err != nil {
+		t.Fatalf("the wait held on another writer's missing range: %v", err)
+	}
+}
+
+// A gap of the walk's own writer that reaches back over the version the
+// run names leaves the walk unheld.
+func TestAHoleInTheWalksOwnWriterBlocksTheWait(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	work := syncingEnricher(t, catalog)
+	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
+	agent.recordGap(t, sqliteAgentActor, 1, 1000)
 	work.syncTimeout = 100 * time.Millisecond
 
 	if err := work.awaitCatalogSync(t.Context()); err == nil {
-		t.Error("the wait ended on a copy that knows it is missing a range")
+		t.Error("the wait ended on a copy missing the walk writer's versions")
 	}
 }
 

@@ -211,30 +211,6 @@ func TestDeleteConfirmationsTakesOneLibrary(t *testing.T) {
 	}
 }
 
-// The count of ranges the copy knows it is missing, whoever wrote
-// them, which is what says a copy is whole.
-func TestTheOpenGapsAreEveryWritersMissingRanges(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-
-	none, err := catalog.openGaps(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if none != 0 {
-		t.Errorf("gaps = %d, want none on a copy with no hole", none)
-	}
-
-	agent.recordGap(t, sqliteAgentActor, 4, 6)
-
-	gaps, err := catalog.openGaps(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gaps != 1 {
-		t.Errorf("gaps = %d, want the one recorded range", gaps)
-	}
-}
-
 // The shipped schema keys a confirmation by the library, the
 // worker, the Job, and the confirming pod, and carries the run version
 // that row proves as a cell beside them.

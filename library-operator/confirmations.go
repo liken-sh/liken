@@ -79,7 +79,6 @@ func (c *Catalog) confirmedBy(ctx context.Context, library, worker, job, confirm
 const (
 	heldVersionQuery = `SELECT db_version FROM crsql_db_versions WHERE hex(site_id) = ?`
 	versionGapQuery  = `SELECT count(*) FROM __corro_bookkeeping_gaps WHERE hex(actor_id) = ? AND start <= ?`
-	openGapQuery     = `SELECT count(*) FROM __corro_bookkeeping_gaps`
 )
 
 // VersionsHeld answers whether this copy holds everything one
@@ -97,12 +96,6 @@ func versionsHeld(ctx context.Context, catalog *Catalog, actor string, version i
 	}
 	gaps, err := catalog.queryInt(ctx, versionGapQuery, []any{id, version})
 	return gaps == 0 && err == nil, err
-}
-
-// OpenGaps counts every range this copy knows it is missing,
-// whoever wrote it. A copy with none holds every version it has heard of.
-func (c *Catalog) openGaps(ctx context.Context) (int, error) {
-	return c.queryInt(ctx, openGapQuery, nil)
 }
 
 // ActorHex renders an agent id the way hex(site_id) reads it. The

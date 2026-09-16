@@ -6,10 +6,13 @@ package main
 // that is not there. On the first drill the probe read zero files where the
 // reporter counted 24.
 //
-// The copy is synced when it holds the walk's own write and has no
-// hole behind it: a finished scan run that names the agent and version its
-// writer made, every version of that writer up to it, and no range this
-// copy knows it is missing. The counts alone are not enough: a walk that
+// The copy is synced when it holds the walk's own write: a finished
+// scan run that names the agent and version its writer made, and every
+// version of that writer up to it. Ranges missing from other writers do
+// not count, because a copy carries the gaps of agents that died with
+// versions unsent, and those never fill.
+//
+// The counts alone are not enough: a walk that
 // changes no item and no file, such as the one after a refresh, leaves the
 // counts as they were while its attempts and rows are still on their way,
 // and a container that read its gap then found most of the work missing.
@@ -46,10 +49,8 @@ func syncTimeout(raw string) time.Duration {
 }
 
 // A copy is synced when its runs table holds a finished scan of this
-// library that names the write its writer made, when this copy holds every
-// version of that writer up to it, and when this copy knows of no missing
-// range at all. A copy with a hole anywhere is one whose gap read would
-// report work that is already done.
+// library that names the write its writer made, and this copy holds
+// every version of that writer up to it.
 //
 // A finished scan that names no version was written by a scanner from
 // before the confirmation existed, and there is nothing about it to
@@ -65,14 +66,10 @@ func catalogSynced(ctx context.Context, catalog *Catalog, library string) (bool,
 	if !held || walk.Finished.IsZero() {
 		return false, nil
 	}
-	if walk.Version > 0 {
-		whole, err := versionsHeld(ctx, catalog, walk.Actor, walk.Version)
-		if err != nil || !whole {
-			return false, err
-		}
+	if walk.Version == 0 {
+		return true, nil
 	}
-	gaps, err := catalog.openGaps(ctx)
-	return gaps == 0 && err == nil, err
+	return versionsHeld(ctx, catalog, walk.Actor, walk.Version)
 }
 
 // The wait polls the local copy until it holds the walk. The timeout
