@@ -466,13 +466,13 @@ spec:
                     The run's conditions. There is one, DisplayAlive,
                     and it reports the playback pod's display container,
                     the native sidecar that draws the on-screen display.
-                    True with reason Running means the container runs
-                    and the kubelet has restarted it at most once. False
-                    with reason Restarting means the kubelet has
-                    restarted it two or more times, or it exited and has
-                    not started again. The message states the restart
-                    count and the last termination's reason and exit
-                    code. More than two restarts in one run set the phase
+                    It is True with reason Running while the container
+                    runs, at any restart count, and False with reason
+                    Restarting only while the container is down after
+                    an exit the kubelet recorded. The message states
+                    the restart count with the reason and exit code of
+                    the last termination, and a display that has never
+                    restarted has no message. More than two restarts in one run set the phase
                     to Finished with the same message, and the run
                     retires the way a finished film does. The condition
                     is absent while the pod reports no display container
@@ -504,3 +504,11 @@ spec:
                         description: >-
                           When the status last changed, so a reader can
                           tell how long the display has been down or up.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        description: >-
+                          The Play's metadata.generation the condition
+                          was derived from, so a reader can tell a
+                          condition on the current spec from a stale
+                          one.

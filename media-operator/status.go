@@ -90,7 +90,7 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		// and the unit returns to its idle screen.
 		if condition, reported := displayAlive(pod); reported {
 			status.Conditions = []PlayCondition{
-				foldPlayCondition(play.Status.Conditions, condition),
+				foldPlayCondition(play.Status.Conditions, condition, play.Metadata.Generation),
 			}
 			if displayKeepsDying(pod) {
 				status.Phase = phaseFinished
@@ -127,7 +127,8 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 // foldPlayCondition keeps the held stamp while the status is unchanged
 // and stamps the moment the status changed, so lastTransitionTime
 // answers how long the run has been in the state it reports.
-func foldPlayCondition(held []PlayCondition, condition PlayCondition) PlayCondition {
+func foldPlayCondition(held []PlayCondition, condition PlayCondition, generation int64) PlayCondition {
+	condition.ObservedGeneration = generation
 	for _, one := range held {
 		if one.Type != condition.Type {
 			continue

@@ -14,15 +14,9 @@ const (
 	displayReasonRestarting = "Restarting"
 )
 
-// The kubelet restarts a native sidecar alone, and one restart is the
-// cheapest repair a crashed display can get, so the condition stays
-// True through it. A run whose display has restarted more than
-// displayRestartsEnding times has no display a viewer can use, so the
-// run ends.
-const (
-	displayRestartsAlive  = 1
-	displayRestartsEnding = 2
-)
+// A run whose display has restarted more than displayRestartsEnding
+// times has no display a viewer can use, so the run ends.
+const displayRestartsEnding = 2
 
 // displayContainerStatus returns the status of the display container.
 // A playback pod with no screen has no display container, so the second
@@ -44,17 +38,17 @@ func displayAlive(pod *Pod) (PlayCondition, bool) {
 	if !reported {
 		return PlayCondition{}, false
 	}
-	running := container.State.Running != nil
-	if running && container.RestartCount <= displayRestartsAlive {
+	if container.State.Running != nil {
 		return PlayCondition{
-			Type:   displayAliveCondition,
-			Status: conditionTrue,
-			Reason: displayReasonRunning,
+			Type:    displayAliveCondition,
+			Status:  conditionTrue,
+			Reason:  displayReasonRunning,
+			Message: displayRestartMessage(container),
 		}, true
 	}
 	// A container that has neither started nor ended belongs to a pod
 	// that is still starting, which is no fault of the display.
-	if !running && container.LastState.Terminated == nil {
+	if container.LastState.Terminated == nil {
 		return PlayCondition{}, false
 	}
 	return PlayCondition{
@@ -68,17 +62,26 @@ func displayAlive(pod *Pod) (PlayCondition, bool) {
 // displayRestartMessage states the restart count and the last exit the
 // kubelet recorded, its reason and its exit code, because those are the
 // facts a person acts on.
+//
+// A display with a restart count of 0 has no message, because there is
+// no exit to report and the status and reason say the rest.
 func displayRestartMessage(container ContainerStatus) string {
+	if container.RestartCount == 0 {
+		return ""
+	}
+	restarts := fmt.Sprintf("the display restarted %d times", container.RestartCount)
+	if container.RestartCount == 1 {
+		restarts = "the display restarted 1 time"
+	}
 	terminated := container.LastState.Terminated
 	if terminated == nil {
-		return fmt.Sprintf("the display restarted %d times", container.RestartCount)
+		return restarts
 	}
 	reason := terminated.Reason
 	if reason == "" {
 		reason = "the display exited"
 	}
-	return fmt.Sprintf("the display restarted %d times: %s (exit code %d)",
-		container.RestartCount, reason, terminated.ExitCode)
+	return fmt.Sprintf("%s: %s (exit code %d)", restarts, reason, terminated.ExitCode)
 }
 
 // displayKeepsDying reports whether the display has restarted more
@@ -101,17 +104,42 @@ func displayRestartCount(pod *Pod) int {
 	return container.RestartCount
 }
 
+// displayRestartMemo is the restart count one run has already added to
+// the counter, and the Player its series is labeled with, so the run's
+// end can delete that series.
+type displayRestartMemo struct {
+	player string
+	count  int
+}
+
 // countDisplayRestarts adds the growth of the kubelet's count since the
 // last pass to media_display_restarts_total. A recreated pod starts its
 // count at zero again, and a count that fell adds nothing, so the total
 // never falls.
+//
+// The series is created at 0 on the pass that first reads the run's
+// pod, so a scrape of a healthy run reports 0 and not an absent series.
 func (o *operator) countDisplayRestarts(play *Play, pod *Pod) {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	count := displayRestartCount(pod)
 	counted := o.displayRestarts[key]
-	o.displayRestarts[key] = count
-	if o.metrics == nil || count <= counted {
+	o.displayRestarts[key] = displayRestartMemo{player: playerName(play), count: count}
+	if o.metrics == nil || pod == nil {
 		return
 	}
-	o.metrics.displayRestarts.WithLabelValues(playerName(play)).Add(float64(count - counted))
+	series := o.metrics.displayRestarts.WithLabelValues(playerName(play))
+	if count > counted.count {
+		series.Add(float64(count - counted.count))
+	}
+}
+
+// forgetDisplayRestarts drops one run's memo and deletes the series the
+// run created, the way the pass drops every other memo of a run the
+// collection no longer holds.
+func (o *operator) forgetDisplayRestarts(key string) {
+	memo := o.displayRestarts[key]
+	delete(o.displayRestarts, key)
+	if o.metrics != nil && memo.player != "" {
+		o.metrics.displayRestarts.DeleteLabelValues(memo.player)
+	}
 }

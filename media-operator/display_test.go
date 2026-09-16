@@ -72,23 +72,24 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "one restart is still alive",
+		name: "a display running again after one restart is alive, and says so",
 		pod:  displayPod(1, true, crash),
 		held: true,
 		want: PlayCondition{
-			Type:   displayAliveCondition,
-			Status: conditionTrue,
-			Reason: displayReasonRunning,
+			Type:    displayAliveCondition,
+			Status:  conditionTrue,
+			Reason:  displayReasonRunning,
+			Message: "the display restarted 1 time: Error (exit code 1)",
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a second restart reads as restarting",
+		name: "a display running again after two restarts is alive",
 		pod:  displayPod(2, true, crash),
 		held: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
-			Status:  conditionFalse,
-			Reason:  displayReasonRestarting,
+			Status:  conditionTrue,
+			Reason:  displayReasonRunning,
 			Message: "the display restarted 2 times: Error (exit code 1)",
 		},
 		phase: phaseRunning,
@@ -105,7 +106,7 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		phase: phaseRunning,
 	}, {
 		name: "a restart with no reason names the exit alone",
-		pod:  displayPod(2, true, &ContainerStateTerminated{ExitCode: 137}),
+		pod:  displayPod(2, false, &ContainerStateTerminated{ExitCode: 137}),
 		held: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
@@ -120,14 +121,25 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		held: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
-			Status:  conditionFalse,
-			Reason:  displayReasonRestarting,
+			Status:  conditionTrue,
+			Reason:  displayReasonRunning,
 			Message: "the display restarted 2 times",
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a third restart ends the run",
+		name: "a third restart ends the run, and the display that runs again says so",
 		pod:  displayPod(3, true, crash),
+		held: true,
+		want: PlayCondition{
+			Type:    displayAliveCondition,
+			Status:  conditionTrue,
+			Reason:  displayReasonRunning,
+			Message: "the display restarted 3 times: Error (exit code 1)",
+		},
+		phase: phaseFinished,
+	}, {
+		name: "a third restart ends the run while the display is down",
+		pod:  displayPod(3, false, crash),
 		held: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
@@ -161,6 +173,18 @@ func TestARunThatEndsOnTheDisplayCarriesTheReason(t *testing.T) {
 	mustMatch(t, status.Message, "the display restarted 3 times: Error (exit code 1)")
 }
 
+// The condition names the spec revision it was derived from, so a
+// reader can tell a condition on the current spec from a stale one.
+func TestTheDisplayAliveConditionReportsTheGeneration(t *testing.T) {
+	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
+	play := statusTestPlay()
+	play.Metadata.Generation = 4
+
+	status := derivePlayStatus(play, player, nil, displayPod(0, true, nil), nil, resolvedPreferences{})
+
+	mustMatch(t, status.Conditions[0].ObservedGeneration, int64(4))
+}
+
 // The stamp moves only when the status changes.
 func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
@@ -184,7 +208,7 @@ func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 		{name: "the display is alive as it was", held: []PlayCondition{alive},
 			pod: displayPod(1, true, crash), kept: true},
 		{name: "the display went from alive to restarting", held: []PlayCondition{alive},
-			pod: displayPod(2, true, crash)},
+			pod: displayPod(2, false, crash)},
 		{name: "the run holds another condition first", held: []PlayCondition{other, alive},
 			pod: displayPod(1, true, crash), kept: true},
 		{name: "the run holds no condition of this type", held: []PlayCondition{other},
@@ -255,6 +279,37 @@ func TestTheDisplayRestartCount(t *testing.T) {
 			mustMatch(t, displayRestartCount(one.pod), one.want)
 		})
 	}
+}
+
+// A run whose display never crashed reports a count of 0 from the pass
+// that first reads its pod, so a scrape tells a healthy run from a unit
+// with no run.
+func TestAHealthyRunReportsZeroDisplayRestarts(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.metrics = newMediaMetrics("test")
+
+	media.pass()
+
+	body := scrapeMetrics(t, media.metrics.registry)
+	if !strings.Contains(body, `media_display_restarts_total{player="theater"} 0`) {
+		t.Errorf("the scrape shows no series for a healthy run\n%s", body)
+	}
+}
+
+// The series is deleted when the run leaves, so a unit that plays
+// nothing has no display series at all.
+func TestTheDisplayRestartsSeriesGoesWithTheRun(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.metrics = newMediaMetrics("test")
+	media.pass()
+	mustMatch(t, testutil.CollectAndCount(media.metrics.displayRestarts), 1)
+
+	delete(cluster.plays, "movie")
+	media.pass()
+
+	mustMatch(t, testutil.CollectAndCount(media.metrics.displayRestarts), 0)
 }
 
 // A display that keeps crashing ends the run the way a finished film

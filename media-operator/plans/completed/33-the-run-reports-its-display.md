@@ -1,7 +1,8 @@
 # 33, The run reports its display
 
-Built on 2026-09-16. The on-hardware drill on `liken-1` runs with the
-next release. A `Play` reports the liveness of its display sidecar as
+Built on 2026-09-16, and drilled on `liken-1` the same day with three
+kills of the display sidecar.
+A `Play` reports the liveness of its display sidecar as
 a `DisplayAlive` condition, `kubectl get plays` shows the condition's
 reason in a `Display` column, the unit's bus status includes the
 condition, and `media_display_restarts_total` counts the restarts. A
@@ -35,14 +36,27 @@ run reports it, and after two restarts the run ends.
 
 **The condition.** `DisplayAlive` on a `Play`:
 
-* `True`, reason `Running`: the display container runs and
-  `restartCount` is at most 1.
-* `False`, reason `Restarting`: `restartCount` of 2 or more, or a
-  container that is not running and has ended once. The message carries
-  the count, the last termination's reason, and its exit code.
+* `True`, reason `Running`: the display container runs, whatever its
+  `restartCount`.
+* `False`, reason `Restarting`: the container is not running, after an
+  exit the kubelet recorded.
+* the message, on either status: the restart count with the last
+  termination's reason and its exit code, and no message at a count
+  of 0.
 * absent: no display container status, or a container that has neither
   started nor ended.
 * `lastTransitionTime`: stamped only where the status changes.
+* `observedGeneration`: the `Play`'s `metadata.generation`.
+
+The condition reads the container's present state on every pass and
+never latches. A display that crashed once and came back reads `True`
+again, with the restart count in its message, because the fact a
+viewer acts on is whether the display draws right now. The count is
+the history, and the message states it. A condition that stayed
+`False` after one crash would report a fault the kubelet had already
+repaired, and the operator would need a rule of its own for when to
+clear it. The self-heal reads the count, not the condition, so a run
+can end while the condition reads `True`.
 
 The count comes from `status.initContainerStatuses` because the
 display is a native sidecar, an init container with `restartPolicy:
@@ -62,7 +76,16 @@ report the phase alone cannot give.
 `.status.conditions[?(@.type=="DisplayAlive")].reason`.
 
 **The metric.** `media_display_restarts_total{player}`, from the same
-container status.
+container status, at 0 from the run's first pod, and deleted with the
+run.
+
+The series exists at 0 from the pass that first reads the run's pod,
+so a scrape tells a healthy run from a unit with no run. A series that
+appeared on the first restart would be absent in both cases, and a
+dashboard could not tell them apart. The run's end deletes the series,
+the way the other per-run series go, because the label names the unit
+and a retired run's count would otherwise be reported against the next
+run on the same unit.
 
 The operator remembers the count it last read for each run, in a map
 keyed by the run and dropped when the run goes, and adds only the
@@ -80,10 +103,10 @@ message from the condition, then the retire that a finished film takes.
 
 The kubelet's restart of the sidecar alone is the cheapest repair
 there is: mpv keeps playing, the position holds, and the display is
-back within seconds. A first restart is that repair, so the condition
-stays `True`. A second is a display that crashed twice, so
-the condition reads `False` and the message names the exit, while the
-pod stands because the repair may still hold. A third in one run is a
+back within seconds.
+The first two restarts are that repair, and the pod stays through
+them: the phase stays `Running`, and the condition reports each
+restart in its count. A third in one run is a
 display that does not stay running, and a film that plays with no
 display is the case a person deletes the pod by hand for. So the
 operator ends the run itself: the phase moves to `Finished` with the
@@ -123,15 +146,36 @@ of the condition, the stamp that moves only on a change, the counter
 across a recreated pod, the run that ends on its third restart, and
 the bus status with and without the condition.
 
-The drill on `liken-1` runs with the next release, and it proves the
-whole path on hardware. With a film playing, kill the display
-container's process from a pod on the same node once, and read the
-condition `True` with reason `Running`, `restartCount` 1 in the pod's
-`initContainerStatuses`, and `media_display_restarts_total` at 1. Kill
-it again, and read the condition `False` with reason `Restarting`,
-`Display` reading `Restarting` in `kubectl get plays`, the pod still
-`Running` with the film playing, and the `displayAlive` block in the
-`Player`'s status topic with the count and the exit. Kill it a third
-time, and read the `Play` at `Finished` with the condition's message,
-the pod and the claim gone, the unit's status topic at `Idle`, and the
-idle screen or the browser back on the panel.
+The drill ran on `liken-1` on 2026-09-16 with a film playing. The
+display sidecar's process was killed three times from the host PID
+namespace, through `kubectl debug node/<node> --profile=sysadmin`, and
+the table below is what the cluster reported after each kill.
+
+The kill comes from the host PID namespace because `kubectl debug
+--target=display` cannot deliver it. That debug container shares the
+display container's PID namespace, where the display's process is PID
+1, and the kernel drops a signal sent to PID 1 of a namespace from
+inside that namespace when the process has no handler for it. From
+the host's namespace the same process has an ordinary PID, and the
+signal reaches it.
+
+| Measurement | Time after the kill |
+| --- | --- |
+| first restart | 1 s |
+| second restart | 11 s |
+| third restart | 22 s |
+| condition `False`, after the second kill | 3 s |
+| `Play` `Finished`, after the third kill | 32 s |
+| pod gone, after the third kill | 38 s |
+
+The three restart times are the kubelet's backoff. It restarts a
+container at once on its first exit, waits 10 s before the second
+restart, and 20 s before the third, and it doubles the wait on each
+exit up to 5 minutes. The 1 s, 11 s, and 22 s in the table are those
+waits plus the time the kubelet took to record each exit.
+
+The `Display` column, `media_display_restarts_total`, and the
+`displayAlive` block on the unit's status topic each reported the
+state after every kill, and the ending ran as designed. Playback never
+stalled through the three restarts. The browser returned to its page
+when the pod went, with no restart of its own.

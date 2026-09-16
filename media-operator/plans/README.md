@@ -35,8 +35,9 @@ These plans are designed. Each keeps its number and moves to
 
 * [33, The run reports its
   display](completed/33-the-run-reports-its-display.md). Built on
-  2026-09-16. The on-hardware drill on `liken-1` runs with the next
-  release. A `Play` reports the liveness of its display sidecar as a
+  2026-09-16, and drilled on `liken-1` the same day with three kills
+  of the display sidecar.
+  A `Play` reports the liveness of its display sidecar as a
   `DisplayAlive` condition, `kubectl get plays` shows the condition's
   reason in a `Display` column, the unit's bus status includes the
   condition, and `media_display_restarts_total` counts the restarts.

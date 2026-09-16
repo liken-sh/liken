@@ -209,7 +209,10 @@ type operator struct {
 	// displayRestarts maps each run to the display restart count the last
 	// pass read, so the counter adds the growth alone. Only the pass
 	// goroutine touches it.
-	displayRestarts map[string]int
+	//
+	// The memo also names the Player the run's series is labeled with,
+	// so the run's end deletes that series.
+	displayRestarts map[string]displayRestartMemo
 
 	// keysPublished maps each Remote's keys topic to the table the
 	// operator last published there. The topic is retained, so the
@@ -326,7 +329,7 @@ func operate() {
 		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]bool{},
 		positionWrites:   map[string]time.Time{},
-		displayRestarts:  map[string]int{},
+		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
 		wake:             wake,
@@ -541,7 +544,7 @@ func (o *operator) pass() {
 	}
 	for key := range o.displayRestarts {
 		if !live[key] {
-			delete(o.displayRestarts, key)
+			o.forgetDisplayRestarts(key)
 		}
 	}
 	for key := range o.recreateBackoff {

@@ -36,10 +36,14 @@ const (
 // creationTimestamp is the API server's own stamp. The operator reads it
 // to tell the newest Play on a Player from an older one.
 type ObjectMeta struct {
-	Name              string            `json:"name,omitempty"`
-	Namespace         string            `json:"namespace,omitempty"`
-	UID               string            `json:"uid,omitempty"`
-	ResourceVersion   string            `json:"resourceVersion,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Namespace       string `json:"namespace,omitempty"`
+	UID             string `json:"uid,omitempty"`
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+	// Generation is the API server's count of the spec's revisions. A
+	// condition reports the generation it was derived from, so a reader
+	// can tell a condition on the current spec from a stale one.
+	Generation        int64             `json:"generation,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Annotations       map[string]string `json:"annotations,omitempty"`
 	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
@@ -553,6 +557,9 @@ type PlayCondition struct {
 	Reason             string `json:"reason,omitempty"`
 	Message            string `json:"message,omitempty"`
 	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
+	// ObservedGeneration is the Play's metadata.generation the condition
+	// was derived from.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // The four phases, in the words Jobs and Pods use so nobody learns a
