@@ -81,7 +81,7 @@ Every push to the operator's main branch publishes a development
 build. Its version is the most recent release plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
 `2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds carries the same version, and `:latest` still names the
+builds has the same version, and `:latest` still names the
 most recent release.
 
 A development build has no git tag, so the manifests pin to the
@@ -105,7 +105,7 @@ The install runs two `Deployments` in `liken-system`, and they are
 separate on purpose:
 
 * `media-operator` watches the five resources and reconciles them
-  into claims and pods. It holds no volume and serves no HTTP; on
+  into claims and pods. It holds no volume and serves no HTTP. On
   every pass it re-derives everything from the API server, and it
   reads each playback pod's report from the bus.
 * `bus` is one [Mosquitto](https://mosquitto.org/) broker, with a
@@ -131,18 +131,18 @@ pods and your own programs share.
 
 ## Read the player's full output
 
-The playback pod runs mpv with `--quiet`, because mpv's status line
-prints about eight times a second and every line lands in the pod
-log. Warnings and errors still print. To read everything mpv says,
-set one variable on the operator:
+The playback pod runs `mpv` with `--quiet`, because `mpv`'s status
+line prints about eight times a second and every line lands in the
+pod log. Warnings and errors still print. To read everything `mpv`
+says, set one variable on the operator:
 
 ```sh
 kubectl set env deployment/media-operator MEDIA_PLAYER_VERBOSE=1
 ```
 
 The switch removes `--quiet` and adds nothing else. It reaches every
-playback pod created after it, so it takes effect on the next `Play`,
-and a pod already running keeps the setting it started with. Read the
+playback pod created after it, so it takes effect on the next `Play`.
+A pod already running keeps the setting it started with. Read the
 log with `kubectl logs <play>-playback -c player`. To turn the switch
 off again:
 
@@ -152,9 +152,9 @@ kubectl set env deployment/media-operator MEDIA_PLAYER_VERBOSE-
 
 ## Remove the operator
 
-Deleting a `Play` stops its run, and deleting a `Player` or a
+Deleting a `Play` stops its run. Deleting a `Player` or a
 `Remote` removes its pods and claims, through the
-`ownerReference` every one of them carries. To remove the operator
+`ownerReference` every one of them has. To remove the operator
 itself:
 
     kubectl delete -n liken-system \

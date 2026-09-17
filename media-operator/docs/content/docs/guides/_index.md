@@ -15,12 +15,12 @@ After those, the work is declaring resources, and the
 
 ## How the pieces fit
 
-The install puts two Deployments in `liken-system`: the operator and
-the message bus, one Mosquitto broker. Nothing else runs
+The install puts two `Deployments` in `liken-system`: the operator
+and the message bus, one Mosquitto broker. Nothing else runs
 continuously.
 
 The resources divide the work by how often you write them. A
-`Player` is written once per unit of equipment: it selects the
+`Player` is written once per unit of equipment. It selects the
 unit's devices out of what the hardware operators publish, with the
 same [CEL](https://kubernetes.io/docs/reference/using-api/cel/)
 selectors a hand-written `ResourceClaim` would use. A `Remote` and

@@ -1,6 +1,6 @@
 ---
 name: handing-the-idle-screen-to-another-controller
-description: "Hand a Player's idle screen to another operator through spec.idle.controller, and the contract that operator follows to draw the screen and read presses. Use when something other than media-operator should draw the screen while nothing plays."
+description: "Hand a Player's idle screen to another operator through spec.idle.controller, and follow the contract that operator uses to draw the screen and read presses. Use when something other than media-operator should draw the screen while nothing plays."
 ---
 
 This skill is the guide at https://media.liken.sh/docs/guides/handing-the-idle-screen-to-another-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -8,7 +8,7 @@ This skill is the guide at https://media.liken.sh/docs/guides/handing-the-idle-s
 # Hand the idle screen to another controller
 
 By default the media operator draws a `Player`'s idle screen with its
-own client. `spec.idle.controller` names who draws it instead. This
+own client. `spec.idle.controller` names what draws it instead. This
 guide covers both sides: the field a cluster owner sets, and the
 contract an operator follows to take a screen over.
 
@@ -48,7 +48,7 @@ delegate that exists today.
 
 The delegate acts on `status.idle` and never on `spec.idle`. The spec
 may inherit its controller from `MediaPreferences`, and the media
-operator is what resolves the two tiers.
+operator resolves the two into one name.
 
     status:
       idle:
@@ -71,7 +71,7 @@ operator is what resolves the two tiers.
 * `controller` is the resolved name. Act when it is yours.
 * `claim` is the `ResourceClaim` in the `Player`'s namespace that
   holds the screen. Your pod references it by name.
-* `requests` are the request names the claim carries. `draw` is the
+* `requests` are the request names in the claim. `draw` is the
   shared draw device on the unit's screen. `render` is the GPU render
   node, present when the `Player` has one.
 * `fadeAfterSeconds` and `offAfterSeconds` are the resolved quiet
@@ -103,19 +103,19 @@ and give the container one entry per request:
 
 The draw device delivers `WAYLAND_DISPLAY`, a compositor socket the
 display operator opened for this claim alone. Open it and map your
-window. The socket is what says which screen the window belongs on,
-so the window needs no app-id and no flag.
+window. The socket says which screen the window belongs on, so the
+window needs no app-id and no flag.
 
 The draw device is shared. Your pod and a `Play`'s playback pod hold
 the screen at once, and the playback window draws over yours while
 media plays.
 
-A window can go away under a running client, when the compositor
+A window can go away under a running client when the compositor
 restarts. Nothing inside the process can open the connection again, so
-exit when no window exists for longer than a grace and let the kubelet
-restart the container. The operator's own client exits with code 7 in
-that case, so a person reading a container's last state finds the same
-code whichever client the image runs.
+exit when no window exists for longer than a grace period, and let the
+kubelet restart the container. The operator's own client exits with
+code 7 in that case, so a person reading a container's last state
+finds the same code whichever client the image runs.
 
 ## Read the presses
 
@@ -129,10 +129,9 @@ There are two ways to hold that contract:
 * Take the `media-screen` crate from this repository as a git
   dependency pinned to a release tag. It reads the variables below,
   runs every rule, and hands the client what it draws: a press, the
-  shade down or up, and a focus. Name topics of your
-  own when you open the reader, and every message on one comes back on
-  the same connection, so a client reads back the retained state it
-  owns.
+  shade down or up, and a focus. Name topics of your own when you open
+  the reader. Every message on one comes back on the same connection,
+  so a client reads back the retained state it owns.
 * Read the same topics yourself and hold the same gates. The
   [bus reference](https://media.liken.sh/docs/reference/bus/) describes each topic.
 
@@ -148,7 +147,7 @@ Set these variables on your container. Each value comes from
   a unit with no sinks. Set nothing then, and the client draws no level
   and steps none.
 * `MEDIA_PLAYER_VOLUME_OWNER_TOPIC`, from `bus.volumeOwnerTopic`. It
-  is present whenever `bus.volumeTopic` is. The topic carries the
+  is present whenever `bus.volumeTopic` is. The topic holds the
   retained [owner mark](https://media.liken.sh/docs/reference/players/#volumeowner): a
   non-empty payload means equipment applies the unit's level, and an
   empty payload means no owner holds it. While the mark stands, draw
@@ -159,11 +158,11 @@ Set these variables on your container. Each value comes from
   pod publishes `{"action": "play-next"}` there when a person takes the
   up-next offer on the scrubber, for a client that starts what follows.
   It publishes `{"action": "home"}` there when a person presses home
-  during a film, just before the `Play` ends, and the client reads that
-  ask as a press of the home key. When a `Play` ends, the client's own
-  surface is on the screen again without it asking, and the retained
-  status is the cue. Nothing else arrives, and the client publishes
-  nothing back.
+  during a film, just before the `Play` ends. The client reads that
+  message as a press of the home key. When a `Play` ends, the client's
+  own surface is on the screen again without it asking, and the
+  retained status is the cue. Nothing else arrives, and the client
+  publishes nothing back.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
   publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
   The operator turns the desire into an override on the screen's
@@ -175,8 +174,8 @@ Set these variables on your container. Each value comes from
 * `IDLE_OFF_AFTER_SECONDS`, from `offAfterSeconds`.
 
 A press arrives on a controller's events topic as
-`{"key": "KEY_UP", "value": 1}`, the same JSON the `Remote`'s events
-topic carries for every reader. A press acts only while the
+`{"key": "KEY_UP", "value": 1}`, the same JSON every reader of the
+`Remote`'s events topic gets. A press acts only while the
 controller's focus mark names this `Player`, only while the unit plays
 nothing, and only while the screen is awake. A press on a sleeping
 screen wakes it and does nothing else. A held control arrives again as
@@ -184,7 +183,7 @@ value 2, and a release, value 0, acts on nothing.
 
 The client brings its own shade down. The operator's client does it on
 back. A client with levels does it when back has no level left to
-climb.
+return to.
 
 ## Expect the claim to change
 

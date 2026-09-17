@@ -8,12 +8,12 @@ This skill is the guide at https://media.liken.sh/docs/guides/mapping-a-controll
 # Map a new controller
 
 A controller works before it has a `Keymap`. The standing pod passes
-every `KEY_*` code through under the kernel's own name, turns the hat
-axes into the arrows, and reads a gamepad's south and east buttons as
-enter and back. This guide finds the codes a controller emits and
+every `KEY_*` code through under the kernel's own name, and turns the
+hat axes into the arrows. It reads a gamepad's south and east buttons
+as enter and back. This guide finds the codes a controller emits and
 writes a `Keymap` row only for a control the base gets wrong or
-leaves out. At the end, every button the controller has does what the
-plastic says.
+leaves out. At the end, every button the controller has does what its
+label says.
 
 You need:
 
@@ -25,8 +25,8 @@ You need:
 * `kubectl` access to the namespace.
 
 The controller keeps working while you map it. Discovery changes
-what the pod logs, not what it publishes, so a controller in
-discovery still drives its unit.
+what the pod logs and leaves what it publishes the same, so a
+controller in discovery still drives its unit.
 
 ## Declare the Remote
 
@@ -68,17 +68,17 @@ The pod first logs one verdict line per input node, then each press:
     remote:   - press: KEY_PLAYPAUSE   # code 164
     remote:     key: <a KEY_* name, or none>
 
-The two indented lines are a `Keymap` row: paste it under
-`spec.buttons`, or under `spec.axes` for a hat direction, and replace
-the key line with the kernel name the control should report, or with
-`none` to drop the control. A control that already reports the right
-name needs no row. `KEY_PLAYPAUSE` above pauses a film as it is. Only
-the press earns a row; a release or a repeat logs a line that states
-so.
+The two indented lines are a `Keymap` row. Paste it under
+`spec.buttons`, or under `spec.axes` for a hat direction. Then
+replace the key line with the kernel name the control should report,
+or with `none` to drop the control. A control that already reports
+the right name needs no row. `KEY_PLAYPAUSE` above pauses a film as
+it is. Only a press needs a row. A release or a repeat logs a line
+that says so.
 
 If the controller has modes, press every button in every mode. A
-combined remote can emit different codes for one button per mode: an
-air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode and
+combined remote can emit different codes for one button per mode. An
+air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode, and
 `KEY_ENTER` in keys mode. `KEY_ENTER` passes on its own. `BTN_LEFT`
 is a mouse button and means nothing to a screen, so it needs a row
 that makes it `KEY_ENTER`.
@@ -88,11 +88,11 @@ that makes it `KEY_ENTER`.
     kubectl get remote den-remote -o yaml
 
 `status.unbound` lists every declared control that the base and the
-`Keymap` together map to nothing: a hat axis with no row, a control a
-row set to `none`, and a code the kernel gives no name. A declared
-`KEY_*` code passes as itself, so it is never on the list, and a
-keyboard remote starts with an empty list. Each entry carries the
-code, its evdev name, and its event type.
+`Keymap` together map to nothing. The list holds a hat axis with no
+row, a control a row set to `none`, and a code the kernel gives no
+name. A declared `KEY_*` code passes as itself, so it is never on the
+list, and a keyboard remote starts with an empty list. Each entry has
+the code, its evdev name, and its event type.
 
 ## Write the Keymap
 
