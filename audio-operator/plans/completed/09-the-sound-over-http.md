@@ -720,6 +720,18 @@ too. `mpv` in place of `curl -o` listens live.
   container's load is the limit that costs something.
 - **A `levels` route**, a stream of the running level. An open
   problem below.
+- **An aggregated `APIService`.** A spike on 2026-09-17 measured a
+  throwaway extension server in front of this API through the API
+  server. It streams: a 30 s WAV tap arrived whole, chunk for chunk,
+  about 35 ms behind the direct read, with every header and problem
+  body intact. It cuts every stream at the API server's 60 s
+  `--request-timeout` with no terminating chunk; Kubernetes 1.36
+  exempts only a hardcoded set of verbs and subresources (`watch`,
+  `proxy`, `log`, `exec`, `attach`, `portforward`), and `?timeout=`
+  can only shorten the deadline. It also refuses any 3xx with a
+  `Location`. Staying under the limit would put a `proxy` or `watch`
+  segment in every path, and lifting it would change the whole API
+  server. Chris ruled both showstoppers, so this front door stays.
 
 ## How the work is proved
 
@@ -869,13 +881,6 @@ Not run, in either drill:
 
 ## Open problems
 
-- **The aggregated `APIService` end state.** It needs its own group,
-  because `audio.liken.sh` is taken by the CRDs and an `APIService`
-  for it would stop them being served, so the RBAC vocabulary would
-  change with it. It moves the CA into `spec.caBundle` rather than
-  removing it, needs the `extension-apiserver-authentication-reader`
-  `Role` in `kube-system`, and its paths are a second vocabulary, not
-  a move.
 - **A one-line client.** A `kubectl` plugin, or a `liken` CLI verb,
   that opens the forward, reads the CA, mints the token, and follows a
   307 into a sibling `Service` with the caller's token.
