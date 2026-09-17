@@ -730,7 +730,19 @@ on the path. **A transcode to AAC for Safari.** An encode on the API
 node; an open problem. **`Warning: 299` on the no-sink redirect.**
 RFC 9111 obsoleted the header. **A `kubectl` plugin.** None in v1 in
 any of the three repositories; the redirect-following client is an
-open problem below.
+open problem below. **An aggregated `APIService`.** A spike on
+2026-09-17 proved the aggregation layer streams a chunked body
+chunk for chunk, about 35 ms behind a direct read, with headers and
+problem bodies intact. It also proved two limits: the API server
+refuses any 3xx with a `Location`, so the sibling redirects here
+would have to become proxied bodies, and it cuts every stream at its
+60 s `--request-timeout` with no terminating chunk. Kubernetes 1.36
+exempts only a hardcoded set of verbs and subresources (`watch`,
+`proxy`, `log`, `exec`, `attach`, `portforward`), and `?timeout=`
+can only shorten the deadline, so staying under the limit would mean
+a `proxy` or `watch` segment in every path. Chris ruled the duration
+limit and that path showstoppers, and the three hand-rolled front
+doors stay.
 
 ## How it was proved
 
@@ -921,13 +933,6 @@ way that produces them.
   first keyframe.** A client that asked for the screen with its sound
   waits about four seconds for the first byte, and the flush at the
   status line moves only the status.
-* **The aggregated `APIService`.** It needs its own group, because
-  `media.liken.sh` is served by the CRDs and an `APIService` for it
-  would take the group over. It moves the CA into `spec.caBundle`
-  rather than removing it, it needs the
-  `extension-apiserver-authentication-reader` `Role` in `kube-system`,
-  and its paths under `/apis/` are a second vocabulary, not a move of
-  this one.
 * **A one-line client.** A `kubectl` plugin, or a `liken` CLI verb,
   that opens the forward, reads the CA, mints the token, and follows a
   307 into a sibling Service with the caller's token, so a `Player`
