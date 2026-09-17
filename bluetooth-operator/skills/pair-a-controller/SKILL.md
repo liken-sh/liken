@@ -34,10 +34,11 @@ Then create a `PairingRequest` for it:
       windowSeconds: 180
     EOF
 
-The operator opens a window on that radio: it scans, and it stays
-pairable and discoverable, for `windowSeconds` (180 by default, 15 to
-900). Between windows the radio is neither, so nothing pairs with the
-cluster while nobody asked.
+The operator opens a window on that radio. It scans, and the radio
+stays pairable and discoverable, for `windowSeconds`. The default is
+180, and the range is 15 to 900. Between windows the radio is neither
+pairable nor discoverable, so nothing pairs with the cluster unless
+somebody asked for a window.
 
 ## 2. Put the controller in pairing mode and read what the radio reports
 
@@ -46,9 +47,9 @@ flashes. Then read the request:
 
     kubectl get pairingrequest new-gamepad -n liken-system -o yaml
 
-Every device the scan finds, and the cluster holds no bond with,
-appears in `status.seen` with its address, its name, and when the
-radio first observed it.
+A device appears in `status.seen` when the scan finds it and the
+cluster holds no bond with it. The entry has its address, its name,
+and when the radio first observed it.
 
 ## 3. Approve the device you meant
 
@@ -59,16 +60,16 @@ Approval is a write to the request's spec:
 
 The operator pairs that device, trusts it, records the bond as a
 `Peripheral`, and closes the window. Trust lets a later connection run
-with no agent registered; it does not make the device connect. Who
-connects depends on the device. A controller connects when you press
-its own button. A speaker is connected by the operator itself,
-whenever the speaker is powered on and in range: a failed attempt is
-retried, and the wait between attempts doubles from 10 seconds up to
-two minutes.
+with no agent registered. It does not make the device connect. What
+starts the connection depends on the device. A controller connects
+when you press its own button. The operator connects a speaker
+itself, whenever the speaker is powered on and in range. It retries a
+failed attempt, and the wait between attempts doubles from 10 seconds
+up to two minutes.
 
 The request's `status.phase` goes to `Paired`. A request nobody
-approves only scans: an empty `spec.device` never pairs anything, the
-window expires on its own, and the finished request is collected
+approves only scans. An empty `spec.device` never pairs anything, and
+the window expires on its own. The finished request is collected
 after `spec.ttlSecondsAfterFinished`, a day by default.
 
 To re-pair a device the cluster already records, set `spec.device`
@@ -129,7 +130,7 @@ that selects the controller by its address:
 
 The toleration sets how long the radio may go silent before the
 eviction controller ends the pod. Tolerate
-`bluetooth.liken.sh/disconnected` and nothing else:
+`bluetooth.liken.sh/disconnected` and nothing else.
 [Devices](https://bluetooth.liken.sh/docs/reference/devices/#the-taints) explains why the other
 taint must stay untolerated. Leave out the selector to claim any
 paired controller.
@@ -167,7 +168,7 @@ In a `Deployment`, claim through a `ResourceClaimTemplate` instead of
 a standing `ResourceClaim`. A standing claim keeps its allocation
 across an eviction, so the `ReplicaSet`'s replacement pods would
 schedule onto a device that is gone and be evicted at once. A
-template gives each replacement pod a fresh claim, and a fresh claim
+template gives each replacement pod a fresh claim. A fresh claim
 needs a new allocation, which the taints block.
 
 ## Unpair

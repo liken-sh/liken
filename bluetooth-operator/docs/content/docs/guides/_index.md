@@ -21,15 +21,15 @@ with their attributes. The slices are the inventory the scheduler
 reads.
 
 A `DeviceClass` names a kind of device a workload can ask for. The
-deploy base ships only the operator's own `bluetooth-adapter`; the
+deploy base ships only the operator's own `bluetooth-adapter`. The
 class your workloads claim through is yours to create, and
 [Install the operator](/docs/guides/install/) gives the YAML:
 `bluetooth-input` names a paired input device. A class can be
-generic like that one, or specific down to a single device;
+generic like that one, or specific down to a single device.
 [Generic or specific](/docs/guides/install/#generic-or-specific)
-weighs the choice. A workload asks
-with a `ResourceClaim`, or with a `ResourceClaimTemplate` under a
-`Deployment`. The claim's selector is a
+weighs the choice. A workload asks with a `ResourceClaim`, or with
+a `ResourceClaimTemplate` under a `Deployment`. The claim's
+selector is a
 [Common Expression Language (CEL)](https://kubernetes.io/docs/reference/using-api/cel/)
 expression over the published attributes:
 `device.attributes["bluetooth.liken.sh"].address == "A0:AB:51:33:B7:12"`
