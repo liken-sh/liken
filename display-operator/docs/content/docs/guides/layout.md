@@ -7,18 +7,18 @@ description: "Put programs from several namespaces on one monitor, each in its o
 # Put regions on a screen
 
 This guide puts two programs from two namespaces on one monitor, each
-in its own rectangle: a notice board on the left seven tenths of a
-lobby screen and a parking-lot camera in the upper right. You need the
-operator [installed](/docs/guides/install/) and the
+in its own rectangle. A notice board is on the left seven tenths of a
+lobby screen, and a parking-lot camera is in the upper right. You need
+the operator [installed](/docs/guides/install/) and the
 [claim guide](/docs/guides/claim/) read, because each program gets to
 the screen the way that guide shows.
 
 A screen with no `Layout` shows every window fullscreen, with the
 newest on top. A `Layout` divides the screen into regions, and each
 region shows the window of a pod whose labels match the region's
-selector. The pods never learn where they are drawn. The `Layout` is
-the only place the arrangement lives, and one `Layout` serves any
-number of screens.
+selector. A pod never receives its position on the screen. The
+`Layout` is the only place that states the arrangement, and one
+`Layout` works for any number of screens.
 
 ## 1. Write the `Layout`
 
@@ -45,7 +45,7 @@ names a namespace or a monitor. Each rectangle is four fractions of
 the screen, so the same `Layout` fits a 1080p panel and a 4K one. The
 order of the list is the stacking order: a region written after
 another draws over it where they overlap, which is how a small
-picture sits in the corner of a large one.
+picture appears in the corner of a large one.
 
 The selector matches labels the way a `Service` does, and any label
 counts. The candidates are only the pods that hold a claim on this
@@ -60,8 +60,8 @@ A `transition` has two halves, and each is `fade` over the stated
 milliseconds or `none`. The `enter` half runs when a window enters
 its region, and a fade brings the window from transparent to opaque.
 The `exit` half runs when a window that is still drawing stops
-matching the region, which is what a label a controller removes does,
-and a fade brings the window back to transparent while the program
+matching the region, which is what a label a controller removes does.
+A fade then brings the window back to transparent while the program
 keeps drawing. A program that exits takes its window with it, and
 nothing fades a window the compositor no longer holds.
 
@@ -116,12 +116,12 @@ namespaces each hold a claim on one screen, because the screen's draw
 device allows many claims at once.
 
 When a window lands in a region, the compositor tells the program the
-region's size and the program redraws at that size, the way it would
-if you dragged a window's edge. A page reflows, and a video player
-letterboxes inside its rectangle. mpv needs `--keepaspect-window=no`
-to do that, because its default keeps the window at the film's own
-aspect and the compositor then scales that smaller buffer up to the
-region. A program that ignores the request is scaled to fit.
+region's size. The program redraws at that size, the way it would if
+you dragged a window's edge. A page reflows, and a video player
+letterboxes inside its rectangle. `mpv` needs `--keepaspect-window=no`
+to do that. Its default keeps the window at the film's own aspect, and
+the compositor then scales that smaller buffer up to the region. A
+program that does not redraw at that size is scaled to fit.
 
 ## 4. Read what the screen shows
 
@@ -149,12 +149,12 @@ region. A program that ignores the request is scaled to fit.
           size: {width: 576, height: 648}
           region: lot
 
-Every window the compositor holds is in `surfaces`, with the claim it
-arrived through, the pods that hold that claim, their labels, its
-current size, and the region it is in. A window that matches no
-region is listed with no `region`, which is the first thing to read
-when a program is running and not on the screen. A region that shows
-nothing reads `surface: empty`.
+Every window the compositor holds is in `surfaces`. Each entry has
+the claim the window arrived through, the pods that hold that claim,
+their labels, the window's current size, and the region it is in. A
+window that matches no region is listed with no `region`, which is
+the first thing to read when a program is running and not on the
+screen. A region that shows nothing reads `surface: empty`.
 
 ## A window for a while
 
@@ -162,18 +162,18 @@ A camera that should show for fifteen seconds is a `Job` whose image
 streams for fifteen seconds, with the claim and the label above. Its
 window appears in its region when the pod starts and leaves when the
 pod ends, and the region reads `empty` again. Nothing in the `Layout`
-reads a clock: how long a window stays is the program's own business.
+reads a clock. The program controls how long its window stays.
 
 ## What a `Layout` does not do
 
 It does not start anything. A region with a selector and no matching
 pod stays empty until something creates a pod with that label and a
 claim on the screen. A `Deployment`, a `Job`, or an operator that
-makes pods is what fills a screen, and the `Layout` only says where.
+makes pods fills a screen, and the `Layout` only says where.
 
 It does not fill a region with two windows. A second window from a
 matching pod stays off the screen until the first is gone.
 
 It does not move a window a program is drawing. A program never
-learns its rectangle, and it cannot ask for another one. Move the
+receives its rectangle, and it cannot ask for another one. Move the
 region in the `Layout` and every screen that names it follows.

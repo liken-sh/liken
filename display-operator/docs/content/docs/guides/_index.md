@@ -37,8 +37,9 @@ A workload asks with a
 The claim narrows the class with a selector written in
 [Common Expression Language (CEL)](https://kubernetes.io/docs/reference/using-api/cel/).
 A selector names the output whose `connector` is `HDMI-A-1`, or any
-output whose monitor is an LG HDR WQHD. A `Deployment` can reference one claim by
-name, or create one per pod from a `ResourceClaimTemplate`.
+output whose monitor is an LG HDR WQHD. A `Deployment` can reference
+one claim by name, or create one per pod from a
+`ResourceClaimTemplate`.
 
 The scheduler matches the claim against the slices, allocates one
 output, and places the pod on that output's machine. The kubelet

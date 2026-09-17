@@ -34,7 +34,7 @@ device. Look for a `displayNode` attribute in that node's
 
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-If no device carries `displayNode`, the operator's own claim will
+If no device has `displayNode`, the operator's own claim will
 park and its pod will stay `Pending`. The
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/)
 page describes this layering: `liken` publishes the card, and this
@@ -51,12 +51,12 @@ by owner:
   [`deviceclasses.yaml`](https://display.liken.sh/deploy/deviceclasses.yaml). The
   operator's own pod claims the graphics card's card node, its
   render node, and its monitor-control wires through them, from the
-  devices `liken` publishes, and the `ResourceClaimTemplate` in
+  devices `liken` publishes. The `ResourceClaimTemplate` in
   [`operator.yaml`](https://display.liken.sh/deploy/operator.yaml) names them literally, so
   the operator cannot start without them. Do not delete them. The
   classes select on the `displayNode` and `renderNode` attributes
-  and on the i2c companion's `subsystem`, rather than on a vendor
-  and a product id, so they stay correct across a fleet of
+  and on the i2c companion's `subsystem`. They do not select on a
+  vendor and a product id, so they stay correct across a fleet of
   different machines.
 * The class your workloads claim through is yours to create,
   because it is your cluster's vocabulary, and the base ships no
@@ -73,11 +73,11 @@ by owner:
                   device.driver == "display.liken.sh" &&
                   has(device.attributes["display.liken.sh"].appId)
 
-  The `appId` guard is what keeps the class on outputs. The driver
-  also publishes each panel's
+  The `appId` guard keeps the class on outputs. The driver also
+  publishes each panel's
   [control device](https://display.liken.sh/docs/reference/devices/#the-control-device),
-  which carries no `appId`, and a class that matched the whole
-  driver would allocate either.
+  which has no `appId`, and a class that matched the whole driver
+  would allocate either one.
 
 ### Generic or specific
 
@@ -107,12 +107,12 @@ when you want the choice of screen in cluster policy rather than in
 each workload's manifest, create a specific class.
 
 The example selects by `connector`, an attribute every output
-always publishes; the `appId` guard is there because the panel's
-control device publishes `connector` too. A specific class that selects by a monitor
-attribute, such as `model`, must guard the read with `has()`, the
-way [Put a window on a screen](https://display.liken.sh/docs/guides/claim/) shows. Those
-attributes are absent on a dark connector, and a selector that
-reads a missing attribute fails the whole allocation.
+always publishes. The `appId` guard is there because the panel's
+control device publishes `connector` too. A specific class that
+selects by a monitor attribute, such as `model`, must guard the read
+with `has()`, the way [Put a window on a screen](https://display.liken.sh/docs/guides/claim/)
+shows. Those attributes are absent on a dark connector, and a
+selector that reads a missing attribute fails the whole allocation.
 
 ## 3. Apply the manifests
 
@@ -134,8 +134,8 @@ describes, and an owner who wants no capture API leaves it out.
 
 `displays.yaml` is the `Display` `CustomResourceDefinition`. The
 operator creates a [`Display`](https://display.liken.sh/docs/reference/displays/) for every
-monitor it probes, and it cannot do that on a cluster the kind is
-missing from.
+monitor it probes, and it cannot do that on a cluster where the kind
+is missing.
 
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
@@ -184,13 +184,13 @@ into a `ResourceSlice` named `<node>-display.liken.sh`:
 
     kubectl get resourceslice <node>-display.liken.sh -o yaml
 
-A connector with a monitor carries the monitor's attributes. An
+A connector with a monitor has the monitor's attributes. An
 empty connector publishes too, with a `disconnected` taint, so a
 claim on it parks until a monitor arrives.
 [Devices](https://display.liken.sh/docs/reference/devices/) describes every attribute.
 
 The operator also creates one `Display` per monitor, the
-cluster-scoped resource that carries the panel's controls and takes
+cluster-scoped resource that reports the panel's controls and takes
 declarations:
 
     kubectl get displays
@@ -205,7 +205,7 @@ Every push to the operator's main branch publishes a development
 build. Its version is the most recent release plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
 `2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds carries the same version, and `:latest` still names the
+builds has the same version, and `:latest` still names the
 most recent release.
 
 A development build has no git tag, so the manifests pin to the
@@ -246,7 +246,7 @@ The device classes are yours too. When nothing else claims through
 them, delete them.
 
 **Deleting the `Display` CRD deletes every `Display` with it**,
-including the brightness a standing override captured, so a panel an
-override darkened has nothing left to restore it. Lift every
+including the brightness a standing override captured. A panel an
+override darkened then has nothing left to restore it. Lift every
 override, and confirm every panel shows what you expect, before you
 delete `displays.yaml`.

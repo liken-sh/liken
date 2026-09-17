@@ -115,7 +115,7 @@ pod starts on its own when a monitor is plugged in.
 
 One line makes this work. `resources.claims` gives the container the
 claim. That is what places the pod, and it is what delivers the
-socket. The program needs no flag and no app-id: the compositor knows
+socket. The program needs no flag and no app-id. The compositor reads
 which screen a window belongs on from the socket it arrived on.
 
 The image is yours. Any Wayland client works; the operator delivers
@@ -154,7 +154,7 @@ A claim can state the resolution its screen runs. The operator
 writes it into the compositor's config, restarts the compositor,
 and delivers the screen only after the card reports the mode. The
 name is one of the values in the `modes` attribute, spelled as the
-kernel spells it, and it can carry a refresh: `3840x1600@24` runs
+kernel spells it, and it can include a refresh. `3840x1600@24` runs
 a 24 fps film without the 3:2 cadence a 60 Hz mode forces on it.
 The refresh is a whole number of hertz.
 
@@ -162,7 +162,7 @@ A mode 3840 pixels wide or wider runs at an output scale of 2, and
 a narrower one at 1. The compositor states the scale to every
 client on the output. A client that lays out in logical pixels
 draws a 4K panel at the 1080p size and rasters at the panel's full
-resolution, and a client that does not is scaled up so that it is
+resolution. A client that does not is scaled up so that it is
 readable. The rule reads the mode the output runs, whether the
 claim stated it or the monitor preferred it.
 
@@ -193,20 +193,20 @@ claim stated it or the monitor preferred it.
                 mode: "1280x720"
 
 Do not state a mode casually. One compositor drives every output
-of the card, and it reads its config once at startup, so a mode on
+of the card, and it reads its config once at startup. So a mode on
 one connector restarts it and ends every Wayland client on every
 screen of that machine. The lab measured about 1.3 seconds of
 dark, plus whatever each client takes to come back.
 
 Run every display consumer under a controller. A bare `Pod` whose
-compositor restarted dies `Completed` and stays dead. A
-`Deployment` brings it back, and the `tolerationSeconds` above is
-what keeps the pod scheduled through the restart.
+compositor restarted ends `Completed` and never starts again. A
+`Deployment` brings it back, and the `tolerationSeconds` above
+keeps the pod scheduled through the restart.
 
 A claim that asks for the mode the screen already runs delivers at
-once, with no restart, and a claim that states no refresh matches
+once, with no restart. A claim that states no refresh matches
 whatever rate the screen runs under that name. Releasing the claim
-restarts nothing either: the screen keeps the mode until the next
+restarts nothing either. The screen keeps the mode until the next
 compositor start, and the slice's `currentMode` says what it runs,
 refresh included.
 
@@ -233,9 +233,9 @@ movie pod that ends leaves a dark screen. Use `on` for a workload a
 new claim, and `onWhileClaimed` would blink the screen on every
 rollout.
 
-Not every panel takes these. The operator asks each panel what it
-carries and publishes the answers as the `controlsBrightness` and
-`controlsPower` attributes, so add the matching attribute to your
+Not every panel takes these. The operator asks each panel which
+controls it has and publishes the answers as the `controlsBrightness`
+and `controlsPower` attributes, so add the matching attribute to your
 selector:
 
     selectors:
@@ -247,8 +247,7 @@ selector:
 Without the selector, the scheduler can place the claim on a panel
 that refuses the protocol, and the prepare fails with the missing
 capability named. Some panels also ship with DDC/CI switched off in
-their on-screen menu; turning it on there is what makes the
-attributes appear.
+their on-screen menu. Turn it on there, and the attributes appear.
 
 Neither parameter restarts the compositor. A claim that states only
 these delivers without the dark second a mode costs.
@@ -258,9 +257,9 @@ these delivers without the dark second a mode costs.
 The parameters above are set once, at prepare. A pod that speaks the
 panel's protocol itself while it runs claims the connector's control
 device instead, and receives the raw i2c node. Most pods never need
-the wire: setting or temporarily overriding the panel goes through
-the [`Display`](/docs/reference/displays/), and the operator writes
-the bus. One claim can take a screen and its control channel
+it. Setting or temporarily overriding the panel goes through the
+[`Display`](/docs/reference/displays/), and the operator writes the
+bus. One claim can take a screen and its control channel
 together, with a `matchAttribute` constraint tying the two requests
 to one monitor:
 
@@ -292,7 +291,7 @@ The `display-control` class is yours to create, like
 YAML. The container that names the `control` request receives
 `/dev/i2c-N` and `DISPLAY_CONTROL_BUS` holding that path. An init
 container that sets the brightness to 87 before the player starts,
-using the `ddcutil` the operator image carries:
+using the `ddcutil` in the operator image:
 
     initContainers:
       - name: brightness
@@ -306,12 +305,12 @@ using the `ddcutil` the operator image carries:
 `ddcutil` finds the bus itself from the one `/dev/i2c-*` node the
 claim delivered, so the command needs no bus number. A config block
 that states `mode`, `brightness`, or `power` must name the `screen`
-request when the claim also holds a control request, because those
-parameters act on outputs and a control request takes none.
+request when the claim also holds a control request. Those
+parameters act on outputs, and a control request takes none.
 
 Do not write to any i2c address other than `0x37`. The
 [reference](/docs/reference/devices/#the-control-device) explains
-what lives at `0x50` and why a write there follows the monitor to
+what is at `0x50` and why a write there follows the monitor to
 every machine it ever plugs into.
 
 ## Unplugged monitors, moved monitors, and second screens
