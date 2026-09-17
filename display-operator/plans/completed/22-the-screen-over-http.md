@@ -784,12 +784,6 @@ was not measured. The one avoidance a client holds is to take the
 next capture only after the previous one retired, which the protocol
 already requires and this client already does.
 
-**The 4K numbers.** No 4K clip and no 4K still ran, because the only
-screen over 1080p has no panel and a down compositor, so the memory
-limit rests on the workstation's estimate. mpv's dropped frames under
-a clip were not run either, because no `Play` ran during the drills,
-and that number decides whether a capture may run while a film plays.
-
 **A `framerate` default the stick's CPU decides.** With the
 conversion on the CPU, a 1080p clip costs about one core at the
 default of 15 fps and about two at 30 fps on `stick-1`, with the
