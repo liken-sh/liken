@@ -2,7 +2,19 @@
 # Stands in for opusenc in the tap's tests, the way the flac script
 # beside it stands in for flac: it records its arguments and copies
 # its input behind a four-byte marker.
+#
+# CAPTURE_FAKE_ENCODER_LINGER is how a test asks for the window the
+# real encoder leaves at the end of a span: its stdin closes, it writes
+# its last page, and it is still there for a moment before it exits
+# zero. Stdout closes first, so the container sees the end of the body
+# while the process is still running, which is the moment it has to
+# wait through rather than kill.
 set -eu
 printf '%s\n' "$@" > "$CAPTURE_FAKE_ENCODER_ARGS"
 printf 'OggS'
-exec cat
+cat
+if [ -n "${CAPTURE_FAKE_ENCODER_LINGER:-}" ]; then
+	exec 1>&-
+	sleep "$CAPTURE_FAKE_ENCODER_LINGER"
+fi
+exit 0

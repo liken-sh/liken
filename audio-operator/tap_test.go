@@ -233,8 +233,11 @@ func TestAProcessThisContainerKilledReportsASignal(t *testing.T) {
 	if got := exitStatus(failing.Run()); got != 3 {
 		t.Errorf("a process that exited 3 reports %d", got)
 	}
-	if got := exitStatus(errors.New("the binary is not there")); got != 1 {
-		t.Errorf("a process that never started reports %d", got)
+	// An error that carries no status is not a status. A process that
+	// never started is refused in startTap, with its own stderr, long
+	// before anything here reads an exit.
+	if got := exitStatus(errors.New("the binary is not there")); got != exitUnknown {
+		t.Errorf("an error with no status reports %d, want %d", got, exitUnknown)
 	}
 }
 
@@ -294,5 +297,26 @@ func TestTheConfirmationStopsAtTheFirstLookWhenTheLinkIsThere(t *testing.T) {
 	// A tap whose link is already built waits for nothing.
 	if elapsed := time.Since(started); elapsed > 50*time.Millisecond {
 		t.Errorf("a confirmed link took %s", elapsed)
+	}
+}
+
+// os/exec answers exec.ErrWaitDelay when a process exits well and its
+// pipes are still open a moment later. That is not a status the
+// process chose, and reading it as one made every finished Opus span
+// on liken-1 look like a capture that was cut short: the client got
+// the whole body and then an HTTP/2 INTERNAL_ERROR.
+func TestAWaitThatAnsweredNoStatusIsNotAFailure(t *testing.T) {
+	if got := exitStatus(exec.ErrWaitDelay); got != exitUnknown {
+		t.Errorf("a wait delay reads as %d, want %d", got, exitUnknown)
+	}
+	if got := exitStatus(errors.New("the wait went wrong somehow")); got != exitUnknown {
+		t.Errorf("an error with no status reads as %d, want %d", got, exitUnknown)
+	}
+	ended := tapExit{Recorder: -1, Encoder: exitUnknown}
+	if ended.failed() {
+		t.Error("a wait that carried no status was counted as an encoder failure")
+	}
+	if got := ended.String(); !strings.Contains(got, "encoder:unknown") {
+		t.Errorf("the ended field is %q", got)
 	}
 }

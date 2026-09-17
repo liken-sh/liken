@@ -795,3 +795,93 @@ func TestTheContainerSendsItsHeadersBeforeTheDiscardIsOver(t *testing.T) {
 		t.Errorf("the whole tap took %s, so the discard never ran", total)
 	}
 }
+
+// A finished span must end with its terminating chunk. The drill on
+// liken-1 read a whole Opus body and then an HTTP/2 INTERNAL_ERROR,
+// because the span's end looked like a capture that was cut short.
+//
+// Two things made it look that way, and this test holds both. The
+// encoder is drained rather than killed, so the status is its own
+// zero; and os/exec's answer when a process exits well with its pipes
+// still open is not read as a failure.
+func TestAFinishedOpusSpanEndsCleanlyOverHTTP2(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(2, 48000, 2))
+	// The encoder takes a moment to write its last page once its stdin
+	// closes, the way the real one does.
+	t.Setenv("CAPTURE_FAKE_ENCODER_LINGER", "0.1")
+
+	// The container's own listener, over HTTP/2, which is where the
+	// drill saw the stream reset.
+	serving := httptest.NewUnstartedServer(harness.server.handler())
+	serving.EnableHTTP2 = true
+	serving.StartTLS()
+	t.Cleanup(serving.Close)
+
+	request, err := http.NewRequest(http.MethodGet, serving.URL+
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.25", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a.b.c")
+	answer, err := serving.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = answer.Body.Close() }()
+	if answer.Proto != "HTTP/2.0" {
+		t.Fatalf("the test spoke %s, and the reset was seen over HTTP/2", answer.Proto)
+	}
+	if answer.StatusCode != http.StatusOK {
+		t.Fatalf("the tap answered %s", answer.Status)
+	}
+
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("a finished span ended with %v", err)
+	}
+	// 0.25 s at 48000 Hz, two channels, two bytes a sample, behind the
+	// encoder's own four-byte marker.
+	if len(body) != 4+48000 {
+		t.Errorf("the body is %d bytes, want %d", len(body), 4+48000)
+	}
+
+	lines := harness.logged()
+	if len(lines) != 1 {
+		t.Fatalf("the container logged %v", lines)
+	}
+	if strings.Contains(lines[0], "truncated") {
+		t.Errorf("a finished span was read as cut short: %q", lines[0])
+	}
+	// The encoder was drained, so the status is the one it exited
+	// with, not the one a process this container killed reports.
+	if !strings.Contains(lines[0], "encoder:0") {
+		t.Errorf("the encoder was not waited for: %q", lines[0])
+	}
+}
+
+func TestAFinishedWAVSpanEndsCleanlyOverHTTP2(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(2, 48000, 2))
+	serving := httptest.NewUnstartedServer(harness.server.handler())
+	serving.EnableHTTP2 = true
+	serving.StartTLS()
+	t.Cleanup(serving.Close)
+
+	request, err := http.NewRequest(http.MethodGet, serving.URL+
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.25", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a.b.c")
+	answer, err := serving.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = answer.Body.Close() }()
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("a finished span ended with %v", err)
+	}
+	if len(body) != wavHeaderBytes+48000 {
+		t.Errorf("the body is %d bytes, want %d", len(body), wavHeaderBytes+48000)
+	}
+}

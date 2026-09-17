@@ -121,7 +121,7 @@ func (s *spoken) String() string {
 type runningTap struct {
 	Body io.ReadCloser
 
-	stop     func() tapExit
+	stop     func(drain bool) tapExit
 	pump     *discardPump
 	recorded *spoken
 	encoded  *spoken
@@ -173,14 +173,30 @@ func (e tapExit) String() string {
 	return ended
 }
 
+// The two statuses that are not a process's own.
+//
 // exitNotRun marks a process this tap never started, which is the
-// encoder of a WAV tap.
-const exitNotRun = -2
+// encoder of a WAV tap. exitUnknown marks a wait that answered
+// something other than an exit: os/exec reports exec.ErrWaitDelay when
+// a process exits well and its pipes are still open a moment later,
+// and that says nothing about how the process ended.
+const (
+	exitNotRun  = -2
+	exitUnknown = -3
+)
+
+// encoderDrain is how long the pipeline waits for an encoder that is
+// already finishing. The span closed its stdin, so it is writing its
+// last bytes and exiting; a second is many times what either encoder
+// needs, and a wait that runs out cancels rather than hanging a tap.
+const encoderDrain = time.Second
 
 func exitWords(status int) string {
 	switch status {
 	case exitNotRun:
 		return "none"
+	case exitUnknown:
+		return "unknown"
 	case -1:
 		return "signalled"
 	default:
@@ -252,10 +268,10 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	encoderArgs := encoderCommand(plan.Form, plan.Format, plan.Knobs.Bitrate)
 	if encoderArgs == nil {
 		tap.Body = readCloser{Reader: samples, close: raw.Close}
-		tap.stop = func() tapExit {
+		tap.stop = func(bool) tapExit {
 			cancel()
 			return tapExit{
-				Recorder: exitStatus(record.Wait()),
+				Recorder: exitStatus(waitForRecorder(record, raw)),
 				Encoder:  exitNotRun,
 				Words:    lastLine(recorded.String()),
 			}
@@ -280,10 +296,30 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 			unexpectedStderr(tap.encoded.String()))
 	}
 	tap.Body = readCloser{Reader: encoded, close: encoded.Close}
-	tap.stop = func() tapExit {
+	waited := make(chan error, 1)
+	go func() { waited <- encoder.Wait() }()
+	tap.stop = func(drain bool) tapExit {
+		ended := tapExit{}
+		// A span that ran out closed the encoder's stdin, so the
+		// encoder is already writing its last bytes and exiting on its
+		// own. Waiting for that is what makes the status its own:
+		// cancelling first leaves os/exec watching pipes it is about
+		// to close, and the wait then answers ErrWaitDelay rather than
+		// the zero the encoder exited with.
+		if drain {
+			select {
+			case err := <-waited:
+				ended.Encoder = exitStatus(err)
+			case <-time.After(encoderDrain):
+				cancel()
+				ended.Encoder = exitStatus(<-waited)
+			}
+		} else {
+			cancel()
+			ended.Encoder = exitStatus(<-waited)
+		}
 		cancel()
-		ended := tapExit{Encoder: exitStatus(encoder.Wait())}
-		ended.Recorder = exitStatus(record.Wait())
+		ended.Recorder = exitStatus(waitForRecorder(record, raw))
 		ended.Words = lastLine(tap.encoded.String())
 		if ended.Words == "" {
 			ended.Words = lastLine(recorded.String())
@@ -294,8 +330,12 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 }
 
 // exitStatus reads what a process ended with. A process this container
-// signalled reports -1, which is how a tap that finished its span and
-// a tap whose client hung up both end.
+// signalled reports -1, which is how a tap whose client hung up ends.
+//
+// An error that is not an ExitError carries no status at all: os/exec
+// answers exec.ErrWaitDelay when a process exits well and its pipes
+// are still open a moment later, and reading that as a failure made
+// every finished Opus span look like a capture that was cut short.
 func exitStatus(err error) int {
 	if err == nil {
 		return 0
@@ -304,7 +344,19 @@ func exitStatus(err error) int {
 	if errors.As(err, &ended) {
 		return ended.ExitCode()
 	}
-	return 1
+	return exitUnknown
+}
+
+// waitForRecorder reaps pw-record after the context has killed it.
+//
+// The pipe this container reads its samples from is closed first,
+// because os/exec waits out WaitDelay for a pipe that is still open
+// when the process ends, and that second was landing on the end of
+// every tap: the client had its last block and sat waiting for the
+// response to close.
+func waitForRecorder(record *exec.Cmd, samples io.ReadCloser) error {
+	_ = samples.Close()
+	return record.Wait()
 }
 
 // commandOf builds one process under the context, with the same wait
@@ -414,15 +466,15 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	}
 	stopped := false
 	ended := tapExit{}
-	finish := func() tapExit {
+	finish := func(drain bool) tapExit {
 		if !stopped {
 			_ = tap.Body.Close()
-			ended = tap.stop()
+			ended = tap.stop(drain)
 			stopped = true
 		}
 		return ended
 	}
-	defer finish()
+	defer finish(false)
 
 	if err := s.confirm(r.Context(), plan.Stream, plan.Format.NodeID); err != nil {
 		// A graph this container could not read says nothing about
@@ -472,7 +524,9 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	// span and a tap whose client hung up both end with a signal, and
 	// neither is a failure; only a process that ended on its own with
 	// a status of one or more is.
-	exit := finish()
+	// The span running out is the one end that leaves an encoder
+	// finishing of its own accord, and the only one worth waiting for.
+	exit := finish(tap.delivered())
 	if exit.failed() {
 		s.readings.failed(failureEncoder)
 	}
