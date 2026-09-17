@@ -122,7 +122,7 @@ var apiRoutes = []apiRoute{
 		template: apiRoot + "/" + displaysPlural + "/{name}/" + screenAspect,
 		kind:     captureRoute,
 		aspect:   screenAspect,
-		summary:  "The screen in the type Accept selects",
+		summary:  "The screen, in the format chosen by Accept",
 		answer:   "The screen in the type Accept selected, image/png by default.",
 	},
 	{

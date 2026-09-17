@@ -18,34 +18,11 @@ each error means.
 
 `display-api`, version `dev`, described in OpenAPI 3.1.1.
 
-The screen of every Display in this cluster, as one frame, a clip or a stream.
+The screen of every Display in this cluster, as one frame, a clip, or a stream.
 
-Identity is in the path, the format is in the extension or in the Accept field, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.
+The path names the Display, the extension or Accept chooses the format, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.
 
-## GET /v1/display
-
-The discovery document
-
-**Answers**
-
-| Status | Media type | Schema | Description |
-| --- | --- | --- | --- |
-| 200 | `application/json` | object | The routes this API serves, as RFC 6570 templates. |
-| 304 | none | | The document has not changed since the entity tag the client holds. |
-| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
-| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
-| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
-
-**Headers**
-
-| Header | Status | Description |
-| --- | --- | --- |
-| `Cache-Control` | 200 | no-cache. A document is revalidated against its entity tag. |
-| `ETag` | 200 | The build this document came from. |
-| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
-| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
-
-## HEAD /v1/display
+## `GET` `/v1/display` {data-method=GET}
 
 The discovery document
 
@@ -68,9 +45,32 @@ The discovery document
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display
+## `HEAD` `/v1/display` {data-method=HEAD}
 
-The methods this route answers
+The discovery document
+
+**Answers**
+
+| Status | Media type | Schema | Description |
+| --- | --- | --- | --- |
+| 200 | `application/json` | object | The routes this API serves, as RFC 6570 templates. |
+| 304 | none | | The document has not changed since the entity tag the client holds. |
+| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
+| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
+| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+
+**Headers**
+
+| Header | Status | Description |
+| --- | --- | --- |
+| `Cache-Control` | 200 | no-cache. A document is revalidated against its entity tag. |
+| `ETag` | 200 | The build this document came from. |
+| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
+| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+
+## `OPTIONS` `/v1/display` {data-method=OPTIONS}
+
+The methods this route allows
 
 **Answers**
 
@@ -82,9 +82,9 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/displays/{name}
+## `GET` `/v1/display/displays/{name}` {data-method=GET}
 
 The screen's size, scale, refresh and formats
 
@@ -116,7 +116,7 @@ The screen's size, scale, refresh and formats
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## HEAD /v1/display/displays/{name}
+## `HEAD` `/v1/display/displays/{name}` {data-method=HEAD}
 
 The screen's size, scale, refresh and formats
 
@@ -148,9 +148,9 @@ The screen's size, scale, refresh and formats
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/displays/{name}
+## `OPTIONS` `/v1/display/displays/{name}` {data-method=OPTIONS}
 
-The methods this route answers
+The methods this route allows
 
 **Parameters**
 
@@ -168,11 +168,11 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/displays/{name}/screen
+## `GET` `/v1/display/displays/{name}/screen` {data-method=GET}
 
-The screen in the type Accept selects
+The screen, in the format chosen by Accept
 
 **Parameters**
 
@@ -216,9 +216,9 @@ The screen in the type Accept selects
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## HEAD /v1/display/displays/{name}/screen
+## `HEAD` `/v1/display/displays/{name}/screen` {data-method=HEAD}
 
-The screen in the type Accept selects
+The screen, in the format chosen by Accept
 
 **Parameters**
 
@@ -262,9 +262,9 @@ The screen in the type Accept selects
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/displays/{name}/screen
+## `OPTIONS` `/v1/display/displays/{name}/screen` {data-method=OPTIONS}
 
-The methods this route answers
+The methods this route allows
 
 **Parameters**
 
@@ -288,50 +288,9 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/displays/{name}/screen.jpg
-
-One frame of the screen as JPEG
-
-**Parameters**
-
-| Parameter | In | Required | Type | Description |
-| --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
-| `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
-| `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
-| `quality` | query | no | integer | JPEG quality from 1 to 100, 85 by default. |
-
-**Answers**
-
-| Status | Media type | Schema | Description |
-| --- | --- | --- | --- |
-| 200 | `image/jpeg` | string (binary) | One frame of the screen, encoded as JPEG. |
-| 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
-| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
-| 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
-| 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
-| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
-| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
-| 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
-| 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
-
-**Headers**
-
-| Header | Status | Description |
-| --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
-| `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
-| `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
-| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
-| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
-
-## HEAD /v1/display/displays/{name}/screen.jpg
+## `GET` `/v1/display/displays/{name}/screen.jpg` {data-method=GET}
 
 One frame of the screen as JPEG
 
@@ -372,9 +331,50 @@ One frame of the screen as JPEG
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/displays/{name}/screen.jpg
+## `HEAD` `/v1/display/displays/{name}/screen.jpg` {data-method=HEAD}
 
-The methods this route answers
+One frame of the screen as JPEG
+
+**Parameters**
+
+| Parameter | In | Required | Type | Description |
+| --- | --- | --- | --- | --- |
+| `name` | path | yes | string | The name of the Display. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
+| `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
+| `quality` | query | no | integer | JPEG quality from 1 to 100, 85 by default. |
+
+**Answers**
+
+| Status | Media type | Schema | Description |
+| --- | --- | --- | --- |
+| 200 | `image/jpeg` | string (binary) | One frame of the screen, encoded as JPEG. |
+| 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
+| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
+| 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
+| 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
+| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
+| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
+| 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
+
+**Headers**
+
+| Header | Status | Description |
+| --- | --- | --- |
+| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
+| `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
+| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
+| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+
+## `OPTIONS` `/v1/display/displays/{name}/screen.jpg` {data-method=OPTIONS}
+
+The methods this route allows
 
 **Parameters**
 
@@ -397,9 +397,9 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/displays/{name}/screen.mjpeg
+## `GET` `/v1/display/displays/{name}/screen.mjpeg` {data-method=GET}
 
 A stream of the screen, one JPEG per frame
 
@@ -441,7 +441,7 @@ A stream of the screen, one JPEG per frame
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## HEAD /v1/display/displays/{name}/screen.mjpeg
+## `HEAD` `/v1/display/displays/{name}/screen.mjpeg` {data-method=HEAD}
 
 A stream of the screen, one JPEG per frame
 
@@ -483,9 +483,9 @@ A stream of the screen, one JPEG per frame
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/displays/{name}/screen.mjpeg
+## `OPTIONS` `/v1/display/displays/{name}/screen.mjpeg` {data-method=OPTIONS}
 
-The methods this route answers
+The methods this route allows
 
 **Parameters**
 
@@ -509,50 +509,9 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/displays/{name}/screen.mp4
-
-A clip of the screen as H.264 in fragmented MP4
-
-**Parameters**
-
-| Parameter | In | Required | Type | Description |
-| --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
-| `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
-| `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
-| `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
-
-**Answers**
-
-| Status | Media type | Schema | Description |
-| --- | --- | --- | --- |
-| 200 | `video/mp4` | string (binary) | A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that. |
-| 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
-| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
-| 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
-| 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
-| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
-| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
-| 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
-| 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
-
-**Headers**
-
-| Header | Status | Description |
-| --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
-| `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
-| `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
-| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
-| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
-
-## HEAD /v1/display/displays/{name}/screen.mp4
+## `GET` `/v1/display/displays/{name}/screen.mp4` {data-method=GET}
 
 A clip of the screen as H.264 in fragmented MP4
 
@@ -593,9 +552,50 @@ A clip of the screen as H.264 in fragmented MP4
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/displays/{name}/screen.mp4
+## `HEAD` `/v1/display/displays/{name}/screen.mp4` {data-method=HEAD}
 
-The methods this route answers
+A clip of the screen as H.264 in fragmented MP4
+
+**Parameters**
+
+| Parameter | In | Required | Type | Description |
+| --- | --- | --- | --- | --- |
+| `name` | path | yes | string | The name of the Display. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
+| `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
+| `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
+
+**Answers**
+
+| Status | Media type | Schema | Description |
+| --- | --- | --- | --- |
+| 200 | `video/mp4` | string (binary) | A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that. |
+| 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
+| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
+| 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
+| 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
+| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
+| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
+| 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
+
+**Headers**
+
+| Header | Status | Description |
+| --- | --- | --- |
+| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
+| `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
+| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
+| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+
+## `OPTIONS` `/v1/display/displays/{name}/screen.mp4` {data-method=OPTIONS}
+
+The methods this route allows
 
 **Parameters**
 
@@ -618,49 +618,9 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/displays/{name}/screen.png
-
-One frame of the screen as PNG
-
-**Parameters**
-
-| Parameter | In | Required | Type | Description |
-| --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
-| `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
-| `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
-
-**Answers**
-
-| Status | Media type | Schema | Description |
-| --- | --- | --- | --- |
-| 200 | `image/png` | string (binary) | One frame of the screen, encoded as PNG. |
-| 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
-| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
-| 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
-| 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
-| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
-| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
-| 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
-| 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
-
-**Headers**
-
-| Header | Status | Description |
-| --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
-| `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
-| `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
-| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
-| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
-
-## HEAD /v1/display/displays/{name}/screen.png
+## `GET` `/v1/display/displays/{name}/screen.png` {data-method=GET}
 
 One frame of the screen as PNG
 
@@ -700,9 +660,49 @@ One frame of the screen as PNG
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/displays/{name}/screen.png
+## `HEAD` `/v1/display/displays/{name}/screen.png` {data-method=HEAD}
 
-The methods this route answers
+One frame of the screen as PNG
+
+**Parameters**
+
+| Parameter | In | Required | Type | Description |
+| --- | --- | --- | --- | --- |
+| `name` | path | yes | string | The name of the Display. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
+| `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
+
+**Answers**
+
+| Status | Media type | Schema | Description |
+| --- | --- | --- | --- |
+| 200 | `image/png` | string (binary) | One frame of the screen, encoded as PNG. |
+| 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
+| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
+| 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
+| 404 | `application/problem+json` | [Problem](#problem) | No Display of that name. |
+| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
+| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+| 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
+| 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
+
+**Headers**
+
+| Header | Status | Description |
+| --- | --- | --- |
+| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
+| `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
+| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
+| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+
+## `OPTIONS` `/v1/display/displays/{name}/screen.png` {data-method=OPTIONS}
+
+The methods this route allows
 
 **Parameters**
 
@@ -724,32 +724,9 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
-## GET /v1/display/openapi.json
-
-The OpenAPI 3.1 description of this API
-
-**Answers**
-
-| Status | Media type | Schema | Description |
-| --- | --- | --- | --- |
-| 200 | `application/openapi+json` | object | This document. |
-| 304 | none | | The document has not changed since the entity tag the client holds. |
-| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
-| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
-| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
-
-**Headers**
-
-| Header | Status | Description |
-| --- | --- | --- |
-| `Cache-Control` | 200 | no-cache. A document is revalidated against its entity tag. |
-| `ETag` | 200 | The build this document came from. |
-| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
-| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
-
-## HEAD /v1/display/openapi.json
+## `GET` `/v1/display/openapi.json` {data-method=GET}
 
 The OpenAPI 3.1 description of this API
 
@@ -772,9 +749,32 @@ The OpenAPI 3.1 description of this API
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
 
-## OPTIONS /v1/display/openapi.json
+## `HEAD` `/v1/display/openapi.json` {data-method=HEAD}
 
-The methods this route answers
+The OpenAPI 3.1 description of this API
+
+**Answers**
+
+| Status | Media type | Schema | Description |
+| --- | --- | --- | --- |
+| 200 | `application/openapi+json` | object | This document. |
+| 304 | none | | The document has not changed since the entity tag the client holds. |
+| 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
+| 405 | `application/problem+json` | [Problem](#problem) | A method other than GET, HEAD and OPTIONS. |
+| 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
+
+**Headers**
+
+| Header | Status | Description |
+| --- | --- | --- |
+| `Cache-Control` | 200 | no-cache. A document is revalidated against its entity tag. |
+| `ETag` | 200 | The build this document came from. |
+| `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
+| `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+
+## `OPTIONS` `/v1/display/openapi.json` {data-method=OPTIONS}
+
+The methods this route allows
 
 **Answers**
 
@@ -786,7 +786,7 @@ The methods this route answers
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | The methods this route answers. |
+| `Allow` | 204 | The methods this route allows. |
 
 ## Schemas
 

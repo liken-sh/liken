@@ -67,8 +67,8 @@
     }
   },
   "info": {
-    "description": "Identity is in the path, the format is in the extension or in the Accept field, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
-    "summary": "The screen of every Display in this cluster, as one frame, a clip or a stream.",
+    "description": "The path names the Display, the extension or Accept chooses the format, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
+    "summary": "The screen of every Display in this cluster, as one frame, a clip, or a stream.",
     "title": "display-api",
     "version": "dev"
   },
@@ -232,7 +232,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -240,7 +240,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       }
     },
     "/v1/display/displays/{name}": {
@@ -461,7 +461,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -469,7 +469,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       },
       "parameters": [
         {
@@ -655,7 +655,7 @@
             "description": "The sidecar sent no headers within the header timeout."
           }
         },
-        "summary": "The screen in the type Accept selects"
+        "summary": "The screen, in the format chosen by Accept"
       },
       "head": {
         "operationId": "HEAD_v1_display_displays__name__screen",
@@ -828,7 +828,7 @@
             "description": "The sidecar sent no headers within the header timeout."
           }
         },
-        "summary": "The screen in the type Accept selects"
+        "summary": "The screen, in the format chosen by Accept"
       },
       "options": {
         "operationId": "OPTIONS_v1_display_displays__name__screen",
@@ -837,7 +837,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -845,7 +845,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       },
       "parameters": [
         {
@@ -1219,7 +1219,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -1227,7 +1227,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       },
       "parameters": [
         {
@@ -1592,7 +1592,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -1600,7 +1600,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       },
       "parameters": [
         {
@@ -1974,7 +1974,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -1982,7 +1982,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       },
       "parameters": [
         {
@@ -2347,7 +2347,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -2355,7 +2355,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       },
       "parameters": [
         {
@@ -2563,7 +2563,7 @@
             "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
             "headers": {
               "Allow": {
-                "description": "The methods this route answers.",
+                "description": "The methods this route allows.",
                 "schema": {
                   "type": "string"
                 }
@@ -2571,7 +2571,7 @@
             }
           }
         },
-        "summary": "The methods this route answers"
+        "summary": "The methods this route allows"
       }
     }
   },

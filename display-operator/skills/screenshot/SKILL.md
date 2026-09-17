@@ -7,45 +7,48 @@ This skill is the guide at https://display.liken.sh/docs/guides/screenshot/, emi
 
 # Take a picture of a screen
 
-This guide captures what a monitor shows: one frame as PNG or JPEG,
-a clip as MP4, a live MJPEG stream, and a rectangle of any of them.
-You need the operator [installed](https://display.liken.sh/docs/guides/install/) on your
+This guide shows you how to capture what a monitor shows: one frame
+as PNG or JPEG, a clip as MP4, a live MJPEG stream, or a rectangle
+of any of those. You need the operator
+[installed](https://display.liken.sh/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster and a connected
 [`Display`](https://display.liken.sh/docs/reference/displays/).
 
-`display-api` answers the captures. It is a `Deployment` in
-`liken-system`, and the capture container in the `display-operator`
-pod on each node takes the frames from the compositor. Nothing is
-stored. Every capture is taken when it is asked for and streamed to
-the caller as it is made. The [API reference](https://display.liken.sh/docs/reference/api/)
-states the whole contract; this guide is the short path through it.
+`display-api` serves the captures. It is a `Deployment` in
+`liken-system`. The capture container in the `display-operator` pod
+on each node takes the frames from the compositor. Nothing is
+stored. Each capture is taken when you ask for it and streamed to
+you while it is made. The [API reference](https://display.liken.sh/docs/reference/api/) has
+the full contract. This guide is the short path through it.
 
 ## 1. Who may capture
 
-A request names its caller two ways, and the API reads them in the
-order the API server reads them.
+You can identify yourself with a client certificate or with a
+Bearer token. The API checks for a certificate first, then for a
+token, in the same order as the Kubernetes API server.
 
-A connection that carries a client certificate the cluster's own
-authority signed names that certificate's subject. The user is the
-subject's common name, and the groups are its organization values.
-The credentials in your kubeconfig therefore name the same subject
-here that they name to `kubectl`. A certificate from any other
-authority ends the handshake.
+If your connection presents a client certificate signed by the
+cluster's own certificate authority, you are that certificate's
+subject. Your user name is the subject's common name, and your
+groups are its organization values. The credentials in your
+kubeconfig identify you here the same way they identify you to
+`kubectl`. A certificate from any other authority ends the TLS
+handshake.
 
-A caller that offers no certificate carries a Bearer token. The API
-sends the token in a `TokenReview` with the audience `display-api`,
-and checks that the answer names that audience. A pod's ordinary
-API-server token does not open this API.
+If you present no certificate, send a Bearer token. The API
+verifies it with a `TokenReview` for the audience `display-api`, and
+checks that the answer names that audience. A pod's ordinary API
+server token does not have that audience, so it does not work here.
 
-The API then sends a `SubjectAccessReview` for the verb `get` on
-`displays/screen` in the group `display.liken.sh`. Every route
-authorizes before it reads, so a 403 never says whether a name
-exists.
+After it knows who you are, the API sends a `SubjectAccessReview`
+for the verb `get` on `displays/screen` in the group
+`display.liken.sh`. Every route authorizes before it reads anything,
+so a 403 never tells you whether a name exists.
 
-The base ships the `ClusterRole` `display-capture-viewer` and binds
-it to nobody. It grants `get` on `displays/screen` for the capture
-routes and `get` on `displays` for the info route beside them. Read
-your own subject out of your kubeconfig:
+The operator ships a `ClusterRole` named `display-capture-viewer`
+and binds it to nobody. It grants `get` on `displays/screen` for the
+capture routes and `get` on `displays` for the info route. Read your
+own subject from your kubeconfig:
 
     kubectl config view --raw --minify \
       -o jsonpath='{.users[0].user.client-certificate-data}' \
@@ -65,10 +68,10 @@ Then bind the role to the common name that command printed:
       - kind: User
         name: <the common name>
 
-An organization value in the same certificate binds as `kind: Group`
-with that value as the name.
+To bind a group instead, use `kind: Group` with one of the
+certificate's organization values as the name.
 
-An application holds the grant through its `ServiceAccount`:
+An application gets the grant through its `ServiceAccount`:
 
     apiVersion: v1
     kind: ServiceAccount
@@ -89,36 +92,36 @@ An application holds the grant through its `ServiceAccount`:
         name: display-viewer
         namespace: liken-system
 
-A role with a wildcard `resources: ["*"]` on `display.liken.sh`, and
-`cluster-admin`, already grant `displays/screen`, so every subject
-that holds one may look at every screen. `pods/exec` in
-`liken-system` reaches the capture socket through the
-`display-operator` pod's shared process namespace, so that grant is
-a capture grant too.
+A role that grants `resources: ["*"]` on `display.liken.sh` already
+includes `displays/screen`, and so does `cluster-admin`. Every
+subject with one of those may look at every screen. `pods/exec` in
+`liken-system` is also a capture grant: the `display-operator` pod
+shares its process namespace between its containers, so a shell in
+that pod can reach the capture socket.
 
-Every request that produced bytes writes a `Captured` `Event` on the
+Every request that returned bytes writes a `Captured` `Event` on the
 `Display`, with the subject and the aspect in its message.
 
 ## 2. Reach the API
 
 `display-api` is a `ClusterIP` `Service` at
-`https://display-api.liken-system.svc`. It serves HTTPS under its
-own authority, and that authority's certificate is in the
+`https://display-api.liken-system.svc`. It serves HTTPS with its own
+certificate authority. That authority's certificate is in the
 `ConfigMap` `display-api-ca` in `liken-system`, under the key
 `ca.crt`.
 
-A port-forward carries a still well and a stream badly. It is a
-single TCP connection through the API server, and in the lab it
-moved about 2 Mbit/s: a 3 second MJPEG stream that the node captured
-in 3.06 s took 25 s to read through the forward and 3.09 s from a
-pod on the cluster network. A 1080p MJPEG stream needs about
-15 Mbit/s, so a viewer on the forward sees it at about an eighth of
-real time. Stills are not affected: `screen.png` cost 0.9 s to first
-byte through the forward against 0.76 s from the cluster network.
-Read a stream from a pod on the cluster network.
+A port-forward is fine for a still and bad for a stream. It is a
+single TCP connection through the API server. In our tests it moved
+about 2 Mbit/s: a 3 second MJPEG stream that the node captured in
+3.06 s took 25 s to read through the forward, and 3.09 s from a pod
+on the cluster network. A 1080p MJPEG stream needs about 15 Mbit/s,
+so through the forward you see it at about one eighth of real time.
+Stills are not affected. `screen.png` took 0.9 s to first byte
+through the forward and 0.76 s from the cluster network. Read a
+stream from a pod on the cluster network.
 
-Put your client certificate and its key in a `Secret` that pod can
-mount:
+Put your client certificate and its key in a `Secret` that the pod
+can mount:
 
     kubectl config view --raw --minify \
       -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > client.crt
@@ -155,15 +158,16 @@ Write the pod to `capture-pod.yaml`:
           secret:
             secretName: display-client
 
-The pod is in `liken-system` because a volume reads a `ConfigMap`
-and a `Secret` from the pod's own namespace. It sleeps for an hour
-and then ends, so a forgotten pod does not run for a week.
+The pod is in `liken-system` because a volume can only read a
+`ConfigMap` or a `Secret` from the pod's own namespace. The pod
+sleeps for an hour and then exits, so a pod you forget does not run
+forever.
 
     kubectl apply -f capture-pod.yaml
     kubectl -n liken-system wait --for=condition=Ready pod/capture --timeout 60s
 
 An application needs no `Secret`. It runs as the `ServiceAccount`
-you bound in step 1, mounts a token for the API's own audience, and
+you bound in step 1, mounts a token for the API's audience, and
 sends it as `Authorization: Bearer`:
 
     volumes:
@@ -175,9 +179,9 @@ sends it as `Authorization: Bearer`:
                 expirationSeconds: 3600
                 path: token
 
-For one still and nothing more, a port-forward needs no pod. The
-forward is a TCP tunnel, so the TLS handshake runs end to end and
-carries the certificate to the API untouched:
+For one still and nothing more, you need no pod. A port-forward is a
+TCP tunnel, so the TLS handshake runs end to end and the certificate
+reaches the API unchanged:
 
     kubectl -n liken-system port-forward svc/display-api 8443:443 &
     kubectl -n liken-system get configmap display-api-ca \
@@ -192,9 +196,9 @@ List the screens and pick one:
 
     kubectl get displays
 
-Every capture below runs in the pod from step 2 and writes its file
-there. `--fail-with-body` makes `curl` exit non-zero on a refusal
-and still write the problem document, which step 4 reads.
+Every command below runs in the pod from step 2 and writes its file
+there. `--fail-with-body` makes `curl` exit non-zero on an error and
+still write the problem document, which step 4 reads.
 
 One frame as PNG:
 
@@ -231,34 +235,19 @@ The top left quarter of a 1920x1080 screen, as PNG:
       -o /tmp/corner.png \
       'https://display-api.liken-system.svc/v1/display/displays/lg-hdr-wqhd-display/screen.png?xywh=0,0,960,540'
 
-### The query knobs
+### The query parameters
 
-`t=` is a W3C Media Fragments time range in seconds, and its zero is
-the instant the capture container accepts the request. `t=,10`
-records ten seconds from now, `t=5,7` discards five seconds and then
-records two, and `t=5` on a still waits five seconds and takes one
-frame. A begin over 60 seconds is a 400, and a `t=` end on a still
-is a 400. Without a `t=` end, a clip or a stream runs until the
-client hangs up.
+| Parameter | What it does |
+| --- | --- |
+| `t=` | A W3C Media Fragments time range in seconds. Zero is the instant the capture container accepts the request. `t=,10` records ten seconds from now. `t=5,7` discards five seconds and then records two. `t=5` on a still waits five seconds and takes one frame. A begin over 60 seconds is a 400, and a `t=` end on a still is a 400. Without an end, a clip or a stream runs until you close the connection. |
+| `xywh=` | A rectangle of the frame as `x,y,width,height`, in the frame's own physical pixels. `xywh=percent:0,0,50,50` is the same rectangle in percent. A region that runs off an edge is clipped to the screen. An origin at or past an edge is a 400. |
+| `width=`, `height=` | Scale the region down after the crop, with the aspect ratio kept. Both together, or a value larger than the source, is a 400. |
+| `framerate=` | Frames per second of a clip or an MJPEG stream. 15 by default, at most the output's refresh rate. A 400 on a still. |
+| `quality=` | JPEG quality from 1 to 100. 85 by default. A 400 on PNG and MP4. |
 
-`xywh=` is a rectangle of the frame, `x,y,width,height` in the
-frame's own physical pixels. `xywh=percent:0,0,50,50` states the
-same rectangle in percent. A region that runs off an edge is clipped
-to the screen, and an origin at or past an edge is a 400.
-
-`width=` or `height=` scales the region down after the crop, with
-the aspect kept. The two together, or a value above the source, is a
-400.
-
-`framerate=` is the frames per second of a clip or an MJPEG stream,
-15 by default, at most the output's refresh, and a 400 on a still.
-
-`quality=` is the JPEG quality, 1 to 100, 85 by default, and a 400
-on PNG and MP4.
-
-The extensions are `.png`, `.jpg`, `.mp4`, and `.mjpeg`. The path
-with no extension negotiates on `Accept` and answers `image/png`
-when the caller states none.
+The extensions are `.png`, `.jpg`, `.mp4`, and `.mjpeg`. A path
+with no extension negotiates on `Accept` and returns `image/png` if
+you send none.
 
 ## 4. Check what you got
 
@@ -267,37 +256,38 @@ Copy a file out of the pod and read it with `ffprobe`:
     kubectl -n liken-system cp capture:/tmp/clip.mp4 clip.mp4
     ffprobe clip.mp4
 
-A clip reads as H.264 in `mov,mp4,m4a,3gp,3g2,mj2`, at the size of
-the screen. A still reads as one `png` or `mjpeg` frame. An
-`xywh=` capture reads at the size of the region.
+A clip is H.264 in `mov,mp4,m4a,3gp,3g2,mj2`, at the size of the
+screen. A still is one `png` or `mjpeg` frame. A capture with
+`xywh=` has the size of the region.
 
 The cluster's own record of the capture is an `Event`. A `Display`
-is cluster-scoped, so its `Event`s land in `default`, the convention
-a `Node`'s own `Event`s follow:
+is cluster-scoped, so its `Event`s are in the `default` namespace,
+the same convention a `Node`'s `Event`s follow:
 
     kubectl get events --field-selector reason=Captured
 
 Each message names the subject, the aspect, and the media type, so
-`kubectl describe display` answers who looked at a screen and when.
+`kubectl describe display` tells you who looked at a screen and
+when.
 
 ### When a capture is refused
 
 Every error is an `application/problem+json` document with `type`,
-`title`, `status`, `detail`, and `instance`. `curl` wrote it where
-the picture would have gone, so read that file:
+`title`, `status`, `detail`, and `instance`. `curl` wrote it to the
+output file, so read that file:
 
     kubectl -n liken-system exec capture -- cat /tmp/screen.png
 
 | Status | What it means | What to do |
 | --- | --- | --- |
-| 401 | The API read no client certificate and no token, or the `TokenReview` refused the token | Check that the `Secret` holds the certificate and key of the kubeconfig you use, or mint a token for the audience `display-api` |
-| 403 | The `SubjectAccessReview` said no | Bind `display-capture-viewer` to your subject, as step 1 shows. The `WWW-Authenticate` field names the scope you need |
-| 503 | The screen has no node (`no-node`), its compositor is not serving (`compositor-down`), the output is already being captured (`capture-busy`), or the capture container is absent or not ready (`upstream-failed`) | The answer carries `Retry-After: 5`. Wait five seconds and ask again. `detail` carries the source's own words |
+| 401 | No client certificate and no token, or the `TokenReview` refused the token | Check that the `Secret` has the certificate and key from the kubeconfig you use, or mint a token for the audience `display-api` |
+| 403 | The `SubjectAccessReview` said no | Bind `display-capture-viewer` to your subject, as step 1 shows. The `WWW-Authenticate` header names the scope you need |
+| 503 | The screen has no node (`no-node`), its compositor is not serving (`compositor-down`), the output is already being captured (`capture-busy`), or the capture container is absent or not ready (`upstream-failed`) | The response has `Retry-After: 5`. Wait five seconds and try again. `detail` quotes the source of the error |
 
-A `Display` answers what it is even when its screen is down. The
-info route carries the name, the node, and the size and refresh the
-`Display` reports, with `compositor: down` or
-`sidecar: unreachable` and the condition's words in `detail`:
+You can ask what a `Display` is even when its screen is down. The
+info route returns the name, the node, and the size and refresh rate
+the `Display` reports, with `compositor: down` or
+`sidecar: unreachable` and the condition's message in `detail`:
 
     kubectl -n liken-system exec capture -- curl -sS --fail-with-body \
       --cacert /ca/ca.crt --cert /client/tls.crt --key /client/tls.key \
@@ -309,16 +299,16 @@ info route carries the name, the node, and the size and refresh the
     kubectl -n liken-system delete secret display-client
     rm client.crt client.key
 
-The `ClusterRoleBinding` from step 1 is the standing grant. Delete
-it too when the capture was a one-off:
+The `ClusterRoleBinding` from step 1 is a standing grant. If the
+capture was a one-off, delete it too:
 
     kubectl delete clusterrolebinding display-viewer
 
 ## What a capture costs the screen
 
-A capture holds the compositor's hardware planes off for its whole
-length, so a film that a plane would show is composited through the
-GL renderer while a clip runs. On a node whose driver has no VA-API
-post-processing the colour conversion runs on the CPU as well, which
-costs about four times the cores at 1080p. The info route's
-`conversion` member names the graph the node runs.
+A capture turns off the compositor's hardware planes for its whole
+length. A film that a plane would normally show goes through the GL
+renderer instead while a clip runs. On a node whose driver has no
+VA-API post-processing, the color conversion runs on the CPU too,
+which costs about four times the cores at 1080p. The info route's
+`conversion` field names the pipeline the node uses.

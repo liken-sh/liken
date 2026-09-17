@@ -50,8 +50,8 @@ func openAPIDocument(server string) map[string]any {
 		"info": map[string]any{
 			"title":       "display-api",
 			"version":     version,
-			"summary":     "The screen of every Display in this cluster, as one frame, a clip or a stream.",
-			"description": "Identity is in the path, the format is in the extension or in the Accept field, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
+			"summary":     "The screen of every Display in this cluster, as one frame, a clip, or a stream.",
+			"description": "The path names the Display, the extension or Accept chooses the format, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
 		},
 		"servers": []any{map[string]any{
 			"url":         server,
@@ -110,12 +110,12 @@ func operation(route apiRoute, method string) map[string]any {
 func optionsOperation(route apiRoute) map[string]any {
 	return map[string]any{
 		"operationId": operationID(route, http.MethodOptions),
-		"summary":     "The methods this route answers",
+		"summary":     "The methods this route allows",
 		"responses": map[string]any{
 			"204": map[string]any{
 				"description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
 				"headers": map[string]any{
-					"Allow": headerSpec("The methods this route answers."),
+					"Allow": headerSpec("The methods this route allows."),
 				},
 			},
 		},
