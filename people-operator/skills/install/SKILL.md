@@ -1,8 +1,9 @@
 ---
-title: Install
-weight: 10
+name: install
 description: "Install the Person resource definition from people-operator's kustomize base. Use when a cluster needs Person objects, which other operators name as the owners of playback progress."
 ---
+
+This skill is the guide at https://people.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 Install the resource definition from the kustomize base in the
 repository's `deploy/` directory. You need `kubectl` with
