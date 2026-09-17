@@ -338,9 +338,21 @@ func operate() {
 	// channel every other source uses. The retry costs the loop no
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
-	// The link history is the operator's own, one for the process, because
-	// the grace it holds is measured across passes.
+	// The link history is the operator's own, one for the process,
+	// because the answer it holds is measured across passes.
 	links := newLinkHistory()
+	// A restarted operator starts with no history, and a machine that
+	// booted with its panel on another input has no EDID in sysfs
+	// either. The Display resources are what carry a node's screens
+	// across a restart, so the history starts from them. A read that
+	// fails costs the dark screens their identity until a monitor
+	// answers, which is the behavior of an operator with no seed, so it
+	// is reported and not fatal.
+	if displays, err := listDisplays(client); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the screens this node last served: %v\n", err)
+	} else {
+		links.seed(displays, nodeName, discoverOutputs(sysRoot, card))
+	}
 	// The prepare path reads the same history the slice is published
 	// from, so a claim on a dark screen is delivered exactly when the
 	// slice still publishes that screen.

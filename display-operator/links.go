@@ -21,6 +21,8 @@ package main
 // on the Display is what still reports the wire.
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -136,4 +138,86 @@ func (h *linkHistory) remembered(connector string) EDID {
 		return EDID{}
 	}
 	return was.monitor
+}
+
+// seed puts the screens the cluster already knows about into a history
+// that has none.
+//
+// The history is this process's own, so a restarted operator starts
+// with nothing and every dark connector reads as an empty one. That is
+// the whole of the cold case: a machine that boots with its panel on
+// another input has no EDID in sysfs, nothing on the machine says which
+// screen belongs to which connector, and the claim on that screen
+// cannot allocate.
+//
+// The Display resources are what remember. Each one names the node and
+// the connector it was last served on, and the resource's own name is
+// the monitor identity every claim selects on. So the cluster carries a
+// machine's screens across a reboot, and this reads them back.
+//
+// A connector with a monitor on it now is left alone, because the wire
+// is a better answer than the record. A screen that is lit on some
+// other connector is left alone too: it moved, and publishing it on
+// both would give a claim two devices to match.
+func (h *linkHistory) seed(displays []Display, node string, outputs []Output) {
+	lit := map[string]bool{}
+	elsewhere := map[string]bool{}
+	for _, output := range connected(outputs) {
+		lit[output.Connector] = true
+		if id := monitorID(output.Monitor); id != "" {
+			elsewhere[id] = true
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, display := range displays {
+		connector := display.Status.Connector
+		if display.Status.Node != node || connector == "" {
+			continue
+		}
+		if lit[connector] || elsewhere[display.Metadata.Name] {
+			continue
+		}
+		if _, held := h.links[connector]; held {
+			continue
+		}
+		monitor, rebuilt := rememberedMonitor(display)
+		if !rebuilt {
+			continue
+		}
+		h.links[connector] = link{monitor: monitor}
+	}
+}
+
+// rememberedMonitor rebuilds the monitor a Display was published for.
+//
+// The product code is in the resource's name and in no status field,
+// because the name is the pairing identity and monitorID is what built
+// it. So the name is read back for that one number, and the rest comes
+// from the status beside it.
+//
+// A Display whose facts do not rebuild its own name is refused. The
+// name is what a claim matches, and a screen published under a name
+// this operator cannot derive would answer a claim that asked for
+// another monitor.
+func rememberedMonitor(display Display) (EDID, bool) {
+	name := display.Metadata.Name
+	parts := strings.SplitN(name, "-", 3)
+	if len(parts) < 2 {
+		return EDID{}, false
+	}
+	code, err := strconv.ParseUint(parts[1], 16, 16)
+	if err != nil {
+		return EDID{}, false
+	}
+	monitor := EDID{
+		Manufacturer: display.Status.Manufacturer,
+		ProductCode:  uint16(code),
+		ModelName:    display.Status.Model,
+		Serial:       display.Status.Serial,
+	}
+	if monitorID(monitor) != name {
+		return EDID{}, false
+	}
+	return monitor, true
 }

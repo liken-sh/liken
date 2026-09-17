@@ -204,3 +204,125 @@ func TestAConnectorThatComesBackWithNoMonitorIDDoesNotTaint(t *testing.T) {
 		}
 	}
 }
+
+// The Display the cluster holds for one screen, as the operator last
+// wrote it. The name is the pairing identity, which is what a claim
+// selects on and what the seed reads the product code back from.
+func screenRecord(node, connector string, monitor EDID) Display {
+	return Display{
+		Metadata: DisplayMeta{Name: monitorID(monitor)},
+		Status: DisplayStatus{
+			Node:         node,
+			Connector:    connector,
+			Manufacturer: monitor.Manufacturer,
+			Model:        monitor.ModelName,
+			Serial:       monitor.Serial,
+		},
+	}
+}
+
+// A machine that boots with its panel on another input has no EDID in
+// sysfs and no history in this process. The Displays the cluster holds
+// are what say which screen belongs to which connector, so the seeded
+// connector keeps its monitor and never taints.
+func TestASeededConnectorKeepsItsScreenWhileDark(t *testing.T) {
+	bench := newLinkBench()
+	bench.history.seed([]Display{screenRecord("liken-1", "HDMI-A-2", labMonitor())},
+		"liken-1", []Output{darkConnector("HDMI-A-2")})
+
+	tainted := bench.pass(darkConnector("HDMI-A-2"))
+
+	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
+		if tainted[device] {
+			t.Errorf("%s taints, and the cluster says which screen it carries", device)
+		}
+	}
+}
+
+// The seed answers which screen a connector carries, so each drill
+// reads the identity the connector publishes afterwards.
+func TestTheSeedRefusesAScreenItMustNotPublish(t *testing.T) {
+	misnamed := screenRecord("liken-1", "HDMI-A-2", labMonitor())
+	misnamed.Status.Model = "Some Other Panel"
+
+	for _, drill := range []struct {
+		name    string
+		display Display
+		outputs []Output
+		want    string
+		why     string
+	}{
+		{
+			name:    "another node's screen",
+			display: screenRecord("stick-1", "HDMI-A-2", labMonitor()),
+			outputs: []Output{darkConnector("HDMI-A-2")},
+			want:    "",
+			why:     "the record names another machine",
+		},
+		{
+			name:    "a connector with a monitor on it now",
+			display: screenRecord("liken-1", "HDMI-A-2", labMonitor()),
+			outputs: []Output{linkedPanel("HDMI-A-2", portableMonitor(), "1920x1080@60")},
+			want:    monitorID(portableMonitor()),
+			why:     "the wire answers, and it is the better answer",
+		},
+		{
+			name:    "a screen that is lit on another connector",
+			display: screenRecord("liken-1", "HDMI-A-2", labMonitor()),
+			outputs: []Output{darkConnector("HDMI-A-2"), linkedPanel("HDMI-A-1", labMonitor(), "3840x1600@60")},
+			want:    "",
+			why:     "the monitor moved, and two devices would carry one identity",
+		},
+		{
+			name:    "a record whose facts do not rebuild its name",
+			display: misnamed,
+			outputs: []Output{darkConnector("HDMI-A-2")},
+			want:    "",
+			why:     "the name is what a claim matches",
+		},
+	} {
+		t.Run(drill.name, func(t *testing.T) {
+			bench := newLinkBench()
+			bench.history.seed([]Display{drill.display}, "liken-1", drill.outputs)
+
+			var got string
+			for _, device := range sliceDevices(withLinks(drill.outputs, bench.history)) {
+				if device.Name != "hdmi-a-2" {
+					continue
+				}
+				if id := device.Attributes[pairingAttribute].String; id != nil {
+					got = *id
+				}
+			}
+			if got != drill.want {
+				t.Errorf("hdmi-a-2 publishes %q, want %q: %s", got, drill.want, drill.why)
+			}
+		})
+	}
+}
+
+// The seed is read back from the resource's name, so a screen that goes
+// through it comes out under the name a claim already selects on.
+func TestASeededScreenKeepsTheIdentityAClaimSelectsOn(t *testing.T) {
+	for _, monitor := range []EDID{labMonitor(), portableMonitor()} {
+		t.Run(monitorID(monitor), func(t *testing.T) {
+			bench := newLinkBench()
+			bench.history.seed([]Display{screenRecord("liken-1", "HDMI-A-2", monitor)},
+				"liken-1", []Output{darkConnector("HDMI-A-2")})
+
+			devices := sliceDevices(withLinks([]Output{darkConnector("HDMI-A-2")}, bench.history))
+
+			var got string
+			for _, device := range devices {
+				if device.Name == "hdmi-a-2" {
+					if id := device.Attributes[pairingAttribute].String; id != nil {
+						got = *id
+					}
+				}
+			}
+			if want := monitorID(monitor); got != want {
+				t.Errorf("the dark connector publishes %q, want %q", got, want)
+			}
+		})
+	}
+}
