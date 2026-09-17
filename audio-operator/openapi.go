@@ -80,13 +80,13 @@ func newOpenAPI(server string) openAPIDocument {
 			Version: "v1",
 			Summary: "Taps what a Sink plays and what a Source hears, and streams it as " +
 				"WAV, FLAC, or Ogg Opus.",
-			Description: "Identity is in the path, the format is in the extension or in " +
-				"Accept, and the span is a W3C Media Fragments t= in the query. A " +
-				"request carries a client certificate the cluster's own authority " +
-				"signed, or a ServiceAccount token minted with the audience " +
-				"audio-api, and a tap needs get on sinks/audio or sources/audio in the " +
-				"group audio.liken.sh. Nothing is stored: every answer streams from the " +
-				"node the endpoint is on.",
+			Description: "The path names the Sink or Source, the extension or Accept " +
+				"chooses the format, and a W3C Media Fragments t= in the query sets " +
+				"the span. Authenticate with a client certificate signed by the " +
+				"cluster's authority, or with a ServiceAccount token for the audience " +
+				"audio-api. A tap needs get on sinks/audio or sources/audio in the " +
+				"group audio.liken.sh. Nothing is stored. Every response streams " +
+				"from the node the endpoint is on.",
 		},
 		Servers: []openAPIServer{{URL: server}},
 		Paths:   map[string]any{},
@@ -134,11 +134,11 @@ func openAPIPathItem(route apiRoute) map[string]any {
 		},
 		"options": map[string]any{
 			"operationId": openAPIOperationID(route) + "Options",
-			"summary": "The methods this route answers, as a 204 with Allow " +
+			"summary": "The methods this route allows, as a 204 with Allow " +
 				"(RFC 9110 section 10.2.1).",
 			"responses": map[string]any{
 				"204": map[string]any{
-					"description": "The methods this route answers.",
+					"description": "The methods this route allows.",
 					"headers": map[string]any{
 						"Allow": map[string]any{
 							"description": "GET, HEAD, OPTIONS.",

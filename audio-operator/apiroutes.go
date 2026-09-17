@@ -238,7 +238,7 @@ func buildRoutes() []apiRoute {
 			Kind:     routeTap,
 			Resource: resource,
 			Aspect:   audioAspect,
-			Answers:  title(heard[:1]) + heard[1:] + ", in the form Accept chooses.",
+			Answers:  title(heard[:1]) + heard[1:] + ", in the format chosen by Accept.",
 			Methods:  apiMethods,
 			Serves:   audioRepresentations,
 			Query:    []queryParameter{spanParameter, bitrateParameter},

@@ -7,50 +7,52 @@ This skill is the guide at https://audio.liken.sh/docs/guides/listen/, emitted f
 
 # Listen to what a speaker plays
 
-This guide taps an endpoint for a bounded span and saves it as a
-file: what a speaker plays, or what a microphone hears, as WAV,
-FLAC, or Ogg Opus. You need the operator
+This guide shows you how to tap an endpoint for a fixed span and
+save it as a file: what a speaker plays, or what a microphone hears,
+as WAV, FLAC, or Ogg Opus. You need the operator
 [installed](https://audio.liken.sh/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster and a connected
 [`Sink`](https://audio.liken.sh/docs/reference/sinks/) or
 [`Source`](https://audio.liken.sh/docs/reference/sources/).
 
-`audio-api` answers the taps. It is a `Deployment` in
-`liken-system` that finds the endpoint's node and forwards the
-stream, and the `capture` container in the `audio-operator` pod on
-that node reads PipeWire. Nothing is stored on either side. The
-[API reference](https://audio.liken.sh/docs/reference/api/) states the whole contract;
-this guide is the short path through it.
+`audio-api` serves the taps. It is a `Deployment` in `liken-system`
+that finds the endpoint's node and forwards the stream. The
+`capture` container in the `audio-operator` pod on that node reads
+the sound from PipeWire. Nothing is stored on either side. The
+[API reference](https://audio.liken.sh/docs/reference/api/) has the full contract. This
+guide is the short path through it.
 
 ## 1. Who may listen
 
-A request names its caller two ways, and the API reads them in the
-order the API server reads them.
+You can identify yourself with a client certificate or with a
+Bearer token. The API checks for a certificate first, then for a
+token, in the same order as the Kubernetes API server.
 
-A connection that carries a client certificate the cluster's own
-authority signed names that certificate's subject. The user is the
-subject's common name, and the groups are its organization values.
-The credentials in your kubeconfig therefore name the same subject
-here that they name to `kubectl`. A certificate from any other
-authority ends the handshake.
+If your connection presents a client certificate signed by the
+cluster's own certificate authority, you are that certificate's
+subject. Your user name is the subject's common name, and your
+groups are its organization values. The credentials in your
+kubeconfig identify you here the same way they identify you to
+`kubectl`. A certificate from any other authority ends the TLS
+handshake.
 
-A caller that offers no certificate sends a Bearer token, which the
-API authenticates with a `TokenReview` that requires the audience
-`audio-api`. A pod's ordinary API-server token does not open this
-API.
+If you present no certificate, send a Bearer token. The API
+verifies it with a `TokenReview` that requires the audience
+`audio-api`. A pod's ordinary API server token does not have that
+audience, so it does not work here.
 
-Either credential is then authorized with a `SubjectAccessReview`
+After it knows who you are, the API sends a `SubjectAccessReview`
 for the verb `get` on `sinks/audio` or `sources/audio` in the group
-`audio.liken.sh`. The review names the resource and an empty
+`audio.liken.sh`, with the name of the object and an empty
 namespace, because both kinds are cluster-scoped. Every route
-authorizes before it reads, so a 403 never reveals that a name
-exists.
+authorizes before it reads anything, so a 403 never tells you
+whether a name exists.
 
-The operator ships one `ClusterRole` for an owner to bind,
+The operator ships one `ClusterRole` for a cluster owner to bind:
 `audio-capture-viewer`. It grants `get` on `sinks`, `sources`,
 `sinks/audio`, and `sources/audio`: the two plain resources for the
-information routes and the two subresources for the taps. Read your
-own subject out of your kubeconfig:
+info routes and the two subresources for the taps. Read your own
+subject from your kubeconfig:
 
     kubectl config view --raw --minify \
       -o jsonpath='{.users[0].user.client-certificate-data}' \
@@ -70,10 +72,10 @@ Then bind the role to the common name that command printed:
       - kind: User
         name: <the common name>
 
-An organization value in the same certificate binds as `kind: Group`
-with that value as the name.
+To bind a group instead, use `kind: Group` with one of the
+certificate's organization values as the name.
 
-An application holds the grant through its `ServiceAccount`:
+An application gets the grant through its `ServiceAccount`:
 
     apiVersion: v1
     kind: ServiceAccount
@@ -94,30 +96,32 @@ An application holds the grant through its `ServiceAccount`:
         name: audio-listener
         namespace: liken-system
 
-The subresource shape lets an owner write a narrower rule instead. A
+Because the taps are subresources, you can write a narrower rule. A
 rule with `resources: [sinks/audio]` and a `resourceNames` list
-grants the sound of one speaker and nothing else, not even the
-information document beside it. A role with `resources: ["*"]` in
-`audio.liken.sh`, and `cluster-admin`, already grant every tap.
+grants the sound of one speaker and nothing else, not even the info
+document next to it. A role that grants `resources: ["*"]` in
+`audio.liken.sh` already includes every tap, and so does
+`cluster-admin`.
 
-Every request that produces bytes writes a `Captured` `Event` on the
+Every request that returned bytes writes a `Captured` `Event` on the
 `Sink` or the `Source`.
 
 ## 2. Reach the API
 
 `audio-api` is a `ClusterIP` `Service` at
-`https://audio-api.liken-system.svc`. It serves HTTPS under its own
-authority, and that authority's certificate is in the `ConfigMap`
-`audio-api-ca` in `liken-system`, under the key `ca.crt`.
+`https://audio-api.liken-system.svc`. It serves HTTPS with its own
+certificate authority. That authority's certificate is in the
+`ConfigMap` `audio-api-ca` in `liken-system`, under the key
+`ca.crt`.
 
 A port-forward is a single TCP connection through the API server. A
-short bounded tap reads well through one, and the API reference's
-own [recipe](https://audio.liken.sh/docs/reference/api/#calling-it) does that. Read a long
-tap from a pod on the cluster network, which is what the rest of
-this guide uses.
+short tap works through one, and the API reference's own
+[recipe](https://audio.liken.sh/docs/reference/api/#examples) does that. For a long tap,
+read from a pod on the cluster network, which is what the rest of
+this guide does.
 
-Put your client certificate and its key in a `Secret` that pod can
-mount:
+Put your client certificate and its key in a `Secret` that the pod
+can mount:
 
     kubectl config view --raw --minify \
       -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > client.crt
@@ -154,15 +158,16 @@ Write the pod to `listen-pod.yaml`:
           secret:
             secretName: audio-client
 
-The pod is in `liken-system` because a volume reads a `ConfigMap`
-and a `Secret` from the pod's own namespace. It sleeps for an hour
-and then ends, so a forgotten pod does not run for a week.
+The pod is in `liken-system` because a volume can only read a
+`ConfigMap` or a `Secret` from the pod's own namespace. The pod
+sleeps for an hour and then exits, so a pod you forget does not run
+forever.
 
     kubectl apply -f listen-pod.yaml
     kubectl -n liken-system wait --for=condition=Ready pod/listen --timeout 60s
 
 An application needs no `Secret`. It runs as the `ServiceAccount`
-you bound in step 1, mounts a token for the API's own audience, and
+you bound in step 1, mounts a token for the API's audience, and
 sends it as `Authorization: Bearer`:
 
     volumes:
@@ -181,9 +186,9 @@ List the endpoints and pick one:
     kubectl get sinks
     kubectl get sources
 
-Every tap below runs in the pod from step 2 and writes its file
-there. `--fail-with-body` makes `curl` exit non-zero on a refusal
-and still write the problem document, which step 4 reads.
+Every command below runs in the pod from step 2 and writes its file
+there. `--fail-with-body` makes `curl` exit non-zero on an error and
+still write the problem document, which step 4 reads.
 
 Five seconds of a speaker, as PCM in a RIFF WAVE stream:
 
@@ -213,29 +218,23 @@ Ten seconds of a microphone, as WAV:
       -o /tmp/microphone.wav \
       'https://audio-api.liken-system.svc/v1/audio/sources/usb-0573-1573-a34004801402-usb-audio-capture/audio.wav?t=0,10'
 
-Two seconds, five seconds from now, which skips a fade-in:
+Two seconds, starting five seconds from now, which skips a fade-in:
 
     kubectl -n liken-system exec listen -- curl -sS --fail-with-body \
       --cacert /ca/ca.crt --cert /client/tls.crt --key /client/tls.key \
       -o /tmp/later.wav \
       'https://audio-api.liken-system.svc/v1/audio/sinks/kitchen-pci-0000-00-1f-3-hdmi-0/audio.wav?t=5,7'
 
-### The query knobs
+### The query parameters
 
-`t=` is the W3C Media Fragments temporal dimension in seconds, in
-the forms `t=begin,end`, `t=begin`, and `t=,end`. The interval is
-half-open, and its zero is the instant the capture container accepts
-the request. `t=5,7` discards five seconds and then records two. A
-begin over 60 seconds is a 400. An absent end, or an absent `t=`,
-taps until the client closes, so a bounded tap always states an end.
+| Parameter | What it does |
+| --- | --- |
+| `t=` | A W3C Media Fragments time range in seconds, as `t=begin,end`, `t=begin`, or `t=,end`. The interval is half-open. Zero is the instant the capture container accepts the request. `t=5,7` discards five seconds and then records two. A begin over 60 seconds is a 400. Without an end, or without `t=` at all, the tap runs until you close the connection, so always give an end for a file. |
+| `bitrate=` | The Opus bitrate in kbit/s per channel, 6 to 256. If absent, `opusenc` picks one from the sample rate. A bitrate on WAV or FLAC is a 400. |
 
-`bitrate=` is the Opus bitrate in kbit/s per channel, 6 to 256.
-`opusenc` chooses one from the sample rate when this is absent. A
-bitrate on WAV or FLAC is a 400.
-
-The extensions are `.wav`, `.flac`, and `.opus`. The path with no
-extension negotiates on `Accept` and answers `audio/wav` when the
-caller states none.
+The extensions are `.wav`, `.flac`, and `.opus`. A path with no
+extension negotiates on `Accept` and returns `audio/wav` if you send
+none.
 
 ## 4. Check what you got
 
@@ -244,47 +243,48 @@ Copy a file out of the pod and read it with `ffprobe`:
     kubectl -n liken-system cp listen:/tmp/speaker.flac speaker.flac
     ffprobe speaker.flac
 
-The stream reads at the rate and the channel count the endpoint's
-information route reports:
+The stream has the sample rate and channel count that the endpoint's
+info route reports:
 
     kubectl -n liken-system exec listen -- curl -sS --fail-with-body \
       --cacert /ca/ca.crt --cert /client/tls.crt --key /client/tls.key \
       https://audio-api.liken-system.svc/v1/audio/sinks/kitchen-pci-0000-00-1f-3-hdmi-0
 
-A WAV and an Opus file report the `t=` span as their duration. A
-FLAC file reports none, because the encoder writes the header before
-it knows the length of a live tap. Decode it to measure it:
+A WAV or Opus file reports the `t=` span as its duration. A FLAC
+file reports no duration, because the encoder writes the header
+before it knows the length of a live tap. Decode it to measure it:
 
     ffmpeg -i speaker.flac -f null -
 
 The cluster's own record of the tap is an `Event`. A `Sink` and a
-`Source` are cluster-scoped, so their `Event`s land in `default`:
+`Source` are cluster-scoped, so their `Event`s are in the `default`
+namespace:
 
     kubectl get events --field-selector reason=Captured
 
-`kubectl describe sink` answers who listened and when.
+`kubectl describe sink` tells you who listened and when.
 
 A tap of a speaker that plays nothing is silence, and so is a tap of
-a muted microphone. A muted speaker is not: a sink's monitor ports
-carry what the sink receives, and `spec.mute` is applied after them,
-so muting a speaker silences the room and changes nothing on this
-route.
+a muted microphone. A muted speaker is not silent. A sink's monitor
+ports carry what the sink receives, and `spec.mute` is applied after
+them, so muting a speaker silences the room and changes nothing on
+this route.
 
 ### When a tap is refused
 
 Every error is an `application/problem+json` document with `type`,
-`title`, `status`, `detail`, and `instance`. `detail` carries the
-source's own words, such as `pw-record`'s stderr. `curl` wrote the
-document where the sound would have gone, so read that file:
+`title`, `status`, `detail`, and `instance`. `detail` quotes the
+source of the error, such as the stderr of `pw-record`. `curl` wrote
+the document to the output file, so read that file:
 
     kubectl -n liken-system exec listen -- cat /tmp/speaker.wav
 
 | Status | What it means | What to do |
 | --- | --- | --- |
-| 401 | The API read no client certificate and no token, or the `TokenReview` refused the token | Check that the `Secret` holds the certificate and key of the kubeconfig you use, or mint a token for the audience `audio-api` |
-| 403 | The `SubjectAccessReview` said no | Bind `audio-capture-viewer` to your subject, as step 1 shows. The `WWW-Authenticate` field names the scope you need |
-| 409 | The endpoint has no `status.node` | The endpoint is away. `detail` says to power the device on |
-| 503 | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused `pw-record` | The answer carries `Retry-After: 5`. Wait five seconds and ask again |
+| 401 | No client certificate and no token, or the `TokenReview` refused the token | Check that the `Secret` has the certificate and key from the kubeconfig you use, or mint a token for the audience `audio-api` |
+| 403 | The `SubjectAccessReview` said no | Bind `audio-capture-viewer` to your subject, as step 1 shows. The `WWW-Authenticate` header names the scope you need |
+| 409 | The endpoint has no `status.node` | The device is away. `detail` tells you to power it on |
+| 503 | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused `pw-record` | The response has `Retry-After: 5`. Wait five seconds and try again |
 
 ## 5. Clean up
 
@@ -292,14 +292,14 @@ document where the sound would have gone, so read that file:
     kubectl -n liken-system delete secret audio-client
     rm client.crt client.key
 
-The `ClusterRoleBinding` from step 1 is the standing grant. Delete
-it too when the tap was a one-off:
+The `ClusterRoleBinding` from step 1 is a standing grant. If the tap
+was a one-off, delete it too:
 
     kubectl delete clusterrolebinding audio-listener
 
-## The door this grant does not close
+## The side door this grant does not close
 
-The claim-delivered PipeWire socket is an existing side door this
-API does not close. Any pod that holds any audio claim on a node can
-already tap that node's microphones and sinks, with no RBAC and no
-record. A `Source` grant is a courtesy until that door closes.
+The PipeWire socket is delivered to pods through claims, so any pod
+with any audio claim on a node can already tap that node's
+microphones and sinks, with no RBAC and no record. Until that door
+is closed, a `Source` grant controls only this API.

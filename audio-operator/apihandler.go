@@ -78,7 +78,7 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 	if !answersMethod(r.Method) {
 		w.Header().Set("Allow", allowHeader())
 		return s.refuse(w, r, route, name, http.StatusMethodNotAllowed, problemBlank, id,
-			fmt.Sprintf("%s is not one of the methods this route answers", r.Method))
+			fmt.Sprintf("%s is not one of the methods this route allows", r.Method))
 	}
 	if r.Method == http.MethodOptions {
 		writeAnswerHeaders(w, route, name)

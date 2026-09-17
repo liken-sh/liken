@@ -6,162 +6,286 @@ toc: true
 
 # API
 
-The API is an HTTP door to the sound itself. It taps what a `Sink`
-plays and what a `Source` hears, and streams it as WAV, FLAC, or Ogg
-Opus, under a grant that RBAC governs and with an audit record on the
-object.
+The API lets you listen to the sound itself over HTTP. It taps what
+a `Sink` plays or what a `Source` hears, and streams it to you as
+WAV, FLAC, or Ogg Opus. RBAC decides who may listen, and every tap
+writes an audit record on the object. Two processes are involved.
+`audio-api` is a `Deployment` in `liken-system`. It finds the node of
+the `Sink` or `Source` and forwards the stream. The `capture`
+container in the `audio-operator` pod on that node reads the sound
+from PipeWire. Nothing is stored on either side.
 
-`audio-api` is a `Deployment` in `liken-system` that finds the
-target's node and forwards the stream, and the `capture` container in
-the `audio-operator` pod on that node reads PipeWire. Nothing is
-stored on either side.
+**At a glance**
 
-This is one of three APIs that share a route shape, a vocabulary, and
-the same standards. The display and media operators hold the other
-two, and the three share no code.
+| Item | Value |
+| --- | --- |
+| Service | `https://audio-api.liken-system.svc` |
+| CA `ConfigMap` | `audio-api-ca` in `liken-system` |
+| Discovery | `/v1/audio` |
+| OpenAPI | `/v1/audio/openapi.json` |
+| Shipped `ClusterRole` | `audio-capture-viewer` |
+| Audit record | a `Captured` `Event` on the `Sink` or `Source` |
+| Route reference | [Routes](/docs/reference/routes/) |
 
-## The routes
+The display and media operators have the same kind of API for a
+`Display` and a `Player`. The three APIs share the same paths, the
+same HTTP behavior, and the same standards, but no code.
 
-The path grammar is
+## Authentication
+
+There are two ways to identify yourself: a client certificate or a
+Bearer token. The API checks for a certificate first, then for a
+token, in the same order as the Kubernetes API server.
+
+### Client certificate
+
+If your TLS connection presents a client certificate signed by the
+cluster's own certificate authority, you are that certificate's
+subject. Your user name is the subject's common name, and your groups
+are the subject's organization values. This is exactly how the
+Kubernetes API server reads a client certificate, so the credentials
+in your kubeconfig identify you here the same way they identify you
+to `kubectl`. The API reads the authority from the `ConfigMap`
+`extension-apiserver-authentication` in `kube-system`, which is where
+the API server publishes it, and reads it again every minute. A
+rotated authority takes effect with no restart. A certificate from
+any other authority ends the TLS handshake.
+
+### Bearer token
+
+If the connection has no client certificate, the API looks for a
+Bearer token. It authenticates the token with a `TokenReview` that
+requires the audience `audio-api`. That requirement keeps every pod's
+ordinary API server token out of this API. It has a real cost for
+OIDC users: a kubeconfig's OIDC token has the OIDC audience, so a
+person on OIDC also has to mint a `ServiceAccount` token.
+
+### Authorization
+
+After it knows who you are, the API sends a `SubjectAccessReview` for
+the verb `get` on `sinks/audio` or `sources/audio` in the API group
+`audio.liken.sh`, with the name of the object and an empty namespace,
+because both kinds are cluster-scoped. An info route needs `get` on
+the plain resource. The discovery and OpenAPI documents need
+authentication but no authorization. Every route authorizes before it
+reads anything, so a `403` never tells you whether a name exists.
+
+### Grants
+
+The operator ships one `ClusterRole` for a cluster owner to bind:
+`audio-capture-viewer`. It grants `get` on `sinks`, `sources`,
+`sinks/audio`, and `sources/audio`. That covers every route below the
+discovery document: the two plain resources for the info routes and
+the two subresources for the taps.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audio-capture-viewer
+rules:
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks, sources, sinks/audio, sources/audio]
+    verbs: [get]
+```
+
+The same `ClusterRole` binds to a person. Use `kind: User` with the
+common name from their certificate, or `kind: Group` with one of its
+organization values.
+
+Because the taps are subresources, an owner can write a narrower
+rule. This one grants the sound of one sink and nothing else, not
+even the info document next to it:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kitchen-listener
+rules:
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks/audio]
+    verbs: [get]
+    resourceNames: [kitchen-pci-0000-00-1f-3-hdmi-0]
+```
+
+A role that grants `resources: ["*"]` in `audio.liken.sh` already
+includes the taps, and so does `cluster-admin`.
+
+There is one existing side door this API does not close. The PipeWire
+socket is delivered through claims, so any pod with any audio claim
+on a node can already tap that node's microphone and sinks, with no
+RBAC and no record. Until that door is closed, a `Source` grant
+controls only this API.
+
+A muted `Sink` still delivers its signal to a tap. A sink's monitor
+ports carry what the sink receives, and `spec.mute` is applied after
+them. Muting a speaker silences the room and changes nothing on this
+route. A muted `Source` does tap as silence, because its mute is
+applied before the ports the tap reads. Mute is not a way to keep a
+speaker out of this API. The grant is.
+
+Every request that returned bytes writes a `Captured` `Event` on the
+`Sink` or `Source`, so `kubectl describe sink` tells you who listened
+and when.
+
+## Routes
+
+Every path has the form
 `/v1/{domain}/[namespaces/{ns}/]{plural}/{name}/{aspect}[.{ext}]`.
 `domain` is the first label of the CRD's API group, so
-`audio.liken.sh` gives `audio`. A namespaced kind puts
-`namespaces/{ns}` before its plural, as Kubernetes does.
-
-The domain segment is in the path so that one ingress can later mount
-every domain's API under one host name with no path clash, and so
-that a future `video` domain with sinks and sources of its own fits
-beside `audio`. That ingress is not v1 work; in v1 each API is its
+`audio.liken.sh` gives `audio`. A namespaced kind has
+`namespaces/{ns}` before its plural, the same as Kubernetes. The
+domain segment is in the path so that one ingress can later serve
+every domain's API under one host name without a path clash, and so
+that a future `video` domain with its own sinks and sources fits next
+to `audio`. That ingress is not part of v1. In v1, each API is its
 own `Service`.
 
-The format is chosen by the extension or by `Accept`, the span by a
-W3C Media Fragments `t=` in the query, and a knob that only changes
-the representation also goes in the query.
+You choose the format with the extension or with `Accept`. You choose
+the span with a W3C Media Fragments `t=` in the query. Any other
+parameter that only changes the representation, such as the bitrate,
+also goes in the query. No route accepts a request body, so `415`
+never occurs.
 
-| Route | Answer |
-| --- | --- |
-| `GET /v1/audio` | the discovery document, `application/json` |
-| `GET /v1/audio/openapi.json` | the OpenAPI 3.1 document |
-| `GET /v1/audio/sinks/{name}` | the sink's format and the routes that tap it |
-| `GET /v1/audio/sinks/{name}/audio` | what the speakers play now, negotiated by `Accept` |
-| `GET /v1/audio/sinks/{name}/audio.wav` | PCM in a RIFF WAVE stream |
-| `GET /v1/audio/sinks/{name}/audio.flac` | FLAC |
-| `GET /v1/audio/sinks/{name}/audio.opus` | Ogg Opus |
-| `GET /v1/audio/sinks/{name}/audio.wav?t=0,5` | five seconds, then the stream ends |
-| `GET /v1/audio/sinks/{name}/audio.wav?t=5,7` | discard five seconds, then two seconds |
-| `GET /v1/audio/sinks/{name}/audio.opus?bitrate=128` | Opus at 128 kbit/s |
-| `GET /v1/audio/sources/{name}` | the source's format and the routes that tap it |
-| `GET /v1/audio/sources/{name}/audio[.ext]` | what the microphone hears, the same forms |
-
-`HEAD` answers with the `GET`'s headers, takes no sample, and makes no
-call to the capture container (RFC 9110 section 9.3.2). A `HEAD` on an
-error carries no body (section 15.5).
-
-`OPTIONS` answers `204` with `Allow: GET, HEAD, OPTIONS` (RFC 9110
-sections 9.3.7 and 10.2.1). Any other method is `405` with the same
-`Allow` (section 15.5.6). No route accepts content, so `415` never
-occurs.
-
-[Routes](/docs/reference/routes/) gives each route from the OpenAPI
-document, with its parameters, its answers, and the fields they
-carry.
-
-## Status codes
-
-The table lists every status this API answers, with the headers each
-one carries and the standard each one comes from.
-
-| Status | When | Headers | From |
+| Method | Path | Response | Notes |
 | --- | --- | --- | --- |
-| `200` document | `/v1/audio`, `openapi.json`, an info route | `Content-Type`, `ETag`, `Cache-Control: no-cache`, `Vary: Accept`, `Link` | RFC 9110 sections 8.8.3 and 12.5.5, RFC 9111 section 5.2.2.4 |
-| `304` | `If-None-Match` matches a document's `ETag` | `ETag`, `Vary: Accept` | RFC 9110 sections 13.1.2 and 15.4.5 |
-| `200` tap | a tap runs | `Content-Type`, `Vary: Accept`, `Cache-Control: no-store`, `Accept-Ranges: none`, `Content-Disposition`, `Link`, `Transfer-Encoding: chunked` on HTTP/1.1, and `Content-Location` on the negotiated route | RFC 9110, RFC 9111 section 5.2.2.5, RFC 9112 section 7.1, RFC 6266, RFC 8288 |
-| `204` | `OPTIONS` | `Allow: GET, HEAD, OPTIONS` | RFC 9110 section 10.2.1 |
-| `400` | a `t=` the grammar refuses, `t=a,b` with `a >= b`, a begin over `captureBeginMax`, a repeated dimension, an unknown query parameter, a knob the format does not take | `application/problem+json` | RFC 9457; a deliberate departure from Media Fragments, below |
-| `401` | no client certificate and no token: `WWW-Authenticate: Bearer realm="audio-api"` alone; a token the `TokenReview` refuses: `error="invalid_token"`, `error_description` with the review's own words | `WWW-Authenticate` | RFC 9110 section 15.5.2, RFC 6750 section 3 |
-| `403` | the `SubjectAccessReview` says no | `WWW-Authenticate: Bearer realm="audio-api", error="insufficient_scope", scope="sinks/audio"` | RFC 9110 section 15.5.4, RFC 6750 section 3.1 |
-| `404` | no `Sink` or `Source` of that name, or PipeWire holds no node for it | `application/problem+json` | RFC 9110 section 15.5.5 |
-| `405` | a method other than the three | `Allow` | RFC 9110 section 15.5.6 |
-| `406` | `Accept` excludes every representation the route serves | `application/problem+json` with `acceptable` | RFC 9110 sections 12.5.1 and 15.5.7 |
-| `409` | the object is away: no `status.node`; `detail` says to power the device on | `application/problem+json`, type `away` | RFC 9110 section 15.5.10 |
-| `500` | the tap's link landed on a node other than the one asked for | `application/problem+json`, type `wrong-target` | RFC 9110 section 15.6.1 |
-| `502` | the capture container answered something that is not HTTP or not a problem document | `application/problem+json` | RFC 9110 section 15.6.3 |
-| `503` | the container is at its tap limit, refused the connection, is not ready, has no certificate yet, or PipeWire refused `pw-record` | `Retry-After: 5`, `application/problem+json` | RFC 9110 sections 15.6.4 and 10.2.3 |
-| `504` | the container sent no headers within the header timeout | `application/problem+json` | RFC 9110 section 15.6.5 |
+| GET, HEAD | `/v1/audio` | 200 `application/json` | The discovery document |
+| GET, HEAD | `/v1/audio/openapi.json` | 200 `application/openapi+json` | OpenAPI 3.1 |
+| GET, HEAD | `/v1/audio/sinks/{name}` | 200 `application/json` | The sink's format and the routes that tap it |
+| GET, HEAD | `/v1/audio/sinks/{name}/audio` | 200, negotiated | What the speakers play now. Default `audio/wav` |
+| GET, HEAD | `/v1/audio/sinks/{name}/audio.wav` | 200 `audio/wav` | PCM in a RIFF WAVE stream |
+| GET, HEAD | `/v1/audio/sinks/{name}/audio.flac` | 200 `audio/flac` | FLAC |
+| GET, HEAD | `/v1/audio/sinks/{name}/audio.opus` | 200 `audio/ogg; codecs=opus` | Ogg Opus |
+| GET, HEAD | `/v1/audio/sources/{name}` | 200 `application/json` | The source's format and the routes that tap it |
+| GET, HEAD | `/v1/audio/sources/{name}/audio[.ext]` | as the sink routes above | What the microphone hears, in the same forms |
+| OPTIONS | any of the above | 204, no body | `Allow: GET, HEAD, OPTIONS` (RFC 9110 sections 9.3.7 and 10.2.1) |
 
-`409` is used only where the caller can act, and the `detail` says
-what clears it.
+The [Routes](/docs/reference/routes/) page lists every route from the
+OpenAPI document, with its parameters, responses, and fields. The
+OpenAPI 3.1 document is generated from the router table, so the
+routes, media types, query parameters, and problem types on this page
+and in that document come from one source. It is at
+[`/v1/audio/openapi.json`](/v1/audio/openapi.json). Its media type,
+`application/openapi+json`, is registered by
+`draft-ietf-httpapi-rest-api-mediatypes` and is provisional until
+that draft is published.
 
-Every route authorizes before it reads, so a `403` never reveals that
-a name exists.
+## Query parameters
 
-## Problem documents
+| Parameter | Applies to | Values | Default | Rejected with `400` when |
+| --- | --- | --- | --- | --- |
+| `t` | every tap route | Media Fragments NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval is half-open, `[begin, end)` | none: the tap runs until you close the connection | a form the grammar rejects; `t=a,b` with `a >= b`; a begin over 60 s (`captureBeginMax`); a repeated dimension |
+| `bitrate` | `audio` and `audio.opus` | the Opus bitrate in kbit/s per channel, 6 to 256 | `opusenc` chooses one from the sample rate | WAV or FLAC; a value outside 6 to 256 |
 
-Every error is an RFC 9457 problem document. `type` is a URL. With
-`about:blank`, the `title` is the status phrase (section 4.2.1).
+`t=0,5` gives five seconds and then ends the stream. `t=5,7` discards
+five seconds and then records two. With no `end`, or with no `t=` at
+all, the tap runs until you close the connection.
+`audio.opus?bitrate=128` gives Opus at 128 kbit/s.
 
-`instance` is the request path plus `#` plus the request id, and the
-log line carries the same id.
+`t=` goes in the query because of Media Fragments section 3.1, "a URI
+query produces a new resource", and section 7.4, which says a query
+may change the media type. The parser follows section 5.1.1: it
+splits on `&` and `=` first and percent-decodes second, so
+`t=10%2C20`, `t=%6ept:10`, and `t=npt%3a10` all parse (section
+6.1.1).
 
-`detail` carries the source's own words verbatim: `pw-record`'s
-stderr, an encoder's stderr, or the API server's `status.message`.
+Media Fragments puts NPT's zero at the start of the source media
+(section 6.1.1). A live tap has no start, so this API puts the zero
+at the instant the capture container accepts the request. The
+`clock:` format that would say this directly is in the advanced Media
+Fragments document, not in version 1.0. The capture container sends
+the headers at once, starts `pw-record` at once, discards samples
+until `begin` on its own clock, and stops the encoder at `end`. So
+sample zero of the body is the request time plus `begin`, as long as
+the pipeline started within `begin`.
 
-A `406` carries `acceptable`, a list of `{"type", "href"}`. On an
-extension route it lists that route's own type and its siblings with
-their URIs (RFC 9110 section 15.5.7).
+Media Fragments tells a user agent to ignore an invalid, unknown, or
+non-existent dimension (sections 6.2, 6.2.1, 6.3.1). This API returns
+`400` instead. A query produces a new resource, so a client that
+asked for a span must not silently get something else.
 
-These are the type URIs this API answers with. The first five are
-shared with the display and media APIs, and the last one is this
-domain's own.
+## Content negotiation
 
-- `https://liken.sh/problems/no-node`
-- `https://liken.sh/problems/not-acceptable`
-- `https://liken.sh/problems/capture-busy`
-- `https://liken.sh/problems/upstream-failed`
-- `https://liken.sh/problems/away`
-- `https://audio.liken.sh/problems/wrong-target`
+An extension names one fixed representation. With no extension, the
+API chooses by `Accept` with q-values, per RFC 9110 section 12.5.1.
+Ties resolve in the server's order: WAV, FLAC, Opus. No `Accept`
+header means `audio/wav`.
 
-## Headers
+| Request | Response |
+| --- | --- |
+| `Accept` absent, `*/*`, or `audio/*` | `200`, `audio/wav`, `Content-Location: /v1/audio/sinks/kitchen/audio.wav` |
+| `Accept: audio/ogg; codecs=opus, audio/flac;q=0.5` | Opus, the higher q |
+| `Accept: audio/flac;q=0.5, audio/ogg;q=0.5` | FLAC, the server's order at equal q |
+| `Accept: audio/wav;q=0, */*` | FLAC: `q=0` excludes WAV, and the wildcard admits the rest |
+| `Accept: audio/mpeg` | `406`, and `acceptable` lists the three types with their `href`s |
 
-Documents carry `ETag`, which is the build version because the router
-table is compiled in, and `Cache-Control: no-cache`, and they answer
-`If-None-Match` with `304`.
+That table is the response to `GET /v1/audio/sinks/kitchen/audio`. On
+`audio.wav`, `Accept: audio/flac` is a `406` that lists `audio.wav`,
+`audio.flac`, and `audio.opus`. `Accept: audio/vnd.wave` gets WAV.
 
-Taps carry `Cache-Control: no-store` and `Accept-Ranges: none`,
-because a live capture has no byte identity: offset 44 of two
-requests is two different moments (RFC 9110 section 14.3).
+| Format | Media type | Aliases | Standard |
+| --- | --- | --- | --- |
+| RIFF WAVE | `audio/wav` | `audio/wave`, `audio/x-wav`, `audio/vnd.wave` | RFC 2361 for `audio/vnd.wave`, WHATWG MIME Sniffing section 6.2 for `audio/wave` |
+| FLAC | `audio/flac` | `audio/x-flac`, deprecated | RFC 9639 section 12.1 |
+| Ogg Opus | `audio/ogg; codecs=opus` | `audio/ogg` | RFC 5334 for `audio/ogg` and its `codecs` parameter, RFC 7845 section 9 for `opus` and the `.opus` extension |
 
-`Content-Disposition: inline; filename="<name>-<time>.<ext>"` names a
-browser's save (RFC 6266). The RFC 3339 UTC time has its colons
-replaced by dashes, because a colon is not legal in a file name
-everywhere a browser saves. This is the one place the time is not in
-the standard form:
-`usb-0573-1573-a34004801402-usb-audio-2026-09-16T21-02-16Z.wav`.
+The only RIFF WAVE name in the IANA registry is `audio/vnd.wave` from
+RFC 2361, an informational RFC from 1998 that no browser, ffmpeg, or
+mpv sends. The WHATWG MIME Sniffing Standard calls the RIFF signature
+`audio/wave`. Clients use `audio/wav`, so that is what the API sends.
 
-`Vary: Accept` is on every response, extension routes included, for
-RFC 9110 section 12.5.5's second purpose: it tells the recipient the
-response was subject to negotiation, where `Accept` could turn a
-`200` into a `406`.
+## Response headers
 
-`Content-Location` is on the negotiated route only, as an absolute
-path, under RFC 9110 section 8.7's clause that it is "a more specific
-identifier for the selected representation". Section 8.7's identity
-guarantee, that a `GET` on that URI would return the same
-representation, does not hold for a live capture and is not claimed.
+Every response has these headers:
 
-Every response carries `rel="service-desc"` to the OpenAPI document
-and `rel="service-doc"` to this page (RFC 8631), and
-`rel="describedby"` absolute to the resource's own API object path,
-because a relative reference would resolve against the wrong server
-(RFC 8288 section 3.1).
+| Header | Value | Standard |
+| --- | --- | --- |
+| `Content-Type` | the media type of the body | RFC 9110 |
+| `Vary` | `Accept`, on every response, extension routes included | RFC 9110 section 12.5.5 |
+| `Link` | `rel="service-desc"` to the OpenAPI document, and `rel="service-doc"` to this page | RFC 8631 |
+| `Link` | on a response about one object: `rel="describedby"` with the absolute URL of the object in the Kubernetes API | RFC 8288 section 3.1 |
 
-The extensionless route adds `rel="alternate"` for each fixed form,
-and an info document adds `rel="related"` (RFC 4287, registered) to
-its capture routes.
+A document (discovery, OpenAPI, or an info route) has an `ETag` and
+`Cache-Control: no-cache`, and answers `If-None-Match` with a `304`
+(RFC 9110 section 8.8.3, RFC 9111 section 5.2.2.4). The `ETag` is the
+build version, because the router table is compiled into the binary.
+An info document adds `rel="related"` (RFC 4287, registered) to each
+of its capture routes. A tap has these headers instead:
 
-`type` carries no media type parameters (RFC 8288 section 3.4.1).
-Only registered relations are used; an extension relation would go
-under `https://liken.sh/rel/`.
+| Header | Value | Standard |
+| --- | --- | --- |
+| `Cache-Control` | `no-store` | RFC 9111 section 5.2.2.5 |
+| `Accept-Ranges` | `none` | RFC 9110 section 14.3 |
+| `Content-Disposition` | `inline; filename="<name>-<time>.<ext>"` | RFC 6266 |
+| `Transfer-Encoding` | `chunked`, on HTTP/1.1 | RFC 9112 section 7.1 |
+| `Content-Location` | on the negotiated route only: the absolute path of the extension route that was served | RFC 9110 section 8.7 |
+| `Link` | on the route with no extension: one `rel="alternate"` per fixed format | RFC 8288 |
+
+`Content-Location` is only on the negotiated route. RFC 9110 section
+8.7 calls it "a more specific identifier for the selected
+representation". The same section says a `GET` on that URL returns
+the same representation. That is not true for a live capture, and the
+API does not claim it. `Accept-Ranges: none` says the same thing
+about bytes: a live capture has no byte identity, and byte 44 of two
+requests is two different moments.
+
+`Vary: Accept` is on the extension routes as well, where `Accept` can
+turn a `200` into a `406`. RFC 9110 section 12.5.5 gives a second
+reason for `Vary`: it tells the recipient that the response was
+subject to negotiation. The `describedby` URL is absolute because a
+relative reference would resolve against the wrong server.
+
+`Content-Disposition` gives a browser the file name to save as. The
+time in it is RFC 3339 UTC with the colons replaced by dashes, for
+example `usb-0573-1573-a34004801402-usb-audio-2026-09-16T21-02-16Z.wav`.
+A colon is not a legal file name character on every system a browser
+saves to. This is the only place the API writes a time in a
+non-standard form.
+
+The `type` attribute of a link has no media type parameters (RFC 8288
+section 3.4.1). The API only uses registered relations. An extension
+relation would go under `https://liken.sh/rel/`.
 
 ```
 Link: <https://kubernetes.default.svc/apis/audio.liken.sh/v1alpha1/sinks/kitchen>; rel="describedby",
@@ -169,87 +293,69 @@ Link: <https://kubernetes.default.svc/apis/audio.liken.sh/v1alpha1/sinks/kitchen
       </v1/audio/sinks/kitchen/audio.opus>; rel="alternate"; type="audio/ogg"
 ```
 
-(wrapped for reading; one field line on the wire)
+(wrapped here for reading; it is one header line on the wire)
 
-## The negotiation
+`HEAD` returns the same headers as `GET`. It takes no sample and does
+not call the capture container (RFC 9110 section 9.3.2). A `HEAD` on
+an error has no body (section 15.5).
 
-An extension names one fixed representation. With no extension,
-`Accept` chooses by RFC 9110 section 12.5.1 with q-values, ties
-broken by the server's preference order (WAV, FLAC, Opus), and no
-`Accept` means `audio/wav`.
+## Errors
 
-WAV is sent as `audio/wav`. The IANA registry's only RIFF WAVE name
-is `audio/vnd.wave` from RFC 2361, informational, 1998, which no
-browser, ffmpeg, or mpv sends, and the WHATWG MIME Sniffing Standard
-names the RIFF signature `audio/wave` (section 6.2). `audio/wav` is
-what clients use, so it is the name sent, and `wav`, `wave`, `x-wav`,
-and `vnd.wave` match as one representation.
+Every error is an RFC 9457 problem document,
+`application/problem+json`. `type` is a URL. When it is `about:blank`,
+the `title` is the status phrase (section 4.2.1). `instance` is the
+request path, then `#`, then the request id. The API's log line for
+the request has the same id. `detail` quotes the source of the error
+verbatim: the stderr of `pw-record`, the stderr of an encoder, or the
+`status.message` from the API server. A `406` has an `acceptable`
+list of `{"type", "href"}` objects. On an extension route it lists
+that route's own type and its siblings, with their URLs (RFC 9110
+section 15.5.7).
 
-FLAC is `audio/flac`, RFC 9639 section 12.1. `audio/x-flac` is its
-deprecated alias and matches too.
+This table lists every status this API returns, the headers that come
+with it, and the standard it comes from.
 
-Ogg Opus is `audio/ogg; codecs=opus`, because RFC 5334 registers
-`audio/ogg` with the `codecs` parameter and RFC 7845 section 9 adds
-`opus` and the `.opus` extension. A plain `audio/ogg` matches it.
+| Status | When | Headers | From |
+| --- | --- | --- | --- |
+| `200` document | `/v1/audio`, `openapi.json`, or an info route | see [Response headers](#response-headers) | RFC 9110 sections 8.8.3 and 12.5.5, RFC 9111 section 5.2.2.4 |
+| `304` | `If-None-Match` matches a document's `ETag` | `ETag`, `Vary: Accept` | RFC 9110 sections 13.1.2 and 15.4.5 |
+| `200` tap | a tap is running | see [Response headers](#response-headers) | RFC 9110, RFC 9111 section 5.2.2.5, RFC 9112 section 7.1, RFC 6266, RFC 8288 |
+| `204` | `OPTIONS` | `Allow: GET, HEAD, OPTIONS` | RFC 9110 section 10.2.1 |
+| `400` | a `t=` the grammar rejects, `t=a,b` with `a >= b`, a begin over `captureBeginMax`, a repeated dimension, an unknown query parameter, or a parameter the format does not take | `application/problem+json` | RFC 9457. This is a deliberate departure from Media Fragments, explained under [Query parameters](#query-parameters) |
+| `401` | no client certificate and no token: `WWW-Authenticate: Bearer realm="audio-api"`. A token the `TokenReview` refuses: the same header plus `error="invalid_token"` and an `error_description` with the review's own words | `WWW-Authenticate` | RFC 9110 section 15.5.2, RFC 6750 section 3 |
+| `403` | the `SubjectAccessReview` said no | `WWW-Authenticate: Bearer realm="audio-api", error="insufficient_scope", scope="sinks/audio"` | RFC 9110 section 15.5.4, RFC 6750 section 3.1 |
+| `404` | no `Sink` or `Source` has that name, or PipeWire has no node for it | `application/problem+json` | RFC 9110 section 15.5.5 |
+| `405` | a method other than GET, HEAD, or OPTIONS | `Allow` | RFC 9110 section 15.5.6 |
+| `406` | `Accept` excludes every representation the route can serve | `application/problem+json` with `acceptable` | RFC 9110 sections 12.5.1 and 15.5.7 |
+| `409` | the object is away: it has no `status.node`. `detail` tells you to power the device on | `application/problem+json`, type `away` | RFC 9110 section 15.5.10 |
+| `500` | the tap connected to a node other than the one you asked for | `application/problem+json`, type `wrong-target` | RFC 9110 section 15.6.1 |
+| `502` | the capture container answered with something that is not HTTP, or not a problem document | `application/problem+json` | RFC 9110 section 15.6.3 |
+| `503` | the capture container is at its tap limit, refused the connection, is not ready, has no certificate yet, or PipeWire refused `pw-record` | `Retry-After: 5`, `application/problem+json` | RFC 9110 sections 15.6.4 and 10.2.3 |
+| `504` | the capture container sent no headers within the header timeout | `application/problem+json` | RFC 9110 section 15.6.5 |
 
-The table is the answer on `GET /v1/audio/sinks/kitchen/audio`.
+The API uses `409` only where you can do something about it, and the
+`detail` says what.
 
-| `Accept` | Answer |
-| --- | --- |
-| absent, `*/*`, or `audio/*` | `200`, `audio/wav`, `Content-Location: /v1/audio/sinks/kitchen/audio.wav` |
-| `audio/ogg; codecs=opus, audio/flac;q=0.5` | Opus, the higher q |
-| `audio/flac;q=0.5, audio/ogg;q=0.5` | FLAC, the server's order at equal q |
-| `audio/wav;q=0, */*` | FLAC: `q=0` excludes WAV, the wildcard admits the rest |
-| `audio/mpeg` | `406`; `acceptable` lists the three with their `href`s |
+These are the problem types this API uses. The first five are shared
+with the display and media APIs. The last one belongs to this API.
 
-On `audio.wav`, `Accept: audio/flac` is `406` listing `audio.wav`,
-`audio.flac`, and `audio.opus`, and `Accept: audio/vnd.wave` is WAV.
+| Type URI | Meaning | Status |
+| --- | --- | --- |
+| `https://liken.sh/problems/no-node` | no `Sink` or `Source` has that name, or PipeWire has no node for it | `404` |
+| `https://liken.sh/problems/not-acceptable` | `Accept` excludes every representation the route can serve | `406` |
+| `https://liken.sh/problems/capture-busy` | the capture container is at its tap limit | `503` |
+| `https://liken.sh/problems/upstream-failed` | the capture container answered something this API cannot relay, or sent no headers in time | `502`, `504` |
+| `https://liken.sh/problems/away` | the object is away: it has no `status.node` | `409` |
+| `https://audio.liken.sh/problems/wrong-target` | the tap connected to a node other than the one you asked for | `500` |
 
-## Time
+## Discovery
 
-`t=` is the W3C Media Fragments temporal dimension in NPT (section
-4.2.1), in the forms `t=begin,end`, `t=begin`, or `t=,end`. The
-interval is half-open, `[begin, end)`.
-
-The query form is Media Fragments section 3.1, "a URI query produces
-a new resource", and section 7.4, which says a query approach may
-change the media type.
-
-The parser follows section 5.1.1: it splits on `&` and `=` first and
-percent-decodes second, so `t=10%2C20`, `t=%6ept:10`, and
-`t=npt%3a10` parse (section 6.1.1).
-
-Media Fragments fixes NPT's zero at the start of the source media
-(section 6.1.1). A live tap has no start, so this API defines the
-source media's zero as the instant the capture container accepts the
-request. The `clock:` format that would say this directly is in the
-advanced document, not in 1.0.
-
-Media Fragments tells a user agent to ignore an invalid, unknown, or
-non-existent dimension (sections 6.2, 6.2.1, 6.3.1). This API answers
-`400` instead, because a query produces a new resource and a client
-that asked for a span must not silently get something else. A
-repeated dimension is `400`, and `t=a,b` with `a >= b` is `400`.
-
-The origin is the instant the container accepts the request. It sends
-the headers at once, starts `pw-record` at once, discards samples
-until `begin` on its own clock, and stops the encoder at `end`, so
-sample zero of the body is origin plus `begin` whenever the pipeline
-started within `begin`. `t=5,7` discards five seconds, then records
-two.
-
-The largest `begin` is 60 seconds, the `captureBeginMax` the status
-table names, and a larger `begin` is `400`. An absent `end`, or an
-absent `t=`, means until the client closes.
-
-## Discovery and OpenAPI
-
-`GET /v1/audio` answers the shape the three APIs share.
-
-The templates are RFC 6570: `{name}` is simple expansion (section
-3.2.2), `{.ext}` label expansion (3.2.5), and `{?t,bitrate}`
-form-style query expansion (3.2.8), which percent-encodes the comma
-in `t=5,7`, a form the parsing order accepts.
+`GET /v1/audio` returns the discovery document. All three capture
+APIs use the same shape. The templates are RFC 6570. `{name}` is
+simple expansion (section 3.2.2), `{.ext}` is label expansion
+(3.2.5), and `{?t,bitrate}` is form-style query expansion (3.2.8).
+Form-style expansion percent-encodes the comma in `t=5,7`, and the
+parsing order above accepts that form.
 
 ```json
 {
@@ -281,110 +387,10 @@ in `t=5,7`, a form the parsing order accepts.
 }
 ```
 
-`GET /v1/audio/sinks/{name}` answers `node`, `connectionType`, the
-`rate` and `channels` a tap would use, `status.format` as reported,
-the formats served, and `Link: rel="related"` to each capture route,
-from one API server read and one graph read.
+## Examples
 
-The OpenAPI 3.1 document is generated from the router table, so the
-routes, media types, query parameters, and problem types on this page
-and in that document are one source.
-
-The `application/openapi+json` type is registered by
-`draft-ietf-httpapi-rest-api-mediatypes` and is provisional until
-that draft publishes.
-
-- [`/v1/audio/openapi.json`](/v1/audio/openapi.json), `application/openapi+json`
-
-## Grants
-
-A request names its caller two ways, and the API reads them in the
-order the API server reads them.
-
-A connection that carries a client certificate the cluster's own
-authority signed names that certificate's subject. The user is the
-subject's common name and the groups are its organization values,
-which is how the API server reads a client certificate. The
-credentials in a person's kubeconfig therefore name the same subject
-here that they name to `kubectl`. The API reads the authority from
-the `ConfigMap` `extension-apiserver-authentication` in
-`kube-system`, where the API server publishes it, and reads the
-`ConfigMap` again every minute, so a rotated authority opens the door
-with no restart. A certificate from any other authority ends the
-handshake.
-
-A caller that offers no certificate sends a Bearer token, which is
-authenticated with a `TokenReview` that requires the audience
-`audio-api`.
-
-Either credential is then authorized with a `SubjectAccessReview`
-for verb `get` on `sinks/audio` or `sources/audio` in group
-`audio.liken.sh`, with the resource's name and an empty namespace,
-because both kinds are cluster-scoped.
-
-An info route needs `get` on the ordinary resource. The discovery and
-OpenAPI documents need authentication and no authorization.
-
-The operator ships one `ClusterRole` for an owner to bind,
-`audio-capture-viewer`. It grants `get` on `sinks`, `sources`,
-`sinks/audio` and `sources/audio`, which is every route below the
-discovery document: the two plain resources for the info routes and
-the two subresources for the taps.
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: audio-capture-viewer
-rules:
-  - apiGroups: [audio.liken.sh]
-    resources: [sinks, sources, sinks/audio, sources/audio]
-    verbs: [get]
-```
-
-The same `ClusterRole` binds to a person. The subject is `kind: User`
-with the name in their certificate's common name, or `kind: Group`
-with one of its organization values.
-
-The subresource shape lets an owner write a narrower rule instead.
-This one grants the sound of one sink and nothing else, not even the
-information document beside it.
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: kitchen-listener
-rules:
-  - apiGroups: [audio.liken.sh]
-    resources: [sinks/audio]
-    verbs: [get]
-    resourceNames: [kitchen-pci-0000-00-1f-3-hdmi-0]
-```
-
-A role with `resources: ["*"]` in `audio.liken.sh`, and
-`cluster-admin`, gain capture on the day this ships.
-
-The claim-delivered PipeWire socket is an existing side door this API
-does not close. Any pod that holds any audio claim on a node can
-already tap that node's microphone and sinks, with no RBAC and no
-record, so a `Source` grant is a courtesy until that door closes.
-
-A muted `Sink` still carries its signal to a tap. A sink's monitor
-ports carry what the sink receives, and `spec.mute` is applied after
-them, so muting a speaker silences the room and changes nothing on
-this route. A muted `Source` does tap as silence, because there the
-mute is in front of the ports the tap reads. Mute is not a way to
-close a speaker to this API; the grant is.
-
-Every request that produces bytes writes a `Captured` `Event` on the
-`Sink` or `Source`, so `kubectl describe sink` answers who listened
-and when.
-
-## Calling it
-
-There is no `kubectl` plugin in v1. The recipe below runs through a
-port-forward or the owner's ingress.
+There is no `kubectl` plugin in v1. The recipe below works through a
+port-forward or through an ingress the cluster owner sets up.
 
 ```sh
 kubectl -n liken-system create serviceaccount listener
@@ -398,15 +404,10 @@ curl --cacert ca.crt --resolve audio-api.liken-system.svc:8443:127.0.0.1 \
     -o kitchen.wav
 ```
 
-The audience keeps every pod's ordinary API-server token out of this
-API. The cost is real for OIDC: a kubeconfig's own OIDC token carries
-the OIDC audience, so a person on OIDC mints a `ServiceAccount` token
-too.
-
-A person whose kubeconfig holds a client certificate sends that
-instead, with no `ServiceAccount` and no token to mint. The
-port-forward carries the certificate to the API untouched, because
-the forward is a TCP tunnel and the TLS handshake runs end to end.
+If your kubeconfig has a client certificate, send that instead. You
+need no `ServiceAccount` and no token. The port-forward is a TCP
+tunnel, so the TLS handshake runs end to end and the certificate
+reaches the API unchanged.
 
 ```sh
 kubectl config view --raw --minify \
@@ -419,26 +420,34 @@ curl --cacert ca.crt --cert client.crt --key client.key \
     -o kitchen.wav
 ```
 
-From a pod on the cluster network the same two files reach
-`https://audio-api.liken-system.svc/v1/audio/...` with no forward and
-no `--resolve`.
+From a pod on the cluster network, the same two files work against
+`https://audio-api.liken-system.svc/v1/audio/...` with no
+port-forward and no `--resolve`.
 
-`mpv` in place of `curl -o` listens live.
+To listen live, use `mpv` with the URL in place of `curl -o`.
 
-v1 has no CORS, so a browser reaches the API only on the same origin
-through a port-forward.
+v1 has no CORS support, so a browser can only reach the API on the
+same origin through a port-forward.
+
+## Notes
+
+**The info route.** `GET /v1/audio/sinks/{name}` returns the `node`,
+the `connectionType`, the `rate` and `channels` a tap would use, the
+`status.format` as reported, the formats served, and a
+`Link: rel="related"` to each capture route. It costs one read from
+the API server and one read of the PipeWire graph.
 
 ## Metrics
 
 Both processes serve `liken_build_info`, `/healthz`, `/readyz`, and
-`/metrics`: the API on 9200 in its own pod, and the capture container
-on 9201. The `route` label is the RFC 6570 template, never the
-concrete path, so no endpoint name enters Prometheus.
+`/metrics`: the API on port 9200 in its own pod, and the capture
+container on port 9201. The `route` label is the RFC 6570 template,
+never the concrete path, so no endpoint name reaches Prometheus.
 
 | Process | Metric | Type |
 | --- | --- | --- |
 | audio-api | `audio_api_requests_total{route,method,status}` | counter |
-| audio-api | `audio_api_request_seconds{route}` | histogram, header time |
+| audio-api | `audio_api_request_seconds{route}` | histogram, time to headers |
 | audio-api | `audio_api_streams_active{aspect}` | gauge |
 | audio-api | `audio_api_certificate_expiry_seconds` | gauge |
 | audio-capture | `audio_capture_ready` | gauge |
@@ -447,5 +456,5 @@ concrete path, so no endpoint name enters Prometheus.
 | audio-capture | `audio_captures_active{aspect}` | gauge |
 | audio-capture | `audio_capture_failures_total{reason}` | counter: `connect`, `target`, `wrong-target`, `encoder`, `limit`, `certificate` |
 
-The capture counters are emitted by the container only, so nothing
-double-counts.
+Only the capture container emits the capture counters, so nothing is
+counted twice.

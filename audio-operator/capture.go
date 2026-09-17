@@ -202,7 +202,7 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 	if !answersMethod(r.Method) {
 		w.Header().Set("Allow", allowHeader())
 		s.refuse(w, r, http.StatusMethodNotAllowed, problemBlank, id,
-			fmt.Sprintf("%s is not one of the methods this route answers", r.Method))
+			fmt.Sprintf("%s is not one of the methods this route allows", r.Method))
 		return
 	}
 	if r.Method == http.MethodOptions {

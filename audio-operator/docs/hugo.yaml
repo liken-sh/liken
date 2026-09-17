@@ -25,6 +25,14 @@ params:
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]
 
+# crdref and apiref write a span with an id on every field row, so a
+# link can point at one field. Goldmark drops raw HTML unless the
+# renderer allows it.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+
 # Every page renders twice, once as HTML for people and once as the
 # authored Markdown for agents and scripts. The two files land side
 # by side, so the Markdown twin of / is /index.md. The theme renders

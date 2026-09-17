@@ -20,9 +20,9 @@ means.
 
 Taps what a Sink plays and what a Source hears, and streams it as WAV, FLAC, or Ogg Opus.
 
-Identity is in the path, the format is in the extension or in Accept, and the span is a W3C Media Fragments t= in the query. A request carries a client certificate the cluster's own authority signed, or a ServiceAccount token minted with the audience audio-api, and a tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored: every answer streams from the node the endpoint is on.
+The path names the Sink or Source, the extension or Accept chooses the format, and a W3C Media Fragments t= in the query sets the span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audience audio-api. A tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored. Every response streams from the node the endpoint is on.
 
-## GET /v1/audio
+## `GET` `/v1/audio` {data-method=GET}
 
 The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.
 
@@ -47,7 +47,7 @@ The discovery document: every resource this API serves, with an RFC 6570 templat
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio
+## `HEAD` `/v1/audio` {data-method=HEAD}
 
 The headers of the discovery document: every resource this API serves, with an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -72,15 +72,15 @@ The headers of the discovery document: every resource this API serves, with an R
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio
+## `OPTIONS` `/v1/audio` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -88,7 +88,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/openapi.json
+## `GET` `/v1/audio/openapi.json` {data-method=GET}
 
 This document.
 
@@ -113,7 +113,7 @@ This document.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/openapi.json
+## `HEAD` `/v1/audio/openapi.json` {data-method=HEAD}
 
 The headers of this document. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -138,15 +138,15 @@ The headers of this document. HEAD takes no sample and makes no call to the capt
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/openapi.json
+## `OPTIONS` `/v1/audio/openapi.json` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -154,7 +154,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sinks/{name}
+## `GET` `/v1/audio/sinks/{name}` {data-method=GET}
 
 The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.
 
@@ -190,7 +190,7 @@ The sink's format and the routes that tap it: the node a tap targets, the rate a
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sinks/{name}
+## `HEAD` `/v1/audio/sinks/{name}` {data-method=HEAD}
 
 The headers of the sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -226,9 +226,9 @@ The headers of the sink's format and the routes that tap it: the node a tap targ
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sinks/{name}
+## `OPTIONS` `/v1/audio/sinks/{name}` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -240,7 +240,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -248,9 +248,9 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sinks/{name}/audio
+## `GET` `/v1/audio/sinks/{name}/audio` {data-method=GET}
 
-What the speakers play now, in the form Accept chooses.
+What the speakers play now, in the format chosen by Accept.
 
 **Parameters**
 
@@ -264,9 +264,9 @@ What the speakers play now, in the form Accept chooses.
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the speakers play now, in the form Accept chooses. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, in the form Accept chooses. |
-| 200 | `audio/wav` | string (binary) | What the speakers play now, in the form Accept chooses. |
+| 200 | `audio/flac` | string (binary) | What the speakers play now, in the format chosen by Accept. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, in the format chosen by Accept. |
+| 200 | `audio/wav` | string (binary) | What the speakers play now, in the format chosen by Accept. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -290,9 +290,9 @@ What the speakers play now, in the form Accept chooses.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sinks/{name}/audio
+## `HEAD` `/v1/audio/sinks/{name}/audio` {data-method=HEAD}
 
-The headers of what the speakers play now, in the form Accept chooses. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of what the speakers play now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
@@ -306,9 +306,9 @@ The headers of what the speakers play now, in the form Accept chooses. HEAD take
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the speakers play now, in the form Accept chooses. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, in the form Accept chooses. |
-| 200 | `audio/wav` | string (binary) | What the speakers play now, in the form Accept chooses. |
+| 200 | `audio/flac` | string (binary) | What the speakers play now, in the format chosen by Accept. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, in the format chosen by Accept. |
+| 200 | `audio/wav` | string (binary) | What the speakers play now, in the format chosen by Accept. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -332,9 +332,9 @@ The headers of what the speakers play now, in the form Accept chooses. HEAD take
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sinks/{name}/audio
+## `OPTIONS` `/v1/audio/sinks/{name}/audio` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -346,7 +346,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -354,7 +354,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sinks/{name}/audio.flac
+## `GET` `/v1/audio/sinks/{name}/audio.flac` {data-method=GET}
 
 What the speakers play now, as FLAC.
 
@@ -392,7 +392,7 @@ What the speakers play now, as FLAC.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sinks/{name}/audio.flac
+## `HEAD` `/v1/audio/sinks/{name}/audio.flac` {data-method=HEAD}
 
 The headers of what the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -430,9 +430,9 @@ The headers of what the speakers play now, as FLAC. HEAD takes no sample and mak
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sinks/{name}/audio.flac
+## `OPTIONS` `/v1/audio/sinks/{name}/audio.flac` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -444,7 +444,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -452,7 +452,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sinks/{name}/audio.opus
+## `GET` `/v1/audio/sinks/{name}/audio.opus` {data-method=GET}
 
 What the speakers play now, as Ogg Opus.
 
@@ -491,7 +491,7 @@ What the speakers play now, as Ogg Opus.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sinks/{name}/audio.opus
+## `HEAD` `/v1/audio/sinks/{name}/audio.opus` {data-method=HEAD}
 
 The headers of what the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -530,9 +530,9 @@ The headers of what the speakers play now, as Ogg Opus. HEAD takes no sample and
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sinks/{name}/audio.opus
+## `OPTIONS` `/v1/audio/sinks/{name}/audio.opus` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -544,7 +544,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -552,7 +552,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sinks/{name}/audio.wav
+## `GET` `/v1/audio/sinks/{name}/audio.wav` {data-method=GET}
 
 What the speakers play now, as PCM in a RIFF WAVE stream.
 
@@ -590,7 +590,7 @@ What the speakers play now, as PCM in a RIFF WAVE stream.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sinks/{name}/audio.wav
+## `HEAD` `/v1/audio/sinks/{name}/audio.wav` {data-method=HEAD}
 
 The headers of what the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -628,9 +628,9 @@ The headers of what the speakers play now, as PCM in a RIFF WAVE stream. HEAD ta
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sinks/{name}/audio.wav
+## `OPTIONS` `/v1/audio/sinks/{name}/audio.wav` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -642,7 +642,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -650,7 +650,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sources/{name}
+## `GET` `/v1/audio/sources/{name}` {data-method=GET}
 
 The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.
 
@@ -686,7 +686,7 @@ The source's format and the routes that tap it: the node a tap targets, the rate
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sources/{name}
+## `HEAD` `/v1/audio/sources/{name}` {data-method=HEAD}
 
 The headers of the source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -722,9 +722,9 @@ The headers of the source's format and the routes that tap it: the node a tap ta
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sources/{name}
+## `OPTIONS` `/v1/audio/sources/{name}` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -736,7 +736,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -744,9 +744,9 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sources/{name}/audio
+## `GET` `/v1/audio/sources/{name}/audio` {data-method=GET}
 
-What the microphone hears now, in the form Accept chooses.
+What the microphone hears now, in the format chosen by Accept.
 
 **Parameters**
 
@@ -760,9 +760,9 @@ What the microphone hears now, in the form Accept chooses.
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the microphone hears now, in the form Accept chooses. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, in the form Accept chooses. |
-| 200 | `audio/wav` | string (binary) | What the microphone hears now, in the form Accept chooses. |
+| 200 | `audio/flac` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
+| 200 | `audio/wav` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -786,9 +786,9 @@ What the microphone hears now, in the form Accept chooses.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sources/{name}/audio
+## `HEAD` `/v1/audio/sources/{name}/audio` {data-method=HEAD}
 
-The headers of what the microphone hears now, in the form Accept chooses. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of what the microphone hears now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
@@ -802,9 +802,9 @@ The headers of what the microphone hears now, in the form Accept chooses. HEAD t
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the microphone hears now, in the form Accept chooses. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, in the form Accept chooses. |
-| 200 | `audio/wav` | string (binary) | What the microphone hears now, in the form Accept chooses. |
+| 200 | `audio/flac` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
+| 200 | `audio/wav` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -828,9 +828,9 @@ The headers of what the microphone hears now, in the form Accept chooses. HEAD t
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sources/{name}/audio
+## `OPTIONS` `/v1/audio/sources/{name}/audio` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -842,7 +842,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -850,7 +850,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sources/{name}/audio.flac
+## `GET` `/v1/audio/sources/{name}/audio.flac` {data-method=GET}
 
 What the microphone hears now, as FLAC.
 
@@ -888,7 +888,7 @@ What the microphone hears now, as FLAC.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sources/{name}/audio.flac
+## `HEAD` `/v1/audio/sources/{name}/audio.flac` {data-method=HEAD}
 
 The headers of what the microphone hears now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -926,9 +926,9 @@ The headers of what the microphone hears now, as FLAC. HEAD takes no sample and 
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sources/{name}/audio.flac
+## `OPTIONS` `/v1/audio/sources/{name}/audio.flac` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -940,7 +940,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -948,7 +948,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sources/{name}/audio.opus
+## `GET` `/v1/audio/sources/{name}/audio.opus` {data-method=GET}
 
 What the microphone hears now, as Ogg Opus.
 
@@ -987,7 +987,7 @@ What the microphone hears now, as Ogg Opus.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sources/{name}/audio.opus
+## `HEAD` `/v1/audio/sources/{name}/audio.opus` {data-method=HEAD}
 
 The headers of what the microphone hears now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -1026,9 +1026,9 @@ The headers of what the microphone hears now, as Ogg Opus. HEAD takes no sample 
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sources/{name}/audio.opus
+## `OPTIONS` `/v1/audio/sources/{name}/audio.opus` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -1040,7 +1040,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 
@@ -1048,7 +1048,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 | --- | --- | --- |
 | `Allow` | 204 | GET, HEAD, OPTIONS. |
 
-## GET /v1/audio/sources/{name}/audio.wav
+## `GET` `/v1/audio/sources/{name}/audio.wav` {data-method=GET}
 
 What the microphone hears now, as PCM in a RIFF WAVE stream.
 
@@ -1086,7 +1086,7 @@ What the microphone hears now, as PCM in a RIFF WAVE stream.
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## HEAD /v1/audio/sources/{name}/audio.wav
+## `HEAD` `/v1/audio/sources/{name}/audio.wav` {data-method=HEAD}
 
 The headers of what the microphone hears now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
@@ -1124,9 +1124,9 @@ The headers of what the microphone hears now, as PCM in a RIFF WAVE stream. HEAD
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
 
-## OPTIONS /v1/audio/sources/{name}/audio.wav
+## `OPTIONS` `/v1/audio/sources/{name}/audio.wav` {data-method=OPTIONS}
 
-The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
+The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 **Parameters**
 
@@ -1138,7 +1138,7 @@ The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route answers. |
+| 204 | The methods this route allows. |
 
 **Headers**
 

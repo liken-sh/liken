@@ -4,7 +4,7 @@
     "title": "audio.liken.sh capture API",
     "version": "v1",
     "summary": "Taps what a Sink plays and what a Source hears, and streams it as WAV, FLAC, or Ogg Opus.",
-    "description": "Identity is in the path, the format is in the extension or in Accept, and the span is a W3C Media Fragments t= in the query. A request carries a client certificate the cluster's own authority signed, or a ServiceAccount token minted with the audience audio-api, and a tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored: every answer streams from the node the endpoint is on."
+    "description": "The path names the Sink or Source, the extension or Accept chooses the format, and a W3C Media Fragments t= in the query sets the span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audience audio-api. A tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored. Every response streams from the node the endpoint is on."
   },
   "servers": [
     {
@@ -139,7 +139,7 @@
         "operationId": "discoveryOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -150,7 +150,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       }
     },
     "/v1/audio/openapi.json": {
@@ -282,7 +282,7 @@
         "operationId": "openapiOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -293,7 +293,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       }
     },
     "/v1/audio/sinks/{name}": {
@@ -453,7 +453,7 @@
         "operationId": "getSinkOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -464,7 +464,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -523,7 +523,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, in the form Accept chooses.",
+            "description": "What the speakers play now, in the format chosen by Accept.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -597,7 +597,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the speakers play now, in the form Accept chooses."
+        "summary": "What the speakers play now, in the format chosen by Accept."
       },
       "head": {
         "operationId": "getSinkAudioHead",
@@ -643,7 +643,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, in the form Accept chooses.",
+            "description": "What the speakers play now, in the format chosen by Accept.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -717,13 +717,13 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the speakers play now, in the form Accept chooses. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of what the speakers play now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSinkAudioOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -734,7 +734,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -939,7 +939,7 @@
         "operationId": "getSinkAudioFlacOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -950,7 +950,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -1173,7 +1173,7 @@
         "operationId": "getSinkAudioOpusOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -1184,7 +1184,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -1389,7 +1389,7 @@
         "operationId": "getSinkAudioWavOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -1400,7 +1400,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -1571,7 +1571,7 @@
         "operationId": "getSourceOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -1582,7 +1582,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -1641,7 +1641,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, in the form Accept chooses.",
+            "description": "What the microphone hears now, in the format chosen by Accept.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1715,7 +1715,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the microphone hears now, in the form Accept chooses."
+        "summary": "What the microphone hears now, in the format chosen by Accept."
       },
       "head": {
         "operationId": "getSourceAudioHead",
@@ -1761,7 +1761,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, in the form Accept chooses.",
+            "description": "What the microphone hears now, in the format chosen by Accept.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1835,13 +1835,13 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the microphone hears now, in the form Accept chooses. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of what the microphone hears now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSourceAudioOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -1852,7 +1852,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -2057,7 +2057,7 @@
         "operationId": "getSourceAudioFlacOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -2068,7 +2068,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -2291,7 +2291,7 @@
         "operationId": "getSourceAudioOpusOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -2302,7 +2302,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
@@ -2507,7 +2507,7 @@
         "operationId": "getSourceAudioWavOptions",
         "responses": {
           "204": {
-            "description": "The methods this route answers.",
+            "description": "The methods this route allows.",
             "headers": {
               "Allow": {
                 "description": "GET, HEAD, OPTIONS.",
@@ -2518,7 +2518,7 @@
             }
           }
         },
-        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+        "summary": "The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1)."
       },
       "parameters": [
         {
