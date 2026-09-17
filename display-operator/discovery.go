@@ -77,9 +77,17 @@ type screenInfo struct {
 	Node    string   `json:"node"`
 	Width   int      `json:"width"`
 	Height  int      `json:"height"`
-	Scale   int      `json:"scale"`
+	Scale   int      `json:"scale,omitempty"`
 	Refresh int      `json:"refresh"`
-	Formats []string `json:"formats"`
+	Formats []string `json:"formats,omitempty"`
+	// What is wrong with the screen, when something is. A screen that
+	// answers carries neither: compositor is "down" for a screen whose
+	// compositor is not serving, sidecar is "unreachable" for a node
+	// this API cannot call, and detail carries the words of whichever
+	// one it is.
+	Compositor string `json:"compositor,omitempty"`
+	Sidecar    string `json:"sidecar,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 	// The graph the node encodes with, vaapi or software. A node
 	// whose driver has no VA-API post-processing converts on the CPU,
 	// which costs four times the cores at 1080p, so the document

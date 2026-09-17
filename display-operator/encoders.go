@@ -264,7 +264,7 @@ func (e *encoder) failure() error {
 	if err := e.wait(); err != nil {
 		return err
 	}
-	return fmt.Errorf("%s wrote no bytes: %s", ffmpegProgram, e.stderr.text())
+	return fmt.Errorf("%s wrote no bytes: %s", ffmpegProgram, e.stderr.lastLine())
 }
 
 // An encode that failed carries ffmpeg's last words, which is what
@@ -274,7 +274,7 @@ func (e *encoder) wait() error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%s: %w: %s", ffmpegProgram, err, e.stderr.text())
+	return fmt.Errorf("%s: %w: %s", ffmpegProgram, err, e.stderr.lastLine())
 }
 
 func (e *encoder) end() {
@@ -307,6 +307,47 @@ func (t *stderrTail) text() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return strings.TrimSpace(string(t.held))
+}
+
+// The last line ffmpeg wrote that says something, which is what a
+// problem document and a startup line carry. The whole tail reaches
+// this process's log beside it, so the one line is the answer and
+// the log is the working.
+//
+// A failed run ends in an epilogue that names no cause: the progress
+// counter, the muxer's note that it wrote nothing, and "Conversion
+// failed!". Those are skipped. A tail that is nothing but epilogue
+// answers its own last line rather than nothing at all.
+func (t *stderrTail) lastLine() string {
+	lines := strings.Split(t.text(), "\n")
+	last := ""
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line == "" {
+			continue
+		}
+		if last == "" {
+			last = line
+		}
+		if !ffmpegEpilogue(line) {
+			return line
+		}
+	}
+	return last
+}
+
+// Whether a line of ffmpeg's is part of that epilogue. The component
+// tag comes off first, because ffmpeg 8 writes the muxer's note as
+// "[out#0/mp4] Nothing was written into output file, ...".
+func ffmpegEpilogue(line string) bool {
+	if strings.HasPrefix(line, "[") {
+		if _, rest, tagged := strings.Cut(line, "] "); tagged {
+			line = rest
+		}
+	}
+	return line == "Conversion failed!" ||
+		strings.HasPrefix(line, "Nothing was written into output file") ||
+		strings.HasPrefix(line, "frame=")
 }
 
 // The sidecar's log carries its own lines and ffmpeg's together, so
@@ -348,8 +389,12 @@ func probeConversion(ctx context.Context, device string) error {
 		"-f", "null", "-")
 	tail := &stderrTail{}
 	probe.Stderr = tail
+	// One line, not the fourteen a probe run writes. A node that
+	// takes the software conversion is reporting a normal outcome,
+	// and a startup log that carries a whole ffmpeg run for it reads
+	// like a failure.
 	if err := probe.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, tail.text())
+		return fmt.Errorf("%w: %s", err, tail.lastLine())
 	}
 	return nil
 }

@@ -37,7 +37,8 @@
               "https://liken.sh/problems/capture-busy",
               "https://liken.sh/problems/upstream-failed",
               "https://display.liken.sh/problems/capture-denied",
-              "https://display.liken.sh/problems/compositor-down"
+              "https://display.liken.sh/problems/compositor-down",
+              "https://display.liken.sh/problems/encoder-failed"
             ],
             "format": "uri",
             "type": "string"
@@ -250,7 +251,7 @@
                 }
               }
             },
-            "description": "The size, scale, refresh and formats of one screen.",
+            "description": "The size, scale, refresh and formats of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
             "headers": {
               "Cache-Control": {
                 "description": "no-cache. A document is revalidated against its entity tag.",
@@ -355,7 +356,7 @@
                 }
               }
             },
-            "description": "The size, scale, refresh and formats of one screen.",
+            "description": "The size, scale, refresh and formats of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
             "headers": {
               "Cache-Control": {
                 "description": "no-cache. A document is revalidated against its entity tag.",
@@ -617,7 +618,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -790,7 +791,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -1023,7 +1024,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -1172,7 +1173,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -1396,7 +1397,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -1545,7 +1546,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -1778,7 +1779,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -1927,7 +1928,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -2151,7 +2152,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {
@@ -2300,7 +2301,7 @@
                 }
               }
             },
-            "description": "The compositor denied the capture."
+            "description": "The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed)."
           },
           "502": {
             "content": {

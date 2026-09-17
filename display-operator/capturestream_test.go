@@ -247,7 +247,14 @@ func TestTheConversionGraphIsNamedInTheEnvironment(t *testing.T) {
 func silentProgram(t *testing.T) string {
 	t.Helper()
 	path := t.TempDir() + "/ffmpeg"
-	script := "#!/bin/sh\ncat >/dev/null\necho 'Failed to create processing pipeline config: 12' >&2\nexit 251\n"
+	// The three lines ffmpeg ends such a run with: the cause, the
+	// muxer's note, and the epilogue. The detail must carry the
+	// first of them.
+	script := "#!/bin/sh\ncat >/dev/null\n" +
+		"echo '[Parsed_scale_vaapi_1 @ 0x1] Failed to create processing pipeline config: 12 (the requested VAProfile is not supported).' >&2\n" +
+		"echo '[out#0/mp4] Nothing was written into output file, because at least one of its streams received no packets.' >&2\n" +
+		"echo 'Conversion failed!' >&2\n" +
+		"exit 251\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -282,8 +289,21 @@ func TestAnEncoderThatWroteNothingIsAFailure(t *testing.T) {
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
 		t.Fatal(err)
 	}
+	if document.Type != problemEncoderFailed {
+		t.Errorf("the problem type is %q, want %q", document.Type, problemEncoderFailed)
+	}
+	// One line, the one ffmpeg ended with. The whole tail is in the
+	// sidecar's own log, where it costs a caller nothing.
 	if !strings.Contains(document.Detail, "Failed to create processing pipeline config") {
-		t.Errorf("the detail is %q, want the encoder's own last words", document.Detail)
+		t.Errorf("the detail is %q, want the encoder's own last line", document.Detail)
+	}
+	if strings.Contains(document.Detail, "\n") {
+		t.Errorf("the detail is %q, want one line", document.Detail)
+	}
+	for _, epilogue := range []string{"Conversion failed!", "Nothing was written into output file"} {
+		if strings.Contains(document.Detail, epilogue) {
+			t.Errorf("the detail is %q, which is ffmpeg's epilogue and names no cause", document.Detail)
+		}
 	}
 }
 

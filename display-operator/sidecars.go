@@ -31,6 +31,7 @@ const (
 type sidecarPod struct {
 	Namespace string
 	Name      string
+	Node      string
 	IP        string
 	Ready     bool
 }
@@ -62,6 +63,7 @@ func (i *sidecarIndex) hold(pod Pod) {
 	i.byNode[pod.Spec.NodeName] = sidecarPod{
 		Namespace: pod.Metadata.Namespace,
 		Name:      pod.Metadata.Name,
+		Node:      pod.Spec.NodeName,
 		IP:        pod.Status.PodIP,
 		Ready:     pod.Status.ready(),
 	}

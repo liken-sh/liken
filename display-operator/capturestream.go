@@ -70,7 +70,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	encoder, err := startEncoder(r.Context(), s.plan(mediaType, screen, crop, chosen))
 	if err != nil {
 		s.readings.failed(encoderReason)
-		return newFault(http.StatusInternalServerError, problemBlank, err.Error())
+		return newFault(http.StatusInternalServerError, problemEncoderFailed, err.Error())
 	}
 	defer encoder.end()
 
@@ -101,7 +101,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 			return nil
 		}
 		s.readings.failed(encoderReason)
-		return newFault(http.StatusInternalServerError, problemBlank, encoder.failure().Error())
+		return newFault(http.StatusInternalServerError, problemEncoderFailed, encoder.failure().Error())
 	}
 
 	w.Header().Set("Content-Type", contentTypeOf(mediaType))

@@ -113,7 +113,7 @@ var apiRoutes = []apiRoute{
 		kind:      infoRoute,
 		mediaType: jsonMediaType,
 		summary:   "The screen's size, scale, refresh and formats",
-		answer:    "The size, scale, refresh and formats of one screen.",
+		answer:    "The size, scale, refresh and formats of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
 	},
 	{
 		template: apiRoot + "/" + displaysPlural + "/{name}/" + screenAspect,

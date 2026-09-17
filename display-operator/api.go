@@ -209,9 +209,12 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	screen, f := s.readDisplay(name)
-	if f != nil {
-		s.refuse(w, r, route, id, start, head, f)
+	screen, notServing := s.readDisplay(name)
+	// A screen that is down still has a name, a node, and a mode, and
+	// the info route answers those. Every other route needs the
+	// screen itself, so the refusal stands for them.
+	if notServing != nil && (route.kind != infoRoute || screen == nil) {
+		s.refuse(w, r, route, id, start, head, notServing)
 		return
 	}
 
@@ -221,7 +224,11 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if route.kind == infoRoute {
-		s.serveInfo(w, r, route, name, screen, id, start, head)
+		s.serveInfo(w, r, route, name, screen, notServing, id, start, head)
+		return
+	}
+	if notServing != nil {
+		s.refuse(w, r, route, id, start, head, notServing)
 		return
 	}
 
@@ -305,7 +312,10 @@ func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	}
 	for _, condition := range screen.Status.Conditions {
 		if condition.Type == CompositorServingCondition && condition.Status == conditionFalse {
-			return nil, unavailable(problemCompositorDown, condition.Message)
+			// The object comes back with the refusal, because the
+			// info route answers a screen that is down from the
+			// object alone.
+			return screen, unavailable(problemCompositorDown, condition.Message)
 		}
 	}
 	return screen, nil
@@ -387,18 +397,20 @@ func (s *apiServer) serveDocument(w http.ResponseWriter, r *http.Request, route 
 // sidecar on the node, which has them from the compositor's wl_output
 // events. Its Links point at the routes that capture the screen with
 // the related relation. A HEAD asks the node for nothing.
+//
+// A screen whose compositor is down, and a screen whose sidecar this
+// API cannot reach, answer 200 from the Display object alone: the
+// name, the node, and the mode the Display's status reports, with
+// what is wrong beside them. A caller asking what a screen is must
+// not need the screen to be up, and the members that come from the
+// node are left out rather than guessed.
 func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name string, screen *Display, id string, start time.Time, head bool) {
+	name string, screen *Display, down *fault, id string, start time.Time, head bool) {
 	if head {
 		s.document(w, r, route, name, jsonMediaType, id, start, head, nil)
 		return
 	}
-	pod, f := s.reach(screen)
-	if f != nil {
-		s.refuse(w, r, route, id, start, head, f)
-		return
-	}
-	info, f := s.sidecar.info(r.Context(), pod, screen.Status.Connector)
+	info, f := s.screenInfo(r, screen, down)
 	if f != nil {
 		if s.hungUp(r, route, id, start) {
 			return
@@ -413,6 +425,41 @@ func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiR
 		return
 	}
 	s.document(w, r, route, name, jsonMediaType, id, start, head, body)
+}
+
+// What the info route answers with: the node's own reading of the
+// screen, or the Display's when the node cannot be asked.
+func (s *apiServer) screenInfo(r *http.Request, screen *Display, down *fault) (screenInfo, *fault) {
+	if down != nil {
+		return staticInfo(screen, "compositor", "down", down.detail), nil
+	}
+	pod, f := s.reach(screen)
+	if f != nil {
+		return staticInfo(screen, "sidecar", "unreachable", f.detail), nil
+	}
+	info, f := s.sidecar.info(r.Context(), pod, screen.Status.Connector)
+	if f != nil {
+		if r.Context().Err() != nil {
+			return screenInfo{}, f
+		}
+		return staticInfo(screen, "sidecar", "unreachable", f.detail), nil
+	}
+	return info, nil
+}
+
+// The screen as the Display states it, for a node that cannot be
+// asked. The mode status reports gives the size and the refresh;
+// scale, formats, and conversion come from the compositor and the
+// encoder, so they are absent rather than invented.
+func staticInfo(screen *Display, part, state, detail string) screenInfo {
+	width, height, refresh := screenMode(screen)
+	info := screenInfo{Width: width, Height: height, Refresh: refresh, Detail: detail}
+	if part == "compositor" {
+		info.Compositor = state
+		return info
+	}
+	info.Sidecar = state
+	return info
 }
 
 // Every document answer carries an ETag, Vary: Accept, and
@@ -541,7 +588,7 @@ func (s *apiServer) refuse(w http.ResponseWriter, r *http.Request, route apiRout
 	id string, start time.Time, head bool, f *fault) {
 	writeFault(w, f, r.URL.Path, id, head)
 	s.readings.answered(route.template, r.Method, f.status, s.now().Sub(start))
-	s.logged(r, route, id, f.detail, f.status, 0, start)
+	s.logged(r, route, id, f.logged(), f.status, 0, start)
 }
 
 // Every request writes one log line: the route as its template, the
@@ -576,12 +623,14 @@ type subjectKey struct{}
 func (s *apiServer) reach(screen *Display) (sidecarPod, *fault) {
 	pod, held := s.sidecars.on(screen.Status.Node)
 	if !held {
-		return pod, unavailable(problemNoNode,
+		return pod, unavailable(problemUpstreamFailed,
 			fmt.Sprintf("no capture sidecar runs on %s", screen.Status.Node))
 	}
 	if pod.IP == "" || !pod.Ready {
-		return pod, unavailable(problemNoNode,
-			fmt.Sprintf("the capture sidecar %s/%s on %s is not ready", pod.Namespace, pod.Name, screen.Status.Node))
+		notReady := unavailable(problemUpstreamFailed,
+			fmt.Sprintf("the capture sidecar on %s is not ready", screen.Status.Node))
+		notReady.log = fmt.Sprintf("%s/%s at %q, ready=%t", pod.Namespace, pod.Name, pod.IP, pod.Ready)
+		return pod, notReady
 	}
 	return pod, nil
 }

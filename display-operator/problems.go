@@ -22,10 +22,11 @@ const (
 	displayProblemBase = "https://display.liken.sh/problems/"
 )
 
-// The six typed problems this API answers with. no-node,
+// The seven typed problems this API answers with. no-node,
 // not-acceptable, capture-busy, and upstream-failed are shared with
-// the audio and media APIs; capture-denied and compositor-down are
-// display's own, because only this domain has a compositor.
+// the audio and media APIs. capture-denied, compositor-down, and
+// encoder-failed are display's own, because only this domain has a
+// compositor and an encoder.
 const (
 	problemBlank          = "about:blank"
 	problemNoNode         = sharedProblemBase + "no-node"
@@ -34,6 +35,7 @@ const (
 	problemUpstreamFailed = sharedProblemBase + "upstream-failed"
 	problemCaptureDenied  = displayProblemBase + "capture-denied"
 	problemCompositorDown = displayProblemBase + "compositor-down"
+	problemEncoderFailed  = displayProblemBase + "encoder-failed"
 )
 
 // Every type this API answers with, for the OpenAPI document's own
@@ -48,6 +50,7 @@ func problemTypes() []string {
 		problemUpstreamFailed,
 		problemCaptureDenied,
 		problemCompositorDown,
+		problemEncoderFailed,
 	}
 }
 
@@ -94,6 +97,12 @@ type fault struct {
 	title      string
 	detail     string
 	acceptable []acceptableForm
+	// What the log line says where the caller is told less. A
+	// refusal that names an address, a port, or a path inside the
+	// cluster tells a caller who may only read screens something
+	// about the shape of the cluster, so the caller gets the fact and
+	// the log gets the words.
+	log string
 	// The fields RFC 9110 requires beside certain status codes:
 	// Allow on a 405, Retry-After on a 503, WWW-Authenticate on a
 	// 401 and a 403.
@@ -104,13 +113,22 @@ func (f *fault) Error() string {
 	return fmt.Sprintf("%d %s: %s", f.status, f.title, f.detail)
 }
 
+// What this refusal writes to the log, which is the detail unless the
+// fault carries words of its own.
+func (f *fault) logged() string {
+	if f.log != "" {
+		return f.log
+	}
+	return f.detail
+}
+
 // A fault with no type of its own is about:blank, and its title is
 // the status phrase (RFC 9457 section 4.2.1).
 func newFault(status int, kind, detail string) *fault {
 	return &fault{status: status, kind: kind, title: faultTitle(kind, status), detail: detail}
 }
 
-// The titles of the six typed problems. A title names the condition
+// The titles of the seven typed problems. A title names the condition
 // and never the one request it happened to; detail carries that.
 var problemTitles = map[string]string{
 	problemNoNode:         "The screen cannot be reached",
@@ -119,6 +137,7 @@ var problemTitles = map[string]string{
 	problemUpstreamFailed: "The capture sidecar failed",
 	problemCaptureDenied:  "The compositor denied the capture",
 	problemCompositorDown: "The compositor is not serving this screen",
+	problemEncoderFailed:  "The encoder wrote no picture",
 }
 
 func faultTitle(kind string, status int) string {

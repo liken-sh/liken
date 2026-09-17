@@ -55,6 +55,7 @@ func newTestCluster(t *testing.T) *testCluster {
 				Status: DisplayStatus{
 					Node:      "node-1",
 					Connector: "HDMI-A-3",
+					Mode:      &DisplayMode{Kernel: "1280x720@60"},
 					Conditions: []DisplayCondition{{
 						Type:    CompositorServingCondition,
 						Status:  conditionFalse,

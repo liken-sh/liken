@@ -581,3 +581,120 @@ func TestEveryRefusalCarriesADetail(t *testing.T) {
 		})
 	}
 }
+
+// A caller asking what a screen is must not need the screen to be
+// up. A screen whose compositor is not serving answers 200 with what
+// the Display object states, and says what is wrong; the members
+// that come from the node are left out rather than guessed.
+func TestTheInfoRouteAnswersAScreenThatIsDown(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-3", nil)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a screen whose compositor is down answered %d, want 200", resp.StatusCode)
+	}
+	held := body(t, resp)
+	var info screenInfo
+	if err := json.Unmarshal([]byte(held), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != "HDMI-A-3" || info.Node != "node-1" {
+		t.Errorf("the document names %s on %s", info.Name, info.Node)
+	}
+	if info.Width != 1280 || info.Height != 720 || info.Refresh != 60 {
+		t.Errorf("the document reports %dx%d at %d, want the mode the Display states",
+			info.Width, info.Height, info.Refresh)
+	}
+	if info.Compositor != "down" {
+		t.Errorf("the document says compositor %q, want down", info.Compositor)
+	}
+	if !strings.Contains(info.Detail, "no such file or directory") {
+		t.Errorf("the document's detail is %q, want the condition's own words", info.Detail)
+	}
+	for _, absent := range []string{`"scale"`, `"formats"`, `"conversion"`} {
+		if strings.Contains(held, absent) {
+			t.Errorf("the document carries %s, which only the node can answer", absent)
+		}
+	}
+	if sidecar.called() != 0 {
+		t.Errorf("the info route called the node %d times for a screen that is down", sidecar.called())
+	}
+}
+
+// The same for a node this API cannot reach: the screen's facts, and
+// what is wrong beside them.
+func TestTheInfoRouteAnswersAnUnreachableSidecar(t *testing.T) {
+	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
+	server.sidecars = newSidecarIndex()
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1", nil)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a screen whose node cannot be reached answered %d, want 200", resp.StatusCode)
+	}
+	var info screenInfo
+	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Sidecar != "unreachable" {
+		t.Errorf("the document says sidecar %q, want unreachable", info.Sidecar)
+	}
+	if info.Width != 1920 || info.Height != 1080 {
+		t.Errorf("the document reports %dx%d, want the mode the Display states", info.Width, info.Height)
+	}
+	if !strings.Contains(info.Detail, "node-1") {
+		t.Errorf("the document's detail is %q, want the node it could not reach", info.Detail)
+	}
+}
+
+// A refusal that could not reach a node names the node and what went
+// wrong with it, and never the address, the port, or the path on the
+// private leg. Those are the shape of the cluster, and the log line
+// is where they belong.
+func TestASidecarRefusalNamesTheNodeAndNotTheAddress(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+	server.sidecar.http = &http.Client{}
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a sidecar with an unknown certificate answered %d, want 503", resp.StatusCode)
+	}
+	var document problemDocument
+	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Detail != "the capture sidecar on node-1 did not present a certificate this API trusts" {
+		t.Errorf("the detail is %q, want the node and the reason", document.Detail)
+	}
+	for _, leaked := range []string{"127.0.0.1", "9201", "/v1/display/displays/HDMI-A-1", "x509"} {
+		if strings.Contains(document.Detail, leaked) {
+			t.Errorf("the detail carries %q, which is the cluster's own shape", leaked)
+		}
+	}
+}
+
+// The encoder's own failure is a typed problem, so a client matches
+// on it, and its detail is the one line ffmpeg ended with.
+func TestAnEncoderFailureIsTyped(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	sidecar.answers(answerProblem(http.StatusInternalServerError, problemEncoderFailed,
+		"/usr/bin/ffmpeg: exit status 251: Conversion failed!", ""))
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4", nil)
+
+	var document problemDocument
+	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError || document.Type != problemEncoderFailed {
+		t.Errorf("the API answered %d %s, want 500 %s", resp.StatusCode, document.Type, problemEncoderFailed)
+	}
+	if got := resp.Header.Get("Retry-After"); got != "" {
+		t.Errorf("an encoder failure carries Retry-After %q; a retry never clears it", got)
+	}
+}

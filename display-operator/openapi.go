@@ -206,7 +206,7 @@ func responses(route apiRoute) map[string]any {
 		return answers
 	}
 	answers["400"] = problemResponse("A query the grammar refuses.")
-	answers["500"] = problemResponse("The compositor denied the capture.")
+	answers["500"] = problemResponse("The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed).")
 	answers["502"] = problemResponse("The sidecar answered something that is not HTTP or not a problem document.")
 	answers["504"] = problemResponse("The sidecar sent no headers within the header timeout.")
 	return answers

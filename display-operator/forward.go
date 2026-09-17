@@ -104,17 +104,19 @@ func (c *sidecarClient) open(ctx context.Context, pod sidecarPod, path, query st
 	if err != nil {
 		timer.Stop()
 		cancel()
-		return nil, nil, unavailable(problemUpstreamFailed, err.Error())
+		return nil, nil, unreachable(pod, err, "cannot be called")
 	}
 	resp, err := c.http.Do(req)
 	stopped := timer.Stop()
 	if err != nil {
 		cancel()
 		if !stopped {
-			return nil, nil, gatewayTimeout(fmt.Sprintf(
-				"the capture sidecar %s/%s sent no headers within %s", pod.Namespace, pod.Name, deadline))
+			late := gatewayTimeout(fmt.Sprintf(
+				"the capture sidecar on %s sent no headers within %s", pod.Node, deadline))
+			late.log = fmt.Sprintf("%s/%s at %s: %v", pod.Namespace, pod.Name, pod.IP, err)
+			return nil, nil, late
 		}
-		return nil, nil, dialFault(err)
+		return nil, nil, dialFault(pod, err)
 	}
 	if resp.StatusCode == http.StatusOK {
 		// The body outlives this call and the caller ends it. Closing
@@ -140,20 +142,39 @@ func (c *sidecarClient) open(ctx context.Context, pod sidecarPod, path, query st
 // answered and what it said was not HTTP. A cancelled request is
 // none of the three: the caller hung up, and the caller is what the
 // API checks before it answers at all.
-func dialFault(err error) *fault {
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) ||
-		errors.Is(err, syscall.ENETUNREACH) {
-		return unavailable(problemUpstreamFailed, err.Error())
+//
+// What the caller reads is the node and what went wrong with it. The
+// address, the port, and the path on the private leg are the shape
+// of the cluster, and a caller who may read screens is not owed
+// them, so they go to the log instead.
+func dialFault(pod sidecarPod, err error) *fault {
+	refused := unreachable(pod, err, "refused the connection")
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return refused
+	}
+	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) {
+		return unreachable(pod, err, "is not reachable from this API")
 	}
 	var verification *tls.CertificateVerificationError
 	if errors.As(err, &verification) {
-		return unavailable(problemUpstreamFailed, err.Error())
+		return unreachable(pod, err, "did not present a certificate this API trusts")
 	}
 	var operation *net.OpError
 	if errors.As(err, &operation) && operation.Op == "dial" {
-		return unavailable(problemUpstreamFailed, err.Error())
+		return refused
 	}
-	return upstreamFailed(err.Error())
+	broken := upstreamFailed(fmt.Sprintf("the capture sidecar on %s answered something that is not HTTP", pod.Node))
+	broken.log = fmt.Sprintf("%s/%s at %s: %v", pod.Namespace, pod.Name, pod.IP, err)
+	return broken
+}
+
+// A 503 that names the node and the class of the failure, with the
+// dial error itself in the log line.
+func unreachable(pod sidecarPod, err error, because string) *fault {
+	f := unavailable(problemUpstreamFailed,
+		fmt.Sprintf("the capture sidecar on %s %s", pod.Node, because))
+	f.log = fmt.Sprintf("%s/%s at %s: %v", pod.Namespace, pod.Name, pod.IP, err)
+	return f
 }
 
 // A problem document the sidecar sent is answered with its own

@@ -246,3 +246,69 @@ func TestThePixelFormatComesFromTheCompositor(t *testing.T) {
 		t.Errorf("the command starts %v", args[:2])
 	}
 }
+
+// The lines the drill's log carries from a probe on a chip with no
+// VA-API post-processing, in their own order. The cause is in the
+// middle and the last three lines name none.
+const probeStderr = `Input #0, lavfi, from 'color=size=64x64:duration=0.1:rate=5':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: wrapped_avframe, yuv420p, 64x64 [SAR 1:1 DAR 1:1], 5 fps, 5 tbr, 5 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (wrapped_avframe (native) -> h264 (h264_vaapi))
+[Parsed_scale_vaapi_1 @ 0x7c1e48002540] Failed to create processing pipeline config: 12 (the requested VAProfile is not supported).
+[Parsed_scale_vaapi_1 @ 0x7c1e48002540] Failed to configure output pad on Parsed_scale_vaapi_1
+[vf#0:0] Error reinitializing filters!
+[vost#0:0/h264_vaapi] Could not open encoder before EOF
+[out#0/mp4] Nothing was written into output file, because at least one of its streams received no packets.
+frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A
+Conversion failed!
+`
+
+// An error carries one line of ffmpeg's, and it is a line that says
+// something. ffmpeg ends a failed run with an epilogue that names no
+// cause, so a problem document that carried the true last line would
+// tell a caller only that the conversion failed.
+func TestTheStderrTailSkipsTheEpilogue(t *testing.T) {
+	cases := []struct {
+		name  string
+		wrote string
+		want  string
+	}{
+		{
+			name:  "a probe on a chip with no post-processing",
+			wrote: probeStderr,
+			want:  "[vost#0:0/h264_vaapi] Could not open encoder before EOF",
+		},
+		{
+			name:  "the muxer's note under a component tag",
+			wrote: "[vf#0:0] Error reinitializing filters!\n[out#0/mp4] Nothing was written into output file, because at least one of its streams received no packets.\n",
+			want:  "[vf#0:0] Error reinitializing filters!",
+		},
+		{
+			name:  "a progress counter after the cause",
+			wrote: "Device creation failed: -22.\nframe=   12 fps=8.0 q=-0.0 size=       0KiB time=00:00:00.40\n",
+			want:  "Device creation failed: -22.",
+		},
+		{
+			name:  "nothing but the epilogue",
+			wrote: "frame=    0 fps=0.0 q=0.0\nConversion failed!\n",
+			want:  "Conversion failed!",
+		},
+		{
+			name:  "one line that says something",
+			wrote: "Unrecognized option 'bogus'.\n",
+			want:  "Unrecognized option 'bogus'.",
+		},
+	}
+	for _, row := range cases {
+		t.Run(row.name, func(t *testing.T) {
+			tail := &stderrTail{}
+			if _, err := tail.Write([]byte(row.wrote)); err != nil {
+				t.Fatal(err)
+			}
+			if got := tail.lastLine(); got != row.want {
+				t.Errorf("the line is\n  %s\nwant\n  %s", got, row.want)
+			}
+		})
+	}
+}

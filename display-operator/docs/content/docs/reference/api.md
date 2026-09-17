@@ -36,7 +36,7 @@ with no path clash; until then each domain is one `Service`.
 | --- | --- | --- | --- |
 | GET, HEAD | `/v1/display` | `application/json` | The discovery document |
 | GET, HEAD | `/v1/display/openapi.json` | `application/openapi+json` | OpenAPI 3.1 |
-| GET, HEAD | `/v1/display/displays/{name}` | `application/json` | Size, scale, refresh, formats, links |
+| GET, HEAD | `/v1/display/displays/{name}` | `application/json` | Size, scale, refresh, formats, links; a screen that is down answers what the `Display` states |
 | GET, HEAD | `/v1/display/displays/{name}/screen` | negotiated | Default `image/png` |
 | GET, HEAD | `/v1/display/displays/{name}/screen.png` | `image/png` | One frame |
 | GET, HEAD | `/v1/display/displays/{name}/screen.jpg` | `image/jpeg` | One frame |
@@ -198,14 +198,24 @@ own words: the compositor's refusal, the `TokenReview`'s error, the
 The problem types the three capture APIs share live under
 `https://liken.sh/problems/`: `no-node`, `not-acceptable`,
 `capture-busy`, and `upstream-failed`. This domain's own live under
-`https://display.liken.sh/problems/`: `capture-denied`, and
-`compositor-down` for a screen whose compositor is not serving,
-which no other domain has. A screen with no node and a screen whose
-compositor is down are both a 503, and they carry different types
-because they are different waits: one is waiting for the scheduler,
-the other for the operator to start the compositor again. An error
-with no type of its own is `about:blank`, and its `title` is the
-status phrase. The OpenAPI document enumerates every type.
+`https://display.liken.sh/problems/`: `capture-denied`,
+`compositor-down` for a screen whose compositor is not serving, and
+`encoder-failed` for an encode that produced no picture. All three
+are display's own, because no other domain has a compositor or an
+encoder. A screen with no node and a screen whose compositor is down
+are both a 503, and they carry different types because they are
+different waits: one is waiting for the scheduler, the other for the
+operator to start the compositor again. An error with no type of its
+own is `about:blank`, and its `title` is the status phrase. The
+OpenAPI document enumerates every type.
+
+A `detail` that names a failure on a node names the node and what
+went wrong with it, such as "the capture sidecar on stick-1 did not
+present a certificate this API trusts". It never carries the pod's
+address, the port of the private leg, or the path this API called on
+it: those are the shape of the cluster, and a caller who may read
+screens is not owed them. The API's log line for the request carries
+the whole dial error under the same request id.
 
 ## Discovery
 
@@ -317,6 +327,26 @@ Stills are not affected: `screen.png` cost 0.9 s to first byte
 through the forward against 0.76 s from the cluster network. Read a
 stream from a pod on the cluster network, or through a `Service` the
 cluster owner exposes.
+
+If the `Secret` `display-capture-server` is deleted, the API mints it
+again within the minute, and the screens come back about 98 seconds
+after the delete. The API's part takes under 30 seconds; the rest is
+the kubelet's own sync period for the projected volume, which it does
+on its own clock and which nothing in this operator drives. A sidecar
+that still holds the old leaf keeps answering 200 throughout, because
+the leaf is still valid and this API still trusts it; the 503 appears
+only where the sidecar also restarted and found no files, and then it
+reads "the capture sidecar on `stick-1` did not present a certificate
+this API trusts".
+
+A caller asking what a screen is does not need the screen to be up.
+`GET /v1/display/displays/{name}` answers 200 for a screen whose
+compositor is not serving and for a node this API cannot reach: it
+carries the name, the node, and the size and refresh the `Display`'s
+own status reports, with `compositor: down` or `sidecar: unreachable`
+and the condition's words in `detail`. `scale`, `formats`, and
+`conversion` are read from the node, so they are absent rather than
+guessed.
 
 A capture holds the compositor's hardware planes off for its whole
 length, so a film that a plane would show is composited through the
