@@ -5,9 +5,10 @@ weight: 10
 
 # Guides
 
-The guides give the steps for the three tasks this operator exists
-for: the install, the claim that puts a window on a screen, and the
-`Layout` that puts more than one window on it.
+The guides give the steps for the four tasks this operator exists
+for: the install, the claim that puts a window on a screen, the
+`Layout` that puts more than one window on it, and the capture that
+takes a picture of one.
 
 ## How the pieces fit
 
