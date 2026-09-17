@@ -1,8 +1,9 @@
 ---
-title: Install
-weight: 10
+name: install
 description: "Install equipment-operator on a liken cluster, declare a Receiver, and put it under a Player. Use when an AV receiver must report its power, input, and volume to the cluster."
 ---
+
+This skill is the guide at https://equipment.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 This guide installs `equipment-operator` on a
 [`liken`](https://liken.sh/docs/) cluster and declares a `Receiver`.
@@ -23,7 +24,7 @@ You need:
 ## Apply the manifests
 
 This site serves the repository's
-[`deploy/`](/deploy/kustomization.yaml) directory as raw YAML, so
+[`deploy/`](https://equipment.liken.sh/deploy/kustomization.yaml) directory as raw YAML, so
 the install needs no clone:
 
     kubectl apply -n liken-system \
@@ -86,7 +87,7 @@ the remote's volume keys turn the receiver whether a film plays or
 not. The topic and its payload are the `media-operator`'s, given on
 its [players page](https://media.liken.sh/docs/reference/players/).
 What this operator reads and writes there is on
-[the receiver on the bus](/docs/reference/bus/). When a `Play`
+[the receiver on the bus](https://equipment.liken.sh/docs/reference/bus/). When a `Play`
 starts, the session powers the receiver on and selects the input,
 once. An idle screen never wakes the receiver.
 
