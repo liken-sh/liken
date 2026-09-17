@@ -1,17 +1,25 @@
 # The docs domain builds the manual for audio.liken.sh, with the
 # same `make build` every operator repository runs, so the docs
 # workflows stay one pattern. The build generates two reference
-# pages, for the Sink and Source CRDs, through crdref, the generator
-# the brand repository publishes, pinned as a tool of this module the
-# way Hugo is.
+# pages, for the Sink and Source CRDs, through crdref, and the route
+# reference from the API's own OpenAPI document, through apiref. Both
+# generators come from the brand repository, pinned as tools of this
+# module the way Hugo is.
 HUGO := go tool hugo
 CRDREF := go tool crdref
+APIREF := go tool apiref
 
 REFERENCE := content/docs/reference
 
+# The OpenAPI document is committed, under the static tree the site
+# publishes it from. `make openapi` in the repository root is the one
+# command that rewrites it, from the router table.
+OPENAPI := static/v1/audio/openapi.json
+
 GENERATED := \
 	$(REFERENCE)/sinks.md \
-	$(REFERENCE)/sources.md
+	$(REFERENCE)/sources.md \
+	$(REFERENCE)/routes.md
 
 SKILLS := go tool skills
 BASE := https://audio.liken.sh
@@ -43,3 +51,10 @@ $(REFERENCE)/sinks.md: ../deploy/crds.yaml crdref/sinks-preamble.md crdref/sinks
 
 $(REFERENCE)/sources.md: ../deploy/crds.yaml crdref/sources-preamble.md crdref/sources-postamble.md go.mod
 	$(CRDREF) -kind Source -title Sources -weight 30 -postamble crdref/sources-postamble.md $< $@ crdref/sources-preamble.md
+
+# The route reference is the OpenAPI document as a page: one section
+# per route, with its parameters, its answers, and the fields they
+# carry. The hand-written API page beside it holds the narrative,
+# which no document can generate.
+$(REFERENCE)/routes.md: $(OPENAPI) apiref/routes-preamble.md apiref/routes-postamble.md go.mod
+	$(APIREF) -title Routes -weight 55 -postamble apiref/routes-postamble.md $< $@ apiref/routes-preamble.md
