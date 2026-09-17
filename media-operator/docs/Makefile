@@ -19,6 +19,9 @@ GENERATED := \
 	$(REFERENCE)/keymaps.md \
 	$(REFERENCE)/mediapreferences.md
 
+SKILLS := go tool skills
+BASE := https://media.liken.sh
+
 .PHONY: build
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
@@ -27,6 +30,14 @@ build: $(GENERATED)
 .PHONY: test
 test:
 	go test ./...
+
+# The skills target emits every guide as an Agent Skill into ../skills,
+# one SKILL.md per guide, with the generator the brand repository
+# publishes (its README says what the output holds). The output is
+# committed, and the root test-docs target fails when it is stale.
+.PHONY: skills
+skills:
+	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
 $(REFERENCE)/players.md: ../deploy/players-crd.yaml crdref/players-preamble.md crdref/players-postamble.md go.mod
 	$(CRDREF) -title Players -weight 10 -postamble crdref/players-postamble.md $< $@ crdref/players-preamble.md

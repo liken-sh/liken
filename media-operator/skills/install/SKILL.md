@@ -1,8 +1,9 @@
 ---
-title: Install the operator
-weight: 10
+name: install
 description: "Install media-operator and its message bus on a liken cluster, choose the device classes, and watch it start. Use when a cluster has no Player, Play, Remote, Keymap, or MediaPreferences yet, when running a development build, or when removing the operator."
 ---
+
+This skill is the guide at https://media.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Install the operator
 
@@ -37,7 +38,7 @@ use. Each hardware operator's manual gives the YAML for its class:
 ## Apply the manifests
 
 This site serves the repository's
-[`deploy/`](/deploy/kustomization.yaml) directory as raw YAML, so
+[`deploy/`](https://media.liken.sh/deploy/kustomization.yaml) directory as raw YAML, so
 the install needs no clone:
 
     kubectl apply -n liken-system \
@@ -73,7 +74,7 @@ takes a raw YAML URL as a resource:
 
 A clone works too: `kubectl apply -k deploy/` from the repository
 applies the same files through
-[`deploy/kustomization.yaml`](/deploy/kustomization.yaml).
+[`deploy/kustomization.yaml`](https://media.liken.sh/deploy/kustomization.yaml).
 
 ## Running a development build
 
@@ -125,8 +126,8 @@ what it found:
     media.liken.sh: operating 0 plays and 0 remotes over bus.liken-system.svc:1883
 
 From here, the work is declaring resources. The
-[reference](/docs/reference/) describes each one, and
-[the message bus](/docs/reference/bus/) describes every topic the
+[reference](https://media.liken.sh/docs/reference/) describes each one, and
+[the message bus](https://media.liken.sh/docs/reference/bus/) describes every topic the
 pods and your own programs share.
 
 ## Read the player's full output
