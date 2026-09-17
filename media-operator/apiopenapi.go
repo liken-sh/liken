@@ -116,7 +116,7 @@ func openAPIDocument() []byte {
 		Info: openAPIInfo{
 			Title:   "media-api",
 			Version: "v1alpha1",
-			Description: "media-api answers HTTP for a Player. Its screen routes redirect to " +
+			Description: "media-api serves the HTTP routes for a Player. Its screen routes redirect to " +
 				"display-api, its audio routes redirect to audio-api, and its media routes " +
 				"compose the two into one muxed stream.",
 		},
@@ -162,7 +162,7 @@ func openAPIDocument() []byte {
 			Head: &head,
 			Options: &openAPIOperation{
 				OperationID: operation.OperationID + "Options",
-				Summary:     "The methods this route answers.",
+				Summary:     "The methods this route allows.",
 				Responses: map[string]openAPIResponse{
 					"204": {Description: "Allow names GET, HEAD, and OPTIONS."},
 				},
@@ -273,7 +273,7 @@ func openAPISummary(template string) string {
 		mediaAspectName:  "The Player's screen and sound in one stream",
 	}[aspect.name]
 	if form.Type == "" {
-		return subject + ", in the type the Accept field chooses."
+		return subject + ", in the format chosen by Accept."
 	}
 	return subject + ", as " + form.Type + "."
 }

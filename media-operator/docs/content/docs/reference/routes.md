@@ -17,9 +17,9 @@ a `Player`, and what each error means.
 
 `media-api`, version `v1alpha1`, described in OpenAPI 3.1.0.
 
-media-api answers HTTP for a Player. Its screen routes redirect to display-api, its audio routes redirect to audio-api, and its media routes compose the two into one muxed stream.
+media-api serves the HTTP routes for a Player. Its screen routes redirect to display-api, its audio routes redirect to audio-api, and its media routes compose the two into one muxed stream.
 
-## GET /v1/media
+## `GET` `/v1/media` {data-method=GET}
 
 The routes this API serves, as RFC 6570 templates.
 
@@ -33,7 +33,7 @@ The routes this API serves, as RFC 6570 templates.
 | 403 | The SubjectAccessReview denied the subject. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 
-## HEAD /v1/media
+## `HEAD` `/v1/media` {data-method=HEAD}
 
 The routes this API serves, as RFC 6570 templates. The headers alone, with no body, no capture, and no upstream call.
 
@@ -47,9 +47,9 @@ The routes this API serves, as RFC 6570 templates. The headers alone, with no bo
 | 403 | The SubjectAccessReview denied the subject. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 
-## OPTIONS /v1/media
+## `OPTIONS` `/v1/media` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -57,7 +57,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}` {data-method=GET}
 
 The Player's Display, its Sinks, whether a Play runs, and the stream count.
 
@@ -79,7 +79,7 @@ The Player's Display, its Sinks, whether a Play runs, and the stream count.
 | 404 | No Player of that name. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}` {data-method=HEAD}
 
 The Player's Display, its Sinks, whether a Play runs, and the stream count. The headers alone, with no body, no capture, and no upstream call.
 
@@ -101,9 +101,9 @@ The Player's Display, its Sinks, whether a Play runs, and the stream count. The 
 | 404 | No Player of that name. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -111,9 +111,9 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/audio
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/audio` {data-method=GET}
 
-The Player's sound, in the type the Accept field chooses.
+The Player's sound, in the format chosen by Accept.
 
 **Parameters**
 
@@ -140,9 +140,9 @@ The Player's sound, in the type the Accept field chooses.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/audio
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/audio` {data-method=HEAD}
 
-The Player's sound, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.
+The Player's sound, in the format chosen by Accept. The headers alone, with no body, no capture, and no upstream call.
 
 **Parameters**
 
@@ -169,9 +169,9 @@ The Player's sound, in the type the Accept field chooses. The headers alone, wit
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/audio
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/audio` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -179,7 +179,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/audio.flac
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/audio.flac` {data-method=GET}
 
 The Player's sound, as audio/flac.
 
@@ -208,7 +208,7 @@ The Player's sound, as audio/flac.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/audio.flac
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/audio.flac` {data-method=HEAD}
 
 The Player's sound, as audio/flac. The headers alone, with no body, no capture, and no upstream call.
 
@@ -237,9 +237,9 @@ The Player's sound, as audio/flac. The headers alone, with no body, no capture, 
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/audio.flac
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/audio.flac` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -247,7 +247,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/audio.opus
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/audio.opus` {data-method=GET}
 
 The Player's sound, as audio/ogg.
 
@@ -276,7 +276,7 @@ The Player's sound, as audio/ogg.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/audio.opus
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/audio.opus` {data-method=HEAD}
 
 The Player's sound, as audio/ogg. The headers alone, with no body, no capture, and no upstream call.
 
@@ -305,9 +305,9 @@ The Player's sound, as audio/ogg. The headers alone, with no body, no capture, a
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/audio.opus
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/audio.opus` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -315,7 +315,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/audio.wav
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/audio.wav` {data-method=GET}
 
 The Player's sound, as audio/wav.
 
@@ -344,7 +344,7 @@ The Player's sound, as audio/wav.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/audio.wav
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/audio.wav` {data-method=HEAD}
 
 The Player's sound, as audio/wav. The headers alone, with no body, no capture, and no upstream call.
 
@@ -373,9 +373,9 @@ The Player's sound, as audio/wav. The headers alone, with no body, no capture, a
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/audio.wav
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/audio.wav` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -383,9 +383,9 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/media
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/media` {data-method=GET}
 
-The Player's screen and sound in one stream, in the type the Accept field chooses.
+The Player's screen and sound in one stream, in the format chosen by Accept.
 
 **Parameters**
 
@@ -418,9 +418,9 @@ The Player's screen and sound in one stream, in the type the Accept field choose
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/media
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/media` {data-method=HEAD}
 
-The Player's screen and sound in one stream, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.
+The Player's screen and sound in one stream, in the format chosen by Accept. The headers alone, with no body, no capture, and no upstream call.
 
 **Parameters**
 
@@ -453,9 +453,9 @@ The Player's screen and sound in one stream, in the type the Accept field choose
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/media
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/media` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -463,7 +463,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/media.mkv
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/media.mkv` {data-method=GET}
 
 The Player's screen and sound in one stream, as video/matroska.
 
@@ -498,7 +498,7 @@ The Player's screen and sound in one stream, as video/matroska.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/media.mkv
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/media.mkv` {data-method=HEAD}
 
 The Player's screen and sound in one stream, as video/matroska. The headers alone, with no body, no capture, and no upstream call.
 
@@ -533,9 +533,9 @@ The Player's screen and sound in one stream, as video/matroska. The headers alon
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/media.mkv
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/media.mkv` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -543,7 +543,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/media.mp4
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/media.mp4` {data-method=GET}
 
 The Player's screen and sound in one stream, as video/mp4.
 
@@ -578,7 +578,7 @@ The Player's screen and sound in one stream, as video/mp4.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/media.mp4
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/media.mp4` {data-method=HEAD}
 
 The Player's screen and sound in one stream, as video/mp4. The headers alone, with no body, no capture, and no upstream call.
 
@@ -613,9 +613,9 @@ The Player's screen and sound in one stream, as video/mp4. The headers alone, wi
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/media.mp4
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/media.mp4` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -623,9 +623,9 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/screen
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/screen` {data-method=GET}
 
-The Player's screen, in the type the Accept field chooses.
+The Player's screen, in the format chosen by Accept.
 
 **Parameters**
 
@@ -656,9 +656,9 @@ The Player's screen, in the type the Accept field chooses.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/screen
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/screen` {data-method=HEAD}
 
-The Player's screen, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.
+The Player's screen, in the format chosen by Accept. The headers alone, with no body, no capture, and no upstream call.
 
 **Parameters**
 
@@ -689,9 +689,9 @@ The Player's screen, in the type the Accept field chooses. The headers alone, wi
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/screen
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/screen` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -699,7 +699,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/screen.jpg
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/screen.jpg` {data-method=GET}
 
 The Player's screen, as image/jpeg.
 
@@ -732,7 +732,7 @@ The Player's screen, as image/jpeg.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/screen.jpg
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/screen.jpg` {data-method=HEAD}
 
 The Player's screen, as image/jpeg. The headers alone, with no body, no capture, and no upstream call.
 
@@ -765,9 +765,9 @@ The Player's screen, as image/jpeg. The headers alone, with no body, no capture,
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/screen.jpg
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/screen.jpg` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -775,7 +775,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg` {data-method=GET}
 
 The Player's screen, as multipart/x-mixed-replace.
 
@@ -808,7 +808,7 @@ The Player's screen, as multipart/x-mixed-replace.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg` {data-method=HEAD}
 
 The Player's screen, as multipart/x-mixed-replace. The headers alone, with no body, no capture, and no upstream call.
 
@@ -841,9 +841,9 @@ The Player's screen, as multipart/x-mixed-replace. The headers alone, with no bo
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -851,7 +851,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/screen.mp4
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/screen.mp4` {data-method=GET}
 
 The Player's screen, as video/mp4.
 
@@ -884,7 +884,7 @@ The Player's screen, as video/mp4.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/screen.mp4
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/screen.mp4` {data-method=HEAD}
 
 The Player's screen, as video/mp4. The headers alone, with no body, no capture, and no upstream call.
 
@@ -917,9 +917,9 @@ The Player's screen, as video/mp4. The headers alone, with no body, no capture, 
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/screen.mp4
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/screen.mp4` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -927,7 +927,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/namespaces/{namespace}/players/{name}/screen.png
+## `GET` `/v1/media/namespaces/{namespace}/players/{name}/screen.png` {data-method=GET}
 
 The Player's screen, as image/png.
 
@@ -960,7 +960,7 @@ The Player's screen, as image/png.
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## HEAD /v1/media/namespaces/{namespace}/players/{name}/screen.png
+## `HEAD` `/v1/media/namespaces/{namespace}/players/{name}/screen.png` {data-method=HEAD}
 
 The Player's screen, as image/png. The headers alone, with no body, no capture, and no upstream call.
 
@@ -993,9 +993,9 @@ The Player's screen, as image/png. The headers alone, with no body, no capture, 
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
-## OPTIONS /v1/media/namespaces/{namespace}/players/{name}/screen.png
+## `OPTIONS` `/v1/media/namespaces/{namespace}/players/{name}/screen.png` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 
@@ -1003,7 +1003,7 @@ The methods this route answers.
 | --- | --- |
 | 204 | Allow names GET, HEAD, and OPTIONS. |
 
-## GET /v1/media/openapi.json
+## `GET` `/v1/media/openapi.json` {data-method=GET}
 
 This OpenAPI document.
 
@@ -1017,7 +1017,7 @@ This OpenAPI document.
 | 403 | The SubjectAccessReview denied the subject. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 
-## HEAD /v1/media/openapi.json
+## `HEAD` `/v1/media/openapi.json` {data-method=HEAD}
 
 This OpenAPI document. The headers alone, with no body, no capture, and no upstream call.
 
@@ -1031,9 +1031,9 @@ This OpenAPI document. The headers alone, with no body, no capture, and no upstr
 | 403 | The SubjectAccessReview denied the subject. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 
-## OPTIONS /v1/media/openapi.json
+## `OPTIONS` `/v1/media/openapi.json` {data-method=OPTIONS}
 
-The methods this route answers.
+The methods this route allows.
 
 **Answers**
 

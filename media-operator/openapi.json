@@ -3,7 +3,7 @@
   "info": {
     "title": "media-api",
     "version": "v1alpha1",
-    "description": "media-api answers HTTP for a Player. Its screen routes redirect to display-api, its audio routes redirect to audio-api, and its media routes compose the two into one muxed stream."
+    "description": "media-api serves the HTTP routes for a Player. Its screen routes redirect to display-api, its audio routes redirect to audio-api, and its media routes compose the two into one muxed stream."
   },
   "servers": [
     {
@@ -64,7 +64,7 @@
       },
       "options": {
         "operationId": "discoveryOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -159,7 +159,7 @@
       },
       "options": {
         "operationId": "playerOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -170,7 +170,7 @@
     "/v1/media/namespaces/{namespace}/players/{name}/audio": {
       "get": {
         "operationId": "playerAudio",
-        "summary": "The Player's sound, in the type the Accept field chooses.",
+        "summary": "The Player's sound, in the format chosen by Accept.",
         "parameters": [
           {
             "name": "namespace",
@@ -241,7 +241,7 @@
       },
       "head": {
         "operationId": "playerAudioHead",
-        "summary": "The Player's sound, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.",
+        "summary": "The Player's sound, in the format chosen by Accept. The headers alone, with no body, no capture, and no upstream call.",
         "parameters": [
           {
             "name": "namespace",
@@ -312,7 +312,7 @@
       },
       "options": {
         "operationId": "playerAudioOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -465,7 +465,7 @@
       },
       "options": {
         "operationId": "playerAudioFlacOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -618,7 +618,7 @@
       },
       "options": {
         "operationId": "playerAudioOpusOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -771,7 +771,7 @@
       },
       "options": {
         "operationId": "playerAudioWavOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -782,7 +782,7 @@
     "/v1/media/namespaces/{namespace}/players/{name}/media": {
       "get": {
         "operationId": "playerMedia",
-        "summary": "The Player's screen and sound in one stream, in the type the Accept field chooses.",
+        "summary": "The Player's screen and sound in one stream, in the format chosen by Accept.",
         "parameters": [
           {
             "name": "namespace",
@@ -891,7 +891,7 @@
       },
       "head": {
         "operationId": "playerMediaHead",
-        "summary": "The Player's screen and sound in one stream, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.",
+        "summary": "The Player's screen and sound in one stream, in the format chosen by Accept. The headers alone, with no body, no capture, and no upstream call.",
         "parameters": [
           {
             "name": "namespace",
@@ -1000,7 +1000,7 @@
       },
       "options": {
         "operationId": "playerMediaOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -1229,7 +1229,7 @@
       },
       "options": {
         "operationId": "playerMediaMkvOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -1458,7 +1458,7 @@
       },
       "options": {
         "operationId": "playerMediaMp4Options",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -1469,7 +1469,7 @@
     "/v1/media/namespaces/{namespace}/players/{name}/screen": {
       "get": {
         "operationId": "playerScreen",
-        "summary": "The Player's screen, in the type the Accept field chooses.",
+        "summary": "The Player's screen, in the format chosen by Accept.",
         "parameters": [
           {
             "name": "namespace",
@@ -1568,7 +1568,7 @@
       },
       "head": {
         "operationId": "playerScreenHead",
-        "summary": "The Player's screen, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.",
+        "summary": "The Player's screen, in the format chosen by Accept. The headers alone, with no body, no capture, and no upstream call.",
         "parameters": [
           {
             "name": "namespace",
@@ -1667,7 +1667,7 @@
       },
       "options": {
         "operationId": "playerScreenOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -1876,7 +1876,7 @@
       },
       "options": {
         "operationId": "playerScreenJpgOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -2085,7 +2085,7 @@
       },
       "options": {
         "operationId": "playerScreenMjpegOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -2294,7 +2294,7 @@
       },
       "options": {
         "operationId": "playerScreenMp4Options",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -2503,7 +2503,7 @@
       },
       "options": {
         "operationId": "playerScreenPngOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
@@ -2556,7 +2556,7 @@
       },
       "options": {
         "operationId": "openapiOptions",
-        "summary": "The methods this route answers.",
+        "summary": "The methods this route allows.",
         "responses": {
           "204": {
             "description": "Allow names GET, HEAD, and OPTIONS."
