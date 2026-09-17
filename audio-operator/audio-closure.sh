@@ -40,7 +40,11 @@ stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
 #
 # The SPA plugins are the media layer: audioconvert and audiomixer
 # for every adapter node, support for the loop and the logger, dbus
-# for the client libraries that ask for a bus.
+# for the client libraries that ask for a bus. libspa-support.so also
+# carries the support.null-audio-sink factory, which the release gate
+# builds a sink from: the runner has no sound card, so without one the
+# gate's capture stream has nothing to link to and never settles into
+# the graph.
 #
 # libspa-alsa.so opens no card on a machine that has none, so no
 # runtime check reports it loading. It is named here because a machine

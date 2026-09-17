@@ -201,6 +201,15 @@ jobs:
             docker rm -f probe > /dev/null
             [ "$code" = 0 ]
           }
+          # One pw-dump into a file, for the checks that read the graph
+          # rather than an exit status.
+          graph() {
+            docker rm -f probe > /dev/null 2>&1 || true
+            start probe /usr/bin/pw-dump
+            timeout 20 docker wait probe > /dev/null || true
+            docker logs probe > "$1" 2> /dev/null || true
+            docker rm -f probe > /dev/null
+          }
           # The probe the pod's startupProbe runs. A socket nobody can reach
           # is a broken image.
           answers() {
@@ -233,42 +242,67 @@ jobs:
           probe /usr/bin/pw-metadata -n settings \
             || { echo "pw-metadata did not read the settings"; exit 1; }
 
+          # A sink for the recorder below to tap. The runner has no
+          # sound card, so the graph has no sink at all and a capture
+          # stream with nowhere to link fails with "no target node
+          # available" before it ever settles into the graph. A null
+          # sink is a node the support plugin builds in software,
+          # needs no hardware, and carries monitor ports like any
+          # other sink, so the tap below is the tap the capture
+          # container makes. object.linger keeps the node after
+          # pw-cli exits.
+          probe /usr/bin/pw-cli create-node adapter \
+            '{ factory.name=support.null-audio-sink node.name=gate-sink media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' \
+            || { docker logs pipewire; echo "pw-cli did not create the null sink"; exit 1; }
+          for attempt in $(seq 10); do
+            graph graph.json
+            grep -q '"node.name": "gate-sink"' graph.json && break
+            sleep 1
+          done
+          grep -q '"node.name": "gate-sink"' graph.json || {
+            docker logs pipewire
+            echo "the null sink never appeared in the graph"
+            exit 1
+          }
+
           # The listing above proves the files exist. This proves they
           # load: pw-record opens libsndfile and the PipeWire client
           # libraries, and each encoder opens its own codec library,
           # so a run of each one against the live graph is what
-          # reports a library the closure lost. pw-record with no
-          # source to read still starts, and starting is the load this
-          # check is for, so the run is bounded by a sleep and its
-          # exit status is not read. The loader's own complaint on
-          # stderr is the one signal.
+          # reports a library the closure lost. The loader's own
+          # complaint on stderr is one signal.
           #
           # The -P line is the one the capture container builds: a SPA
           # JSON object carrying the name the confirmation matches on
           # and, for a sink, PipeWire's own monitor key. A pw-cat that
           # refused that object would leave every tap unconfirmed, and
-          # the graph is the only place that shows, so the run here
-          # asks pw-dump whether the node arrived under its name.
+          # the graph is the only place that shows, so the graph is
+          # read while the recorder still runs and asked whether the
+          # node arrived under its name.
           docker rm -f recorder > /dev/null 2>&1 || true
           docker run -d --name recorder -v "audio-release:$runtime" \
             -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
             --entrypoint /usr/bin/pw-record "$image" \
             -P '{ node.name = "audio-capture-release", stream.capture.sink = true }' \
+            --target gate-sink \
             --raw --format s16 --rate 48000 --channels 2 - > /dev/null
-          sleep 3
-          docker logs recorder > pw-record.out 2> pw-record.err || true
+          found=no
+          for attempt in $(seq 10); do
+            sleep 1
+            graph graph.json
+            if grep -q '"node.name": "audio-capture-release"' graph.json; then
+              found=yes
+              break
+            fi
+          done
+          docker logs recorder > /dev/null 2> pw-record.err || true
+          docker rm -f recorder > /dev/null
           if grep -qi 'error while loading shared libraries' pw-record.err; then
             cat pw-record.err
-            docker rm -f recorder > /dev/null
             echo "pw-record is missing a library"
             exit 1
           fi
-          docker rm -f probe > /dev/null 2>&1 || true
-          start probe /usr/bin/pw-dump
-          timeout 20 docker wait probe > /dev/null || true
-          docker logs probe > graph.json 2>/dev/null || true
-          docker rm -f probe recorder > /dev/null
-          grep -q '"node.name": "audio-capture-release"' graph.json || {
+          [ "$found" = yes ] || {
             cat pw-record.err
             echo "pw-record did not take the properties object the capture container builds"
             exit 1
