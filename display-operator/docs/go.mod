@@ -15,12 +15,13 @@ go 1.26.5
 
 tool (
 	github.com/gohugoio/hugo
+	github.com/liken-sh/brand/apiref
 	github.com/liken-sh/brand/coverage
 	github.com/liken-sh/brand/crdref
 	github.com/liken-sh/brand/skills
 )
 
-require github.com/liken-sh/brand v0.0.0-20260917021826-107cd574b3ba
+require github.com/liken-sh/brand v0.0.0-20260917115021-60491f065f7e
 
 require (
 	cel.dev/expr v0.25.1 // indirect

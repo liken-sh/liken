@@ -1,18 +1,22 @@
 # The docs domain builds the manual for display.liken.sh, with the
 # same `make build` every operator repository runs, so the docs
 # workflows stay one pattern. The build generates a reference page for
-# each CRD, the Display and the Layout, through crdref, the generator
-# the brand repository publishes, pinned as a tool of this module the
-# way Hugo is.
+# each CRD, the Display and the Layout, through crdref, and the route
+# reference from the API's own OpenAPI document, through apiref. Both
+# generators come from the brand repository, pinned as tools of this
+# module the way Hugo is.
 HUGO := go tool hugo
 CRDREF := go tool crdref
+APIREF := go tool apiref
 
 REFERENCE := content/docs/reference
+OPENAPI := $(REFERENCE)/openapi.json
 
 GENERATED := \
 	$(REFERENCE)/displays.md \
 	$(REFERENCE)/layouts.md \
-	$(REFERENCE)/openapi.json
+	$(REFERENCE)/routes.md \
+	$(OPENAPI)
 
 SKILLS := go tool skills
 BASE := https://display.liken.sh
@@ -48,8 +52,15 @@ $(REFERENCE)/displays.md: ../deploy/displays.yaml crdref/displays-preamble.md cr
 # The API's description is generated from the router itself, by the
 # operator's own binary, so a route the program serves cannot be
 # missing from the page that describes it.
-$(REFERENCE)/openapi.json: $(wildcard ../*.go) ../go.mod
+$(OPENAPI): $(wildcard ../*.go) ../go.mod
 	cd .. && go run . openapi > docs/$@
+
+# The route reference is that same document as a page: one section
+# per route, with its parameters, its answers, and the fields they
+# carry. The hand-written API page beside it holds the narrative,
+# which no document can generate.
+$(REFERENCE)/routes.md: $(OPENAPI) apiref/routes-preamble.md apiref/routes-postamble.md go.mod
+	$(APIREF) -title Routes -weight 55 -postamble apiref/routes-postamble.md $< $@ apiref/routes-preamble.md
 
 # The Layout page carries no postamble: every rule a reader needs is
 # in the schema's own descriptions, and the guide holds the worked
