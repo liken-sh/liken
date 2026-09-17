@@ -869,11 +869,6 @@ Not run, in either drill:
 
 ## Open problems
 
-- **The side door.** The claim-delivered socket lets any audio-claim
-  holder on a node tap that node's microphone and sinks, because
-  PipeWire's permission model does not separate playback from
-  capture. Closing it needs a distinguishing property on the capture
-  client and a narrower `access.rules` match, or one socket per role.
 - **The aggregated `APIService` end state.** It needs its own group,
   because `audio.liken.sh` is taken by the CRDs and an `APIService`
   for it would stop them being served, so the RBAC vocabulary would
