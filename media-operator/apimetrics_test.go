@@ -5,6 +5,7 @@ package main
 // labels the plan's table states.
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func TestTheApiSeriesRecordWhatTheyName(t *testing.T) {
 
 	metrics.observeRequest(apiPlayerTemplate, "GET", 200, 250*time.Millisecond)
 	metrics.observeUpstream(upstreamDisplay, "503")
-	metrics.observeOffset(0.04)
+	metrics.observeOffset(-0.04)
 	metrics.observeExpiry(3600)
 	release := metrics.holdStream(mediaAspectName)
 
@@ -50,10 +51,46 @@ func TestTheApiSeriesRecordWhatTheyName(t *testing.T) {
 	}
 	mustMatchAll(t, names, []string{
 		"media_api_certificate_expiry_seconds",
+		"media_api_compose_offset_last_seconds",
 		"media_api_compose_offset_seconds",
 		"media_api_request_seconds",
 		"media_api_requests_total",
 		"media_api_streams_active",
 		"media_api_upstream_requests_total",
 	})
+}
+
+// A correction runs either way, so the histogram carries its size and
+// the gauge carries its sign. The drill found every negative offset in
+// the first bucket of a histogram that had no room below zero.
+func TestTheOffsetHistogramCarriesTheSizeAndTheGaugeTheSign(t *testing.T) {
+	metrics := newAPIMetrics("test")
+
+	metrics.observeOffset(-0.86)
+	metrics.observeOffset(0.02)
+
+	mustMatch(t, testutil.ToFloat64(metrics.composeOffsetLast), 0.02)
+	mustMatchAll(t, offsetBuckets(t, metrics), []string{
+		"0.001:0", "0.005:0", "0.01:0", "0.033:1", "0.1:1",
+		"0.25:1", "0.5:1", "1:2", "2:2",
+	})
+}
+
+// offsetBuckets reads each bucket's upper bound and its count, so a
+// test names the buckets the histogram was built with.
+func offsetBuckets(t *testing.T, metrics *apiMetrics) []string {
+	t.Helper()
+	gathered, err := metrics.registry.Gather()
+	mustSucceed(t, err)
+	var read []string
+	for _, family := range gathered {
+		if family.GetName() != "media_api_compose_offset_seconds" {
+			continue
+		}
+		for _, bucket := range family.GetMetric()[0].GetHistogram().GetBucket() {
+			read = append(read, strconv.FormatFloat(bucket.GetUpperBound(), 'g', -1, 64)+
+				":"+strconv.FormatUint(bucket.GetCumulativeCount(), 10))
+		}
+	}
+	return read
 }

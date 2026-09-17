@@ -50,7 +50,9 @@ func TestTheComposedContentTypeCarriesTheUpstreamsProfile(t *testing.T) {
 		codec string
 		want  string
 	}{
-		{"mp4 with a profile", composedForms[0], true, "avc1.64001f", `video/mp4; codecs="avc1.64001f,Opus"`},
+		{"mp4 with a profile", composedForms[0], true, "avc1.640029", `video/mp4; codecs="avc1.640029,Opus"`},
+		{"mp4 with several video elements", composedForms[0], true, "avc1.640029,avc1.42c00c",
+			`video/mp4; codecs="avc1.640029,avc1.42c00c,Opus"`},
 		{"mp4 with no profile", composedForms[0], true, "", "video/mp4"},
 		{"mp4 with no screen", composedForms[0], false, "", `video/mp4; codecs="Opus"`},
 		{"matroska", composedForms[1], true, "avc1.64001f", "video/matroska"},
@@ -62,19 +64,22 @@ func TestTheComposedContentTypeCarriesTheUpstreamsProfile(t *testing.T) {
 	}
 }
 
-func TestTheCodecsParameterIsReadFromTheUpstreamsContentType(t *testing.T) {
+// The codecs parameter is copied whole from the sibling that encoded
+// the track. Nothing here reads it, because only display-api knows
+// what it sent, and a sibling that names none leaves it empty.
+func TestTheCodecsParameterIsCopiedWholeFromTheUpstream(t *testing.T) {
 	rows := []struct {
 		field string
 		want  string
 	}{
-		{`video/mp4; codecs="avc1.64001f"`, "avc1.64001f"},
-		{`video/mp4; codecs="avc1.4d401e,mp4a.40.2"`, "avc1.4d401e"},
+		{`video/mp4; codecs="avc1.640029"`, "avc1.640029"},
+		{`video/mp4; codecs="avc1.4d401e,mp4a.40.2"`, "avc1.4d401e,mp4a.40.2"},
 		{"video/mp4", ""},
 		{"not a media type", ""},
 	}
 	for _, row := range rows {
 		t.Run(row.field, func(t *testing.T) {
-			mustMatch(t, codecsOf(row.field), row.want)
+			mustMatch(t, upstreamCodecs(row.field), row.want)
 		})
 	}
 }
@@ -222,8 +227,8 @@ func TestACaptureWritesTheCapturedEvent(t *testing.T) {
 	mustMatch(t, event.Reason, capturedReason)
 	mustMatch(t, event.Type, normalEventType)
 	mustMatch(t, event.InvolvedObject.Name, testAPIPlayer)
-	mustMatch(t, strings.Contains(event.Message, testAPISubject), true)
-	mustMatch(t, strings.Contains(event.Message, mediaAspectName), true)
+	mustMatch(t, event.Message,
+		testAPISubject+" took the media of "+testAPIPlayer+" as video/mp4")
 }
 
 // One real mux over a fixture video and two fixture audio streams,
@@ -240,14 +245,14 @@ func TestOneRealMuxCarriesOneVideoAndTwoAudioTracks(t *testing.T) {
 	fixture.server.now = time.Now
 	fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 2, true)
 	fixture.display.body = video
-	fixture.display.contentType = `video/mp4; codecs="avc1.42c00c"`
+	fixture.display.contentType = `video/mp4; codecs="avc1.640029"`
 	fixture.audio.contentType = "audio/ogg"
 	fixture.audio.bodies = map[string][]byte{testAPISink: first, testAPISecond: second}
 
 	recorder := fixture.get(playerPathFor("media.mp4"))
 
 	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="avc1.42c00c,Opus"`)
+	mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="avc1.640029,Opus"`)
 	composed := filepath.Join(directory, "composed.mp4")
 	mustSucceed(t, os.WriteFile(composed, recorder.Body.Bytes(), 0o644))
 	mustMatchAll(t, probeTracks(t, composed), []string{"video", "audio", "audio"})
@@ -441,4 +446,20 @@ func TestAShortStderrIsKeptWhole(t *testing.T) {
 	mustSucceed(t, err)
 
 	mustMatch(t, writer.tail(), "Output file is empty, nothing was encoded")
+}
+
+// A zero-stream 409 names the action for the whole unit, because a
+// Player that resolves neither a screen nor a sink is not answered by
+// a sentence about sound alone.
+func TestAZeroStreamComposedRefusalNamesTheWholeUnit(t *testing.T) {
+	fixture := newAPIFixture(t)
+	fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 0, false)
+
+	recorder := fixture.get(playerPathFor("media.mp4"))
+
+	mustMatch(t, recorder.Code, http.StatusConflict)
+	document := problemOf(t, recorder)
+	mustMatch(t, document.Type, problemNotPlaying)
+	mustMatch(t, document.Detail,
+		"run a Play on this Player; it resolves nothing to capture until one runs")
 }

@@ -310,7 +310,12 @@ func (e *apiExchange) authorize(subresource string) bool {
 		}
 		e.writer.Header().Set("WWW-Authenticate",
 			`Bearer realm="`+apiRealm+`", error="insufficient_scope", scope="`+scope+`"`)
-		e.fail(aboutBlank, http.StatusForbidden, "", "the SubjectAccessReview denied get on "+scope)
+		// The detail names the grant the caller lacks and the object it
+		// lacks it on, because a SubjectAccessReview carries no words
+		// of its own to relay and a caller needs to know what to ask
+		// an owner for.
+		e.fail(aboutBlank, http.StatusForbidden, "",
+			"not allowed to get "+scope+" on "+e.namespace+"/"+e.name)
 		return false
 	}
 	return true

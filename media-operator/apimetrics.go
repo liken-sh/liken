@@ -9,6 +9,7 @@ package main
 // composition.
 
 import (
+	"math"
 	"strconv"
 	"time"
 
@@ -41,6 +42,7 @@ type apiMetrics struct {
 	streamsActive     *prometheus.GaugeVec
 	upstreamRequests  *prometheus.CounterVec
 	composeOffset     prometheus.Histogram
+	composeOffsetLast prometheus.Gauge
 	certificateExpiry prometheus.Gauge
 }
 
@@ -66,7 +68,17 @@ func newAPIMetrics(version string) *apiMetrics {
 		}, []string{"upstream", "status"}),
 		composeOffset: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "media_api_compose_offset_seconds",
-			Help: "The measured difference between the two upstreams' header instants.",
+			Help: "How far apart the two upstreams' header instants were, without a sign.",
+			// A correction can run either way, and a histogram bucket
+			// has no room below zero, so the histogram carries the size
+			// of the offset and the gauge beside it carries the sign.
+			// The buckets run from one millisecond to two seconds, and
+			// 33 ms is one frame at 30 fps, the target the plan sets.
+			Buckets: []float64{0.001, 0.005, 0.01, 0.033, 0.1, 0.25, 0.5, 1, 2},
+		}),
+		composeOffsetLast: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "media_api_compose_offset_last_seconds",
+			Help: "The last correction, signed: a negative value means the audio headers arrived first.",
 		}),
 		certificateExpiry: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "media_api_certificate_expiry_seconds",
@@ -79,6 +91,7 @@ func newAPIMetrics(version string) *apiMetrics {
 		m.streamsActive,
 		m.upstreamRequests,
 		m.composeOffset,
+		m.composeOffsetLast,
 		m.certificateExpiry,
 	)
 	return m
@@ -101,11 +114,15 @@ func (m *apiMetrics) observeUpstream(upstream, status string) {
 	m.upstreamRequests.WithLabelValues(upstream, status).Inc()
 }
 
+// observeOffset records one correction twice: its size in the
+// histogram, where a quantile answers how far apart the siblings run,
+// and its signed value in the gauge, where a reader sees which way.
 func (m *apiMetrics) observeOffset(seconds float64) {
 	if m == nil {
 		return
 	}
-	m.composeOffset.Observe(seconds)
+	m.composeOffset.Observe(math.Abs(seconds))
+	m.composeOffsetLast.Set(seconds)
 }
 
 func (m *apiMetrics) observeExpiry(seconds float64) {

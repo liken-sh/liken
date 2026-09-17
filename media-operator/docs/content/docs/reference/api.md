@@ -228,6 +228,19 @@ opens both requests at once, records each instant, and starts ffmpeg
 with `-itsoffset` on the audio input equal to
 `headersAt[audio] - headersAt[video]`.
 
+The first byte of a composition arrives after the lead-in plus the
+slower sibling's first keyframe. `media-api` holds nothing back of
+its own: it opens both upstreams at once and writes what the muxer
+writes, and the muxer writes nothing until it has a keyframe from the
+video and a packet from each sink. A screen capture at the default
+15 frames per second has a keyframe every second, so a second of
+lead-in and a second of keyframe wait are the floor, and the muxer's
+first fragment adds the rest. The drill on `liken-1` measured 4.09 to
+4.34 s over ten runs of `media.mp4?t=0,10`, and 4.18 s for
+`media.mkv`, against upstream headers that arrived at 1.12 to 1.38 s.
+Those numbers are from before `display-api` sent its headers at the
+accept instant, so they are the ceiling and not the current cost.
+
 ## Discovery
 
 `GET /v1/media` answers the shared document shape, keyed by plural:

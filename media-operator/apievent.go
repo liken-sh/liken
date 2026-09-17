@@ -60,7 +60,7 @@ type EventSource struct {
 // write it is a line on stderr and never fails the capture, because
 // the record is secondary to the bytes and the client already holds
 // them.
-func (s *apiServer) recordCapture(e *apiExchange, player *Player, aspect string) {
+func (s *apiServer) recordCapture(e *apiExchange, player *Player, aspect, mediaType string) {
 	stamp := s.clock().UTC().Format(time.RFC3339)
 	event := &Event{
 		APIVersion: "v1",
@@ -78,7 +78,7 @@ func (s *apiServer) recordCapture(e *apiExchange, player *Player, aspect string)
 		},
 		Reason:         capturedReason,
 		Type:           normalEventType,
-		Message:        e.subject + " captured " + aspect,
+		Message:        e.subject + " took the " + aspect + " of " + player.Metadata.Name + " as " + mediaType,
 		Source:         EventSource{Component: eventSourceAPI},
 		FirstTimestamp: stamp,
 		LastTimestamp:  stamp,

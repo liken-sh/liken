@@ -37,8 +37,8 @@ func TestTheDetailOfA409NamesTheAction(t *testing.T) {
 		sinks   int
 		detail  string
 	}{
-		{"no Play runs", false, 2, "no Play runs on this Player; run a Play to open its sound"},
-		{"a Play runs and no sink resolved", true, 0, "this Player resolves no Sink; state spec.sinks and run a Play"},
+		{"no Play runs", false, 2, "run a Play on this Player to open its sound"},
+		{"a Play runs and no sink resolved", true, 0, "this Player resolves no Sink; state spec.sinks on it and run a Play"},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {

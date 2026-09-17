@@ -126,7 +126,7 @@ func (s *apiServer) redirectToSink(e *apiExchange, player *Player, form mediaFor
 	sinks := tappableSinks(player)
 	if len(sinks) == 0 {
 		e.fail(problemNotPlaying, http.StatusConflict, "This Player plays nothing",
-			notPlayingDetail(player))
+			notPlayingDetail(player, audioAspectName))
 		return
 	}
 	// A unit with several sinks redirects to the first, in spec.sinks
@@ -142,12 +142,17 @@ func (s *apiServer) redirectToSink(e *apiExchange, player *Player, form mediaFor
 
 // notPlayingDetail names the action that clears the 409, because a
 // 409 is sent only where the caller can act and the detail is where
-// the action is stated.
-func notPlayingDetail(player *Player) string {
-	if player.Status.Activity != playerPlaying {
-		return "no Play runs on this Player; run a Play to open its sound"
+// the action is stated. The composed route resolves no screen either
+// where it reaches this, so its sentence names the whole unit and not
+// the sound alone.
+func notPlayingDetail(player *Player, aspect string) string {
+	if player.Status.Activity == playerPlaying {
+		return "this Player resolves no Sink; state spec.sinks on it and run a Play"
 	}
-	return "this Player resolves no Sink; state spec.sinks and run a Play"
+	if aspect == audioAspectName {
+		return "run a Play on this Player to open its sound"
+	}
+	return "run a Play on this Player; it resolves nothing to capture until one runs"
 }
 
 // rememberedMonitor is the screen memory, the Display name, empty

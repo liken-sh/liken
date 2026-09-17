@@ -61,7 +61,7 @@ func (s *apiServer) serveComposed(e *apiExchange, player *Player, form mediaForm
 	switch {
 	case monitor == "" && len(sinks) == 0:
 		e.fail(problemNotPlaying, http.StatusConflict, "This Player plays nothing",
-			notPlayingDetail(player))
+			notPlayingDetail(player, mediaAspectName))
 		return
 	case monitor != "" && len(sinks) == 0:
 		e.redirect(displayTarget(s.display, monitor, composedMP4Extension, query, 0), query)
@@ -198,7 +198,7 @@ func (s *apiServer) streamComposed(e *apiExchange, player *Player, form mediaFor
 	e.writer.Header().Set("Content-Type", composedContentType(form, screen != "", streams[0].codecs))
 	done := s.metrics.holdStream(mediaAspectName)
 	defer done()
-	s.recordCapture(e, player, mediaAspectName)
+	s.recordCapture(e, player, mediaAspectName, form.Type)
 	e.answer(http.StatusOK)
 
 	if err := s.mux(ctx, cancel, e, form.Extension, screen != "", streams, offsets, query); err != nil {

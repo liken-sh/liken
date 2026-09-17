@@ -141,7 +141,7 @@ func (u *upstreamClient) open(parent context.Context, name, target string, heade
 		target:    target,
 		headersAt: u.clock(name),
 		body:      response.Body,
-		codecs:    codecsOf(response.Header.Get("Content-Type")),
+		codecs:    upstreamCodecs(response.Header.Get("Content-Type")),
 		cancel:    cancel,
 	}, nil
 }
@@ -221,19 +221,14 @@ func upstreamDetail(response *http.Response) (string, bool) {
 	return document.Detail, true
 }
 
-// codecsOf reads the avc1 element out of the display upstream's
-// Content-Type, which is where the video half of the composed codecs
-// parameter comes from.
-func codecsOf(contentType string) string {
+// upstreamCodecs answers the codecs parameter of an upstream's
+// Content-Type, whole and unread. The composed type carries what the
+// sibling said about its own track and never a value this API invented,
+// so a sibling that names no codec leaves the parameter off.
+func upstreamCodecs(contentType string) string {
 	_, parameters, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return ""
 	}
-	for _, codec := range strings.Split(parameters["codecs"], ",") {
-		codec = strings.TrimSpace(codec)
-		if strings.HasPrefix(codec, "avc1") {
-			return codec
-		}
-	}
-	return ""
+	return strings.TrimSpace(parameters["codecs"])
 }

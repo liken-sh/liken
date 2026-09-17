@@ -42,4 +42,6 @@ func TestTheCapturedEventNamesThePlayerAndTheRequest(t *testing.T) {
 	mustMatch(t, event.Metadata.Namespace, testAPINamespace)
 	mustMatch(t, event.Count, 1)
 	mustMatch(t, event.Metadata.Name, testAPIPlayer+"."+fixture.lines[0].ID)
+	mustMatch(t, event.Message,
+		testAPISubject+" took the media of "+testAPIPlayer+" as video/mp4")
 }

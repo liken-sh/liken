@@ -110,6 +110,8 @@ func TestADenialNamesTheScopeItRefused(t *testing.T) {
 	mustMatch(t, recorder.Code, http.StatusForbidden)
 	mustMatch(t, recorder.Header().Get("WWW-Authenticate"),
 		`Bearer realm="media-api", error="insufficient_scope", scope="players/media"`)
+	mustMatch(t, problemOf(t, recorder).Detail,
+		"not allowed to get players/media on media/studio")
 }
 
 // The SubjectAccessReview names the path's namespace and the aspect's
@@ -363,7 +365,7 @@ func TestTheAudioAspectNeedsARunningPlay(t *testing.T) {
 	mustMatch(t, recorder.Code, http.StatusConflict)
 	document := problemOf(t, recorder)
 	mustMatch(t, document.Type, problemNotPlaying)
-	mustMatch(t, document.Detail, "no Play runs on this Player; run a Play to open its sound")
+	mustMatch(t, document.Detail, "run a Play on this Player to open its sound")
 }
 
 // A screen the Player never resolved is a 409 no-node, not a 404,
