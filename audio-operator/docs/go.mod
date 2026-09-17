@@ -15,9 +15,10 @@ tool (
 	github.com/gohugoio/hugo
 	github.com/liken-sh/brand/coverage
 	github.com/liken-sh/brand/crdref
+	github.com/liken-sh/brand/skills
 )
 
-require github.com/liken-sh/brand v0.0.0-20260905124916-f549935dd193
+require github.com/liken-sh/brand v0.0.0-20260917021826-107cd574b3ba
 
 require (
 	cel.dev/expr v0.25.1 // indirect

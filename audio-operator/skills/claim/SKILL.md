@@ -1,15 +1,16 @@
 ---
-title: Play sound to an output
-weight: 20
+name: claim
 description: "Play one workload's sound through one physical output with a ResourceClaim and a Deployment. Use when a pod needs a speaker, the analog jack, a Bluetooth speaker with a chosen codec, or a microphone to record from."
 ---
+
+This skill is the guide at https://audio.liken.sh/docs/guides/claim/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Play sound to an output
 
 This guide plays one workload's sound through one physical output,
 from a `Deployment`: an internet radio player on the kitchen
 monitor's speakers. It works the same for the analog jack. You need
-the operator [installed](/docs/guides/install/) on your
+the operator [installed](https://audio.liken.sh/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
 The flow is
@@ -30,7 +31,7 @@ Each device is one PCM device of the card, with the attached
 monitor's facts as attributes. A playback endpoint carries the
 `sink` attribute. Write a CEL selector against them. If the Dynamic
 Resource Allocation (DRA) objects are new to you, read
-[How the pieces fit](/docs/guides/#how-the-pieces-fit) first. Four
+[How the pieces fit](https://audio.liken.sh/docs/guides/#how-the-pieces-fit) first. Four
 useful forms:
 
     # by name, the same name kubectl get sinks shows
@@ -61,7 +62,7 @@ no guard inside the `audio-sink` class, because every device the
 class selects publishes it. Guard `address` the
 same way: only a Bluetooth speaker publishes it, so an unguarded
 read fails the allocation on every one of the card's outputs.
-[Devices](/docs/reference/devices/) lists every attribute, and
+[Devices](https://audio.liken.sh/docs/reference/devices/) lists every attribute, and
 explains why the pairing attribute reads under its own domain,
 `monitor.liken.sh`.
 
@@ -228,7 +229,7 @@ The switch takes a second or two, and the pod's start waits for
 it. The speaker's sink arrives at unity volume on every prepare, so
 set loudness in your player's own stream volume. The level the
 speaker itself rests at is declared on its `Sink`, which
-[Set what an endpoint rests at](/docs/guides/rest/) shows, and a
+[Set what an endpoint rests at](https://audio.liken.sh/docs/guides/rest/) shows, and a
 codec declared there is the resting choice a claim's own parameter
 wins over.
 
@@ -282,4 +283,4 @@ until the first releases the output.
 records that decision.
 
 To put sound and picture on one monitor, continue with
-[Pair sound with its screen](/docs/guides/pair/).
+[Pair sound with its screen](https://audio.liken.sh/docs/guides/pair/).

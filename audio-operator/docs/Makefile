@@ -13,6 +13,9 @@ GENERATED := \
 	$(REFERENCE)/sinks.md \
 	$(REFERENCE)/sources.md
 
+SKILLS := go tool skills
+BASE := https://audio.liken.sh
+
 .PHONY: build
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
@@ -24,6 +27,14 @@ build: $(GENERATED)
 .PHONY: test
 test: $(GENERATED)
 	go test ./...
+
+# The skills target emits every guide as an Agent Skill into ../skills,
+# one SKILL.md per guide, with the generator the brand repository
+# publishes (its README says what the output holds). The output is
+# committed, and the root test-docs target fails when it is stale.
+.PHONY: skills
+skills:
+	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
 # Both CRDs are in one file, and crdref picks the document whose
 # spec.names.kind matches the -kind it is given.
