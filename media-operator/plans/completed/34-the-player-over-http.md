@@ -1,12 +1,20 @@
 # 34, The player over HTTP
 
-A `media-api` Deployment answers HTTP for a `Player`. Its `screen.*`
+Built on 2026-09-16, and drilled on `liken-1` on 2026-09-17 in three
+passes. A `media-api` Deployment answers HTTP for a `Player` under
+`/v1/media/namespaces/{ns}/players/{name}/`. Its `screen.*`
 routes redirect to the display-operator's `display-api`, its
 `audio.*` routes redirect to the audio-operator's `audio-api`, and its
-`media.*` routes compose the two into one muxed stream. It is the
+`media.*` routes compose the two into one muxed stream, one second
+behind now, with each sink's audio offset corrected from the
+upstreams' header instants. The operator publishes `status.sinks[]`,
+the `Sink` each `spec.sinks` selection resolved to. It is the
 media instance of the capture API design that display-operator plan
 22 and audio-operator plan 09 share: one shape, one vocabulary, no
-shared code.
+shared code. The first drill pass found the composed stream 0.84 to
+0.93 s out of sync, because `display-api` held its headers until
+`begin`; with that fixed on display's side, the third pass measured
+the residual at tens of milliseconds.
 
 ## The problem
 
@@ -41,7 +49,11 @@ writes the `Sink` the scheduler picked where a client can read it.
 `media-api` holds no hardware and has no sidecar, so it runs no pod
 informer and finds no node. It reads one object, the `Player`, and
 calls the two siblings as an ordinary Bearer client under its own
-ServiceAccount, the pattern for one liken API calling another. A
+ServiceAccount, the pattern for one liken API calling another. Each
+sibling call carries a projected token minted for that sibling's
+audience, `display-api` or `audio-api`, from a projected volume the
+kubelet rewrites every ten minutes, because each public API refuses
+a token minted for another audience. A
 browser is not a v1 client: there is no CORS, and a browser reaches
 the API only on the same origin through a port-forward.
 
@@ -79,8 +91,8 @@ follow the memory: `audio.*` and the audio tracks of `media.*`
 require a running `Play` (`status.activity` is `Playing`). Otherwise
 `audio.*` answers 409 `not-playing`, and `media.*` redirects to the
 screen. A remembered `Sink` that another unit is using is never
-tapped through this one. The players CRD gains the field and `crdref`
-regenerates the manual page.
+tapped through this one. The players CRD carries the field and
+`crdref` renders it on the manual page.
 
 **Set aside: `media-api` reads the claim itself.** It would need
 `get` on `resourceclaims` everywhere, and between runs there is no
@@ -118,7 +130,7 @@ stands for `/v1/media/namespaces/{ns}/players/{name}/`.
 | the TokenReview refuses the token | refused | 401 | `WWW-Authenticate: Bearer realm="media-api", error="invalid_token", error_description="<the TokenReview's words>"` |
 | the SubjectAccessReview denies | refused | 403 | `WWW-Authenticate: Bearer realm="media-api", error="insufficient_scope", scope="players/media"` |
 | no such Player, or an upstream 404 | refused | 404 | problem document, `upstream` member on a relayed one |
-| no `status.screen`, or no running Play for an audio aspect | refused | 409 | problem document whose `detail` names the clearing action |
+| no `status.screen`, or no running Play for an audio aspect | refused | 409 | problem document whose `detail` names the clearing action: "run a Play on this Player to open its sound" on an audio aspect, "run a Play on this Player; it resolves nothing to capture until one runs" on a composed aspect with nothing resolved, and "this Player resolves no Sink; state spec.sinks on it and run a Play" where the list is empty |
 | a query the grammar refuses, or an upstream 400 | refused | 400 | problem document, `upstream` member on a relayed one |
 | the `Accept` excludes the extension's type, or nothing offered is acceptable | refused | 406 | problem document with `acceptable` |
 | an upstream 503, a refused connection, or this API's own composition limit | refused | 503 | `Retry-After: 5` (an upstream's value relayed), problem document |
@@ -304,10 +316,13 @@ opus-codec.org, 2026-09-16): an `OpusSampleEntry` with codingname
 no `codecs` section. The string comes from RFC 6381 section 3.3,
 where the first element is the sample entry's four-character code
 and "values are case sensitive": `video/mp4;
-codecs="avc1.64001f,Opus"`, the `avc1` bytes copied from the display
-upstream. Browsers took lowercase `opus` from the MSE byte-stream
-convention, so the drill checks `MediaSource.isTypeSupported` for
-both spellings and the manual records which browsers take which.
+codecs="avc1.640029,Opus"`, the `codecs` parameter of the display
+upstream's `Content-Type` copied whole with `Opus` appended. The
+composed type carries no `codecs` when the display upstream sends
+none. Browsers took lowercase `opus` from the MSE byte-stream
+convention, so a drill checks `MediaSource.isTypeSupported` for
+both spellings and the manual records which browsers take which;
+no drill pass drove a browser, so that check is still owed.
 MDN's audio codec guide (fetched 2026-09-16) says "Safari supports
 Opus in the `<audio>` element only when packaged in a CAF file", and
 caniuse.com marks Safari partial through version 27. Chrome, Firefox,
@@ -339,9 +354,11 @@ second behind "now"; the manual and the discovery document
 (`"leadIn": "1s"`) both say so. Both sidecars then have a running
 pipeline before their zero, and the correction is the difference of
 the two accept instants. `media-api` measures those as the
-header-arrival instants on its own clock: it opens both requests at
+header-arrival instants on its own clock: it opens every request at
 once, records each instant, and starts ffmpeg with `-itsoffset` on
-the audio input equal to `headersAt[audio] - headersAt[video]`. The
+each audio input equal to `headersAt[audio] - headersAt[video]`. The
+reference clock is the first stream, the screen where the unit has
+one and the first sink where it has none. The
 ffmpeg manual (fetched 2026-09-16): "The offset is added to the
 timestamps of the input files. Specifying a positive offset means
 that the corresponding streams are delayed by the time duration
@@ -384,10 +401,12 @@ for the `Player`'s media, and the `Player` has one answer.
 The same rule applies to every `media.*` request. `media-api` counts
 the streams the `Player` resolves: one video for `status.screen`, and
 one audio per `status.sinks` entry while a `Play` runs. More than one
-composes. Exactly one redirects with 307 to that stream's own route:
-a screen with no sink, or with no running `Play`, goes to the Display
-route; a sink with no screen goes to the Sink route. Zero is a 409
-whose `detail` says to run a `Play`.
+composes, so two sinks and no screen compose too: that composition
+carries no video input and no video map, and the first sink is the
+reference clock. Exactly one redirects with 307 to that stream's own
+route: a screen with no sink, or with no running `Play`, goes to the
+Display route; a sink with no screen goes to the Sink route. Zero is
+a 409 whose `detail` says to run a `Play`.
 
 ### A worked example
 
@@ -397,7 +416,7 @@ Host: media-api.liken-system.svc
 Authorization: Bearer eyJ...
 
 HTTP/1.1 200 OK
-Content-Type: video/mp4; codecs="avc1.64001f,Opus"
+Content-Type: video/mp4; codecs="avc1.640029,Opus"
 Content-Disposition: inline; filename="media-studio-2026-09-16T21-02-16Z.mp4"
 Cache-Control: no-store
 Vary: Accept
@@ -424,6 +443,15 @@ its `Retry-After` relayed and a problem document `capture-busy` whose
 `detail` is the upstream's own and whose `upstream` member is its
 URL. A failure after the stream began ends the response; the fault
 reaches the client as a truncated body and the request log line.
+
+The composed response's headers flush at the status line, so the
+client reads the 200 when the composition begins and not with the
+first fragment. Go's server holds a written status until the body
+fills its buffer, and a composition's first byte waits on the muxer's
+first fragment; the first drill pass read the status only at the
+first byte, 4.1 s in, and this flush is the answer. A redirect and a
+document need none of this: each writes its whole body before it
+returns.
 
 ### Concurrency and timeouts
 
@@ -459,12 +487,16 @@ audience too, which is a cost the manual states. It authorizes with a
 `players/screen`, `players/audio`, or `players/media` in
 `media.liken.sh`, with the `Player`'s namespace from the path. A unit
 test asserts both. Every route authorizes before it reads, so a 403
-never leaks that a name exists. Discovery and OpenAPI need
+never leaks that a name exists. A 403's `detail` is "not allowed to
+get players/media on {ns}/{name}", the grant the caller lacks and the
+object it lacks it on, because a `SubjectAccessReview` carries no
+words of its own to relay. Discovery and OpenAPI need
 authentication and no authorization. The info route needs `get` on
 `players`. RBAC does not check that a subresource exists, so an owner
 grants capture with the shipped `ClusterRole` `media-capture-viewer`
-(`get` on the three subresources) bound per namespace, or one rule
-with `resourceNames`.
+(`get` on the three subresources, and `get` on `players` so a subject
+bound to that role alone can read the info route) bound per
+namespace, or one rule with `resourceNames`.
 
 Positive verdicts are cached under the SHA-256 of the raw token for
 `min(exp, 60 s)`; a denial is never cached; the key is never logged.
@@ -505,13 +537,25 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [media-api-tls]
-    verbs: [get, update, watch]
+    verbs: [get, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get]
 ```
 
+The `pods` rule carries no `resourceNames`, because a Deployment's
+pod name is generated: the API reads one pod, its own, for the tag of
+its `api` container, and that tag is the version `liken_build_info`
+reports and the compiled documents carry as their `ETag`. The
+`configmaps` watch keeps its `resourceNames` because the watch opens
+each ConfigMap's own path and never the collection, and RBAC reads a
+name from the request path.
+
 Every request that produces bytes writes a Kubernetes `Event` on the
-`Player`: `reason: Captured`, `type: Normal`, the subject and the
-aspect in the message, so `kubectl describe player` answers who
-looked and when. The log line is the detail record, and it never
+`Player`: `reason: Captured`, `type: Normal`, with the message
+"{subject} took the {aspect} of {name} as {type}", so `kubectl
+describe player` answers who looked, at which unit, in which form,
+and when. The log line is the detail record, and it never
 carries the token or any hash of it.
 
 ### TLS
@@ -525,7 +569,11 @@ certificate alone goes to the ConfigMap `media-api-ca`, public data a
 client with no Secret access reads. `display-api` and `audio-api`
 publish theirs the same way, and `media-api` trusts them through
 their ConfigMaps `display-api-ca` and `audio-api-ca`, which it
-watches. It re-mints a leaf when under a third of its life remains
+watches. A sibling the cluster has not deployed answers 404 to every
+watch, so the watch waits one second after a refusal and doubles the
+wait to one minute, reports the refusal once when its reason changes
+and once more when the object appears, and the API serves every
+route but a composition through that sibling meanwhile. It re-mints a leaf when under a third of its life remains
 and publishes `media_api_certificate_expiry_seconds`. Rotation is two
 steps: publish the new CA appended to `ca.crt` in the ConfigMap,
 wait, then switch the leaf. An owner with a CA replaces both objects;
@@ -596,7 +644,7 @@ The `screen` and `audio` lists are copied from the siblings'
 documents at request time. The info route answers the `Display` name
 and node, each `Sink` name, whether a `Play` runs, and the stream
 count, with `related` links to every capture route, so a client
-learns first whether `media.mp4` will compose or redirect.
+reads first whether `media.mp4` will compose or redirect.
 
 The OpenAPI 3.1 document enumerates each extension path as its own
 path item, with no `{.ext}`. The served copy injects `servers:
@@ -607,8 +655,12 @@ provisional: `draft-ietf-httpapi-rest-api-mediatypes` registers it
 and IANA does not list it yet. `go generate` writes the document
 from the router, it is committed, and the manual renders it at
 `docs/content/docs/reference/api.md` with one page per problem
-`type`. Document routes carry `ETag` set to the build version and
-answer `If-None-Match` with 304.
+`type`. Document routes answer `If-None-Match` with 304. The two
+compiled documents carry `ETag` set to the build version, the tag of
+the `api` container in the API's own pod, because they change only
+with a release. The info document's `ETag` is a SHA-256 of its own
+body, because its facts change when a claim moves, and a
+revalidation must answer 304 only while they stand.
 
 ### Metrics and logs
 
@@ -621,8 +673,14 @@ On `:9200`, milestone 65's port, with
 | `media_api_request_seconds` | histogram | `route` (header time) |
 | `media_api_streams_active` | gauge | `aspect` |
 | `media_api_upstream_requests_total` | counter | `upstream`, `status` |
-| `media_api_compose_offset_seconds` | histogram | the measured header offset |
+| `media_api_compose_offset_seconds` | histogram | the absolute value of the measured header offset, in buckets from 1 ms to 2 s |
+| `media_api_compose_offset_last_seconds` | gauge | the signed offset of the last composition |
 | `media_api_certificate_expiry_seconds` | gauge | none |
+
+The histogram observes the absolute value and the gauge carries the
+sign, because a Prometheus histogram's buckets are positive: the first
+drill pass put every negative observation in the smallest bucket, and
+a quantile read 5 ms while the mean was -0.86 s.
 
 The capture counters (`_capture_bytes_total` and its kin) are emitted
 by the sidecars only, so nothing double-counts, and this API has no
@@ -674,7 +732,7 @@ RFC 9111 obsoleted the header. **A `kubectl` plugin.** None in v1 in
 any of the three repositories; the redirect-following client is an
 open problem below.
 
-## How it is proved
+## How it was proved
 
 The unit tests run the router against an `httptest` server in place
 of the siblings. They cover every route-table row and negotiation
@@ -684,13 +742,16 @@ running `Play`. They check the upstream `detail` copied through, the
 `-itsoffset` from two header instants, and the `SubjectAccessReview`
 body with a group-bound subject and the path's namespace. One round
 trip expands the published RFC 6570 template and calls the result.
-The composition test runs a fixture ffmpeg over two short fixture
-streams and checks with ffprobe: one video track, two audio tracks,
-in order.
+The composition test runs ffmpeg over two short fixture streams and
+checks with ffprobe: one video track, two audio tracks, in order. It
+skips where ffmpeg is not installed, so the CI job installs ffmpeg
+before the tests run. One more test holds a thirty-second composition
+open past the header bound, because that bound covers only the wait
+for headers.
 
-The drill runs on `liken-1` with a `Player` on `stick-1`, the Apollo
-Lake node, so the sidecar cost lands there and the API cost on
-`liken-1`:
+The drill plan was to run on `liken-1` with a `Player` on `stick-1`,
+the Apollo Lake node, so the sidecar cost lands there and the API
+cost on `liken-1`:
 
 1. Apply the release. Confirm `status.sinks` after one `Play` and
    that it stays after the `Play` retires.
@@ -705,7 +766,7 @@ Lake node, so the sidecar cost lands there and the API cost on
    Repeat five times.
 4. `GET media.mkv?t=0,10`; play both captures in mpv and Firefox, and
    run `MediaSource.isTypeSupported` in Firefox and Chrome for
-   `codecs="avc1.64001f,Opus"` and `codecs="avc1.64001f,opus"`.
+   `codecs="avc1.640029,Opus"` and `codecs="avc1.640029,opus"`.
 5. `GET screen.png` and `GET audio.wav`: one `curl -v` for the 307,
    then a second `curl` to the `Location` with a token for that
    API's audience. Check each `Location` and `Link`.
@@ -718,22 +779,148 @@ Lake node, so the sidecar cost lands there and the API cost on
    display sidecar's words. `kubectl describe player` shows a
    `Captured` event per capture.
 
-| Measurement | Where it comes from |
-| --- | --- |
-| measured header offset, five runs | `media_api_compose_offset_seconds`, the log line |
-| residual audio/video offset at marks two and later, five runs | ffprobe, white frame minus burst onset |
-| time to first byte of `media.mp4` | `curl -w %{time_starttransfer}`, expected near 1 s plus the upstream's own |
-| time to first byte of `screen.png` through the two calls | `curl -w` on each |
-| CPU of the ffmpeg mux at 1080p30 | `kubectl top pod`, `ps` in the container |
-| RSS of `media-api` idle and during one composition, and of ffmpeg | `kubectl top pod`, `ps` |
-| `isTypeSupported` per spelling per browser | the browser console |
-| whether the capture stalls mpv on `stick-1` | `media_dropped_frames_total` on the playback pod |
-
 Pass: residual under 33 ms on every run, mux under 5% of one core,
 no dropped frames the capture alone explains.
 
+## What the lab measured
+
+The drill ran on `liken-1` on 2026-09-17 in three passes, all
+against the `Player` `lab-portable` in `default`, which draws on the
+BOE panel of `stick-1` and resolves one HDMI sink there. Every
+request came from a `curl` pod on the cluster network, and no
+port-forward was opened. The clapper clip was the plan's, with one
+change: at the default 15 fps capture a one-frame mark was missed on
+three of five runs, so the flash was widened to 100 ms, three frames,
+which every 15 fps capture samples once. The residual is the white
+frame's `pts_time` minus the burst onset, from mark two on.
+
+**Pass one**, 03:30 to 03:55 UTC, on `media-api` at `f07337e` with
+`display-api` at its `dev-004` and `audio-api` at its `dev-008`. The
+composed stream was 0.84 to 0.93 s out of sync on every run, video
+late, against the 33 ms target. `media-api` measured the header
+offset at -0.78 to -0.89 s and applied it as `-itsoffset`, while the
+same two upstreams fetched by hand at one instant and remuxed with no
+correction lined up to +0.2 to +16.3 ms. The cause was on display's
+side: `display-api` sent its response headers after `begin`, 1.235 s
+to headers on `t=1,3` against `audio-api`'s 0.237 s, so the offset
+`media-api` measured was the lead-in and not a clock difference.
+Everything else in the plan passed on this pass, and the later passes
+did not repeat it: every route-table row, every negotiation row, every
+Media Fragments form and refusal with its own words, the discovery
+round trip through the published template, the 401, 403, and 404
+rows, `OPTIONS` and 405, the stream-count rule on three `Player`s,
+the 503 in the display sidecar's words with its `Retry-After`
+relayed, a `Captured` event per capture and none for a redirect or a
+503, and `status.sinks` written by one `Play` and kept through two
+retirements. The pass also found four things this build then
+changed: the composed `Content-Type` carried no `codecs` because
+`display-api` sent none, the offset histogram put all 18 negative
+observations in its smallest bucket, and the 409, 403, and
+`Captured` texts named a mechanism where a caller needed an action, a
+`Player`, or a form.
+
+| Measurement, pass one | Measured |
+| --- | --- |
+| residual at marks two and later, five runs | +916.5, +903.4, +926.9, +911.5, +844.3 ms |
+| the same two upstreams with no correction | +0.2 to +16.3 ms |
+| time to first byte of `media.mp4`, ten runs | 4.08 to 4.34 s |
+| time to first byte of `screen.png` through the redirect | 0.013 s for the 307 plus 0.601 s for the 200 |
+| CPU of the ffmpeg mux at 1080p15, from the container's `cpu.stat` | 5 to 13 millicores, 0.5% to 1.3% of a core |
+| RSS of `media-api`, idle and composing, from `/proc` | 19.2 MB idle, 19.5 to 20.2 MB composing |
+| RSS of ffmpeg | 56 MB |
+| container memory peak against the 256 MiB limit | 33.6 MB |
+| `media_dropped_frames_total` on the playback pod, before and after 18 compositions | 0 and 0 |
+| `HEAD media.mp4` with a `Play` running | 13.7 ms; `display_api_requests_total` 86 before and after, `audio_api_requests_total` 18 before and after |
+
+The mux, the memory, the frames, and `HEAD` pass. The residual fails.
+
+**Pass two**, 04:12 to 04:26 UTC, on `media-api` at `3810e3b`, the
+commit that closed the four findings above, with `display-api` at its
+`dev-006`, which moved the sidecar's headers to the accept instant.
+The residual was still +863 to +964 ms. The sidecar's own leg answered
+its headers in 25 to 71 ms, and `display-api`'s public leg held them
+behind an unflushed writer until the first body block, which is the
+encoder's first frame at `begin`. The four changes passed:
+`Content-Type` read `video/mp4; codecs="avc1.640029,Opus"` on every
+composed MP4, `media_api_compose_offset_last_seconds` equalled the
+last log line's signed offset, the histogram held seven absolute
+values between `le="0.5"` and `le="1.0"`, and a `framerate=30`
+capture held its marks 2 s apart to within one frame, where pass one
+had read 1.77 and 1.70 s.
+
+**Pass three**, 04:36 to 04:50 UTC, on the same `media-api` with
+`display-api` at its `dev-008`, which flushes the relayed headers at
+the status line. `display-api`'s time to headers was 33 to 254 ms on
+twelve runs and no longer tracked `t=`. `media-api` measured the
+offset at +0.15 to +0.20 s, and the composed picture and sound lined
+up with the source.
+
+| Measurement, pass three | Measured |
+| --- | --- |
+| residual, five `media.mp4` runs at 15 fps | +40.2, +96.2, +60.9, +18.9, +96.2 ms |
+| residual, one `media.mkv` run at 15 fps | +13.6 ms |
+| residual, ten `media.mp4` runs at `framerate=30` | mean +16.3 ms, nine of ten under 33 ms |
+| residual, the uncorrected control at 15 fps | +29.2 ms |
+| `offsetSeconds` in the log line, six runs | +0.150 to +0.201 s |
+| `headerSeconds` in the log line | 0.27 to 0.50 s, from 1.11 to 1.35 s in pass two |
+| `media-api`'s own time to first byte, eleven runs | 4.08 to 4.33 s |
+| `mpv` on both captures | video and audio to the end, `A-V: 0.000`, exit 0 |
+
+The 15 fps numbers read above 33 ms on four of the six required runs,
+and that is the instrument. The residual script calls the flash at
+the first bright frame, so it reads the flash 0 to 67 ms late at
+15 fps and 0 to 33 ms late at 30 fps, an expected bias of +26 ms and
++9.5 ms. The `offsetSeconds` varied by 12 ms across the five 15 fps
+runs while their residuals varied by 77 ms, which is the sampling
+phase and not the correction. The uncorrected control, which needs no
+correction, read +29.2 ms on the same instrument, and the composed
+captures read the same as it. The ten 30 fps runs less their bias put
+the true offset near +7 ms, inside the source clip's own -7.2 ms
+detector floor plus one frame of noise. ITU-R BT.1359-1 puts
+detection at 45 ms of audio lead and 125 ms of audio lag.
+
+The +0.15 to +0.20 s offset is the gap between the two upstreams'
+header instants, and it is now `audio-api` that sets it: 185 to
+217 ms to headers against `display-api`'s 71 to 84 ms.
+
+Which numbers predate which fix. The mux CPU, the memory, the dropped
+frames, `HEAD`, the routing, negotiation, and refusal rows, and
+`status.sinks` come from pass one, on `f07337e`, before the
+`codecs`, metrics, and wording changes and before both display-side
+fixes; none of those changes touch what those rows measure. The
+offset and residual numbers come from pass three, after display's
+header flush. The time to first byte, 4.08 to 4.34 s across all three
+passes, predates `media-api`'s own flush of its headers at the status
+line: on pass three the log line reported `headerSeconds` 0.496 while
+`curl` read the `HTTP/2 200` at 4.32 s, because `media-api` held its
+own status the way `display-api` had. The first byte itself is the
+1 s lead-in plus the slower sibling's first keyframe plus the muxer's
+first fragment, and the flush moves the status, not the byte.
+
+Not run in any pass: `MediaSource.isTypeSupported` in a browser, a
+`Player` with two sinks, because no `Player` on the cluster selects
+two, and the 504 and 502 rows, because neither sibling failed in a
+way that produces them.
+
 ## Open problems
 
+* **The 15 fps clapper instrument cannot resolve 33 ms.** Calling the
+  flash at the first bright frame reads it up to one frame period
+  late. A later drill captures at 30 fps or calls the flash at the
+  midpoint between the last dark frame and the first bright one; the
+  drill left `midpoint.py`, that unbiased estimator, beside its
+  captures.
+* **The residual is bounded by the siblings' header times.** The
+  correction is the gap between two header instants, so a sibling
+  that answers its headers late reappears as an offset of that size,
+  as `display-api` did at 0.86 s and as `audio-api` does at 0.19 s
+  today. Plans 22 and 09 must send headers at the accept instant and
+  discard until `begin` with a running pipeline; a drill's residual is
+  the check.
+* **The time to first byte is the lead-in plus the slower sibling's
+  first keyframe.** A client that asked for the screen with its sound
+  waits about four seconds for the first byte, and the flush at the
+  status line moves only the status.
 * **The aggregated `APIService`.** It needs its own group, because
   `media.liken.sh` is served by the CRDs and an `APIService` for it
   would take the group over. It moves the CA into `spec.caBundle`
@@ -761,6 +948,3 @@ no dropped frames the capture alone explains.
   in-cluster clients; public names need the two URL variables. A
   proxying redirect was set aside because it hides the sibling's
   identity check.
-* **The offset correction depends on the siblings.** Plans 22 and 09
-  must send headers at the accept instant and discard until `begin`
-  with a running pipeline; the drill's residual is the check.

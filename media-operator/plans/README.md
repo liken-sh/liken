@@ -31,20 +31,23 @@ becomes a new plan or an open problem.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built.
 
-* [34, The player over HTTP](34-the-player-over-http.md). A
-  `media-api` Deployment answers HTTP for a `Player`: `screen.*` and
-  `audio.*` redirect with 307 to the display and audio APIs, and
-  `media.mp4` composes the screen's video with each sink's audio into
-  one fragmented MP4 through an ffmpeg `-c copy` mux, one second
-  behind now. The operator publishes `status.sinks[]`, the `Sink`
-  name each `spec.sinks` selection resolved to, and the API corrects
-  the two upstreams' clock offset from their header instants behind
-  that lead-in. It is the media instance
-  of the capture API design that display-operator plan 22 and
-  audio-operator plan 09 share.
-
 ## Completed
 
+* [34, The player over HTTP](completed/34-the-player-over-http.md).
+  Built on 2026-09-16, and drilled on `liken-1` on 2026-09-17 in
+  three passes. A `media-api` Deployment answers HTTP for a `Player`:
+  `screen.*` and `audio.*` redirect with 307 to the display and audio
+  APIs, and `media.mp4` composes the screen's video with each sink's
+  audio into one fragmented MP4 through an ffmpeg `-c copy` mux, one
+  second behind now, with each sink's offset corrected from the
+  upstreams' header instants. The operator publishes `status.sinks[]`,
+  the `Sink` each `spec.sinks` selection resolved to. It is the media
+  instance of the capture API design that display-operator plan 22
+  and audio-operator plan 09 share. The first pass found the composed
+  stream 0.84 to 0.93 s out of sync because `display-api` held its
+  headers until `begin`; with that fixed on display's side, the third
+  pass measured ten 30 fps runs at a mean of +16.3 ms, nine under
+  33 ms, and the mux at 5 to 13 millicores.
 * [33, The run reports its
   display](completed/33-the-run-reports-its-display.md). Built on
   2026-09-16, and drilled on `liken-1` the same day with three kills
