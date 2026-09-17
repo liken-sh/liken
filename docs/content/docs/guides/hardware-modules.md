@@ -14,7 +14,7 @@ the hardware operator that owns the device publishes it.
 
 You need:
 
-* A running machine, with `kubectl` access to its Machine resource.
+* A running machine, with `kubectl` access to its `Machine` resource.
 * The machine's manifest in your deployment directory, so the next
   install stick agrees with the cluster.
 
@@ -82,7 +82,7 @@ it:
         - snd_hda_codec_intelhdmi
         - snd_hda_intel
 
-Or patch the live Machine and copy the result into the manifest
+Or patch the live `Machine` and copy the result into the manifest
 afterwards:
 
     kubectl patch machine <name> --type=merge \
