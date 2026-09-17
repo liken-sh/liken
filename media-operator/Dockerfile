@@ -15,6 +15,9 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The api role embeds the OpenAPI document at build time, so the
+# committed copy has to be in the tree the compiler sees.
+COPY openapi.json ./
 # The EDL package builds into the binary, so the source tree it needs is the
 # root files and this one directory.
 COPY edl/ ./edl/
