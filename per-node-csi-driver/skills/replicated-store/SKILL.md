@@ -101,12 +101,13 @@ spec:
       app: store
 ```
 
-When a pod moves, one of two things happens. It lands on a node that
-holds a copy from an earlier pod, and it finds that copy's data under
-`/data`. Or it lands on a node that has never held this volume, and it
-finds an empty directory there and catches up from its peers. Whether
-a copy has caught up is the workload's fact, and its readiness probe is
-where that belongs. The driver has no caught-up signal.
+When a pod moves, one of two things happens. It starts on a node that
+holds a copy from an earlier pod, and that copy's data is under
+`/data`. Or it starts on a node that has never held this volume, and
+the directory there is empty, so the pod catches up from its peers.
+Whether a copy has caught up is the workload's fact, and the
+workload's readiness probe is where it belongs. The driver has no
+caught-up signal.
 
 Each node keeps its copy after the pod leaves. To remove every copy,
 delete the `PersistentVolume`. The [volume reference](https://per-node.liken.sh/docs/reference/volume/)
