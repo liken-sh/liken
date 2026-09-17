@@ -21,11 +21,6 @@ liken's. The sidebar and breadcrumbs exist only in the HTML: a
 page's Markdown twin is the authored file, navigation and all
 chrome excluded.
 -->
-{{- $docs := .Site.GetPage "/docs" -}}
-{{- $project := "" -}}
-{{- with site.Params.repository -}}
-{{- $project = path.Base . -}}
-{{- end -}}
 <!doctype html>
 <html lang="en">
 <head>
@@ -142,41 +137,18 @@ chrome excluded.
     aside a[aria-current] { font-weight: 600; }
   }
 </style>
+{{ partial "head.html" . }}
 </head>
-<body{{ if $docs }} class="manual"{{ end }}>
+{{- /* The sidebar decides the page's shape: a page with one gets the
+manual grid, a page without one is a single column. */ -}}
+{{- $aside := partial "aside.html" . | strings.TrimSpace -}}
+<body{{ if $aside }} class="manual"{{ end }}>
 {{ partial "nav.html" . }}
-{{ with $docs }}
-<aside>
-  <p><a href="{{ .RelPermalink }}"{{ if eq $.Page . }} aria-current="page"{{ end }}>{{ with $project }}<code>{{ . }}</code> manual{{ else }}Manual{{ end }}</a></p>
-  {{ range .Sections }}
-  <p><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></p>
-  <ul>
-    {{ range .RegularPages }}
-    <li><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></li>
-    {{ end }}
-  </ul>
-  {{ end }}
-</aside>
-{{ end }}
+{{ $aside | safeHTML }}
 <main>
-{{ if not .IsHome }}
-<nav class="crumbs">
-  {{ range .Ancestors.Reverse }}<a href="{{ .RelPermalink }}">{{ .Title }}</a> / {{ end }}<span aria-current="page">{{ .Title }}</span>
-</nav>
-{{ end }}
+{{ partial "crumbs.html" . }}
 {{ block "main" . }}{{ end }}
 </main>
-<footer>
-  {{ with .OutputFormats.Get "markdown" -}}
-  <a href="{{ .RelPermalink }}">This page as Markdown</a>
-  {{- end }}
-  {{- /* A site that publishes a test coverage report sets the
-  coverage parameter, and its footer links the page the report lands
-  on. A site that sets nothing shows no link, and its footer is the
-  one it has today. */ -}}
-  {{- if .Site.Params.coverage }}
-  <a href="/coverage.html">Test coverage</a>
-  {{- end }}
-</footer>
+{{ partial "footer.html" . }}
 </body>
 </html>

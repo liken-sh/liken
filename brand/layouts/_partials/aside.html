@@ -1,0 +1,24 @@
+{{- /* The sidebar. This default renders the manual's whole tree when
+the site has a /docs section, and nothing otherwise. A site with its
+own navigation, such as the devlog, shadows this partial with a file
+of the same name in its own layouts. The shell adds the manual class
+to the body whenever this partial renders anything, so a site that
+provides a sidebar gets the sidebar grid with it. */ -}}
+{{- $docs := .Site.GetPage "/docs" -}}
+{{- $project := "" -}}
+{{- with site.Params.repository -}}
+{{- $project = path.Base . -}}
+{{- end -}}
+{{ with $docs }}
+<aside>
+  <p><a href="{{ .RelPermalink }}"{{ if eq $.Page . }} aria-current="page"{{ end }}>{{ with $project }}<code>{{ . }}</code> manual{{ else }}Manual{{ end }}</a></p>
+  {{ range .Sections }}
+  <p><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></p>
+  <ul>
+    {{ range .RegularPages }}
+    <li><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></li>
+    {{ end }}
+  </ul>
+  {{ end }}
+</aside>
+{{ end }}

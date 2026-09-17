@@ -1,0 +1,8 @@
+{{- /* The breadcrumb trail above the page body, from the site's front
+page down to the page. The front page has none. A site that wants a
+different trail shadows this partial. */ -}}
+{{ if not .IsHome }}
+<nav class="crumbs">
+  {{ range .Ancestors.Reverse }}<a href="{{ .RelPermalink }}">{{ .Title }}</a> / {{ end }}<span aria-current="page">{{ .Title }}</span>
+</nav>
+{{ end }}
