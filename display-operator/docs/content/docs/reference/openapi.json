@@ -30,6 +30,15 @@
             "type": "string"
           },
           "type": {
+            "enum": [
+              "about:blank",
+              "https://liken.sh/problems/no-node",
+              "https://liken.sh/problems/not-acceptable",
+              "https://liken.sh/problems/capture-busy",
+              "https://liken.sh/problems/upstream-failed",
+              "https://display.liken.sh/problems/capture-denied",
+              "https://display.liken.sh/problems/compositor-down"
+            ],
             "format": "uri",
             "type": "string"
           }
@@ -330,7 +339,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           }
         },
         "summary": "The screen's size, scale, refresh and formats"
@@ -435,7 +444,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           }
         },
         "summary": "The screen's size, scale, refresh and formats"
@@ -628,7 +637,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -801,7 +810,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -1034,7 +1043,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -1183,7 +1192,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -1407,7 +1416,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -1556,7 +1565,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -1789,7 +1798,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -1938,7 +1947,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -2162,7 +2171,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {
@@ -2311,7 +2320,7 @@
                 }
               }
             },
-            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+            "description": "The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed)."
           },
           "504": {
             "content": {

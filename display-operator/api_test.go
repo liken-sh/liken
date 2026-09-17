@@ -23,6 +23,7 @@ type testCluster struct {
 	mu            sync.Mutex
 	authenticated bool
 	allowed       bool
+	reason        string
 	screens       map[string]Display
 	events        []Event
 	reviews       []accessReview
@@ -33,9 +34,10 @@ func newTestCluster(t *testing.T) *testCluster {
 	cluster := &testCluster{
 		authenticated: true,
 		allowed:       true,
+		reason:        "no RBAC rule grants displays/screen",
 		screens: map[string]Display{
 			"HDMI-A-1": {
-				Metadata: DisplayMeta{Name: "HDMI-A-1"},
+				Metadata: DisplayMeta{Name: "HDMI-A-1", UID: "e740343c-8168-4b59-af5b-4a747367fcf8"},
 				Status: DisplayStatus{
 					Node:      "node-1",
 					Connector: "HDMI-A-1",
@@ -45,6 +47,21 @@ func newTestCluster(t *testing.T) *testCluster {
 			"HDMI-A-2": {
 				Metadata: DisplayMeta{Name: "HDMI-A-2"},
 				Status:   DisplayStatus{},
+			},
+			// A screen on a node whose compositor is not serving it,
+			// which is a different wait from a screen with no node.
+			"HDMI-A-3": {
+				Metadata: DisplayMeta{Name: "HDMI-A-3"},
+				Status: DisplayStatus{
+					Node:      "node-1",
+					Connector: "HDMI-A-3",
+					Conditions: []DisplayCondition{{
+						Type:    CompositorServingCondition,
+						Status:  conditionFalse,
+						Reason:  CompositorDownReason,
+						Message: "dial unix /var/run/display.liken.sh/wayland-0: connect: no such file or directory",
+					}},
+				},
 			},
 		},
 	}
@@ -65,7 +82,7 @@ func (c *testCluster) answer(w http.ResponseWriter, r *http.Request) {
 		var review accessReview
 		_ = json.NewDecoder(r.Body).Decode(&review)
 		c.reviews = append(c.reviews, review)
-		fmt.Fprintf(w, `{"status":{"allowed":%t,"reason":"no RBAC rule grants displays/screen"}}`, c.allowed)
+		fmt.Fprintf(w, `{"status":{"allowed":%t,"reason":%q}}`, c.allowed, c.reason)
 	case strings.HasPrefix(r.URL.Path, DisplaysPath+"/"):
 		screen, held := c.screens[strings.TrimPrefix(r.URL.Path, DisplaysPath+"/")]
 		if !held {
@@ -199,8 +216,8 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 			return reviewToken(client, token, apiAudience)
 		}),
 		sidecar: &sidecarClient{http: sidecar.Client(), tokenPath: tokenFile, port: port},
-		record: func(name, subject, aspect, form string) {
-			recordCapture(client, name, subject, aspect, form)
+		record: func(screen *Display, subject, aspect, form string) {
+			recordCapture(client, screen, subject, aspect, form)
 		},
 		now: time.Now,
 	}

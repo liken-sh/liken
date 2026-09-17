@@ -67,6 +67,28 @@ const outputScaleEvent uint16 = 3
 // and "is always available", so a film on an overlay plane is
 // composited into the frame. writeback is "often not available" in
 // Weston 14, and blending omits the output's color transform.
+//
+// Disabling the planes is what costs the compositor a pair of log
+// lines for every frame this API takes on stick-1. weston 14.0.2's
+// output-capture.c calls weston_output_disable_planes_incr() while a
+// capture is pending, compositor.c then skips assign_planes and puts
+// every view on the primary plane, and that repaint's atomic commit
+// comes back EINVAL from this chip: kms.c prints "atomic: couldn't
+// commit new state: Invalid argument". The second line,
+// "repaint-flush failed", prints strerror(errno) after the state has
+// been freed, so its errno is whatever the free path left and is not
+// a second cause. drm.c then calls
+// weston_output_schedule_repaint_reset, which drops the output out
+// of the repaint loop until the next capture or client commit
+// schedules another one.
+//
+// The captured frames are correct, because the renderer composed
+// them before the commit, and the drill read 1,334 correct frames
+// against 1,334 failed commits. What the kernel objects to is not in
+// weston's log, and whether the panel's own scanout lags during a
+// clip was not measured. The one avoidance a client holds is to take
+// the next capture only after the previous one retired, which the
+// protocol already requires and this client already does.
 const captureSourceFramebuffer uint32 = 1
 
 // The four DRM fourccs weston's GL renderer reports, as the format

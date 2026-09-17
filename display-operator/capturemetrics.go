@@ -25,6 +25,7 @@ const (
 type captureMetrics struct {
 	registry *prometheus.Registry
 	readyNow prometheus.Gauge
+	graph    *prometheus.GaugeVec
 	bytes    *prometheus.CounterVec
 	seconds  *prometheus.CounterVec
 	active   *prometheus.GaugeVec
@@ -40,6 +41,10 @@ func newCaptureMetrics(component, version string) *captureMetrics {
 			Name: "display_capture_ready",
 			Help: "1 while this sidecar holds the certificate the API verifies it under, 0 while it does not.",
 		}),
+		graph: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "display_capture_conversion",
+			Help: "1 on the graph this node converts frames with, 0 on the other.",
+		}, []string{"graph"}),
 		bytes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "display_capture_bytes_total",
 			Help: "Bytes this sidecar encoded and sent, by aspect and format.",
@@ -61,12 +66,14 @@ func newCaptureMetrics(component, version string) *captureMetrics {
 			Help: "Captures that failed, by why.",
 		}, []string{"reason"}),
 	}
-	registry.MustRegister(m.readyNow, m.bytes, m.seconds, m.active, m.frames, m.failures)
+	registry.MustRegister(m.readyNow, m.graph, m.bytes, m.seconds, m.active, m.frames, m.failures)
 
 	// A counter a scrape has never seen is a counter an alert cannot
 	// rate, so every bounded label this process can write starts at
 	// zero.
 	m.active.WithLabelValues(screenAspect).Set(0)
+	m.graph.WithLabelValues(vaapiGraph).Set(0)
+	m.graph.WithLabelValues(softwareGraph).Set(0)
 	for _, reason := range []string{deniedReason, busyReason, compositorReason, encoderReason} {
 		m.failures.WithLabelValues(reason).Add(0)
 	}
@@ -89,6 +96,21 @@ func (m *captureMetrics) ready(held bool) {
 		return
 	}
 	m.readyNow.Set(0)
+}
+
+// Which graph this node converts with, as a pair of gauges: the one
+// it runs reads 1 and the other reads 0, so a fleet panel counts the
+// nodes that fell back to the CPU without reading a log.
+func (m *captureMetrics) converting(software bool) {
+	if m == nil {
+		return
+	}
+	chosen, other := vaapiGraph, softwareGraph
+	if software {
+		chosen, other = softwareGraph, vaapiGraph
+	}
+	m.graph.WithLabelValues(chosen).Set(1)
+	m.graph.WithLabelValues(other).Set(0)
 }
 
 func (m *captureMetrics) wrote(aspect, format string, count int) {

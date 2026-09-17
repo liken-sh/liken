@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -236,5 +238,107 @@ func TestThePerOutputKnob(t *testing.T) {
 				t.Errorf("%q is a limit of %d, want %d", row.value, got, row.want)
 			}
 		})
+	}
+}
+
+// The graph a node converts with is decided once at startup. A node
+// that was told which graph to run is believed in either direction,
+// and a node that was told nothing is asked.
+func TestTheConversionGraphIsChosenOnce(t *testing.T) {
+	cases := []struct {
+		name         string
+		knob         string
+		program      string
+		wantSoftware bool
+	}{
+		{"a node told to convert on the CPU", softwareGraph, "#!/bin/sh\nexit 0\n", true},
+		{"a node told to convert on the GPU", vaapiGraph, "#!/bin/sh\nexit 1\n", false},
+		{"a driver that runs the graph", "", "#!/bin/sh\nexit 0\n", false},
+		{"a driver with no post-processing", "", "#!/bin/sh\necho 'the requested VAProfile is not supported' >&2\nexit 251\n", true},
+	}
+	for _, row := range cases {
+		t.Run(row.name, func(t *testing.T) {
+			path := t.TempDir() + "/ffmpeg"
+			if err := os.WriteFile(path, []byte(row.program), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			held := ffmpegProgram
+			ffmpegProgram = path
+			defer func() { ffmpegProgram = held }()
+			t.Setenv(captureConversion, row.knob)
+
+			if got := chooseConversion(context.Background(), "/dev/dri/renderD128"); got != row.wantSoftware {
+				t.Errorf("the node chose software=%t, want %t", got, row.wantSoftware)
+			}
+		})
+	}
+}
+
+// A node with no render device converts on the CPU, because there is
+// no device for hwupload to open.
+func TestANodeWithNoRenderDeviceConvertsOnTheCPU(t *testing.T) {
+	t.Setenv(captureConversion, "")
+	if !chooseConversion(context.Background(), "") {
+		t.Error("a node with no render device chose the GPU graph")
+	}
+}
+
+// The scrape names the graph the node runs and the one it does not,
+// so a fleet panel counts the nodes that fell back with no log.
+func TestTheConversionGaugeNamesTheGraph(t *testing.T) {
+	readings := newCaptureMetrics(captureComponent, version)
+	readings.converting(true)
+
+	served := scrapeHandler(t, processHandler(readings.registry, func() bool { return true }))
+	for _, line := range []string{
+		`display_capture_conversion{graph="software"} 1`,
+		`display_capture_conversion{graph="vaapi"} 0`,
+	} {
+		if !strings.Contains(served, line) {
+			t.Errorf("the scrape does not carry %s", line)
+		}
+	}
+}
+
+// The info document names the graph beside the screen's own numbers,
+// so a caller reads what a clip from this node costs.
+func TestTheInfoDocumentNamesTheConversion(t *testing.T) {
+	weston := startCaptureWeston(t, formatXR24,
+		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 8, height: 4, refresh: 60000}})
+	server := newCaptureFixture(t)
+	server.socketPath = weston.path
+	server.software = true
+
+	resp := askSidecar(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1", "the-api-token")
+
+	var info screenInfo
+	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Conversion != softwareGraph {
+		t.Errorf("the info document names %q, want %q", info.Conversion, softwareGraph)
+	}
+}
+
+// The capture port's own challenge names the capture port. A 401
+// from it is not a 401 from the API, and a person reading a log or a
+// header should not have to work out which door refused.
+func TestTheCapturePortNamesItselfInItsChallenge(t *testing.T) {
+	held := authenticateRealm
+	authenticateRealm = `Bearer realm="display-capture"`
+	defer func() { authenticateRealm = held }()
+
+	server := newCaptureFixture(t)
+	resp := askSidecar(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", "")
+
+	if got := resp.Header.Get("WWW-Authenticate"); got != `Bearer realm="display-capture"` {
+		t.Errorf("the challenge is %q, want the capture port's own realm", got)
+	}
+	var document problemDocument
+	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Detail != noTokenDetail {
+		t.Errorf("the 401 carries %q, want a detail naming the field", document.Detail)
 	}
 }

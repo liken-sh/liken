@@ -256,6 +256,17 @@ func startEncoder(ctx context.Context, plan encodePlan) (*encoder, error) {
 	return &encoder{cmd: cmd, frames: frames, body: body, stderr: tail}, nil
 }
 
+// The words an encoder that wrote no byte failed with. ffmpeg exits
+// nonzero when its graph cannot be built, and it can exit zero when
+// it simply had nothing to write, so both answers end here and both
+// carry the tail.
+func (e *encoder) failure() error {
+	if err := e.wait(); err != nil {
+		return err
+	}
+	return fmt.Errorf("%s wrote no bytes: %s", ffmpegProgram, e.stderr.text())
+}
+
 // An encode that failed carries ffmpeg's last words, which is what
 // the log line and a problem document's detail report.
 func (e *encoder) wait() error {
@@ -317,4 +328,28 @@ func (w *prefixWriter) Write(p []byte) (int, error) {
 		_, _ = fmt.Fprintf(w.to, "%s%s\n", w.prefix, line)
 	}
 	return len(p), nil
+}
+
+// The VA-API graph is not available on every node. Apollo Lake's iHD
+// driver encodes H.264 and MJPEG but carries no post-processing, so
+// scale_vaapi fails to configure and the encode writes nothing at
+// all. The failure is in the graph and not in the frames, so one
+// synthetic frame through the whole graph answers it, and the answer
+// holds for the life of the process: a driver does not gain a
+// pipeline while a pod runs.
+func probeConversion(ctx context.Context, device string) error {
+	probe := exec.CommandContext(ctx, ffmpegProgram,
+		"-hide_banner", "-nostdin",
+		"-f", "lavfi", "-i", "color=size=64x64:duration=0.1:rate=5",
+		"-init_hw_device", "vaapi=gpu:"+device,
+		"-filter_hw_device", "gpu",
+		"-vf", "hwupload,scale_vaapi=format=nv12",
+		"-c:v", "h264_vaapi",
+		"-f", "null", "-")
+	tail := &stderrTail{}
+	probe.Stderr = tail
+	if err := probe.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, tail.text())
+	}
+	return nil
 }

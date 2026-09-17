@@ -51,6 +51,7 @@ type InvolvedObject struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
+	UID        string `json:"uid,omitempty"`
 }
 
 type EventSource struct {
@@ -59,7 +60,8 @@ type EventSource struct {
 
 // A failed Event write is reported to the log and never fails the
 // request, because the bytes already reached the caller.
-func recordCapture(c *Client, name, subject, aspect, form string) {
+func recordCapture(c *Client, screen *Display, subject, aspect, form string) {
+	name := screen.Metadata.Name
 	at := time.Now().UTC().Format(time.RFC3339)
 	body, err := json.Marshal(Event{
 		APIVersion: "v1",
@@ -72,6 +74,7 @@ func recordCapture(c *Client, name, subject, aspect, form string) {
 			APIVersion: DisplayAPIVersion,
 			Kind:       "Display",
 			Name:       name,
+			UID:        screen.Metadata.UID,
 		},
 		Reason:         capturedReason,
 		Message:        fmt.Sprintf("%s took the %s of %s as %s", subject, aspect, name, form),

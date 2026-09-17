@@ -22,9 +22,10 @@ const (
 	displayProblemBase = "https://display.liken.sh/problems/"
 )
 
-// The five typed problems this API answers with. no-node,
+// The six typed problems this API answers with. no-node,
 // not-acceptable, capture-busy, and upstream-failed are shared with
-// the audio and media APIs; capture-denied is display's own.
+// the audio and media APIs; capture-denied and compositor-down are
+// display's own, because only this domain has a compositor.
 const (
 	problemBlank          = "about:blank"
 	problemNoNode         = sharedProblemBase + "no-node"
@@ -32,7 +33,23 @@ const (
 	problemCaptureBusy    = sharedProblemBase + "capture-busy"
 	problemUpstreamFailed = sharedProblemBase + "upstream-failed"
 	problemCaptureDenied  = displayProblemBase + "capture-denied"
+	problemCompositorDown = displayProblemBase + "compositor-down"
 )
+
+// Every type this API answers with, for the OpenAPI document's own
+// enumeration of them. A reader of the description then meets the
+// same list a caller meets.
+func problemTypes() []string {
+	return []string{
+		problemBlank,
+		problemNoNode,
+		problemNotAcceptable,
+		problemCaptureBusy,
+		problemUpstreamFailed,
+		problemCaptureDenied,
+		problemCompositorDown,
+	}
+}
 
 // The media type RFC 9457 registers. Every refusal is sent under it,
 // so a client tells a problem document from a capture body by the
@@ -41,10 +58,12 @@ const problemMediaType = "application/problem+json"
 
 // The realm every WWW-Authenticate field names, and the scope a 403
 // names beside error="insufficient_scope", RFC 6750 section 3.
-const (
-	authenticateRealm = `Bearer realm="display-api"`
-	captureScope      = "displays/screen"
-)
+const captureScope = "displays/screen"
+
+// The realm a challenge names is the process that answers it. The
+// API keeps the default; the capture sidecar names itself at
+// startup, so a 401 from either one says which door refused.
+var authenticateRealm = `Bearer realm="display-api"`
 
 // One entry of a 406 document's acceptable member: the
 // "representation characteristics and corresponding resource
@@ -91,7 +110,7 @@ func newFault(status int, kind, detail string) *fault {
 	return &fault{status: status, kind: kind, title: faultTitle(kind, status), detail: detail}
 }
 
-// The titles of the five typed problems. A title names the condition
+// The titles of the six typed problems. A title names the condition
 // and never the one request it happened to; detail carries that.
 var problemTitles = map[string]string{
 	problemNoNode:         "The screen cannot be reached",
@@ -99,6 +118,7 @@ var problemTitles = map[string]string{
 	problemCaptureBusy:    "The output is already being captured",
 	problemUpstreamFailed: "The capture sidecar failed",
 	problemCaptureDenied:  "The compositor denied the capture",
+	problemCompositorDown: "The compositor is not serving this screen",
 }
 
 func faultTitle(kind string, status int) string {
@@ -117,15 +137,21 @@ func badRequest(detail string) *fault {
 	return newFault(http.StatusBadRequest, problemBlank, detail)
 }
 
+// The detail of a 401 that met no token at all. RFC 9457 asks every
+// problem for one, and a caller who sent no field reads what the
+// field is called and what it carries.
+const noTokenDetail = "no Authorization field carries a Bearer token"
+
 func unauthenticated(detail string) *fault {
-	f := newFault(http.StatusUnauthorized, problemBlank, detail)
 	// RFC 6750 section 3 gives WWW-Authenticate two forms here: the
 	// bare challenge for a request with no token, and invalid_token
 	// with the review's own words for a token it refused.
 	if detail == "" {
+		f := newFault(http.StatusUnauthorized, problemBlank, noTokenDetail)
 		f.headers = [][2]string{{"WWW-Authenticate", authenticateRealm}}
 		return f
 	}
+	f := newFault(http.StatusUnauthorized, problemBlank, detail)
 	f.headers = [][2]string{{"WWW-Authenticate", fmt.Sprintf(
 		`%s, error="invalid_token", error_description=%q`, authenticateRealm, detail)}}
 	return f

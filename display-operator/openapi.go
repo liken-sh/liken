@@ -201,7 +201,7 @@ func responses(route apiRoute) map[string]any {
 	}
 	answers["403"] = problemResponse("The SubjectAccessReview refused the subject.")
 	answers["404"] = problemResponse("No Display of that name.")
-	answers["503"] = problemResponse("The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready.")
+	answers["503"] = problemResponse("The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed).")
 	if route.kind == infoRoute {
 		return answers
 	}
@@ -260,6 +260,15 @@ func okHeaders(route apiRoute) map[string]any {
 	return headers
 }
 
+// A list of strings as the document's own JSON holds them.
+func anyOf(values []string) []any {
+	held := make([]any, 0, len(values))
+	for _, value := range values {
+		held = append(held, value)
+	}
+	return held
+}
+
 func headerSpec(note string) map[string]any {
 	return map[string]any{
 		"description": note,
@@ -285,7 +294,11 @@ func problemSchema() map[string]any {
 		"type":     "object",
 		"required": []any{"type", "title", "status", "instance"},
 		"properties": map[string]any{
-			"type":     map[string]any{"type": "string", "format": "uri"},
+			"type": map[string]any{
+				"type":   "string",
+				"format": "uri",
+				"enum":   anyOf(problemTypes()),
+			},
 			"title":    map[string]any{"type": "string"},
 			"status":   map[string]any{"type": "integer"},
 			"detail":   map[string]any{"type": "string"},

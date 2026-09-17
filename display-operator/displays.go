@@ -65,6 +65,10 @@ type DisplayList struct {
 type DisplayMeta struct {
 	Name            string `json:"name"`
 	ResourceVersion string `json:"resourceVersion,omitempty"`
+	// The API server's own identifier for this object. An Event names
+	// it, because kubectl describe searches for a resource's Events
+	// by uid and finds none written without it.
+	UID string `json:"uid,omitempty"`
 }
 
 // The settings the panel rests at. Every control field is a pointer

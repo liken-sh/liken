@@ -93,6 +93,14 @@ func (a *objectAPI) held(t *testing.T, path string, out any) {
 	}
 }
 
+// An object deleted out from under the API, which is what a person
+// running kubectl delete does.
+func (a *objectAPI) forget(path string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.objects, path)
+}
+
 func (a *objectAPI) counts(path string) (int, int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

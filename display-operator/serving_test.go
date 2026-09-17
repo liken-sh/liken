@@ -229,3 +229,40 @@ func TestTheLeafIsReMintedUnderAThirdOfItsLife(t *testing.T) {
 		t.Errorf("the new leaf expires %s, want later than %s", renewed.Expires, material.Expires)
 	}
 }
+
+// The sidecar's Secret is put back within the minute if it goes
+// away. Nothing else puts it back, and while it is missing every
+// sidecar serves a certificate of its own making and every capture
+// in the cluster answers 503.
+func TestTheSidecarSecretIsMintedAgainWhenItGoesAway(t *testing.T) {
+	api := newObjectAPI()
+	client := objectClient(t, api)
+	_, ca, err := ensureServingMaterial(client, testNamespace, testSecret, serviceNames(testNamespace), mintTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSidecarLeaf(client, testNamespace, sidecarTLSSecret, ca, sidecarName, mintTime); err != nil {
+		t.Fatal(err)
+	}
+	created, _ := api.counts(secretsPath(testNamespace))
+
+	// A pass over a Secret that stands writes nothing.
+	if err := ensureSidecarLeaf(client, testNamespace, sidecarTLSSecret, ca, sidecarName, mintTime.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := api.counts(secretsPath(testNamespace)); again != created {
+		t.Errorf("a pass over a Secret that stands created %d, want %d", again, created)
+	}
+
+	api.forget(secretsPath(testNamespace) + "/" + sidecarTLSSecret)
+	if err := ensureSidecarLeaf(client, testNamespace, sidecarTLSSecret, ca, sidecarName, mintTime.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	var minted Secret
+	api.held(t, secretsPath(testNamespace)+"/"+sidecarTLSSecret, &minted)
+	leaf := parseCertificate(t, minted.Data[tlsCertKey])
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != sidecarName {
+		t.Errorf("the leaf names %v, want the sidecar's own SAN", leaf.DNSNames)
+	}
+}

@@ -81,7 +81,7 @@ type apiServer struct {
 	tokens     *tokenCache
 	readings   *apiMetrics
 	sidecar    *sidecarClient
-	record     func(name, subject, aspect, form string)
+	record     func(screen *Display, subject, aspect, form string)
 	publicBase string
 	now        func() time.Time
 }
@@ -111,12 +111,14 @@ func serveAPI() {
 	go index.run(ctx, client, namespace)
 
 	server := &apiServer{
-		client:     client,
-		sidecars:   index,
-		tokens:     newTokenCache(func(token string) (*reviewedToken, *fault) { return reviewToken(client, token, apiAudience) }),
-		readings:   readings,
-		sidecar:    newSidecarClient(anchor, captureTokenPath),
-		record:     func(name, subject, aspect, form string) { recordCapture(client, name, subject, aspect, form) },
+		client:   client,
+		sidecars: index,
+		tokens:   newTokenCache(func(token string) (*reviewedToken, *fault) { return reviewToken(client, token, apiAudience) }),
+		readings: readings,
+		sidecar:  newSidecarClient(anchor, captureTokenPath),
+		record: func(screen *Display, subject, aspect, form string) {
+			recordCapture(client, screen, subject, aspect, form)
+		},
 		publicBase: os.Getenv("PUBLIC_BASE"),
 		now:        time.Now,
 	}
@@ -266,15 +268,30 @@ func (s *apiServer) authorize(route apiRoute, name string, who *reviewedToken) *
 		return f
 	}
 	if !allowed {
+		// The API server states a reason for most refusals and states
+		// none for a subject that simply matches no rule, so the rule
+		// that was asked for is the answer when it says nothing.
+		if reason == "" {
+			reason = fmt.Sprintf("not allowed to get %s on %s", captureScope, name)
+			if subresource == "" {
+				reason = fmt.Sprintf("not allowed to get %s on %s", displaysPlural, name)
+			}
+		}
 		return unauthorized(reason)
 	}
 	return nil
 }
 
 // A Display is absent, present with no node, or present with a
-// node. No node yet, or a compositor that is not serving, is a 503
-// with Retry-After, not a 409: 409 is for a state the caller can
-// act on, and a Display waiting for its node is not one.
+// node whose compositor may or may not be serving. Each of the last
+// two is a 503 with Retry-After, not a 409: 409 is for a state the
+// caller can act on, and a Display waiting for its node is not one.
+// The two carry different types, because they are different waits.
+// A screen with no node is waiting for the scheduler, which is a
+// state every capture API has and which they share the type for. A
+// compositor that is not serving is display's own: the operator
+// restarts it, and the words the Display's own condition carries say
+// what it is doing.
 func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	screen, err := get[Display](s.client, DisplaysPath+"/"+name)
 	if err == ErrNotFound {
@@ -288,7 +305,7 @@ func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	}
 	for _, condition := range screen.Status.Conditions {
 		if condition.Type == CompositorServingCondition && condition.Status == conditionFalse {
-			return nil, unavailable(problemNoNode, condition.Message)
+			return nil, unavailable(problemCompositorDown, condition.Message)
 		}
 	}
 	return screen, nil

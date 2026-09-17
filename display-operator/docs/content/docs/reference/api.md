@@ -182,7 +182,7 @@ own words: the compositor's refusal, the `TokenReview`'s error, the
 | 406 | `Accept` excludes everything the route serves | | section 15.5.7 |
 | 500 | the compositor denied the capture, `unauthorized`; type `capture-denied` | none, a retry never clears it | section 15.6.1 |
 | 502 | the sidecar answered something that is not HTTP or not a problem document | | section 15.6.3 |
-| 503 | the output is being captured; the compositor is not serving; the sidecar refused the connection, is absent, or is not ready; the `Display` has no `status.node` yet | `Retry-After: 5` | sections 15.6.4 and 10.2.3 |
+| 503 | the output is being captured, type `capture-busy`; the compositor is not serving the screen, type `compositor-down`, with the `CompositorServing` condition's words as `detail`; the sidecar refused the connection, is absent, or is not ready, type `upstream-failed`; the `Display` has no `status.node` yet, type `no-node` | `Retry-After: 5` | sections 15.6.4 and 10.2.3 |
 | 504 | the sidecar sent no headers within the header timeout | | section 15.6.5 |
 
 ```json
@@ -197,10 +197,15 @@ own words: the compositor's refusal, the `TokenReview`'s error, the
 
 The problem types the three capture APIs share live under
 `https://liken.sh/problems/`: `no-node`, `not-acceptable`,
-`capture-busy`, and `upstream-failed`. This domain's own,
-`capture-denied`, lives under `https://display.liken.sh/problems/`.
-An error with no type of its own is `about:blank`, and its `title`
-is the status phrase.
+`capture-busy`, and `upstream-failed`. This domain's own live under
+`https://display.liken.sh/problems/`: `capture-denied`, and
+`compositor-down` for a screen whose compositor is not serving,
+which no other domain has. A screen with no node and a screen whose
+compositor is down are both a 503, and they carry different types
+because they are different waits: one is waiting for the scheduler,
+the other for the operator to start the compositor again. An error
+with no type of its own is `about:blank`, and its `title` is the
+status phrase. The OpenAPI document enumerates every type.
 
 ## Discovery
 
@@ -302,6 +307,21 @@ curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
   'https://localhost:8443/v1/display/displays/HDMI-A-1/screen.mp4?t=,10' > clip.mp4
 ```
 
+A port-forward carries a still well and a stream badly. It is a
+single TCP connection through the API server, and on `liken-1` it
+moved about 2 Mbit/s: a 3 second MJPEG stream that the node captured
+in 3.06 s took 25 s to read through the forward and 3.09 s from a pod
+on the cluster network. A 1080p MJPEG stream needs about 15 Mbit/s,
+so a viewer on the forward sees it at about an eighth of real time.
+Stills are not affected: `screen.png` cost 0.9 s to first byte
+through the forward against 0.76 s from the cluster network. Read a
+stream from a pod on the cluster network, or through a `Service` the
+cluster owner exposes.
+
 A capture holds the compositor's hardware planes off for its whole
 length, so a film that a plane would show is composited through the
-GL renderer while a clip runs.
+GL renderer while a clip runs. On a node whose driver has no VA-API
+post-processing the colour conversion runs on the CPU as well, which
+costs about four times the cores at 1080p; the info document's
+`conversion` member names the graph the node runs, and
+`display_capture_conversion` carries the same answer to a dashboard.

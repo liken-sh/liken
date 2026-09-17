@@ -131,15 +131,22 @@ func (c *sidecarClient) open(ctx context.Context, pod sidecarPod, path, query st
 	return nil, nil, relay
 }
 
-// A request to a node fails before an answer in two ways. A sidecar
+// A request to a node fails before an answer in three ways. A sidecar
 // that refused the connection or is not there is a 503 a retry may
-// clear. Anything else on the wire is a 502, because the sidecar
+// clear. So is a sidecar whose certificate does not verify: it is
+// serving one of its own making because the Secret the API mints has
+// not reached it yet, and the API puts that Secret back within the
+// minute. Anything else on the wire is a 502, because the sidecar
 // answered and what it said was not HTTP. A cancelled request is
-// neither: the caller hung up, and the caller is what the API checks
-// before it answers at all.
+// none of the three: the caller hung up, and the caller is what the
+// API checks before it answers at all.
 func dialFault(err error) *fault {
 	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) ||
 		errors.Is(err, syscall.ENETUNREACH) {
+		return unavailable(problemUpstreamFailed, err.Error())
+	}
+	var verification *tls.CertificateVerificationError
+	if errors.As(err, &verification) {
 		return unavailable(problemUpstreamFailed, err.Error())
 	}
 	var operation *net.OpError
@@ -251,11 +258,25 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 	s.readings.streaming(route.aspect, 1)
 	defer s.readings.streaming(route.aspect, -1)
 
-	written := s.stream(w, r, resp.Body, cancel, seconds(chosen.Time.Begin))
+	written, truncated := s.stream(w, r, resp.Body, cancel, seconds(chosen.Time.Begin))
 	if written > 0 && s.record != nil {
-		s.record(name, who.Username, route.aspect, mediaType)
+		s.record(screen, who.Username, route.aspect, mediaType)
 	}
-	s.logged(r, route, id, "", http.StatusOK, written, start)
+	s.logged(r, route, id, truncatedDetail(truncated), http.StatusOK, written, start)
+	if truncated && r.Context().Err() == nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// What the log line says about a capture whose bytes stopped part
+// way. The status was 200 and the bytes are real, so the line reads
+// as a request that was answered and the detail is what says the
+// answer is not whole.
+func truncatedDetail(truncated bool) string {
+	if truncated {
+		return "the capture sidecar ended the body part way"
+	}
+	return ""
 }
 
 // The copy flushes after every block, so a browser and mpv both see
@@ -265,7 +286,7 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 // the caller asked to discard, and it counts idle from the first
 // body byte after that.
 func (s *apiServer) stream(w http.ResponseWriter, r *http.Request, body io.Reader,
-	quiet context.CancelFunc, begins time.Duration) int {
+	quiet context.CancelFunc, begins time.Duration) (int, bool) {
 	idle := time.AfterFunc(begins+idleDeadline, quiet)
 	defer idle.Stop()
 	control := http.NewResponseController(w)
@@ -280,14 +301,18 @@ func (s *apiServer) stream(w http.ResponseWriter, r *http.Request, body io.Reade
 			written += sent
 			_ = control.Flush()
 			if writeErr != nil {
-				return written
+				return written, false
 			}
 		}
 		if err != nil {
-			return written
+			// A sidecar that ended its body without the terminating
+			// chunk is a capture that failed after its status line
+			// went out. The caller must not read that as a complete
+			// picture, so this response ends the same way.
+			return written, err != io.EOF
 		}
 		if r.Context().Err() != nil {
-			return written
+			return written, false
 		}
 	}
 }

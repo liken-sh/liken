@@ -50,15 +50,21 @@ const captureSocketPath = "/etc/weston/wayland-capture"
 // from the first.
 const capturePerOutput = "CAPTURE_PER_OUTPUT"
 
-// The knob that picks the conversion graph. The software fallback is
-// a setting and not a retry, because the status line is on the wire
-// before ffmpeg has read a frame, so a failed upload has no 500 to
-// become. A node whose driver refuses a bgr0 upload is named here
-// once, and the drill's ffmpeg log is the signal to name it.
+// The knob that picks the conversion graph, and the two values it
+// takes. It is a setting rather than a per-request retry, because a
+// graph that cannot be built fails the same way on every request,
+// and the probe below reads that answer once. An owner who sets it
+// overrides the probe in either direction.
 const (
 	captureConversion = "CAPTURE_CONVERSION"
 	softwareGraph     = "software"
+	vaapiGraph        = "vaapi"
 )
+
+// How long the startup probe may take. It encodes one 64 by 64 frame
+// to nothing, which is milliseconds of work, so a probe still
+// running after this is a driver that is not answering.
+const conversionProbeTimeout = 20 * time.Second
 
 // How long the client waits on the compositor for each step of the
 // exchange: the connection, the registry, the output's events, and
@@ -127,14 +133,19 @@ func serveCaptureSidecar() {
 		perOutput:  perOutputLimit(),
 		now:        time.Now,
 		running:    map[string][]runningCapture{},
-		software:   envOr(captureConversion, "gpu") == softwareGraph,
+		software:   chooseConversion(ctx, device),
 	}
+	readings.converting(server.usesSoftwareConversion())
 
 	address := envOr("CAPTURE_ADDR", defaultCaptureAddr)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		fatal("the capture listener on %s: %v", address, err)
 	}
+	// The realm a challenge names is this process, not the caller it
+	// expects, so a 401 from the capture port reads as the capture
+	// port's own.
+	authenticateRealm = `Bearer realm="display-capture"`
 	fmt.Printf("%s: serving captures on %s through %s\n", captureComponent, address, server.socketPath)
 	serving := &http.Server{
 		Handler:           server,
@@ -148,6 +159,39 @@ func serveCaptureSidecar() {
 	if err := serving.ServeTLS(listener, "", ""); err != nil && ctx.Err() == nil {
 		fatal("the capture listener stopped: %v", err)
 	}
+}
+
+// Which conversion graph this process runs, decided once at startup.
+// A node that was told which graph to run is believed, because an
+// owner who set the knob knows something the probe cannot read. Every
+// other node is asked: the GPU graph runs one synthetic frame, and a
+// failure selects the software conversion for the life of the
+// process. Either way the choice and the reason go in the log, so a
+// node's own line answers which graph it takes.
+func chooseConversion(ctx context.Context, device string) bool {
+	switch envOr(captureConversion, "") {
+	case softwareGraph:
+		fmt.Printf("%s: %s names the software conversion, so this node converts on the CPU\n",
+			captureComponent, captureConversion)
+		return true
+	case vaapiGraph:
+		fmt.Printf("%s: %s names the GPU graph, so this node converts in scale_vaapi\n",
+			captureComponent, captureConversion)
+		return false
+	}
+	if device == "" {
+		fmt.Printf("%s: no render node, so this node converts on the CPU\n", captureComponent)
+		return true
+	}
+	probe, stop := context.WithTimeout(ctx, conversionProbeTimeout)
+	defer stop()
+	if err := probeConversion(probe, device); err != nil {
+		fmt.Printf("%s: %s has no VA-API post-processing, so this node converts on the CPU: %v\n",
+			captureComponent, device, err)
+		return true
+	}
+	fmt.Printf("%s: %s converts in scale_vaapi\n", captureComponent, device)
+	return false
 }
 
 func perOutputLimit() int {
@@ -221,11 +265,12 @@ func (s *captureServer) answerInfo(w http.ResponseWriter, r *http.Request, conne
 
 	screen := session.screen()
 	body, err := renderJSON(screenInfo{
-		Width:   screen.Width,
-		Height:  screen.Height,
-		Scale:   screen.Scale,
-		Refresh: screen.Refresh,
-		Formats: screenMediaTypes(),
+		Width:      screen.Width,
+		Height:     screen.Height,
+		Scale:      screen.Scale,
+		Refresh:    screen.Refresh,
+		Formats:    screenMediaTypes(),
+		Conversion: s.conversionName(),
 	})
 	if err != nil {
 		writeFault(w, upstreamFailed(err.Error()), r.URL.Path, id, head)
@@ -331,9 +376,48 @@ func (s *captureServer) answerCapture(w http.ResponseWriter, r *http.Request, ro
 	}
 }
 
+// One line at the first frame of every capture. It carries what the
+// compositor sent and what this process made of it: the DRM fourcc,
+// the -pixel_format derived from it, the size and scale the output
+// reported, and the graph the frames run through. A drill reads the
+// node's own answer here rather than inferring it from ffmpeg's echo
+// of its input.
+func (s *captureServer) report(connector string, screen captureScreen, mediaType string) {
+	fmt.Printf("the capture of %s: %s at %dx%d scale %d, fourcc %s (%#08x) as %s, %s, %s conversion\n",
+		connector, mediaType, screen.Width, screen.Height, screen.Scale,
+		fourccName(screen.Format), screen.Format, screen.PixelFormat,
+		s.socketPath, s.conversionName())
+}
+
 // An answer that is already streaming cannot become a problem
-// document, because its status line is on the wire. This reports
-// the cause to the log, and the response ends.
+// document, because its status line is on the wire. This reports the
+// cause to the log, and the response ends.
 func (s *captureServer) reportMidStream(connector string, err error) {
 	fmt.Fprintf(os.Stderr, "the capture of %s ended: %v\n", connector, err)
+}
+
+// The same report for a capture that ended while its caller was
+// still reading, which is where a mode change lands: the compositor
+// destroys the output, the connection dies with it, and the feed
+// reads an end of file. The line carries both sizes, the one the
+// capture was encoding at and the one the screen serves now, because
+// a reader of the log cannot otherwise tell a mode change from a
+// compositor that stopped.
+func (s *captureServer) reportEnded(connector string, was captureScreen, err error) {
+	fmt.Fprintf(os.Stderr, "the capture of %s ended at %dx%d: %v%s\n",
+		connector, was.Width, was.Height, err, s.sizeNow(connector))
+}
+
+// The size the screen serves now, for the log line of a capture that
+// ended. A compositor that answers nothing says so instead: a mode
+// change ends the connection, and the compositor is often still
+// restarting when this line is written.
+func (s *captureServer) sizeNow(connector string) string {
+	session, err := openCapture(s.socketPath, connector, captureOpenTimeout)
+	if err != nil {
+		return fmt.Sprintf("; %s serves nothing now: %v", connector, err)
+	}
+	defer func() { _ = session.close() }()
+	screen := session.screen()
+	return fmt.Sprintf("; %s serves %dx%d now", connector, screen.Width, screen.Height)
 }

@@ -80,4 +80,9 @@ type screenInfo struct {
 	Scale   int      `json:"scale"`
 	Refresh int      `json:"refresh"`
 	Formats []string `json:"formats"`
+	// The graph the node encodes with, vaapi or software. A node
+	// whose driver has no VA-API post-processing converts on the CPU,
+	// which costs four times the cores at 1080p, so the document
+	// names it.
+	Conversion string `json:"conversion,omitempty"`
 }

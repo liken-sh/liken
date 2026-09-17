@@ -116,6 +116,15 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			field:  [2]string{"Retry-After", retryAfterSeconds},
 		},
 		{
+			name:   "a screen whose compositor is not serving",
+			method: http.MethodGet,
+			target: apiRoot + "/displays/HDMI-A-3/screen.png",
+			status: http.StatusServiceUnavailable,
+			kind:   problemCompositorDown,
+			field:  [2]string{"Retry-After", retryAfterSeconds},
+			detail: "connect: no such file or directory",
+		},
+		{
 			name: "the output is being captured",
 			set: func(_ *testCluster, sidecar *sidecarFixture) {
 				sidecar.answers(answerProblem(http.StatusServiceUnavailable, problemCaptureBusy,
@@ -377,7 +386,7 @@ func TestTheCaptureStreamsWhatTheSidecarSent(t *testing.T) {
 func TestTheSubjectRidesTheRequest(t *testing.T) {
 	cluster := newTestCluster(t)
 	server := newTestAPI(t, cluster, newSidecarFixture(t))
-	server.record = func(name, subject, aspect, form string) {
+	server.record = func(screen *Display, subject, aspect, form string) {
 		if subject != "system:serviceaccount:liken-system:viewer" {
 			t.Errorf("the record names %q, want the subject the review answered with", subject)
 		}
@@ -468,5 +477,107 @@ func TestACallerThatHungUpIsAnsweredWithNothing(t *testing.T) {
 	}
 	if recorder.Code != http.StatusOK {
 		t.Errorf("the API wrote status %d to a caller that hung up", recorder.Code)
+	}
+}
+
+// A sidecar serving a certificate this API cannot verify is a 503
+// with Retry-After, not a 502: it is serving one of its own making
+// because the Secret has not reached it, and the API puts that
+// Secret back within the minute.
+func TestASidecarWithAnUnknownCertificateIsUnavailable(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+	// A client that trusts nothing is what a sidecar serving its own
+	// leaf looks like from here.
+	server.sidecar.http = &http.Client{}
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a sidecar with an unknown certificate answered %d, want 503", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Retry-After"); got != retryAfterSeconds {
+		t.Errorf("Retry-After is %q, want %q", got, retryAfterSeconds)
+	}
+	var document problemDocument
+	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(document.Detail, "certificate") {
+		t.Errorf("the detail is %q, want the handshake's own words", document.Detail)
+	}
+}
+
+// The Captured Event names the object by uid as well as by name,
+// because kubectl describe searches a resource's events by uid and
+// finds none written without one.
+func TestTheCapturedEventNamesTheObjectsUID(t *testing.T) {
+	cluster := newTestCluster(t)
+	server := newTestAPI(t, cluster, newSidecarFixture(t))
+
+	call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+
+	events := cluster.recorded()
+	if len(events) != 1 {
+		t.Fatalf("the capture wrote %d events, want one", len(events))
+	}
+	named := events[0].InvolvedObject
+	if named.UID != "e740343c-8168-4b59-af5b-4a747367fcf8" {
+		t.Errorf("the event names uid %q, want the Display's own", named.UID)
+	}
+	if named.APIVersion != DisplayAPIVersion || named.Kind != "Display" {
+		t.Errorf("the event names %s %s, want the Display's own kind", named.APIVersion, named.Kind)
+	}
+}
+
+// Every refusal carries a detail, the two that used to answer with
+// none included: a request with no token names the field it wants,
+// and a subject RBAC matched no rule for is told which rule was
+// asked for.
+func TestEveryRefusalCarriesADetail(t *testing.T) {
+	cases := []struct {
+		name   string
+		set    func(cluster *testCluster)
+		header http.Header
+		target string
+		want   string
+	}{
+		{
+			name:   "no token at all",
+			header: bearer(""),
+			target: apiRoot + "/displays/HDMI-A-1/screen.png",
+			want:   noTokenDetail,
+		},
+		{
+			name:   "a subject no rule matched",
+			set:    func(cluster *testCluster) { cluster.allowed, cluster.reason = false, "" },
+			target: apiRoot + "/displays/HDMI-A-1/screen.png",
+			want:   "not allowed to get displays/screen on HDMI-A-1",
+		},
+		{
+			name:   "a subject no rule matched, on the info route",
+			set:    func(cluster *testCluster) { cluster.allowed, cluster.reason = false, "" },
+			target: apiRoot + "/displays/HDMI-A-1",
+			want:   "not allowed to get displays on HDMI-A-1",
+		},
+	}
+	for _, row := range cases {
+		t.Run(row.name, func(t *testing.T) {
+			cluster := newTestCluster(t)
+			if row.set != nil {
+				row.set(cluster)
+			}
+			server := newTestAPI(t, cluster, newSidecarFixture(t))
+
+			resp := call(t, server, http.MethodGet, row.target, row.header)
+
+			var document problemDocument
+			if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
+				t.Fatal(err)
+			}
+			if document.Detail != row.want {
+				t.Errorf("the refusal carries %q, want %q", document.Detail, row.want)
+			}
+		})
 	}
 }

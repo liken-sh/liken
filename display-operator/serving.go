@@ -20,12 +20,17 @@ import (
 
 // The API looks at its own certificate twice a day, which is often
 // enough for a leaf that lives a year and is re-minted with four
-// months left. The sidecar looks for the files the optional Secret
+// months left. It looks for the sidecar's Secret every minute,
+// because that Secret can be deleted and nothing else puts it back:
+// a get of one object costs the API server almost nothing, and the
+// alternative is a cluster whose captures answer nothing until the
+// next renewal. The sidecar looks for the files the optional Secret
 // volume delivers every fifteen seconds, because the volume changes
 // with no event a process can wait on, and a fresh install waits
 // this long at most for its first leaf.
 const (
 	renewalInterval = 12 * time.Hour
+	sidecarInterval = time.Minute
 	reloadInterval  = 15 * time.Second
 )
 
@@ -148,6 +153,9 @@ func startAuthority(ctx context.Context, c *Client, namespace string,
 // expiry gauge to the date a person reads on a dashboard.
 func keepCertificates(ctx context.Context, c *Client, namespace string,
 	ca *certificateAuthority, holder *certificateHolder, readings *apiMetrics) {
+	if ca != nil {
+		go keepSidecarLeaf(ctx, c, namespace, ca)
+	}
 	tick := time.NewTicker(renewalInterval)
 	defer tick.Stop()
 	for {
@@ -168,11 +176,26 @@ func keepCertificates(ctx context.Context, c *Client, namespace string,
 				continue
 			}
 			readings.certificateExpires(material.Expires)
-			if ca == nil {
-				continue
-			}
+		}
+	}
+}
+
+// Every minute the API reads the sidecar's Secret and mints it again
+// if it is gone. Nothing else puts that Secret back: an owner who
+// deletes it leaves every node's sidecar serving a certificate of its
+// own making, which the API refuses to verify, so every capture in
+// the cluster answers 503 until this pass runs. A leaf that stands
+// costs one get and writes nothing.
+func keepSidecarLeaf(ctx context.Context, c *Client, namespace string, ca *certificateAuthority) {
+	tick := time.NewTicker(sidecarInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-tick.C:
 			if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, now); err != nil {
-				fmt.Fprintf(os.Stderr, "re-minting the sidecar certificate: %v\n", err)
+				fmt.Fprintf(os.Stderr, "minting the sidecar certificate: %v\n", err)
 			}
 		}
 	}
