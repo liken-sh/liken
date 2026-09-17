@@ -7,6 +7,7 @@ weight: 10
 
 The guides give the steps to operate this project: the
 [install](/docs/guides/install/),
+[declaring a Player](/docs/guides/declare-a-player/) for a screen,
 [mapping a controller](/docs/guides/mapping-a-controller/) whose
 codes no one has written down, and
 [handing the idle screen to another controller](/docs/guides/handing-the-idle-screen-to-another-controller/).
