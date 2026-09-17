@@ -954,6 +954,15 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		if player.Spec.Display != nil {
 			desired.Screen, desired.Conditions = o.reconcileScreen(player, key, lookup)
 		}
+		// The sink memory is the same kind of fact as the screen memory
+		// and is carried forward the same way. The spec holds only
+		// selections; the running Play's claim is the one place that
+		// says which Sink the scheduler picked for each one, and
+		// media-api reads the answer off the Player rather than the
+		// claim, which is gone between runs.
+		if len(player.Spec.Sinks) > 0 {
+			desired.Sinks = o.reconcileSinks(player, desired.Play)
+		}
 		idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
 		// The panel state is what the screen's Display last
 		// observed, so the status reports the hardware and not what

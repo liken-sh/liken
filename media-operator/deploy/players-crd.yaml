@@ -423,6 +423,37 @@ spec:
                       description: >-
                         The monitor id of the screen, which is the name
                         of its Display.
+                sinks:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  # The list is memory for the same reason status.screen
+                  # is: the idle claim holds the draw device alone, so a
+                  # sink is allocated only while a Play runs, and a client
+                  # that asks between runs would otherwise find nothing.
+                  # The memory names the Sinks and does not open them. A
+                  # remembered Sink that another unit is using is never
+                  # tapped through this Player, so the media API still
+                  # requires a running Play for audio.
+                  description: >-
+                    The Sink each spec.sinks selection resolved to, in
+                    spec order. The operator writes the list from an
+                    allocated playback claim and keeps it after the
+                    Play retires, the way it keeps status.screen. A tap
+                    through these names still needs a running Play.
+                  items:
+                    type: object
+                    properties:
+                      request:
+                        type: string
+                        description: >-
+                          The claim's request name, audio0 for the
+                          first sink the spec states.
+                      name:
+                        type: string
+                        description: >-
+                          The name of the Sink object, which is the
+                          audio operator's own device name for that
+                          endpoint.
                 conditions:
                   type: array
                   x-kubernetes-list-type: map

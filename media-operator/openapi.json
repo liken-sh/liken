@@ -1,0 +1,2560 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "media-api",
+    "version": "v1alpha1",
+    "description": "media-api answers HTTP for a Player. Its screen routes redirect to display-api, its audio routes redirect to audio-api, and its media routes compose the two into one muxed stream."
+  },
+  "servers": [
+    {
+      "url": "https://media-api.liken-system.svc"
+    }
+  ],
+  "paths": {
+    "/v1/media": {
+      "get": {
+        "operationId": "discovery",
+        "summary": "The routes this API serves, as RFC 6570 templates.",
+        "responses": {
+          "200": {
+            "description": "The discovery document, keyed by plural, with one entry per aspect."
+          },
+          "304": {
+            "description": "The document matches the If-None-Match field."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          }
+        }
+      },
+      "head": {
+        "operationId": "discoveryHead",
+        "summary": "The routes this API serves, as RFC 6570 templates. The headers alone, with no body, no capture, and no upstream call.",
+        "responses": {
+          "200": {
+            "description": "The discovery document, keyed by plural, with one entry per aspect."
+          },
+          "304": {
+            "description": "The document matches the If-None-Match field."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          }
+        }
+      },
+      "options": {
+        "operationId": "discoveryOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}": {
+      "get": {
+        "operationId": "player",
+        "summary": "The Player's Display, its Sinks, whether a Play runs, and the stream count.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Player's capture facts, with a related link to every capture route."
+          },
+          "304": {
+            "description": "The document matches the If-None-Match field."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerHead",
+        "summary": "The Player's Display, its Sinks, whether a Play runs, and the stream count. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Player's capture facts, with a related link to every capture route."
+          },
+          "304": {
+            "description": "The document matches the If-None-Match field."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/audio": {
+      "get": {
+        "operationId": "playerAudio",
+        "summary": "The Player's sound, in the type the Accept field chooses.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerAudioHead",
+        "summary": "The Player's sound, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerAudioOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/audio.flac": {
+      "get": {
+        "operationId": "playerAudioFlac",
+        "summary": "The Player's sound, as audio/flac.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerAudioFlacHead",
+        "summary": "The Player's sound, as audio/flac. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerAudioFlacOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/audio.opus": {
+      "get": {
+        "operationId": "playerAudioOpus",
+        "summary": "The Player's sound, as audio/ogg.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerAudioOpusHead",
+        "summary": "The Player's sound, as audio/ogg. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerAudioOpusOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/audio.wav": {
+      "get": {
+        "operationId": "playerAudioWav",
+        "summary": "The Player's sound, as audio/wav.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerAudioWavHead",
+        "summary": "The Player's sound, as audio/wav. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The audio-api route for this Player's Sink."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "No Play runs on this Player, or it resolves no Sink."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerAudioWavOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/media": {
+      "get": {
+        "operationId": "playerMedia",
+        "summary": "The Player's screen and sound in one stream, in the type the Accept field chooses.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
+          },
+          "307": {
+            "description": "The one stream this Player resolves, where it resolves only one."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player resolves no stream at all."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerMediaHead",
+        "summary": "The Player's screen and sound in one stream, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
+          },
+          "307": {
+            "description": "The one stream this Player resolves, where it resolves only one."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player resolves no stream at all."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerMediaOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/media.mkv": {
+      "get": {
+        "operationId": "playerMediaMkv",
+        "summary": "The Player's screen and sound in one stream, as video/matroska.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
+          },
+          "307": {
+            "description": "The one stream this Player resolves, where it resolves only one."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player resolves no stream at all."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerMediaMkvHead",
+        "summary": "The Player's screen and sound in one stream, as video/matroska. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
+          },
+          "307": {
+            "description": "The one stream this Player resolves, where it resolves only one."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player resolves no stream at all."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerMediaMkvOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/media.mp4": {
+      "get": {
+        "operationId": "playerMediaMp4",
+        "summary": "The Player's screen and sound in one stream, as video/mp4.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
+          },
+          "307": {
+            "description": "The one stream this Player resolves, where it resolves only one."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player resolves no stream at all."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerMediaMp4Head",
+        "summary": "The Player's screen and sound in one stream, as video/mp4. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
+          },
+          "307": {
+            "description": "The one stream this Player resolves, where it resolves only one."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player resolves no stream at all."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerMediaMp4Options",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/screen": {
+      "get": {
+        "operationId": "playerScreen",
+        "summary": "The Player's screen, in the type the Accept field chooses.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerScreenHead",
+        "summary": "The Player's screen, in the type the Accept field chooses. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerScreenOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/screen.jpg": {
+      "get": {
+        "operationId": "playerScreenJpg",
+        "summary": "The Player's screen, as image/jpeg.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerScreenJpgHead",
+        "summary": "The Player's screen, as image/jpeg. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerScreenJpgOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/screen.mjpeg": {
+      "get": {
+        "operationId": "playerScreenMjpeg",
+        "summary": "The Player's screen, as multipart/x-mixed-replace.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerScreenMjpegHead",
+        "summary": "The Player's screen, as multipart/x-mixed-replace. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerScreenMjpegOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/screen.mp4": {
+      "get": {
+        "operationId": "playerScreenMp4",
+        "summary": "The Player's screen, as video/mp4.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerScreenMp4Head",
+        "summary": "The Player's screen, as video/mp4. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerScreenMp4Options",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/namespaces/{namespace}/players/{name}/screen.png": {
+      "get": {
+        "operationId": "playerScreenPng",
+        "summary": "The Player's screen, as image/png.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "head": {
+        "operationId": "playerScreenPngHead",
+        "summary": "The Player's screen, as image/png. The headers alone, with no body, no capture, and no upstream call.",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "xywh",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "framerate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "The display-api route for this Player's Display."
+          },
+          "400": {
+            "description": "A query the grammar refuses, or an upstream 400."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "404": {
+            "description": "No Player of that name, or an upstream 404."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          },
+          "406": {
+            "description": "Nothing this route serves is acceptable."
+          },
+          "409": {
+            "description": "The Player carries no status.screen."
+          },
+          "502": {
+            "description": "An upstream answer this API cannot relay."
+          },
+          "503": {
+            "description": "An upstream is busy, or this API is at its composition limit."
+          },
+          "504": {
+            "description": "An upstream sent no headers within ten seconds plus the t= begin."
+          }
+        }
+      },
+      "options": {
+        "operationId": "playerScreenPngOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    },
+    "/v1/media/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "summary": "This OpenAPI document.",
+        "responses": {
+          "200": {
+            "description": "This document, with the servers entry naming the origin the request reached."
+          },
+          "304": {
+            "description": "The document matches the If-None-Match field."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          }
+        }
+      },
+      "head": {
+        "operationId": "openapiHead",
+        "summary": "This OpenAPI document. The headers alone, with no body, no capture, and no upstream call.",
+        "responses": {
+          "200": {
+            "description": "This document, with the servers entry naming the origin the request reached."
+          },
+          "304": {
+            "description": "The document matches the If-None-Match field."
+          },
+          "401": {
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "description": "The SubjectAccessReview denied the subject."
+          },
+          "405": {
+            "description": "A method other than GET, HEAD, or OPTIONS."
+          }
+        }
+      },
+      "options": {
+        "operationId": "openapiOptions",
+        "summary": "The methods this route answers.",
+        "responses": {
+          "204": {
+            "description": "Allow names GET, HEAD, and OPTIONS."
+          }
+        }
+      }
+    }
+  }
+}

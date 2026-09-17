@@ -15,6 +15,9 @@ button tables.
 cluster's language defaults. [The media bus](/docs/reference/bus/)
 is the MQTT contract that carries what happens while a run is live:
 reports, commands, button events, and state.
+[The media API](/docs/reference/api/) is the HTTPS face of a
+`Player`: it captures what is on the unit now, its screen, its audio,
+or the two composed into one stream.
 
 Each resource page gives the resource's fields, then its topics and
 payloads in an "On the bus" section. `MediaPreferences` alone has no

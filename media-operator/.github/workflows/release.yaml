@@ -16,15 +16,18 @@
 # The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The five images release together, always, and three Dockerfiles
-# build them: the idle image and the display image are two targets of
-# one file, and the sidecar image is the operator image under a second
-# name, tagged here and never built twice. The operator stamps the
-# player image into every playback pod, the idle image into every idle
-# pod, the display image into every display container, and the sidecar
-# image into every sidecar container, and images that could drift apart
-# would put the report contract and the screen topic at two versions at
-# once.
+# The six images release together, always: operator, player, idle,
+# display, sidecar, and api. Four Dockerfiles build them: the idle
+# image and the display image are two targets of Dockerfile.screen,
+# the api image is Dockerfile.api, and the sidecar image is the
+# operator image under a second name, tagged here and never built
+# twice. The operator stamps the player image into every playback pod,
+# the idle image into every idle pod, the display image into every
+# display container, and the sidecar image into every sidecar
+# container, and images that could drift apart would put the report
+# contract and the screen topic at two versions at once. The api image
+# reads the same Player types the operator writes, so it releases in
+# the same set.
 name: release
 
 on:
@@ -104,6 +107,8 @@ jobs:
             echo "    newTag: $VERSION"
             echo "  - name: ghcr.io/$GITHUB_REPOSITORY-display"
             echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-api"
+            echo "    newTag: $VERSION"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -173,6 +178,18 @@ jobs:
             ghcr.io/liken-sh/media-operator-display:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-display:latest
 
+      - name: Build the api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.api
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-api:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/media-operator-api:${{ env.VERSION }}
+            ghcr.io/liken-sh/media-operator-api:latest
+
       # The sidecar image is the operator image under a second name.
       # Every sidecar container runs the operator binary in one of its
       # modes, so a second build would spend a build to produce the same
@@ -222,6 +239,16 @@ jobs:
             || { echo "the player image has no /media-operator"; exit 1; }
           docker rm "$container" > /dev/null
 
+      # The api gate proves ffmpeg is in the image and runs. The
+      # composed stream is one ffmpeg mux, and the image has no shell,
+      # so the check runs ffmpeg itself as the entrypoint.
+      - name: Prove the api image
+        run: |
+          set -eu
+          image="ghcr.io/liken-sh/media-operator-api:$VERSION"
+          docker run --rm --entrypoint /usr/bin/ffmpeg "$image" -version > ffmpeg.txt
+          grep -q '^ffmpeg version ' ffmpeg.txt
+
       # ci.yaml runs beside this workflow on a push to main and holds
       # the coverage floors and the other checks. This step waits for
       # that run and lets nothing push from a red gate. The images built
@@ -269,10 +296,12 @@ jobs:
           docker push "ghcr.io/liken-sh/media-operator-idle:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-display:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-sidecar:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator-api:$VERSION"
           if [ "$RELEASE" = true ]; then
             docker push "ghcr.io/liken-sh/media-operator:latest"
             docker push "ghcr.io/liken-sh/media-operator-player:latest"
             docker push "ghcr.io/liken-sh/media-operator-idle:latest"
             docker push "ghcr.io/liken-sh/media-operator-display:latest"
             docker push "ghcr.io/liken-sh/media-operator-sidecar:latest"
+            docker push "ghcr.io/liken-sh/media-operator-api:latest"
           fi

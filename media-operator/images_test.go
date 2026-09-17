@@ -252,3 +252,23 @@ func TestOperatorVersionAnswersEmptyWhenItCannotBeRead(t *testing.T) {
 		})
 	}
 }
+
+// The api role reads its release the way the operator does, off the tag
+// of the container deploy/api.yaml names, and asking for a container
+// the pod does not hold answers the empty string.
+func TestTheApiRoleReadsItsOwnContainersTag(t *testing.T) {
+	t.Setenv(podNameVariable, "media-api-6c7d9f4b88-t4r2m")
+	t.Setenv(podNamespaceVariable, "liken-system")
+	api := &cannedAPI{answers: map[string]any{
+		"GET /api/v1/namespaces/liken-system/pods/media-api-6c7d9f4b88-t4r2m": Pod{
+			Metadata: ObjectMeta{Name: "media-api-6c7d9f4b88-t4r2m", Namespace: "liken-system"},
+			Spec: PodSpec{Containers: []Container{
+				{Name: apiContainerName, Image: "ghcr.io/liken-sh/media-operator-api:2026.09.16-001"},
+			}},
+		},
+	}}
+	client := testAPIClient(t, api.handler())
+
+	mustMatch(t, containerVersion(client, apiContainerName), "2026.09.16-001")
+	mustMatch(t, containerVersion(client, operatorContainerName), "")
+}

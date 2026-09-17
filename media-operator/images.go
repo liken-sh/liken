@@ -101,6 +101,16 @@ func resolveImages(client *Client) (companionImages, error) {
 // a tag all answer the empty string, because metrics are secondary to
 // the reconcile loop and never worth failing startup over.
 func operatorVersion(client *Client) string {
+	return containerVersion(client, operatorContainerName)
+}
+
+// containerVersion is the release a role runs, read off the tag of the
+// named container in the role's own pod. Every role reads it this way,
+// so no role carries a version of its own and every image in one
+// release reports the same one. A pod the role cannot read, a container
+// the pod does not hold, and an image with no tag all answer the empty
+// string, for the same reason operatorVersion does.
+func containerVersion(client *Client, container string) string {
 	name, namespace := os.Getenv(podNameVariable), os.Getenv(podNamespaceVariable)
 	if name == "" || namespace == "" {
 		return ""
@@ -109,9 +119,9 @@ func operatorVersion(client *Client) string {
 	if err != nil {
 		return ""
 	}
-	for _, container := range pod.Spec.Containers {
-		if container.Name == operatorContainerName {
-			if _, tag, tagged := splitReference(container.Image); tagged {
+	for _, held := range pod.Spec.Containers {
+		if held.Name == container {
+			if _, tag, tagged := splitReference(held.Image); tagged {
 				return tag
 			}
 		}

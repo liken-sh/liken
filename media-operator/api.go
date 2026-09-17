@@ -141,10 +141,30 @@ type PlayerStatus struct {
 	// unit whose panel is away still knows which Display to read.
 	Screen *PlayerScreenStatus `json:"screen,omitempty"`
 
+	// Sinks is the sink memory: the Sink each spec.sinks selection
+	// resolved to, in spec order. It is memory the way Screen is. The
+	// idle claim holds the draw device alone, so a sink is allocated
+	// only while a Play runs; the operator writes the list from an
+	// allocated playback claim and keeps it after the Play retires.
+	// The list names the Sinks; it does not open them. A tap through
+	// media-api still needs a running Play, because a remembered Sink
+	// that another unit is using is never tapped through this one.
+	Sinks []PlayerSinkStatus `json:"sinks,omitempty"`
+
 	// Conditions carries the Screen condition, which reads the
 	// remembered Display's Connected condition for the unit. It is
 	// empty until the claim has resolved once.
 	Conditions []PlayerCondition `json:"conditions,omitempty"`
+}
+
+// PlayerSinkStatus is one resolved sink. Request is the claim request
+// that asked for it, audio0 for the first spec.sinks entry, so a
+// person reading the claim finds the row. Name is the Sink object the
+// scheduler allocated, which is the audio operator's own device name
+// for that endpoint, so a client can call the audio API with it.
+type PlayerSinkStatus struct {
+	Request string `json:"request,omitempty"`
+	Name    string `json:"name,omitempty"`
 }
 
 // PlayerScreenStatus is the screen memory: the node the draw device

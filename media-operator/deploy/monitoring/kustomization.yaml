@@ -23,6 +23,7 @@ kind: Component
 
 resources:
   - podmonitor-operator.yaml
+  - podmonitor-api.yaml
   - podmonitor-screens.yaml
 
 # The dashboard travels as a ConfigMap carrying the

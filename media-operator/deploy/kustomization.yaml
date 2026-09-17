@@ -21,6 +21,7 @@ resources:
   - mediapreferences-crd.yaml
   - rbac.yaml
   - operator.yaml
+  - api.yaml
   - bus.yaml
 
 labels:
@@ -31,4 +32,6 @@ labels:
 
 images:
   - name: ghcr.io/liken-sh/media-operator
+    newTag: latest
+  - name: ghcr.io/liken-sh/media-operator-api
     newTag: latest

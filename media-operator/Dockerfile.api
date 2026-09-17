@@ -1,0 +1,42 @@
+# The api image: liken's ffmpeg image and the same binary the operator
+# image carries, run in its api role alone. The operator's own image
+# cannot serve here, because it is one static binary on scratch and
+# the composed stream is one ffmpeg mux.
+
+# The runtime base of the last stage. An argument a FROM line reads has
+# to be declared before the first stage, so it is here and not beside
+# the stage that uses it. The tag pins one release of the display
+# operator's ffmpeg image, and a workstation sets the argument to a
+# base it built.
+ARG FFMPEG_BASE=ghcr.io/liken-sh/ffmpeg:2026.09.16-001
+
+# The build stage repeats the operator image's, so every image that
+# carries the binary carries the same one, built from the same source.
+FROM golang:1.27.0-bookworm AS build
+WORKDIR /src
+# The module files come first, so a source edit reuses the cached
+# download layer.
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
+# The EDL package builds into the binary, so the source tree it needs
+# is the root files and this one directory.
+COPY edl/ ./edl/
+# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
+# static binary with no paths from the build machine in it. Static
+# even though this image has a libc, because the same artifact then
+# serves every image.
+RUN CGO_ENABLED=0 go build -trimpath -o /media-operator .
+
+# The ffmpeg image carries ffmpeg with its demuxers and muxers. The
+# mux uses -c copy alone, so it reads two containers and writes one
+# without decoding a packet, and this image needs no codec and no GPU
+# on its node.
+FROM ${FFMPEG_BASE}
+
+COPY --from=build /media-operator /media-operator
+
+# The entrypoint is the binary in its api role, so the Deployment
+# names no arguments of its own. ffmpeg is a child process the api
+# starts once per composition and ends with it.
+ENTRYPOINT ["/media-operator", "api"]
