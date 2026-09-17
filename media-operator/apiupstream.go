@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -81,16 +80,15 @@ type upstreamClient struct {
 // open sends one upstream request and answers the stream or the
 // fault. The header bound is a timer that cancels the request's
 // context, not a client timeout, because a client timeout covers the
-// whole exchange and would cut a live stream on schedule. The timer
-// stops once the headers arrive, and the body runs under the idle
-// bound instead.
+// whole exchange and would cut a live stream on schedule. Stop answers
+// whether it prevented the cancel from running, so it is also the
+// question "did the headers arrive in time": a stream whose deadline
+// fired is refused rather than handed back on a context that is
+// already cancelled. Once the headers are in, nothing bounds the body
+// but the idle watchdog.
 func (u *upstreamClient) open(parent context.Context, name, target string, headerTimeout time.Duration) (*upstreamStream, *upstreamFault) {
 	ctx, cancel := context.WithCancel(parent)
-	var late atomic.Bool
-	timer := time.AfterFunc(headerTimeout, func() {
-		late.Store(true)
-		cancel()
-	})
+	timer := time.AfterFunc(headerTimeout, cancel)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		timer.Stop()
@@ -111,22 +109,25 @@ func (u *upstreamClient) open(parent context.Context, name, target string, heade
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	response, err := u.http.Do(request)
-	timer.Stop()
+	inTime := timer.Stop()
 	if err != nil {
 		cancel()
-		if late.Load() {
-			u.metrics.observeUpstream(name, "timeout")
-			return nil, &upstreamFault{
-				status: http.StatusGatewayTimeout, kind: aboutBlank,
-				detail:   "the upstream sent no headers within " + headerTimeout.String(),
-				upstream: target,
-			}
+		if !inTime {
+			return nil, u.lateFault(name, target, headerTimeout)
 		}
 		u.metrics.observeUpstream(name, "error")
 		return nil, &upstreamFault{
 			status: http.StatusServiceUnavailable, kind: aboutBlank,
 			detail: err.Error(), upstream: target, retryAfter: retryAfterSeconds,
 		}
+	}
+	// The deadline can fire as the headers land. The context is
+	// cancelled by then, so the body would fail on its first read, and
+	// a refusal the client can read beats a stream that dies at once.
+	if !inTime {
+		drain(response.Body)
+		cancel()
+		return nil, u.lateFault(name, target, headerTimeout)
 	}
 	u.metrics.observeUpstream(name, strconv.Itoa(response.StatusCode))
 	if response.StatusCode != http.StatusOK {
@@ -143,6 +144,17 @@ func (u *upstreamClient) open(parent context.Context, name, target string, heade
 		codecs:    codecsOf(response.Header.Get("Content-Type")),
 		cancel:    cancel,
 	}, nil
+}
+
+// lateFault is the answer to a sibling that did not send its headers
+// within the bound, which is ten seconds plus the caller's begin.
+func (u *upstreamClient) lateFault(name, target string, headerTimeout time.Duration) *upstreamFault {
+	u.metrics.observeUpstream(name, "timeout")
+	return &upstreamFault{
+		status: http.StatusGatewayTimeout, kind: aboutBlank,
+		detail:   "the upstream sent no headers within " + headerTimeout.String(),
+		upstream: target,
+	}
 }
 
 // relayFault maps a sibling's status to this API's own: a 400 and a

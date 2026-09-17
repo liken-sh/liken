@@ -135,6 +135,13 @@ type sibling struct {
 	delay       time.Duration
 	stall       bool
 	hungUp      bool
+
+	// A body written in several parts, with a pause between them and a
+	// hook the test runs as each one goes out. A stream longer than the
+	// header bound is how a test tells the two bounds apart.
+	chunks   int
+	chunkGap time.Duration
+	onChunk  func()
 }
 
 func newSibling(t *testing.T) *sibling {
@@ -144,6 +151,7 @@ func newSibling(t *testing.T) *sibling {
 		s.mutex.Lock()
 		call := r.URL.RequestURI()
 		status, contentType, body, after, delay, stall := s.status, s.contentType, s.body, s.retryAfter, s.delay, s.stall
+		chunks, gap, onChunk := s.chunks, s.chunkGap, s.onChunk
 		for key, chosen := range s.bodies {
 			if strings.Contains(call, key) {
 				body = chosen
@@ -160,6 +168,17 @@ func newSibling(t *testing.T) *sibling {
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
+		if chunks > 0 {
+			for range chunks {
+				_, _ = w.Write(body)
+				w.(http.Flusher).Flush()
+				if onChunk != nil {
+					onChunk()
+				}
+				time.Sleep(gap)
+			}
+			return
+		}
 		_, _ = w.Write(body)
 		if !stall {
 			return

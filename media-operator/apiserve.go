@@ -56,6 +56,13 @@ const (
 // release the role runs is read off that container's image tag.
 const apiContainerName = "api"
 
+// serverReadHeaderTimeout bounds how long this API waits for a
+// caller's own request headers. It is this server's bound and not the
+// upstream one, although both are ten seconds: a composed response has
+// no write timeout at all, because a capture runs for as long as the
+// caller reads it.
+const serverReadHeaderTimeout = 10 * time.Second
+
 // certificateReview is how often the keeper looks at the leaf's
 // remaining life. The leaf lives a year and re-mints with a third
 // left, so an hour is many chances before the deadline.
@@ -306,20 +313,30 @@ func runAPI() {
 		server.ready.Store(true)
 	}
 
-	listener := &http.Server{
-		Addr:              environmentOr(apiAddressVariable, defaultAPIAddress),
-		Handler:           server.handler(),
-		ReadHeaderTimeout: upstreamHeaderTimeout,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return server.servingCertificate()
-			},
-		},
-	}
+	listener := server.listener(environmentOr(apiAddressVariable, defaultAPIAddress))
 	if err := listener.ListenAndServeTLS("", ""); err != nil {
 		fmt.Fprintf(os.Stderr, "serving on %s: %v\n", listener.Addr, err)
 		os.Exit(1)
+	}
+}
+
+// listener is the HTTPS server this role runs. It bounds the wait for
+// a caller's request headers and nothing else: a capture has no length
+// in advance, so a write deadline would cut every stream on schedule,
+// and an idle deadline would cut a tap that is discarding up to its
+// begin. The certificate comes from the keeper on every handshake, so
+// a re-minted leaf serves the next connection with no restart.
+func (s *apiServer) listener(address string) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           s.handler(),
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return s.servingCertificate()
+			},
+		},
 	}
 }
 
