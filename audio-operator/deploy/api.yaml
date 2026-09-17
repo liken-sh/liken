@@ -113,13 +113,19 @@ subjects:
 # tap is a read of the endpoint's sound. A role with resources ["*"]
 # in audio.liken.sh, and cluster-admin, gain capture on the day this
 # ships.
+#
+# The plain sinks and sources go with them, because the info route at
+# /v1/audio/sinks/{name} authorizes against the ordinary resource and
+# a listener who cannot read the rate and channel count cannot tell
+# what a tap will deliver. One role is the whole grant, which is what
+# the manual's recipe binds.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: audio-capture-viewer
 rules:
   - apiGroups: [audio.liken.sh]
-    resources: [sinks/audio, sources/audio]
+    resources: [sinks, sources, sinks/audio, sources/audio]
     verbs: [get]
 ---
 # audio-api is the operator's image in a fifth mode, so the cluster

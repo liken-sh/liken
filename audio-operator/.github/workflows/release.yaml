@@ -242,19 +242,37 @@ jobs:
           # check is for, so the run is bounded by a sleep and its
           # exit status is not read. The loader's own complaint on
           # stderr is the one signal.
+          #
+          # The -P line is the one the capture container builds: a SPA
+          # JSON object carrying the name the confirmation matches on
+          # and, for a sink, PipeWire's own monitor key. A pw-cat that
+          # refused that object would leave every tap unconfirmed, and
+          # the graph is the only place that shows, so the run here
+          # asks pw-dump whether the node arrived under its name.
           docker rm -f recorder > /dev/null 2>&1 || true
           docker run -d --name recorder -v "audio-release:$runtime" \
             -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
             --entrypoint /usr/bin/pw-record "$image" \
+            -P '{ node.name = "audio-capture-release", stream.capture.sink = true }' \
             --raw --format s16 --rate 48000 --channels 2 - > /dev/null
           sleep 3
           docker logs recorder > pw-record.out 2> pw-record.err || true
-          docker rm -f recorder > /dev/null
           if grep -qi 'error while loading shared libraries' pw-record.err; then
             cat pw-record.err
+            docker rm -f recorder > /dev/null
             echo "pw-record is missing a library"
             exit 1
           fi
+          docker rm -f probe > /dev/null 2>&1 || true
+          start probe /usr/bin/pw-dump
+          timeout 20 docker wait probe > /dev/null || true
+          docker logs probe > graph.json 2>/dev/null || true
+          docker rm -f probe recorder > /dev/null
+          grep -q '"node.name": "audio-capture-release"' graph.json || {
+            cat pw-record.err
+            echo "pw-record did not take the properties object the capture container builds"
+            exit 1
+          }
           for encoder in \
             "/usr/bin/flac --force-raw-format --endian=little --sign=signed --bps=16 --channels=2 --sample-rate=48000 --stdout -" \
             "/usr/bin/opusenc --raw --raw-bits 16 --raw-rate 48000 --raw-chan 2 - -"

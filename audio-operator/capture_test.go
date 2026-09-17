@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -22,6 +25,16 @@ type captureHarness struct {
 	samples string
 	args    string
 	encoder string
+
+	mu    sync.Mutex
+	lines []string
+}
+
+// logged is the per-tap lines this container wrote.
+func (h *captureHarness) logged() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.lines...)
 }
 
 // newCaptureHarness points the container at the fixtures in
@@ -47,7 +60,6 @@ func newCaptureHarness(t *testing.T, graph string, samples []byte) *captureHarne
 		encoder: filepath.Join(work, "encoder.args"),
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("CAPTURE_FAKE_PID", filepath.Join(work, "pw-record.pid"))
 	t.Setenv("CAPTURE_FAKE_ARGS", harness.args)
 	t.Setenv("CAPTURE_FAKE_ENCODER_ARGS", harness.encoder)
 	t.Setenv("CAPTURE_FAKE_SAMPLES", sampleFile)
@@ -61,6 +73,11 @@ func newCaptureHarness(t *testing.T, graph string, samples []byte) *captureHarne
 	})
 	harness.server = newCaptureServer(newCaptureMetrics("dev"), newLeaf(work),
 		review.reviewer(captureAudience), 4)
+	harness.server.log = func(line string) {
+		harness.mu.Lock()
+		defer harness.mu.Unlock()
+		harness.lines = append(harness.lines, line)
+	}
 	harness.serving = httptest.NewServer(harness.server.handler())
 	t.Cleanup(harness.serving.Close)
 	return harness
@@ -120,11 +137,17 @@ func TestATapRunsPwRecordWithTheLineThePlanStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading what pw-record was given: %v", err)
 	}
-	want := "-P\nstream.capture.sink=true\n--target\n" +
+	// The stream's own name is the request's, so the line is compared
+	// around it.
+	given := string(args)
+	if !strings.HasPrefix(given, "-P\n{ node.name = \"audio-capture-") {
+		t.Errorf("pw-record was given\n%q", given)
+	}
+	tail := "\", stream.capture.sink = true }\n--target\n" +
 		"usb-0573-1573-a34004801402-usb-audio\n--raw\n--format\ns16\n" +
 		"--rate\n48000\n--channels\n2\n-\n"
-	if string(args) != want {
-		t.Errorf("pw-record was given\n%q\nwant\n%q", args, want)
+	if !strings.HasSuffix(given, tail) {
+		t.Errorf("pw-record was given\n%q\nwant a line ending\n%q", given, tail)
 	}
 }
 
@@ -471,7 +494,7 @@ func TestTheGraphIsReadBeforeTheTapAndAgainToConfirm(t *testing.T) {
 		reads++
 		return readGraphFixture(t, "graph-no-settings.json"), nil
 	}
-	err := server.confirm(context.Background(), 4242, 48)
+	err := server.confirm(context.Background(), "audio-capture-4242", 48)
 	if err == nil {
 		t.Fatal("a graph with no link at all confirmed")
 	}
@@ -524,5 +547,126 @@ func TestTheSpanTheLogLineNames(t *testing.T) {
 		if got := spanWords(span); got != want {
 			t.Errorf("the span reads %q, want %q", got, want)
 		}
+	}
+}
+
+// A PipeWire that answers nothing says nothing about where the tap
+// landed. The drill killed the daemon mid-tap and got a 500
+// wrong-target with "can't connect: Host is down" in it; a daemon that
+// is down clears on its own, so it is a 503.
+func TestAPipeWireThatDoesNotAnswerIsUnavailableAndNotAWrongTarget(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
+	// The graph resolves once, then the daemon goes away, which is what
+	// the confirmation meets.
+	reads := 0
+	resolve := harness.server.graph
+	harness.server.graph = func(ctx context.Context) ([]byte, error) {
+		reads++
+		if reads == 1 {
+			return resolve(ctx)
+		}
+		return nil, fmt.Errorf("%w: running pw-dump: exit status 255: can't connect: Host is down",
+			ErrGraphUnread)
+	}
+	answer := harness.call(t, http.MethodGet,
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+	if answer.StatusCode != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("a dead PipeWire answered %s: %s", answer.Status, body)
+	}
+	if got := answer.Header.Get("Retry-After"); got != "5" {
+		t.Errorf("the refusal says Retry-After: %q", got)
+	}
+	document := readProblemBody(t, answer)
+	if document.Type == problemWrongTarget {
+		t.Error("a dead PipeWire was called a wrong target")
+	}
+	// The daemon's own words reach the caller.
+	if !strings.Contains(document.Detail, "can't connect: Host is down") {
+		t.Errorf("the detail is %q", document.Detail)
+	}
+}
+
+func TestAGraphThatWillNotReadIsNotAWrongTarget(t *testing.T) {
+	server := &captureServer{
+		version:      "dev",
+		readings:     newCaptureMetrics("dev"),
+		taps:         make(chan struct{}, 1),
+		now:          time.Now,
+		linkDeadline: 300 * time.Millisecond,
+	}
+	server.graph = func(context.Context) ([]byte, error) {
+		return nil, fmt.Errorf("%w: running pw-dump: exit status 255", ErrGraphUnread)
+	}
+	err := server.confirm(context.Background(), "audio-capture-4242", 46)
+	if !errors.Is(err, ErrGraphUnread) {
+		t.Errorf("a graph that will not read answered %v", err)
+	}
+}
+
+// The plan asks for one line per tap in the container. The drill found
+// none at all, because every tap ended at the confirmation and only
+// the paths past it wrote one.
+func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		target string
+		graph  string
+		link   string
+		rate   string
+	}{
+		{"a tap that delivered", "audio.wav?t=0,0.125", "graph.json", "link=on-target", "rate=48000"},
+		{"a tap that landed elsewhere", "audio.wav", "graph-wrong-target.json",
+			"link=wrong-target", "rate=44100"},
+	}
+	for _, row := range cases {
+		harness := newCaptureHarness(t, row.graph, silence(0.5, 48000, 2))
+		harness.server.linkDeadline = 300 * time.Millisecond
+		answer := harness.call(t, http.MethodGet,
+			"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/"+row.target)
+		_, _ = io.Copy(io.Discard, answer.Body)
+
+		lines := harness.logged()
+		if len(lines) != 1 {
+			t.Errorf("%s wrote %d lines, want 1: %v", row.name, len(lines), lines)
+			continue
+		}
+		line := lines[0]
+		for _, want := range []string{
+			"target=usb-0573-1573-a34004801402-usb-audio",
+			"node=46",
+			"stream=audio-capture-",
+			"format=wav",
+			row.rate,
+			"channels=2",
+			"span=",
+			"bytes=",
+			"discarded=",
+			row.link,
+			"ended=",
+		} {
+			if !strings.Contains(line, want) {
+				t.Errorf("%s wrote %q, which carries no %s", row.name, line, want)
+			}
+		}
+		// The line names the request, so it joins the API's own.
+		if !strings.Contains(line, "tap ") {
+			t.Errorf("%s names no request: %q", row.name, line)
+		}
+	}
+}
+
+func TestATapRefusedByTheLimitWritesNoTapLine(t *testing.T) {
+	// Nothing was tapped, so there is nothing to say about a tap. The
+	// refusal is on the metric and in the API's line.
+	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
+	for range cap(harness.server.taps) {
+		harness.server.taps <- struct{}{}
+	}
+	answer := harness.call(t, http.MethodGet,
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+	_, _ = io.Copy(io.Discard, answer.Body)
+	if lines := harness.logged(); len(lines) != 0 {
+		t.Errorf("a refused tap wrote %v", lines)
 	}
 }

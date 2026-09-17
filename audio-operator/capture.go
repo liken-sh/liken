@@ -70,6 +70,10 @@ type captureServer struct {
 	// linkDeadline bounds the confirmation. It is a field so a test
 	// drives the no-link case without waiting the real three seconds.
 	linkDeadline time.Duration
+
+	// log is where the per-tap line goes. It is a field so a test
+	// reads the line rather than the process's own output.
+	log func(string)
 }
 
 // capture is the mode's entry point.
@@ -117,6 +121,7 @@ func newCaptureServer(readings *captureMetrics, held *leaf, review *reviewer, ta
 		graph:    dumpGraph,
 		start:    startTap,
 		now:      time.Now,
+		log:      func(line string) { fmt.Println(line) },
 	}
 }
 
@@ -277,6 +282,7 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 		Format:    format,
 		Knobs:     knobs,
 		RequestID: id,
+		Stream:    streamName(id),
 	}, at)
 }
 

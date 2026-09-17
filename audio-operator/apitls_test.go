@@ -368,3 +368,100 @@ func TestPEMThatIsNotACertificateIsARefusal(t *testing.T) {
 		t.Error("a certificate that cannot be read reported an expiry")
 	}
 }
+
+// A Secret an owner deleted has to come back within a minute, not
+// within the hour the lifetime check runs on: a capture container with
+// no leaf serves a certificate no client trusts, so every tap on its
+// node is a 503 until it returns.
+func TestADeletedCaptureSecretIsMintedAgainByTheMinuteCheck(t *testing.T) {
+	store := newObjectStore(t)
+	certs := store.certificates()
+	if _, err := certs.ensure(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store.mu.Lock()
+	delete(store.secrets, captureTLSSecret)
+	store.mu.Unlock()
+
+	if err := certs.keepCaptureLeaf(); err != nil {
+		t.Fatalf("the minute check: %v", err)
+	}
+	next, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
+	if err != nil {
+		t.Fatal("the Secret was not minted again")
+	}
+	if first.SerialNumber.Cmp(next.SerialNumber) == 0 {
+		t.Error("the Secret carries the deleted leaf")
+	}
+	// The same CA signs it, so nothing a client already trusts moves.
+	authority, _ := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCABundle])
+	if err := next.CheckSignatureFrom(authority); err != nil {
+		t.Errorf("the new leaf is signed by another CA: %v", err)
+	}
+}
+
+func TestTheMinuteCheckWritesNothingWhenTheSecretIsInOrder(t *testing.T) {
+	store := newObjectStore(t)
+	certs := store.certificates()
+	if _, err := certs.ensure(); err != nil {
+		t.Fatal(err)
+	}
+	held, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		if err := certs.keepCaptureLeaf(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	same, _ := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
+	if held.SerialNumber.Cmp(same.SerialNumber) != 0 {
+		t.Error("a pass over a Secret in order minted a new leaf")
+	}
+}
+
+func TestALeafAnotherCASignedIsMintedAgain(t *testing.T) {
+	store := newObjectStore(t)
+	certs := store.certificates()
+	if _, err := certs.ensure(); err != nil {
+		t.Fatal(err)
+	}
+	// A Secret left over from a CA that is gone: a container serving it
+	// would present a leaf the API refuses.
+	stranger, err := mintAuthority(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := stranger.mintLeaf(captureAudience, []string{captureAudience}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.secrets[captureTLSSecret] = secret{
+		Metadata: EndpointMeta{Name: captureTLSSecret},
+		Type:     "kubernetes.io/tls",
+		Data: map[string]string{
+			tlsCertFile: base64.StdEncoding.EncodeToString(leaf.Certificate),
+			tlsKeyFile:  base64.StdEncoding.EncodeToString(leaf.Key),
+		},
+	}
+	store.mu.Unlock()
+
+	if err := certs.keepCaptureLeaf(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, _ := parseCertificate(certs.anchor())
+	if err := next.CheckSignatureFrom(authority); err != nil {
+		t.Errorf("a leaf another CA signed was left in place: %v", err)
+	}
+}

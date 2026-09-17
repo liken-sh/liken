@@ -42,9 +42,16 @@ const (
 // on the public leaf.
 const apiService = "audio-api"
 
-// certificateCheck is how often the API looks at its own certificates
-// and mints a leaf again when one is nearing its end.
+// certificateCheck is how often the API looks at the lives of the
+// certificates it holds and mints a leaf again when one is nearing its
+// end. A year of life needs no closer watch than this.
 const certificateCheck = time.Hour
+
+// secretCheck is how often the API looks for the Secret the capture
+// containers mount. A get on one object is cheap, and an owner who
+// deletes the Secret gets it back within a minute rather than waiting
+// out the hour above: every node's capture is down until it returns.
+const secretCheck = time.Minute
 
 // apiServer is the whole of this mode's state.
 type apiServer struct {
@@ -64,9 +71,13 @@ type apiServer struct {
 	// name instead of a moving one.
 	now func() time.Time
 
-	// record writes the Captured event. A field so a test reads what
+	// event writes the Captured record. A field so a test reads what
 	// was written with no API server behind it.
-	record func(kind, name, uid, aspect, format, who string, at time.Time) error
+	event func(kind, name, uid, aspect, format, who string, at time.Time) error
+
+	// log is where the one line per request goes. It is a field for
+	// the same reason.
+	log func(string)
 }
 
 // serveAPI is the mode's entry point.
@@ -145,7 +156,7 @@ func newAPIServer(client *Client, namespace string) *apiServer {
 		readings:   newAPIMetrics(version),
 		publicBase: os.Getenv(publicBaseVariable),
 		now:        time.Now,
-		record: func(kind, name, uid, aspect, format, who string, at time.Time) error {
+		event: func(kind, name, uid, aspect, format, who string, at time.Time) error {
 			return recordCapture(client, kind, name, uid, aspect, format, who, at)
 		},
 	}
@@ -153,14 +164,27 @@ func newAPIServer(client *Client, namespace string) *apiServer {
 
 // keepCertificates mints a leaf again when under a third of its life
 // remains, and reports the nearest expiry on every pass.
+//
+// The two ticks answer two different failures. The hourly one is the
+// lifetime check, which reads certificates already in memory. The
+// minute one is for a Secret that left: a capture container with no
+// leaf serves a certificate no client trusts, so every tap on its node
+// is a 503 until the Secret is back.
 func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
-	tick := time.NewTicker(certificateCheck)
-	defer tick.Stop()
+	lifetimes := time.NewTicker(certificateCheck)
+	defer lifetimes.Stop()
+	secrets := time.NewTicker(secretCheck)
+	defer secrets.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-secrets.C:
+			if err := s.certs.keepCaptureLeaf(); err != nil {
+				fmt.Fprintf(os.Stderr, "keeping the capture container's leaf: %v\n", err)
+			}
+			continue
+		case <-lifetimes.C:
 		}
 		leaf, err := s.certs.ensure()
 		if err != nil {

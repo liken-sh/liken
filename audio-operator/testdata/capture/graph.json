@@ -133,10 +133,10 @@
     "type": "PipeWire:Interface:Node",
     "info": {
       "props": {
-        "node.name": "pw-record",
         "media.class": "Stream/Input/Audio",
-        "application.process.id": "PWRECORDPID",
-        "stream.capture.sink": "true"
+        "node.name": "PWSTREAMNAME",
+        "application.name": "pw-record",
+        "target.object": "usb-0573-1573-a34004801402-usb-audio"
       },
       "params": {
         "Format": [],

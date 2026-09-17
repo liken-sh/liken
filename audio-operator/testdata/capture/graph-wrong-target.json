@@ -26,9 +26,9 @@
     "type": "PipeWire:Interface:Node",
     "info": {
       "props": {
-        "node.name": "pw-record",
         "media.class": "Stream/Input/Audio",
-        "application.process.id": "PWRECORDPID"
+        "node.name": "PWSTREAMNAME",
+        "application.name": "pw-record"
       },
       "params": { "Format": [], "EnumFormat": [] }
     }

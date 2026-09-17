@@ -303,14 +303,32 @@ because both kinds are cluster-scoped.
 An info route needs `get` on the ordinary resource. The discovery and
 OpenAPI documents need authentication and no authorization.
 
-The subresource shape lets an ordinary RBAC rule grant a tap, per
-sink if wanted, as the `ClusterRole` below does.
+The operator ships one `ClusterRole` for an owner to bind,
+`audio-capture-viewer`. It grants `get` on `sinks`, `sources`,
+`sinks/audio` and `sources/audio`, which is every route below the
+discovery document: the two plain resources for the info routes and
+the two subresources for the taps.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: audio-capture-viewer
+rules:
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks, sources, sinks/audio, sources/audio]
+    verbs: [get]
+```
+
+The subresource shape lets an owner write a narrower rule instead.
+This one grants the sound of one sink and nothing else, not even the
+information document beside it.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kitchen-listener
 rules:
   - apiGroups: [audio.liken.sh]
     resources: [sinks/audio]

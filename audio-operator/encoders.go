@@ -49,19 +49,43 @@ const flacMD5Warning = "WARNING, cannot write back MD5 sum when encoding to stdo
 // to stdout. --format s16 is the width every player reads. The rate
 // and channel count come from the graph, so audioconvert resamples
 // nothing in the running case.
-func recordCommand(node string, direction pwDirection, format captureFormat) []string {
-	command := []string{"pw-record"}
-	if direction == directionSink {
-		command = append(command, "-P", "stream.capture.sink=true")
-	}
-	return append(command,
+func recordCommand(node, stream string, direction pwDirection, format captureFormat) []string {
+	return []string{
+		"pw-record",
+		"-P", streamProperties(stream, direction),
 		"--target", node,
 		"--raw",
 		"--format", "s16",
 		"--rate", strconv.Itoa(format.Rate),
 		"--channels", strconv.Itoa(format.Channels),
 		"-",
-	)
+	}
+}
+
+// streamProperties is the SPA JSON object -P carries: the name this
+// tap's own node takes in the graph, and, for a sink, PipeWire's key
+// for reading the monitor ports.
+//
+// The name is how the confirmation finds this tap among every other
+// client of the socket. PipeWire sets no application.process.id here,
+// because the kernel cannot translate a peer's pid across PID
+// namespaces, which is the same reason config/51-access-rules.conf
+// marks every client of this socket flatpak. A name this container
+// chose is a property that is certainly there and certainly unique.
+func streamProperties(stream string, direction pwDirection) string {
+	properties := `node.name = "` + stream + `"`
+	if direction == directionSink {
+		properties += `, stream.capture.sink = true`
+	}
+	return "{ " + properties + " }"
+}
+
+// streamName names one tap's node in the graph. The request id is
+// already unique for the life of the request, and no endpoint name
+// enters it, so a person reading pw-dump sees which request a stream
+// belongs to and nothing about what was captured.
+func streamName(requestID string) string {
+	return captureAudience + "-" + requestID
 }
 
 // encoderCommand is the process the raw samples are piped into, or

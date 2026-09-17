@@ -1,0 +1,113 @@
+[
+  {
+    "id": 30,
+    "type": "PipeWire:Interface:Metadata",
+    "props": {
+      "metadata.name": "settings"
+    },
+    "metadata": [
+      {
+        "subject": 0,
+        "key": "clock.rate",
+        "type": "",
+        "value": 48000
+      }
+    ]
+  },
+  {
+    "id": 33,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "liken.audio.card1-pcm0",
+        "media.class": "Audio/Sink",
+        "audio.card": "1",
+        "audio.pcm": "0"
+      },
+      "params": {
+        "EnumFormat": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "channels": 2
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "rate": 48000,
+            "channels": 2,
+            "position": [
+              "FL",
+              "FR"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": 39,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "liken.audio.card1-pcm0c",
+        "media.class": "Audio/Source",
+        "audio.card": "1",
+        "audio.pcm": "0"
+      },
+      "params": {
+        "EnumFormat": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "channels": 2
+          }
+        ],
+        "Format": []
+      }
+    }
+  },
+  {
+    "id": 123,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "audio-capture-725682cad0fd5870",
+        "application.name": "pw-record",
+        "media.class": "Stream/Input/Audio",
+        "node.driver-id": 33,
+        "target.object": "liken.audio.card1-pcm0"
+      },
+      "params": {
+        "Format": [],
+        "EnumFormat": []
+      }
+    }
+  },
+  {
+    "id": 124,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 33,
+      "output-port-id": 35,
+      "input-node-id": 123,
+      "input-port-id": 125,
+      "state": "active",
+      "props": {}
+    }
+  },
+  {
+    "id": 126,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 33,
+      "output-port-id": 36,
+      "input-node-id": 123,
+      "input-port-id": 127,
+      "state": "active",
+      "props": {}
+    }
+  }
+]

@@ -76,17 +76,20 @@ func (s *apiServer) serveEndpoint(w http.ResponseWriter, r *http.Request, route 
 		return s.refuseAs(w, r, route, name, who, http.StatusServiceUnavailable,
 			problemBlank, id, err.Error())
 	}
-	if held.Status.NodeName == "" {
+	// status.node is the machine the endpoint is on and status.nodeName
+	// is the PipeWire node a stream targets. An endpoint with no
+	// machine is away, whatever PipeWire last held for it.
+	if held.Status.Node == "" {
 		return s.refuseAs(w, r, route, name, who, http.StatusConflict, problemAway, id,
 			fmt.Sprintf("%s %s is away; power the device on, or connect it, and the operator "+
 				"publishes its node again", held.Kind, held.Name))
 	}
 
-	pod, running := s.pods.on(held.Status.NodeName)
+	pod, running := s.pods.on(held.Status.Node)
 	if !running || !pod.Ready {
 		w.Header().Set("Retry-After", retryAfterSeconds)
 		return s.refuseAs(w, r, route, name, who, http.StatusServiceUnavailable, problemBlank, id,
-			fmt.Sprintf("no Ready capture container is running on the node %s", held.Status.NodeName))
+			fmt.Sprintf("no Ready capture container is running on the node %s", held.Status.Node))
 	}
 
 	if route.Kind == routeInfo {
@@ -135,7 +138,7 @@ func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiR
 func (s *apiServer) readCaptureFormat(r *http.Request, route apiRoute,
 	held capturedEndpoint, pod capturePod) (captureFormat, error) {
 	answer, err := s.relay.forward(r.Context(), pod,
-		apiPrefix+"/"+route.Resource+"/"+held.Status.Node, "", 0)
+		apiPrefix+"/"+route.Resource+"/"+held.Status.NodeName, "", 0)
 	if err != nil {
 		return captureFormat{}, err
 	}
@@ -167,9 +170,9 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	}
 
 	// The container's route mirrors this one with the extension always
-	// present, and the node the container resolves is the one the
-	// endpoint's status names.
-	private := apiPrefix + "/" + route.Resource + "/" + held.Status.Node +
+	// present, and what it resolves is a PipeWire node, so the path
+	// carries status.nodeName rather than the machine in status.node.
+	private := apiPrefix + "/" + route.Resource + "/" + held.Status.NodeName +
 		"/" + route.Aspect + "." + form.Extension
 	// The stream runs under a context of its own, so the idle bound
 	// below can end it: a read on a connection that went silent blocks
@@ -204,7 +207,7 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	// open-ended tap runs for hours, and kubectl describe has to
 	// answer who is listening while they still are.
 	sent, copyErr := copyFlushing(w, body, func() {
-		if err := s.record(held.Kind, held.Name, held.UID, route.Aspect,
+		if err := s.event(held.Kind, held.Name, held.UID, route.Aspect,
 			form.Extension, who.Username, at); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the Captured event for %s: %v\n", held.Name, err)
 		}

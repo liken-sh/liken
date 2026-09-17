@@ -7,11 +7,11 @@ import (
 )
 
 func TestASinkTapCarriesPipeWiresOwnCaptureProperty(t *testing.T) {
-	got := recordCommand("usb-0573-1573-a34004801402-usb-audio", directionSink,
-		captureFormat{Rate: 48000, Channels: 2})
+	got := recordCommand("usb-0573-1573-a34004801402-usb-audio", "audio-capture-0f1b2c3d",
+		directionSink, captureFormat{Rate: 48000, Channels: 2})
 	want := []string{
 		"pw-record",
-		"-P", "stream.capture.sink=true",
+		"-P", `{ node.name = "audio-capture-0f1b2c3d", stream.capture.sink = true }`,
 		"--target", "usb-0573-1573-a34004801402-usb-audio",
 		"--raw",
 		"--format", "s16",
@@ -30,9 +30,11 @@ func TestASinkTapCarriesPipeWiresOwnCaptureProperty(t *testing.T) {
 }
 
 func TestASourceTapOmitsTheSinkProperty(t *testing.T) {
-	got := recordCommand("desk-mic", directionSource, captureFormat{Rate: 44100, Channels: 1})
+	got := recordCommand("desk-mic", "audio-capture-0f1b2c3d", directionSource,
+		captureFormat{Rate: 44100, Channels: 1})
 	want := []string{
 		"pw-record",
+		"-P", `{ node.name = "audio-capture-0f1b2c3d" }`,
 		"--target", "desk-mic",
 		"--raw",
 		"--format", "s16",
@@ -43,8 +45,37 @@ func TestASourceTapOmitsTheSinkProperty(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("the tap is %v, want %v", got, want)
 	}
-	if slices.Contains(got, "stream.capture.sink=true") {
-		t.Error("a source tap carries the sink property, which would link it to a monitor")
+	for _, entry := range got {
+		if strings.Contains(entry, "stream.capture.sink") {
+			t.Error("a source tap carries the sink property, which would link it to a monitor")
+		}
+	}
+}
+
+// The confirmation finds this tap's own stream by the name given here,
+// so every tap has to carry one and no two taps may share it.
+func TestEveryTapNamesItsOwnStream(t *testing.T) {
+	for _, direction := range []pwDirection{directionSink, directionSource} {
+		command := recordCommand("kitchen", streamName("0f1b2c3d"), direction,
+			captureFormat{Rate: 48000, Channels: 2})
+		properties := command[2]
+		if !strings.Contains(properties, `node.name = "audio-capture-0f1b2c3d"`) {
+			t.Errorf("a %s tap names its stream %q", direction, properties)
+		}
+		// One -P carries both properties as a SPA JSON object, which is
+		// the form pw-cat documents. Two flags would depend on pw-cat
+		// merging them.
+		if count := slices.Contains(command[3:], "-P"); count {
+			t.Errorf("a %s tap passes -P more than once: %v", direction, command)
+		}
+	}
+	if streamName("a") == streamName("b") {
+		t.Error("two requests share one stream name")
+	}
+	// The name carries no endpoint name, so a person reading pw-dump
+	// learns which request a stream belongs to and nothing else.
+	if strings.Contains(streamName("0f1b2c3d"), "kitchen") {
+		t.Error("the stream name carries what was captured")
 	}
 }
 

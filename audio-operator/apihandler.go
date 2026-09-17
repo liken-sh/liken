@@ -39,10 +39,11 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result := s.answer(w, r, route, name, id, at)
 	headers := s.now().Sub(at) - result.Streamed
 	s.readings.answered(route.Template, r.Method, result.Status, headers)
-	fmt.Printf("%s: %s route=%s id=%s user=%s resource=%s status=%d bytes=%d headers=%.3f stream=%.3f\n",
+	s.record(fmt.Sprintf(
+		"%s: %s route=%s id=%s user=%s resource=%s status=%d bytes=%d headers=%.3f stream=%.3f",
 		DriverName, apiComponent, route.Template, id, callerName(result.Who),
 		resourceOf(route, name), result.Status, result.Sent,
-		headers.Seconds(), result.Streamed.Seconds())
+		headers.Seconds(), result.Streamed.Seconds()))
 }
 
 // answered is what one request produced, which is what the log line
@@ -88,11 +89,12 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 	allowed, reason, err := s.access.authorize(who, route, name)
 	if err != nil {
 		w.Header().Set("Retry-After", retryAfterSeconds)
-		return s.refuse(w, r, route, name, http.StatusServiceUnavailable, problemBlank, id, err.Error())
+		return s.refuseAs(w, r, route, name, who, http.StatusServiceUnavailable,
+			problemBlank, id, err.Error())
 	}
 	if !allowed {
 		w.Header().Set("WWW-Authenticate", insufficientScopeChallenge(scopeOf(route)))
-		return s.refuse(w, r, route, name, http.StatusForbidden, problemBlank, id, reason)
+		return s.refuseAs(w, r, route, name, who, http.StatusForbidden, problemBlank, id, reason)
 	}
 
 	form, acceptable := negotiate(route, r.Header.Get("Accept"))
@@ -108,7 +110,10 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 
 	knobs, err := parseKnobs(route, r.URL.RawQuery)
 	if err != nil {
-		return s.refuse(w, r, route, name, http.StatusBadRequest, problemBlank, id, err.Error())
+		// Authentication ran first, so the line names who asked even
+		// when the query is what refused them.
+		return s.refuseAs(w, r, route, name, who, http.StatusBadRequest,
+			problemBlank, id, err.Error())
 	}
 
 	if route.Kind == routeDiscovery || route.Kind == routeOpenAPI {
@@ -200,6 +205,15 @@ func resourceOf(route apiRoute, name string) string {
 		return "-"
 	}
 	return route.Resource + "/" + name
+}
+
+// record writes the one line this API keeps for a request.
+func (s *apiServer) record(line string) {
+	if s.log == nil {
+		fmt.Println(line)
+		return
+	}
+	s.log(line)
 }
 
 // callerName is the username the log line carries. A request that

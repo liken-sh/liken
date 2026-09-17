@@ -119,6 +119,29 @@ type apiHarness struct {
 	container *containerFake
 	server    *apiServer
 	serving   *httptest.Server
+	lines     *loggedLines
+}
+
+// loggedLines holds what the API wrote, so a test reads the one line
+// per request rather than the process's own output.
+type loggedLines struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *loggedLines) add(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, line)
+}
+
+func (l *loggedLines) last() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.lines) == 0 {
+		return ""
+	}
+	return l.lines[len(l.lines)-1]
 }
 
 // containerFake stands in for one node's capture container on the
@@ -219,12 +242,19 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	server.relay.scheme = "http"
 	server.relay.port = 0
 	server.relay.address = containerURL.Host
-	server.record = func(kind, name, uid, aspect, format, who string, at time.Time) error {
+	server.event = func(kind, name, uid, aspect, format, who string, at time.Time) error {
 		return recordCapture(client, kind, name, uid, aspect, format, who, at)
 	}
+	harnessLines := &loggedLines{}
+	server.log = harnessLines.add
 	server.pods.replace([]pod{samplePod("node-1")})
 
-	harness := &apiHarness{cluster: cluster, container: container, server: server}
+	harness := &apiHarness{
+		cluster:   cluster,
+		container: container,
+		server:    server,
+		lines:     harnessLines,
+	}
 	harness.serving = httptest.NewServer(server)
 	t.Cleanup(harness.serving.Close)
 	return harness
@@ -242,15 +272,30 @@ func samplePod(node string) pod {
 	return held
 }
 
-// holds puts one Sink in the fake cluster.
-func (h *apiHarness) holds(name, node, nodeName string) {
+// holds puts one Sink in the fake cluster. The two names it takes are
+// the two the status carries and they are never the same thing:
+// machine is status.node, the Kubernetes node the endpoint is on, and
+// pipewireNode is status.nodeName, the node a stream targets.
+func (h *apiHarness) holds(name, machine, pipewireNode string) {
 	h.cluster.mu.Lock()
 	defer h.cluster.mu.Unlock()
 	h.cluster.sinks[name] = Sink{
 		Metadata: EndpointMeta{Name: name, UID: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"},
-		Status:   EndpointStatus{Node: node, NodeName: nodeName, ConnectionType: "usb"},
+		Status: EndpointStatus{
+			Node:           machine,
+			NodeName:       pipewireNode,
+			ConnectionType: "usb",
+		},
 	}
 }
+
+// The two names the drill on liken-1 read, which look nothing alike on
+// purpose: a build that swaps them finds no pod and asks the container
+// for a machine.
+const (
+	drillMachine      = "liken-1"
+	drillPipeWireNode = "liken.audio.card1-pcm0"
+)
 
 func (h *apiHarness) call(t *testing.T, method, target string, headers http.Header) *http.Response {
 	t.Helper()
@@ -448,16 +493,16 @@ func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"a node with no container", http.StatusServiceUnavailable, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "alsa_output.kitchen", "node-9")
+			h.holds("kitchen", "node-9", drillPipeWireNode)
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"an Accept the route cannot serve", http.StatusNotAcceptable, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "alsa_output.kitchen", "node-1")
+			h.holds("kitchen", "node-1", drillPipeWireNode)
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
 				http.Header{"Accept": {"audio/mpeg"}})
 		}},
 		{"a problem the container answered", http.StatusInternalServerError, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "alsa_output.kitchen", "node-1")
+			h.holds("kitchen", "node-1", drillPipeWireNode)
 			h.container.answers(problem{
 				Type: problemWrongTarget, Title: "Wrong target",
 				Status: http.StatusInternalServerError, Detail: "pw-record linked elsewhere",
@@ -483,5 +528,49 @@ func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 			t.Errorf("%s says Link: %q", row.name, link)
 		}
 		_, _ = io.Copy(io.Discard, answer.Body)
+	}
+}
+
+// Authentication runs before the query is parsed, so a 400 already
+// knows who asked. The drill found every 400 logging user=-.
+func TestTheLogNamesTheCallerOnEveryStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		drive  func(*apiHarness) *http.Response
+	}{
+		{"a query the grammar refuses", http.StatusBadRequest, func(h *apiHarness) *http.Response {
+			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav?t=7,5", nil)
+		}},
+		{"a request with no grant", http.StatusForbidden, func(h *apiHarness) *http.Response {
+			h.cluster.refuses("no RBAC policy matched")
+			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		}},
+		{"an Accept the route cannot serve", http.StatusNotAcceptable, func(h *apiHarness) *http.Response {
+			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
+				http.Header{"Accept": {"audio/mpeg"}})
+		}},
+		{"a name the cluster does not hold", http.StatusNotFound, func(h *apiHarness) *http.Response {
+			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		}},
+		{"an endpoint that is away", http.StatusConflict, func(h *apiHarness) *http.Response {
+			h.holds("kitchen", "", drillPipeWireNode)
+			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		}},
+	}
+	for _, row := range cases {
+		harness := newAPIHarness(t)
+		answer := row.drive(harness)
+		if answer.StatusCode != row.status {
+			t.Errorf("%s answered %s, want %d", row.name, answer.Status, row.status)
+		}
+		_, _ = io.Copy(io.Discard, answer.Body)
+		line := harness.lines.last()
+		if !strings.Contains(line, "user=system:serviceaccount:liken-system:listener") {
+			t.Errorf("%s logged %q", row.name, line)
+		}
+		if strings.Contains(line, "user=-") {
+			t.Errorf("%s named no caller: %q", row.name, line)
+		}
 	}
 }

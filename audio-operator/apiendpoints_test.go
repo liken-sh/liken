@@ -46,7 +46,7 @@ func TestAnEndpointWithNoNodeIsAway(t *testing.T) {
 
 func TestANodeWithNoReadyContainerIsUnavailable(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-9")
+	harness.holds("kitchen", "node-9", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("a node with no container answered %s", answer.Status)
@@ -58,7 +58,7 @@ func TestANodeWithNoReadyContainerIsUnavailable(t *testing.T) {
 
 func TestATapForwardsTheNodeNameAndTheQuery(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/kitchen/audio.opus?t=5,7&bitrate=128", nil)
 	if answer.StatusCode != http.StatusOK {
@@ -71,9 +71,10 @@ func TestATapForwardsTheNodeNameAndTheQuery(t *testing.T) {
 	if len(called) != 1 {
 		t.Fatalf("the container was called %d times", len(called))
 	}
-	// The API forwards the node the Sink's status names, not the Sink's
-	// own name, because the container resolves a PipeWire node.
-	if called[0].Path != "/v1/audio/sinks/alsa_output.kitchen/audio.opus" {
+	// The API forwards the PipeWire node in status.nodeName, not the
+	// Sink's own name and not the machine in status.node, because what
+	// the container resolves is a node in the graph.
+	if called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode+"/audio.opus" {
 		t.Errorf("the private path is %q", called[0].Path)
 	}
 	if called[0].RawQuery != "t=5,7&bitrate=128" {
@@ -86,7 +87,7 @@ func TestATapForwardsTheNodeNameAndTheQuery(t *testing.T) {
 
 func TestATapAddsTheFourHeadersTheAPIOwns(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio", nil)
 	_, _ = io.Copy(io.Discard, answer.Body)
 
@@ -113,7 +114,7 @@ func TestATapAddsTheFourHeadersTheAPIOwns(t *testing.T) {
 
 func TestATapThatProducedBytesWritesACapturedEvent(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac", nil)
 	_, _ = io.Copy(io.Discard, answer.Body)
 
@@ -136,7 +137,7 @@ func TestATapThatProducedBytesWritesACapturedEvent(t *testing.T) {
 
 func TestAHeadTakesNoSampleAndMakesNoPrivateCall(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusOK {
 		t.Fatalf("the HEAD answered %s", answer.Status)
@@ -173,7 +174,7 @@ func TestAHeadOnAnErrorCarriesNoBody(t *testing.T) {
 
 func TestAnAcceptTheRouteCannotServeIsA406WithItsSiblings(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
 		http.Header{"Accept": {"audio/mpeg"}})
 	if answer.StatusCode != http.StatusNotAcceptable {
@@ -214,7 +215,7 @@ func TestTheNegotiationChoosesTheForwardedExtension(t *testing.T) {
 	}
 	for accept, want := range cases {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+		harness.holds("kitchen", "node-1", drillPipeWireNode)
 		headers := http.Header{}
 		if accept != "" {
 			headers.Set("Accept", accept)
@@ -233,13 +234,13 @@ func TestTheNegotiationChoosesTheForwardedExtension(t *testing.T) {
 
 func TestTheContainersProblemIsRelayedWithThisRequestsInstance(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	harness.container.answers(problem{
 		Type:     problemWrongTarget,
 		Title:    "Wrong target",
 		Status:   http.StatusInternalServerError,
 		Detail:   "pw-record linked to a node other than the 46 this request named",
-		Instance: "/v1/audio/sinks/alsa_output.kitchen/audio.wav#deadbeef",
+		Instance: "/v1/audio/sinks/" + drillPipeWireNode + "/audio.wav#deadbeef",
 	})
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusInternalServerError {
@@ -261,7 +262,7 @@ func TestTheContainersProblemIsRelayedWithThisRequestsInstance(t *testing.T) {
 
 func TestAnAnswerThatIsNotAProblemDocumentIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	harness.container.mu.Lock()
 	harness.container.status = http.StatusInternalServerError
 	harness.container.body = []byte("<html>a proxy wrote this</html>")
@@ -279,7 +280,7 @@ func TestAnAnswerThatIsNotAProblemDocumentIsABadGateway(t *testing.T) {
 
 func TestTheInfoDocumentJoinsTheObjectAndTheGraph(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
 	if answer.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(answer.Body)
@@ -289,7 +290,13 @@ func TestTheInfoDocumentJoinsTheObjectAndTheGraph(t *testing.T) {
 	if err := json.NewDecoder(answer.Body).Decode(&document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Node != "alsa_output.kitchen" || document.Rate != 48000 || document.Channels != 2 {
+	// The document carries both names the status carries, under the
+	// CRD's own spellings: node is the machine and nodeName is the
+	// PipeWire node a tap targets.
+	if document.Node != "node-1" || document.NodeName != drillPipeWireNode {
+		t.Errorf("the info document names %q and %q", document.Node, document.NodeName)
+	}
+	if document.Rate != 48000 || document.Channels != 2 {
 		t.Errorf("the info document is %+v", document)
 	}
 	if document.ConnectionType != "usb" {
@@ -333,11 +340,11 @@ func TestOptionsAndTheOtherMethods(t *testing.T) {
 
 func TestEveryRouteInTheTableAnswersThroughTheRouter(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	harness.cluster.mu.Lock()
 	harness.cluster.sources["desk"] = Source{
 		Metadata: EndpointMeta{Name: "desk"},
-		Status:   EndpointStatus{Node: "alsa_input.desk", NodeName: "node-1"},
+		Status:   EndpointStatus{Node: "node-1", NodeName: "liken.audio.card1-pcm0c"},
 	}
 	harness.cluster.mu.Unlock()
 
@@ -376,7 +383,7 @@ func TestAPathOutsideTheTableIsANotFound(t *testing.T) {
 
 func TestAHeadOnTheInfoRouteMakesNoPrivateCall(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen", nil)
 	if answer.StatusCode != http.StatusOK {
 		t.Fatalf("the HEAD answered %s", answer.Status)
@@ -398,7 +405,7 @@ func TestAHeadOnTheInfoRouteMakesNoPrivateCall(t *testing.T) {
 
 func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	// A listener that answers bytes no transport can read as HTTP. The
 	// rulings put that at 502, apart from a refused connection at 503.
 	broken, err := net.Listen("tcp", "127.0.0.1:0")
@@ -431,7 +438,7 @@ func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 
 func TestAContainerThatRefusedTheConnectionIsUnavailable(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "alsa_output.kitchen", "node-1")
+	harness.holds("kitchen", "node-1", drillPipeWireNode)
 	// A port nothing listens on: the connection is refused, which the
 	// rulings put at 503 with Retry-After.
 	closed, err := net.Listen("tcp", "127.0.0.1:0")
@@ -450,4 +457,66 @@ func TestAContainerThatRefusedTheConnectionIsUnavailable(t *testing.T) {
 		t.Errorf("the refusal says Retry-After: %q", got)
 	}
 	_, _ = io.Copy(io.Discard, answer.Body)
+}
+
+// status.node is the machine and status.nodeName is the PipeWire node.
+// A build that reads one where it needs the other looks the pod up by
+// a name no node has and asks the container for a machine, and every
+// route answers 503. The two names here look nothing alike, so the
+// swap cannot pass.
+func TestTheMachineAndThePipeWireNodeAreNotInterchangeable(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if answer.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	}
+	_, _ = io.Copy(io.Discard, answer.Body)
+
+	called := harness.container.called()
+	if len(called) != 1 {
+		t.Fatalf("the container was called %d times", len(called))
+	}
+	// The pod came from the machine, and the path carries the graph's
+	// node.
+	if called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode+"/audio.wav" {
+		t.Errorf("the private path is %q, want the PipeWire node", called[0].Path)
+	}
+	if strings.Contains(called[0].Path, drillMachine) {
+		t.Error("the API asked the capture container for a machine")
+	}
+}
+
+func TestAnEndpointWithAPipeWireNodeAndNoMachineIsAway(t *testing.T) {
+	// PipeWire held a node for it once and the machine is gone, which
+	// is the state a USB card that was unplugged leaves behind.
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", "", drillPipeWireNode)
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if answer.StatusCode != http.StatusConflict {
+		t.Fatalf("an endpoint with no machine answered %s", answer.Status)
+	}
+	if document := readProblemBody(t, answer); document.Type != problemAway {
+		t.Errorf("the problem type is %q", document.Type)
+	}
+}
+
+func TestTheInfoRouteTakesTheSameTwoNames(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
+	if answer.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("the info route answered %s: %s", answer.Status, body)
+	}
+	_, _ = io.Copy(io.Discard, answer.Body)
+	called := harness.container.called()
+	if len(called) != 1 || called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode {
+		t.Errorf("the info route asked for %v", called)
+	}
 }

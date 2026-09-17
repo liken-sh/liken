@@ -212,6 +212,14 @@ func (c *certificates) publishAnchor() error {
 	return c.updateConfigMap(apiCAConfigMap, map[string]string{tlsCABundle: anchor})
 }
 
+// keepCaptureLeaf is the minute check: it reads the Secret the capture
+// containers mount and mints the leaf again when it is gone, when it
+// is expiring, or when another CA signed it. It writes nothing when
+// the Secret is in order, so the cost of a pass is one get.
+func (c *certificates) keepCaptureLeaf() error {
+	return c.publishCaptureLeaf()
+}
+
 // publishCaptureLeaf mints the container's leaf when none is held or
 // the one held is expiring, and writes it into the Secret the
 // DaemonSet mounts.

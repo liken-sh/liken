@@ -1,15 +1,14 @@
 #!/bin/sh
 # Stands in for pw-record in the tap's tests. It records its own
-# argument list and its process id, so a test asserts the command
-# line the container built, and the graph fixture carries the same
-# id for the confirmation to find.
+# argument list, so a test asserts the command line the container
+# built and the fake pw-dump beside it reads the name the container
+# gave this stream out of the same file.
 #
 # It never ends. A real tap is an endless stream, and the container
 # discards from it on a clock while the link is confirmed, so a
 # stand-in that ran out would answer an empty body rather than the
 # span that was asked for.
 set -eu
-printf '%s\n' "$$" > "$CAPTURE_FAKE_PID"
 printf '%s\n' "$@" > "$CAPTURE_FAKE_ARGS"
 while :; do
 	cat "$CAPTURE_FAKE_SAMPLES"

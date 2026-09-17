@@ -1,13 +1,13 @@
 #!/bin/sh
 # Stands in for pw-dump in the tap's tests. The graph it prints is a
-# fixture beside it, with the running pw-record's own process id and
-# the node the link landed on substituted in, so the confirmation
-# reads the same shape a real graph has and one fixture serves a tap
-# on any endpoint in it.
+# fixture beside it, with the name the container gave the running
+# pw-record's node and the node the link landed on substituted in, so
+# the confirmation reads the same shape a real graph has and one
+# fixture serves a tap on any endpoint in it.
 set -eu
-pid=0
-if [ -f "$CAPTURE_FAKE_PID" ]; then
-	pid=$(cat "$CAPTURE_FAKE_PID")
+stream=none
+if [ -f "$CAPTURE_FAKE_ARGS" ]; then
+	stream=$(sed -n 's/.*node.name = "\([^"]*\)".*/\1/p' "$CAPTURE_FAKE_ARGS")
 fi
 target=${CAPTURE_FAKE_TARGET:-46}
-sed -e "s/PWRECORDPID/$pid/" -e "s/PWTARGETID/$target/" "$CAPTURE_FAKE_GRAPH"
+sed -e "s/PWSTREAMNAME/$stream/" -e "s/PWTARGETID/$target/" "$CAPTURE_FAKE_GRAPH"

@@ -98,7 +98,7 @@ func TestTheAPIRegistryCarriesTheFourSeriesThePlanNames(t *testing.T) {
 
 func TestTheRouteLabelIsNeverAConcretePath(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("usb-0573-1573-a34004801402-usb-audio", "alsa_output.usb", "node-1")
+	harness.holds("usb-0573-1573-a34004801402-usb-audio", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
 	_, _ = io.Copy(io.Discard, answer.Body)

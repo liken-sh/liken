@@ -33,6 +33,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,6 +58,12 @@ const (
 // overshoot the instant it is aiming at.
 const discardBlock = 2048
 
+// ErrGraphUnread marks a graph this container could not read at all,
+// which is PipeWire being down rather than a tap that landed
+// somewhere else. It is a 503 that clears on its own, and the daemon's
+// own words go in the detail.
+var ErrGraphUnread = errors.New("PipeWire did not answer")
+
 // tapPlan is everything one tap needs, settled before any process
 // starts.
 type tapPlan struct {
@@ -67,6 +74,10 @@ type tapPlan struct {
 	Format    captureFormat
 	Knobs     captureKnobs
 	RequestID string
+
+	// Stream is the node.name pw-record's own node takes in the
+	// graph, which is how the confirmation finds this tap.
+	Stream string
 
 	// Until is when sample zero of the body belongs: the accept
 	// instant plus begin. Release is closed when the link is
@@ -97,11 +108,10 @@ func (s *spoken) String() string {
 	return s.buffer.String()
 }
 
-// runningTap is the pipeline: the samples to read, the process id the
-// confirmation looks for, and the words each process printed.
+// runningTap is the pipeline: the samples to read, and the words each
+// process printed.
 type runningTap struct {
-	Body      io.ReadCloser
-	RecordPID int
+	Body io.ReadCloser
 
 	stop     func()
 	pump     *discardPump
@@ -138,7 +148,7 @@ func (t *runningTap) words() string {
 // never lets the pipe fill and never shifts the samples.
 func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	record := commandOf(ctx, recordCommand(plan.Node, plan.Direction, plan.Format))
+	record := commandOf(ctx, recordCommand(plan.Node, plan.Stream, plan.Direction, plan.Format))
 	recorded := &spoken{}
 	record.Stderr = recorded
 	raw, err := record.StdoutPipe()
@@ -152,9 +162,8 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	}
 
 	tap := &runningTap{
-		RecordPID: record.Process.Pid,
-		recorded:  recorded,
-		encoded:   &spoken{},
+		recorded: recorded,
+		encoded:  &spoken{},
 	}
 
 	// The span is taken off the raw samples, before any encoder, so
@@ -293,13 +302,25 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 		s.readings.failed(failureConnect)
 		w.Header().Set("Retry-After", retryAfterSeconds)
 		s.refuse(w, r, http.StatusServiceUnavailable, problemBlank, plan.RequestID, err.Error())
+		s.logTap(plan, at, 0, 0, "not-started", err.Error())
 		return
 	}
 	defer func() { _ = tap.Body.Close(); tap.stop() }()
 
-	if err := s.confirm(r.Context(), tap.RecordPID, plan.Format.NodeID); err != nil {
+	if err := s.confirm(r.Context(), plan.Stream, plan.Format.NodeID); err != nil {
+		// A graph this container could not read says nothing about
+		// where the tap landed. PipeWire that is down clears on its
+		// own, so it is a 503 and the tap is not called wrong.
+		if errors.Is(err, ErrGraphUnread) {
+			s.readings.failed(failureConnect)
+			w.Header().Set("Retry-After", retryAfterSeconds)
+			s.refuse(w, r, http.StatusServiceUnavailable, problemBlank, plan.RequestID, err.Error())
+			s.logTap(plan, at, 0, 0, "unread", err.Error())
+			return
+		}
 		s.readings.failed(failureWrongTarget)
 		s.refuse(w, r, http.StatusInternalServerError, problemWrongTarget, plan.RequestID, err.Error())
+		s.logTap(plan, at, 0, 0, "wrong-target", err.Error())
 		return
 	}
 	close(release)
@@ -325,15 +346,33 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 
 	if words := tap.words(); words != "" {
 		s.readings.failed(failureEncoder)
-		fmt.Printf("%s: tap %s target=%s format=%s rate=%d channels=%d bytes=%d seconds=%.3f: %s\n",
-			DriverName, plan.RequestID, plan.Node, plan.Form.Extension,
-			plan.Format.Rate, plan.Format.Channels, sent, ran.Seconds(), words)
+		s.logTap(plan, at, sent, tap.discarded(), "on-target", words)
 		return
 	}
-	fmt.Printf("%s: tap %s target=%s format=%s rate=%d channels=%d span=%s discarded=%d bytes=%d seconds=%.3f at=%s%s\n",
-		DriverName, plan.RequestID, plan.Node, plan.Form.Extension,
-		plan.Format.Rate, plan.Format.Channels, spanWords(plan.Knobs.Span),
-		tap.discarded(), sent, ran.Seconds(), at.UTC().Format(time.RFC3339), endedWords(copyErr))
+	ended := "ok"
+	if copyErr != nil {
+		ended = copyErr.Error()
+	}
+	s.logTap(plan, at, sent, tap.discarded(), "on-target", ended)
+}
+
+// logTap writes the one line this container keeps for a tap, whatever
+// became of it. link says what the confirmation read, and ended is the
+// exit status: the encoder's own words when one failed, the reason a
+// stream stopped, or ok.
+func (s *captureServer) logTap(plan tapPlan, at time.Time, sent, discarded int64,
+	link, ended string) {
+	line := fmt.Sprintf("%s: tap %s target=%s node=%d stream=%s format=%s rate=%d "+
+		"channels=%d span=%s bytes=%d discarded=%d link=%s at=%s seconds=%.3f ended=%s",
+		DriverName, plan.RequestID, plan.Node, plan.Format.NodeID, plan.Stream,
+		plan.Form.Extension, plan.Format.Rate, plan.Format.Channels,
+		spanWords(plan.Knobs.Span), sent, discarded, link,
+		at.UTC().Format(time.RFC3339), s.now().Sub(at).Seconds(), ended)
+	if s.log == nil {
+		fmt.Println(line)
+		return
+	}
+	s.log(line)
 }
 
 // confirm reads the graph until the link this tap's stream made
@@ -341,7 +380,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 // the deadline ends it too: pw-record with an unknown target links to
 // the default sink's monitor, and either way the sound on the wire
 // would not be the sound that was asked for.
-func (s *captureServer) confirm(ctx context.Context, processID, targetNodeID int) error {
+func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID int) error {
 	wait := s.linkDeadline
 	if wait == 0 {
 		wait = linkDeadline
@@ -354,7 +393,7 @@ func (s *captureServer) confirm(ctx context.Context, processID, targetNodeID int
 		}
 		// One parse answers all three states, so a poll reads the
 		// graph once rather than walking it twice.
-		state, err := confirmLink(document, processID, targetNodeID)
+		state, err := confirmLink(document, stream, targetNodeID)
 		if err != nil {
 			return err
 		}
@@ -423,7 +462,8 @@ func dumpGraph(ctx context.Context) ([]byte, error) {
 	command.Stderr = complaints
 	raw, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("running pw-dump: %w: %s", err, unexpectedStderr(complaints.String()))
+		return nil, fmt.Errorf("%w: running pw-dump: %w: %s",
+			ErrGraphUnread, err, unexpectedStderr(complaints.String()))
 	}
 	return raw, nil
 }

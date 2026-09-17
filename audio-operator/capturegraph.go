@@ -32,11 +32,6 @@ const (
 	clockRateKey     = "clock.rate"
 )
 
-// processIDProperty is the property a client's node carries, which
-// is how the confirmation finds the stream this container started
-// among every other client of the socket.
-const processIDProperty = "application.process.id"
-
 // captureObject is the part of one pw-dump object a tap reads. It is
 // separate from pwObject because the questions differ: the reconcile
 // loop asks which PCM device a node serves, and a tap asks which node
@@ -127,21 +122,22 @@ const (
 	linkElsewhere
 )
 
-// confirmLink says whether the stream one process started is linked to
-// the node the request named, to some other node, or to nothing yet.
-// One walk of the graph answers all three, because a poll reads the
-// whole dump anyway.
+// confirmLink says whether the stream one tap started is linked to the
+// node the request named, to some other node, or to nothing yet. One
+// walk of the graph answers all three, because a poll reads the whole
+// dump anyway.
 //
 // A sink tap reads the sink's monitor ports, so the target is the
 // link's output and the stream is its input. A source tap reads the
 // source's output ports, and the ends are the same way round. So one
 // read covers both directions.
 //
-// The stream is found by application.process.id, which the client
-// writes from its own PID namespace, so a client in another container
-// with the same numeric pid would match too. Only this container runs
-// pw-record on this socket, so that collision has no source here.
-func confirmLink(document []byte, processID, targetNodeID int) (linkState, error) {
+// The stream is found by the node.name this container gave it. Every
+// client of this socket arrives with the access flatpak, because the
+// kernel cannot translate a peer's pid across PID namespaces, so
+// PipeWire sets no application.process.id to match on and
+// application.name is pw-record for every tap on the node.
+func confirmLink(document []byte, stream string, targetNodeID int) (linkState, error) {
 	objects, err := parseCaptureObjects(document)
 	if err != nil {
 		return linkNone, err
@@ -151,7 +147,7 @@ func confirmLink(document []byte, processID, targetNodeID int) (linkState, error
 		if object.Type != "PipeWire:Interface:Node" || object.Info == nil {
 			continue
 		}
-		if numericValue(property(object.Info.Props, processIDProperty)) == processID {
+		if property(object.Info.Props, "node.name") == stream {
 			streams[object.ID] = true
 		}
 	}
