@@ -24,18 +24,7 @@ becomes a new plan or an open problem.
 
 ## Planned
 
-A plan keeps its number and moves to [`completed/`](completed/) when
-it is built.
-
-* [09, The sound over HTTP](09-the-sound-over-http.md). An HTTP API
-  that taps what a `Sink` plays and what a `Source` hears, as WAV,
-  FLAC, or Ogg Opus, with a W3C Media Fragments `t=` for the span. A
-  small `audio-api` `Deployment` authenticates the caller with a
-  `TokenReview`, authorizes a `get` on `sinks/audio` with a
-  `SubjectAccessReview`, reads `status.node`, and forwards to a fifth
-  container in the `DaemonSet` pod that runs `pw-record` on the pod's
-  socket and encodes. The audio instance of a design the display and
-  media operators share.
+Nothing is planned right now.
 
 ## Designs
 
@@ -96,6 +85,19 @@ it is built.
   Built, and drilled on liken-1 on 2026-09-10. Claimed endpoint
   availability, failed control operations, and observation health,
   with optional Prometheus collection.
+* [09, The sound over HTTP](completed/09-the-sound-over-http.md).
+  Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
+  2026-09-17. An HTTP API that taps what a `Sink` plays and what a
+  `Source` hears, as WAV, FLAC, or Ogg Opus, with a W3C Media
+  Fragments `t=` for the span. A small `audio-api` `Deployment`
+  authenticates the caller with a `TokenReview`, authorizes a `get`
+  on `sinks/audio` with a `SubjectAccessReview`, reads `status.node`,
+  and forwards to a fifth container in the `DaemonSet` pod that runs
+  `pw-record` on the pod's socket and encodes. The audio instance of
+  a design the display and media operators share. The drill read a
+  439.5 Hz peak in all three formats, a first byte at 0.45 to 0.59 s,
+  and 3.67 MB more closure on the node, and left the idle RSS by
+  `/proc` and the first byte as open problems in the plan.
 
 ## Open problems
 

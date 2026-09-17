@@ -1,5 +1,8 @@
 # 09, The sound over HTTP
 
+Plan 09. Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
+2026-09-17.
+
 An HTTP API that taps what a `Sink` plays and what a `Source` hears,
 and streams it as WAV, FLAC, or Ogg Opus. It is the audio instance of
 a design three operators share: a small `<domain>-api` `Deployment`
@@ -39,9 +42,12 @@ until then a `Source` grant is a courtesy and the manual says so.
   PipeWire              the sink's monitor ports, or the source's output ports
 ```
 
-`audio-api` finds the node and forwards the stream. The `capture`
-container holds every fact about PipeWire and every encoder. Nothing
-is stored on either side.
+`audio-api` finds the node and forwards the stream. It reads
+`status.node` for the machine that holds the endpoint and
+`status.nodeName` for the PipeWire node it asks the container for; the
+CRD descriptions state which is which. The `capture` container holds
+every fact about PipeWire and every encoder. Nothing is stored on
+either side.
 
 ### The routes
 
@@ -92,9 +98,9 @@ accepts content, so `415` never occurs.
 | `405` | a method other than the three | `Allow` | RFC 9110 section 15.5.6 |
 | `406` | `Accept` excludes every representation the route serves | `application/problem+json` with `acceptable` | RFC 9110 sections 12.5.1 and 15.5.7 |
 | `409` | the object is away: no `status.node`; `detail` says to power the device on | `application/problem+json`, type `away` | RFC 9110 section 15.5.10 |
-| `500` | the tap's link landed on a node other than the one asked for | `application/problem+json`, type `wrong-target` | RFC 9110 section 15.6.1 |
+| `500` | the tap's link landed on a node other than the one asked for, or made no link within 3 s; the status line comes after the confirmation, so no `200` precedes it | `application/problem+json`, type `wrong-target` | RFC 9110 section 15.6.1 |
 | `502` | the capture container answered something that is not HTTP or not a problem document | `application/problem+json` | RFC 9110 section 15.6.3 |
-| `503` | the container is at its tap limit, refused the connection, is not ready, has no certificate yet, or PipeWire refused `pw-record` | `Retry-After: 5`, `application/problem+json` | RFC 9110 sections 15.6.4 and 10.2.3 |
+| `503` | the container is at its tap limit, refused the connection, is not ready, has no certificate yet, PipeWire refused `pw-record`, or PipeWire did not answer `pw-dump` at all | `Retry-After: 5`, `application/problem+json` | RFC 9110 sections 15.6.4 and 10.2.3 |
 | `504` | the container sent no headers within the header timeout | `application/problem+json` | RFC 9110 section 15.6.5 |
 
 `409` is used only where the caller can act, and the `detail` says
@@ -214,9 +220,11 @@ zero of the body is origin plus `begin` whenever the pipeline started
 within `begin`. `t=5,7` discards five seconds, then records two.
 `captureBeginMax` is 60 s; a larger `begin` is `400`. An absent `end`,
 or an absent `t=`, means until the client closes. The API's header
-timeout on the private leg is 10 s plus `begin`; its idle timeout on
-the body is 30 s, counted from the first body byte or from `begin`,
-whichever is later, so it never fires during `begin`.
+deadline on the private leg is 10 s plus `begin`, and it bounds only
+the wait for the container's headers: the timer stops when they
+arrive, and the body runs under the idle timeout alone. That timeout
+is 30 s, counted from the first body byte or from `begin`, whichever
+is later, so it never fires during `begin`.
 
 ### The capture container
 
@@ -233,24 +241,37 @@ one-port-per-pod rule.
 key, "try to capture the sink output instead of source output"
 (`pw_keys`, read 2026-09-16), and WirePlumber's
 `src/scripts/lib/common-utils.lua` reads it to link the stream to the
-sink's monitor ports. `pw-record` has no flag for it; `-P` puts it in
+sink's monitor ports. `pw-record` has no flag for it and no `--monitor`; `-P` puts it in
 the stream properties, `--target` sets `target.object`, and `-` with
 `--raw` writes raw samples to stdout (`pw-cat` source, GitHub mirror,
 read 2026-09-16). A sink tap is
 
-    pw-record -P stream.capture.sink=true --target <node> --raw \
-        --format s16 --rate <rate> --channels <channels> -
+    pw-record -P '{ node.name = "audio-capture-<request id>", stream.capture.sink = true }' \
+        --target <node> --raw --format s16 --rate <rate> --channels <channels> -
 
-and a source tap is the same line without `-P`, on the pod's socket at
-`/var/run/audio.liken.sh/pipewire-0` through the `runtime` volume.
+and a source tap is the same line with `node.name` alone in the
+properties, on the pod's socket at `/var/run/audio.liken.sh/pipewire-0`
+through the `runtime` volume. The `node.name` is the name the tap's
+own node takes in the graph, built from the request id, so a person
+reading `pw-dump` sees which request a stream belongs to and nothing
+about what was captured.
 `pw-record` never refuses a bad target: with the property set and an
 unknown name it links to the default sink's monitor, and without the
 property a sink name links to a microphone. So the container resolves
 the node from `pw-dump` before the tap, the read `pipewire.go` already
 makes, and answers `404` when the graph has no node of that name.
-After the stream starts it confirms from the graph that the link
-landed on the requested node; if not, it ends the response and answers
-`500` `wrong-target`.
+After the stream starts, and before it writes the status line, it
+confirms from the graph that the link from the stream named
+`audio-capture-<request id>` landed on the requested node. The stream
+is found by that name because PipeWire sets no
+`application.process.id` on a client outside the pod's PID namespace,
+the same reason `config/51-access-rules.conf` marks every client of
+this socket `flatpak`. Each look is one `pw-dump`; the first comes
+20 ms after the start and the interval doubles up to 250 ms, for up to
+3 s. A link elsewhere, or none within 3 s, is `500` `wrong-target`
+with no `200` before it. A `pw-dump` that cannot reach the daemon is
+`503` with its words, because PipeWire is down and that clears on its
+own.
 
 **The formats.** Every tap is s16le at the endpoint's own rate and
 channel count. `deploy/crds.yaml` declares no format on a `Sink`, and
@@ -293,13 +314,14 @@ what `stdbuf -o0` does.
 **The closure.** `audio-closure.sh` gains `/usr/bin/pw-cat` with its
 `pw-record` link, `/usr/bin/flac`, `/usr/bin/opusenc`, and
 `libstdbuf.so`; the Dockerfile installs `flac` and `opus-tools`. The
-measured delta is 4.3 MB, about 17 percent of the closure. `libopus`
+five seeds add 3,100,123 bytes to a closure of 25,626,562 bytes
+without them, 3.1 MB and 12.1 percent, measured in the build; on the
+node, `du` of `/usr` reads 3,584 KiB more, which is 3.67 MB. `libopus`
 is already there, pulled by `libspa-codec-bluez5-opus.so`; the largest
 part is `libsndfile`, which drags in `libvorbisenc`, `libvorbis`,
 `libmpg123`, and `libmp3lame`, four codec libraries `--raw` never
-opens. The comment that keeps `pw-cat` out today counts that tree
-"for a file player"; the tap is now the reason, and the comment
-changes with the seed list.
+opens. The comment on the seed list states the tap as the reason
+`pw-cat` is in and counts that tree.
 
 **The container's route** mirrors the public one with the extension
 always present. It owns node resolution, `t=`, `bitrate=`, the
@@ -320,9 +342,12 @@ speakers play now", and silence is that answer; `503` would report a
 failure the service does not have. The monitor link makes the node
 run (observed: suspended, running, idle across a tap), so
 `status.format` appears while the tap lasts, and on a Bluetooth
-speaker the A2DP transport opens. A muted `Source` or `Sink` taps as
-silence too: `spec.mute` lands on audioconvert before the ports the
-stream reads, so a closed microphone stays closed to this door.
+speaker the A2DP transport opens. A muted `Source` taps as silence:
+its mute is in front of the ports a tap reads, so a closed microphone
+stays closed to this door. A muted `Sink` taps at the level it was
+sent, because a sink's monitor ports carry what the sink receives and
+`spec.mute` is applied after them; the manual says so, and mute is not
+a way to keep a sink's sound off this route.
 
 **Authorizing the API.** The API sends its own `ServiceAccount` token,
 projected with audience `audio-capture` and a ten-minute life. The
@@ -342,9 +367,13 @@ dials the pod IP with that `ServerName` and the CA as trust anchor.
 The leaf reaches the pod as a `Secret` volume with `optional: true`,
 reloaded on file change, so a `Secret` that does not exist yet holds
 nothing in `ContainerCreating` and the `DaemonSet`'s `ServiceAccount`
-needs no `get` or `watch` on it. Until the file exists the container
-answers nothing, `audio_capture_ready` is 0, and the API reports
-`503` with the reason.
+needs no `get` or `watch` on it. While the file is absent the
+container mints one self-signed leaf and serves it, so the liveness
+probe passes; no client trusts that leaf, so `audio_capture_ready` is
+0 and the API reports `503` with the TLS failure as the reason. The
+API checks for the `Secret` every minute and re-mints an absent leaf,
+so an owner who deletes it gets it back within a minute and the
+kubelet refreshes the optional volume after that.
 
 **Envelope.** Idle, one Go process listening: under 10 MB RSS and no
 CPU. Each tap adds one `pw-record` and, for FLAC or Opus, one encoder.
@@ -352,9 +381,13 @@ On cgroup v2 the kubelet's default sets `memory.oom.group`, so one
 encoder over the limit kills the whole container: every tap on the
 node ends, the container restarts, and nothing else in the pod is
 touched. The pod's limits become 64 + 128 + 128 + 128 + 64 = 512Mi on
-a machine that may have 1 GB. An encoder that dies ends the response
-without a terminating chunk, the HTTP/1.1 signal for an incomplete
-message (RFC 9112 section 8), and the log line carries its stderr.
+a machine that may have 1 GB. A pipeline that dies mid-tap ends the
+body without its terminating chunk on both legs, the HTTP/1.1 signal
+for an incomplete message (RFC 9112 section 8); over HTTP/2 the
+stream is reset. The log line survives the abort and carries the exit
+status of each process and the last line it wrote. The exit status
+decides an encoder failure, not stderr: both encoders print a banner
+and a progress bar there and exit 0 on every successful tap.
 
 ```yaml
         # A restart of this container ends every running capture on
@@ -433,14 +466,18 @@ an empty namespace because both kinds are cluster-scoped, and `user`,
 `groups`, `uid`, and `extra` copied from the `TokenReview` status;
 unit tests assert both. An info route needs `get` on the ordinary
 resource; the discovery and OpenAPI documents need authentication and
-no authorization. The subresource shape lets an ordinary RBAC rule
-grant a tap, per sink if wanted:
+no authorization. The operator ships one `ClusterRole` for an owner
+to bind, `audio-capture-viewer`, which grants `get` on `sinks`,
+`sources`, `sinks/audio`, and `sources/audio`: the two plain
+resources for the info routes and the two subresources for the taps.
+The subresource shape lets an ordinary RBAC rule grant a tap alone,
+per sink if wanted:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: audio-capture-viewer
+  name: kitchen-listener
 rules:
   - apiGroups: [audio.liken.sh]
     resources: [sinks/audio]
@@ -507,8 +544,10 @@ the `Service`'s DNS names, in the `kubernetes.io/tls` shape with
 `audio-api-ca`, so a client reads the trust anchor with an ordinary
 `get` and never touches the `Secret`, and signs the container leaf
 from the same CA. The CA lives ten years, a leaf one year, and the API
-re-mints a leaf when under a third of its life remains;
-`audio_api_certificate_expiry_seconds` reports the nearest expiry.
+re-mints a leaf when under a third of its life remains, on an hourly
+check of the lives it holds; the sidecar `Secret` is checked every
+minute, above. `audio_api_certificate_expiry_seconds` reports the
+nearest expiry.
 Rotation of the CA is two steps: publish the new CA appended to
 `ca.crt` in the `ConfigMap`, wait, then switch the leaves. A
 cert-manager owner replaces `audio-api-tls` with a `Certificate` of
@@ -626,8 +665,10 @@ double-counts. `deploy/monitoring/dashboards/audio-operator.json`
 gains one row: captures active, failures by reason, API request rate
 by status. One log line per request: the route template, the request
 id, the caller's username, the resource, status, bytes, header time,
-stream time. One per tap in the container: target, format, rate and
-channels used, span, bytes, encoder exit status.
+stream time. One per tap in the container: the target and its graph
+node id, the stream name, the format, the rate and channels used, the
+span, the bytes, the discarded bytes, the link verdict, the start
+time, the duration, and the exit status of each process.
 
 ### The one-line use
 
@@ -660,7 +701,7 @@ too. `mpv` in place of `curl -o` listens live.
   device list on 2026-09-16 names `alsa`, `jack`, `pulse`, `oss`, and
   nothing named PipeWire), so `pw-record` is needed either way, and
   `ghcr.io/liken-sh/ffmpeg` (display plan 19) is a 218 MB layer for
-  three encoders that cost 4.3 MB. A second image would also break the
+  three encoders that cost 3.1 MB. A second image would also break the
   one-image pattern `main.go` states.
 - **Encoding in the Go process**, the other cure for stdio buffering.
   No pure-Go Opus encoder exists, and `libstdbuf.so` is one file.
@@ -675,7 +716,8 @@ too. `mpv` in place of `curl -o` listens live.
 - **`503` on a suspended sink.** Silence is the answer.
 - **One tap per endpoint.** PipeWire fans out; the cap on the
   container's load is the limit that costs something.
-- **A `levels` route**, a stream of the running level, is a follow-up.
+- **A `levels` route**, a stream of the running level. An open
+  problem below.
 
 ## How the work is proved
 
@@ -723,12 +765,104 @@ and its `Source`, `usb-0573-1573-a34004801402-usb-audio-capture`:
 | time to first body byte, no `t=`, tone playing | `curl -w '%{time_starttransfer}'` | under 200 ms |
 | time to first body byte, silent sink, each format | the same | under 200 ms |
 | `pw-top -b -n 1` xrun count on the DAC's node | before, during, and after a tap | unchanged |
-| the closure's size | `du` of `/out` in the closure stage, before and after | 4.3 MB more |
+| the closure's size | `du` of `/out` in the closure stage, before and after | 3.1 MB more |
 | a tap wakes a suspended sink | `status.format` on the `Sink` | appears and leaves |
 
 The xrun count and the ear together answer whether a tap disturbs
-playback. Each number lands in this plan's drill section in the
-commit that closes it.
+playback. The drill section below holds each number.
+
+## The drill
+
+Run on `liken-1` in two passes, both on the USB DAC
+`usb-0573-1573-a34004801402-usb-audio` (PipeWire node
+`liken.audio.card1-pcm0`, 48000 Hz, 2 channels) and its `Source`
+`usb-0573-1573-a34004801402-usb-audio-capture` (48000 Hz, 1 channel):
+
+- Drill 1, 2026-09-17 01:45 to 02:12 UTC, against
+  `2026.09.10-001-dev-005-3413547a`, the first build. No tap produced
+  a byte through the public leg: the API read `status.nodeName` where
+  it needed `status.node` and the other way round, and the link
+  confirmation looked for `pw-record` by `application.process.id`, so
+  every tap ended `500` `wrong-target` after 3 s. The CPU rows of that
+  drill were measured on the same command lines from a pod on the same
+  socket.
+- Drill 2, 2026-09-17 02:41 to 03:08 UTC, against
+  `2026.09.10-001-dev-007-ca00d9e8`, with those two defects fixed.
+  The public leg produced sound in all three formats. Every tap ended
+  after 10 s plus `begin` with a clean `200`, because the header
+  deadline was on the whole request context; a FLAC or Opus tap
+  counted as an encoder failure for its banner on stderr; and a muted
+  `Sink` tapped at full level. The build after that drill (`f285eca`)
+  answers the first two as the design above states and states the
+  third as the rule; it has not been drilled.
+
+| Measurement | Expected | Drill 1 | Drill 2 |
+| --- | --- | --- | --- |
+| idle RSS of `capture`, `kubectl top` | under 10 MB | 5 Mi | 9 Mi |
+| idle RSS of `capture`, `/proc/<pid>/status` | under 10 MB | `VmRSS` 22,848 kB, `VmHWM` 25,660 kB, 18 threads | `VmRSS` 22,396 kB, `VmHWM` 23,520 kB, 14 threads; `smaps_rollup` `Pss` 13,222 kB, `Shared_Clean` 13,816 kB, `Private_Dirty` 8,516 kB |
+| idle CPU of `capture` over 60 s | 0 | 2 ticks, 0.02 s, 0.033% of a core (`kubectl top` 1m) | the same |
+| CPU of one WAV tap over 30 s | about 1% of a core | 12 ticks, 0.40% of a core, `pw-record` alone | 0.842% while it runs, plus 0.182 s of CPU at the start; 1.449% across 30 s, whole cgroup |
+| CPU of one FLAC tap over 30 s | not stated | 23 ticks, 0.77% of a core | 0.926% while it runs; 1.534% across 30 s |
+| CPU of one Opus tap over 30 s | a few percent of a core | 82 ticks, 2.73% of a core | 3.408% while it runs; 4.076% across 30 s |
+| first body byte, no `t=`, tone playing | under 200 ms | no body byte; `500` at 3.029 s | 0.474 s, 0.495 s, 0.501 s over three runs |
+| first body byte, silent sink, `audio.wav?t=0,5` | under 200 ms | no body byte; `500` at 3.030 s | 0.589 s |
+| first body byte, silent sink, `audio.flac?t=0,5` | under 200 ms | no body byte; `500` at 3.054 s | 0.450 s, at the start and not at the end, so the `libstdbuf.so` preload works |
+| first body byte, silent sink, `audio.opus?t=0,5` | under 200 ms | no body byte; `500` at 3.042 s | 0.517 s, the same |
+| `pw-top -b -n 1` xruns on the DAC's node, before / during / after | unchanged | `ERR` 0 / 0 / 0 | `ERR` 0 / 0 / 0 |
+| the closure's size | 3.1 MB more | `du /usr` 46,992 KiB to 50,576 KiB, 3,584 KiB (3.67 MB) more; the compressed layer 12.28 MB to 13.52 MB | not re-measured; only the Go binary changed |
+| a tap wakes a suspended sink | `status.format` appears and leaves | absent, then `{"channels":2,"positions":["FL","FR"],"rate":48000}` while a monitor tap ran, then absent | the same |
+| the `Secret` re-minted after a delete | `503`, then `200` | not within 2.5 min; the check was hourly, and the API was restarted by hand | 43 s to the new `Secret`; `200` again 107 s after the delete, when the kubelet refreshed the optional volume |
+| the tone in the tap | one peak at 440 Hz | 439.5 Hz (bin width 2.93 Hz), RMS -15.3 dBFS, through `pw-record` alone | 439.5 Hz in WAV, FLAC, and Opus through the API, RMS -13.5, -13.5, -13.4 dBFS |
+
+The drill 2 CPU rows come from the `capture` container's own cgroup
+(`cpu.stat` `usage_usec`), so they count `pw-record` and the encoder
+with the Go process; a `t=0,1` tap and a `t=0,9` tap each ran three
+times, and their difference gives the rate while a tap runs. The TLS
+handshake through the port-forward costs 0.09 to 0.12 s of each
+first-byte figure; the API's own log read `headers=0.354` to
+`headers=0.378` on every tap, so the rest is the container's node
+resolution, `pw-record` start, and link confirmation.
+
+What ran in drill 2, against the list above:
+
+* Step 1 was adapted: no `Player` held the DAC and no reachable
+  `https://` tone source existed, so a 440 Hz stereo s16 tone was
+  piped into `pw-cat --playback` on the node's socket, the same graph
+  a `Player` feeds.
+* Steps 2 and 3 passed. `ffprobe` read `pcm_s16le 48000 Hz 2
+  channels, duration 5.000000` (960,044 bytes), `flac 48000 2` with
+  `duration=N/A` (STREAMINFO total samples 0, as designed), and
+  `opus/ogg 48000 2, duration 5.006500`. `t=5,7` returned 384,044
+  bytes, `duration=2.000000`, in 7.199 s, and the container logged
+  952,320 bytes discarded, 4.96 s of samples.
+* Step 4 passed, the round trip included: the template from `GET
+  /v1/audio` expanded with `uritemplate` 4.2.0 to `audio.opus?t=0%2C5&bitrate=64`
+  and answered `200` with 53,129 bytes against 76,323 at the default
+  bitrate.
+* Step 5, the muted half: a muted `Source` tapped 288,044 bytes with a
+  peak absolute sample of 0.
+* Steps 7, 8, 10, and 12 passed as written. The fifth tap was `503`
+  at 0.203 s with `Retry-After: 5`; every negotiation row of the table
+  matched; a token without the audience was `401` and one without a
+  grant was `403`; a tap cut by a PipeWire kill ended at 3.310 s, the
+  next request was `503` with `pw-dump`'s own words, a tap answered
+  `200` again 14 s after the kill, and 33 `Captured` events were on
+  the `Sink` and both `Source`s. A `HEAD` answered `200` in 0.067 s
+  with PipeWire dead.
+* Step 9: an unknown name was `404` from the API, and a source node
+  asked as a sink, or an absent node, was `404` from the container,
+  never another sink's sound.
+* Step 11 passed, on the timeline in the table.
+
+Not run, in either drill:
+
+* The `409` `away` row. Every endpoint on the cluster held a
+  `status.node`, the Bluetooth speaker was connected, and turning its
+  adapter off was out of scope.
+* A live `Source`. The DAC has nothing patched into its input and the
+  other `Source` on the cluster reports `Capture Switch` off, so no
+  microphone on the cluster carries a signal; the open tap returned
+  288,044 bytes with a peak of 0, the same as the muted one.
 
 ## Open problems
 
@@ -754,3 +888,18 @@ commit that closes it.
 - **`ClusterTrustBundle`.** The k8s-native home for the CA anchors,
   which removes the `ConfigMap` and its grant, once `liken`'s k3s
   reaches 1.37.
+- **The idle RSS by `/proc` is above the line.** The envelope says
+  under 10 MB, and `/proc/<pid>/status` reads `VmRSS` 21.9 MB while
+  `kubectl top` reads 9 Mi against a 64 Mi limit. `Pss` is 13.2 MB:
+  the mapped binary's page-cache pages are shared with the three other
+  containers of the same image. Either the line names the method that
+  measures the container's own cost, or the figure comes down.
+- **The first body byte.** 0.45 to 0.59 s against 200 ms, with 0.354
+  to 0.378 s of it in the container: 0.182 s of CPU at every tap's
+  start on two `pw-dump` reads of the graph and the `pw-record` start.
+  The confirmation's first look moved from 250 ms to 20 ms after that
+  drill, and the number has not been measured since. Caching the graph
+  read, or confirming the link after the first bytes, are the cures
+  left.
+- **A `levels` route.** A stream of the running level, for a rule or
+  a meter that never needs the samples.
