@@ -810,6 +810,7 @@ Run on `liken-1` in two passes, both on the USB DAC
 | first body byte, silent sink, `audio.wav?t=0,5` | under 200 ms | no body byte; `500` at 3.030 s | 0.589 s |
 | first body byte, silent sink, `audio.flac?t=0,5` | under 200 ms | no body byte; `500` at 3.054 s | 0.450 s, at the start and not at the end, so the `libstdbuf.so` preload works |
 | first body byte, silent sink, `audio.opus?t=0,5` | under 200 ms | no body byte; `500` at 3.042 s | 0.517 s, the same |
+| first body byte, silent sink, `audio.opus?t=0,3`, after the 20 ms first look (dev-012, 2026-09-17) | under 200 ms | | 0.189 s through a port-forward |
 | `pw-top -b -n 1` xruns on the DAC's node, before / during / after | unchanged | `ERR` 0 / 0 / 0 | `ERR` 0 / 0 / 0 |
 | the closure's size | 3.1 MB more | `du /usr` 46,992 KiB to 50,576 KiB, 3,584 KiB (3.67 MB) more; the compressed layer 12.28 MB to 13.52 MB | not re-measured; only the Go binary changed |
 | a tap wakes a suspended sink | `status.format` appears and leaves | absent, then `{"channels":2,"positions":["FL","FR"],"rate":48000}` while a monitor tap ran, then absent | the same |
@@ -890,12 +891,5 @@ Not run, in either drill:
 - **`ClusterTrustBundle`.** The k8s-native home for the CA anchors,
   which removes the `ConfigMap` and its grant, once `liken`'s k3s
   reaches 1.37.
-- **The first body byte.** 0.45 to 0.59 s against 200 ms, with 0.354
-  to 0.378 s of it in the container: 0.182 s of CPU at every tap's
-  start on two `pw-dump` reads of the graph and the `pw-record` start.
-  The confirmation's first look moved from 250 ms to 20 ms after that
-  drill, and the number has not been measured since. Caching the graph
-  read, or confirming the link after the first bytes, are the cures
-  left.
 - **A `levels` route.** A stream of the running level, for a rule or
   a meter that never needs the samples.
