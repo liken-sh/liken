@@ -1,6 +1,7 @@
 # The screen over HTTP
 
-Plan 22. Planned.
+Plan 22. Built on 2026-09-16, and drilled on liken-1 on 2026-09-16
+and 2026-09-17.
 
 A `GET` on a `Display` answers with what its screen shows: one frame
 as PNG or JPEG, a clip as H.264 in fragmented MP4, or an MJPEG stream.
@@ -61,7 +62,7 @@ ingress is not v1 work; v1 is one `Service` per domain.
 | GET, HEAD | `/v1/display/displays/{name}/screen` | negotiated | Default `image/png` |
 | GET, HEAD | `/v1/display/displays/{name}/screen.png` | `image/png` | One frame |
 | GET, HEAD | `/v1/display/displays/{name}/screen.jpg` | `image/jpeg` | One frame |
-| GET, HEAD | `/v1/display/displays/{name}/screen.mp4` | `video/mp4` | H.264 in fragmented MP4, until hang-up or the `t=` end |
+| GET, HEAD | `/v1/display/displays/{name}/screen.mp4` | `video/mp4; codecs="avc1.640029"` | H.264 in fragmented MP4, until hang-up or the `t=` end |
 | GET, HEAD | `/v1/display/displays/{name}/screen.mjpeg` | `multipart/x-mixed-replace; boundary=ffmpeg` | One `image/jpeg` part per frame |
 | OPTIONS | any of the above | none, 204 | `Allow: GET, HEAD, OPTIONS` |
 
@@ -96,8 +97,17 @@ representation". 8.7's identity guarantee, that a `GET` on it returns
 the same representation, does not hold for a live capture, which is
 also why `Accept-Ranges` is `none`. No `Content-Length`, because
 RFC 9112 section 6.2 forbids one beside `Transfer-Encoding`; a still
-streams like a clip so the headers go out before the frame. HTTP/2
-(RFC 9113) frames the body itself. `type` on a `Link` carries no
+streams like a clip. HTTP/2 (RFC 9113) frames the body itself.
+
+The sidecar takes the first frame before the status line goes out,
+and sends the status line and the headers as soon as that frame is in
+hand, milliseconds after accept. The compositor's answer to the first
+capture request is where a denial arrives, and a denial after a 200
+has no status left to carry it, so the first frame is the check that
+turns `unauthorized` into a 500. The headers wait for nothing else:
+media-api composes this stream with sound by comparing the arrival of
+the two streams' headers, so headers that waited out a `t=` lead-in
+would read as a clock difference of the lead-in's length. `type` on a `Link` carries no
 media type parameters. The `filename` time is RFC 3339 UTC with the
 colons replaced by hyphens, `HDMI-A-1-2026-09-16T21-02-16Z.png`,
 because a colon is not legal in a file name everywhere a browser
@@ -115,14 +125,21 @@ RFC 9457 problem document:
 | 404 | no `Display` of that name | | section 15.5.5 |
 | 405 | a method other than GET, HEAD, OPTIONS | `Allow: GET, HEAD, OPTIONS` | section 15.5.6 |
 | 406 | `Accept` excludes everything the route serves | | section 15.5.7 |
-| 500 | the compositor denied the capture, `unauthorized`; type `capture-denied` | none, a retry never clears it | section 15.6.1 |
+| 500 | the compositor denied the capture, `unauthorized`, type `capture-denied`; the encoder could not start, type `encoder-failed`, with ffmpeg's last error line as `detail` | none, a retry never clears it | section 15.6.1 |
 | 502 | the sidecar answered something that is not HTTP or not a problem document | | section 15.6.3 |
-| 503 | the output is being captured; the compositor is not serving; the sidecar refused the connection, is absent, or is not ready; the `Display` has no `status.node` yet | `Retry-After: 5` | sections 15.6.4 and 10.2.3 |
+| 503 | the output is being captured, type `capture-busy`; the compositor is not serving, type `compositor-down`, with the `CompositorServing` condition's message as `detail`; the sidecar refused the connection, is absent, is not ready, or presented a leaf the API does not trust, type `upstream-failed`; the `Display` has no `status.node` yet, type `no-node` | `Retry-After: 5` | sections 15.6.4 and 10.2.3 |
 | 504 | the sidecar sent no headers within the header timeout | | section 15.6.5 |
 
 No route accepts a body, so 415 is never sent; a `POST` gets 405 and
 `Allow`. 409 is reserved for a state the caller can act on, and a
 `Display` waiting for its node is not one.
+
+An encoder that started and then wrote nothing cannot become a 500,
+because the status line is already on the wire. The body ends without
+its terminating chunk, so the caller reads an unexpected end of file,
+which is the one thing that tells a truncated capture from a complete
+one, and the log carries ffmpeg's last line. Only an encoder that
+cannot start is a 500.
 
 ### Selection
 
@@ -142,9 +159,9 @@ Media Fragments fixes NPT's zero at the start of the source media
 (section 6.1.1). A live tap has no start, so this API defines the
 source media's zero as the instant the sidecar accepts the request.
 The wall-clock `clock:` format that would say this directly is in the
-advanced document, not in 1.0 (section 4.2.1). The sidecar sends the
-headers at once and starts its pipeline at once, and discards frames
-until `begin` on its own clock, so frame zero of the body is
+advanced document, not in 1.0 (section 4.2.1). The sidecar takes the
+first frame, sends the headers, starts its pipeline, and discards
+frames until `begin` on its own clock, so frame zero of the body is
 origin plus `begin`. `t=5,7` discards five seconds, then records two;
 `t=,10` records ten from now; `t=5` on a still discards five seconds
 and takes one frame.
@@ -154,10 +171,16 @@ non-existent dimension (sections 6.2, 6.2.1, 6.3.1). This API answers
 400 instead, because a query produces a new resource and a client that
 asked for a region must not silently get the whole screen. A repeated
 dimension, an unknown key, `t=a,b` with `a >= b`, and a `t=` end on a
-still are all 400. An out-of-range `xywh` is clipped per section
-6.1.2, not refused. `percent:` rounds the origin down and the size up
-(section 6.1.2, whose published formula transposes the operands),
-then rounds width and height up to even for the encoder.
+still are all 400. An `xywh` that runs off an edge is clipped per
+section 6.1.2, not refused. The one region section 6.1.2 clips to
+nothing is a rectangle whose origin is at or past an edge of the
+screen, and that is a 400, for the same reason: the client asked for
+a region and must not silently get a strip of the edge. `percent:`
+rounds the origin down and the size up (section 6.1.2, whose
+published formula transposes the operands). Every crop then rounds
+its width and height up to even, because the encoder takes no odd
+dimension; an origin that no longer fits moves back, and a frame
+whose own size is odd rounds down instead.
 
 `xywh=` is `pixel:` by default, in the frame's own pixels, the
 physical pixels `weston_capture_source_v1.size` reports; plan 15's
@@ -211,11 +234,17 @@ Every error is `application/problem+json` with `type`, `title`,
 plus `#` plus the request id, and the log line carries the same id.
 Shared types live under `https://liken.sh/problems/` (`no-node`,
 `not-acceptable`, `capture-busy`, `upstream-failed`); display's own
-under `https://display.liken.sh/problems/` (`capture-denied`). With
-`about:blank`, `title` is the status phrase (RFC 9457 section 4.2.1).
-`detail` carries the source's own words: a weston `failed` event's
-`msg`, the `CompositorServing` condition's message, or ffmpeg's
-stderr tail.
+under `https://display.liken.sh/problems/` (`capture-denied`,
+`compositor-down`, `encoder-failed`), because only this domain has a
+compositor and an encoder. With `about:blank`, `title` is the status
+phrase (RFC 9457 section 4.2.1). `detail` carries the source's own
+words: a weston `failed` event's `msg`, the `CompositorServing`
+condition's message, or ffmpeg's last error line. A 401 and a 403
+carry a `detail` too. A sidecar the API cannot reach is described by
+the node and the class of the failure, "the capture sidecar on
+`stick-1` did not present a certificate this API trusts"; the pod
+address, the port, and the path on the private leg are the shape of
+the cluster, so they go to the log line and never to the caller.
 
 ```json
 {
@@ -256,9 +285,17 @@ carries an RFC 6570 template, its media types, its extensions, and
 RFC 6570's form-style expansion percent-encodes commas and colons,
 so a client that expands the template sends `t=5%2C7`, which the
 parser's decoding step accepts. `GET /v1/display/displays/{name}`
-answers `name`, `node`, `width`, `height`, `scale`, `refresh`, and
-`formats`, from the sidecar's own `wl_output` events, with
-`rel="related"` links (RFC 4287, registered) to its capture routes.
+answers `name`, `node`, `width`, `height`, `scale`, `refresh`,
+`formats`, `codecs`, and `conversion`, from the sidecar's own
+`wl_output` events and its startup probe, with `rel="related"` links
+(RFC 4287, registered) to its capture routes. A screen whose
+compositor is not serving, or whose sidecar the API cannot reach,
+answers 200 from the `Display` object alone: the name, the node, and
+the size and refresh its status reports, with `compositor: down` or
+`sidecar: unreachable` and the condition's words in `detail`. A
+caller asking what a screen is does not need the screen to be up,
+and `scale`, `formats`, and `conversion` come from the node, so they
+are absent rather than guessed.
 Any extension relation the three APIs need lives under
 `https://liken.sh/rel/`, never under a per-domain host.
 
@@ -325,7 +362,11 @@ GL renderer's read format is not fixed. Stride is exactly
 format changed: on a still the sidecar reallocates and reissues, on
 a clip it ends the response and logs both sizes, because
 `-video_size` cannot follow. The buffer is a `memfd`, 33 MB at 4K,
-one output at a time, unmapped when the request ends.
+one output at a time, unmapped when the request ends. The sidecar
+logs one line at the first frame of every capture: the fourcc, the
+`-pixel_format` derived from it, the size and scale the output
+reported, the socket, and the conversion graph, so a drill reads the
+node's own answer there.
 
 **The encoders.** Every format runs through ffmpeg, one process per
 request, one code path. The sidecar cuts the frame to `xywh=` in its
@@ -339,10 +380,10 @@ ffmpeg -f rawvideo -pixel_format bgr0 -video_size 1920x1080 -i pipe:0 \
 
 # a clip
 ffmpeg -f rawvideo -pixel_format bgr0 -video_size 1920x1080 -framerate 15 \
-  -thread_queue_size 8 -i pipe:0 \
+  -use_wallclock_as_timestamps 1 -thread_queue_size 8 -i pipe:0 \
   -init_hw_device vaapi=gpu:/dev/dri/renderD128 -filter_hw_device gpu \
   -vf 'hwupload,scale_vaapi=w=1920:h=-2:format=nv12' \
-  -c:v h264_vaapi -g 15 -bf 0 \
+  -c:v h264_vaapi -profile:v high -level 4.1 -g 15 -bf 0 -flush_packets 1 \
   -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof -frag_duration 1000000 pipe:1
 
 # the low-end stream
@@ -353,18 +394,40 @@ ffmpeg ... -vf 'hwupload,scale_vaapi=format=nv12' -c:v mjpeg_vaapi -global_quali
 `h264_vaapi` takes only `vaapi` frames (ffmpeg 8.0.1), so `hwupload`
 is in every clip's graph, with its device from `-init_hw_device` and
 `-filter_hw_device` (ffmpeg.org/ffmpeg.html, 2026-09-16). The color
-conversion runs on the GPU in `scale_vaapi=format=nv12`;
-`format=nv12,hwupload` is the software fallback only if the node's
-driver refuses a `bgr0` upload. `scale_vaapi` is where `width=`
-lands, and a clip on a 4K output is scaled to 1080p unless `width=`
-asks for more. `-g <framerate> -bf 0` puts a keyframe every second,
+conversion runs on the GPU in `scale_vaapi=format=nv12` where the
+node's driver has VA-API post-processing, and on the CPU in
+`format=nv12,hwupload` where it does not. The sidecar probes its
+conversion graph once at startup: it encodes one synthetic 64 by 64
+frame through `hwupload,scale_vaapi` and `h264_vaapi` to nothing, and
+a failure selects the software conversion for the life of the
+process, because a driver does not gain a pipeline while a pod runs.
+Apollo Lake's iHD driver has no VA-API post-processing, so `stick-1`
+converts on the CPU and `liken-1` converts in `scale_vaapi`. Each node
+states which graph it took and why in one startup log line, reports
+it as the gauge `display_capture_conversion{graph}`, 1 on the graph it
+runs and 0 on the other, and in the info document's `conversion`
+member. `CAPTURE_CONVERSION=software` or `=vaapi` overrides the probe
+in either direction. Both graphs scale to the same size: `scale_vaapi`
+or `scale` is where `width=` lands, and a clip on a 4K output is
+scaled to 1080p unless `width=` asks for more. `-g <framerate> -bf 0`
+puts a keyframe every second,
 because `h264_vaapi` defaults to a 120-frame GOP and `frag_keyframe`
 ("Fragment at video keyframes") cuts only there; `-frag_duration` is
 the second cut. `empty_moov` ("Make the initial moov atom empty") and
 `default_base_moof` ("Set the default-base-is-moof flag in tfhd
 atoms") let a browser or mpv play the stream as it arrives.
 `-thread_queue_size` is bounded so a slow encoder cannot grow the
-process. MJPEG is the `mpjpeg` muxer,
+process. A clip pins `h264_vaapi` to profile high and the level the
+encoded size needs, 4.1 up to 1920x1080 at 60 fps and 5.1 above, so
+the `Content-Type` states `codecs="avc1.640029"` (RFC 6381) before the
+first byte, and media-api copies it into the composed stream's own
+type. `-framerate` is the nominal rate, and each raw frame is stamped
+by the wall clock, `-use_wallclock_as_timestamps 1`, because a node
+that cannot hold the cadence writes fewer frames than it promised,
+and without the wall clock ffmpeg stamps them as though it had held
+it, so every event in the clip drifts earlier: at 30 fps on `stick-1`,
+marks two seconds apart in the source landed 1.7 seconds apart in the
+body. MJPEG is the `mpjpeg` muxer,
 `multipart/x-mixed-replace; boundary=ffmpeg`, a type IANA registers
 (W3C, 2014) with `boundary` required; no RFC defines it.
 `mjpeg_vaapi` takes `-global_quality` on a 1 to 100 scale.
@@ -424,8 +487,14 @@ independent. A second request on a busy output gets 503,
 The sidecar's leaf reaches it as an `optional` `Secret` volume,
 reloaded on file change, so the pod starts before the API has minted
 it and the DaemonSet's `ServiceAccount` needs no grant on the
-`Secret`. Until the files exist, `display_capture_ready` is 0 and the
-API answers 503. On a cgroup v2 machine, an ffmpeg that exceeds the
+`Secret`. Until the files exist, the sidecar serves a self-signed leaf
+of its own making, so the liveness probe's handshake succeeds and the
+kubelet does not restart it; `display_capture_ready` is 0, because the
+API trusts only the CA it published, and the API answers 503 with
+`Retry-After: 5`. A sidecar that still holds the projected leaf after
+the `Secret` alone is deleted keeps answering 200, because the leaf is
+still valid; the 503 appears only where the sidecar also restarted and
+found no files. On a cgroup v2 machine, an ffmpeg that exceeds the
 limit kills the whole container cgroup, so one runaway encode ends
 every capture on the node and the kubelet restarts the container.
 The pod's limits become 64 + 512 + 128 + 384 = 1088Mi on a machine
@@ -466,8 +535,9 @@ exists. The documents need authentication and no authorization; the
 info route needs `get` on `displays`. Verdicts are cached by the
 SHA-256 of the raw token for `min(exp, 60 s)`; denials are never
 cached and the key is never logged. The base ships a `ClusterRole`
-`display-capture-viewer` with the one `displays/screen` rule for
-owners to bind, and media-api holds that binding. The manual says
+`display-capture-viewer` with two rules for owners to bind: `get` on
+`displays/screen`, and `get` on `displays`, because the info route
+reads the `Display` itself. media-api holds that binding. The manual says
 beside the grant examples that a wildcard `resources: ["*"]` role
 and `cluster-admin` gain capture on the day this ships.
 
@@ -502,7 +572,11 @@ date. CA rotation is two steps: publish the new CA appended to
 **The record.** Every request that produces bytes writes a Kubernetes
 `Event` on the `Display`: `reason: Captured`, `type: Normal`, the
 subject and aspect in the message, so `kubectl describe display`
-answers who looked at a screen and when. The log line is the detail
+answers who looked at a screen and when. An `Event` is namespaced and
+a `Display` is not, so the `Event`s land in `default`, the convention
+a `Node`'s own `Event`s follow, and `involvedObject` carries the
+`Display`'s `uid`, which is what `kubectl describe` searches by. The
+log line is the detail
 record, one per request with the route as its RFC 6570 template, the
 caller's subject, status, bytes, duration, and the request id; it
 never carries the token.
@@ -523,6 +597,7 @@ concrete path.
 | api | `display_api_streams_active{aspect}` | gauge |
 | api | `display_api_certificate_expiry_seconds` | gauge |
 | capture | `display_capture_ready` | gauge |
+| capture | `display_capture_conversion{graph}` | gauge, 1 on `software` or `vaapi` |
 | capture | `display_capture_bytes_total{aspect,format}` | counter |
 | capture | `display_capture_seconds_total{aspect,format}` | counter, stream time |
 | capture | `display_captures_active{aspect}` | gauge |
@@ -564,18 +639,26 @@ curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
   'https://localhost:8443/v1/display/displays/HDMI-A-1/screen.mp4?t=,10' > clip.mp4
 ```
 
+A port-forward carries a still well and a stream badly. It is one
+TCP connection through the API server, and on liken-1 it moved about
+2 Mbit/s, where a 1080p MJPEG stream needs about 15 Mbit/s, so a
+viewer on the forward sees the stream at about an eighth of real
+time. The manual says to read a stream from a pod on the cluster
+network, or through a `Service` the cluster owner exposes.
+
 ## What it costs, estimated
 
 These are workstation measurements (Intel Core Ultra 7 165H, iHD
-26.1.2, ffmpeg 8.0.1), not stick1's numbers; the drill replaces them.
+26.1.2, ffmpeg 8.0.1), not stick-1's numbers; the drill table under
+"How the work is proved" holds stick-1's.
 
 | Cost | Estimate |
 | --- | --- |
 | Sidecar idle | one static Go binary, no Wayland connection, no frame: target under 15 MB RSS and no CPU |
 | 1080p clip at 15 fps, GPU conversion | 0.084 cores, 111 MB RSS, against 0.32 cores with the software fallback |
-| 4K clip at 15 fps, GPU conversion | 0.49 cores, 231 MB RSS, against 1.06 cores; stick1's cores are about a quarter of the workstation's, so the fallback cannot run 4K there |
+| 4K clip at 15 fps, GPU conversion | 0.49 cores, 231 MB RSS, against 1.06 cores; stick-1's cores are about a quarter of the workstation's, so the fallback cannot run 4K there |
 | Still | 0.07 s wall for 1080p, 0.70 s for 4K, process start included |
-| Interference with mpv | planes are off for the whole clip, so mpv's film is composited through the GL renderer for its length; plan 17 measured weston at 99 millicores composing four surfaces on stick1 |
+| Interference with mpv | planes are off for the whole clip, so mpv's film is composited through the GL renderer for its length; plan 17 measured weston at 99 millicores composing four surfaces on stick-1 |
 
 ## What was considered and set aside
 
@@ -641,32 +724,77 @@ document. `layout/smoke.sh` gains a client on the capture socket
 that reads `complete` and one on `wayland-0` that reads `failed`
 with `unauthorized`, the privacy proof.
 
-The drill on liken-1, on stick1, records these when the plan closes:
+Two drills ran on liken-1, both against `boe-1080-display` on
+`stick-1`, an Intel Celeron J3455 (Apollo Lake, 4 cores, 1.5 GHz)
+with iHD 25.2.3, VA-API 1.22, and ffmpeg 8.0.1, at 1920x1080@60
+showing the media browser's home. The first drill, 2026-09-17 02:14
+to 02:45 UTC, ran build `2026.09.16-001-dev-002` through a
+port-forward, and took its clip numbers with `CAPTURE_CONVERSION=software`
+set by hand, because that build had no probe and every clip on the
+GPU graph answered 200 with an empty body. The second drill, 03:08 to
+03:20 UTC, ran build `-dev-004` with no knob set, and read clips and
+the stream from a pod on the cluster network. The second `Display`,
+`gsm-7716-lg-hdr-wqhd` on `liken-1`, has no panel and its compositor
+is down, which is the only screen over 1080p in the lab.
 
-| Number | How |
+| Number | Measured |
 | --- | --- |
-| Sidecar idle RSS and CPU | `kubectl top pod --containers` an hour after the roll |
-| Node disk added and first pull time | `crictl images` and the pod's first start after the roll |
-| Time to first byte, still | `curl -w '%{time_starttransfer}'` on `screen.png` and `screen.jpg`, 1080p and 4K if the panel offers it |
-| Time to first byte, clip | the same on `screen.mp4?t=,5` |
-| CPU of a 1080p clip at 30 fps | `kubectl top pod --containers` for `capture` and `weston`, and the package temperature |
-| CPU of a 4K clip at 30 fps | the same on a 4K mode, or recorded as not run |
-| GPU busy during each clip | an i915 engine reader if one runs on the node, else unmeasured with ffmpeg's CPU as the proxy |
-| Which conversion graph the node runs | ffmpeg's log: `scale_vaapi` after a `bgr0` upload, or the software fallback |
-| Which fourcc the compositor reports | the sidecar's first-frame log line |
-| Fence-fd path or five-refresh timer | the achieved frame rate: a ceiling near 12 fps at 60 Hz is the timer path |
-| MJPEG bytes per 1080p frame at `quality=85` | `display_capture_bytes_total` over one second at 15 fps, against the 100 KB estimate |
-| Whether mpv drops frames over a whole 30 fps clip | mpv's `frame-drop-count` over IPC if the player exposes it, else by eye and the player's log |
-| A mode change during a clip | the response ends, the log carries both sizes |
-| A second request during a clip | 503, `Retry-After: 5`, the problem document's words |
-| A capture from a draw claim's socket | `failed` with `unauthorized`, 500 `capture-denied` |
-| Whether a clip ever puts two captures in flight | the compositor's log over a whole clip: no `sequence` protocol error, and the connection lives to the end |
-| The `Captured` `Event` | `kubectl describe display` after one still |
-
-The 4K numbers decide the `framerate` default and the memory limit.
-The mpv number decides whether a capture may run while a film plays.
+| Sidecar idle RSS and CPU | First drill, from the container cgroup: 1 millicore and 8.4 MiB `memory.current` over 9 idle seconds; `/proc` `VmRSS` 16.2 MB at start, 20.0 MB after captures, `VmHWM` 29.1 MB. Second drill, `kubectl top`: 2 millicores and 8 MiB idle. The estimate was under 15 MB RSS and no CPU: the CPU holds, the RSS does not. Read 20 minutes after the roll, not an hour, because the pod restarted twice during the first drill. |
+| Node disk added and first pull time | First drill: `ghcr.io/liken-sh/display-capture` is 180,963,891 bytes (172.6 MiB) unpacked, the only new image on `stick-1`. First pull 2.88 s on `stick-1` and 480 ms on `liken-1`. |
+| Time to first byte, still | First drill, through the port-forward: `screen.png` 1.18, 0.85, and 0.97 s over three calls, 1,240,302 bytes; `screen.jpg` 0.65, 0.84, and 0.57 s, 82,417 bytes. From a pod on the cluster network `screen.png` was 0.76 s to first byte and 0.82 s in total, so about 0.4 s of the port-forward reading is the forward. No 4K panel: not run. |
+| Time to first byte, clip | First drill, port-forward: `screen.mp4?t=,5` 0.95 s, 5.64 s in total, 415,975 bytes. Second drill, cluster network: 0.375 s, 5.100 s in total, 416,241 bytes, 73 frames, 4.867 s of video, a keyframe at every second and five fragments. `screen.mp4?t=5,7`: first byte 5.148 s, 30 frames, duration exactly 2.000000 s. `screen.mjpeg?t=,3`: 0.362 s. |
+| CPU of a 1080p clip at 30 fps | First drill, `cpu.stat` per second from the container cgroups, software conversion: `capture` 1874 millicores, `weston` 132 millicores, `capture` memory 100 MiB, package 71 to 76 C against 61 to 65 C idle. At 15 fps: `capture` 1117 millicores, `weston` 57 millicores, up to 69 C. Second drill, `kubectl top` over a 45 s clip at 15 fps: `capture` 798 to 1198 millicores, `weston` 26 to 62 millicores. About one core at 15 fps and about two at 30 fps on this chip. |
+| CPU of a 4K clip at 30 fps | Not run. The only screen over 1080p is `gsm-7716-lg-hdr-wqhd`, which has no panel and whose compositor is down. |
+| GPU busy during each clip | Unmeasured. No i915 engine reader runs on the node, and ffmpeg's CPU is the proxy. |
+| Which conversion graph the node runs | First drill: the GPU graph fails on `stick-1`, `Failed to create processing pipeline config: 12 (the requested VAProfile is not supported)`, and `h264_vaapi` itself runs, `VAProfileH264High`, `VAEntrypointEncSliceLP`. Second drill: the startup line reads `has no VA-API post-processing, so this node converts on the CPU` on `stick-1` and `converts in scale_vaapi` on `liken-1`; `display_capture_conversion` reads `software` 1 on `stick-1` and `vaapi` 1 on `liken-1`; the info document reads `"conversion": "software"`. |
+| Which fourcc the compositor reports | Second drill, the first-frame line: `fourcc AR24 (0x34325241) as bgra`. |
+| Fence-fd path or five-refresh timer | Not the timer path. First drill: a 15 s clip at `framerate=30` held 441 frames over 14.7 s, 30.0 fps, against the timer path's ceiling near 12 fps at 60 Hz; at `framerate=15`, 222 frames over 14.8 s. |
+| MJPEG bytes per 1080p frame at `quality=85` | First drill: 135,491 bytes per frame, every frame the same size, 43 frames and 5,693,320 bytes over 3.06 s, 14.9 Mbit/s. Second drill: 135,431 bytes per frame, 42 frames and 5,690,800 bytes over 3.083 s, 14.8 Mbit/s. The estimate was about 100 KB and 12 Mbit/s, so a frame costs a third more. |
+| Whether mpv drops frames over a whole 30 fps clip | Not run. No `Play` ran on the screen during either drill. |
+| A mode change during a clip | First drill: `spec.mode` moved to `1280x720@60` four seconds into a `t=,20` clip, the body ended at 61 frames and 4.07 s, and the status stayed 200. The end line now carries the size the clip encoded at and the size the screen serves; the second drill did not run a mode change. |
+| A second request during a clip | First drill: 503, `Retry-After: 5`, type `capture-busy`, `detail` `HDMI-A-1 is being captured until its client closes`. |
+| A capture from a draw claim's socket | First drill: a second `capture` process on the draw socket answered 500, type `capture-denied`, `detail` `unauthorized`. |
+| Whether a clip ever puts two captures in flight | Never. No `sequence` protocol error and no client disconnection in the compositor's log over 1,334 captured frames in the first drill, two 15 s clips and a 30 s clip, and none over 898 in the second. |
+| The `Captured` `Event` | Second drill: `kubectl describe display` lists five, in the namespace `default`, and a search by `involvedObject.uid` finds the same five. |
+| A lost sidecar leaf | Second drill. With the `Secret` alone deleted, stills stay 200 and the API re-mints it 34 s after the delete. With the `Secret` and the pod deleted, the new sidecar self-signs and the API answers 503, `Retry-After: 5`, `detail` `the capture sidecar on stick-1 did not present a certificate this API trusts`; the `Secret` is re-minted 29 s after the delete and the first 200 arrives 69 s after that, 98 s after the delete. The 69 s are the kubelet's own projected-volume sync, which nothing in this operator drives. |
+| An encoder that cannot build its graph | Second drill, with `CAPTURE_CONVERSION=vaapi` forcing the graph the chip cannot build: `screen.mp4?t=,2` answered 500 in 0.99 s with ffmpeg's words, and `screen.mjpeg` the same, where the first drill's build answered 200 with `content-length: 0`. |
+| A stream through the recipe | First drill: the same 3 s MJPEG request took 25.07 s through the port-forward at 0.25 MB/s and 3.09 s from a pod on the cluster network at 1.84 MB/s, with 3.06 s of capture in both. |
+| The errors | Second drill: 401 with `detail` `no Authorization field carries a Bearer token`; 403 with `detail` `not allowed to get displays/screen on boe-1080-display`; the down screen 503 with type `compositor-down` and the `CompositorServing` condition's message as `detail`; the info route 200 under the viewer role alone. First drill: every 400 in the table above, 404, 405, 406 with four `acceptable` entries, `HEAD` in 0.156 s taking no frame, and every selection query at the size it asked for. |
 
 ## What it still owes
+
+**A failed atomic commit for every captured frame.** On `stick-1`
+weston logs `atomic: couldn't commit new state: Invalid argument` and
+`repaint-flush failed: No such file or directory` once per frame this
+API takes: 1,334 pairs against 1,334 frames in the first drill, 898
+against 898 in the second, and no other repeated message. The cause
+is the disabled planes. weston 14.0.2's `output-capture.c` calls
+`weston_output_disable_planes_incr()` while a capture is pending,
+`compositor.c` then skips `assign_planes` and puts every view on the
+primary plane, and that repaint's atomic commit comes back `EINVAL`
+from this chip. The second line prints `strerror(errno)` after the
+state has been freed, so its errno is whatever the free path left and
+not a second cause. `drm.c` then calls
+`weston_output_schedule_repaint_reset`, which drops the output out of
+the repaint loop until the next capture or client commit schedules
+another one. The captured frames are correct, because the renderer
+composed them before the commit. What the kernel objects to is not in
+weston's log, and whether the panel's own scanout lags during a clip
+was not measured. The one avoidance a client holds is to take the
+next capture only after the previous one retired, which the protocol
+already requires and this client already does.
+
+**The 4K numbers.** No 4K clip and no 4K still ran, because the only
+screen over 1080p has no panel and a down compositor, so the memory
+limit rests on the workstation's estimate. mpv's dropped frames under
+a clip were not run either, because no `Play` ran during the drills,
+and that number decides whether a capture may run while a film plays.
+
+**A `framerate` default the stick's CPU decides.** With the
+conversion on the CPU, a 1080p clip costs about one core at the
+default of 15 fps and about two at 30 fps on `stick-1`, with the
+package at 76 C over a 15 s clip at 30 fps. The 4K numbers were to
+decide the default, and they were not run.
 
 **An aggregated `APIService`.** It needs its own API group, because
 `v1alpha1.display.liken.sh` is served by the CRDs and an `APIService`

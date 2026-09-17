@@ -23,18 +23,6 @@ The manual at [display.liken.sh](https://display.liken.sh) says how
 to deploy the operator and how to claim an output. These documents
 say why it is built the way it is.
 
-## Planned
-
-* [22, The screen over HTTP](22-the-screen-over-http.md). A
-  `display-api` `Deployment` and a capture sidecar in the operator's
-  pod serve a `Display`'s screen over HTTPS: one frame as PNG or
-  JPEG, a clip as H.264 in fragmented MP4, or an MJPEG stream, cut by
-  W3C Media Fragments `t=` and `xywh=`, encoded on the node's GPU,
-  and stored nowhere. The layout module opens the one capture socket
-  the compositor's screenshot authority admits. The display instance
-  of the shape audio-operator's plan 09 and media-operator's plan 34
-  share.
-
 ## Designs
 
 * [01, The compositor image](completed/01-the-compositor-image.md). Built. The
@@ -253,6 +241,20 @@ say why it is built the way it is.
   A freeze that holds for 10 s ends with `SIGKILL`, because nothing
   else in the pod ends a process that does not exit, and the kubelet
   starts the compositor again.
+* [22, The screen over HTTP](completed/22-the-screen-over-http.md).
+  Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
+  2026-09-17. A `display-api` `Deployment` and a capture sidecar in
+  the operator's pod serve a `Display`'s screen over HTTPS: one frame
+  as PNG or JPEG, a clip as H.264 in fragmented MP4, or an MJPEG
+  stream, cut by W3C Media Fragments `t=` and `xywh=`, encoded on the
+  node's GPU, and stored nowhere. The layout module opens the one
+  capture socket the compositor's screenshot authority admits. The
+  display instance of the shape audio-operator's plan 09 and
+  media-operator's plan 34 share. On the lab's Apollo Lake box, whose
+  driver has no VA-API post-processing so the color conversion runs
+  on the CPU, a 1080p clip cost about one core at 15 fps and about
+  two at 30 fps, held 30.0 fps over 441 frames, and put no two
+  captures in flight over 1,334 frames.
 
 ## Open problems
 
