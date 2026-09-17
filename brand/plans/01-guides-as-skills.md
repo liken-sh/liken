@@ -124,10 +124,11 @@ troubleshoot guide, not code.
   floats to main and loses the known-good set. Neither is chosen.
   The catalog would be a new `liken-sh/plugins` repository; nothing
   else in the org is about the org.
-* **Skills for other harnesses.** `npx skills add` installs from a
-  GitHub repository into every agent it knows, and the plan assumes
-  it scans `skills/` at the root. That is unverified until someone
-  runs it against one of these repositories.
+* **Skills for other harnesses.** `npx skills add liken-sh/<repo>
+  --list` finds every skill under `skills/` at the repository root,
+  with its description, checked against media-operator on
+  2026-09-17. What is not checked is the install itself, into each
+  harness's directory.
 * **Guides that are not procedures.** Some guides describe a thing
   (the catalog, scanning, franchises) and give no steps. They emit
   as skills too, and their `description` says what they explain.
