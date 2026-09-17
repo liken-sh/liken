@@ -9,8 +9,9 @@ The guides give the steps to operate this project: the
 [install](/docs/guides/install/),
 [declaring a Player](/docs/guides/declare-a-player/) for a screen,
 [mapping a controller](/docs/guides/mapping-a-controller/) whose
-codes no one has written down, and
-[handing the idle screen to another controller](/docs/guides/handing-the-idle-screen-to-another-controller/).
+codes no one has written down,
+[handing the idle screen to another controller](/docs/guides/handing-the-idle-screen-to-another-controller/),
+and [recording what a player is playing](/docs/guides/record/).
 After those, the work is declaring resources, and the
 [reference](/docs/reference/) describes each one.
 

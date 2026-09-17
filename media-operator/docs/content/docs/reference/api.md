@@ -110,9 +110,11 @@ subject, so a captor of a `Player` also needs the grant on the
 caller needs `players/media` alone.
 
 A client certificate needs no second credential at the sibling. The
-three APIs read the same authority, so `curl -L` with `--cert` and
-`--key` follows the 307 and names the same subject at `display-api`
-and `audio-api` that it named here.
+three APIs read the same authority, so the same `--cert` and `--key`
+name the same subject at `display-api` and `audio-api` that they
+named here. Read `Location` and repeat the request there: recent
+`curl` releases send no client certificate on the second handshake
+when `-L` changes the host.
 
 `players/media` on a `Player` is a grant on that `Player`'s `Display`
 and `Sink`s, and a role with `resources: ["*"]` in `media.liken.sh`,
