@@ -69,7 +69,7 @@ Each volume names its own deploy key here. Two volumes can name one
 
 Each claim binds one volume and names a class. The binder pairs a claim
 and a static volume only when both name the same class, so the
-`PersistentVolume` above carries the same `volumeAttributesClassName`.
+`PersistentVolume` above has the same `volumeAttributesClassName`.
 
 ```yaml
 apiVersion: v1
@@ -99,7 +99,7 @@ spec:
 
 The classes can differ. The home automation service writes a database
 beside its configuration, so its class ignores those files. The static
-site is edited in bursts, so its class waits longer for the tree to go
+site changes in bursts, so its class waits longer for the tree to go
 quiet.
 
 ```yaml
@@ -129,8 +129,8 @@ its values, and its default.
 ## One directory in each pod
 
 `subPath` on the volume mount publishes one directory of the tree into
-the container. The container sees that directory and nothing else of the
-repository. Use `strategy: Recreate` on a `Deployment`, because a
+the container. The container gets that directory and nothing else of
+the repository. Use `strategy: Recreate` on a `Deployment`, because a
 rolling update would wait forever for a second pod that
 `ReadWriteOncePod` never lets start.
 
@@ -188,23 +188,23 @@ spec:
 
 ## When both applications push
 
-Each volume commits and pushes on its own. The first push of the two
-lands. The second finds the ref moved, and the forge rejects it. The
-driver then fetches, rebases the volume's commits onto upstream beside
-the pod's tree, and pushes again, three times at most. The pod's tree
-takes the result in one step that rewrites only the files upstream
-changed. Those files are the other application's, and `subPath` keeps
-them out of its pod. The claim's events carry `GitVolumeRebased`, with
-the count of commits and the upstream commit.
+Each volume commits and pushes on its own. The first of the two pushes
+succeeds. The second runs against a ref that moved, so the forge
+rejects it. The driver then fetches, rebases the volume's commits onto
+upstream beside the pod's tree, and pushes again, three times at most.
+The pod's tree takes the result in one step that rewrites only the
+files upstream changed. Those files are the other application's, and
+`subPath` keeps them out of its pod. The claim's events include
+`GitVolumeRebased`, with the count of commits and the upstream commit.
 
 ## When both applications write one file
 
 The rebase does not settle a file that the application and upstream both
-changed. That volume moves to the branch `<ref>.<volumeHandle>`, and its
-events carry `GitVolumeDiverged`. Every push goes there until a person
-merges it into the ref on the forge, and commits continue, so no work
-stops. At the volume's next push after the merge, it is back on the
-ref and the side branch is deleted. The writeable guide's [When upstream
+changed. That volume moves to the branch `<ref>.<volumeHandle>`, and
+its events include `GitVolumeDiverged`. Every push goes there until a
+person merges it into the ref on the forge, and commits continue, so no
+work stops. At the volume's next push after the merge, it is back on
+the ref and the side branch is deleted. The writeable guide's [When upstream
 moves](https://git.liken.sh/docs/guides/writeable/#when-upstream-moves) gives the full rule.
 
 ## The metadata record
@@ -212,10 +212,10 @@ moves](https://git.liken.sh/docs/guides/writeable/#when-upstream-moves) gives th
 The modes, owners, and empty directories of the tree are recorded on
 one ref, `refs/git-csi/metadata`, as the writeable guide says. Two
 writers share it. After a rebase, a volume takes the other
-application's modes for the files the rebase brought in, and a
-record the forge rejects is rebuilt on the record the forge holds, so
-neither application's record overwrites the other's. `metadata` stays
-on.
+application's modes for the files the rebase brought in. The driver
+rebuilds a record the forge rejects on the record the forge holds, so
+neither application's record overwrites the other's. Leave the
+`metadata` parameter on.
 
 ## A read-only claim beside the writers
 

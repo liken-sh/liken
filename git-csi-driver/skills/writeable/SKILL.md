@@ -1,21 +1,21 @@
 ---
 name: writeable
-description: "Give an application a git repository as a writeable volume that the driver commits and pushes. Use when an application writes files that must land in git, when upstream moves, when several writers share one repository, or to restore a volume."
+description: "Give an application a git repository as a writeable volume that the driver commits and pushes. Use when an application writes files that must go into git, when upstream moves, when several writers share one repository, or to restore a volume."
 ---
 
 This skill is the guide at https://git.liken.sh/docs/guides/writeable/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 A writeable volume is a `PersistentVolume` that names a repository, a
 `PersistentVolumeClaim` that binds it, and a `VolumeAttributesClass`
-that says how the driver commits and pushes. The application sees a
-plain directory and writes to it as it always did. The driver commits
-what it wrote and pushes it.
+that says how the driver commits and pushes. The application gets a
+plain directory and writes to it as it always does. The driver commits
+what the application wrote and pushes it.
 
 ## The volume
 
 The `PersistentVolume` holds what identifies the volume: the
 repository, the ref, and the credentials. Its `csi` block cannot
-change after creation, so nothing that a person tunes lives here.
+change after creation, so nothing that a person tunes is here.
 
 ```yaml
 apiVersion: v1
@@ -37,7 +37,7 @@ spec:
       namespace: home
 ```
 
-`capacity` is required by the API and means nothing to the driver. The
+`capacity` is required by the API, and the driver ignores it. The
 access mode must be `ReadWriteOncePod`. `ReadWriteOnce` allows two pods
 on one node to write the same tree, and the driver refuses it.
 
@@ -45,8 +45,8 @@ on one node to write the same tree, and the driver refuses it.
 
 The claim names the volume. Until it also names a class, the volume is
 unarmed: the driver watches the tree and reports what it would commit,
-and commits nothing. This is the moment to write the repository's
-`.gitignore`, before the first commit can carry a token or a database.
+and commits nothing. Write the repository's `.gitignore` now, before
+the first commit can include a token or a database.
 
 ```yaml
 apiVersion: v1
@@ -90,7 +90,7 @@ kubectl patch pvc config -n home -p '{"spec":{"volumeAttributesClassName":"confi
 ```
 
 Set the class after the claim is bound. The binder pairs a claim and a
-static volume only when both name the same class, so a claim that names
+static volume only when both name the same class. So a claim that names
 a class before it binds needs the same `volumeAttributesClassName` on
 the `PersistentVolume`. A bound claim takes a class change without that.
 
@@ -103,41 +103,42 @@ The driver waits until the tree has been quiet for `push.quiesce`,
 then commits every changed path that is not ignored and not over
 `commit.maxFileSize`. It pushes when the quiesce passes with no new
 write, or when the oldest unpushed commit is older than
-`push.maxLatency`, and always when the pod stops. Modes, owners, and
-empty directories are recorded on a ref of the driver's own,
-`refs/git-csi/metadata`, which never appears in the tree or on the
+`push.maxLatency`, and always when the pod stops. The driver records
+modes, owners, and empty directories on a ref of its own,
+`refs/git-csi/metadata`. That ref never appears in the tree or on the
 forge's file view.
 
 ## When upstream moves
 
 The application's tree changes only when the application writes it,
-with one exception below. Upstream reaches the tree at stage, when the
-pod starts. At stage the driver compares the tree to the ref:
+with one exception below. The driver applies upstream to the tree at
+stage, when the pod starts. At stage the driver compares the tree to
+the ref:
 
 - **Behind.** The tree takes upstream.
-- **Ahead.** Nothing changes. The next push carries the commits.
-- **Diverged.** The driver rebases the tree's commits onto upstream. A
-  rebase that conflicts is aborted, and the volume moves to a side
-  branch.
-- **Uncommitted writes.** A tree with writes no commit carries yet is
-  left as it is, whatever upstream did, and the abnormal gauge and the
-  log say upstream moved.
+- **Ahead.** Nothing changes. The next push includes the commits.
+- **Diverged.** The driver rebases the tree's commits onto upstream.
+  The driver aborts a rebase that conflicts, and the volume moves to a
+  side branch.
+- **Uncommitted writes.** When the tree has writes that no commit
+  holds yet, the driver leaves the tree as it is, whatever upstream
+  did. The abnormal gauge and the log then say upstream moved.
 
 The exception is a push the forge rejects because the ref moved. The
 driver then fetches, rebases the tree's commits onto upstream beside
 the pod's tree, and pushes again, three times at most. The pod's tree
 takes the result in one step that rewrites only the files upstream
 changed. A file the application wrote since the last commit is kept,
-unless upstream changed that same file. The claim's events carry
-`GitVolumeRebased` when this lands.
+unless upstream changed that same file. The claim's events include
+`GitVolumeRebased` when this happens.
 
-A push still rejected after the third rebase, an aborted rebase, or a
-file the application and upstream both changed moves the volume to the
-branch `<ref>.<volumeHandle>`. Every push goes there until a person
-merges it into the ref on the forge. The events and the log name both
-branches, and commits continue, so no work stops. At the volume's next
-push after the merge, or its next pod start, the volume is back on the
-ref and the side branch is deleted.
+Three things move the volume to the branch `<ref>.<volumeHandle>`: a
+push still rejected after the third rebase, an aborted rebase, or a
+file the application and upstream both changed. Every push goes there
+until a person merges it into the ref on the forge. The events and the
+log name both branches, and commits continue, so no work stops. At the
+volume's next push after the merge, or its next pod start, the volume
+is back on the ref and the driver deletes the side branch.
 
 ## Many writers on one repository
 
@@ -159,13 +160,14 @@ A work tree stays on the node after the pod stops, so the next stage on
 the same node is not a clone. Once an hour the driver removes work trees
 that nothing has staged for `--sweep-after`, 30 days by default, and
 whose every commit the remote holds. A tree with unpushed commits is
-never removed. Its age is named in the log and the abnormal gauge of the
-next volume of the same repository, so a person learns that work sits on the node with
-no claim that reaches it.
+never removed. Its age is named in the log and the abnormal gauge of
+the next volume of the same repository, so a person learns that work
+stays on the node with no claim that reaches it.
 
 The same hourly pass deletes the refs under `refs/git-csi/` that no
-volume follows and runs `git gc` in each bare repository that stays, so
-the node's store does not grow with every ref a volume ever followed.
+volume follows, and runs `git gc` in each bare repository that stays.
+The node's store then does not grow with every ref a volume ever
+followed.
 
 ## What the driver does not serve
 
@@ -175,7 +177,7 @@ object it names, and a writeable volume takes no `depth`.
 
 ## What the driver reports
 
-The pod's events and the claim's events carry `GitVolumeArmed`,
+The pod's events and the claim's events include `GitVolumeArmed`,
 `GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
 `GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeRebased`,
 `GitVolumeDiverged`, `GitVolumeHealed`, and `GitVolumeSwept`. The node plugin's `/metrics`
