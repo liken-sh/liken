@@ -142,6 +142,11 @@ type sibling struct {
 	chunks   int
 	chunkGap time.Duration
 	onChunk  func()
+
+	// How long the sibling holds its first body byte after it has sent
+	// and flushed its headers, which is what a capture waiting for its
+	// first keyframe does.
+	bodyDelay time.Duration
 }
 
 func newSibling(t *testing.T) *sibling {
@@ -151,7 +156,7 @@ func newSibling(t *testing.T) *sibling {
 		s.mutex.Lock()
 		call := r.URL.RequestURI()
 		status, contentType, body, after, delay, stall := s.status, s.contentType, s.body, s.retryAfter, s.delay, s.stall
-		chunks, gap, onChunk := s.chunks, s.chunkGap, s.onChunk
+		chunks, gap, onChunk, bodyDelay := s.chunks, s.chunkGap, s.onChunk, s.bodyDelay
 		for key, chosen := range s.bodies {
 			if strings.Contains(call, key) {
 				body = chosen
@@ -168,6 +173,10 @@ func newSibling(t *testing.T) *sibling {
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
+		if bodyDelay > 0 {
+			_ = http.NewResponseController(w).Flush()
+			time.Sleep(bodyDelay)
+		}
 		if chunks > 0 {
 			for range chunks {
 				_, _ = w.Write(body)

@@ -8,7 +8,9 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -462,4 +464,44 @@ func TestAZeroStreamComposedRefusalNamesTheWholeUnit(t *testing.T) {
 	mustMatch(t, document.Type, problemNotPlaying)
 	mustMatch(t, document.Detail,
 		"run a Play on this Player; it resolves nothing to capture until one runs")
+}
+
+// The composed response's headers reach the client when this API
+// decides them, not when the muxer writes its first fragment. The
+// drill read HTTP/2 200 at 4.32 s while the log line reported the
+// headers at 0.496 s, because net/http holds a written status until
+// the body fills its buffer.
+func TestTheComposedHeadersReachTheClientBeforeTheFirstByte(t *testing.T) {
+	fixture := newAPIFixture(t)
+	fixture.server.now = time.Now
+	fixture.server.ffmpeg = copyingFFmpeg(t)
+	// Both siblings answer at once and hold their first byte, which is
+	// a capture waiting for its first keyframe.
+	fixture.display.bodyDelay = 600 * time.Millisecond
+	fixture.audio.bodyDelay = 600 * time.Millisecond
+	fixture.display.body = []byte("frame")
+
+	public := httptest.NewServer(fixture.server.handler())
+	defer public.Close()
+	request, err := http.NewRequest(http.MethodGet, public.URL+playerPathFor("media.mp4"), nil)
+	mustSucceed(t, err)
+	request.Header.Set("Authorization", "Bearer "+testAPIToken)
+
+	began := time.Now()
+	response, err := public.Client().Do(request)
+	mustSucceed(t, err)
+	defer drain(response.Body)
+	headers := time.Since(began)
+	body, err := io.ReadAll(response.Body)
+	mustSucceed(t, err)
+	firstByte := time.Since(began)
+
+	mustMatch(t, response.StatusCode, http.StatusOK)
+	mustMatch(t, string(body), "frame")
+	if headers > 400*time.Millisecond {
+		t.Errorf("the headers took %v, and the siblings held their first byte for 600ms", headers)
+	}
+	if firstByte < 500*time.Millisecond {
+		t.Errorf("the body arrived in %v, so the siblings did not hold it", firstByte)
+	}
 }

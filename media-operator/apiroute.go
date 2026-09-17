@@ -250,6 +250,22 @@ func (e *apiExchange) answer(status int) {
 	e.writer.WriteHeader(status)
 }
 
+// answerStreaming is answer for a route whose body follows later. It
+// pushes the headers to the client at once, because net/http holds a
+// written status until the first bytes of the body fill its buffer,
+// and a composition's first byte waits on the muxer's first fragment.
+// Without the flush a caller reads the status seconds after this API
+// decided it, and a client that wants to know a capture began has
+// nothing to read. A redirect and a document need none of this: each
+// writes its whole body before it returns.
+//
+// A writer that cannot flush is not a failure. The caller then reads
+// the status with the first byte, which is what it read before.
+func (e *apiExchange) answerStreaming(status int) {
+	e.answer(status)
+	_ = http.NewResponseController(e.writer).Flush()
+}
+
 func (e *apiExchange) fail(kind string, status int, title, detail string) {
 	e.answerProblem(newProblem(kind, status, title, detail, e.instance()))
 }

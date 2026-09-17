@@ -199,7 +199,7 @@ func (s *apiServer) streamComposed(e *apiExchange, player *Player, form mediaFor
 	done := s.metrics.holdStream(mediaAspectName)
 	defer done()
 	s.recordCapture(e, player, mediaAspectName, form.Type)
-	e.answer(http.StatusOK)
+	e.answerStreaming(http.StatusOK)
 
 	if err := s.mux(ctx, cancel, e, form.Extension, screen != "", streams, offsets, query); err != nil {
 		e.ffmpeg = err.Error()
@@ -441,9 +441,7 @@ type flushWriter struct {
 
 func (f *flushWriter) Write(payload []byte) (int, error) {
 	written, err := f.writer.Write(payload)
-	if flusher, holds := f.writer.(http.Flusher); holds {
-		flusher.Flush()
-	}
+	_ = http.NewResponseController(f.writer).Flush()
 	return written, err
 }
 
