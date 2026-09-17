@@ -105,6 +105,26 @@ subjects:
     name: audio-api
     namespace: liken-system
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: audio-api-authentication-reader
+  # The API server publishes the cluster's client certificate
+  # authority in the ConfigMap extension-apiserver-authentication in
+  # kube-system, and the API reads it to verify a caller's client
+  # certificate. extension-apiserver-authentication-reader is the
+  # built-in Role that grants a get on that one object, and it is the
+  # Role every extension API server binds for the same read.
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: audio-api
+    namespace: liken-system
+---
 # The grant a cluster owner gives a person or a workload that may
 # listen. It is the only role in this file the owner binds. The
 # subresource shape, sinks/audio and sources/audio, is what makes a

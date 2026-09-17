@@ -4,7 +4,7 @@
     "title": "audio.liken.sh capture API",
     "version": "v1",
     "summary": "Taps what a Sink plays and what a Source hears, and streams it as WAV, FLAC, or Ogg Opus.",
-    "description": "Identity is in the path, the format is in the extension or in Accept, and the span is a W3C Media Fragments t= in the query. Every request carries a ServiceAccount token minted with the audience audio-api, and a tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored: every answer streams from the node the endpoint is on."
+    "description": "Identity is in the path, the format is in the extension or in Accept, and the span is a W3C Media Fragments t= in the query. A request carries a client certificate the cluster's own authority signed, or a ServiceAccount token minted with the audience audio-api, and a tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored: every answer streams from the node the endpoint is on."
   },
   "servers": [
     {
@@ -2653,6 +2653,10 @@
         "description": "A ServiceAccount token minted with the audience audio-api, which this API checks with a TokenReview.",
         "scheme": "bearer",
         "type": "http"
+      },
+      "mutualTLS": {
+        "description": "A client certificate the cluster's own authority signed. The subject's common name is the user and its organization values are the groups, which is how the API server reads one.",
+        "type": "mutualTLS"
       }
     },
     "responses": {
@@ -2747,7 +2751,7 @@
             }
           }
         },
-        "description": "No token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words."
+        "description": "No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words."
       },
       "unavailable": {
         "content": {
@@ -2772,6 +2776,9 @@
     }
   },
   "security": [
+    {
+      "mutualTLS": []
+    },
     {
       "bearerToken": []
     }

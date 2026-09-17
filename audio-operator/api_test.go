@@ -27,9 +27,10 @@ type clusterFake struct {
 	allowed       bool
 	denyReason    string
 
-	sinks   map[string]Sink
-	sources map[string]Source
-	events  []event
+	sinks    map[string]Sink
+	sources  map[string]Source
+	events   []event
+	accesses []accessReview
 
 	server *httptest.Server
 }
@@ -71,6 +72,7 @@ func (f *clusterFake) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == accessReviewPath:
 		var sent accessReview
 		_ = json.NewDecoder(r.Body).Decode(&sent)
+		f.accesses = append(f.accesses, sent)
 		sent.Status = accessReviewStatus{Allowed: f.allowed, Denied: !f.allowed, Reason: f.denyReason}
 		_ = json.NewEncoder(w).Encode(&sent)
 	case strings.HasPrefix(r.URL.Path, SinksPath+"/"):
@@ -104,6 +106,14 @@ func (f *clusterFake) recorded() []event {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]event(nil), f.events...)
+}
+
+// reviewed is every SubjectAccessReview the API sent. A test reads
+// the caller the API named out of it.
+func (f *clusterFake) reviewed() []accessReview {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]accessReview(nil), f.accesses...)
 }
 
 func (f *clusterFake) refuses(reason string) {

@@ -134,11 +134,17 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 	return s.serveEndpoint(w, r, route, name, form, knobs, who, id, at, outcome)
 }
 
-// authenticate reviews the caller's token. It answers the caller, or
-// the status and the challenge a refusal carries. A review the API
-// server did not answer is a 503, not a 401: the token was never
-// judged.
+// authenticate names the caller the two ways this API takes one, in
+// the order the API server reads them: a verified client certificate
+// first, then the Bearer token.
+//
+// It answers the caller, or the status and the challenge a refusal
+// carries. A review the API server did not answer is a 503, not a
+// 401: the token was never judged.
 func (s *apiServer) authenticate(r *http.Request) (caller, int, string, string) {
+	if who, found := certificateCaller(r.TLS); found {
+		return who, 0, "", ""
+	}
 	token, found := bearerToken(r.Header.Get("Authorization"))
 	if !found {
 		return caller{}, http.StatusUnauthorized, challenge(),

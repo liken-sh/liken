@@ -59,8 +59,11 @@ const sweepAbove = 64
 // API server not answering, which is a 503.
 var ErrTokenDenied = errors.New("the token review refused the token")
 
-// caller is who the API server says is calling. The four fields are
-// what a SubjectAccessReview copies.
+// caller is who is calling. A TokenReview answers with all four
+// fields, and a verified client certificate answers with the user and
+// the groups alone, so every route and every record reads one type
+// and never checks which credential arrived. A SubjectAccessReview
+// copies all four.
 type caller struct {
 	Username string
 	UID      string

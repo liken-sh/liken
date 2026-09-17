@@ -51,6 +51,9 @@ const certificateCheck = time.Hour
 // containers mount. A get on one object is cheap, and an owner who
 // deletes the Secret gets it back within a minute rather than waiting
 // out the hour above: every node's capture is down until it returns.
+//
+// The same pass reads the cluster's client certificate authority
+// again, which costs one more get of one object.
 const secretCheck = time.Minute
 
 // apiServer is the whole of this mode's state.
@@ -61,6 +64,7 @@ type apiServer struct {
 	pods     *podIndex
 	relay    *forwarder
 	certs    *certificates
+	anchors  *clientAnchors
 	readings *apiMetrics
 
 	// publicBase is the origin the served OpenAPI document names. An
@@ -104,6 +108,16 @@ func serveAPI() {
 	held.set(leaf)
 	go server.keepCertificates(ctx, held)
 
+	// The cluster's client authority is read before the listener
+	// starts, and again on every minute pass. A read that fails is
+	// reported and never fatal: an API that cannot read the ConfigMap
+	// still answers every caller that sends a Bearer token, and the
+	// next pass loads the authority once the grant or the API server
+	// is back.
+	if err := server.anchors.load(client); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
+	}
+
 	go watchPods(ctx, client, namespace, server.pods, func(err error) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	})
@@ -130,10 +144,7 @@ func serveAPI() {
 	serving := &http.Server{
 		Handler:           server,
 		ReadHeaderTimeout: metricsDeadline,
-		TLSConfig: &tls.Config{
-			GetCertificate: held.certificate,
-			MinVersion:     tls.VersionTLS12,
-		},
+		TLSConfig:         apiTLSConfig(held, server.anchors),
 	}
 	go func() {
 		<-ctx.Done()
@@ -153,6 +164,7 @@ func newAPIServer(client *Client, namespace string) *apiServer {
 		pods:       newPodIndex(),
 		relay:      newForwarder(certs.anchor),
 		certs:      certs,
+		anchors:    &clientAnchors{},
 		readings:   newAPIMetrics(version),
 		publicBase: os.Getenv(publicBaseVariable),
 		now:        time.Now,
@@ -170,6 +182,10 @@ func newAPIServer(client *Client, namespace string) *apiServer {
 // minute one is for a Secret that left: a capture container with no
 // leaf serves a certificate no client trusts, so every tap on its node
 // is a 503 until the Secret is back.
+//
+// The minute pass also reads the cluster's client certificate
+// authority again, so a rotation of that authority takes effect with
+// no restart.
 func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 	lifetimes := time.NewTicker(certificateCheck)
 	defer lifetimes.Stop()
@@ -182,6 +198,9 @@ func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 		case <-secrets.C:
 			if err := s.certs.keepCaptureLeaf(); err != nil {
 				fmt.Fprintf(os.Stderr, "keeping the capture container's leaf: %v\n", err)
+			}
+			if err := s.anchors.load(s.client); err != nil {
+				fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 			}
 			continue
 		case <-lifetimes.C:

@@ -81,8 +81,9 @@ func newOpenAPI(server string) openAPIDocument {
 			Summary: "Taps what a Sink plays and what a Source hears, and streams it as " +
 				"WAV, FLAC, or Ogg Opus.",
 			Description: "Identity is in the path, the format is in the extension or in " +
-				"Accept, and the span is a W3C Media Fragments t= in the query. Every " +
-				"request carries a ServiceAccount token minted with the audience " +
+				"Accept, and the span is a W3C Media Fragments t= in the query. A " +
+				"request carries a client certificate the cluster's own authority " +
+				"signed, or a ServiceAccount token minted with the audience " +
 				"audio-api, and a tap needs get on sinks/audio or sources/audio in the " +
 				"group audio.liken.sh. Nothing is stored: every answer streams from the " +
 				"node the endpoint is on.",
@@ -94,7 +95,10 @@ func newOpenAPI(server string) openAPIDocument {
 			SecuritySchemes: openAPISecuritySchemes(),
 			Responses:       openAPIResponses(),
 		},
-		Secure: []map[string][]any{{"bearerToken": {}}},
+		// A list of two requirement objects is OpenAPI's OR, so a
+		// route takes the client certificate or the token, in the
+		// order this API reads them.
+		Secure: []map[string][]any{{"mutualTLS": {}}, {"bearerToken": {}}},
 	}
 	for _, route := range apiRoutes {
 		document.Paths[openAPIPath(route)] = openAPIPathItem(route)
@@ -384,9 +388,15 @@ func openAPISchemas() map[string]any {
 	}
 }
 
-// openAPISecuritySchemes names the one credential this API takes.
+// openAPISecuritySchemes names the two credentials this API takes.
 func openAPISecuritySchemes() map[string]any {
 	return map[string]any{
+		"mutualTLS": map[string]any{
+			"type": "mutualTLS",
+			"description": "A client certificate the cluster's own authority signed. " +
+				"The subject's common name is the user and its organization values are " +
+				"the groups, which is how the API server reads one.",
+		},
 		"bearerToken": map[string]any{
 			"type":         "http",
 			"scheme":       "bearer",
@@ -406,8 +416,9 @@ func openAPIResponses() map[string]any {
 		"badRequest": "A t= the grammar refuses, a t=a,b with a at or after b, a begin " +
 			"over 60 seconds, a repeated dimension, an unknown query parameter, or a " +
 			"knob the format does not take.",
-		"unauthorized": "No token, or a token the TokenReview refuses. The " +
-			"WWW-Authenticate header carries the review's own words.",
+		"unauthorized": "No client certificate and no token, or a token the " +
+			"TokenReview refuses. The WWW-Authenticate header carries the review's " +
+			"own words.",
 		"forbidden": "The SubjectAccessReview said no. The WWW-Authenticate header names " +
 			"the scope the caller would need.",
 		"notFound":         "No Sink or Source of that name, or PipeWire holds no node for it.",

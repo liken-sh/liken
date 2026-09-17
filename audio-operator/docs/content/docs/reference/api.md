@@ -62,6 +62,10 @@ sections 9.3.7 and 10.2.1). Any other method is `405` with the same
 `Allow` (section 15.5.6). No route accepts content, so `415` never
 occurs.
 
+[Routes](/docs/reference/routes/) gives each route from the OpenAPI
+document, with its parameters, its answers, and the fields they
+carry.
+
 ## Status codes
 
 The table lists every status this API answers, with the headers each
@@ -74,7 +78,7 @@ one carries and the standard each one comes from.
 | `200` tap | a tap runs | `Content-Type`, `Vary: Accept`, `Cache-Control: no-store`, `Accept-Ranges: none`, `Content-Disposition`, `Link`, `Transfer-Encoding: chunked` on HTTP/1.1, and `Content-Location` on the negotiated route | RFC 9110, RFC 9111 section 5.2.2.5, RFC 9112 section 7.1, RFC 6266, RFC 8288 |
 | `204` | `OPTIONS` | `Allow: GET, HEAD, OPTIONS` | RFC 9110 section 10.2.1 |
 | `400` | a `t=` the grammar refuses, `t=a,b` with `a >= b`, a begin over `captureBeginMax`, a repeated dimension, an unknown query parameter, a knob the format does not take | `application/problem+json` | RFC 9457; a deliberate departure from Media Fragments, below |
-| `401` | no token: `WWW-Authenticate: Bearer realm="audio-api"` alone; a token the `TokenReview` refuses: `error="invalid_token"`, `error_description` with the review's own words | `WWW-Authenticate` | RFC 9110 section 15.5.2, RFC 6750 section 3 |
+| `401` | no client certificate and no token: `WWW-Authenticate: Bearer realm="audio-api"` alone; a token the `TokenReview` refuses: `error="invalid_token"`, `error_description` with the review's own words | `WWW-Authenticate` | RFC 9110 section 15.5.2, RFC 6750 section 3 |
 | `403` | the `SubjectAccessReview` says no | `WWW-Authenticate: Bearer realm="audio-api", error="insufficient_scope", scope="sinks/audio"` | RFC 9110 section 15.5.4, RFC 6750 section 3.1 |
 | `404` | no `Sink` or `Source` of that name, or PipeWire holds no node for it | `application/problem+json` | RFC 9110 section 15.5.5 |
 | `405` | a method other than the three | `Allow` | RFC 9110 section 15.5.6 |
@@ -294,8 +298,26 @@ that draft publishes.
 
 ## Grants
 
-A request is authenticated with a `TokenReview` that requires the
-audience `audio-api`. It is authorized with a `SubjectAccessReview`
+A request names its caller two ways, and the API reads them in the
+order the API server reads them.
+
+A connection that carries a client certificate the cluster's own
+authority signed names that certificate's subject. The user is the
+subject's common name and the groups are its organization values,
+which is how the API server reads a client certificate. The
+credentials in a person's kubeconfig therefore name the same subject
+here that they name to `kubectl`. The API reads the authority from
+the `ConfigMap` `extension-apiserver-authentication` in
+`kube-system`, where the API server publishes it, and reads the
+`ConfigMap` again every minute, so a rotated authority opens the door
+with no restart. A certificate from any other authority ends the
+handshake.
+
+A caller that offers no certificate sends a Bearer token, which is
+authenticated with a `TokenReview` that requires the audience
+`audio-api`.
+
+Either credential is then authorized with a `SubjectAccessReview`
 for verb `get` on `sinks/audio` or `sources/audio` in group
 `audio.liken.sh`, with the resource's name and an empty namespace,
 because both kinds are cluster-scoped.
@@ -319,6 +341,10 @@ rules:
     resources: [sinks, sources, sinks/audio, sources/audio]
     verbs: [get]
 ```
+
+The same `ClusterRole` binds to a person. The subject is `kind: User`
+with the name in their certificate's common name, or `kind: Group`
+with one of its organization values.
 
 The subresource shape lets an owner write a narrower rule instead.
 This one grants the sound of one sink and nothing else, not even the
@@ -376,6 +402,26 @@ The audience keeps every pod's ordinary API-server token out of this
 API. The cost is real for OIDC: a kubeconfig's own OIDC token carries
 the OIDC audience, so a person on OIDC mints a `ServiceAccount` token
 too.
+
+A person whose kubeconfig holds a client certificate sends that
+instead, with no `ServiceAccount` and no token to mint. The
+port-forward carries the certificate to the API untouched, because
+the forward is a TCP tunnel and the TLS handshake runs end to end.
+
+```sh
+kubectl config view --raw --minify \
+    -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > client.crt
+kubectl config view --raw --minify \
+    -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > client.key
+curl --cacert ca.crt --cert client.crt --key client.key \
+    --resolve audio-api.liken-system.svc:8443:127.0.0.1 \
+    "https://audio-api.liken-system.svc:8443/v1/audio/sinks/kitchen-pci-0000-00-1f-3-hdmi-0/audio.wav?t=0,5" \
+    -o kitchen.wav
+```
+
+From a pod on the cluster network the same two files reach
+`https://audio-api.liken-system.svc/v1/audio/...` with no forward and
+no `--resolve`.
 
 `mpv` in place of `curl -o` listens live.
 

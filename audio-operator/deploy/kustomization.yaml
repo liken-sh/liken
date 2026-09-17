@@ -11,12 +11,28 @@
 # policy, and the install guide gives the YAML for audio-output,
 # the one to start with. An owner who renames sound-card patches
 # both the class and the template.
+#
+# The namespace below is set with a transformer rather than with the
+# top-level namespace field, because unsetOnly is what keeps the one
+# object that names its own namespace where it belongs: the RoleBinding
+# in kube-system that lets audio-api read the cluster's client
+# certificate authority. The top-level field overwrites a stated
+# namespace, and that binding in any other namespace names a Role that
+# is not there. Every other object here states no namespace, and the
+# transformer sets liken-system on each of them.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: liken-system
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: liken-system
+      namespace: liken-system
+    unsetOnly: true
 
-# kustomize stamps the namespace below onto the DeviceClass too,
+# The transformer above stamps the namespace onto the DeviceClass too,
 # because resource.k8s.io/v1 is not in its compiled OpenAPI schema
 # and an unknown kind is treated as namespaced. The stamp is
 # harmless: the API server ignores a namespace on a cluster-scoped
