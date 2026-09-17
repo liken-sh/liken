@@ -1,8 +1,9 @@
 ---
-title: Add machines
-weight: 30
+name: add-nodes
 description: "Add one declared machine to a running liken cluster: write its manifest, rebuild the install stick, boot the machine from it, and watch it join. Use when a cluster needs another node."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/add-nodes/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Add machines to a cluster
 
@@ -25,7 +26,7 @@ the machine restarts, and the results in between are unpredictable.
 ### A machine on a wireless network
 
 If the machine joins over wifi, give its interface a
-[`wireless`](/docs/reference/machine/#specnetworkinterfaceswireless)
+[`wireless`](https://liken.sh/docs/reference/machine/#specnetworkinterfaceswireless)
 entry. The SSID and the security type are the only wireless facts in
 the manifest:
 
@@ -63,7 +64,7 @@ condition.
 ## 2. If the new machine is a leader
 
 If the new machine will run a control plane, add its name to
-[`spec.leaders`](/docs/reference/cluster/#spec) in two places:
+[`spec.leaders`](https://liken.sh/docs/reference/cluster/#spec) in two places:
 
 * On the live cluster, with `kubectl edit cluster`. The machines read
   this document, and each machine gets its role from it.
@@ -79,8 +80,8 @@ of leaders, so that the datastore can always make a majority.
 A change to the deployment layer needs new install media. Use the
 release that your fleet runs. `kubectl get clusters` shows it in the
 VERSION column. Pack the layer and the stick again with
-[`liken layer`](/docs/reference/cli/#liken-layer) and
-[`liken stick`](/docs/reference/cli/#liken-stick):
+[`liken layer`](https://liken.sh/docs/reference/cli/#liken-layer) and
+[`liken stick`](https://liken.sh/docs/reference/cli/#liken-stick):
 
     ./liken layer mycluster mycluster/identity mycluster/deployment.cpio
     ./liken stick channel/<version> mycluster/deployment.cpio mycluster/install.img
@@ -97,7 +98,7 @@ The stick's menu now lists the new machine, with an `install as
 know this hardware, boot `liken hardware report` first. It writes
 `hardware-report.yaml` to the stick, so you can correct the machine's
 disks, interfaces, and drivers before you install. [Install a
-cluster](/docs/guides/install/#5-boot-each-machine-from-the-stick)
+cluster](https://liken.sh/docs/guides/install/#5-boot-each-machine-from-the-stick)
 describes the report and the held console messages fully.
 
 Select `install as <name>`. The machine installs itself and holds the

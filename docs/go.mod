@@ -19,11 +19,12 @@ tool (
 	github.com/gohugoio/hugo
 	github.com/liken-sh/brand/coverage
 	github.com/liken-sh/brand/crdref
+	github.com/liken-sh/brand/skills
 	honnef.co/go/tools/cmd/staticcheck
 )
 
 require (
-	github.com/liken-sh/brand v0.0.0-20260905124916-f549935dd193
+	github.com/liken-sh/brand v0.0.0-20260917021826-107cd574b3ba
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

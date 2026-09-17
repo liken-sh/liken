@@ -1,8 +1,9 @@
 ---
-title: Install a cluster
-weight: 10
+name: install
 description: "Install a liken cluster from a downloaded release: describe the cluster, mint its identity, build the install stick, boot each machine from it, and reach the cluster with kubectl. Use when creating a cluster on blank x86-64 machines."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Install a cluster
 
@@ -52,17 +53,17 @@ executable, and download and verify the rest of the release:
     ./liken fetch -digest sha256:<hex> https://releases.liken.sh <version> channel
 
 The `-digest` value is the digest of `release.yaml` from the release
-page. [`liken fetch`](/docs/reference/cli/#liken-fetch) writes the
+page. [`liken fetch`](https://liken.sh/docs/reference/cli/#liken-fetch) writes the
 whole release into `channel/<version>/`, and it checks each byte
 against the document. [The release
-channel](/docs/reference/release-channel/) describes the layout and
+channel](https://liken.sh/docs/reference/release-channel/) describes the layout and
 the trust chain.
 
 ## 2. Describe your cluster
 
     ./liken new mycluster
 
-[`liken new`](/docs/reference/cli/#liken-new) asks a short series of
+[`liken new`](https://liken.sh/docs/reference/cli/#liken-new) asks a short series of
 plain questions: the names of your machines, which machines are
 leaders, their addresses, and their disks. Then it writes `mycluster/`:
 a `cluster.yaml` file and one manifest for each machine. Each field has
@@ -78,24 +79,24 @@ writes a corrected manifest.
 
     ./liken mint mycluster/identity
 
-[`liken mint`](/docs/reference/cli/#liken-mint) creates the identity:
+[`liken mint`](https://liken.sh/docs/reference/cli/#liken-mint) creates the identity:
 the set of certificate authorities and the join token that make your
 machines into one cluster. The files include private keys. The
 scaffold's `.gitignore` keeps them out of version control.
 
 If you already run a k3s cluster, do not run `liken mint`. Use
-[`liken adopt`](/docs/reference/cli/#liken-adopt) instead, to join
+[`liken adopt`](https://liken.sh/docs/reference/cli/#liken-adopt) instead, to join
 machines to that cluster. [Adopt an existing k3s
-cluster](/docs/guides/adopt/) gives the steps.
+cluster](https://liken.sh/docs/guides/adopt/) gives the steps.
 
 ## 4. Build the install stick
 
     ./liken layer mycluster mycluster/identity mycluster/deployment.cpio
     ./liken stick channel/<version> mycluster/deployment.cpio mycluster/install.img
 
-[`liken layer`](/docs/reference/cli/#liken-layer) packs the layer: the
+[`liken layer`](https://liken.sh/docs/reference/cli/#liken-layer) packs the layer: the
 small archive that contains your manifests and your identity.
-[`liken stick`](/docs/reference/cli/#liken-stick) joins the release
+[`liken stick`](https://liken.sh/docs/reference/cli/#liken-stick) joins the release
 with your layer into one bootable disk image.
 
 For a machine with no screen, name its serial port when you build the
@@ -168,7 +169,7 @@ can install with them unchanged. Two roles still need your attention.
 containerd image store. Thus the workloads on the node set its size.
 Increase it if this machine runs many images, or large images. Select
 this number carefully. The Cluster's
-[`spec.runtime.kubelet.imageGC`](/docs/reference/cluster/#specruntimekubeletimagegc)
+[`spec.runtime.kubelet.imageGC`](https://liken.sh/docs/reference/cluster/#specruntimekubeletimagegc)
 section controls how much of this filesystem the image store keeps. `podStorage` comes after
 `clusterState` on the disk, so `clusterState` cannot become larger
 after the installation.
@@ -257,7 +258,7 @@ leaders make the control plane, and the followers join it.
 
     ./liken kubeconfig mycluster
 
-[`liken kubeconfig`](/docs/reference/cli/#liken-kubeconfig) writes
+[`liken kubeconfig`](https://liken.sh/docs/reference/cli/#liken-kubeconfig) writes
 `mycluster/identity/kubeconfig`, an administrator credential. It points
 at the `endpoint:` in your `cluster.yaml`. If your workstation reaches
 the cluster at a different address, pass `-server`:
@@ -275,9 +276,9 @@ cluster, with two more `liken` resources:
     kubectl get machines      each machine, as the OS sees it
 
 Edit those resources to make configuration changes. The
-[Machine](/docs/reference/machine/) and
-[Cluster](/docs/reference/cluster/) pages describe each field. When a
-new release is available, [Upgrade the fleet](/docs/guides/upgrade/)
+[Machine](https://liken.sh/docs/reference/machine/) and
+[Cluster](https://liken.sh/docs/reference/cluster/) pages describe each field. When a
+new release is available, [Upgrade the fleet](https://liken.sh/docs/guides/upgrade/)
 moves each machine to it with one edit. If a step did not go as this
-guide says, [Troubleshoot](/docs/guides/troubleshoot/) starts from
+guide says, [Troubleshoot](https://liken.sh/docs/guides/troubleshoot/) starts from
 the symptom.

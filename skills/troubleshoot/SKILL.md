@@ -1,8 +1,9 @@
 ---
-title: Troubleshoot
-weight: 80
+name: troubleshoot
 description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, or refuses a disk."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Troubleshoot
 
@@ -34,7 +35,7 @@ from its own disk.
 `install as <name>` claims blank disks only, so it does not erase
 data that it did not write. To replace an installation that `liken`
 made, select `wipe and reinstall as <name>` instead.
-[Install a cluster](/docs/guides/install/#to-reinstall-a-machine-that-liken-installed)
+[Install a cluster](https://liken.sh/docs/guides/install/#to-reinstall-a-machine-that-liken-installed)
 explains both paths, and the disk-replacement case between them.
 
 ## The installation fails and holds
@@ -46,7 +47,7 @@ again. An installation is idempotent, so a second attempt is safe.
 If the error says that a disk needs a driver the boot path does not
 have, run the hardware report. The report names the driver and
 keeps that disk out of the proposed layout.
-[Install a cluster](/docs/guides/install/#first-run-the-hardware-report)
+[Install a cluster](https://liken.sh/docs/guides/install/#first-run-the-hardware-report)
 describes the report.
 
 ## A machine does not join the cluster
@@ -79,7 +80,7 @@ is `False` names the reason:
   do. The common case is a storage role that is smaller in the spec
   than on the disk, after a reinstallation with a different layout.
   The condition's message gives the sizes.
-  [Install a cluster](/docs/guides/install/#to-reinstall-a-machine-that-liken-installed)
+  [Install a cluster](https://liken.sh/docs/guides/install/#to-reinstall-a-machine-that-liken-installed)
   gives the order of the corrections.
 * `RejectedLastBoot`: the machine booted the change one time, and
   the boot failed. See the next section.
@@ -89,10 +90,10 @@ is `False` names the reason:
 The machine booted the new version one time, the trial failed, and
 the machine returned to the slot it had proved. Its conditions show
 `RejectedLastBoot`, and
-[`status.boot.systemRejection`](/docs/reference/machine/#statusbootsystemrejection)
+[`status.boot.systemRejection`](https://liken.sh/docs/reference/machine/#statusbootsystemrejection)
 records what happened. The machine does not boot that version again
-until [`spec.version`](/docs/reference/cluster/#spec--version)
-points at a different release. [Roll back](/docs/guides/rollback/) describes the
+until [`spec.version`](https://liken.sh/docs/reference/cluster/#spec--version)
+points at a different release. [Roll back](https://liken.sh/docs/guides/rollback/) describes the
 fallback and the correction.
 
 ## The fleet stays on the old version
@@ -103,7 +104,7 @@ column. For a machine that did not move, read its conditions:
 * `RebootPending`: the machine's `rebootPolicy` is `Manual`, which is
   the default, and the machine waits for you. Read what it waits for
   and grant the reboot with
-  [`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot).
+  [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot).
 * `AwaitingTurn`: the machine waits for the cluster's disruption
   budget. The default budget is one machine at a time, and only one
   leader is down at a time whatever the budget says.
@@ -123,7 +124,7 @@ rest of the fleet is safe while you do.
 
 A kernel crash survives the reboot. The next boot reads the crash
 from the machine's crash journal and reports it in the Machine's
-[`status.lastCrash`](/docs/reference/machine/#statuslastcrash), with
+[`status.lastCrash`](https://liken.sh/docs/reference/machine/#statuslastcrash), with
 the log lines that the kernel wrote as it failed:
 
     kubectl get machine <name> -o jsonpath='{.status.lastCrash}' | jq
@@ -160,7 +161,7 @@ clear only at boot anyway. A kernel driver that bound the wrong
 device holds it until the machine restarts, and no edit takes it
 back.
 
-[`liken request-reboot`](/docs/reference/cli/#liken-request-reboot)
+[`liken request-reboot`](https://liken.sh/docs/reference/cli/#liken-request-reboot)
 asks for that boot:
 
     ./liken request-reboot mycluster <name>
@@ -168,23 +169,23 @@ asks for that boot:
 The machine waits for its reboot turn, cordons, and drains, the same
 as a machine applying a staged change. If its `rebootPolicy` is
 `Manual`, it reports `RebootPending` and waits for
-[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot).
+[`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot).
 The `RebootRequestHonored` condition reports where the request is.
 
 ## A pod with a device claim stays Pending
 
-[Give a workload a device](/docs/guides/devices/#when-a-claim-does-not-schedule)
+[Give a workload a device](https://liken.sh/docs/guides/devices/#when-a-claim-does-not-schedule)
 gives the checks, in order.
 
 ## Reading logs
 
-[`liken stern`](/docs/reference/cli/#liken-stern) tails the logs of
+[`liken stern`](https://liken.sh/docs/reference/cli/#liken-stern) tails the logs of
 many pods at once, with the deployment's credential:
 
     ./liken stern mycluster <pod-name-pattern>
 
 When the logs do not explain a problem, the Cluster's
-[`spec.runtime`](/docs/reference/cluster/#specruntime) section raises
+[`spec.runtime`](https://liken.sh/docs/reference/cluster/#specruntime) section raises
 the log level of k3s or containerd, one field each, and says what
 each level costs.
 

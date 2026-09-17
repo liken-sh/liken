@@ -1,8 +1,9 @@
 ---
-title: Adopt an existing k3s cluster
-weight: 20
+name: adopt
 description: "Join liken machines to an existing k3s cluster with embedded etcd and replace its machines one at a time while the cluster serves. Use when moving a cluster onto liken without exporting or restoring its state."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/adopt/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Adopt an existing k3s cluster
 
@@ -46,9 +47,9 @@ certificates with the shared roots.
     ./liken new mycluster
     ./liken adopt harvest mycluster/identity
 
-[`liken adopt`](/docs/reference/cli/#liken-adopt) puts the harvested
+[`liken adopt`](https://liken.sh/docs/reference/cli/#liken-adopt) puts the harvested
 files into the identity directory in the same arrangement as
-[`liken mint`](/docs/reference/cli/#liken-mint). It refuses an
+[`liken mint`](https://liken.sh/docs/reference/cli/#liken-mint). It refuses an
 incomplete harvest, and it makes sure that the token agrees with the
 harvested certificate authority. After this step, the later steps are
 the same for a minted identity and an adopted identity.
@@ -57,7 +58,7 @@ the same for a minted identity and an adopted identity.
 
 Edit `mycluster/cluster.yaml`:
 
-* Set [`spec.origin`](/docs/reference/cluster/#spec--origin) to
+* Set [`spec.origin`](https://liken.sh/docs/reference/cluster/#spec--origin) to
   `Adopted`.
 * Set `spec.endpoint` to the existing cluster's join URL.
 
@@ -68,7 +69,7 @@ into two clusters.
 
 ### The document claims the whole cluster
 
-[`spec.features`](/docs/reference/cluster/#spec--features) is an
+[`spec.features`](https://liken.sh/docs/reference/cluster/#spec--features) is an
 opt-in list, and `liken` reads it as a statement
 about the cluster, not only about the machines you install. A feature
 that the document does not name is a feature that the cluster
@@ -95,13 +96,13 @@ install the first machine:
   `spec.features`. The sync keeps running. The condition stays, and it
   is the report that `liken` manages none of it.
 * To run the fleet from git with `liken`, declare the `flux` feature.
-  [Run the fleet from git](/docs/guides/gitops/) has the steps, and
+  [Run the fleet from git](https://liken.sh/docs/guides/gitops/) has the steps, and
   its last section covers an installation that already exists.
 
 ## 4. Install the `liken` machines
 
 Build the stick and install each machine as in
-[Install a cluster](/docs/guides/install/). Start with the first
+[Install a cluster](https://liken.sh/docs/guides/install/). Start with the first
 leader. Each machine joins the existing cluster directly. The existing
 machines continue to serve during the procedure.
 

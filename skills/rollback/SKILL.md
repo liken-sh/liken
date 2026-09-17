@@ -1,8 +1,9 @@
 ---
-title: Roll back
-weight: 50
+name: rollback
 description: "Return a machine or the fleet to a version that works: the automatic fallback after a failed first boot, and the deliberate rollback that points the Cluster at an earlier release. Use when an upgrade fails or misbehaves."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/rollback/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Roll back
 
@@ -25,9 +26,9 @@ into the new slot one time only, as a trial:
 
 In both cases, the machine serves on the version it ran before. Its
 phase shows Blocked, its conditions show `RejectedLastBoot`, and
-[`status.boot.systemRejection`](/docs/reference/machine/#statusbootsystemrejection)
+[`status.boot.systemRejection`](https://liken.sh/docs/reference/machine/#statusbootsystemrejection)
 records what happened. The rejection stays until you point
-[`spec.version`](/docs/reference/cluster/#spec--version) at a
+[`spec.version`](https://liken.sh/docs/reference/cluster/#spec--version) at a
 different version, so the machine does not boot the failed version
 again.
 
@@ -43,7 +44,7 @@ that release:
     kubectl edit cluster
 
 The version must still be in
-[`spec.releases.catalog`](/docs/reference/cluster/#specreleasescatalog).
+[`spec.releases.catalog`](https://liken.sh/docs/reference/cluster/#specreleasescatalog).
 This is a reason to keep the old entries. The rollout is the same as
 for an upgrade: each machine downloads the older release into its
 inactive slot, verifies it, and reboots on its granted turn, one

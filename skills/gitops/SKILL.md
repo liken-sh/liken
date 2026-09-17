@@ -1,8 +1,9 @@
 ---
-title: Run the fleet from git
-weight: 60
+name: gitops
 description: "Run a liken fleet from a git repository with the flux feature: lay out the repository, register the deploy key, watch the first sync, and work by commit. Use when a cluster's machines and workloads should converge to git, or when rotating or retracting the deploy key."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/gitops/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Run the fleet from git
 
@@ -15,7 +16,7 @@ each change with a commit, and the fleet converges to the repository.
 You need:
 
 * A cluster, either running or ready to install. [Install a
-  cluster](/docs/guides/install/) has those steps.
+  cluster](https://liken.sh/docs/guides/install/) has those steps.
 * A private, empty git repository at a forge you can reach over SSH.
 * The [Flux CLI](https://fluxcd.io/flux/installation/) on your
   workstation, for one command in step 1.
@@ -90,7 +91,7 @@ fleet then syncs from the first boot.
 default for `path` is the repository root. `knownHosts` holds the
 forge's host keys, one key per line. The keys are public material, so
 they belong in the spec. They let the first clone verify the forge.
-The [Cluster reference](/docs/reference/cluster/#spec--features)
+The [Cluster reference](https://liken.sh/docs/reference/cluster/#spec--features)
 describes each parameter.
 
 On a running cluster, k3s restarts in place on each machine, one
@@ -108,7 +109,7 @@ Register this value at the forge as a deploy key for the repository,
 and give it write access. On GitHub, the setting is in the
 repository's Settings, then Deploy keys. The sync starts when the
 forge accepts the key.
-[`status.flux`](/docs/reference/cluster/#statusflux) describes the
+[`status.flux`](https://liken.sh/docs/reference/cluster/#statusflux) describes the
 lifecycle of the key.
 
 ## 4. Watch the first sync
@@ -124,7 +125,7 @@ repository.
 From now on, change the fleet with a commit. Add a workload manifest
 under the synced path, and the cluster runs it. Edit a feature or a
 Machine's disks in `liken/`, and the fleet converges as it does for a
-live edit. To [upgrade the fleet](/docs/guides/upgrade/), commit the
+live edit. To [upgrade the fleet](https://liken.sh/docs/guides/upgrade/), commit the
 new catalog entry and `spec.version` in `liken/cluster.yaml`.
 
 ## Rules for safe operation

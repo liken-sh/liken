@@ -23,7 +23,10 @@ HUGO := go tool hugo
 # server enforces.
 GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
 
-.PHONY: all build generate serve test clean
+SKILLS := go tool skills
+BASE := https://liken.sh
+
+.PHONY: all build generate serve skills test clean
 
 all: build
 
@@ -63,6 +66,13 @@ build: dist/site/index.html
 # a layout edit would go stale for any page fetched another way.
 serve: $(GENERATED)
 	$(HUGO) server --renderToMemory --disableFastRender
+
+# The skills target emits every guide as an Agent Skill into ../skills,
+# one SKILL.md per guide, with the generator the brand repository
+# publishes (its README says what the output holds). The output is
+# committed, and the root test-docs target fails when it is stale.
+skills:
+	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
 # The domain's Go checks run here, against this module, because the
 # root module's `./...` does not descend into a nested module. The

@@ -1,8 +1,9 @@
 ---
-title: Upgrade the fleet
-weight: 40
+name: upgrade
 description: "Move every machine in a fleet to a new release with one edit to the Cluster, and watch the rollout. Use when a new release is on the channel and the fleet should take it."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/upgrade/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Upgrade the fleet
 
@@ -39,8 +40,8 @@ a catalog entry you can copy. To compute the digest yourself:
     kubectl edit cluster
 
 Add the release to
-[`spec.releases.catalog`](/docs/reference/cluster/#specreleasescatalog),
-and point [`spec.version`](/docs/reference/cluster/#spec--version)
+[`spec.releases.catalog`](https://liken.sh/docs/reference/cluster/#specreleasescatalog),
+and point [`spec.version`](https://liken.sh/docs/reference/cluster/#spec--version)
 at it:
 
     spec:
@@ -53,7 +54,7 @@ at it:
 
 If `spec.version` names no catalog entry, the API refuses the change
 while your edit is still open. The digest is the start of
-[the trust chain](/docs/reference/release-channel/#the-trust-chain).
+[the trust chain](https://liken.sh/docs/reference/release-channel/#the-trust-chain).
 The digest names the release document, and the release document names
 the artifacts. Each machine checks every downloaded byte against one
 or the other.
@@ -73,19 +74,19 @@ Each machine that runs a different version:
    success when the OS starts and rejoins the cluster. From that time,
    the machine boots that slot. If the trial fails, the machine
    returns to the other slot without help:
-   [Roll back](/docs/guides/rollback/) describes this.
+   [Roll back](https://liken.sh/docs/guides/rollback/) describes this.
 
 The cluster grants turns within
-[`spec.disruption.maxUnavailable`](/docs/reference/cluster/#specdisruption)
+[`spec.disruption.maxUnavailable`](https://liken.sh/docs/reference/cluster/#specdisruption)
 (the default is one machine at a time). Only one leader is down at a
 time, whatever the budget says, because the datastore needs a majority
 of the leaders.
 
 If a machine's
-[`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) is
+[`rebootPolicy`](https://liken.sh/docs/reference/machine/#spec--rebootpolicy) is
 `Manual` (the default), the machine stages the change, reports
 `RebootPending`, and waits for you. Grant the reboot with
-[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot):
+[`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot):
 
     liken approve-reboot mycluster <machine>
 

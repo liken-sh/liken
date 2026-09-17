@@ -719,6 +719,12 @@ coverage-report:
 
 test-docs:
 	$(MAKE) -C docs test
+# skills/ is generated from the guides and committed, so a checkout
+# carries it. The check regenerates it and fails when git reports a
+# change or an untracked file there, which means a guide changed and
+# nobody ran `make -C docs skills`.
+	$(MAKE) -C docs skills
+	test -z "$$(git status --porcelain -- skills)" || { git status --short -- skills; exit 1; }
 	$(MAKE) -C docs build
 
 # Every domain that vendors something says what it pins and what its

@@ -1,8 +1,9 @@
 ---
-title: Give a workload a device
-weight: 70
+name: devices
 description: "Give a pod a device through Dynamic Resource Allocation: a GPU for a Deployment, or a USB adapter that one pod holds alone. Use when a workload needs hardware, or when a pod with a device claim does not schedule."
 ---
+
+This skill is the guide at https://liken.sh/docs/guides/devices/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Give a workload a device
 
@@ -10,8 +11,8 @@ This guide gives a pod a piece of hardware: a GPU for a transcoder,
 and a USB adapter that one pod holds alone. No step here needs a
 privileged pod or a host path.
 
-[Devices](/docs/reference/devices/) describes what `liken` publishes and
-why. The [hardware operators](/docs/concepts/extension-operators/#the-hardware-operators)
+[Devices](https://liken.sh/docs/reference/devices/) describes what `liken` publishes and
+why. The [hardware operators](https://liken.sh/docs/concepts/extension-operators/#the-hardware-operators)
 publish devices the operating system does not: paired Bluetooth
 controllers, monitor outputs, and audio outputs.
 
@@ -87,7 +88,7 @@ it. Look at the hardware the machine reports that it cannot drive:
 ## 2. Declare the driver
 
 A device becomes available for a claim when a driver binds it. Add the
-module to [`spec.modules`](/docs/reference/machine/#spec--modules)
+module to [`spec.modules`](https://liken.sh/docs/reference/machine/#spec--modules)
 in the machine's manifest:
 
     spec:
@@ -101,13 +102,13 @@ few seconds.
 
 The hardware report names these modules for you, as comments, when you
 install the machine. See
-[Install a cluster](/docs/guides/install/#first-run-the-hardware-report).
+[Install a cluster](https://liken.sh/docs/guides/install/#first-run-the-hardware-report).
 
 One module serves a stack rather than a device: `uhid`. Declare it on
 a machine whose Bluetooth adapter serves BLE input devices, such as a
 remote or a keyboard, and the adapter's claim then delivers
 `/dev/uhid`. The
-[device reference](/docs/reference/devices/#bluetooth-adapters)
+[device reference](https://liken.sh/docs/reference/devices/#bluetooth-adapters)
 states why.
 
 ## 3. Say what your workload needs
