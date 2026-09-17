@@ -16,12 +16,12 @@ a pod that is playing or recording. You need the operator
 Every output and input the operator publishes has a resource of its
 own: a [`Sink`](/docs/reference/sinks/) for something that plays,
 and a [`Source`](/docs/reference/sources/) for something that
-records. The operator fills in `status` with what it knows about
-the hardware and what it last read from it. You fill in `spec` with
-what you want, and the operator keeps the hardware there. A pod
+records. The operator fills in `status` with the facts about the
+hardware and the values it last read from it. You fill in `spec`
+with what you want, and the operator keeps the hardware there. A pod
 that plays through the speaker still holds it through a claim, and
 still has its own stream volume. Your declaration is the level the
-speaker itself sits at, underneath that.
+speaker itself rests at, underneath that.
 
 ## 1. See what is there
 
@@ -31,20 +31,20 @@ speaker itself sits at, underneath that.
 Each row is one endpoint: the node it is on, how it connects, the
 level and mute it was last read at, which claim holds it, and
 whether it is connected and ready. To see everything the operator
-knows about one, read the whole resource:
+reports about one, read the whole resource:
 
     kubectl get sink kitchen-pci-0000-00-1f-3-hdmi-0 -o yaml
 
-Two parts of `status` are worth a look. `capabilities` lists the
-controls the sound card itself offers for this endpoint, with the
-range or the choices each one takes. `observed` is the last value
-the operator read for each setting. It keeps up with the hardware
-on its own: turn a knob on a USB DAC, press the volume button on a
-Bluetooth speaker, or let a client change the graph, and the new
-value shows here within about a second. An endpoint that nothing is
-playing through has no level of its own to read, so `observed`
-shows the level you declared, which is the level it will start at,
-and no level at all until you declare one.
+Read two parts of `status`. `capabilities` lists the controls the
+sound card itself offers for this endpoint, with the range or the
+choices each one takes. `observed` is the last value the operator
+read for each setting. It keeps up with the hardware on its own.
+Turn a knob on a USB DAC, press the volume button on a Bluetooth
+speaker, or let a client change the graph, and the new value shows
+here within about a second. An endpoint that nothing is playing
+through has no level of its own to read. `observed` then shows the
+level you declared, which is the level it will start at. Until you
+declare one, it shows no level at all.
 
 ## 2. Set the volume
 
@@ -60,11 +60,11 @@ display moves too.
 
 The change takes effect at once, even while a pod is playing
 through the speaker. The pod's own stream volume is a separate
-control on top of this one, so the two never fight.
+control on top of this one, so the two never conflict.
 
 Once you have declared a volume, it stays declared. If the speaker
 reconnects, the operator restarts, or some client changes the level
-behind your back, the operator writes your value back. If you never
+on its own, the operator writes your value back. If you never
 declare one, the endpoint rests at 100.
 
 ## 3. Mute an output, or close a microphone
@@ -103,7 +103,7 @@ range, is skipped and logged rather than written:
 
 Not every endpoint has controls. An HDMI output has only its
 `IEC958 Playback Switch`, because an HDMI PCM has no volume control
-of its own; use `volume` for its level. A Bluetooth speaker has
+of its own. Use `volume` for its level. A Bluetooth speaker has
 none.
 
 ## 5. Take a declaration back
@@ -119,8 +119,8 @@ never makes up a value on its own:
 
 Because the resources are ordinary Kubernetes objects, RBAC decides
 who may change them. A role that can patch `sinks` but not
-`sources` is the right shape for a wall remote or a home automation
-rule that sets volume and must never touch a microphone:
+`sources` fits a wall remote or a home automation rule that sets
+volume and must never touch a microphone:
 
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole

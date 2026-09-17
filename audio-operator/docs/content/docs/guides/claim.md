@@ -27,7 +27,7 @@ List what a node offers:
     kubectl get resourceslice <node>-audio.liken.sh -o yaml
 
 Each device is one PCM device of the card, with the attached
-monitor's facts as attributes. A playback endpoint carries the
+monitor's facts as attributes. A playback endpoint has the
 `sink` attribute. Write a CEL selector against them. If the Dynamic
 Resource Allocation (DRA) objects are new to you, read
 [How the pieces fit](/docs/guides/#how-the-pieces-fit) first. Four
@@ -48,19 +48,19 @@ useful forms:
     has(device.attributes["audio.liken.sh"].address) &&
     device.attributes["audio.liken.sh"].address == "A0:AB:51:33:B7:12"
 
-On a machine whose radio the pod claimed a media bus from, a device
-is also one paired Bluetooth speaker. A speaker carries its
-address, the name BlueZ reports, its connection state, and its
-codec, and a claim selects it the same way it selects an output.
+On a machine where the pod claimed a media bus from the radio, a
+device is also one paired Bluetooth speaker. A speaker publishes
+its address, the name BlueZ reports, its connection state, and its
+codec. A claim selects it the same way it selects an output.
 
 Guard `connectionType` and `monitor.liken.sh/id` with `has()`, as
 above. On an HDMI or DisplayPort output both come from the monitor,
-so an output with no monitor publishes neither, and a selector that
+so an output with no monitor publishes neither. A selector that
 reads a missing attribute fails the whole allocation. `sink` needs
 no guard inside the `audio-sink` class, because every device the
-class selects publishes it. Guard `address` the
-same way: only a Bluetooth speaker publishes it, so an unguarded
-read fails the allocation on every one of the card's outputs.
+class selects publishes it. Guard `address` the same way: only a
+Bluetooth speaker publishes it, so an unguarded read fails the
+allocation on every one of the card's outputs.
 [Devices](/docs/reference/devices/) lists every attribute, and
 explains why the pairing attribute reads under its own domain,
 `monitor.liken.sh`.
@@ -131,17 +131,17 @@ play, and the pod starts on its own when it can.
                   - name: output
 
 One line makes this work: `resources.claims` gives the container
-the claim. That is what places the pod and delivers the
-socket. No flag hands over the sink, because PipeWire's client
-library reads the two delivered environment variables itself:
+the claim. That is what places the pod and delivers the socket. No
+flag names the sink, because PipeWire's client library reads the
+two delivered environment variables itself:
 `PIPEWIRE_REMOTE` names the socket, and `PIPEWIRE_NODE` sets
 `target.object` on every stream the client creates.
 
 The image is yours, with two requirements:
 
-* The player must use PipeWire's stream API, as mpv's `--ao=pipewire`
-  does. A client on the PulseAudio protocol or the ALSA
-  compatibility plugin selects its sink another way, which the
+* The player must use PipeWire's stream API, as `mpv`'s
+  `--ao=pipewire` does. A client on the PulseAudio protocol or the
+  ALSA compatibility plugin selects its sink another way, which the
   delivered variables do not set.
 * The image must contain PipeWire's client configuration. `libpipewire`
   does not open a client context without
@@ -159,7 +159,7 @@ sink. `Recreate` ends the old pod first.
 ## 4. What the container receives
 
 A mount and two environment variables. No device node: the
-container does not open a PCM device, it connects to PipeWire, which
+container does not open a PCM device. It connects to PipeWire, which
 holds every PCM device on the card.
 
 | What | Value |
@@ -173,18 +173,18 @@ write permission on the socket itself, not on the directory that
 holds it.
 
 **One container holds at most one output.** `PIPEWIRE_REMOTE` and
-`PIPEWIRE_NODE` each hold one value, so two allocations delivered to
-one container overwrite, and the last wins. A pod that plays into
-two outputs runs two containers, each naming its own request in the
-claim.
+`PIPEWIRE_NODE` each hold one value, so the second of two
+allocations delivered to one container overwrites the first. A pod
+that plays into two outputs runs two containers, each naming its own
+request in the claim.
 
 ## Choose the codec on a Bluetooth speaker
 
 A speaker's `codecs` attribute lists the A2DP codecs it offers,
 and a claim can state which one to play. The driver switches the
-transport before your pod starts. The case that wants this: on a
-busy radio, aptX holds its bitrate and chops, and SBC lowers its
-bitrate and holds together.
+transport before your pod starts. This matters on a busy radio:
+aptX holds its bitrate and chops, and SBC lowers its bitrate and
+holds together.
 
     spec:
       devices:
@@ -215,12 +215,13 @@ way, because only a Bluetooth transport has a codec to choose.
 
 A config block with no `requests` list applies to every request
 in the claim, and a `requests` list narrows it. `codec` is the only
-parameter this driver reads, and a key it does not read fails the
-prepare rather than playing something nobody asked for.
+parameter this driver reads. A key it does not read fails the
+prepare, rather than starting a pod under a setting the driver
+ignored.
 
-A `DeviceClass` can carry the same opaque block, which makes a
+A `DeviceClass` can hold the same opaque block, which makes a
 codec cluster policy for every claim that allocates through that
-class. A claim that states its own codec wins over the class's.
+class. A claim that states its own codec overrides the class's.
 Write the block in the claim when one workload needs a codec, and
 in the class when every workload through it does.
 
@@ -228,9 +229,9 @@ The switch takes a second or two, and the pod's start waits for
 it. The speaker's sink arrives at unity volume on every prepare, so
 set loudness in your player's own stream volume. The level the
 speaker itself rests at is declared on its `Sink`, which
-[Set what an endpoint rests at](/docs/guides/rest/) shows, and a
-codec declared there is the resting choice a claim's own parameter
-wins over.
+[Set what an endpoint rests at](/docs/guides/rest/) shows. A codec
+declared there is the resting choice, and a claim's own parameter
+overrides it.
 
 ## Record from a source
 
@@ -270,8 +271,8 @@ whichever output its cable lands on next.
 
 **A PipeWire restart ends every client's audio.** The socket belongs
 to the PipeWire container, so its restart takes the socket away. A
-client that reconnects finds the new socket at the same path; a
-client that does not has to restart. The operator's own restart
+client that reconnects finds the new socket at the same path. A
+client that does not must restart. The operator's own restart
 takes nothing away, because the daemons run in their own containers
 and keep playing through it.
 

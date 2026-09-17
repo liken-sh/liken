@@ -107,8 +107,8 @@ attributes. The constraint brings the matching speakers with it.
 
 `resources.claims` names the claim once, so the container receives
 both allocations: the display operator's delivery for the screen,
-and this operator's for the speakers. Two of mpv's flags route the
-two halves: `--wayland-app-id=$(DISPLAY_APP_ID)` puts the window on
+and this operator's for the speakers. Two of `mpv`'s flags route the
+two halves. `--wayland-app-id=$(DISPLAY_APP_ID)` puts the window on
 the allocated screen, and `--ao=pipewire` plays through PipeWire,
 which reads the delivered `PIPEWIRE_REMOTE` and `PIPEWIRE_NODE`
 itself.
@@ -128,19 +128,20 @@ Each driver applies its own edits, and they do not collide:
 | audio | `PIPEWIRE_NODE` | the allocated output's node name |
 
 The display operator points `XDG_RUNTIME_DIR` at its own directory,
-and that does not misroute the audio: a `PIPEWIRE_REMOTE` that
-starts with a slash is used as an absolute socket path, and the
-runtime directory is not consulted.
+and that does not misroute the audio. A `PIPEWIRE_REMOTE` that
+starts with a slash is an absolute socket path, and PipeWire does
+not read the runtime directory.
 
 ## The grain of the pairing
 
-The pairing identity names a monitor's model, not a unit. The ELD
-has no serial number, so two monitors of one model publish one
-value, and the constraint is satisfied by either pairing.
+The pairing identity names a monitor's model. It does not identify
+one unit of that model. The ELD has no serial number, so two
+monitors of one model publish one value, and the constraint is
+satisfied by either pairing.
 [Devices](https://audio.liken.sh/docs/reference/devices/#the-pairing-identity) gives the
 derivation. On a machine with two identical monitors, the screen and
 the speakers the scheduler picks can come from different units, and
 no selector can prevent that. A `serial` selector on the `screen`
-request pins the screen to one unit, but this operator publishes no
-serial for the constraint to hold the speakers to. The ELD offers
-nothing finer.
+request pins the screen to one unit. This operator publishes no
+serial, so the constraint has nothing to hold the speakers to. The
+ELD offers nothing finer.

@@ -23,9 +23,9 @@ You need:
   jack.
 * For Bluetooth speakers, the
   [`bluetooth-operator`](https://bluetooth.liken.sh) on the same
-  machine. Its media bus is what puts the sound server on
-  `bluetoothd`'s bus, and it is optional: a machine with a card and
-  no radio installs nothing extra.
+  machine. Its media bus puts the sound server on `bluetoothd`'s
+  bus. The `bluetooth-operator` is optional, and a machine with a
+  card and no radio installs nothing extra.
 * `kubectl` with cluster-admin access. You create cluster-scoped
   [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
   yourself, and the base creates a `ClusterRole` and two
@@ -41,8 +41,8 @@ device. Look for a device stamped
 
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-If no device carries the stamp, the operator's
-own claim will park and its pod will stay `Pending`. The
+If no device has the stamp, the operator's own claim will park and
+its pod will stay `Pending`. The
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/)
 page describes this layering: `liken` publishes the card, and this
 operator refines it into outputs.
@@ -63,8 +63,8 @@ owner:
   because they are your cluster's vocabulary, and the base ships no
   policy. `audio-sink` and `audio-source` are the ones to start
   with. Each covers one direction of what this driver publishes: a
-  playback endpoint carries the `sink` attribute and a capture
-  endpoint carries `source`:
+  playback endpoint has the `sink` attribute and a capture
+  endpoint has `source`:
 
         apiVersion: resource.k8s.io/v1
         kind: DeviceClass
@@ -177,12 +177,12 @@ slice it wrote:
     slice: created generation 1, 3 devices, 0 tainted
 
 The image is a file closure on `scratch`: no shell, no package
-manager. `pw-dump` is the way to inspect the running sound server:
+manager. Use `pw-dump` to inspect the running sound server:
 
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-dump
 
 Three more tools ship in the same image, for the times the graph
-reads correct and the sound does not. Each runs as its own
+reads correctly and the sound is still wrong. Each runs as its own
 `kubectl exec`, with no shell between. `pw-top -b -n 1` prints one
 reading of every node, and its `ERR` column counts the dropouts.
 `pw-cli` lists any object in the graph and writes a parameter on
@@ -234,7 +234,7 @@ Every push to the operator's main branch publishes a development
 build. Its version is the most recent release plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
 `2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds carries the same version, and `:latest` still names the
+builds has the same version, and `:latest` still names the
 most recent release.
 
 A development build has no git tag, so the manifests pin to the
