@@ -731,3 +731,72 @@ func TestThePublicLegLogsEveryRequestWhateverBecameOfIt(t *testing.T) {
 		t.Errorf("the discovery document logged %q", line)
 	}
 }
+
+// The headers reach the caller when the container's do, not when the
+// first block of audio does. A tap with a begin sends no audio for as
+// long as the discard runs, so a caller waiting on the headers would
+// otherwise have nothing to show for a minute.
+func TestTheRelayedHeadersReachTheCallerBeforeTheFirstBodyByte(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+
+	const silent = 600 * time.Millisecond
+	harness.container.streams(func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "audio/flac")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_ = http.NewResponseController(w).Flush()
+		time.Sleep(silent)
+		_, _ = w.Write([]byte("fLaC"))
+		_ = http.NewResponseController(w).Flush()
+	})
+
+	// Do returns when the headers arrive, so this is the wait a client
+	// sees before it knows what it is getting.
+	request, err := http.NewRequest(http.MethodGet,
+		harness.serving.URL+"/v1/audio/sinks/kitchen/audio.flac?t=0.6,0.7", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a.b.c")
+	started := time.Now()
+	answer, err := harness.serving.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = answer.Body.Close() }()
+	waited := time.Since(started)
+
+	if answer.StatusCode != http.StatusOK {
+		t.Fatalf("the tap answered %s", answer.Status)
+	}
+	if waited >= silent {
+		t.Errorf("the headers took %s, which is the whole of the container's silence", waited)
+	}
+	if waited > silent/3 {
+		t.Errorf("the headers took %s, and the container sent them at once", waited)
+	}
+	// Everything the caller needs to act on is already there.
+	if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
+		t.Errorf("the type is %q", got)
+	}
+	if answer.Header.Get("Content-Disposition") == "" {
+		t.Error("the save name is not in the headers")
+	}
+	if got := answer.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("the cache directive is %q", got)
+	}
+
+	// And the body still arrives.
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("reading the body: %v", err)
+	}
+	if string(body) != "fLaC" {
+		t.Errorf("the body is %q", body)
+	}
+	if total := time.Since(started); total < silent {
+		t.Errorf("the whole tap took %s, so the container's silence never happened", total)
+	}
+}

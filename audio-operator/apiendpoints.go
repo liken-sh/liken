@@ -194,7 +194,13 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	// so nothing of the container's is relayed onto it.
 	writeTapHeaders(w, route, held.Name, form, at)
 	w.WriteHeader(http.StatusOK)
-	flush(w)
+	// The container's headers reach the caller now, not when the first
+	// block of audio does. A tap with a begin sends no audio until the
+	// discard is over, and a caller that had not yet seen the status,
+	// the type, or the save name would have nothing to show for it.
+	if err := flush(w); err != nil {
+		fmt.Fprintf(os.Stderr, "the relayed headers could not be flushed: %v\n", err)
+	}
 
 	s.readings.streaming(route.Aspect, 1)
 	defer s.readings.streaming(route.Aspect, -1)

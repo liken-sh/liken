@@ -6,5 +6,14 @@
 set -eu
 printf '%s\n' "$@" > "$CAPTURE_FAKE_ENCODER_ARGS"
 printf 'WARNING, cannot write back MD5 sum when encoding to stdout\n' >&2
+# CAPTURE_FAKE_ENCODER_QUIET is how a test asks for what a real
+# encoder does: write nothing until input has arrived, because the
+# container header it starts with describes the samples it has read.
+# The marker up front is a convenience for the tests that assert on
+# the shape of the body, and it would hide a response whose own
+# headers were sitting in a buffer.
+if [ "${CAPTURE_FAKE_ENCODER_QUIET:-no}" = yes ]; then
+	exec cat
+fi
 printf 'fLaC'
 exec cat

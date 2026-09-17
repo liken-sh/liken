@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -445,7 +446,13 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")
 	w.WriteHeader(http.StatusOK)
-	flush(w)
+	// The headers go out now, not when the first block of audio
+	// arrives. A tap with a begin sends nothing for as long as the
+	// discard runs, and a client that had not yet seen the status
+	// would have nothing to show for it.
+	if err := flush(w); err != nil {
+		fmt.Fprintf(os.Stderr, "the capture headers could not be flushed: %v\n", err)
+	}
 
 	s.readings.started(plan.Route.Aspect)
 	started := s.now()
@@ -453,7 +460,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	if plan.Form.Extension == "wav" {
 		written, _ := w.Write(wavHeader(plan.Format.Rate, plan.Format.Channels))
 		sent += int64(written)
-		flush(w)
+		_ = flush(w)
 	}
 	copied, copyErr := copyFlushing(w, tap.Body, nil)
 	sent += copied
@@ -585,7 +592,7 @@ func copyFlushing(w http.ResponseWriter, from io.Reader, onFirst func()) (int64,
 				onFirst = nil
 			}
 			sent += int64(written)
-			flush(w)
+			_ = flush(w)
 			if writeErr != nil {
 				return sent, fmt.Errorf("%w: %w", errClientGone, writeErr)
 			}
@@ -599,10 +606,16 @@ func copyFlushing(w http.ResponseWriter, from io.Reader, onFirst func()) (int64,
 	}
 }
 
-func flush(w http.ResponseWriter) {
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
+// flush pushes what has been written to the client at once.
+//
+// It goes through a ResponseController rather than a type assertion on
+// http.Flusher, because an assertion answers no for any writer that
+// wraps another and a flush that quietly does not happen is invisible:
+// the headers and the first block would then sit in a buffer until
+// something else filled it. The controller unwraps the chain and says
+// so when nothing in it can flush.
+func flush(w http.ResponseWriter) error {
+	return http.NewResponseController(w).Flush()
 }
 
 // dumpGraph is the container's own read of PipeWire, which is the same

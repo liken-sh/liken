@@ -754,3 +754,44 @@ func TestAClientThatHungUpEndsCleanly(t *testing.T) {
 		t.Errorf("a client that hung up was read as a truncation: %q", lines[0])
 	}
 }
+
+// The container sends its headers when it accepts the request, not
+// when the first sample of the span arrives. A tap with a begin
+// discards for as long as begin asks, and the API relays what it has;
+// if the headers waited for audio, every tap with a begin would keep
+// its caller in the dark for that long.
+func TestTheContainerSendsItsHeadersBeforeTheDiscardIsOver(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
+	// The encoder writes nothing until samples reach it, the way a
+	// real one does, so the only thing that can carry the headers out
+	// ahead of the discard is the flush that follows them.
+	t.Setenv("CAPTURE_FAKE_ENCODER_QUIET", "yes")
+
+	request, err := http.NewRequest(http.MethodGet, harness.serving.URL+
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0.4,0.5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a.b.c")
+	started := time.Now()
+	answer, err := harness.serving.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = answer.Body.Close() }()
+	waited := time.Since(started)
+
+	if answer.StatusCode != http.StatusOK {
+		t.Fatalf("the tap answered %s", answer.Status)
+	}
+	if waited > 200*time.Millisecond {
+		t.Errorf("the headers took %s, and the discard is 400 ms", waited)
+	}
+	if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
+		t.Errorf("the type is %q", got)
+	}
+	_, _ = io.Copy(io.Discard, answer.Body)
+	if total := time.Since(started); total < 400*time.Millisecond {
+		t.Errorf("the whole tap took %s, so the discard never ran", total)
+	}
+}
