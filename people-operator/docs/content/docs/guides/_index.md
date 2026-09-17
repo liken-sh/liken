@@ -3,5 +3,5 @@ title: Guides
 weight: 10
 ---
 
-There is one guide. It installs the resource definition and declares
-the people of a cluster.
+There is one guide. It gives the steps to install the resource
+definition and to declare the people of a cluster.
