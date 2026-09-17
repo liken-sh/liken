@@ -124,6 +124,8 @@ type accessReview struct {
 			Verb        string `json:"verb"`
 			Name        string `json:"name"`
 		} `json:"resourceAttributes"`
+		User   string   `json:"user"`
+		Groups []string `json:"groups"`
 	} `json:"spec"`
 }
 
@@ -213,7 +215,7 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 	return &apiServer{
 		client:   client,
 		sidecars: index,
-		tokens: newTokenCache(func(token string) (*reviewedToken, *fault) {
+		tokens: newTokenCache(func(token string) (*caller, *fault) {
 			return reviewToken(client, token, apiAudience)
 		}),
 		sidecar: &sidecarClient{http: sidecar.Client(), tokenPath: tokenFile, port: port},

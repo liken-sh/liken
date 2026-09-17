@@ -45,7 +45,9 @@ with no path clash; until then each domain is one `Service`.
 | OPTIONS | any of the above | none, 204 | `Allow: GET, HEAD, OPTIONS` |
 
 The [OpenAPI 3.1 description](/docs/reference/openapi.json) of every
-route above is generated from the router itself.
+route above is generated from the router itself, and
+[Routes](/docs/reference/routes/) is that description as a page, with
+the parameters, the answers, and the fields of each route.
 
 `application/openapi+json` is provisional
 (draft-ietf-httpapi-rest-api-mediatypes) and not yet registered. The
@@ -175,7 +177,7 @@ own words: the compositor's refusal, the `TokenReview`'s error, the
 | Status | When | Extra header | Standard |
 | --- | --- | --- | --- |
 | 400 | a query the grammar rejects; a repeated or unknown query key; `t=a,b` with `a >= b`; `width` with `height`; a `t=` end on a still; a `t=` begin over `captureBeginMax`, 60 s; `framerate` above the refresh | | RFC 9110 section 15.5.1 |
-| 401 | no token: `WWW-Authenticate: Bearer realm="display-api"`; a token the `TokenReview` refuses: the same plus `error="invalid_token"` and `error_description` with the review's own words | as stated | section 15.5.2, RFC 6750 section 3 |
+| 401 | no client certificate and no token: `WWW-Authenticate: Bearer realm="display-api"`; a token the `TokenReview` refuses: the same plus `error="invalid_token"` and `error_description` with the review's own words | as stated | section 15.5.2, RFC 6750 section 3 |
 | 403 | the `SubjectAccessReview` says no | `WWW-Authenticate: Bearer realm="display-api", error="insufficient_scope", scope="displays/screen"` | section 15.5.4, RFC 6750 section 3 |
 | 404 | no `Display` of that name | | section 15.5.5 |
 | 405 | a method other than GET, HEAD, OPTIONS | `Allow: GET, HEAD, OPTIONS` | section 15.5.6 |
@@ -248,11 +250,26 @@ accepts.
 
 ## Who may look at a screen
 
-Every request carries a Bearer token (RFC 6750 section 2.1). The API
-sends it in a `TokenReview` with the audience `display-api` and
-checks that the answer names that audience, so a pod's ordinary
-API-server token does not open it. The cost is that a person on an
-OIDC kubeconfig cannot use their own credentials: they mint a
+A request names its caller two ways, and the API reads them in the
+order the API server reads them.
+
+A connection that carries a client certificate the cluster's own
+authority signed names that certificate's subject. The user is the
+subject's common name and the groups are its organization values,
+which is how the API server reads a client certificate. The
+credentials in a person's kubeconfig therefore name the same subject
+here that they name to `kubectl`. The API reads the authority from
+the `ConfigMap` `extension-apiserver-authentication` in
+`kube-system`, where the API server publishes it, and reads the
+`ConfigMap` again every minute, so a rotated authority opens the door
+with no restart. A certificate from any other authority ends the
+handshake.
+
+A caller that offers no certificate carries a Bearer token (RFC 6750
+section 2.1). The API sends it in a `TokenReview` with the audience
+`display-api` and checks that the answer names that audience, so a
+pod's ordinary API-server token does not open it. A person on an OIDC
+kubeconfig holds no client certificate, so they mint a
 `ServiceAccount` token for that audience, which is what the recipe
 below does.
 
@@ -288,6 +305,10 @@ subjects:
     namespace: liken-system
 ```
 
+The same `ClusterRole` binds to a person. The subject is `kind: User`
+with the name in their certificate's common name, or `kind: Group`
+with one of its organization values.
+
 A role with a wildcard `resources: ["*"]` on `display.liken.sh`, and
 `cluster-admin`, already grant `displays/screen`, so every subject
 that holds one may look at every screen.
@@ -316,6 +337,24 @@ curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
 curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
   'https://localhost:8443/v1/display/displays/HDMI-A-1/screen.mp4?t=,10' > clip.mp4
 ```
+
+A person whose kubeconfig holds a client certificate sends that
+instead, with no token to mint. The port-forward carries the
+certificate to the API untouched, because the forward is a TCP tunnel
+and the TLS handshake runs end to end:
+
+```sh
+kubectl config view --raw --minify \
+  -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > client.crt
+kubectl config view --raw --minify \
+  -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > client.key
+curl --cert client.crt --key client.key --cacert display-api-ca.crt \
+  https://localhost:8443/v1/display/displays/HDMI-A-1/screen.png > screen.png
+```
+
+From a pod on the cluster network the same two files reach
+`https://display-api.liken-system.svc/v1/display/displays/HDMI-A-1/screen.png`
+with no forward.
 
 `screen.mp4` names its codec in the `Content-Type`, as RFC 6381
 writes it: `avc1.640029` is High profile, no constraint flags, level

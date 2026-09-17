@@ -1,15 +1,15 @@
 package main
 
 // This file is display-api, the one door a caller reaches a screen
-// through. It authenticates the caller with a TokenReview, authorizes
-// the request with a SubjectAccessReview, reads the Display to find
-// its node, and forwards the request to the capture sidecar on that
-// node. It stores nothing, and it never decodes, encodes, or holds a
-// frame: the bytes the sidecar sends are the bytes the caller reads.
+// through. It names the caller from a verified client certificate or
+// from a TokenReview, authorizes the request with a
+// SubjectAccessReview, reads the Display to find its node, and
+// forwards the request to the capture sidecar on that node. It stores
+// nothing, and it never decodes, encodes, or holds a frame: the bytes
+// the sidecar sends are the bytes the caller reads.
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -107,13 +107,25 @@ func serveAPI() {
 		fatal("the serving certificate: %v", err)
 	}
 
+	// The cluster's client authority is read before the listener
+	// starts, and again every minute. A read that fails is reported
+	// and never fatal: an API that cannot read the ConfigMap still
+	// answers every caller that sends a Bearer token, and the next
+	// pass loads the authority once the grant or the API server is
+	// back.
+	anchors := &clientAnchors{}
+	if err := anchors.load(client); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
+	}
+	go keepClientAnchors(ctx, client, anchors)
+
 	index := newSidecarIndex()
 	go index.run(ctx, client, namespace)
 
 	server := &apiServer{
 		client:   client,
 		sidecars: index,
-		tokens:   newTokenCache(func(token string) (*reviewedToken, *fault) { return reviewToken(client, token, apiAudience) }),
+		tokens:   newTokenCache(func(token string) (*caller, *fault) { return reviewToken(client, token, apiAudience) }),
 		readings: readings,
 		sidecar:  newSidecarClient(anchor, captureTokenPath),
 		record: func(screen *Display, subject, aspect, form string) {
@@ -140,7 +152,7 @@ func serveAPI() {
 	serving := &http.Server{
 		Handler:           server,
 		ReadHeaderTimeout: headerDeadline,
-		TLSConfig:         &tls.Config{GetCertificate: holder.get, MinVersion: tls.VersionTLS12},
+		TLSConfig:         apiTLSConfig(holder, anchors),
 	}
 	go func() {
 		<-ctx.Done()
@@ -245,10 +257,17 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.serveCapture(w, r, route, name, screen, mediaType, chosen, who, id, start, head)
 }
 
-// Every request carries the token in the Authorization field, RFC
-// 6750 section 2.1. A request with no token gets the bare challenge,
-// and a token the TokenReview refuses gets the review's own words.
-func (s *apiServer) authenticate(r *http.Request) (*reviewedToken, *fault) {
+// A caller names itself two ways, and this API reads them in the
+// order kube-apiserver reads them. A connection that carries a client
+// certificate the cluster's authority signed is that certificate's
+// subject. Otherwise the caller carries a token in the Authorization
+// field, RFC 6750 section 2.1: a request with no token gets the bare
+// challenge, and a token the TokenReview refuses gets the review's
+// own words.
+func (s *apiServer) authenticate(r *http.Request) (*caller, *fault) {
+	if who, held := certificateCaller(r.TLS); held {
+		return who, nil
+	}
 	field := r.Header.Get("Authorization")
 	scheme, token, split := strings.Cut(field, " ")
 	if !split || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(token) == "" {
@@ -262,7 +281,7 @@ func (s *apiServer) authenticate(r *http.Request) (*reviewedToken, *fault) {
 // needs get on displays; a capture needs get on displays/screen. The
 // subresource exists in no CRD. It is a string RBAC matches, the way
 // pods/log is matched.
-func (s *apiServer) authorize(route apiRoute, name string, who *reviewedToken) *fault {
+func (s *apiServer) authorize(route apiRoute, name string, who *caller) *fault {
 	if route.kind == documentRoute {
 		return nil
 	}
@@ -607,8 +626,9 @@ func (s *apiServer) logged(r *http.Request, route apiRoute, id, detail string, s
 		"detail", detail)
 }
 
-// The subject a log line names comes from the TokenReview, and is
-// empty for a request refused before the review answered.
+// The subject a log line names comes from the client certificate or
+// the TokenReview, and is empty for a request refused before either
+// one named a caller.
 func subjectOf(r *http.Request) string {
 	if who, held := r.Context().Value(subjectKey{}).(string); held {
 		return who

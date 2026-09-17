@@ -242,7 +242,7 @@ func TestSubjectAccessReviewCarriesTheSubject(t *testing.T) {
 	api := newReviewAPI()
 	api.answers[accessReviewsPath] = `{"status": {"allowed": true, "reason": "RBAC: allowed by ClusterRoleBinding \"viewers\""}}`
 
-	who := &reviewedToken{
+	who := &caller{
 		Username: "system:serviceaccount:liken-system:display-viewer",
 		UID:      "6b3f0e1a-9c2d-4f11-8a77-1c4e5d2b3a90",
 		Groups:   []string{"system:serviceaccounts", "system:authenticated"},
@@ -326,7 +326,7 @@ func TestSubjectAccessReviewVerdicts(t *testing.T) {
 			api := newReviewAPI()
 			api.answers[accessReviewsPath] = test.answer
 
-			allowed, reason, f := authorizeSubject(reviewClient(t, api), &reviewedToken{Username: "viewer"},
+			allowed, reason, f := authorizeSubject(reviewClient(t, api), &caller{Username: "viewer"},
 				"get", DisplayGroup, displaysPlural, screenAspect, "", "HDMI-A-1")
 			if f != nil {
 				t.Fatalf("review failed: %v", f)
@@ -347,7 +347,7 @@ func TestSubjectAccessReviewCarriesTheAPIServersFailure(t *testing.T) {
 	api.status[accessReviewsPath] = http.StatusInternalServerError
 	api.answers[accessReviewsPath] = `{"message": "` + message + `"}`
 
-	_, _, f := authorizeSubject(reviewClient(t, api), &reviewedToken{Username: "viewer"},
+	_, _, f := authorizeSubject(reviewClient(t, api), &caller{Username: "viewer"},
 		"get", DisplayGroup, displaysPlural, screenAspect, "", "HDMI-A-1")
 	if f.status != http.StatusServiceUnavailable {
 		t.Fatalf("status is %d, want 503", f.status)
@@ -363,11 +363,11 @@ func TestSubjectAccessReviewCarriesTheAPIServersFailure(t *testing.T) {
 type countingReview struct {
 	mu    sync.Mutex
 	asked int
-	who   *reviewedToken
+	who   *caller
 	deny  *fault
 }
 
-func (r *countingReview) review(token string) (*reviewedToken, *fault) {
+func (r *countingReview) review(token string) (*caller, *fault) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.asked++
@@ -381,7 +381,7 @@ func (r *countingReview) count() int {
 }
 
 func TestTokenCacheAnswersFromMemory(t *testing.T) {
-	reviews := &countingReview{who: &reviewedToken{Username: "viewer"}}
+	reviews := &countingReview{who: &caller{Username: "viewer"}}
 	cache := newTokenCache(reviews.review)
 	clock := time.Date(2026, 9, 16, 21, 0, 0, 0, time.UTC)
 	cache.now = func() time.Time { return clock }
@@ -411,7 +411,7 @@ func TestTokenCacheExpiresOnTheClock(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			start := time.Date(2026, 9, 16, 21, 0, 0, 0, time.UTC)
-			who := &reviewedToken{Username: "viewer"}
+			who := &caller{Username: "viewer"}
 			if test.expires != 0 {
 				who.Expires = start.Add(test.expires)
 			}
@@ -443,7 +443,7 @@ func TestTokenCacheNeverHoldsADenial(t *testing.T) {
 }
 
 func TestTokenCacheIsSafeForConcurrentUse(t *testing.T) {
-	reviews := &countingReview{who: &reviewedToken{Username: "viewer"}}
+	reviews := &countingReview{who: &caller{Username: "viewer"}}
 	cache := newTokenCache(reviews.review)
 
 	var callers sync.WaitGroup

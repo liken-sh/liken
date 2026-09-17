@@ -125,7 +125,7 @@ func serveCaptureSidecar() {
 
 	server := &captureServer{
 		client:     client,
-		tokens:     newTokenCache(func(token string) (*reviewedToken, *fault) { return reviewToken(client, token, captureAudience) }),
+		tokens:     newTokenCache(func(token string) (*caller, *fault) { return reviewToken(client, token, captureAudience) }),
 		readings:   readings,
 		process:    processHandler(readings.registry, holder.held),
 		socketPath: envOr("CAPTURE_SOCKET", captureSocketPath),

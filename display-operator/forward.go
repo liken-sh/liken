@@ -237,7 +237,7 @@ func capturePrivatePath(connector, ext string) string {
 // bytes as they arrive, and writes the Captured Event once any byte
 // has flowed.
 func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name string, screen *Display, mediaType string, chosen captureSelection, who *reviewedToken,
+	name string, screen *Display, mediaType string, chosen captureSelection, who *caller,
 	id string, start time.Time, head bool) {
 	at := s.now()
 	if head {

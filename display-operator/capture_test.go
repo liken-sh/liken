@@ -18,12 +18,12 @@ func newCaptureFixture(t *testing.T) *captureServer {
 	t.Helper()
 	readings := newCaptureMetrics(captureComponent, version)
 	return &captureServer{
-		tokens: newTokenCache(func(token string) (*reviewedToken, *fault) {
+		tokens: newTokenCache(func(token string) (*caller, *fault) {
 			switch token {
 			case "the-api-token":
-				return &reviewedToken{Username: "system:serviceaccount:liken-system:display-api"}, nil
+				return &caller{Username: "system:serviceaccount:liken-system:display-api"}, nil
 			case "somebody-elses-token":
-				return &reviewedToken{Username: "system:serviceaccount:default:curious"}, nil
+				return &caller{Username: "system:serviceaccount:default:curious"}, nil
 			}
 			return nil, unauthenticated("the token is not valid for the audience display-capture")
 		}),

@@ -31,10 +31,26 @@
 # harmless: the API server ignores a namespace on a cluster-scoped
 # object, and kubectl routes the request by the scope it reads from
 # discovery, not from the object.
+#
+# The namespace below is set with a transformer rather than with the
+# top-level namespace field, because unsetOnly is what keeps the one
+# object that names its own namespace where it belongs: the RoleBinding
+# in kube-system that lets display-api read the cluster's client
+# certificate authority. The top-level field overwrites a stated
+# namespace, and that binding in any other namespace names a Role that
+# is not there. Every other object here states no namespace, and the
+# transformer sets liken-system on each of them.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: liken-system
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: liken-system
+      namespace: liken-system
+    unsetOnly: true
 
 resources:
   - displays.yaml

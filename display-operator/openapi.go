@@ -57,10 +57,20 @@ func openAPIDocument(server string) map[string]any {
 			"url":         server,
 			"description": "The base this API answers on.",
 		}},
-		"security": []any{map[string]any{"bearer": []any{}}},
-		"paths":    paths,
+		// A list of two requirement objects is OpenAPI's OR, so a
+		// route takes the client certificate or the token, in the
+		// order this API reads them.
+		"security": []any{
+			map[string]any{"mutualTLS": []any{}},
+			map[string]any{"bearer": []any{}},
+		},
+		"paths": paths,
 		"components": map[string]any{
 			"securitySchemes": map[string]any{
+				"mutualTLS": map[string]any{
+					"type":        "mutualTLS",
+					"description": "A client certificate the cluster's own authority signed. The subject's common name is the user and its organization values are the groups, which is how the API server reads one.",
+				},
 				"bearer": map[string]any{
 					"type":         "http",
 					"scheme":       "bearer",
@@ -187,7 +197,7 @@ func routeKnobs(route apiRoute) []string {
 func responses(route apiRoute) map[string]any {
 	answers := map[string]any{
 		"200": okResponse(route),
-		"401": problemResponse("No token, or a token the TokenReview refused."),
+		"401": problemResponse("No client certificate and no token, or a token the TokenReview refused."),
 		"405": problemResponse("A method other than GET, HEAD and OPTIONS."),
 		"406": problemResponse("The Accept field excludes every form this route serves."),
 	}

@@ -38,10 +38,13 @@ const (
 	accessReviewsPath        = "/apis/" + authorizationAPIVersion + "/subjectaccessreviews"
 )
 
-// The subject a TokenReview answers with. Expires bounds a cache
-// entry and nothing else; the API server judged the token's
-// validity, not this program.
-type reviewedToken struct {
+// Who is asking. A TokenReview answers with all five fields, and a
+// verified client certificate answers with the user and the groups
+// alone, so every route and every record reads one type and never
+// checks which credential arrived. Expires bounds a cache entry and
+// nothing else; the API server judged the token's validity, not this
+// program.
+type caller struct {
 	Username string
 	UID      string
 	Groups   []string
@@ -87,7 +90,7 @@ type reviewUser struct {
 // and named the audience that was asked for, so a pod's ordinary
 // API-server token, whose audience is the API server, does not open
 // the door.
-func reviewToken(c *Client, token, audience string) (*reviewedToken, *fault) {
+func reviewToken(c *Client, token, audience string) (*caller, *fault) {
 	body, err := json.Marshal(tokenReview{
 		APIVersion: authenticationAPIVersion,
 		Kind:       "TokenReview",
@@ -106,7 +109,7 @@ func reviewToken(c *Client, token, audience string) (*reviewedToken, *fault) {
 	if !status.Authenticated || !slices.Contains(status.Audiences, audience) {
 		return nil, unauthenticated(refusedDetail(status, audience))
 	}
-	return &reviewedToken{
+	return &caller{
 		Username: status.User.Username,
 		UID:      status.User.UID,
 		Groups:   status.User.Groups,
@@ -150,7 +153,7 @@ func tokenExpiry(token string) time.Time {
 // and never holds a denial. The clock is a field so a test can move
 // it past a verdict's horizon.
 type tokenCache struct {
-	review func(token string) (*reviewedToken, *fault)
+	review func(token string) (*caller, *fault)
 	now    func() time.Time
 
 	mu   sync.Mutex
@@ -158,7 +161,7 @@ type tokenCache struct {
 }
 
 type heldVerdict struct {
-	who   *reviewedToken
+	who   *caller
 	until time.Time
 }
 
@@ -168,14 +171,14 @@ type heldVerdict struct {
 // the SubjectAccessReview runs on every request.
 const verdictLife = 60 * time.Second
 
-func newTokenCache(review func(token string) (*reviewedToken, *fault)) *tokenCache {
+func newTokenCache(review func(token string) (*caller, *fault)) *tokenCache {
 	return &tokenCache{review: review, now: time.Now, held: map[string]heldVerdict{}}
 }
 
 // A denial is never held, so a token the API server refused once is
 // asked about again on the next request, and a refusal that was an
 // API-server hiccup is never remembered as one.
-func (t *tokenCache) verdict(token string) (*reviewedToken, *fault) {
+func (t *tokenCache) verdict(token string) (*caller, *fault) {
 	key, now := tokenKey(token), t.now()
 
 	t.mu.Lock()
@@ -204,7 +207,7 @@ func (t *tokenCache) verdict(token string) (*reviewedToken, *fault) {
 }
 
 // A verdict outlives neither the minute nor the token itself.
-func verdictHorizon(who *reviewedToken, now time.Time) time.Time {
+func verdictHorizon(who *caller, now time.Time) time.Time {
 	horizon := now.Add(verdictLife)
 	if !who.Expires.IsZero() && who.Expires.Before(horizon) {
 		return who.Expires
@@ -229,8 +232,8 @@ type subjectAccessReview struct {
 	Status     subjectAccessReviewStatus `json:"status,omitempty"`
 }
 
-// The four subject fields come from the TokenReview's own status, so
-// the API server judges the caller and never the API's own account.
+// The four subject fields are the caller the request named, so the
+// API server judges that caller and never the API's own account.
 type subjectAccessReviewSpec struct {
 	ResourceAttributes resourceAttributes  `json:"resourceAttributes"`
 	User               string              `json:"user,omitempty"`
@@ -264,7 +267,7 @@ type subjectAccessReviewStatus struct {
 // The subresource exists in no CRD. It is a string RBAC matches, as
 // pods/log is, so a ClusterRole names displays/screen and the API
 // server answers without any object of that name.
-func authorizeSubject(c *Client, who *reviewedToken,
+func authorizeSubject(c *Client, who *caller,
 	verb, group, resource, subresource, namespace, name string) (allowed bool, reason string, f *fault) {
 	body, err := json.Marshal(subjectAccessReview{
 		APIVersion: authorizationAPIVersion,
