@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io"
+	"os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -145,4 +149,150 @@ func waitFor(t *testing.T, ready func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("the pump never reached the state this test waits for")
+}
+
+// Both encoders write a banner and a progress bar to stderr and exit
+// zero on every successful tap, so stderr alone says nothing about
+// whether a tap worked. The drill counted one encoder failure for
+// every FLAC and every Opus tap that returned correct audio.
+func TestAnEncoderThatExitedZeroIsNoFailure(t *testing.T) {
+	cases := []struct {
+		name   string
+		exit   tapExit
+		failed bool
+	}{
+		{"a WAV tap the client closed", tapExit{Recorder: -1, Encoder: exitNotRun}, false},
+		{"a FLAC tap that finished its span", tapExit{Recorder: -1, Encoder: 0}, false},
+		{"an Opus tap this container signalled", tapExit{Recorder: -1, Encoder: -1}, false},
+		{"a tap that ran to the end of its input", tapExit{Recorder: 0, Encoder: 0}, false},
+		{"an encoder that failed on its own", tapExit{Recorder: -1, Encoder: 1}, true},
+		{"pw-record that failed on its own", tapExit{Recorder: 1, Encoder: -1}, true},
+	}
+	for _, row := range cases {
+		if row.exit.failed() != row.failed {
+			t.Errorf("%s reads as failed=%v, want %v", row.name, row.exit.failed(), row.failed)
+		}
+	}
+}
+
+func TestTheLoggedEndCarriesTheExitStatusAndOneLine(t *testing.T) {
+	ended := tapExit{Recorder: -1, Encoder: 0, Words: "the last thing it said"}
+	got := ended.String()
+	for _, want := range []string{"pw-record:signalled", "encoder:0", "the last thing it said"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the ended field is %q, which carries no %s", got, want)
+		}
+	}
+	// A WAV tap runs no encoder, so there is no status to report.
+	if got := (tapExit{Recorder: -1, Encoder: exitNotRun}).String(); strings.Contains(got, "encoder:") {
+		t.Errorf("a WAV tap reports an encoder: %q", got)
+	}
+}
+
+// flac's banner runs to several lines and opusenc's progress bar
+// returns the carriage rather than the line, so the whole of either
+// one in a log line buries everything else on it.
+func TestOnlyTheLastLineOfStderrIsLogged(t *testing.T) {
+	banner := "flac 1.5.0\nCopyright (C) 2000-2009 Josh Coalson\n" +
+		"flac comes with ABSOLUTELY NO WARRANTY.\n" + flacMD5Warning + "\n"
+	if got := lastLine(banner); got != flacMD5Warning {
+		t.Errorf("the last line is %q, want %q", got, flacMD5Warning)
+	}
+
+	progress := "Encoding using libopus 1.5.2\r[|] 00:00:01.00 1x realtime\r" +
+		"[/] 00:00:02.00 1x realtime\r[-] 00:00:03.00 1x realtime"
+	if got := lastLine(progress); got != "[-] 00:00:03.00 1x realtime" {
+		t.Errorf("the last line of a progress bar is %q", got)
+	}
+
+	if got := lastLine(""); got != "" {
+		t.Errorf("a process that said nothing reports %q", got)
+	}
+	if got := lastLine("\n\n  \n"); got != "" {
+		t.Errorf("a process that wrote only blanks reports %q", got)
+	}
+
+	// A line of any length is bounded, because a person reads this.
+	long := strings.Repeat("x", 500)
+	if got := lastLine(long); len(got) > lastLineMax+3 {
+		t.Errorf("a long line logged %d characters", len(got))
+	}
+}
+
+func TestAProcessThisContainerKilledReportsASignal(t *testing.T) {
+	if got := exitStatus(nil); got != 0 {
+		t.Errorf("a process that ended cleanly reports %d", got)
+	}
+	// A context that cancelled the command leaves an ExitError whose
+	// code is -1, which is what every finished tap looks like.
+	command := exec.Command("/bin/sh", "-c", "kill -TERM $$")
+	if got := exitStatus(command.Run()); got != -1 {
+		t.Errorf("a signalled process reports %d, want -1", got)
+	}
+	failing := exec.Command("/bin/sh", "-c", "exit 3")
+	if got := exitStatus(failing.Run()); got != 3 {
+		t.Errorf("a process that exited 3 reports %d", got)
+	}
+	if got := exitStatus(errors.New("the binary is not there")); got != 1 {
+		t.Errorf("a process that never started reports %d", got)
+	}
+}
+
+// The confirmation looks as soon as the pipeline starts and backs off
+// from there. A quarter-second interval on the first look was adding
+// itself to the time to the first body byte on every tap whose link
+// PipeWire had not built in the moment before it.
+func TestTheConfirmationLooksAgainSoonAndThenLessOften(t *testing.T) {
+	server := &captureServer{
+		version:      "dev",
+		readings:     newCaptureMetrics("dev"),
+		taps:         make(chan struct{}, 1),
+		now:          time.Now,
+		linkDeadline: 400 * time.Millisecond,
+	}
+	looks := 0
+	var at []time.Duration
+	started := time.Now()
+	server.graph = func(context.Context) ([]byte, error) {
+		looks++
+		at = append(at, time.Since(started))
+		return readGraphFixture(t, "graph-no-settings.json"), nil
+	}
+	if err := server.confirm(context.Background(), drillStream, 48); err == nil {
+		t.Fatal("a graph with no link confirmed")
+	}
+	if looks < 4 {
+		t.Errorf("the confirmation looked %d times in %s", looks, 400*time.Millisecond)
+	}
+	// The second look follows the first closely, rather than a quarter
+	// of a second later.
+	if len(at) > 1 && at[1] > 100*time.Millisecond {
+		t.Errorf("the second look came %s in, which is too late to help", at[1])
+	}
+}
+
+func TestTheConfirmationStopsAtTheFirstLookWhenTheLinkIsThere(t *testing.T) {
+	server := &captureServer{
+		version:      "dev",
+		readings:     newCaptureMetrics("dev"),
+		taps:         make(chan struct{}, 1),
+		now:          time.Now,
+		linkDeadline: time.Second,
+	}
+	looks := 0
+	server.graph = func(context.Context) ([]byte, error) {
+		looks++
+		return readGraphFixture(t, "graph.json"), nil
+	}
+	started := time.Now()
+	if err := server.confirm(context.Background(), drillStream, 46); err != nil {
+		t.Fatalf("a link on the target did not confirm: %v", err)
+	}
+	if looks != 1 {
+		t.Errorf("the confirmation read the graph %d times for a link already there", looks)
+	}
+	// A tap whose link is already built waits for nothing.
+	if elapsed := time.Since(started); elapsed > 50*time.Millisecond {
+		t.Errorf("a confirmed link took %s", elapsed)
+	}
 }

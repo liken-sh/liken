@@ -38,19 +38,26 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // linkDeadline is how long the container waits for PipeWire to build
-// the link before it calls the target wrong, and linkPeriod is how
-// often it looks. Each look is one pw-dump process and one parse of
-// the whole graph, so the period is what bounds the cost of a link
-// that takes its time.
+// the link before it calls the target wrong.
+//
+// Each look is one pw-dump process, so the interval between them
+// trades the time to the first body byte against the number of
+// processes a slow link costs. It starts at linkFirstPeriod and
+// doubles to linkPeriod, because PipeWire usually has the link within
+// a few tens of milliseconds and a poll every quarter second was
+// adding up to that much to every tap.
 const (
-	linkDeadline = 3 * time.Second
-	linkPeriod   = 250 * time.Millisecond
+	linkDeadline    = 3 * time.Second
+	linkFirstPeriod = 20 * time.Millisecond
+	linkPeriod      = 250 * time.Millisecond
 )
 
 // discardBlock is how much the discard reads at a time. 2048 bytes is
@@ -113,7 +120,7 @@ func (s *spoken) String() string {
 type runningTap struct {
 	Body io.ReadCloser
 
-	stop     func()
+	stop     func() tapExit
 	pump     *discardPump
 	recorded *spoken
 	encoded  *spoken
@@ -127,18 +134,80 @@ func (t *runningTap) discarded() int64 {
 	return t.pump.discarded()
 }
 
-// words is what a failure carries: whatever the processes printed that
-// this container does not expect, verbatim.
-func (t *runningTap) words() string {
-	both := unexpectedStderr(t.recorded.String())
-	if encoder := unexpectedStderr(t.encoded.String()); encoder != "" {
-		if both != "" {
-			both += "; "
-		}
-		both += encoder
-	}
-	return both
+// delivered says this tap sent the whole span it was asked for.
+func (t *runningTap) delivered() bool {
+	return t.pump != nil && t.pump.delivered()
 }
+
+// tapExit is how one tap's processes ended: the exit status of each,
+// and the last thing each said.
+//
+// An exit status of -1 is a process this container signalled, which is
+// what ends every tap that finished its span or lost its client. Only
+// a status of one or more is a process that failed on its own.
+type tapExit struct {
+	Recorder int
+	Encoder  int
+	Words    string
+}
+
+// failed says whether a process ended on its own with something to
+// report. Both encoders print a banner and a progress bar to stderr
+// and exit zero on every successful tap, so stderr alone says nothing
+// about whether a tap worked.
+func (e tapExit) failed() bool {
+	return e.Recorder > 0 || e.Encoder > 0
+}
+
+// String is the log line's ended field: the two exit statuses, and the
+// last line either process wrote.
+func (e tapExit) String() string {
+	ended := fmt.Sprintf("pw-record:%s", exitWords(e.Recorder))
+	if e.Encoder != exitNotRun {
+		ended += fmt.Sprintf(" encoder:%s", exitWords(e.Encoder))
+	}
+	if e.Words != "" {
+		ended += " " + e.Words
+	}
+	return ended
+}
+
+// exitNotRun marks a process this tap never started, which is the
+// encoder of a WAV tap.
+const exitNotRun = -2
+
+func exitWords(status int) string {
+	switch status {
+	case exitNotRun:
+		return "none"
+	case -1:
+		return "signalled"
+	default:
+		return strconv.Itoa(status)
+	}
+}
+
+// lastLine is the last thing a process said. An encoder's banner and
+// its progress bar are everything before it, and a progress bar
+// returns the carriage rather than the line, so both endings split it.
+func lastLine(output string) string {
+	kept := ""
+	for _, line := range strings.FieldsFunc(output, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	}) {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			kept = trimmed
+		}
+	}
+	if len(kept) > lastLineMax {
+		return kept[:lastLineMax] + "..."
+	}
+	return kept
+}
+
+// lastLineMax bounds the one line the log carries, because a process
+// may write a line of any length and a log line is read by a person.
+const lastLineMax = 200
 
 // startTap runs pw-record, and an encoder when the form needs one.
 //
@@ -182,7 +251,14 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	encoderArgs := encoderCommand(plan.Form, plan.Format, plan.Knobs.Bitrate)
 	if encoderArgs == nil {
 		tap.Body = readCloser{Reader: samples, close: raw.Close}
-		tap.stop = func() { cancel(); _ = record.Wait() }
+		tap.stop = func() tapExit {
+			cancel()
+			return tapExit{
+				Recorder: exitStatus(record.Wait()),
+				Encoder:  exitNotRun,
+				Words:    lastLine(recorded.String()),
+			}
+		}
 		return tap, nil
 	}
 
@@ -203,12 +279,31 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 			unexpectedStderr(tap.encoded.String()))
 	}
 	tap.Body = readCloser{Reader: encoded, close: encoded.Close}
-	tap.stop = func() {
+	tap.stop = func() tapExit {
 		cancel()
-		_ = encoder.Wait()
-		_ = record.Wait()
+		ended := tapExit{Encoder: exitStatus(encoder.Wait())}
+		ended.Recorder = exitStatus(record.Wait())
+		ended.Words = lastLine(tap.encoded.String())
+		if ended.Words == "" {
+			ended.Words = lastLine(recorded.String())
+		}
+		return ended
 	}
 	return tap, nil
+}
+
+// exitStatus reads what a process ended with. A process this container
+// signalled reports -1, which is how a tap that finished its span and
+// a tap whose client hung up both end.
+func exitStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ended *exec.ExitError
+	if errors.As(err, &ended) {
+		return ended.ExitCode()
+	}
+	return 1
 }
 
 // commandOf builds one process under the context, with the same wait
@@ -239,6 +334,11 @@ type discardPump struct {
 	// dropped is written by the pump's own goroutine and read by the
 	// log line when the tap ends, so it is counted atomically.
 	dropped atomic.Int64
+
+	// whole says the span ran out, which is the one way a bounded tap
+	// ends with nothing left to send. It is written by the pump's own
+	// goroutine for the reason dropped is.
+	whole atomic.Bool
 }
 
 func (p *discardPump) start() io.Reader {
@@ -257,7 +357,10 @@ func (p *discardPump) start() io.Reader {
 		if p.limit > 0 {
 			samples = io.LimitReader(p.from, p.limit)
 		}
-		_, err := io.Copy(writer, samples)
+		copied, err := io.Copy(writer, samples)
+		if p.limit > 0 && copied >= p.limit {
+			p.whole.Store(true)
+		}
 		_ = writer.CloseWithError(err)
 	}()
 	return reader
@@ -277,6 +380,9 @@ func (p *discardPump) ready() bool {
 // discarded is how many bytes the pump dropped, which the log line
 // carries so a reader can tell a long begin from a slow link.
 func (p *discardPump) discarded() int64 { return p.dropped.Load() }
+
+// delivered says the span ran out with every sample of it sent.
+func (p *discardPump) delivered() bool { return p.whole.Load() }
 
 // readCloser pairs a reader with the close that ends the pipeline.
 type readCloser struct {
@@ -305,7 +411,17 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 		s.logTap(plan, at, 0, 0, "not-started", err.Error())
 		return
 	}
-	defer func() { _ = tap.Body.Close(); tap.stop() }()
+	stopped := false
+	ended := tapExit{}
+	finish := func() tapExit {
+		if !stopped {
+			_ = tap.Body.Close()
+			ended = tap.stop()
+			stopped = true
+		}
+		return ended
+	}
+	defer finish()
 
 	if err := s.confirm(r.Context(), plan.Stream, plan.Format.NodeID); err != nil {
 		// A graph this container could not read says nothing about
@@ -344,16 +460,42 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	ran := s.now().Sub(started)
 	s.readings.finished(plan.Route.Aspect, plan.Form.Extension, sent, ran)
 
-	if words := tap.words(); words != "" {
+	// The processes are stopped before the line is written, because
+	// their exit statuses are what it reports. A tap that finished its
+	// span and a tap whose client hung up both end with a signal, and
+	// neither is a failure; only a process that ended on its own with
+	// a status of one or more is.
+	exit := finish()
+	if exit.failed() {
 		s.readings.failed(failureEncoder)
-		s.logTap(plan, at, sent, tap.discarded(), "on-target", words)
-		return
 	}
-	ended := "ok"
+
+	// A body ends cleanly when there was no more of it to send: the
+	// span ran out, or the client stopped reading. Anything else is
+	// the pipeline ending under the tap, which the client has to be
+	// told about.
+	complete := tap.delivered() || errors.Is(copyErr, errClientGone)
+	cut := !complete || exit.failed()
+
+	words := exit.String()
 	if copyErr != nil {
-		ended = copyErr.Error()
+		words += " cut=" + copyErr.Error()
 	}
-	s.logTap(plan, at, sent, tap.discarded(), "on-target", ended)
+	if cut {
+		words += " truncated"
+	}
+	s.logTap(plan, at, sent, tap.discarded(), "on-target", words)
+
+	if cut {
+		// The response is already a 200 with bytes on the wire, so
+		// there is no status left to tell a client with. Ending the
+		// handler this way closes the body without its terminating
+		// chunk, which is RFC 9112 section 8's signal for an
+		// incomplete message, and over HTTP/2 it resets the stream.
+		// ErrAbortHandler is the one panic net/http expects, so it
+		// prints no stack trace for it.
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // logTap writes the one line this container keeps for a tap, whatever
@@ -386,6 +528,7 @@ func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID
 		wait = linkDeadline
 	}
 	deadline := time.After(wait)
+	period := linkFirstPeriod
 	for {
 		document, err := s.graph(ctx)
 		if err != nil {
@@ -409,15 +552,27 @@ func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID
 		case <-deadline:
 			return fmt.Errorf("pw-record made no link to the node %d within %s",
 				targetNodeID, wait)
-		case <-time.After(linkPeriod):
+		case <-time.After(period):
+		}
+		if period *= 2; period > linkPeriod {
+			period = linkPeriod
 		}
 	}
 }
+
+// errClientGone marks a copy that ended because whoever was reading the
+// response stopped reading. That is a client hanging up, which is a
+// normal end of a tap, and it is told apart from the pipeline ending
+// on its own, which is not.
+var errClientGone = errors.New("the client stopped reading")
 
 // copyFlushing copies the pipeline to the response, flushing each
 // block, so a client hears the tap as it arrives rather than when a
 // buffer fills. onFirst runs once, when the first block has been
 // written, which is the moment a request has produced bytes.
+//
+// An error from the writing side is wrapped in errClientGone; an error
+// from the reading side is returned as it came.
 func copyFlushing(w http.ResponseWriter, from io.Reader, onFirst func()) (int64, error) {
 	block := make([]byte, 32*1024)
 	var sent int64
@@ -432,7 +587,7 @@ func copyFlushing(w http.ResponseWriter, from io.Reader, onFirst func()) (int64,
 			sent += int64(written)
 			flush(w)
 			if writeErr != nil {
-				return sent, writeErr
+				return sent, fmt.Errorf("%w: %w", errClientGone, writeErr)
 			}
 		}
 		if err != nil {

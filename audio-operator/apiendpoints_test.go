@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestANameTheClusterDoesNotHoldIsANotFound(t *testing.T) {
@@ -518,5 +519,178 @@ func TestTheInfoRouteTakesTheSameTwoNames(t *testing.T) {
 	called := harness.container.called()
 	if len(called) != 1 || called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode {
 		t.Errorf("the info route asked for %v", called)
+	}
+}
+
+// A tap runs until the client hangs up or the span ends. The header
+// bound covers the wait for the container's status line and nothing
+// after it, so a stream that outlives the bound many times over is
+// what the route promises. The bound here stands in for the real ten
+// seconds, shortened so the test runs in a moment.
+func TestATapOutlivesTheHeaderBound(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.relay.headers = 40 * time.Millisecond
+
+	// The container answers its headers at once and then delivers a
+	// block every 20 ms for well past the bound.
+	blocks := 30
+	harness.container.streams(func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "audio/wav")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		for range blocks {
+			time.Sleep(20 * time.Millisecond)
+			_, _ = w.Write([]byte("samples!"))
+			w.(http.Flusher).Flush()
+		}
+	})
+
+	started := time.Now()
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if answer.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	}
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("the body ended early: %v", err)
+	}
+	ran := time.Since(started)
+	if len(body) != blocks*len("samples!") {
+		t.Errorf("the tap delivered %d bytes of %d, and it was cut short",
+			len(body), blocks*len("samples!"))
+	}
+	if ran < 4*harness.server.relay.headers {
+		t.Errorf("the tap ran %s, which is too short to have outlived the bound", ran)
+	}
+}
+
+func TestHeadersThatArriveLateAreAGatewayTimeout(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.relay.headers = 40 * time.Millisecond
+
+	// The container takes longer than the bound to answer at all.
+	harness.container.streams(func(w http.ResponseWriter) {
+		time.Sleep(400 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if answer.StatusCode != http.StatusGatewayTimeout {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("late headers answered %s: %s", answer.Status, body)
+	}
+	document := readProblemBody(t, answer)
+	if document.Type != problemUpstreamFailed {
+		t.Errorf("the problem type is %q", document.Type)
+	}
+	if !strings.Contains(document.Detail, "sent no headers in time") {
+		t.Errorf("the detail is %q", document.Detail)
+	}
+	_, _ = io.Copy(io.Discard, answer.Body)
+}
+
+// The span's begin is added to the bound, so a tap that discards a
+// minute is not cut off before its first byte.
+func TestTheBoundAllowsForTheSpansOwnBegin(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+	harness.server.relay.headers = 10 * time.Millisecond
+
+	harness.container.streams(func(w http.ResponseWriter) {
+		time.Sleep(120 * time.Millisecond)
+		w.Header().Set("Content-Type", "audio/wav")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("samples!"))
+	})
+
+	// Without the begin the 10 ms bound would cut this off; t=0.2,0.3
+	// adds 200 ms to it.
+	answer := harness.call(t, http.MethodGet,
+		"/v1/audio/sinks/kitchen/audio.wav?t=0.2,0.3", nil)
+	if answer.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("a tap with a begin answered %s: %s", answer.Status, body)
+	}
+	_, _ = io.Copy(io.Discard, answer.Body)
+}
+
+// The capture container ends a cut-short body without its terminating
+// chunk, which reaches this side as a read that ended with anything
+// but EOF. The API tells its own caller the same way, so a truncation
+// crosses both legs as a truncation rather than turning into a clean
+// end at the door.
+func TestAContainerThatCutTheBodyShortCutsThePublicOneToo(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+
+	// The container writes a 200 and some bytes, then ends its handler
+	// the way a tap whose pipeline died does.
+	harness.container.streams(func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "audio/wav")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("RIFFsamples"))
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	})
+
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if answer.StatusCode != http.StatusOK {
+		t.Fatalf("the tap answered %s", answer.Status)
+	}
+	if _, err := io.ReadAll(answer.Body); err == nil {
+		t.Fatal("a body the container cut short arrived as though it were complete")
+	}
+
+	// The record of the request survives the abort, and it says what
+	// happened.
+	line := harness.lines.last()
+	if !strings.Contains(line, "the capture container ended the body part way") {
+		t.Errorf("the API logged %q", line)
+	}
+	if !strings.Contains(line, "status=200") {
+		t.Errorf("the line does not name the status it sent: %q", line)
+	}
+}
+
+func TestABodyTheContainerFinishedArrivesComplete(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+
+	harness.container.streams(func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "audio/wav")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("RIFFsamples"))
+	})
+
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("a finished body ended with %v", err)
+	}
+	if string(body) != "RIFFsamples" {
+		t.Errorf("the body is %q", body)
+	}
+	if line := harness.lines.last(); !strings.Contains(line, "ended=ok") {
+		t.Errorf("the API logged %q", line)
+	}
+}
+
+func TestThePublicLegLogsEveryRequestWhateverBecameOfIt(t *testing.T) {
+	// The line is written from a defer, so the two endings and the
+	// answers that never stream all reach the log.
+	harness := newAPIHarness(t)
+	answer := harness.call(t, http.MethodGet, "/v1/audio", nil)
+	_, _ = io.Copy(io.Discard, answer.Body)
+	if line := harness.lines.last(); !strings.Contains(line, "ended=ok") ||
+		!strings.Contains(line, "route=/v1/audio") {
+		t.Errorf("the discovery document logged %q", line)
 	}
 }

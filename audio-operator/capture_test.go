@@ -83,6 +83,14 @@ func newCaptureHarness(t *testing.T, graph string, samples []byte) *captureHarne
 	return harness
 }
 
+// endsWithTheSamples makes the fake pw-record stop when the samples
+// file runs out, rather than looping, which is what a pw-record that
+// died under a tap looks like to the container.
+func (h *captureHarness) endsWithTheSamples(t *testing.T) {
+	t.Helper()
+	t.Setenv("CAPTURE_FAKE_ONCE", "yes")
+}
+
 // linksTo says which node the fixture's link lands on, which is how
 // one graph serves a tap on any endpoint in it.
 func (h *captureHarness) linksTo(t *testing.T, nodeID string) {
@@ -668,5 +676,81 @@ func TestATapRefusedByTheLimitWritesNoTapLine(t *testing.T) {
 	_, _ = io.Copy(io.Discard, answer.Body)
 	if lines := harness.logged(); len(lines) != 0 {
 		t.Errorf("a refused tap wrote %v", lines)
+	}
+}
+
+// A capture the pipeline ended under has no status left to report: the
+// 200 and its first bytes are already on the wire. The container ends
+// the body without its terminating chunk instead, which is RFC 9112
+// section 8's signal for an incomplete message, and a reader sees the
+// read fail rather than a clean end.
+func TestAPipelineThatDiedMidTapEndsTheBodyIncomplete(t *testing.T) {
+	// The samples run out before the span does: pw-record ended on its
+	// own, which is what PipeWire dying under a tap looks like here.
+	harness := newCaptureHarness(t, "graph.json", silence(0.05, 48000, 2))
+	harness.endsWithTheSamples(t)
+
+	answer := harness.call(t, http.MethodGet,
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,5")
+	if answer.StatusCode != http.StatusOK {
+		t.Fatalf("the tap answered %s", answer.Status)
+	}
+	_, err := io.ReadAll(answer.Body)
+	if err == nil {
+		t.Fatal("a capture that was cut short ended as though it were complete")
+	}
+
+	lines := harness.logged()
+	if len(lines) != 1 || !strings.Contains(lines[0], "truncated") {
+		t.Errorf("the container logged %v", lines)
+	}
+}
+
+func TestAFinishedSpanEndsCleanly(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
+	answer := harness.call(t, http.MethodGet,
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("a finished span ended with %v", err)
+	}
+	// 0.125 s at 48000 Hz, two channels, two bytes a sample.
+	if len(body) != wavHeaderBytes+24000 {
+		t.Errorf("the body is %d bytes, want %d", len(body), wavHeaderBytes+24000)
+	}
+	lines := harness.logged()
+	if len(lines) != 1 || strings.Contains(lines[0], "truncated") {
+		t.Errorf("a finished span logged %v", lines)
+	}
+}
+
+func TestAClientThatHungUpEndsCleanly(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
+	// An open span, read for one block and then abandoned.
+	request, err := http.NewRequest(http.MethodGet,
+		harness.serving.URL+"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a.b.c")
+	answer, err := harness.serving.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(answer.Body, make([]byte, 64)); err != nil {
+		t.Fatalf("reading the first block: %v", err)
+	}
+	_ = answer.Body.Close()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(harness.logged()) == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	lines := harness.logged()
+	if len(lines) != 1 {
+		t.Fatalf("the container logged %v", lines)
+	}
+	if strings.Contains(lines[0], "truncated") {
+		t.Errorf("a client that hung up was read as a truncation: %q", lines[0])
 	}
 }

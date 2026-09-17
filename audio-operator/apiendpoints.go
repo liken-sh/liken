@@ -65,7 +65,7 @@ func (s *apiServer) readEndpoint(route apiRoute, name string) (capturedEndpoint,
 // serveEndpoint answers the info route and the tap routes.
 func (s *apiServer) serveEndpoint(w http.ResponseWriter, r *http.Request, route apiRoute,
 	name string, form representation, knobs captureKnobs, who caller,
-	id string, at time.Time) answered {
+	id string, at time.Time, outcome *answered) answered {
 	held, err := s.readEndpoint(route, name)
 	if errors.Is(err, ErrNotFound) {
 		return s.refuseAs(w, r, route, name, who, http.StatusNotFound, problemNoNode, id,
@@ -95,7 +95,7 @@ func (s *apiServer) serveEndpoint(w http.ResponseWriter, r *http.Request, route 
 	if route.Kind == routeInfo {
 		return s.serveInfo(w, r, route, held, form, pod, who, id)
 	}
-	return s.serveTap(w, r, route, held, form, knobs, pod, who, id, at)
+	return s.serveTap(w, r, route, held, form, knobs, pod, who, id, at, outcome)
 }
 
 // refuseAs writes a problem and names the caller, so the one log line
@@ -160,13 +160,13 @@ func (s *apiServer) readCaptureFormat(r *http.Request, route apiRoute,
 // serveTap forwards one capture and relays what comes back.
 func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRoute,
 	held capturedEndpoint, form representation, knobs captureKnobs, pod capturePod,
-	who caller, id string, at time.Time) answered {
+	who caller, id string, at time.Time, outcome *answered) answered {
 	// A HEAD answers with the GET's headers, takes no sample, and makes
 	// no call to the capture container (RFC 9110 section 9.3.2).
 	if r.Method == http.MethodHead {
 		writeTapHeaders(w, route, held.Name, form, at)
 		w.WriteHeader(http.StatusOK)
-		return answered{Status: http.StatusOK, Who: who}
+		return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
 	}
 
 	// The container's route mirrors this one with the extension always
@@ -214,10 +214,23 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	})
 	streamed := s.now().Sub(started)
 
-	if copyErr != nil {
-		fmt.Printf("%s: %s stream %s ended: %v\n", DriverName, apiComponent, id, copyErr)
+	// The container ends its handler without a terminating chunk when
+	// the capture was cut short, and that reaches this side as a read
+	// that ended with anything but EOF. The caller is told the same
+	// way, so a truncation crosses both legs as a truncation.
+	cut := copyErr != nil && !errors.Is(copyErr, errClientGone)
+	result := answered{
+		Status: http.StatusOK, Sent: sent, Streamed: streamed, Who: who, Ended: "ok",
 	}
-	return answered{Status: http.StatusOK, Sent: sent, Streamed: streamed, Who: who}
+	if copyErr != nil {
+		result.Ended = copyErr.Error()
+	}
+	if cut {
+		result.Ended = "the capture container ended the body part way: " + copyErr.Error()
+		*outcome = result
+		panic(http.ErrAbortHandler)
+	}
+	return result
 }
 
 // relayFailure maps a private leg that did not answer at all. A

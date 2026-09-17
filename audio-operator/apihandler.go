@@ -36,14 +36,22 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := s.answer(w, r, route, name, id, at)
-	headers := s.now().Sub(at) - result.Streamed
-	s.readings.answered(route.Template, r.Method, result.Status, headers)
-	s.record(fmt.Sprintf(
-		"%s: %s route=%s id=%s user=%s resource=%s status=%d bytes=%d headers=%.3f stream=%.3f",
-		DriverName, apiComponent, route.Template, id, callerName(result.Who),
-		resourceOf(route, name), result.Status, result.Sent,
-		headers.Seconds(), result.Streamed.Seconds()))
+	// The line is written from a defer, because a tap the capture
+	// container cut short ends this handler with a panic and the
+	// record of the request has to survive it. serveTap fills the
+	// outcome in before it aborts.
+	outcome := &answered{}
+	defer func() {
+		headers := s.now().Sub(at) - outcome.Streamed
+		s.readings.answered(route.Template, r.Method, outcome.Status, headers)
+		s.record(fmt.Sprintf(
+			"%s: %s route=%s id=%s user=%s resource=%s status=%d bytes=%d "+
+				"headers=%.3f stream=%.3f ended=%s",
+			DriverName, apiComponent, route.Template, id, callerName(outcome.Who),
+			resourceOf(route, name), outcome.Status, outcome.Sent,
+			headers.Seconds(), outcome.Streamed.Seconds(), outcome.Ended))
+	}()
+	*outcome = s.answer(w, r, route, name, id, at, outcome)
 }
 
 // answered is what one request produced, which is what the log line
@@ -53,16 +61,20 @@ type answered struct {
 	Sent     int64
 	Streamed time.Duration
 	Who      caller
+
+	// Ended is how the body finished, which is ok on every answer that
+	// is not a stream the capture container cut short.
+	Ended string
 }
 
-func refused(status int) answered { return answered{Status: status} }
+func refused(status int) answered { return answered{Status: status, Ended: "ok"} }
 
 // answer does the work and reports what was sent, so ServeHTTP writes
 // one log line and one metric for every path through this file. The
 // negotiation and the query come after the authorization, so a 406
 // and a 400 reveal no more than a 403 does.
 func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name, id string, at time.Time) answered {
+	name, id string, at time.Time, outcome *answered) answered {
 	if !answersMethod(r.Method) {
 		w.Header().Set("Allow", allowHeader())
 		return s.refuse(w, r, route, name, http.StatusMethodNotAllowed, problemBlank, id,
@@ -105,7 +117,7 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 		document.Acceptable = route.acceptable(name)
 		writeAnswerHeaders(w, route, name)
 		writeProblem(w, r.Method, document)
-		return answered{Status: http.StatusNotAcceptable, Who: who}
+		return answered{Status: http.StatusNotAcceptable, Who: who, Ended: "ok"}
 	}
 
 	knobs, err := parseKnobs(route, r.URL.RawQuery)
@@ -119,7 +131,7 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 	if route.Kind == routeDiscovery || route.Kind == routeOpenAPI {
 		return s.serveDocument(w, r, route, name, form, who)
 	}
-	return s.serveEndpoint(w, r, route, name, form, knobs, who, id, at)
+	return s.serveEndpoint(w, r, route, name, form, knobs, who, id, at, outcome)
 }
 
 // authenticate reviews the caller's token. It answers the caller, or
@@ -160,14 +172,14 @@ func (s *apiServer) serveDocument(w http.ResponseWriter, r *http.Request,
 		// A 304 carries the ETag and Vary and no body (RFC 9110
 		// section 15.4.5).
 		w.WriteHeader(http.StatusNotModified)
-		return answered{Status: http.StatusNotModified, Who: who}
+		return answered{Status: http.StatusNotModified, Who: who, Ended: "ok"}
 	}
 	if route.Kind == routeDiscovery {
 		writeJSON(w, r.Method, http.StatusOK, newDiscovery())
-		return answered{Status: http.StatusOK, Who: who}
+		return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
 	}
 	writeJSON(w, r.Method, http.StatusOK, newOpenAPI(s.origin(r)))
-	return answered{Status: http.StatusOK, Who: who}
+	return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
 }
 
 // origin is what the served OpenAPI document names in servers: the

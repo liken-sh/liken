@@ -97,6 +97,11 @@ type forwarder struct {
 	// dial is how the connection is made, a field for the same reason.
 	dial func(ctx context.Context, network, address string) (net.Conn, error)
 
+	// headers bounds the wait for the container's status line, over
+	// and above the span's own begin. It is a field so a test drives
+	// the bound without waiting the real ten seconds.
+	headers time.Duration
+
 	mu       sync.Mutex
 	anchored string
 	client   *http.Client
@@ -166,6 +171,14 @@ func (f *forwarder) transport() (*http.Client, error) {
 	return f.client, nil
 }
 
+// headerBound is how long this API waits for the container to answer.
+func (f *forwarder) headerBound() time.Duration {
+	if f.headers > 0 {
+		return f.headers
+	}
+	return headerTimeout
+}
+
 // forward makes one call. The caller owns the answer's body.
 func (f *forwarder) forward(ctx context.Context, held capturePod,
 	path, rawQuery string, begin time.Duration) (*http.Response, error) {
@@ -190,25 +203,30 @@ func (f *forwarder) forward(ctx context.Context, held capturePod,
 
 	// The header bound is ten seconds plus begin, so a tap that
 	// discards a minute is not cut off before its first byte.
-	headers, cancel := context.WithTimeout(ctx, headerTimeout+begin)
+	// The bound covers the wait for the status line and the headers and
+	// nothing after it. A deadline on the request context would cut the
+	// body as well, and a tap is unbounded on purpose: what bounds the
+	// body is the idle watchdog in serveTap and the caller hanging up.
+	// So the bound is a timer this code stops the moment the headers
+	// arrive.
+	headers, cancel := context.WithCancel(ctx)
+	bound := f.headerBound() + begin
+	deadline := time.AfterFunc(bound, cancel)
 	answer, err := client.Do(request.WithContext(headers))
+	// Stop answers false when the timer has already run, which is the
+	// one case that is a 504.
+	expired := !deadline.Stop() && ctx.Err() == nil
 	if err != nil {
-		// The bound is read before it is released: a cancel makes every
-		// context report an error, and only a deadline that passed is
-		// the 504 the table names.
-		expired := errors.Is(headers.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancel()
 		switch {
 		case malformed(err):
 			return nil, fmt.Errorf("%w: %w", ErrCaptureMalformed, err)
 		case expired:
-			return nil, fmt.Errorf("%w within %s: %w", ErrCaptureTimeout, headerTimeout+begin, err)
+			return nil, fmt.Errorf("%w within %s: %w", ErrCaptureTimeout, bound, err)
 		default:
 			return nil, fmt.Errorf("%w: %w", ErrCaptureRefused, err)
 		}
 	}
-	// The bound covered the headers alone. The body's own bound is the
-	// idle reader below.
 	answer.Body = &cancellingBody{ReadCloser: answer.Body, cancel: cancel}
 	return answer, nil
 }

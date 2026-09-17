@@ -66,6 +66,13 @@ func recordCommand(node, stream string, direction pwDirection, format captureFor
 // tap's own node takes in the graph, and, for a sink, PipeWire's key
 // for reading the monitor ports.
 //
+// A sink's monitor ports carry what the sink receives, and spec.mute
+// is applied after them, so a muted Sink taps at the level it was
+// sent and muting a speaker changes nothing on this route. A Source
+// is the other way round: its mute is in front of the ports a tap
+// reads, so a muted microphone taps as silence. Both were measured on
+// liken-1.
+//
 // The name is how the confirmation finds this tap among every other
 // client of the socket. PipeWire sets no application.process.id here,
 // because the kernel cannot translate a peer's pid across PID
@@ -151,7 +158,13 @@ func encoderEnvironment() []string {
 }
 
 // expectedStderr says whether a line an encoder printed is one this
-// container expects. An expected line is logged and is not a failure.
+// container expects.
+//
+// What decides whether a tap failed is the exit status, not stderr:
+// both encoders write a banner and a progress bar there and exit zero
+// on every successful tap. This filter is for the three failures that
+// happen before a process is running, where its stderr is the whole
+// story and flac's own warning would only be noise in it.
 func expectedStderr(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
@@ -160,9 +173,10 @@ func expectedStderr(line string) bool {
 	return strings.Contains(trimmed, flacMD5Warning)
 }
 
-// unexpectedStderr is what a failure carries: the lines a process
+// unexpectedStderr is what a start failure carries: the lines a process
 // printed that this container does not expect, in the process's own
-// words.
+// words. A tap that ran and then ended reports its exit status and one
+// line instead; tapExit holds that.
 func unexpectedStderr(output string) string {
 	var kept []string
 	for _, line := range strings.Split(output, "\n") {

@@ -344,6 +344,13 @@ does not close. Any pod that holds any audio claim on a node can
 already tap that node's microphone and sinks, with no RBAC and no
 record, so a `Source` grant is a courtesy until that door closes.
 
+A muted `Sink` still carries its signal to a tap. A sink's monitor
+ports carry what the sink receives, and `spec.mute` is applied after
+them, so muting a speaker silences the room and changes nothing on
+this route. A muted `Source` does tap as silence, because there the
+mute is in front of the ports the tap reads. Mute is not a way to
+close a speaker to this API; the grant is.
+
 Every request that produces bytes writes a `Captured` `Event` on the
 `Sink` or `Source`, so `kubectl describe sink` answers who listened
 and when.

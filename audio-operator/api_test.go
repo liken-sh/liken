@@ -155,6 +155,7 @@ type containerFake struct {
 	format   captureFormatDocument
 	requests []*url.URL
 	token    string
+	stream   func(http.ResponseWriter)
 	server   *httptest.Server
 }
 
@@ -168,9 +169,17 @@ func newContainerFake(t *testing.T) *containerFake {
 	}
 	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mu.Lock()
-		defer fake.mu.Unlock()
 		fake.requests = append(fake.requests, r.URL)
 		fake.token = r.Header.Get("Authorization")
+		// A test that drives timing owns the whole answer, and it
+		// writes it without the lock so the handler does not hold it
+		// for the life of the stream.
+		if write := fake.stream; write != nil {
+			fake.mu.Unlock()
+			write(w)
+			return
+		}
+		defer fake.mu.Unlock()
 		route, name, _ := matchRoute(r.URL.Path)
 		if route.Kind == routeInfo {
 			fake.format.Node = name
@@ -207,6 +216,14 @@ func (f *containerFake) answers(document problem) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.problem = &document
+}
+
+// streams hands the tap route over to one function, for the tests that
+// drive how an answer arrives in time rather than what it holds.
+func (f *containerFake) streams(write func(http.ResponseWriter)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stream = write
 }
 
 func newAPIHarness(t *testing.T) *apiHarness {
