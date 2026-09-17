@@ -821,7 +821,3 @@ holds a screen, every still on it is a 503.
 **A clip that pauses when the screen does not change.** The
 `framebuffer` source holds planes off and forces a repaint per frame;
 `writeback` is "often not available" in Weston 14.
-
-**Audio in a clip.** A `Display` has no sink; media-operator's plan
-34 composes this API's `screen.mp4` with audio-operator's
-`audio.opus`.
