@@ -19,3 +19,31 @@ spec:
       relabelings:
         - sourceLabels: [__meta_kubernetes_pod_node_name]
           targetLabel: node
+    # The capture listener serves metrics and taps on one TLS port,
+    # with a leaf signed by a CA that audio-api mints after this file
+    # is applied and that Prometheus never holds. The series carry no
+    # capture content, so the scrape skips verification.
+    - port: capture
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+---
+# audio-api is one Deployment for the whole cluster, so its series
+# are about the API and not about a machine. There is no node
+# relabeling here: the pod runs wherever the scheduler put it, and
+# that node means nothing to a reader of these series. The scrape
+# reads the plain HTTP metrics port, not the API's TLS port.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: audio-api
+  namespace: liken-system
+spec:
+  selector:
+    matchLabels:
+      app: audio-api
+  podMetricsEndpoints:
+    - port: metrics

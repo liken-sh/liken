@@ -1,0 +1,2779 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "audio.liken.sh capture API",
+    "version": "v1",
+    "summary": "Taps what a Sink plays and what a Source hears, and streams it as WAV, FLAC, or Ogg Opus.",
+    "description": "Identity is in the path, the format is in the extension or in Accept, and the span is a W3C Media Fragments t= in the query. Every request carries a ServiceAccount token minted with the audience audio-api, and a tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored: every answer streams from the node the endpoint is on."
+  },
+  "servers": [
+    {
+      "url": "https://audio-api.liken-system.svc"
+    }
+  ],
+  "paths": {
+    "/v1/audio": {
+      "get": {
+        "operationId": "discovery",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/discovery"
+                }
+              }
+            },
+            "description": "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          }
+        },
+        "summary": "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect."
+      },
+      "head": {
+        "operationId": "discoveryHead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/discovery"
+                }
+              }
+            },
+            "description": "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          }
+        },
+        "summary": "The headers of the discovery document: every resource this API serves, with an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "discoveryOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      }
+    },
+    "/v1/audio/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/openapi+json": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "This document.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          }
+        },
+        "summary": "This document."
+      },
+      "head": {
+        "operationId": "openapiHead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/openapi+json": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "This document.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          }
+        },
+        "summary": "The headers of this document. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "openapiOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      }
+    },
+    "/v1/audio/sinks/{name}": {
+      "get": {
+        "operationId": "getSink",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/endpoint"
+                }
+              }
+            },
+            "description": "The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served."
+      },
+      "head": {
+        "operationId": "getSinkHead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/endpoint"
+                }
+              }
+            },
+            "description": "The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of the sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSinkOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sinks/{name}/audio": {
+      "get": {
+        "operationId": "getSinkAudio",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, in the form Accept chooses.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Location": {
+                "description": "The extension route that serves the representation the negotiation chose.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the speakers play now, in the form Accept chooses."
+      },
+      "head": {
+        "operationId": "getSinkAudioHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, in the form Accept chooses.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Location": {
+                "description": "The extension route that serves the representation the negotiation chose.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the speakers play now, in the form Accept chooses. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSinkAudioOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sinks/{name}/audio.flac": {
+      "get": {
+        "operationId": "getSinkAudioFlac",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, as FLAC.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the speakers play now, as FLAC."
+      },
+      "head": {
+        "operationId": "getSinkAudioFlacHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, as FLAC.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSinkAudioFlacOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sinks/{name}/audio.opus": {
+      "get": {
+        "operationId": "getSinkAudioOpus",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, as Ogg Opus.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the speakers play now, as Ogg Opus."
+      },
+      "head": {
+        "operationId": "getSinkAudioOpusHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, as Ogg Opus.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSinkAudioOpusOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sinks/{name}/audio.wav": {
+      "get": {
+        "operationId": "getSinkAudioWav",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, as PCM in a RIFF WAVE stream.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the speakers play now, as PCM in a RIFF WAVE stream."
+      },
+      "head": {
+        "operationId": "getSinkAudioWavHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the speakers play now, as PCM in a RIFF WAVE stream.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSinkAudioWavOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sources/{name}": {
+      "get": {
+        "operationId": "getSource",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/endpoint"
+                }
+              }
+            },
+            "description": "The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served."
+      },
+      "head": {
+        "operationId": "getSourceHead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/endpoint"
+                }
+              }
+            },
+            "description": "The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/notModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of the source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSourceOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sources/{name}/audio": {
+      "get": {
+        "operationId": "getSourceAudio",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, in the form Accept chooses.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Location": {
+                "description": "The extension route that serves the representation the negotiation chose.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the microphone hears now, in the form Accept chooses."
+      },
+      "head": {
+        "operationId": "getSourceAudioHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, in the form Accept chooses.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Location": {
+                "description": "The extension route that serves the representation the negotiation chose.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the microphone hears now, in the form Accept chooses. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSourceAudioOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sources/{name}/audio.flac": {
+      "get": {
+        "operationId": "getSourceAudioFlac",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, as FLAC.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the microphone hears now, as FLAC."
+      },
+      "head": {
+        "operationId": "getSourceAudioFlacHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, as FLAC.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the microphone hears now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSourceAudioFlacOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sources/{name}/audio.opus": {
+      "get": {
+        "operationId": "getSourceAudioOpus",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, as Ogg Opus.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the microphone hears now, as Ogg Opus."
+      },
+      "head": {
+        "operationId": "getSourceAudioOpusHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400.",
+            "in": "query",
+            "name": "bitrate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/ogg; codecs=opus": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, as Ogg Opus.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the microphone hears now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSourceAudioOpusOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/audio/sources/{name}/audio.wav": {
+      "get": {
+        "operationId": "getSourceAudioWav",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, as PCM in a RIFF WAVE stream.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "What the microphone hears now, as PCM in a RIFF WAVE stream."
+      },
+      "head": {
+        "operationId": "getSourceAudioWavHead",
+        "parameters": [
+          {
+            "description": "The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400.",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "What the microphone hears now, as PCM in a RIFF WAVE stream.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store. A capture is never cacheable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "The save name a browser gets, with the RFC 3339 time's colons replaced by dashes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/badRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/methodNotAllowed"
+          },
+          "406": {
+            "$ref": "#/components/responses/notAcceptable"
+          },
+          "409": {
+            "$ref": "#/components/responses/away"
+          },
+          "500": {
+            "$ref": "#/components/responses/wrongTarget"
+          },
+          "502": {
+            "$ref": "#/components/responses/badGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/gatewayTimeout"
+          }
+        },
+        "summary": "The headers of what the microphone hears now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+      },
+      "options": {
+        "operationId": "getSourceAudioWavOptions",
+        "responses": {
+          "204": {
+            "description": "The methods this route answers.",
+            "headers": {
+              "Allow": {
+                "description": "GET, HEAD, OPTIONS.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers, as a 204 with Allow (RFC 9110 section 10.2.1)."
+      },
+      "parameters": [
+        {
+          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "discovery": {
+        "description": "The discovery document the three capture APIs share.",
+        "properties": {
+          "openapi": {
+            "type": "string"
+          },
+          "resources": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "resources",
+          "openapi"
+        ],
+        "type": "object"
+      },
+      "endpoint": {
+        "description": "One endpoint's own document: the node a tap targets, the rate and channel count it would use, the format the node reports now, and the forms served.",
+        "properties": {
+          "channels": {
+            "type": "integer"
+          },
+          "connectionType": {
+            "type": "string"
+          },
+          "extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "type": "object"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mediaTypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "rate": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "node",
+          "mediaTypes",
+          "extensions"
+        ],
+        "type": "object"
+      },
+      "problem": {
+        "description": "The RFC 9457 problem document every error answers with. detail carries the source's own words: pw-record's stderr, an encoder's stderr, or the API server's status message. instance is the request path, a number sign, and the request id the log line carries.",
+        "properties": {
+          "acceptable": {
+            "items": {
+              "properties": {
+                "href": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "href"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "instance"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerToken": {
+        "bearerFormat": "JWT",
+        "description": "A ServiceAccount token minted with the audience audio-api, which this API checks with a TokenReview.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    },
+    "responses": {
+      "away": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "The endpoint has no status.node. The detail says to power the device on."
+      },
+      "badGateway": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "The capture container answered something that is not HTTP or not a problem document."
+      },
+      "badRequest": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take."
+      },
+      "forbidden": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need."
+      },
+      "gatewayTimeout": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "The capture container sent no headers within the header timeout."
+      },
+      "methodNotAllowed": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "A method other than GET, HEAD, and OPTIONS."
+      },
+      "notAcceptable": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each."
+      },
+      "notFound": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "No Sink or Source of that name, or PipeWire holds no node for it."
+      },
+      "notModified": {
+        "description": "The If-None-Match field matches this document's ETag."
+      },
+      "unauthorized": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "No token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words."
+      },
+      "unavailable": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record."
+      },
+      "wrongTarget": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problem"
+            }
+          }
+        },
+        "description": "The tap's link landed on a node other than the one asked for."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerToken": []
+    }
+  ]
+}

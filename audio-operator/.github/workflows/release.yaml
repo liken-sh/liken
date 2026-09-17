@@ -139,6 +139,12 @@ jobs:
       # kubectl exec during a debugging session, so the map check
       # reports nothing when one drops out of the closure.
       #
+      # pw-record, flac, opusenc, and libstdbuf.so are asserted by
+      # name for the same reason: the capture container runs each one
+      # per tap, no daemon in this step maps any of them, and
+      # libstdbuf.so arrives through LD_PRELOAD rather than through
+      # any library graph ldd walks.
+      #
       # The two daemons run as separate containers sharing one volume,
       # the same shape the pod uses. The image has no shell, so every
       # container names a binary directly.
@@ -162,6 +168,11 @@ jobs:
             /usr/bin/pw-top \
             /usr/bin/pw-cli \
             /usr/bin/pw-metadata \
+            /usr/bin/pw-cat \
+            /usr/bin/pw-record \
+            /usr/bin/flac \
+            /usr/bin/opusenc \
+            /usr/libexec/coreutils/libstdbuf.so \
             /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so \
             /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-bluez5.so \
             /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so \
@@ -221,6 +232,40 @@ jobs:
             || { echo "pw-cli did not read the core"; exit 1; }
           probe /usr/bin/pw-metadata -n settings \
             || { echo "pw-metadata did not read the settings"; exit 1; }
+
+          # The listing above proves the files exist. This proves they
+          # load: pw-record opens libsndfile and the PipeWire client
+          # libraries, and each encoder opens its own codec library,
+          # so a run of each one against the live graph is what
+          # reports a library the closure lost. pw-record with no
+          # source to read still starts, and starting is the load this
+          # check is for, so the run is bounded by a sleep and its
+          # exit status is not read. The loader's own complaint on
+          # stderr is the one signal.
+          docker rm -f recorder > /dev/null 2>&1 || true
+          docker run -d --name recorder -v "audio-release:$runtime" \
+            -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
+            --entrypoint /usr/bin/pw-record "$image" \
+            --raw --format s16 --rate 48000 --channels 2 - > /dev/null
+          sleep 3
+          docker logs recorder > pw-record.out 2> pw-record.err || true
+          docker rm -f recorder > /dev/null
+          if grep -qi 'error while loading shared libraries' pw-record.err; then
+            cat pw-record.err
+            echo "pw-record is missing a library"
+            exit 1
+          fi
+          for encoder in \
+            "/usr/bin/flac --force-raw-format --endian=little --sign=signed --bps=16 --channels=2 --sample-rate=48000 --stdout -" \
+            "/usr/bin/opusenc --raw --raw-bits 16 --raw-rate 48000 --raw-chan 2 - -"
+          do
+            # shellcheck disable=SC2086
+            set -- $encoder
+            head -c 19200 /dev/zero | docker run --rm -i \
+              -e LD_PRELOAD=/usr/libexec/coreutils/libstdbuf.so -e _STDBUF_O=0 \
+              --entrypoint "$1" "$image" "${@:2}" > /dev/null \
+              || { echo "$1 did not encode"; exit 1; }
+          done
 
           # wpctl connects to PipeWire, not to WirePlumber, so it
           # answers even when the session manager has left. Both

@@ -55,6 +55,16 @@ rules:
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
+  # The capture container answers audio-api and nothing else, and it
+  # proves the caller with a TokenReview, which is a create on a
+  # review object rather than a read. The audience on that token is
+  # what keeps an ordinary pod's API-server token out of the capture
+  # port. The container never authorizes, so there is no
+  # SubjectAccessReview here: audio-api holds that grant through
+  # system:auth-delegator in api.yaml.
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stands in for flac in the tap's tests. It prints the MD5 warning
+# the real flac prints on every tap, so a test proves that line is
+# not read as a failure, and it copies its input behind a four-byte
+# marker so a test tells the encoder's output from the raw samples.
+set -eu
+printf '%s\n' "$@" > "$CAPTURE_FAKE_ENCODER_ARGS"
+printf 'WARNING, cannot write back MD5 sum when encoding to stdout\n' >&2
+printf 'fLaC'
+exec cat

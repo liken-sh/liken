@@ -13,6 +13,11 @@ out=$1
 # dpkg so that no architecture is written down here.
 lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 
+# coreutils ships libstdbuf.so in a private directory of its own,
+# and the directory differs between releases, so the path is read
+# from dpkg rather than written down here.
+stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
+
 # ldd reports the DT_NEEDED graph and nothing about a file a program
 # opens by name at runtime. Every module below is such a file. Each
 # one is named because the running daemons mapped it, and the module
@@ -60,10 +65,24 @@ lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 # libtinfo, pw-cli brings libreadline over the same libtinfo, and
 # pw-metadata brings nothing new.
 #
-# pw-cat and its pw-play and pw-record links stay out. Each is the
-# same 125,240-byte binary, but libsndfile with FLAC, vorbis, opus,
-# ogg, mpg123, and mp3lame under it adds 2,733,960 bytes, which is
-# 11 percent of the closure for a file player.
+# pw-record is how the capture container taps a sink's monitor ports
+# or a source's output ports. It is the same 125,240-byte pw-cat
+# binary under another name, so the link and its target are both
+# named here. flac and opusenc are the two encoders the container
+# pipes pw-record's raw samples into; the Go process does not encode
+# in their place because no pure-Go Opus encoder exists. libstdbuf.so
+# is what the container preloads into flac and opusenc with
+# _STDBUF_O=0, because both write stdout through stdio and a silent
+# sink would otherwise deliver nothing until the tap ends. Its path
+# comes from dpkg for the reason the multiarch directory above does.
+#
+# These five seeds add 3,100,123 bytes to a closure that is
+# 25,626,562 bytes without them, which is 12.1 percent of it. The
+# largest part is libsndfile, which pw-cat links and which brings in
+# libvorbisenc, libvorbis, libmpg123, and libmp3lame: four codec
+# libraries that --raw never opens. libopus is already here, brought
+# in by libspa-codec-bluez5-opus.so below, so opusenc adds the
+# encoder alone.
 #
 # The bluez5 plugin loads by name when the declare container
 # enables WirePlumber's Bluetooth monitor. The codec plugins beside
@@ -78,6 +97,11 @@ seeds="
 /usr/bin/pw-top
 /usr/bin/pw-cli
 /usr/bin/pw-metadata
+/usr/bin/pw-cat
+/usr/bin/pw-record
+/usr/bin/flac
+/usr/bin/opusenc
+$stdbuf
 $lib/pipewire-0.3/libpipewire-module-access.so
 $lib/pipewire-0.3/libpipewire-module-adapter.so
 $lib/pipewire-0.3/libpipewire-module-client-device.so

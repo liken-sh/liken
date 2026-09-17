@@ -1,0 +1,13 @@
+#!/bin/sh
+# Stands in for pw-dump in the tap's tests. The graph it prints is a
+# fixture beside it, with the running pw-record's own process id and
+# the node the link landed on substituted in, so the confirmation
+# reads the same shape a real graph has and one fixture serves a tap
+# on any endpoint in it.
+set -eu
+pid=0
+if [ -f "$CAPTURE_FAKE_PID" ]; then
+	pid=$(cat "$CAPTURE_FAKE_PID")
+fi
+target=${CAPTURE_FAKE_TARGET:-46}
+sed -e "s/PWRECORDPID/$pid/" -e "s/PWTARGETID/$target/" "$CAPTURE_FAKE_GRAPH"

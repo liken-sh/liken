@@ -27,6 +27,7 @@ resources:
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml
+  - api.yaml
 
 labels:
   - includeSelectors: false

@@ -12,12 +12,14 @@ import (
 )
 
 // exceptions are the absolute links no content file answers for.
-// Each one is served by the site anyway: the deploy manifests
-// publish through a module mount in hugo.yaml.
+// The site serves each one anyway, through a module mount in
+// hugo.yaml: the deploy manifests from ../deploy, and the OpenAPI
+// document from static/.
 var exceptions = []string{
 	"/deploy/deviceclasses.yaml",
 	"/deploy/kustomization.yaml",
 	"/deploy/operator.yaml",
+	"/v1/audio/openapi.json",
 }
 
 func TestManualInternalLinks(t *testing.T) {

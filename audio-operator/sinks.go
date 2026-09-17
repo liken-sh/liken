@@ -86,6 +86,10 @@ type SourceList struct {
 type EndpointMeta struct {
 	Name            string `json:"name"`
 	ResourceVersion string `json:"resourceVersion,omitempty"`
+	// An Event names the object it is about by kind, name, and UID,
+	// so a Captured event follows the endpoint it was written on and
+	// not a later object of the same name.
+	UID string `json:"uid,omitempty"`
 }
 
 // SinkSpec is what a playback endpoint rests at.

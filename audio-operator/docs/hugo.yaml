@@ -61,3 +61,10 @@ module:
       target: content
     - source: ../deploy
       target: static/deploy
+    # The OpenAPI document the API serves at /v1/audio/openapi.json is
+    # published here too, so a reader or a client generator reads it
+    # with no cluster. The servers member of this copy is a
+    # placeholder: the served copy fills it in from the request's own
+    # origin.
+    - source: static
+      target: static

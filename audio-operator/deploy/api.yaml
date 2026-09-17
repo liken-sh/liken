@@ -1,0 +1,239 @@
+# audio-api: the one Deployment per cluster that serves the capture
+# API, with its identity, its grants, and its Service. audio-api finds
+# the node an endpoint is on and forwards the stream. The capture
+# container in the DaemonSet pod on that node holds every fact about
+# PipeWire and every encoder. Nothing is stored on either side, so
+# this Deployment carries no volume for state.
+---
+# The identity audio-api authenticates and authorizes with. The tokens
+# it presents to the capture containers are minted for this account.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audio-api
+---
+# system:auth-delegator is the built-in role for a service that asks
+# the API server who a caller is and what that caller may do. It
+# covers the TokenReview that authenticates the Bearer token and the
+# SubjectAccessReview that authorizes the tap. The built-in role is
+# bound rather than a hand-rolled one because the API server ships
+# this grant and its shape is the same in every cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audio-api-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: audio-api
+    namespace: liken-system
+---
+# audio-api reads the named endpoint to learn its node. A Sink and a
+# Source are cluster-scoped, so this is a ClusterRole. The verb is get
+# alone: audio-api is given the name in the request path and never
+# lists. Every request that produces bytes writes a Captured event on
+# the endpoint, so kubectl describe answers who listened and when.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audio-api
+rules:
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks, sources]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audio-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: audio-api
+subjects:
+  - kind: ServiceAccount
+    name: audio-api
+    namespace: liken-system
+---
+# What audio-api does inside its own namespace: find the operator pod
+# on a node, and hold the domain's certificates. One informer on the
+# namespace's pods answers which pod runs on the target's node, from
+# memory. RBAC cannot restrict a list to a label selector, so list
+# and watch cover the namespace's pods. A resourceNames rule cannot
+# cover create, so get and update are separated from create, and the
+# last rule is unnamed: the program creates only the three names
+# above it. audio-api-tls holds the CA and the public leaf,
+# audio-capture-server holds the capture container's leaf, and
+# audio-api-ca publishes the CA certificate alone, so a client reads
+# the trust anchor with an ordinary get and never touches a Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: audio-api
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, update]
+    resourceNames: [audio-api-tls, audio-capture-server]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, update]
+    resourceNames: [audio-api-ca]
+  - apiGroups: [""]
+    resources: [secrets, configmaps]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: audio-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: audio-api
+subjects:
+  - kind: ServiceAccount
+    name: audio-api
+    namespace: liken-system
+---
+# The grant a cluster owner gives a person or a workload that may
+# listen. It is the only role in this file the owner binds. The
+# subresource shape, sinks/audio and sources/audio, is what makes a
+# tap grantable by an ordinary RBAC rule, and a rule of this shape
+# with resourceNames grants one endpoint. The verb is get because a
+# tap is a read of the endpoint's sound. A role with resources ["*"]
+# in audio.liken.sh, and cluster-admin, gain capture on the day this
+# ships.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audio-capture-viewer
+rules:
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks/audio, sources/audio]
+    verbs: [get]
+---
+# audio-api is the operator's image in a fifth mode, so the cluster
+# runs one binary at one version for the whole operator. One replica
+# with the Recreate strategy: the one shared write is the domain's
+# CA, and a create that loses the race reads the winner. The API
+# listener is HTTPS because a Bearer token on a plain listener is
+# replayable by anything on the path, and because Go speaks HTTP/2
+# only over TLS. The metrics listener is plain HTTP on liken's shared
+# metrics port, as the operator's is, because a scrape reads an
+# in-memory registry and carries no capture content.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audio-api
+  labels:
+    app: audio-api
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: audio-api
+  template:
+    metadata:
+      labels:
+        app: audio-api
+    spec:
+      serviceAccountName: audio-api
+      containers:
+        - name: api
+          image: ghcr.io/liken-sh/audio-operator:latest
+          args: ["api"]
+          env:
+            - name: API_ADDRESS
+              value: ":8443"
+            - name: METRICS_ADDRESS
+              value: ":9200"
+            # audio-api reads and writes its certificates in its own
+            # namespace, and the downward API is where a pod reads
+            # which namespace that is.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The token audio-api presents to a capture container,
+            # from the projected volume below.
+            - name: CAPTURE_TOKEN_FILE
+              value: /var/run/secrets/audio.liken.sh/capture/token
+          ports:
+            - name: api
+              containerPort: 8443
+            - name: metrics
+              containerPort: 9200
+          # Both probes read the metrics listener, which is plain
+          # HTTP. The API listener answers no probe, because a probe
+          # carries no token and would be a 401.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+              scheme: HTTP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+              scheme: HTTP
+          securityContext:
+            # audio-api opens two listeners and calls the API server,
+            # and none of that is privileged.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: capture-token
+              mountPath: /var/run/secrets/audio.liken.sh/capture
+              readOnly: true
+      volumes:
+        # How a capture container proves that the caller is audio-api:
+        # the kubelet projects a token for this ServiceAccount, and
+        # the container runs a TokenReview on it. The audience is
+        # audio-capture because an audience keeps every other pod's
+        # ordinary API-server token out of the capture port. The
+        # kubelet refreshes a projected token before it expires, so a
+        # ten-minute life needs no rotation of its own and no minted
+        # Secret.
+        - name: capture-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: audio-capture
+                  expirationSeconds: 600
+                  path: token
+---
+# The API's one door. A client dials https://audio-api.liken-system.svc.
+# The port is 443 so the name carries no port, and it reaches the
+# container's 8443.
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-api
+spec:
+  type: ClusterIP
+  selector:
+    app: audio-api
+  ports:
+    - name: https
+      port: 443
+      targetPort: api

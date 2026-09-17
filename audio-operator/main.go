@@ -89,14 +89,19 @@ const (
 
 // main selects the mode from the command line.
 //
-// The pod runs this one image four times. The declare init container
+// The pod runs this one image five times. The declare init container
 // passes the declare argument and writes PipeWire's node
 // declarations, the PipeWire and WirePlumber containers name their
-// own binary, and the operator container runs with no argument.
+// own binary, the operator container runs with no argument, and the
+// capture container passes capture and serves the taps.
 //
-// The WirePlumber container runs the image a fifth way, as its own
+// The WirePlumber container runs the image once more, as its own
 // probe: the same binary is already there, so the endpoints check
 // needs no second image and no shell.
+//
+// The audio-api Deployment runs the same image with the api argument,
+// so the cluster runs one binary at one version for the whole
+// operator.
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -105,6 +110,12 @@ func main() {
 			return
 		case endpointsMode:
 			endpointsRegistered()
+			return
+		case captureMode:
+			capture()
+			return
+		case apiMode:
+			serveAPI()
 			return
 		}
 	}

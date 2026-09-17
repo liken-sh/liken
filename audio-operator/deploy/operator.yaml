@@ -62,10 +62,13 @@ spec:
       priorityClassName: system-node-critical
       tolerations:
         - operator: Exists
-      # Four containers, one image, and the kubelet orders them. The
+      # Five containers, one image, and the kubelet orders them. The
       # declaration runs to completion, PipeWire and WirePlumber start
-      # in that order and stay up, and the operator starts last and
-      # stops first. Nothing in this pod supervises anything else.
+      # in that order and stay up, and the operator and capture
+      # containers start last and stop first. capture is a regular
+      # container beside the operator, so it starts after the two
+      # sidecars pass their probes and finds a socket that answers.
+      # Nothing in this pod supervises anything else.
       initContainers:
         # The node declarations, written into the volume that PipeWire
         # reads as a configuration drop-in directory. A plain init
@@ -315,6 +318,56 @@ spec:
             # since PipeWire loaded it.
             - name: pipewire-config
               mountPath: /etc/pipewire/pipewire.conf.d
+        # A restart of this container ends every running capture on
+        # the node and takes nothing else with it. There is no
+        # readiness probe: a probe here would decide the pod's Ready
+        # condition, and a late capture credential must not stall the
+        # hardware DaemonSet's rollout. Capture readiness is reported
+        # by the API's 503 and by the audio_capture_ready gauge
+        # instead. The liveness probe reads /healthz over TLS, which
+        # the container answers with a certificate of its own until
+        # audio-api has minted the leaf below.
+        - name: capture
+          image: ghcr.io/liken-sh/audio-operator:latest
+          args: ["capture"]
+          env:
+            - name: PIPEWIRE_RUNTIME_DIR
+              value: /var/run/audio.liken.sh
+            - name: XDG_RUNTIME_DIR
+              value: /var/run/audio.liken.sh
+            - name: CAPTURE_ADDRESS
+              value: ":9201"
+            - name: CAPTURE_TAPS
+              value: "4"
+            - name: CAPTURE_TLS_DIR
+              value: /var/run/audio-capture-tls
+          ports:
+            - name: capture
+              containerPort: 9201
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: capture
+              scheme: HTTPS
+            periodSeconds: 60
+            failureThreshold: 3
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: runtime
+              mountPath: /var/run/audio.liken.sh
+            - name: capture-tls
+              mountPath: /var/run/audio-capture-tls
+              readOnly: true
       resourceClaims:
         - name: controller
           resourceClaimTemplateName: sound-card
@@ -354,3 +407,14 @@ spec:
         # them.
         - name: wireplumber-config
           emptyDir: {}
+        # The capture container's TLS leaf, which audio-api signs
+        # from the domain's CA into this Secret. The Secret does not
+        # exist until audio-api mints it, and an optional volume holds
+        # nothing until then rather than parking the pod in
+        # ContainerCreating. The container reloads the leaf when the
+        # file changes, so this pod's ServiceAccount needs no get and
+        # no watch on the Secret.
+        - name: capture-tls
+          secret:
+            secretName: audio-capture-server
+            optional: true

@@ -39,6 +39,15 @@ test-go:
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
+# The OpenAPI document the site serves is rendered from the router
+# table in apiroutes.go, and a test holds the committed copy equal to
+# the rendered one apart from servers. This is the one command that
+# changes the committed copy, so a route change is followed by a run
+# of it and a commit of the result.
+.PHONY: openapi
+openapi:
+	go test -run TestTheServedAndCommittedDocumentsDifferOnlyInServers -update-openapi .
+
 .PHONY: test-docs
 test-docs:
 	$(MAKE) -C docs test

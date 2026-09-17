@@ -36,12 +36,19 @@ FROM debian:trixie-slim AS closure
 # codec plugins beside it. The plugin registers the media endpoint
 # with bluetoothd, holds the transport descriptor, and encodes the
 # samples, so Bluetooth playback takes nothing else from the host.
+#
+# flac and opus-tools carry the two encoders the capture container
+# pipes pw-record into. pw-record itself is pw-cat from pipewire-bin
+# above, and libopus is already here under the bluez5 codec plugin,
+# so opus-tools adds the encoder alone.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pipewire \
         pipewire-bin \
         wireplumber \
         libspa-0.2-bluetooth \
+        flac \
+        opus-tools \
     && rm -rf /var/lib/apt/lists/*
 COPY audio-closure.sh /
 RUN sh /audio-closure.sh /out

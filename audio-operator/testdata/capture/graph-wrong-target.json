@@ -1,0 +1,48 @@
+[
+  {
+    "id": 30,
+    "type": "PipeWire:Interface:Metadata",
+    "props": { "metadata.name": "settings" },
+    "metadata": [{ "subject": 0, "key": "clock.rate", "type": "", "value": 44100 }]
+  },
+  {
+    "id": 46,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": { "node.name": "usb-0573-1573-a34004801402-usb-audio", "media.class": "Audio/Sink" },
+      "params": { "Format": [], "EnumFormat": [{ "channels": 2 }] }
+    }
+  },
+  {
+    "id": 48,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": { "node.name": "pci-0000-00-1f-3-hdmi-0", "media.class": "Audio/Sink" },
+      "params": { "Format": [], "EnumFormat": [{ "channels": 2 }] }
+    }
+  },
+  {
+    "id": 59,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "pw-record",
+        "media.class": "Stream/Input/Audio",
+        "application.process.id": "PWRECORDPID"
+      },
+      "params": { "Format": [], "EnumFormat": [] }
+    }
+  },
+  {
+    "id": 61,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 48,
+      "output-port-id": 50,
+      "input-node-id": 59,
+      "input-port-id": 62,
+      "state": "active",
+      "props": {}
+    }
+  }
+]

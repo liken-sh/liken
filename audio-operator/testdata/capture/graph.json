@@ -1,0 +1,159 @@
+[
+  {
+    "id": 0,
+    "type": "PipeWire:Interface:Core",
+    "info": {
+      "props": {
+        "core.name": "pipewire-0"
+      }
+    }
+  },
+  {
+    "id": 30,
+    "type": "PipeWire:Interface:Metadata",
+    "props": {
+      "metadata.name": "settings"
+    },
+    "metadata": [
+      {
+        "subject": 0,
+        "key": "clock.rate",
+        "type": "",
+        "value": 48000
+      },
+      {
+        "subject": 0,
+        "key": "clock.quantum",
+        "type": "",
+        "value": 1024
+      }
+    ]
+  },
+  {
+    "id": 46,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "usb-0573-1573-a34004801402-usb-audio",
+        "media.class": "Audio/Sink",
+        "audio.card": "1",
+        "audio.pcm": "0"
+      },
+      "params": {
+        "EnumFormat": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S16LE",
+            "rate": {
+              "default": 48000,
+              "min": 8000,
+              "max": 192000
+            },
+            "channels": 2
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "rate": 48000,
+            "channels": 2,
+            "position": [
+              "FL",
+              "FR"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": 47,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "usb-0573-1573-a34004801402-usb-audio-capture",
+        "media.class": "Audio/Source",
+        "audio.card": "1",
+        "audio.pcm": "0"
+      },
+      "params": {
+        "EnumFormat": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S16LE",
+            "rate": {
+              "default": 48000,
+              "min": 8000,
+              "max": 192000
+            },
+            "channels": 1
+          }
+        ],
+        "Format": []
+      }
+    }
+  },
+  {
+    "id": 48,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "pci-0000-00-1f-3-hdmi-0",
+        "media.class": "Audio/Sink",
+        "audio.card": "0",
+        "audio.pcm": "3"
+      },
+      "params": {
+        "EnumFormat": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S16LE",
+            "rate": {
+              "default": 48000,
+              "min": 32000,
+              "max": 192000
+            },
+            "channels": {
+              "default": 6,
+              "min": 1,
+              "max": 8
+            }
+          }
+        ],
+        "Format": []
+      }
+    }
+  },
+  {
+    "id": 59,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "node.name": "pw-record",
+        "media.class": "Stream/Input/Audio",
+        "application.process.id": "PWRECORDPID",
+        "stream.capture.sink": "true"
+      },
+      "params": {
+        "Format": [],
+        "EnumFormat": []
+      }
+    }
+  },
+  {
+    "id": 60,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": PWTARGETID,
+      "output-port-id": 50,
+      "input-node-id": 59,
+      "input-port-id": 61,
+      "state": "active",
+      "props": {}
+    }
+  }
+]
