@@ -109,6 +109,11 @@ type draPlugin struct {
 	// prepare read. It is nil until the operator wires it, and a nil
 	// seam republishes nothing.
 	republish func()
+	// The operator's link history, which is what answers the monitor a
+	// dark connector still carries. It is nil until the operator wires
+	// it, and a nil history remembers nothing, so a dark connector is
+	// then a connector with no screen.
+	links *linkHistory
 	// The bounds of the wait for the socket and the mode to come
 	// back.
 	switchTimeout  time.Duration
@@ -301,10 +306,15 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 
 	// One walk answers every result in the claim, and it is the same
 	// walk that publishes the slice, so the two always report the same
-	// set of outputs with a monitor on them.
-	live := map[string]Output{}
-	for _, output := range connected(discoverOutputs(p.sysRoot, p.card)) {
-		live[deviceName(output.Connector)] = output
+	// connectors.
+	//
+	// The walk is not filtered to the lit connectors. A monitor that
+	// shows another input is dark on the wire and still the screen the
+	// claim named, and the slice keeps publishing it for that reason.
+	// Everything below that needs the wire states its own answer.
+	onCard := map[string]Output{}
+	for _, output := range discoverOutputs(p.sysRoot, p.card) {
+		onCard[deviceName(output.Connector)] = output
 	}
 
 	// The socket each Wayland result delivers, named before the loop
@@ -330,16 +340,23 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		if base, isDraw := outputOfDraw(result.Device); isDraw {
 			device, draw = base, true
 		}
-		output, lit := live[device]
-		if !lit {
-			// The monitor left between the allocation and this call.
-			// The pod waits in ContainerCreating, and the output's
-			// NoExecute taint is what the eviction controller acts on.
-			//
-			// A mode on a connector with nothing on it fails
-			// here too. There is no mode list to validate against and
-			// no screen to light.
-			return fail("output %s has no monitor on it right now", device)
+		output, onThisCard := onCard[device]
+		if !onThisCard {
+			// The allocation names a connector this card does not have.
+			// A slice this operator wrote never names one, so the claim
+			// was allocated against another machine's pool.
+			return fail("this card has no connector named %s", device)
+		}
+		if !output.Connected {
+			// The monitor is not answering. It is dark because it shows
+			// another input, or because somebody unplugged it, and the
+			// wire says the same thing either way. The claim is
+			// delivered when the operator still carries the screen, and
+			// refused when nothing was ever on the connector.
+			output.Remembered = p.links.remembered(output.Connector)
+			if monitorID(output.Remembered) == "" {
+				return fail("output %s has no monitor on it right now", device)
+			}
 		}
 		var edits cdiEdits
 		switch {
@@ -389,6 +406,14 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// and a delivery that raced it would start the consumer against
 			// a screen that is about to go dark.
 			if mode := selection.forRequest(result.Request); mode != "" {
+				// A dark connector offers no mode list to validate
+				// against and no screen to light. The kubelet's retry
+				// is the wait, and the mode goes on when the monitor
+				// comes back.
+				if !output.Connected {
+					return fail("%s has no monitor answering right now, so it cannot take the mode %s",
+						output.Connector, mode)
+				}
 				if err := p.applyMode(ctx, output, mode); err != nil {
 					return fail("%v", err)
 				}

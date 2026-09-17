@@ -297,11 +297,12 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}
 }
 
-// The link on a monitor's connector goes down. The pass inside the
-// grace publishes the connector with no taint, so the clients drawing
-// on it keep drawing, and the pass past the grace publishes the taint
-// that ends them.
-func TestReconcileHoldsTheTaintWhileALinkIsDown(t *testing.T) {
+// The link on a monitor's connector goes down, because the panel shows
+// another input or the receiver is renegotiating. The connector keeps
+// the monitor it left with: no pass taints it, however long it stays
+// dark, and every pass keeps publishing the monitor's identity, so the
+// claim on that screen still allocates and the pod on it keeps drawing.
+func TestAMonitorThatGoesDarkKeepsItsScreenPublished(t *testing.T) {
 	compositorFixture(t)
 	socket := servingSocket(t, t.TempDir())
 	fixture := &slicePublishFixture{}
@@ -310,7 +311,7 @@ func TestReconcileHoldsTheTaintWhileALinkIsDown(t *testing.T) {
 	clock := time.Now()
 	links.now = func() time.Time { return clock }
 
-	pass := func() []DeviceTaint {
+	pass := func() SliceDevice {
 		t.Helper()
 		fixture.created = nil
 		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links, nil); err != nil {
@@ -321,25 +322,29 @@ func TestReconcileHoldsTheTaintWhileALinkIsDown(t *testing.T) {
 		}
 		for _, device := range fixture.created.Spec.Devices {
 			if device.Name == "hdmi-a-1" {
-				return device.Taints
+				return device
 			}
 		}
 		t.Fatal("the slice published no hdmi-a-1 device")
-		return nil
+		return SliceDevice{}
 	}
 
-	pass()
-	// The A/V receiver switches its input, the HDMI link goes down, and
-	// the pass inside the grace taints nothing.
+	lit := pass()
+	screen := lit.Attributes[pairingAttribute].String
+	if screen == nil || *screen == "" {
+		t.Fatalf("the lit connector published no %s", pairingAttribute)
+	}
+
 	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "")
-	clock = clock.Add(time.Second)
-	if taints := pass(); len(taints) != 0 {
-		t.Errorf("the connector taints one second into the relink: %+v", taints)
-	}
+	clock = clock.Add(disconnectGrace + time.Hour)
+	dark := pass()
 
-	clock = clock.Add(disconnectGrace + time.Second)
-	if taints := pass(); len(taints) != 1 || taints[0].Key != disconnectedTaint {
-		t.Errorf("taints past the grace = %+v", taints)
+	if len(dark.Taints) != 0 {
+		t.Errorf("the dark connector taints, and its monitor is expected back: %+v", dark.Taints)
+	}
+	got := dark.Attributes[pairingAttribute].String
+	if got == nil || *got != *screen {
+		t.Errorf("the dark connector publishes %v for %s, want %q", got, pairingAttribute, *screen)
 	}
 }
 

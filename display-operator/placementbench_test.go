@@ -230,6 +230,43 @@ func (f *placementFixture) report(id int, socket string, width, height int) {
 	})
 }
 
+// darken takes one monitor off the wire. The card stops reporting the
+// connector as lit, and the compositor destroys the output, which the
+// module reports. The surfaces that were on it stay: the module hides
+// each one and clears its placement, and the client keeps its
+// connection.
+func (f *placementFixture) darken(connector string) {
+	f.t.Helper()
+	for i, screen := range f.wired {
+		if screen.Output.Connector == connector {
+			f.wired[i].Output = Output{Connector: connector}
+		}
+	}
+	f.module.send(layoutOutputGoneEvent + " " + connector)
+	waitUntil(f.t, connector+" leaves the store", func() bool {
+		_, held := f.link.state().Outputs[connector]
+		return !held
+	})
+}
+
+// light puts a monitor back on the wire, which creates the output
+// again.
+func (f *placementFixture) light(screen wiredScreen) {
+	f.t.Helper()
+	connector := screen.Output.Connector
+	for i, wired := range f.wired {
+		if wired.Output.Connector == connector {
+			f.wired[i] = screen
+		}
+	}
+	f.module.send(fmt.Sprintf("%s %s %d %d %d", layoutOutputEvent,
+		connector, screen.Width, screen.Height, screen.Scale))
+	waitUntil(f.t, connector+" returns to the store", func() bool {
+		_, held := f.link.state().Outputs[connector]
+		return held
+	})
+}
+
 // The lines the module read since a test last asked, so each pass is
 // read on its own batch. The hello of each connection is not one of
 // them: it is the link's own, and a test that counts connections

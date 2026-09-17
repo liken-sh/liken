@@ -161,9 +161,20 @@ func (p *placementPass) pass() error {
 		p.generation = state.Generation
 		p.forget()
 	}
-	for id := range p.placed {
+	for id, was := range p.placed {
 		if _, held := state.Surfaces[id]; !held {
 			delete(p.placed, id)
+			continue
+		}
+		// The output this surface sat on is gone. The module destroyed
+		// that output's layer, cleared the surface's placement, and hid
+		// it, and the client kept its connection through all of it. So
+		// the memo now describes a screen the surface is no longer on.
+		// Dropping it makes the next pass state the placement again
+		// when the output returns, which is what puts the picture back.
+		if _, lit := state.Outputs[was.connector]; !lit {
+			delete(p.placed, id)
+			delete(p.ordered, was.connector)
 		}
 	}
 

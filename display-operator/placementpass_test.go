@@ -338,6 +338,39 @@ func TestAReconnectStatesEveryPlacementAgain(t *testing.T) {
 	})
 }
 
+// A monitor whose input is not selected drops off the wire, and the
+// compositor destroys its output. The module hides every surface that
+// was on that output and clears each one's placement, and the client
+// keeps its connection through all of it. So when the output returns,
+// the pass has to state every placement again. What it remembered
+// sending is no longer on the screen.
+func TestAnOutputThatLeavesAndReturnsStatesEveryPlacementAgain(t *testing.T) {
+	fixture := newPlacementFixture(t)
+	fixture.screen(labMonitor(), DisplaySpec{})
+	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("living-room", "film-0", map[string]string{"media.liken.sh/focus": "true"})
+	surface := fixture.surface(film, 1920, 1080)
+
+	fixture.run()
+	assertSent(t, fixture.sent(), []string{
+		fmt.Sprintf("place %d HDMI-A-1 0 0 1920 1080 none 0", surface),
+		fmt.Sprintf("order HDMI-A-1 %d", surface),
+		"commit",
+	})
+
+	fixture.darken("HDMI-A-1")
+	fixture.run()
+
+	fixture.light(livingRoomScreen())
+	fixture.run()
+
+	assertSent(t, fixture.sent(), []string{
+		fmt.Sprintf("place %d HDMI-A-1 0 0 1920 1080 none 0", surface),
+		fmt.Sprintf("order HDMI-A-1 %d", surface),
+		"commit",
+	})
+}
+
 // A surface on the compositor's own socket belongs to no claim, so
 // nothing says which screen it was meant for and it goes on the first
 // connected output. The default layout shows it, and no selector

@@ -81,15 +81,30 @@ type Output struct {
 	// and never what it drives. It is empty when the output drives
 	// nothing and when the card could not answer.
 	CurrentMode string
-	// Relinking says the connector is dark and inside the grace the link
-	// history holds it in, so the devices carry no taint yet. It is false
-	// until withLinks has run, which keeps every other reader on the old
-	// rule.
-	Relinking bool
+	// Remembered is the monitor this connector carried the last time
+	// one answered on it. It is set only while the connector is dark,
+	// and it is the zero value on a connector this operator has never
+	// seen a monitor on. It is the zero value until withLinks has run.
+	//
+	// It exists because a monitor that shows another input drops hot
+	// plug detect, and the kernel reports that exactly as it reports an
+	// unplugged cable. The screen is still there, so the operator keeps
+	// serving its identity and the claim on it still allocates.
+	Remembered EDID
 	// Replaced says the connector came back carrying a different monitor
 	// than the one it left with, so the devices taint while a monitor is
 	// on the wire. It is false until withLinks has run.
 	Replaced bool
+}
+
+// monitor answers the monitor this connector is responsible for: the
+// one answering on the wire now, or the one it carries while it is
+// dark. It is the zero value on a connector with no screen behind it.
+func (o Output) monitor() EDID {
+	if o.Connected {
+		return o.Monitor
+	}
+	return o.Remembered
 }
 
 // WithCurrentModes puts the card's readback beside what sysfs

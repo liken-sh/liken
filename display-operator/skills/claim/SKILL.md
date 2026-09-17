@@ -73,12 +73,13 @@ selector that reads a missing attribute fails the whole allocation.
                   effect: NoExecute
                   tolerationSeconds: 30
 
-Tolerate `display.liken.sh/disconnected`, the taint a dark connector
-has. Its effect is `NoExecute`, and `tolerationSeconds` says how
-long your pod may hold a dark screen before the eviction controller
-ends it. Thirty seconds means a reseated cable costs nothing, and it
-also keeps the pod through a restart of the compositor's container,
-which is a restart of every screen on that machine. A claim on a
+Tolerate `display.liken.sh/disconnected`. Its effect is `NoExecute`,
+and `tolerationSeconds` says how long your pod may hold a tainted
+screen before the eviction controller ends it. A monitor that goes
+dark does not taint its connector, so this is not what carries you
+through an input change. Thirty seconds keeps the pod through a
+restart of the compositor's container, which is a restart of every
+screen on that machine. A claim on a
 connector with no monitor parks the pod `Pending`, visibly, and the
 pod starts on its own when a monitor is plugged in.
 
@@ -316,13 +317,21 @@ every machine it ever plugs into.
 
 ## Unplugged monitors, moved monitors, and second screens
 
-**A monitor unplugged.** The device keeps its place in the slice.
-After 90 seconds dark it gains the `disconnected` taint, and after
-your `tolerationSeconds` on top of that, the eviction controller ends
-the pod. A cable reseated within that time costs nothing: the
-client's Wayland connection never breaks, and its picture returns
-with the output. The same holds for an A/V receiver that switches
-its input and back, which renegotiates the link the same way.
+**A monitor dark.** The device keeps its place in the slice and keeps
+publishing the monitor's identity, so your claim still allocates and
+your pod keeps running. Nothing is evicted. The client's Wayland
+connection never breaks, and its picture returns with the output.
+
+This covers every way a monitor goes dark: a cable reseated, an A/V
+receiver renegotiating its link on an input change, and a panel
+showing another source. A monitor that shows another input drops hot
+plug detect, and the kernel reports that exactly as it reports an
+unplugged cable, so the operator treats them the same and keeps the
+screen.
+
+A monitor somebody really unplugged therefore keeps its devices
+claimable, and your pod keeps drawing into nothing. Read the
+`Connected` condition on the `Display` to see what the wire says.
 
 **A monitor moved to another connector.** A claim that selects by
 `model` or by `serial` instead of by `connector` follows the

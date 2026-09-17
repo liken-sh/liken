@@ -341,6 +341,10 @@ func operate() {
 	// The link history is the operator's own, one for the process, because
 	// the grace it holds is measured across passes.
 	links := newLinkHistory()
+	// The prepare path reads the same history the slice is published
+	// from, so a claim on a dark screen is delivered exactly when the
+	// slice still publishes that screen.
+	plugin.links = links
 	publish := func() {
 		err := readings.reconciled(kindResourceSlice, func() error {
 			return reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links, readings)

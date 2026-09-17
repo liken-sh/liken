@@ -56,6 +56,7 @@ func TestWestonConfigNamesTheShellTheModuleAndEachOutput(t *testing.T) {
 		"modules=liken-layout.so",
 		"renderer=gl",
 		"require-input=false",
+		"require-outputs=none",
 		"idle-time=0",
 		"name=HDMI-A-1\nmode=preferred",
 		"name=HDMI-A-2\nmode=preferred",

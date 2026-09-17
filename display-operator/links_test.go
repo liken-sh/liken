@@ -68,20 +68,23 @@ func TestAConnectorThatJustWentDarkCarriesNoTaint(t *testing.T) {
 	}
 }
 
-// A cable that is really unplugged stays unplugged. The grace is the
-// whole of the delay this rule adds, and the taint after it is the one
-// a consumer tolerates with tolerationSeconds.
-func TestAConnectorThatStaysDarkTaintsAfterTheGrace(t *testing.T) {
+// A monitor showing another input is dark on the wire for as long as
+// the person leaves it there, and the kernel reports that exactly as it
+// reports an unplugged cable. The connector keeps the monitor it left
+// with, so it never taints however long it stays dark, and the pod that
+// draws on it keeps running.
+func TestAConnectorThatStaysDarkKeepsItsMonitorAndNeverTaints(t *testing.T) {
 	bench := newLinkBench()
 	bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
 	bench.pass(darkConnector("HDMI-A-2"))
 
-	bench.advance(disconnectGrace + time.Second)
+	bench.advance(disconnectGrace + time.Hour)
 	tainted := bench.pass(darkConnector("HDMI-A-2"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
-		if !tainted[device] {
-			t.Errorf("%s carries no taint after %s dark", device, disconnectGrace+time.Second)
+		if tainted[device] {
+			t.Errorf("%s taints after %s dark, and its monitor is expected back",
+				device, disconnectGrace+time.Hour)
 		}
 	}
 }

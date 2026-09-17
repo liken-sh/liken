@@ -387,16 +387,29 @@ waits for the compositor even though the wire does not need one.
 taint a device has, and it means the output can serve nobody
 right now. It appears in two cases:
 
-* the connector has had no monitor for longer than 90 seconds, or a
-  different monitor arrived on it. A link that goes down and comes
-  back with the same monitor inside that time taints nothing, because
-  an A/V receiver renegotiates its HDMI link on every input change
-  and holds the connector dark for over a minute while a 4K handshake
-  settles,
+* the connector has no screen behind it. Either nothing is in it, or
+  this operator has not seen a monitor on it since it started. A
+  different monitor arriving on the connector taints it too, because
+  the claim on it asked for the monitor that left,
 * nothing answers on the compositor's socket, which covers the
   moment before the compositor's container is up and every restart
   of that container. The kubelet restarts a dead compositor alone,
   and the taint lifts on the pass that finds the socket answering.
+
+A connector that carried a monitor and then went dark is not one of
+them. It keeps that monitor for as long as it stays dark, and the
+slice keeps publishing the monitor's identity, so the claim on that
+screen still allocates and the pod on it keeps running. A monitor
+that shows another input drops hot plug detect, and the kernel
+reports that exactly as it reports a cable somebody pulled out. An
+A/V receiver does the same for about eighty seconds on every input
+change. Nothing on the wire tells the two apart, so the operator
+keeps the screen and the `Connected` condition on the `Display`
+reports what the wire says.
+
+The cost is that a monitor somebody really unplugged keeps its
+devices claimable, and the pod on it keeps drawing into nothing.
+Read `Connected` on the `Display` to see the wire.
 
 A consumer tolerates it with a `tolerationSeconds`, which is how
 long the pod may hold a dark screen before the eviction controller

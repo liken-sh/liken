@@ -180,12 +180,18 @@ func sliceDevices(outputs []Output) []SliceDevice {
 				"appId":     AttrString(appID(output.Connector)),
 			},
 		}
-		monitor := output.Monitor
+		// The identity is published whether the monitor answers now or
+		// is only remembered, because a claim names the screen it wants
+		// and that screen has not moved. Everything below the identity
+		// is read from the wire, so a dark connector states none of it:
+		// the operator cannot promise a mode or a size for a monitor it
+		// cannot ask.
+		monitor := output.monitor()
+		addAttribute(device.Attributes, "manufacturer", monitor.Manufacturer)
+		addAttribute(device.Attributes, "model", monitor.ModelName)
+		addAttribute(device.Attributes, "serial", monitor.Serial)
+		addAttribute(device.Attributes, pairingAttribute, monitorID(monitor))
 		if output.Connected {
-			addAttribute(device.Attributes, "manufacturer", monitor.Manufacturer)
-			addAttribute(device.Attributes, "model", monitor.ModelName)
-			addAttribute(device.Attributes, "serial", monitor.Serial)
-			addAttribute(device.Attributes, pairingAttribute, monitorID(monitor))
 			addSize(device.Attributes, "widthPixels", monitor.WidthPixels)
 			addSize(device.Attributes, "heightPixels", monitor.HeightPixels)
 			// The refresh is in millihertz. A selector that wants 60 Hz
@@ -310,13 +316,11 @@ func drawDevice(output Output, taints []DeviceTaint) SliceDevice {
 		"connector": AttrString(output.Connector),
 		"draw":      AttrBool(true),
 	}
-	if output.Connected {
-		monitor := output.Monitor
-		addAttribute(attributes, "manufacturer", monitor.Manufacturer)
-		addAttribute(attributes, "model", monitor.ModelName)
-		addAttribute(attributes, "serial", monitor.Serial)
-		addAttribute(attributes, pairingAttribute, monitorID(monitor))
-	}
+	monitor := output.monitor()
+	addAttribute(attributes, "manufacturer", monitor.Manufacturer)
+	addAttribute(attributes, "model", monitor.ModelName)
+	addAttribute(attributes, "serial", monitor.Serial)
+	addAttribute(attributes, pairingAttribute, monitorID(monitor))
 	return SliceDevice{
 		Name:                     drawName(output.Connector),
 		AllowMultipleAllocations: &shared,
@@ -325,13 +329,27 @@ func drawDevice(output Output, taints []DeviceTaint) SliceDevice {
 	}
 }
 
-// unservable answers whether the output can serve nobody now. A dark
-// connector serves nobody, and the link history holds the answer back
-// while a link that went down is coming back up. A connector that came
-// back carrying a different monitor serves nobody the claim on it asked
-// for, so it taints while a monitor is on the wire.
+// unservable answers whether the output can serve nobody now. A
+// connector with no screen behind it serves nobody: nothing is in it,
+// or this operator has never seen a monitor on it. A connector that
+// came back carrying a different monitor serves nobody the claim on it
+// asked for, so it taints while a monitor is on the wire.
+//
+// A connector that is dark but still carries the monitor it left with
+// is not one of them. That monitor is expected back, because the
+// commonest reason for a dark connector here is a panel showing another
+// input, and a taint would end the pod that draws on it.
 func unservable(output Output) bool {
-	return output.Replaced || (!output.Connected && !output.Relinking)
+	if output.Replaced {
+		return true
+	}
+	// A monitor on the wire can serve, whatever its EDID says. One that
+	// answers no readable EDID still lights, and the claim on it was
+	// allocated against whatever the last pass published.
+	if output.Connected {
+		return false
+	}
+	return monitorID(output.Remembered) == ""
 }
 
 // unservableTaints is the taint set of an output that can serve

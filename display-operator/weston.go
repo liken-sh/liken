@@ -141,6 +141,14 @@ renderer=gl
 # otherwise refuses to start when it finds no input device.
 require-input=false
 
+# none lets weston start with no output at all. The default, any,
+# ends weston when no connector on the card has a monitor, and this
+# machine is expected to boot with its panel showing another input or
+# with the monitor switched off. A compositor that starts anyway holds
+# the socket every claim is delivered on, so a pod keeps running and
+# its picture arrives with the monitor.
+require-outputs=none
+
 # 0 turns the idle timeout off. Under desktop-shell the 300-second
 # default fades and sleeps the screens, and with no input device
 # nothing ever wakes them. The 0 keeps every screen lit whichever
@@ -252,9 +260,8 @@ func declare() {
 	if len(live) == 0 {
 		// Every connector still gets a config section below, so
 		// weston can light whichever connector a monitor arrives on.
-		// The weston container holds its own start until one does
-		// (monitorwait.go), so this line is a report and not a
-		// failure.
+		// The compositor starts with no output at all, so this line
+		// is a report and not a failure.
 		fmt.Fprintf(os.Stderr, "%s has no monitor on any of its %d connectors\n", card, len(outputs))
 	}
 	for _, output := range live {
@@ -365,10 +372,11 @@ func signalCompositor(procRoot string, signal syscall.Signal) error {
 // can name, then execs weston, so the container holds one process
 // and its exit is the exit the kubelet acts on.
 //
-// Between the two it blocks until one of the card's connectors has a
-// monitor, because weston exits at once on a card with none. The
-// container is Running for the whole of that wait, so a machine with
-// no monitor shows no restarts.
+// It starts the compositor whether or not a monitor is on the card.
+// The config's require-outputs=none is what allows that, and it is
+// what makes a machine whose panel shows another input still hold the
+// socket its claims are delivered on. Weston enables the output when
+// the monitor arrives.
 func compose() {
 	card := claimedCard()
 	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
@@ -380,22 +388,6 @@ func compose() {
 	if err := waitForFile(context.Background(), westonConfigPath, configWaitTimeout); err != nil {
 		fatal("%v", err)
 	}
-
-	// The listener opens before the wait reads sysfs, so a monitor
-	// that arrives between the read and the listen is not missed. A
-	// listener that cannot open ends the container, because a wait
-	// with no wake would hold weston back forever. The listener stops
-	// as soon as the wait ends: the wait is its one reader, and
-	// weston subscribes to the same events itself.
-	listening, stopListening := context.WithCancel(context.Background())
-	uevents, err := listenForUevents(listening)
-	if err != nil {
-		fatal("watching for kernel events: %v", err)
-	}
-	if _, err := waitForMonitor(listening, sysRoot, card, uevents); err != nil {
-		fatal("%v", err)
-	}
-	stopListening()
 
 	if err := os.MkdirAll(socketDir, 0o755); err != nil {
 		fatal("making %s: %v", socketDir, err)
