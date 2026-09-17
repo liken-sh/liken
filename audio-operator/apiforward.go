@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -53,25 +54,25 @@ const (
 )
 
 // The three ways the private leg fails, and the status each one is.
-// A container this API could not reach at all is a 503, an answer
-// that is not HTTP is a 502, and a container that sent no headers
-// within the bound is a 504.
+//
+// The split is by how far the request got, not by what the error says.
+// A connection that was never made, or never trusted, is a 503: the
+// container is coming up, or its leaf has yet to be minted, and both
+// clear on their own. Once the connection stands, anything that goes
+// wrong is the container's answer going wrong, and that is a 502
+// whatever words the transport puts on it. A container that answered
+// nothing in time is a 504.
+//
+// Reading the words was the first cut at this and it was wrong: Go's
+// transport reports a server that writes garbage and closes as a
+// malformed response, a peek failure, or an unexpected EOF depending
+// on which side of the read the close lands, so a classifier that
+// matched on the text answered differently for one failure.
 var (
 	ErrCaptureRefused   = errors.New("the capture container refused the connection")
-	ErrCaptureMalformed = errors.New("the capture container answered something that is not HTTP")
+	ErrCaptureMalformed = errors.New("the capture container's answer could not be read")
 	ErrCaptureTimeout   = errors.New("the capture container sent no headers in time")
 )
-
-// malformedAnswers are net/http's own words for a response its
-// transport could not read as HTTP. There is no sentinel error for it,
-// so the text the transport wrote is what this API reads.
-var malformedAnswers = []string{
-	"malformed HTTP response",
-	"malformed HTTP status code",
-	"malformed HTTP version",
-	"too many transfer encodings",
-	"unexpected EOF reading trailer",
-}
 
 // forwarder dials one node's capture container.
 type forwarder struct {
@@ -219,29 +220,56 @@ func (f *forwarder) forward(ctx context.Context, held capturePod,
 	if err != nil {
 		cancel()
 		switch {
-		case malformed(err):
-			return nil, fmt.Errorf("%w: %w", ErrCaptureMalformed, err)
 		case expired:
 			return nil, fmt.Errorf("%w within %s: %w", ErrCaptureTimeout, bound, err)
-		default:
+		case !reachable(err), !trusted(err), ctx.Err() != nil:
 			return nil, fmt.Errorf("%w: %w", ErrCaptureRefused, err)
+		default:
+			// The connection stood and the answer on it did not read.
+			return nil, fmt.Errorf("%w: %w", ErrCaptureMalformed, err)
 		}
 	}
 	answer.Body = &cancellingBody{ReadCloser: answer.Body, cancel: cancel}
 	return answer, nil
 }
 
-// malformed says whether an error from the transport is an answer it
-// could not read as HTTP, which is the one failure of the private leg
-// that is a 502.
-func malformed(err error) bool {
-	text := err.Error()
-	for _, words := range malformedAnswers {
-		if strings.Contains(text, words) {
-			return true
-		}
+// reachable says whether the connection to the container was made at
+// all. Only these failures are a 503, because only these are a
+// container that is not there yet.
+//
+// A dial that failed reports itself as a net.OpError whose Op is dial,
+// and the three errno values below are what the kernel answers with
+// when nothing is listening, when the node is gone, and when the pod
+// network has not come up.
+func reachable(err error) bool {
+	var operation *net.OpError
+	if errors.As(err, &operation) && operation.Op == "dial" {
+		return false
 	}
-	return false
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED),
+		errors.Is(err, syscall.EHOSTUNREACH),
+		errors.Is(err, syscall.ENETUNREACH):
+		return false
+	}
+	return true
+}
+
+// trusted says whether the certificate the container served is one
+// this API's own CA signed.
+//
+// A container whose Secret has yet to arrive serves a certificate it
+// signed itself, so this is the state the plan names as "has no
+// certificate yet": it clears the moment the API mints the leaf and
+// the kubelet refreshes the volume, which makes it a 503 with a
+// Retry-After rather than a 502 about a broken upstream.
+func trusted(err error) bool {
+	var unverified *tls.CertificateVerificationError
+	if errors.As(err, &unverified) {
+		return false
+	}
+	var record tls.RecordHeaderError
+	return !errors.As(err, &record)
 }
 
 // origin is where one node's container answers. The pod's own address

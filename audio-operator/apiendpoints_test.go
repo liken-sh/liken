@@ -407,8 +407,11 @@ func TestAHeadOnTheInfoRouteMakesNoPrivateCall(t *testing.T) {
 func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	// A listener that answers bytes no transport can read as HTTP. The
-	// rulings put that at 502, apart from a refused connection at 503.
+	// A listener that writes one line no transport can read as HTTP and
+	// closes. Go reports that as a malformed response, a peek failure,
+	// or an unexpected EOF depending on which side of the read the
+	// close lands, so the assertion is on the status and the problem
+	// type and never on the words.
 	broken, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -420,7 +423,7 @@ func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 			if err != nil {
 				return
 			}
-			_, _ = connection.Write([]byte("this is not HTTP at all\r\n\r\n"))
+			_, _ = connection.Write([]byte("this is not HTTP at all\n"))
 			_ = connection.Close()
 		}
 	}()
@@ -433,6 +436,40 @@ func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
 	}
 	document := readProblemBody(t, answer)
 	if document.Type != problemUpstreamFailed {
+		t.Errorf("the problem type is %q", document.Type)
+	}
+}
+
+// A connection that stood and then answered nothing at all is the same
+// failure as one that answered garbage: the container is there and its
+// answer did not read.
+func TestAContainerThatClosedBeforeAnsweringIsABadGateway(t *testing.T) {
+	harness := newAPIHarness(t)
+	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.server.pods.replace([]pod{samplePod(drillMachine)})
+
+	silent, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = silent.Close() })
+	go func() {
+		for {
+			connection, err := silent.Accept()
+			if err != nil {
+				return
+			}
+			_ = connection.Close()
+		}
+	}()
+	harness.server.relay.address = silent.Addr().String()
+
+	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if answer.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(answer.Body)
+		t.Fatalf("a container that closed at once answered %s: %s", answer.Status, body)
+	}
+	if document := readProblemBody(t, answer); document.Type != problemUpstreamFailed {
 		t.Errorf("the problem type is %q", document.Type)
 	}
 }

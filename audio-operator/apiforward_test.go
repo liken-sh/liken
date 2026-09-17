@@ -1,10 +1,14 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -146,4 +150,62 @@ type blockingReader struct{ until chan struct{} }
 func (b blockingReader) Read([]byte) (int, error) {
 	<-b.until
 	return 0, io.EOF
+}
+
+// The private leg is classified by how far the request got, not by
+// what the transport put in the error. Go reports a server that writes
+// garbage and closes as a malformed response, a peek failure, or an
+// unexpected EOF depending on which side of the read the close lands,
+// so a classifier that read the words answered differently for one
+// failure.
+func TestOnlyAConnectionThatWasNeverMadeIsUnreachable(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		reachable bool
+	}{
+		{"a dial that failed", &net.OpError{Op: "dial", Err: errors.New("no route")}, false},
+		{"nothing listening", syscall.ECONNREFUSED, false},
+		{"the node is gone", syscall.EHOSTUNREACH, false},
+		{"the pod network is not up", syscall.ENETUNREACH, false},
+		{"a dial failure the transport wrapped",
+			fmt.Errorf("Get %q: %w", "https://10.42.0.7:9201/",
+				&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}), false},
+		// Everything below happened after the connection stood.
+		{"a read on a connection that stood",
+			&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}, true},
+		{"a malformed response",
+			errors.New(`net/http: HTTP/1.x transport connection broken: malformed HTTP response "x"`), true},
+		{"a peek that failed",
+			errors.New("readLoopPeekFailLocked: %!w(<nil>)"), true},
+		{"an unexpected EOF before the headers", io.ErrUnexpectedEOF, true},
+	}
+	for _, row := range cases {
+		if got := reachable(row.err); got != row.reachable {
+			t.Errorf("%s reads as reachable=%v, want %v", row.name, got, row.reachable)
+		}
+	}
+}
+
+// A container whose Secret has yet to arrive serves a certificate it
+// signed itself. That is the plan's "has no certificate yet", it
+// clears when the API mints the leaf, and it is a 503 rather than a
+// 502 about a broken upstream.
+func TestACertificateThisAPIDoesNotTrustIsNotABrokenUpstream(t *testing.T) {
+	untrusted := &tls.CertificateVerificationError{
+		Err: errors.New("x509: certificate signed by unknown authority"),
+	}
+	if trusted(untrusted) {
+		t.Error("a certificate the CA did not sign read as trusted")
+	}
+	if trusted(fmt.Errorf("Get %q: remote error: %w", "https://10.42.0.7:9201/", untrusted)) {
+		t.Error("a wrapped verification failure read as trusted")
+	}
+	if trusted(tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}) {
+		t.Error("a listener that speaks no TLS read as trusted")
+	}
+	// An answer that did not read is not a certificate problem.
+	if !trusted(errors.New("readLoopPeekFailLocked: %!w(<nil>)")) {
+		t.Error("a peek failure read as a certificate problem")
+	}
 }

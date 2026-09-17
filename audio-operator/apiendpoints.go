@@ -233,13 +233,14 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	return result
 }
 
-// relayFailure maps a private leg that did not answer at all. A
-// container that sent no headers within the bound is a 504. An answer
-// that is not HTTP is a 502. Everything else is a container this API
-// could not reach: a refused connection, a certificate it does not
-// trust, a token it could not read, or a CA it has not minted yet.
-// All of those are a 503 with Retry-After, because each one clears on
-// its own.
+// relayFailure maps a private leg that did not answer at all.
+//
+// A container that sent no headers within the bound is a 504. A
+// container this API never reached, or never trusted, is a 503 with
+// Retry-After: a refused dial, a certificate its own CA did not sign,
+// a token it could not read, or a CA it has not minted yet, each of
+// which clears on its own. Everything after a connection that stood
+// is the answer on it going wrong, and that is a 502.
 func (s *apiServer) relayFailure(w http.ResponseWriter, r *http.Request,
 	route apiRoute, name string, who caller, id string, err error) answered {
 	switch {
