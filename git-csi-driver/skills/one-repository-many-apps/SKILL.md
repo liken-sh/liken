@@ -1,8 +1,9 @@
 ---
-title: Give many applications one repository
-weight: 40
+name: one-repository-many-apps
 description: "Give many applications one git repository, one directory each, as separate writeable volumes on the same ref. Use when several applications share one configuration repository and none may read another's files."
 ---
+
+This skill is the guide at https://git.liken.sh/docs/guides/one-repository-many-apps/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 One repository can hold the configuration of many applications, one
 directory per application. Each application gets its own writeable
@@ -10,7 +11,7 @@ volume on the same repository and the same ref, and mounts only its own
 directory. No application reads or writes another one's files.
 
 Every volume here is a writeable volume, which [Give an application a
-repository to write](../writeable/) describes. The example repository is
+repository to write](https://git.liken.sh/docs/guides/writeable/) describes. The example repository is
 `git@code.example.com:home/configuration.git`. It holds
 `assistant/configuration/` for a home automation service and `maps/site/`
 for a static site.
@@ -122,7 +123,7 @@ parameters:
   commit.author: Maps <maps@home.example>
 ```
 
-The [class reference](../../reference/classes/) lists every parameter,
+The [class reference](https://git.liken.sh/docs/reference/classes/) lists every parameter,
 its values, and its default.
 
 ## One directory in each pod
@@ -204,7 +205,7 @@ events carry `GitVolumeDiverged`. Every push goes there until a person
 merges it into the ref on the forge, and commits continue, so no work
 stops. At the volume's next push after the merge, it is back on the
 ref and the side branch is deleted. The writeable guide's [When upstream
-moves](../writeable/#when-upstream-moves) gives the full rule.
+moves](https://git.liken.sh/docs/guides/writeable/#when-upstream-moves) gives the full rule.
 
 ## The metadata record
 
@@ -221,4 +222,4 @@ on.
 A read-only claim on the same repository takes no part in any of this.
 The driver ignores a `VolumeAttributesClass` on such a claim, because a
 read-only volume commits nothing and pushes nothing. [Mount a repository
-read-only](../read-only/) gives its form.
+read-only](https://git.liken.sh/docs/guides/read-only/) gives its form.

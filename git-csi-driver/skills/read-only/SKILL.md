@@ -1,8 +1,9 @@
 ---
-title: Mount a repository read-only
-weight: 20
+name: read-only
 description: "Mount a git repository read-only, inline in a pod spec or through a claim, with pull on demand and webhooks. Use when a pod needs a checkout it never writes, including a checkout of a private repository."
 ---
+
+This skill is the guide at https://git.liken.sh/docs/guides/read-only/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 A read-only volume has two forms. The inline form is a CSI volume in
 the pod spec. It needs no `PersistentVolume` and no claim, so any pod in
@@ -41,7 +42,7 @@ ten pods on one repository cost one fetch. The driver fetches every
 by one, so a reader sees the old file or the new one and never a partial
 write.
 
-The [attributes reference](../../reference/attributes/) lists every
+The [attributes reference](https://git.liken.sh/docs/reference/attributes/) lists every
 attribute, its values, and its default.
 
 ## A claim on a repository

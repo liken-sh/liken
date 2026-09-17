@@ -1,8 +1,9 @@
 ---
-title: Install
-weight: 10
+name: install
 description: "Install git-csi-driver from its kustomize base and set the plugin's flags. Use when a cluster must mount git repositories as volumes."
 ---
+
+This skill is the guide at https://git.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 The driver installs from the kustomize base in the repository's
 `deploy/` directory. You need a cluster with standard CSI plumbing,
@@ -69,5 +70,5 @@ a kustomize patch on the container's `args`.
 
 The controller pod declares both ports, and the base holds a
 `Service` named `git-csi-driver-webhook` on port 80 in front of the
-webhook port. The [read-only guide](../read-only/#webhooks) says how a
+webhook port. The [read-only guide](https://git.liken.sh/docs/guides/read-only/#webhooks) says how a
 forge reaches it.
