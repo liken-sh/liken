@@ -1,0 +1,281 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "widget-api",
+    "version": "v1alpha1",
+    "summary": "Every Widget in this cluster, and the sound one makes.",
+    "description": "Identity is in the path, and the format is in the extension. The manual is at https://widget.example/docs/reference/api/."
+  },
+  "servers": [
+    {
+      "url": "https://widget-api.liken-system.svc"
+    }
+  ],
+  "paths": {
+    "/v1/widget/widgets": {
+      "get": {
+        "operationId": "listWidgets",
+        "summary": "Every Widget this API serves",
+        "description": "The list is the whole of it. There is no paging, because a cluster holds tens of Widgets and not thousands.",
+        "responses": {
+          "200": {
+            "description": "The list, in name order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Widget"
+                  }
+                }
+              }
+            },
+            "links": {
+              "widget": {
+                "operationId": "getWidget",
+                "description": "One Widget of the list."
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWidget",
+        "summary": "Take a new Widget",
+        "security": [
+          {
+            "bearer": [],
+            "clientCertificate": []
+          }
+        ],
+        "requestBody": {
+          "description": "The Widget to take. The name must be free.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Widget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The Widget as it was taken.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Widget"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "The path of the new Widget (RFC 9110 section 10.2.2).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widget/widgets/{name}/sound": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WidgetName"
+        },
+        {
+          "name": "loudness",
+          "in": "query",
+          "description": "How loud | how quiet.",
+          "schema": {
+            "type": "integer",
+            "default": 50
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getWidgetSound",
+        "summary": "The sound the Widget makes",
+        "parameters": [
+          {
+            "name": "loudness",
+            "in": "query",
+            "required": true,
+            "description": "How loud, in steps this route names.",
+            "schema": {
+              "type": "string",
+              "enum": ["quiet", "loud"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sound, in the form the extension or the Accept field names.",
+            "content": {
+              "audio/flac": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "options": {
+        "operationId": "widgetSoundOptions",
+        "summary": "The methods this route answers",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Widget": {
+        "type": "object",
+        "description": "One Widget: what it is called, what it is made of, and what it answers with.",
+        "required": ["name", "material"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name, unique in the cluster.",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "material": {
+            "$ref": "#/components/schemas/Material"
+          },
+          "home": {
+            "type": ["string", "null"],
+            "description": "Where the Widget stands, and null while it stands nowhere."
+          },
+          "sizes": {
+            "type": "object",
+            "description": "The size of each part, keyed by the part's name.",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "faces": {
+            "type": "array",
+            "description": "Each face of the Widget, in the order they were cut.",
+            "items": {
+              "type": "object",
+              "required": ["edges"],
+              "properties": {
+                "edges": {
+                  "type": "integer",
+                  "description": "How many edges this face has."
+                },
+                "finish": {
+                  "type": "string",
+                  "description": "The finish this face carries.",
+                  "enum": ["rough", "smooth"]
+                }
+              }
+            }
+          },
+          "manual": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where the Widget's own manual is."
+          }
+        }
+      },
+      "Material": {
+        "type": "string",
+        "description": "What a Widget is made of.",
+        "enum": ["oak", "steel"]
+      },
+      "Problem": {
+        "type": "object",
+        "description": "The RFC 9457 problem document every error answers with.",
+        "required": ["type", "title", "status"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "enum": ["about:blank", "https://liken.sh/problems/no-node"]
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "WidgetName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "The name of the Widget.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "No token, or a token the TokenReview refused.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "$ref": "#/components/responses/Missing"
+      },
+      "Missing": {
+        "description": "No Widget of that name.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "A ServiceAccount token minted with the audience widget-api."
+      },
+      "clientCertificate": {
+        "type": "mutualTLS",
+        "description": "A certificate this API's own authority signed."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ]
+}

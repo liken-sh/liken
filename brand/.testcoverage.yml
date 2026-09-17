@@ -11,9 +11,15 @@
 profile: coverage.out
 
 threshold:
-  total: 91
+  total: 93
 
 override:
+  # apiref reads an API's OpenAPI document and writes the route
+  # reference page. The tests run it against the document one of the
+  # manuals publishes, and against small documents for the shapes
+  # that one does not hold. What stays untested is main itself.
+  - path: ^apiref$
+    threshold: 95
   # coverage reads a repository's coverage data and writes the HTML
   # report. The tests run it against a fixture tree with a profile
   # and a Cobertura report. What stays untested is main itself and a

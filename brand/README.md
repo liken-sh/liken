@@ -226,6 +226,31 @@ params:
 Every page's footer then links it. A site that sets nothing shows no
 link.
 
+## The route reference generator
+
+`apiref/` is a Go program that turns an API's OpenAPI 3.1 document
+into one Markdown page. A repository runs it as `go tool apiref`,
+pinned as a tool dependency of its docs module the way `crdref` is:
+
+```sh
+go tool apiref -title Routes -weight 55 \
+  -postamble apiref/routes-postamble.md \
+  openapi.json content/docs/reference/routes.md apiref/routes-preamble.md
+```
+
+The page opens with the document's own summary, then gives one
+section per operation, headed with the method and the path, with the
+parameters, the answers, and the fields each answer carries. Under
+those come the component schemas, as the same field tables `crdref`
+writes for a CRD, and the credentials the document declares. The
+page is Markdown and nothing else: no Swagger UI, no JavaScript, and
+every section is a heading the manual's link check can resolve.
+
+The preamble and the postamble are hand-written files that land
+verbatim, at the top and the bottom. They carry what the document
+cannot: what the API is for, and where the narrative page beside this
+one is. `plans/02-openapi-as-a-page.md` is the design.
+
 ## The skills generator
 
 `skills/` is a Go program that turns a site's guides into
