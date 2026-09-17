@@ -936,9 +936,6 @@ way that produces them.
   credentials, `Access-Control-Allow-Origin` from configuration, and
   `Access-Control-Expose-Headers` for `Content-Location`, `Link`, and
   `Content-Disposition`.
-* **AAC for Safari.** An Opus decode and AAC encode on the API node,
-  about a tenth of a core per stream, as a second form or an `Accept`
-  with `codecs="avc1,mp4a.40.2"`.
 * **`ClusterTrustBundle`.** The k8s-native home for the three CA
   anchors, stable in Kubernetes 1.37; `liken` pins k3s 1.36, so it
   is a next-version item that removes the ConfigMaps and the `get`.
