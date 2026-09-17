@@ -113,6 +113,9 @@ command overwrites the device.
 
     sudo dd if=mycluster/install.img of=/dev/YOUR-STICK bs=4M oflag=direct status=progress
 
+[Write an install stick](/docs/guides/write-an-install-stick/) checks
+the copy before a machine boots from it.
+
 ## 5. Boot each machine from the stick
 
 Connect the stick and boot the machine. For the first boot, you may

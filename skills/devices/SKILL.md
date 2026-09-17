@@ -104,7 +104,7 @@ The hardware report names these modules for you, as comments, when you
 install the machine. See
 [Install a cluster](https://liken.sh/docs/guides/install/#first-run-the-hardware-report).
 
-The `uhid` module is for a stack and not for one device. Declare it on
+The `uhid` module is for a whole stack. Declare it on
 a machine whose Bluetooth adapter serves BLE input devices, such as a
 remote or a keyboard. The adapter's claim then delivers `/dev/uhid`.
 The [device reference](https://liken.sh/docs/reference/devices/#bluetooth-adapters)

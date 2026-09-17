@@ -90,6 +90,9 @@ overwrites the device.
 
     sudo dd if=mycluster/install.img of=/dev/YOUR-STICK bs=4M oflag=direct status=progress
 
+[Write an install stick](/docs/guides/write-an-install-stick/) checks
+the copy before a machine boots from it.
+
 ## 4. Boot the new machine from the stick
 
 The stick's menu now lists the new machine, with an `install as
