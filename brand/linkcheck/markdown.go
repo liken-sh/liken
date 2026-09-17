@@ -30,11 +30,12 @@ var (
 	explicitID = regexp.MustCompile(`\bid="([^"]+)"`)
 
 	// A link's target is at its end, so matching from the closing
-	// bracket finds a link whose text wraps across lines. The target
-	// may include a quoted title. Only absolute targets match, which is
-	// what makes this an internal-link scan: an external target
-	// starts with its scheme, not a slash.
-	absoluteTarget = regexp.MustCompile(`\]\(\s*(/[^)\s]*)(?:\s+"[^"]*")?\)`)
+	// bracket finds a link whose text wraps across lines. The three
+	// groups are the opening, the target, and the optional quoted
+	// title with the closing parenthesis, so a caller can put a new
+	// target between the outer two. Every target matches, external
+	// ones included; the scan below keeps the absolute ones.
+	linkTarget = regexp.MustCompile(`(\]\(\s*)([^)\s]*)((?:\s+"[^"]*")?\))`)
 )
 
 // stripInline reduces a heading line to its rendered text: backticks
@@ -96,14 +97,32 @@ func pageAnchors(page []byte) map[string]bool {
 	return ids
 }
 
+// RewriteTargets replaces every link target on one line with what
+// rewrite returns for it. This is the one place that knows what a
+// Markdown link is, so the link check and the skills generator read
+// the same grammar. The caller decides which targets change and
+// returns the rest as they are.
+func RewriteTargets(line string, rewrite func(target string) string) string {
+	return linkTarget.ReplaceAllStringFunc(line, func(link string) string {
+		m := linkTarget.FindStringSubmatch(link)
+		return m[1] + rewrite(m[2]) + m[3]
+	})
+}
+
 // internalLinks returns every absolute link target on the page, in
 // document order, fragments included.
 func internalLinks(page []byte) []string {
 	var targets []string
 	for _, line := range proseLines(page) {
-		for _, m := range absoluteTarget.FindAllStringSubmatch(line, -1) {
-			targets = append(targets, m[1])
-		}
+		RewriteTargets(line, func(target string) string {
+			// An external target starts with its scheme, not a slash,
+			// so the leading slash is what makes a link the manual's
+			// own to check.
+			if strings.HasPrefix(target, "/") {
+				targets = append(targets, target)
+			}
+			return target
+		})
 	}
 	return targets
 }

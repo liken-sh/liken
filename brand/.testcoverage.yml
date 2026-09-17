@@ -29,3 +29,8 @@ override:
   # and anchors it finds. The tests cover it against fixture trees.
   - path: ^linkcheck$
     threshold: 95
+  # skills turns each guide into a SKILL.md. The tests run it against
+  # a fixture guides directory. What stays untested is main itself
+  # and a scattering of I/O error returns.
+  - path: ^skills$
+    threshold: 91

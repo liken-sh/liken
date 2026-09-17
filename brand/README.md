@@ -226,6 +226,31 @@ params:
 Every page's footer then links it. A site that sets nothing shows no
 link.
 
+## The skills generator
+
+`skills/` is a Go program that turns a site's guides into
+[Agent Skills](https://agentskills.io/), one `SKILL.md` per guide. A
+repository runs it as `go tool skills`, pinned as a tool dependency
+of its docs module the way `crdref` is:
+
+```sh
+go tool skills -base https://media.liken.sh content/docs/guides ../skills
+```
+
+Every guide's front matter needs a `description`, written as a
+trigger: what the guide does and when an agent should use it. The
+generator copies it, drops the title and the weight, turns every
+link into a full URL under `-base`, and opens the skill with the
+guide's URL and an instruction to confirm the `kubectl` context. The
+guide stays the one source, and the output directory is the
+generator's: a renamed or deleted guide leaves no stale skill.
+
+Each repository commits its `skills/` directory, so a checkout
+carries its skills and CI fails when they are stale. An agent loads
+them with `claude --plugin-dir <checkout>` or `npx skills add
+liken-sh/<repository>`. `plans/01-guides-as-skills.md` is the
+design.
+
 ## The `liken-iced` crate
 
 `iced/` is a Rust crate, `liken-iced`, for a program that draws the

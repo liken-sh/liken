@@ -67,7 +67,7 @@ assets/liken.css: liken.css
 	mkdir -p assets
 	cp $< $@
 
-# The checks for this module's Go packages, linkcheck and crdref.
+# The checks for this module's Go packages, linkcheck, crdref, and skills.
 # staticcheck and go-test-coverage are pinned tool dependencies in
 # go.mod, the way the sites pin Hugo, so `go tool` is the whole
 # toolchain.
