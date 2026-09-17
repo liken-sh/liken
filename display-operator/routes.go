@@ -11,7 +11,10 @@ package main
 // API group, display.liken.sh, so a path names the same domain the
 // Kubernetes object does.
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // The path grammar every liken capture API shares is
 // /v1/{domain}/[namespaces/{ns}/]{plural}/{name}/{aspect}[.{ext}].
@@ -113,7 +116,7 @@ var apiRoutes = []apiRoute{
 		kind:      infoRoute,
 		mediaType: jsonMediaType,
 		summary:   "The screen's size, scale, refresh and formats",
-		answer:    "The size, scale, refresh and formats of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
+		answer:    "The size, scale, refresh, formats and clip codecs of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
 	},
 	{
 		template: apiRoot + "/" + displaysPlural + "/{name}/" + screenAspect,
@@ -147,7 +150,7 @@ var apiRoutes = []apiRoute{
 		ext:       "mp4",
 		aspect:    screenAspect,
 		summary:   "A clip of the screen as H.264 in fragmented MP4",
-		answer:    "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up.",
+		answer:    "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that.",
 	},
 	{
 		template:  apiRoot + "/" + displaysPlural + "/{name}/" + screenAspect + ".mjpeg",
@@ -184,6 +187,43 @@ func contentTypeOf(mediaType string) string {
 		return mjpegContentType
 	}
 	return mediaType
+}
+
+// The Content-Type of a capture, which for a clip names the codec
+// the body carries. RFC 6381 writes an H.264 codec as avc1 and three
+// bytes: the profile, the constraint flags, and the level. This
+// encoder pins High profile with no constraint flags, so a clip up
+// to 1920x1080 at 60 fps reads avc1.640029 and anything larger
+// avc1.640033. A client that has to choose a decoder before the
+// first byte, and media-api composing this stream with sound, both
+// read it from here.
+func captureContentType(mediaType string, width, height, framerate int) string {
+	if mediaType != "video/mp4" {
+		return contentTypeOf(mediaType)
+	}
+	return fmt.Sprintf(`video/mp4; codecs="%s"`, h264Codecs(width, height, framerate))
+}
+
+// The levels this encoder pins, and the sizes each one covers.
+// Level 4.1 is 0x29 and carries 1920x1080 at 60 fps; level 5.1 is
+// 0x33 and carries 4096x2160 at 60. High profile is 0x64 and the
+// constraint byte is 0x00.
+func h264Codecs(width, height, framerate int) string {
+	if width > 1920 || height > 1080 || framerate > 60 {
+		return "avc1.640033"
+	}
+	return "avc1.640029"
+}
+
+// The two options that pin the profile and the level the codecs
+// parameter states. Without them h264_vaapi picks a level from the
+// stream and a caller cannot be told the string before the encode.
+func h264Profile(width, height, framerate int) []string {
+	level := "4.1"
+	if h264Codecs(width, height, framerate) == "avc1.640033" {
+		level = "5.1"
+	}
+	return []string{"-profile:v", "high", "-level", level}
 }
 
 // The types the screen aspect offers, in the order negotiation

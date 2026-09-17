@@ -261,11 +261,14 @@ func silentProgram(t *testing.T) string {
 	return path
 }
 
-// An encoder that writes no byte is a problem document carrying
-// ffmpeg's own last words, never a 200 with an empty body. A caller
-// cannot tell an empty clip from a failure, so there is no empty
-// clip to tell it from.
-func TestAnEncoderThatWroteNothingIsAFailure(t *testing.T) {
+// An encoder that writes no byte ends the response without its
+// terminating chunk, so a caller reads a truncated transfer and not
+// a whole file that is empty. The status line left with the first
+// frame, which is what keeps this API's zero at the accept instant,
+// so a problem document is no longer available by the time ffmpeg
+// has failed; the log and display_capture_failures_total carry
+// ffmpeg's own words instead.
+func TestAnEncoderThatWroteNothingTruncatesTheBody(t *testing.T) {
 	weston := startCaptureWeston(t, formatXR24,
 		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 4, height: 3, refresh: 60000}},
 		captureAnswer{event: westonCaptureComplete, seed: 1})
@@ -276,14 +279,45 @@ func TestAnEncoderThatWroteNothingIsAFailure(t *testing.T) {
 	ffmpegProgram = silentProgram(t)
 	defer func() { ffmpegProgram = held }()
 
+	sidecar := httptest.NewServer(server)
+	defer sidecar.Close()
+
+	resp, err := askOverTheWire(t, sidecar, apiRoot+"/displays/HDMI-A-1/screen.mp4?t=,0.1&framerate=30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the clip answered %d, want 200 with a truncated body", resp.StatusCode)
+	}
+	read, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Fatalf("the caller read %q to a clean end, want a truncated body", read)
+	}
+	if len(read) != 0 {
+		t.Errorf("the caller read %d bytes, want none", len(read))
+	}
+}
+
+// An encoder that cannot be started at all is still a problem
+// document, because nothing has reached the wire yet.
+func TestAnEncoderThatCannotStartIsAFailure(t *testing.T) {
+	weston := startCaptureWeston(t, formatXR24,
+		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 4, height: 3, refresh: 60000}},
+		captureAnswer{event: westonCaptureComplete, seed: 1})
+
+	server := newCaptureFixture(t)
+	server.socketPath = weston.path
+	held := ffmpegProgram
+	ffmpegProgram = t.TempDir() + "/no-such-ffmpeg"
+	defer func() { ffmpegProgram = held }()
+
 	resp := askSidecar(t, server, http.MethodGet,
-		apiRoot+"/displays/HDMI-A-1/screen.mp4?t=,0.1&framerate=30", "the-api-token")
+		apiRoot+"/displays/HDMI-A-1/screen.png", "the-api-token")
 
 	if resp.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("an encoder that wrote nothing answered %d, want 500", resp.StatusCode)
-	}
-	if got := resp.Header.Get("Content-Type"); got != problemMediaType {
-		t.Errorf("the refusal is typed %q, want %q", got, problemMediaType)
+		t.Fatalf("an encoder that could not start answered %d, want 500", resp.StatusCode)
 	}
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
@@ -292,19 +326,18 @@ func TestAnEncoderThatWroteNothingIsAFailure(t *testing.T) {
 	if document.Type != problemEncoderFailed {
 		t.Errorf("the problem type is %q, want %q", document.Type, problemEncoderFailed)
 	}
-	// One line, the one ffmpeg ended with. The whole tail is in the
-	// sidecar's own log, where it costs a caller nothing.
-	if !strings.Contains(document.Detail, "Failed to create processing pipeline config") {
-		t.Errorf("the detail is %q, want the encoder's own last line", document.Detail)
+}
+
+// One request to a sidecar over a real connection, which is how a
+// truncated body is told from a whole one.
+func askOverTheWire(t *testing.T, sidecar *httptest.Server, target string) (*http.Response, error) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, sidecar.URL+target, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(document.Detail, "\n") {
-		t.Errorf("the detail is %q, want one line", document.Detail)
-	}
-	for _, epilogue := range []string{"Conversion failed!", "Nothing was written into output file"} {
-		if strings.Contains(document.Detail, epilogue) {
-			t.Errorf("the detail is %q, which is ffmpeg's epilogue and names no cause", document.Detail)
-		}
-	}
+	request.Header.Set("Authorization", "Bearer the-api-token")
+	return sidecar.Client().Do(request)
 }
 
 // This program writes one block and then dies, which is an encoder
@@ -374,8 +407,10 @@ func deadProgram(t *testing.T) string {
 
 // A still that was asked to wait out a t= begin does not hold the
 // failure of an encoder that died at once. The feed is sleeping on
-// its own context, and the failure ends that context rather than
-// waiting a minute for the sleeper.
+// its own context, and the end of the encoder's body ends that
+// context rather than waiting a minute for the sleeper. The caller
+// reads a truncated body at once instead of a whole one in half a
+// minute.
 func TestAFailedEncoderDoesNotWaitOutTheBeginning(t *testing.T) {
 	weston := startCaptureWeston(t, formatXR24,
 		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 4, height: 3, refresh: 60000}},
@@ -387,19 +422,90 @@ func TestAFailedEncoderDoesNotWaitOutTheBeginning(t *testing.T) {
 	ffmpegProgram = deadProgram(t)
 	defer func() { ffmpegProgram = held }()
 
-	answered := make(chan int, 1)
+	sidecar := httptest.NewServer(server)
+	defer sidecar.Close()
+
+	answered := make(chan error, 1)
 	go func() {
-		resp := askSidecar(t, server, http.MethodGet,
-			apiRoot+"/displays/HDMI-A-1/screen.png?t=30", "the-api-token")
-		answered <- resp.StatusCode
+		resp, err := askOverTheWire(t, sidecar, apiRoot+"/displays/HDMI-A-1/screen.png?t=30")
+		if err != nil {
+			answered <- err
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, err = io.ReadAll(resp.Body)
+		answered <- err
 	}()
 
 	select {
-	case status := <-answered:
-		if status != http.StatusInternalServerError {
-			t.Errorf("the capture answered %d, want 500", status)
+	case err := <-answered:
+		if err == nil {
+			t.Error("the caller read a whole body from an encoder that never ran")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the failure waited out the t= begin instead of ending the feed")
+	}
+}
+
+// The zero of every time code in this API is the instant the request
+// was accepted, and the response headers are how a caller reads that
+// instant. They leave within one frame of the accept whatever t=
+// asks for, and the body then starts at the beginning the caller
+// named. media-api composes this stream with sound by comparing the
+// two APIs' header instants, so headers that waited out a lead-in
+// would read as a clock difference and pull the composed stream out
+// of sync by the length of the lead-in.
+func TestTheHeadersLeaveBeforeTheBeginning(t *testing.T) {
+	weston := startCaptureWeston(t, formatXR24,
+		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 4, height: 3, refresh: 60000}},
+		captureAnswer{event: westonCaptureComplete, seed: 1})
+
+	server := newCaptureFixture(t)
+	server.socketPath = weston.path
+	held := ffmpegProgram
+	ffmpegProgram = copyingProgram(t)
+	defer func() { ffmpegProgram = held }()
+
+	// The server reads its own clock once, at the accept, and every
+	// wait is measured from what it read. The drill reads the same
+	// clock, so the two agree on where the origin is.
+	accepted := make(chan time.Time, 1)
+	server.now = func() time.Time {
+		now := time.Now()
+		select {
+		case accepted <- now:
+		default:
+		}
+		return now
+	}
+
+	sidecar := httptest.NewServer(server)
+	defer sidecar.Close()
+
+	const begin = 600 * time.Millisecond
+	resp, err := askOverTheWire(t, sidecar,
+		apiRoot+"/displays/HDMI-A-1/screen.mp4?t=0.6,1.2&framerate=30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	headersAt := time.Now()
+
+	origin := <-accepted
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the clip answered %d", resp.StatusCode)
+	}
+	if waited := headersAt.Sub(origin); waited >= begin {
+		t.Errorf("the headers left %s after the accept, want well inside the %s beginning", waited, begin)
+	}
+
+	one := make([]byte, 1)
+	if _, err := io.ReadFull(resp.Body, one); err != nil {
+		t.Fatal(err)
+	}
+	firstByte := time.Since(origin)
+	if firstByte < begin {
+		t.Errorf("frame zero of the body arrived %s after the accept, want it at the %s beginning",
+			firstByte, begin)
 	}
 }

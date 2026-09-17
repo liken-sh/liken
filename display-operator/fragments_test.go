@@ -338,7 +338,7 @@ func TestFragmentsRoundTripThroughTheTemplate(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("the expanded template answered %d: %s", resp.StatusCode, body(t, resp))
 	}
-	if got := resp.Header.Get("Content-Type"); got != "video/mp4" {
-		t.Errorf("the expanded template was served %q, want video/mp4", got)
+	if got := resp.Header.Get("Content-Type"); got != clipContentType {
+		t.Errorf("the expanded template was served %q, want %q", got, clipContentType)
 	}
 }

@@ -72,7 +72,18 @@ func (p encodePlan) args() []string {
 		"-video_size", fmt.Sprintf("%dx%d", p.width, p.height),
 	}
 	if p.framerate > 0 {
+		// -framerate is the nominal rate, and the wall clock is what
+		// each frame is actually stamped with. A node that cannot
+		// hold the cadence writes fewer frames than it promised, and
+		// without the wall clock ffmpeg stamps them as though it had
+		// held it, so every event in the clip drifts earlier: at 30
+		// fps on stick-1, marks two seconds apart in the source
+		// landed 1.7 seconds apart in the body. The media plan set
+		// this flag aside for its own mux, where it would fight
+		// -itsoffset on an already-stamped stream; here it is the
+		// only clock the input has.
 		args = append(args, "-framerate", strconv.Itoa(p.framerate),
+			"-use_wallclock_as_timestamps", "1",
 			"-thread_queue_size", strconv.Itoa(threadQueueSize))
 	}
 	args = append(args, "-i", "pipe:0")
@@ -87,7 +98,9 @@ func (p encodePlan) args() []string {
 			"-q:v", strconv.Itoa(jpegScale(p.quality)), "-f", "image2pipe", "pipe:1")
 	case "video/mp4":
 		args = append(args, p.hardware()...)
-		return append(args, "-c:v", "h264_vaapi",
+		args = append(args, "-c:v", "h264_vaapi")
+		args = append(args, h264Profile(p.encodedWidth(), p.encodedHeight(), p.framerate)...)
+		return append(args,
 			"-g", strconv.Itoa(p.framerate), "-bf", "0",
 			"-flush_packets", "1",
 			"-f", "mp4",
@@ -150,6 +163,48 @@ func (p encodePlan) encodeSize() string {
 		return fmt.Sprintf("w=%d:h=-2", width)
 	}
 	return ""
+}
+
+// The size a clip of the whole screen encodes at, which is what the
+// info document states its codecs parameter from. A screen wider
+// than 1080p is scaled to 1080p, so a 4K screen answers the level a
+// 1080p clip carries.
+func clipWidth(width int) int {
+	if width > clipWidthLimit {
+		return clipWidthLimit
+	}
+	return width
+}
+
+func clipHeight(screen captureScreen) int {
+	if screen.Width <= clipWidthLimit || screen.Width == 0 {
+		return screen.Height
+	}
+	return screen.Height * clipWidthLimit / screen.Width
+}
+
+// The size the body carries, which is the region the pipe carries
+// scaled by whichever knob was given. The codecs parameter and the
+// level are stated from it, so a caller is told the string before
+// the encoder has written a byte.
+func (p encodePlan) encodedWidth() int {
+	if width := p.encodeWidth(); width > 0 {
+		return width
+	}
+	if height := p.encodeHeight(); height > 0 && p.height > 0 {
+		return p.width * height / p.height
+	}
+	return p.width
+}
+
+func (p encodePlan) encodedHeight() int {
+	if height := p.encodeHeight(); height > 0 {
+		return height
+	}
+	if width := p.encodeWidth(); width > 0 && p.width > 0 {
+		return p.height * width / p.width
+	}
+	return p.height
 }
 
 // height= scales down only, so a height that is not smaller than the

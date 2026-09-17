@@ -698,3 +698,39 @@ func TestAnEncoderFailureIsTyped(t *testing.T) {
 		t.Errorf("an encoder failure carries Retry-After %q; a retry never clears it", got)
 	}
 }
+
+// A HEAD takes no frame, so the Content-Type it answers with is
+// worked out from the Display's own mode. It names the same codec a
+// GET would, because a client that asked what it would get must be
+// able to act on the answer.
+func TestAHeadNamesTheCodecItWouldServe(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+
+	resp := call(t, server, http.MethodHead, apiRoot+"/displays/HDMI-A-1/screen.mp4", nil)
+
+	if got := resp.Header.Get("Content-Type"); got != clipContentType {
+		t.Errorf("the HEAD answered %q, want %q", got, clipContentType)
+	}
+	if sidecar.called() != 0 {
+		t.Errorf("the HEAD called the node %d times", sidecar.called())
+	}
+}
+
+// The API answers the type the node is encoding, parameters and all,
+// so the codecs parameter names the level the encoder pinned rather
+// than one the API worked out a second time.
+func TestTheAPIAnswersTheTypeTheNodeEncodes(t *testing.T) {
+	sidecar := newSidecarFixture(t)
+	sidecar.answers(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", `video/mp4; codecs="avc1.640033"`)
+		_, _ = w.Write([]byte("fragment"))
+	})
+	server := newTestAPI(t, newTestCluster(t), sidecar)
+
+	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4", nil)
+
+	if got := resp.Header.Get("Content-Type"); got != `video/mp4; codecs="avc1.640033"` {
+		t.Errorf("the API answered %q, want the node's own type", got)
+	}
+}

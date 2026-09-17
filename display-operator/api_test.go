@@ -244,6 +244,11 @@ func call(t *testing.T, server *apiServer, method, target string, header http.He
 	return recorder.Result()
 }
 
+// A clip of the fixture's 1080p screen, as its Content-Type reads:
+// the type and the codec RFC 6381 writes for High profile at level
+// 4.1, which is what the encoder pins for this size.
+const clipContentType = `video/mp4; codecs="avc1.640029"`
+
 func bearer(token string) http.Header {
 	return http.Header{"Authorization": []string{token}}
 }
@@ -282,7 +287,7 @@ func TestTheRouteTableAnswersEveryRow(t *testing.T) {
 		{"the negotiated screen", http.MethodGet, apiRoot + "/displays/HDMI-A-1/screen", 200, "image/png"},
 		{"one frame as PNG", http.MethodGet, apiRoot + "/displays/HDMI-A-1/screen.png", 200, "image/png"},
 		{"one frame as JPEG", http.MethodGet, apiRoot + "/displays/HDMI-A-1/screen.jpg", 200, "image/jpeg"},
-		{"a clip", http.MethodGet, apiRoot + "/displays/HDMI-A-1/screen.mp4", 200, "video/mp4"},
+		{"a clip", http.MethodGet, apiRoot + "/displays/HDMI-A-1/screen.mp4", 200, clipContentType},
 		{"the low-end stream", http.MethodGet, apiRoot + "/displays/HDMI-A-1/screen.mjpeg", 200, mjpegContentType},
 	}
 	for _, row := range cases {
@@ -372,7 +377,7 @@ func TestNegotiationAnswersEveryRow(t *testing.T) {
 		{"no Accept takes the default", "/screen", "", 200, "image/png"},
 		{"a type asked for by name", "/screen", "image/jpeg", 200, "image/jpeg"},
 		{"a wildcard takes the first image", "/screen", "image/*", 200, "image/png"},
-		{"a q-value chooses the clip", "/screen", "video/mp4, image/png;q=0.5", 200, "video/mp4"},
+		{"a q-value chooses the clip", "/screen", "video/mp4, image/png;q=0.5", 200, clipContentType},
 		{"a zero excludes one type", "/screen", "image/png;q=0, */*", 200, "image/jpeg"},
 		{"an Accept that excludes the route", "/screen", "audio/wav", 406, problemMediaType},
 		{"an extension under a wildcard", "/screen.png", "image/*", 200, "image/png"},

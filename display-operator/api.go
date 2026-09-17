@@ -527,13 +527,14 @@ func routePath(route apiRoute, name string) string {
 // routes too, where Accept only decides between 200 and 406, for
 // section 12.5.5's second purpose: to say the response was subject to
 // negotiation.
-func (s *apiServer) captureHeaders(w http.ResponseWriter, route apiRoute, name, mediaType string, at time.Time) {
+func (s *apiServer) captureHeaders(w http.ResponseWriter, route apiRoute,
+	name, mediaType, served string, at time.Time) {
 	ext := route.ext
 	if ext == "" {
 		ext = formExtension(mediaType)
 		w.Header().Set("Content-Location", capturePath(name, ext))
 	}
-	w.Header().Set("Content-Type", contentTypeOf(mediaType))
+	w.Header().Set("Content-Type", served)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")
 	w.Header().Set("Vary", "Accept")

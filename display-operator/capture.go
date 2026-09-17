@@ -270,6 +270,7 @@ func (s *captureServer) answerInfo(w http.ResponseWriter, r *http.Request, conne
 		Scale:      screen.Scale,
 		Refresh:    screen.Refresh,
 		Formats:    screenMediaTypes(),
+		Codecs:     h264Codecs(clipWidth(screen.Width), clipHeight(screen), defaultFramerate("video/mp4")),
 		Conversion: s.conversionName(),
 	})
 	if err != nil {

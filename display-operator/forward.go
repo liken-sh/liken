@@ -241,7 +241,7 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 	id string, start time.Time, head bool) {
 	at := s.now()
 	if head {
-		s.captureHeaders(w, route, name, mediaType, at)
+		s.captureHeaders(w, route, name, mediaType, s.capturedAs(screen, mediaType, chosen), at)
 		w.WriteHeader(http.StatusOK)
 		s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 		s.logged(r, route, id, "", http.StatusOK, 0, start)
@@ -273,7 +273,14 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 	defer cancel()
 	defer func() { _ = resp.Body.Close() }()
 
-	s.captureHeaders(w, route, name, mediaType, at)
+	// The node answered with the type it is encoding, parameters
+	// included, so a clip's codecs parameter names the level the
+	// encoder actually pinned rather than one derived twice.
+	served := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(served, mediaType) {
+		served = s.capturedAs(screen, mediaType, chosen)
+	}
+	s.captureHeaders(w, route, name, mediaType, served, at)
 	w.WriteHeader(http.StatusOK)
 	s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 	s.readings.streaming(route.aspect, 1)
@@ -336,4 +343,21 @@ func (s *apiServer) stream(w http.ResponseWriter, r *http.Request, body io.Reade
 			return written, false
 		}
 	}
+}
+
+// The Content-Type a capture will carry, worked out from the
+// Display's own mode. A HEAD takes no frame, so this is the only
+// answer it can give, and a GET falls back to it if the node
+// answered a bare type.
+func (s *apiServer) capturedAs(screen *Display, mediaType string, chosen captureSelection) string {
+	width, height, _ := screenMode(screen)
+	switch {
+	case chosen.Width > 0 && width > 0:
+		height, width = height*chosen.Width/width, chosen.Width
+	case chosen.Height > 0 && height > 0:
+		width, height = width*chosen.Height/height, chosen.Height
+	case width > clipWidthLimit:
+		height, width = height*clipWidthLimit/width, clipWidthLimit
+	}
+	return captureContentType(mediaType, width, height, chosen.Framerate)
 }

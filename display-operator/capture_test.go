@@ -342,3 +342,23 @@ func TestTheCapturePortNamesItselfInItsChallenge(t *testing.T) {
 		t.Errorf("the 401 carries %q, want a detail naming the field", document.Detail)
 	}
 }
+
+// The info document names the codecs parameter a clip of this screen
+// will carry, so a client can choose a decoder before it asks for
+// one frame.
+func TestTheInfoDocumentNamesTheClipCodec(t *testing.T) {
+	weston := startCaptureWeston(t, formatXR24,
+		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 8, height: 4, refresh: 60000}})
+	server := newCaptureFixture(t)
+	server.socketPath = weston.path
+
+	resp := askSidecar(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1", "the-api-token")
+
+	var info screenInfo
+	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Codecs != "avc1.640029" {
+		t.Errorf("the info document names %q, want the codec a clip of this screen carries", info.Codecs)
+	}
+}

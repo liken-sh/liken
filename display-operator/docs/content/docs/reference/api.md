@@ -40,7 +40,7 @@ with no path clash; until then each domain is one `Service`.
 | GET, HEAD | `/v1/display/displays/{name}/screen` | negotiated | Default `image/png` |
 | GET, HEAD | `/v1/display/displays/{name}/screen.png` | `image/png` | One frame |
 | GET, HEAD | `/v1/display/displays/{name}/screen.jpg` | `image/jpeg` | One frame |
-| GET, HEAD | `/v1/display/displays/{name}/screen.mp4` | `video/mp4` | H.264 in fragmented MP4, until hang-up or the `t=` end |
+| GET, HEAD | `/v1/display/displays/{name}/screen.mp4` | `video/mp4; codecs="avc1.640029"` | H.264 in fragmented MP4, until hang-up or the `t=` end |
 | GET, HEAD | `/v1/display/displays/{name}/screen.mjpeg` | `multipart/x-mixed-replace; boundary=ffmpeg` | One `image/jpeg` part per frame |
 | OPTIONS | any of the above | none, 204 | `Allow: GET, HEAD, OPTIONS` |
 
@@ -316,6 +316,15 @@ curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
 curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
   'https://localhost:8443/v1/display/displays/HDMI-A-1/screen.mp4?t=,10' > clip.mp4
 ```
+
+`screen.mp4` names its codec in the `Content-Type`, as RFC 6381
+writes it: `avc1.640029` is High profile, no constraint flags, level
+4.1, which covers every output up to 1920x1080 at 60 fps, and
+`avc1.640033` is level 5.1 above that. The encoder pins the profile
+and the level rather than letting them follow the stream, so the
+parameter is true before the first byte, and the info document
+carries the same string in its `codecs` member. media-api copies it
+from this header into the composed stream's own type.
 
 A port-forward carries a still well and a stream badly. It is a
 single TCP connection through the API server, and on `liken-1` it

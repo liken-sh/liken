@@ -34,10 +34,10 @@ func TestTheEncoderCommands(t *testing.T) {
 				framerate: 15, device: "/dev/dri/renderD128",
 			},
 			want: "-hide_banner -nostdin -f rawvideo -pixel_format bgr0 -video_size 1920x1080 " +
-				"-framerate 15 -thread_queue_size 8 -i pipe:0 " +
+				"-framerate 15 -use_wallclock_as_timestamps 1 -thread_queue_size 8 -i pipe:0 " +
 				"-init_hw_device vaapi=gpu:/dev/dri/renderD128 -filter_hw_device gpu " +
 				"-vf hwupload,scale_vaapi=format=nv12 " +
-				"-c:v h264_vaapi -g 15 -bf 0 -flush_packets 1 " +
+				"-c:v h264_vaapi -profile:v high -level 4.1 -g 15 -bf 0 -flush_packets 1 " +
 				"-f mp4 -movflags frag_keyframe+empty_moov+default_base_moof -frag_duration 1000000 pipe:1",
 		},
 		{
@@ -47,7 +47,7 @@ func TestTheEncoderCommands(t *testing.T) {
 				framerate: 15, quality: 85, device: "/dev/dri/renderD128",
 			},
 			want: "-hide_banner -nostdin -f rawvideo -pixel_format bgr0 -video_size 1920x1080 " +
-				"-framerate 15 -thread_queue_size 8 -i pipe:0 " +
+				"-framerate 15 -use_wallclock_as_timestamps 1 -thread_queue_size 8 -i pipe:0 " +
 				"-init_hw_device vaapi=gpu:/dev/dri/renderD128 -filter_hw_device gpu " +
 				"-vf hwupload,scale_vaapi=format=nv12 " +
 				"-c:v mjpeg_vaapi -global_quality 85 -jfif 1 -g 15 -bf 0 -flush_packets 1 -f mpjpeg pipe:1",
@@ -310,5 +310,92 @@ func TestTheStderrTailSkipsTheEpilogue(t *testing.T) {
 				t.Errorf("the line is\n  %s\nwant\n  %s", got, row.want)
 			}
 		})
+	}
+}
+
+// A clip names its codec in its Content-Type, and the encoder pins
+// the profile and the level that string states. RFC 6381 writes an
+// H.264 codec as avc1 and three bytes: 0x64 High profile, 0x00 for
+// no constraint flags, and the level.
+func TestTheClipNamesItsCodec(t *testing.T) {
+	cases := []struct {
+		name      string
+		region    cropRect
+		asked     int
+		framerate int
+		codecs    string
+		level     string
+	}{
+		{"1080p at 15", cropRect{W: 1920, H: 1080}, 0, 15, "avc1.640029", "4.1"},
+		{"1080p at 60", cropRect{W: 1920, H: 1080}, 0, 60, "avc1.640029", "4.1"},
+		{"a 4K region, which the encoder scales to 1080p", cropRect{W: 3840, H: 2160}, 0, 30, "avc1.640029", "4.1"},
+		{"a caller who asks for more than 1080p", cropRect{W: 2560, H: 1440}, 2560, 30, "avc1.640033", "5.1"},
+	}
+	for _, row := range cases {
+		t.Run(row.name, func(t *testing.T) {
+			plan := encodePlan{
+				mediaType: "video/mp4", width: row.region.W, height: row.region.H,
+				pixelFormat: "bgr0", framerate: row.framerate, scaleWidth: row.asked,
+				device: "/dev/dri/renderD128",
+			}
+			want := `video/mp4; codecs="` + row.codecs + `"`
+			served := captureContentType("video/mp4", plan.encodedWidth(), plan.encodedHeight(), plan.framerate)
+			if served != want {
+				t.Errorf("the type is %q, want %q", served, want)
+			}
+			command := strings.Join(plan.args(), " ")
+			if !strings.Contains(command, "-profile:v high -level "+row.level) {
+				t.Errorf("the command is\n  %s\nwant it to pin level %s", command, row.level)
+			}
+		})
+	}
+}
+
+// The level follows the size and the rate, at the two boundaries
+// RFC 6381 writes as 0x29 and 0x33.
+func TestTheLevelFollowsTheSizeAndTheRate(t *testing.T) {
+	cases := []struct {
+		width, height, framerate int
+		want                     string
+	}{
+		{1920, 1080, 60, "avc1.640029"},
+		{1921, 1080, 30, "avc1.640033"},
+		{1920, 1081, 30, "avc1.640033"},
+		{1920, 1080, 61, "avc1.640033"},
+	}
+	for _, row := range cases {
+		if got := h264Codecs(row.width, row.height, row.framerate); got != row.want {
+			t.Errorf("%dx%d at %d is %q, want %q", row.width, row.height, row.framerate, got, row.want)
+		}
+	}
+}
+
+// Only a clip names a codec. A still and the low-end stream carry
+// the type alone, and the multipart form carries its boundary.
+func TestTheOtherFormsNameNoCodec(t *testing.T) {
+	cases := []struct{ mediaType, want string }{
+		{"image/png", "image/png"},
+		{"image/jpeg", "image/jpeg"},
+		{"multipart/x-mixed-replace", mjpegContentType},
+	}
+	for _, row := range cases {
+		if got := captureContentType(row.mediaType, 1920, 1080, 15); got != row.want {
+			t.Errorf("%s is served as %q, want %q", row.mediaType, got, row.want)
+		}
+	}
+}
+
+// A clip of a 4K screen encodes at 1080p, so the level it pins and
+// the string the info document carries are a 1080p clip's.
+func TestAFourKScreenClipsAtTheScaledSize(t *testing.T) {
+	screen := captureScreen{Width: 3840, Height: 2160}
+	if got := clipWidth(screen.Width); got != 1920 {
+		t.Errorf("a 4K screen clips at width %d, want 1920", got)
+	}
+	if got := clipHeight(screen); got != 1080 {
+		t.Errorf("a 4K screen clips at height %d, want 1080", got)
+	}
+	if got := h264Codecs(clipWidth(screen.Width), clipHeight(screen), 15); got != "avc1.640029" {
+		t.Errorf("a 4K screen's clip names %q, want a 1080p clip's codec", got)
 	}
 }

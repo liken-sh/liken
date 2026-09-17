@@ -80,6 +80,12 @@ type screenInfo struct {
 	Scale   int      `json:"scale,omitempty"`
 	Refresh int      `json:"refresh"`
 	Formats []string `json:"formats,omitempty"`
+	// The codecs parameter screen.mp4 answers with for this screen,
+	// as RFC 6381 writes it. A client that must choose a decoder
+	// before it asks, and media-api composing this stream with
+	// sound, both read it here or from the capture's own
+	// Content-Type.
+	Codecs string `json:"codecs,omitempty"`
 	// What is wrong with the screen, when something is. A screen that
 	// answers carries neither: compositor is "down" for a screen whose
 	// compositor is not serving, sidecar is "unreachable" for a node
