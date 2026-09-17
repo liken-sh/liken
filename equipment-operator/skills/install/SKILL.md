@@ -16,7 +16,7 @@ You need:
   [`media-operator`](https://media.liken.sh) installed. The operator
   reads a session's level from the media bus that `media-operator`
   runs.
-* A receiver that speaks the Denon and Marantz control protocol on
+* A receiver that supports the Denon and Marantz control protocol on
   the network, with network control enabled in its own menu.
 * `kubectl` with cluster-admin access, because the install creates a
   CRD and a `ClusterRole`.
@@ -45,8 +45,8 @@ release tag:
 
 A `Receiver` names the protocol, the address, and the wiring. The
 wiring is the fact nothing can discover: which machine's HDMI output
-lands on which input. A receiver forwards one EDID on every input,
-so every entry names the machine as well as the monitor id.
+connects to which input. A receiver forwards one EDID on every
+input, so every entry names the machine as well as the monitor id.
 
 ```yaml
 apiVersion: equipment.liken.sh/v1alpha1
@@ -68,31 +68,32 @@ spec:
 The input name is the receiver's own spelling. The monitor id is the
 one the [`display-operator`](https://display.liken.sh) publishes for
 that cable. The volume block is in the receiver's own scale. `max` is
-the loudest a press may take the room, and a Denon requires it,
-because the limit a Denon reports moves with the volume. `step` is
-how far one press moves, and half steps are allowed. `kubectl get
-receivers` shows what the receiver last said:
+the loudest level a press may set the room to, and a Denon requires
+it, because the limit a Denon reports moves with the volume. `step`
+is how far one press moves the volume, and half steps are allowed.
+`kubectl get receivers` shows what the receiver last reported:
 
     NAME          POWER   INPUT   VOLUME   REACHABLE   AGE
     living-room   on      MPLAY   50.0     True        2m
 
 ## Put it under a Player
 
-Nothing more is declared. The `media-operator` resolves each
-`Player`'s screen to a machine and a monitor id, finds the input
-that matches both, and applies `spec.session` for as long as the
-`Player` has that screen, at the idle screen included. The session
-takes the level from the `Player`'s volume topic the whole time, so
-the remote's volume keys turn the receiver whether a film plays or
-not. The topic and its payload are the `media-operator`'s, given on
-its [players page](https://media.liken.sh/docs/reference/players/).
+You declare nothing more. The `media-operator` resolves each
+`Player`'s screen to a machine and a monitor id, then finds the
+input that matches both. It applies `spec.session` for as long as
+the `Player` has that screen, the idle screen included. The session
+takes the level from the `Player`'s volume topic the whole time. So
+the remote's volume keys change the receiver's level whether a film
+plays or not. The topic and its payload are the `media-operator`'s,
+given on its
+[players page](https://media.liken.sh/docs/reference/players/).
 What this operator reads and writes there is on
 [the receiver on the bus](https://equipment.liken.sh/docs/reference/bus/). When a `Play`
 starts, the session powers the receiver on and selects the input,
-once. An idle screen never wakes the receiver.
+once. An idle screen never powers the receiver on.
 
-A person at the receiver's own remote outranks the cluster. If they
+A person at the receiver's own remote overrides the cluster. If they
 select another input, the status records it and nothing switches
-back until the next `Play` starts. If they turn the knob, the new
-level is written back to the volume topic, so the next press steps
-from there.
+back until the next `Play` starts. If they turn the knob, the
+operator writes the new level back to the volume topic, so the next
+press steps from there.
