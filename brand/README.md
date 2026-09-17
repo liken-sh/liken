@@ -100,6 +100,16 @@ name, because Hugo gives a site's `layouts/` precedence over the
 theme's. liken.sh does this for its `llms.txt` outputs; a site with
 no override gets the theme's shell unchanged.
 
+Do not copy `baseof.html` to change one part of it. The shell is
+split into partials under `layouts/_partials/`, each with the
+theme's default, and a site shadows only the one it changes:
+`head.html` (empty in the theme; a site adds style rules or link
+elements at the end of the head), `aside.html` (the sidebar; the
+theme's default is the manual tree, and the body gets the manual
+grid whenever this partial renders anything), `crumbs.html` (the
+breadcrumb trail), and `footer.html`. The devlog shadows all four
+and copies nothing.
+
 # The mark
 
 `liken`'s icon is a patch of lichen, drawn as hexagonal tiles.
