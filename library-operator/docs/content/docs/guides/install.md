@@ -81,11 +81,11 @@ provisions every catalog claim as `ReadWriteOnce`, and the namespace's
 A class left empty binds to the cluster's default class.
 
 The catalog of record and the progress store are the two claims worth
-keeping, so give them a class that survives a lost node, such as
-block storage from a SAN. A SQLite file on NFS can corrupt when its
+keeping. Give them a class that survives a lost node, such as block
+storage from a SAN. A SQLite file on NFS can corrupt when its
 node is lost, so do not use an NFS class. A `Library`'s claims are
 working copies that a `Job` rebuilds from the catalog of record, and a
-screen pod is pinned to the machine that holds its display, so a
+screen pod is pinned to the machine that holds its display. A
 node-local class such as `local-path` fits both.
 
 ## 2. Apply the manifests
@@ -114,13 +114,13 @@ every capability dropped. The `Service` is the address every
 `Library`'s [webhook](/docs/guides/webhooks/) is reached at.
 
 The `ClusterRole` is cluster-wide because a `Library` can be in any
-namespace. Its grants are read and status writes on this operator's
-own resources, read on `media-operator`'s `Player` and
-`MediaPreferences`, create and patch on `Play`, patch on
-`people.liken.sh`'s `Person` for one finalizer, and create and delete
-on the claims, pods, `Jobs`, `CronJobs`, `Services`, and the one
-`ConfigMap` per screen namespace it owns, which carries the `Person`
-list every screen reads.
+namespace. On this operator's own resources, its grants are read and
+status writes. On `media-operator`'s `Player` and `MediaPreferences`
+they are read, on `Play` create and patch, and on `people.liken.sh`'s
+`Person` patch, for one finalizer. On the claims, pods, `Jobs`,
+`CronJobs`, `Services`, and the one `ConfigMap` per screen namespace
+it owns, they are create and delete. That `ConfigMap` holds the
+`Person` list every screen reads.
 
 This site serves the same files as raw YAML, so a clone is never
 needed: [`libraries-crd.yaml`](/deploy/libraries-crd.yaml),
@@ -177,7 +177,7 @@ Every push to the operator's main branch publishes a development
 build. Its version is the most recent release plus a suffix:
 `2026.09.03-007-dev-003-abcdef01` is three commits past release
 `2026.09.03-007`, at commit `abcdef01`. Every image the repository
-builds carries the same version, and `:latest` still names the most
+builds has the same version, and `:latest` still names the most
 recent release.
 
 A development build has no git tag, so the manifests pin to the
@@ -198,7 +198,7 @@ in its summary.
 ## Remove the operator
 
 Delete every `Library` first, and wait for each one to go. A `Library`
-carries a finalizer that the operator releases after a cleanup `Job`
+has a finalizer that the operator releases after a cleanup `Job`
 removes its rows from the namespace's catalog. If the operator's
 `Deployment` is gone, nothing runs that `Job`, and the `Library` stays
 `Terminating` until a person patches the finalizer off.

@@ -69,7 +69,7 @@ Over the bus, every key a remote sends reaches the browser under the
 kernel's name, except volume, mute, and the cycle key. Those three are
 handled before they reach the browser, and the browser draws the level
 as a fading row. While the `Player`'s owner-mark topic holds a
-non-empty payload, equipment owns the room's level and carries its own
+non-empty payload, equipment owns the room's level and draws its own
 indicator, so the browser draws no row. So a remote with a keyboard
 types into search, and its home and search buttons work once a
 `Keymap` names them. The same keys reach the browser from a keyboard
@@ -88,8 +88,9 @@ attached to the screen's machine.
 
 Up from the top of any wall puts focus on the strip, the row across
 the top that holds the clock and the search glass. Right from the last
-column of a long wall puts focus on the rail, the bars at the right
-edge that jump through the wall by year, decade, letter, or season.
+column of a long wall puts focus on the rail. The rail is the bars at
+the right edge, and they jump through the wall by year, decade,
+letter, or season.
 Enter on the rail's sort button cycles the wall's order.
 
 ## 5. The screens
@@ -102,33 +103,33 @@ with its count. A wall longer than eight rows draws the rail.
 
 The continue-watching row belongs to the people at the screen. The
 browser asks who is watching, and every play it requests records those
-people. The row then reads the plays that named exactly them: a person
+people. The row then reads the plays that named exactly them. A person
 alone sees what they watched alone, and a family sees what the family
-watched together. A night with one more person in the room still
-counts, as long as it carried on from where the group had reached. For
+watched together. A night with one more person in the room still counts,
+as long as that play continued from where the group had stopped. For
 each series, set, and franchise those plays touch, the row offers the
-next thing in its order, or the thing to resume, and the card's second
-line says why it is there: "Resume", "Next in" the series, the set, or
-the franchise. A card that is next in a series or a set opens that
-title's page. A card that is next in a franchise alone opens the
-franchise page on that member.
+next thing in its order, or the thing to resume. The card's second line
+says why it is there: "Resume", "Next in" the series, the set, or the
+franchise. A card that is next in a series or a set opens that title's
+page. A card that is next in a franchise alone opens the franchise page
+on that member.
 
-The answer to who is watching stands until three hours pass with no
+The answer to who is watching lasts until three hours pass with no
 press. The browser keeps it on the bus, retained, so a screen pod that
 restarts inside those hours draws the same room and asks nobody.
 [The library bus](/docs/reference/bus/#who-is-watching) gives the
 message.
 
 A movie's page shows its art, its facts, its people, and the set or
-franchise it is part of. A series' page shows its seasons as a wall
-of episode stills. A person's page shows their credits and their
-biography. A franchise's page draws its story order as one lane with a
-line per universe beside it, and a heading over the first row of each
-era, with the era's length beside its name. An era inside a wider one
-reads as a smaller line under it. While the wall scrolls inside an era,
-one line held over the cards names the eras around it, outer to inner,
-and left and right jump an era at a time. The wall moves only when the
-row in focus would leave the screen.
+franchise it is part of. A series' page shows its seasons as a wall of
+episode stills. A person's page shows their credits and their biography.
+A franchise's page draws its story order as one lane, with a line per
+universe beside it. Over the first row of each era it draws a heading,
+with the era's length beside its name. An era inside a wider one reads
+as a smaller line under it. While the wall scrolls inside an era, one
+line held over the cards names the eras around it, outer to inner. Left
+and right jump an era at a time. The wall moves only when the row in
+focus would leave the screen.
 
 Search is a wall like any other. Every typed character rereads it.
 The index is built in memory from titles, original titles, people's
@@ -145,14 +146,14 @@ hits puts focus on the strip, and enter there opens the grid again.
 ## 6. Playback
 
 Enter on a title resolves what to play from the browser's own copy of
-the catalog and publishes the list on the bus, as a play request on
-`liken/library/players/{namespace}/{player}/play`. The operator names
+the catalog. It then publishes the list on the bus, as a play request
+on `liken/library/players/{namespace}/{player}/play`. The operator names
 the topic on the browser container as `LIBRARY_PLAY_TOPIC`, and
 [The library bus](/docs/reference/bus/#the-play-request) gives every field
 of the request. The operator turns it into a `Play` for the `Player`,
 with each item's path as a claim reference, and `media-operator` runs
 it. The `Play` is named after the title, so `kubectl get plays` reads
-like a listing. When the `Play` ends, the browser is presented again
+like a listing. When the `Play` ends, the browser is shown again
 on the page it left.
 
 ## Every screen shows every library

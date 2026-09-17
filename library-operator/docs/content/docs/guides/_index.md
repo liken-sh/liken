@@ -26,14 +26,14 @@ the one permanent member of the namespace's replicated SQLite catalog,
 and it sizes every catalog claim. A `Library` is declared once per root
 directory on a volume, and it names the kind of media there.
 
-The operator reconciles a `Library` into a `CronJob`. Each of its
-`Jobs` walks the volume with a catalog agent beside it, writes rows
-into the namespace's catalog, and exits when a catalog pod confirms
-its run. A webhook from Radarr, Sonarr, or Jellyfin runs the same
-walk over one folder. An enrich `Job` asks the providers a `Library`
-names and writes the answers beside the media, as the sidecars and
-art Kodi and Jellyfin read. The volume stays the source of truth, and
-the catalog is derived from it.
+The operator reconciles a `Library` into a `CronJob`. Each of its `Jobs`
+walks the volume with a catalog agent beside it and writes rows into the
+namespace's catalog. The `Job` exits when a catalog pod confirms its
+run. A webhook from Radarr, Sonarr, or Jellyfin runs the same walk over
+one folder. An enrich `Job` asks the providers a `Library` names and
+writes the answers beside the media, as the sidecars and art Kodi and
+Jellyfin read. The volume stays the source of truth, and the catalog is
+derived from it.
 
 A screen is a `Player` that `media-operator` owns. When its idle
 controller names this operator, the operator runs a pod on the

@@ -18,10 +18,10 @@ Every standing `Library` reports its webhook address:
     http://library-operator.liken-system.svc/webhook/media/movies
 
 The address names the operator's own `Service` and the `Library`, so it
-holds for the life of the `Library`. The `Service` is a `ClusterIP`,
-reachable only inside the cluster, and the endpoint checks nothing but
-the method and the path. Give it only to tools that run in the same
-cluster.
+holds for as long as the `Library` exists. The `Service` is a
+`ClusterIP`, reachable only inside the cluster, and the endpoint checks
+nothing but the method and the path. Give it only to tools that run in
+the same cluster.
 
 ## What a POST does
 
@@ -41,7 +41,7 @@ walk.
 
 Add a connection of type Webhook. Set the URL to the movies
 `Library`'s address, and the method to POST. Enable the events that
-carry a file: import, upgrade, and rename. An event with no path, such
+name a file: import, upgrade, and rename. An event with no path, such
 as the test, schedules a full walk. Saving a new connection runs the
 test on its own, and the Test button runs it again, so a new
 connection costs one full walk for each. Make the connection once and
@@ -54,7 +54,7 @@ The same, with the series `Library`'s address.
 ## Jellyfin
 
 Install Jellyfin's Webhook plugin and add a generic destination with
-the `Library`'s address. An item-added notification carries a
+the `Library`'s address. An item-added notification has a
 top-level `Path`, which is what the operator reads.
 
 ## One writer beside the media

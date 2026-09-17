@@ -1,14 +1,14 @@
 ---
 title: Declare a library
 weight: 20
-description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace decides. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
+description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
 ---
 
 # Declare a library
 
 A `Library` is one root directory on one volume, holding media of one
 kind. This guide declares one, reads what it reports, and describes
-what its namespace decides.
+what its namespace determines.
 
 ## The declaration
 
@@ -64,12 +64,12 @@ The listing shows the counts and the phase:
     movies   movies   128      128     560     1         Idle     True    12d
 
 `Titles` is what the last walk cataloged. `Items` counts movies, or
-series and episodes together. `Files` counts the video files with
-their sidecars, art, subtitles, and trickplay directories. `Waiting`
-counts the titles a provider returned candidates for, which a person
-resolves by naming the right `uniqueid` in the `.nfo`. With `-o wide`
-the listing adds the claim and the `Unidentified` count, the folders
-the walk could not name, which are still browsable under their folder
+series and episodes together. `Files` counts the video files with their
+sidecars, art, subtitles, and trickplay directories. `Waiting` counts
+the titles a provider returned candidates for, which a person resolves
+by naming the right `uniqueid` in the `.nfo`. With `-o wide` the listing
+adds the claim and the `Unidentified` count. Those are the folders the
+walk could not name, and they are still browsable under their folder
 names.
 
 `Status` is the phase. `Pending` means the storage, the catalog pod, or
@@ -105,7 +105,7 @@ Every `Library` in a namespace writes into that namespace's one
 catalog, and every screen in the namespace shows that catalog. So a
 `Library` waits with the reason `NoCatalog` until the namespace holds
 a `Catalog`, and two `Catalogs` block both. Every catalog row is keyed
-by its library, so two libraries in one namespace never touch each
+by its library. So two libraries in one namespace never touch each
 other's rows, even on the same relative path or the same provider id.
 
 Put libraries that should show together in one namespace. Put
@@ -114,7 +114,7 @@ libraries that should never meet on a screen in different namespaces.
 ## How a title is played
 
 When a person plays a title from the browser, the operator creates a
-`Play` for `media-operator`, and the media reference in it names the
+`Play` for `media-operator`. The media reference in it names the
 claim, never the volume behind it:
 
     claim://movies-pvc//media/movies/Some Film (1999)/Some Film (1999).mkv

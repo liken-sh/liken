@@ -56,14 +56,14 @@ its node, and its phase.
 The pod is named `<catalog>-catalog`, and it runs two containers. The
 `catalog` container is the Corrosion agent, on a `ReadWriteOnce` claim
 named the same way, so a restarted pod keeps its database. The
-`reporter` container reads that agent and publishes one retained
-report per `Library` on the bus, rebuilt whenever the catalog changes,
-at most once a second. The report is where a `Library`'s counts, gaps,
-and runs come from. The reporter holds no Kubernetes credential. The
-operator alone writes status.
+`reporter` container reads that agent and publishes one retained report
+per `Library` on the bus. It rebuilds the report whenever the catalog
+changes, at most once a second. The report is where a `Library`'s
+counts, gaps, and runs come from. The reporter holds no Kubernetes
+credential. The operator alone writes status.
 
 The agent's API binds to loopback, so nothing on the pod network can
-reach it, and the pod's probes run `SELECT 1` through the agent's own
+reach it. The pod's probes run `SELECT 1` through the agent's own
 binary inside the container. The startup probe allows ninety seconds
 for the agent to open its database.
 
@@ -71,33 +71,33 @@ for the agent to open its database.
 
 The operator writes a headless `Service` named `catalog` in the
 namespace, on UDP port 8787, and writes its `EndpointSlice` itself.
-The slice holds every pod in the namespace that carries the member
+The slice holds every pod in the namespace that has the member
 label: the catalog pod, every running scan, enrich, and cleanup `Job`,
 and every screen. A starting agent is published before it is ready,
 because it is a gossip peer as soon as it starts. Every agent
-bootstraps to `catalog:8787` and keeps re-resolving it for its whole
-life.
+bootstraps to `catalog:8787` and keeps re-resolving it for as long as
+it runs.
 
 ## How a `Job` confirms its rows landed
 
 Every worker `Job` writes a `runs` row when it starts and one when it
-finishes. The write of the finished row answers with the writing
-agent's id and the db version of that write, and the `Job` writes the
-row once more with both of them in it. Every catalog pod runs a
-`confirmer` container beside its agent. The `confirmer` follows the
-finished runs, and for each one it reads `crsql_db_versions` and
-`__corro_bookkeeping_gaps` on its own copy to learn whether that copy
-holds every version of that agent up to the one the run names. When
-it does, it writes a row into the `confirmations` table under its own
-pod name, and the `Job` exits on the first row that names its run at
-that version. The version is the proof, because a receiving agent
-applies versions out of order and records the ones behind as gaps, so
-the newest version alone says nothing about the versions under it.
-While it waits, the `Job` writes its `runs` row again every ten
-seconds with a later finish time, so each write is a new broadcast
-with fresh peers. A `Job` that waits more than two minutes fails,
-which `HANDOFF_TIMEOUT` sets, and Kubernetes retries it. The rows stay
-safe on the `Job`'s own claim.
+finishes. The write of the finished row answers with the writing agent's
+id and the db version of that write. The `Job` then writes the row once
+more with both of them in it. Every catalog pod runs a `confirmer`
+container beside its agent. The `confirmer` follows the finished runs.
+For each one, it reads `crsql_db_versions` and
+`__corro_bookkeeping_gaps` on its own copy. Those two tables report
+whether the copy holds every version of that agent up to the one the run
+names. When it does, the `confirmer` writes a row into the
+`confirmations` table under its own pod name. The `Job` exits on the
+first row that names its run at that version. The version is the proof.
+A receiving agent applies versions out of order and records the ones
+behind as gaps, so the newest version alone says nothing about the
+versions under it. While it waits, the `Job` writes its `runs` row again
+every ten seconds with a later finish time, so each write is a new
+broadcast with fresh peers. A `Job` that waits more than two minutes
+fails, and Kubernetes retries it. `HANDOFF_TIMEOUT` sets that limit. The
+rows stay safe on the `Job`'s own claim.
 
 ## How a screen syncs
 
@@ -110,14 +110,14 @@ machine that holds its display, so a node-local class fits.
 A screen holds a second claim beside it, `<screen-pod>-art`, where
 the browser keeps every piece of art it scaled: posters, backdrops,
 episode stills, logos, and headshots. `spec.screens.artCache.size`
-sizes it, 2Gi by default, and it takes the same class. The browser is
-told to keep 128 MiB under that size, which is the room an atomic
+sizes it, 2Gi by default, and it takes the same class. The browser
+keeps its cache 128 MiB under that size, which is the room an atomic
 write needs. Both claims are created once and never updated, so a
 size change reaches new screens and not standing ones. To resize a
 standing screen, delete its claim, and the next pass creates it at
 the new size.
 
-The catalog claim is what makes a restart fast. On an `emptyDir`, a restarted
+The catalog claim makes a restart fast. On an `emptyDir`, a restarted
 screen synced the whole catalog again every time. On a claim, the
 sync happens once, when the claim is fresh:
 
@@ -128,7 +128,7 @@ sync happens once, when the claim is fresh:
 | First start on a fresh claim | every start | once, 152 s |
 
 A screen in a namespace with no `Catalog` runs on an `emptyDir` and
-pays the sync on every start.
+syncs the whole catalog on every start.
 
 A node-local class binds the claim to the node the pod first landed
 on. If the display moves to another machine, the pod cannot schedule

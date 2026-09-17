@@ -13,11 +13,11 @@ change them.
 
 ## What a screen machine runs
 
-A screen pod is two containers. The catalog agent holds the
-namespace's catalog and requests `64Mi` of memory with a `512Mi`
-limit. The limit is wide because the agent's first sync holds the
-whole catalog in memory as it applies it, and it settles far below
-that once the sync completes. The browser has no limit of its own.
+A screen pod is two containers. The catalog agent holds the namespace's
+catalog and requests `64Mi` of memory with a `512Mi` limit. The limit is
+wide because the agent's first sync holds the whole catalog in memory as
+it applies it. The agent settles far below that limit once the sync
+completes. The browser has no limit of its own.
 
 Measured on a one-gigabyte box, after the screen's catalog synced,
 the browser rested at 216 MiB, most of it the page-size backdrops in
@@ -67,11 +67,11 @@ happens once:
 A scan `Job` requests `32Mi` with a `64Mi` limit, and its own catalog
 agent the same. The enrich `Job`'s art container is limited to `256Mi`.
 The trickplay `Job`, when enabled, requests half a CPU with a `512Mi`
-limit, because it runs `ffmpeg` where every other container reads
-rows and files, and it runs beside the enrich `Job` with a catalog
-agent of its own. Every pod that runs an agent has a sixty-second
-termination grace period, twice the default, because a busy agent
-flushes its database on the way out.
+limit, because it runs `ffmpeg` where every other container reads rows
+and files. It runs beside the enrich `Job` with a catalog agent of its
+own. Every pod that runs an agent has a sixty-second termination grace
+period, twice the default, because a busy agent flushes its database as
+it stops.
 
 ## What to turn down
 

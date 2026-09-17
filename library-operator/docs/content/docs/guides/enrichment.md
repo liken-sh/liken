@@ -110,20 +110,20 @@ The scrub-bar thumbnails are a `Job` of their own, named
 `<library>-trickplay`, because one title's decode runs for minutes and
 the other facts must not wait behind it. It runs beside the enrich
 `Job` when `spec.trickplay.enabled` is set and a video has no tile
-directory, and a webhook's folder gets one beside its enrich stage.
+directory. A webhook's folder gets one beside its enrich stage.
 
 The `Job` decodes on the node's GPU when `spec.trickplay.render` names
 a DeviceClass. The operator keeps a `ResourceClaimTemplate` for the
-`Library`, the `Job`'s pod claims one device from it, and `ffmpeg`
-decodes through VA-API and falls back to software for a codec the
+`Library`, and the `Job`'s pod claims one device from it. `ffmpeg`
+decodes through VA-API, and it falls back to software for a codec the
 GPU refuses. With no render block the `Job` decodes in software. With
 a render block on a cluster where no node offers such a device, the
 pod stays `Pending`, and its events say so.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
 
-The tile directory is the one Jellyfin reads and writes, so a directory
-Jellyfin made first is the answer, and the `Job` leaves it alone.
+The tile directory is the one Jellyfin reads and writes. So the `Job`
+accepts a directory Jellyfin made first and leaves it alone.
 
 ### Identification
 
@@ -131,17 +131,17 @@ The identity fact asks TMDb for the folder's title and runs a fixed
 sequence of tests: the title, then the year, then a year on either side,
 then, for a series, the episode names, then the runtime within five
 minutes. The episode test reads the episode titles from the file names
-of the folder's first season and keeps a candidate whose season on TMDb
-carries at least two of them and at least half. So a series folder
-named with the title alone identifies without a sidecar. One survivor
-is the answer, and its reason is recorded. Several survivors become candidates in
-`.liken/identity.yaml`, and the title counts in `status.waiting` until
-a person names the right `uniqueid` in the `.nfo`. A title no provider
-can name counts in `status.unresolved`.
+of the folder's first season. It keeps a candidate whose season on TMDb
+has at least two of them and at least half. So a series folder named
+with the title alone identifies without a sidecar. One survivor is the
+answer, and its reason is recorded. Several survivors become candidates
+in `.liken/identity.yaml`, and the title counts in `status.waiting`
+until a person names the right `uniqueid` in the `.nfo`. A title no
+provider can name counts in `status.unresolved`.
 
 Once a title has a TMDb id, one more call writes every other
-database's id into the sidecar, so OMDb and Fanart.tv become reachable
-with no account of their own.
+database's id into the sidecar. OMDb and Fanart.tv then become
+reachable with no account of their own.
 
 ### The write rule
 
@@ -168,20 +168,20 @@ resolution where the provider states one, and a score from 1 to 100
 with a one-line reason. The catalog's `trailers` table holds the same
 rows.
 
-The score ranks the videos of one title, so a screen can take the
-first. A video keyed by the title's own id, as TMDb's are, starts at
-100. A video found by a search starts at 90 when its name carries the
-same title and year, and at 60 when the name carries the title and no
-year at all; a search result whose name carries another title or
-another year is not recorded. Then the kind takes points off, a teaser
-less than a TV spot, and so does a language the household does not
-prefer, and so does a TMDb video that is not marked official. The
-reason says which of these applied. Clips, featurettes, and other
-extras are not recorded at all. Within one provider, videos with the
-same name collapse to the best one, and at most five videos per
-provider are kept for a title. An Internet Archive item is kept only
-when its own video runs eight minutes or less, because the
-`movie_trailers` collection holds whole films beside the trailers.
+The score ranks the videos of one title, so a screen can take the first.
+A video keyed by the title's own id, as TMDb's are, starts at 100. A
+video found by a search starts at 90 when its name has the same title
+and year. It starts at 60 when the name has the title and no year at
+all. A search result whose name has another title or another year is not
+recorded. Then the kind takes points off, a teaser less than a TV spot.
+A language the household does not prefer takes points off, and so does a
+TMDb video that is not marked official. The reason says which of these
+applied. Clips, featurettes, and other extras are not recorded at all.
+Within one provider, videos with the same name collapse to the best one,
+and at most five videos per provider are kept for a title. An Internet
+Archive item is kept only when its own video runs eight minutes or less,
+because the `movie_trailers` collection holds whole films beside the
+trailers.
 
 The preferred languages are the library's `spec.languages`, then the
 household's `audioLanguages` from the media operator's
@@ -196,7 +196,7 @@ The `trailerfile` fact pulls one video file per title. It is off unless
 `trailer` fact has recorded links.
 
 The file lands at `<title>/trailers/<name>.mp4`. The name is the
-trailer's own name with every character a file name cannot carry taken
+trailer's own name with every character a file name cannot hold taken
 out, and its length is capped.
 
 The fact takes the highest-scored trailer whose site the operator can
@@ -205,26 +205,27 @@ never YouTube. From that trailer's files it takes the tallest file that
 is no taller than the title's own feature, or the shortest above it
 where none fits.
 
-A title that already holds a trailer file anywhere under its folder is
-never pulled for. A trailer a person placed by hand stays, and the fact
-records nothing.
+The fact never pulls for a title that already holds a trailer file
+anywhere under its folder. A trailer a person placed by hand stays, and
+the fact records nothing.
 
 Every pull is remuxed to MP4 and checked with `ffprobe` before it
 lands. The check requires a video stream and a length between 10
-seconds and 8 minutes, so a TV spot passes and a whole film does not. A file that fails the check never reaches a name
-the walk reads, and the attempt records the error.
+seconds and 8 minutes, so a TV spot passes and a whole film does not.
+A file that fails the check never reaches a name the walk reads, and
+the attempt records the error.
 
 **A trailer is tens of megabytes per title, so a library of any size
 adds gigabytes to the volume the first time this fact runs.**
 
-The operator stands a `<library>-trailers-<walk>` `Job` beside the
+The operator creates a `<library>-trailers-<walk>` `Job` beside the
 enricher, on a catalog claim of its own, and two titles pull at once
 inside it. The fact takes no `spec.refresh`.
 
 ### When a fact asks again
 
-A miss stands for thirty days and an error for one day, then the fact
-asks again. An attempt made before a title's release date stands only
+A miss lasts for thirty days and an error for one day, then the fact
+asks again. An attempt made before a title's release date lasts only
 until that date. To ask one fact again for every title now, set its
 time in `spec.refresh`:
 

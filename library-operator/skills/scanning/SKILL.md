@@ -78,9 +78,9 @@ A folder with one of those names that holds video files is an extras
 folder wherever it is, at the library root or inside a grouping folder.
 The scanner reads no title from it, and nothing under it is cataloged.
 A folder with one of those names that holds only folders is a grouping
-folder, so a genre folder named `Shorts` is read and the titles under
-it are cataloged. A title whose own name is one of those words carries
-its year in its folder name, `Trailers (2016)`, which is not the bare
+folder. So a genre folder named `Shorts` is read, and the titles under
+it are cataloged. A title whose own name is one of those words has its
+year in its folder name, `Trailers (2016)`, which is not the bare
 word.
 
 Every file gets a row. The scanner classifies each one as `video`,
@@ -108,14 +108,13 @@ title folder, `season02-poster.jpg` beside `tvshow.nfo`, and
 ### The `.liken/` directory
 
 Beside a title, a dot-named directory holds what the sidecar has no
-element for: one YAML file per fact, named for the fact.
-`identity.yaml` holds the provider ids, or the candidates left for a
-person to choose from.
-`arrival.yaml` holds when each video file was first seen. Every other
-`<fact>.yaml` holds what that fact wrote, which provider answered, and
-its attempts. One file per writer is what lets several enrichers run
-at once on a network mount with no locks. The scan reads these files
-and never writes them.
+element for: one YAML file per fact, named for the fact. `identity.yaml`
+holds the provider ids, or the candidates left for a person to choose
+from. `arrival.yaml` holds when each video file was first seen. Every
+other `<fact>.yaml` holds what that fact wrote, which provider answered,
+and its attempts. One file per writer lets several enrichers run at once
+on a network mount with no locks. The scan reads these files and never
+writes them.
 
 ### `.contributors/`
 
@@ -139,19 +138,19 @@ runs a one-off `Job` that rescans one folder.
     kubectl -n media create job movies-scan-now --from=cronjob/movies-scan
 
 A scan `Job` writes a `runs` row when it starts and another when it
-finishes, then waits until a catalog pod confirms that run before it
+finishes. Then it waits until a catalog pod confirms that run, and
 exits. So a `Job` that completed is a `Job` whose rows reached a
 standing copy of the catalog.
 
 ## Mark and sweep
 
 Each full walk has an epoch. The walk marks every id, path, and link
-it reads with that epoch, and a prune pass deletes every row of this
+it reads with that epoch. A prune pass then deletes every row of this
 library the epoch did not mark, in batches of five hundred.
 
 Two guards keep a bad walk from emptying a library. A walk that could
 not read every directory, or that found less than half of what the
-catalog holds, is incomplete: it writes what it read and prunes
+catalog holds, is incomplete. It writes what it read and prunes
 nothing, and the log reports it:
 
     incomplete walk: could not read the whole volume, keeping the last counts
@@ -160,16 +159,16 @@ A prune whose epoch marked nothing at all is refused as an error.
 `status.removedLastSweep` reports what the last sweep removed, so a
 mass delete is visible without a shell.
 
-The walk itself runs eight workers over a shared pool of directories,
-which keeps a network volume busy without a burst large enough to slow
+The walk itself runs eight workers over a shared pool of directories.
+That keeps a network volume busy without a burst large enough to slow
 a player.
 
 ## Deleting a Library
 
-A `Library` carries a finalizer, and deleting it starts a departure
-that removes its rows from the namespace's catalog. The operator
-deletes the `CronJob`, waits for any scan or enrich `Job` to finish,
-then runs a cleanup `Job` named `<library>-cleanup` that deletes the
+A `Library` has a finalizer, and deleting it starts a departure that
+removes its rows from the namespace's catalog. The operator deletes
+the `CronJob`, then waits for any scan or enrich `Job` to finish. Then
+it runs a cleanup `Job` named `<library>-cleanup`, which deletes the
 rows in batches through its own catalog agent. The finalizer clears
 once the cleanup `Job` succeeded and a catalog pod confirmed its run.
 
@@ -181,8 +180,8 @@ reports the blocker for as long as the object is deleting.
 
 A namespace with no `Catalog` releases at once, because nothing there
 holds the rows. A library whose own catalog claim is already gone gets
-a fresh, empty one for the cleanup `Job`, whose agent receives the rows
-over gossip and then sweeps them.
+a fresh, empty one for the cleanup `Job`. That `Job`'s agent receives
+the rows over gossip and then sweeps them.
 
 ## Reading progress
 

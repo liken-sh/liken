@@ -17,8 +17,8 @@ resumes on the phone.
 ## 1. Name the server on the Catalog
 
 Make an API key on the Jellyfin server, under Dashboard and API Keys,
-and put it in a `Secret` in the `Catalog`'s namespace. One key serves
-every user, because an API key acts as an administrator.
+and put it in a `Secret` in the `Catalog`'s namespace. One key covers
+every user, because an API key has administrator rights.
 
     apiVersion: v1
     kind: Secret
@@ -40,7 +40,7 @@ Then name the server's address and that `Secret` on the `Catalog`.
           name: jellyfin-api-key
           key: token
 
-The operator stands one pod and one `Service`, both named after the
+The operator creates one pod and one `Service`, both named after the
 `Catalog` with the suffix `-jellyfin`, beside the progress store. The
 key reaches the pod through a `secretKeyRef`, so the operator never
 reads it. The [Catalog](https://library.liken.sh/docs/reference/catalogs/) reference describes
@@ -50,7 +50,7 @@ every field.
 
 Jellyfin tells the role what a person plays through its Webhook
 plugin. Install the plugin from Jellyfin's catalog and add a Generic
-destination. Its URL is the `Service` the operator stood, in the
+destination. Its URL is the `Service` the operator created, in the
 `Catalog`'s namespace:
 
     http://<catalog>-jellyfin.<namespace>.svc:8080/webhook
@@ -87,7 +87,7 @@ of the work, and at or under five minutes. The rule takes whichever of
 the two leaves less time. So a short episode is watched near its end,
 and a long film is watched with up to five minutes left.
 
-Every write to Jellyfin carries a played mark. The role reads the mark
+Every write to Jellyfin includes a played mark. The role reads the mark
 off the position it writes, with that same rule. So a replay from the
 start clears the mark, because the new position does not pass the rule.
 
@@ -108,16 +108,16 @@ shows it, because no `Person` claims it.
 
 The operator runs one backfill on its own, with no step for you to
 take. It waits until every durable copy of the progress store is up,
-then runs one Job named after the `Catalog` with the suffix
+then runs one `Job` named after the `Catalog` with the suffix
 `-jellyfin-backfill`.
 
-For every Jellyfin user the Job reads two lists. It records an item
+For every Jellyfin user the `Job` reads two lists. It records an item
 with a resume point at the position Jellyfin holds. It records an item
-the user finished at the end of the work. Each row carries the date
-Jellyfin last recorded a play of that item.
+the user finished at the end of the work. Each row has the date Jellyfin
+last recorded a play of that item.
 
 Jellyfin holds one state per item and no list of viewings, so the
-backfill carries no history. An item with no provider ids is counted
+backfill records no history. An item with no provider ids is counted
 and skipped. The backfill makes no `Person`: a Jellyfin user with no
 `Person` of that name records rows that no screen shows.
 
@@ -125,7 +125,7 @@ A rerun is safe. The store keeps the newer timestamp, so a backfilled
 row never overwrites a newer play, and a row the backfill writes twice
 is the same row.
 
-`status.jellyfin` on the `Catalog` says where the backfill stands:
+`status.jellyfin` on the `Catalog` reports the state of the backfill:
 
 ```yaml
 status:
@@ -135,12 +135,11 @@ status:
     backfilled: "2026-09-08T14:02:11Z"
 ```
 
-`backfill` is `Pending`, `Running`, `Failed`, or `Finished`. To run
-the backfill again, clear `status.jellyfin` or change
-`spec.jellyfin.url`, because the status names the server it ran
-against. The counts of the run, users, items published, and items
-skipped, are in the Job's log, which stays for an hour after the Job
-ends.
+`backfill` is `Pending`, `Running`, `Failed`, or `Finished`. To run the
+backfill again, clear `status.jellyfin` or change `spec.jellyfin.url`,
+because the status names the server it ran against. The `Job`'s log
+holds the counts of the run: users, items published, and items skipped.
+The log stays for an hour after the `Job` ends.
 
 ## 5. Share the volume with Jellyfin
 
@@ -154,16 +153,16 @@ sidecars, turn these off on each Jellyfin library that reads a
 * Any subtitle download plugin. Plan 60 covers subtitles.
 
 Leave Jellyfin's trickplay extraction on. With extraction off for a
-library, Jellyfin deletes the whole `.trickplay` directory beside
-every video on each refresh, and the rows it holds for them, whoever
-made the directory. So on a volume this operator tiles, Jellyfin's
+library, Jellyfin deletes the whole `.trickplay` directory beside every
+video on each refresh, whoever made the directory. It deletes the rows
+it holds for them too. So on a volume this operator tiles, Jellyfin's
 extraction stays on, and the two race for each new title. The trickplay
-Job claims the node's GPU so that it wins, and a directory Jellyfin
-made first is the same sheets, so the fact leaves it alone.
+`Job` claims the node's GPU so that it wins. A directory Jellyfin made
+first holds the same sheets, so the fact leaves it alone.
 
-Jellyfin imports a tile directory it did not make: same folder name,
-files present, no row of its own for that width. It records the number
-of files in the folder as the thumbnail count, where its own
-extraction records the number of thumbnails. This operator writes
-nothing but the sheets into the folder, so the count is the sheet
-count. Verified against Jellyfin 10.11.
+Jellyfin imports a tile directory it did not make when the folder name
+is the same, the files are present, and it holds no row of its own for
+that width. It records the number of files in the folder as the
+thumbnail count, where its own extraction records the number of
+thumbnails. This operator writes nothing but the sheets into the folder,
+so the count is the sheet count. Verified against Jellyfin 10.11.

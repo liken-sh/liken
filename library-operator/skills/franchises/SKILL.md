@@ -9,9 +9,9 @@ This skill is the guide at https://library.liken.sh/docs/guides/franchises/, emi
 
 A franchise is the films and series of one story, in story order,
 with a calendar of its own. Its files are written by people, in a git
-repository, and a `Library` of kind `franchises` reads a checkout of
-that repository and resolves each member against the other libraries
-of the namespace. This guide gets a checkout onto a claim and declares
+repository. A `Library` of kind `franchises` reads a checkout of that
+repository, and it resolves each member against the other libraries of
+the namespace. This guide gets a checkout onto a claim and declares
 the `Library`. [Franchise files](https://library.liken.sh/docs/reference/franchises/) describes
 the file itself.
 
@@ -21,7 +21,7 @@ The public repository at
 [`tangled.org/guid.foo/fiction-franchises`](https://tangled.org/guid.foo/fiction-franchises)
 holds the first files, one directory per franchise. How a checkout
 reaches a claim is your choice. Any volume with one directory per
-franchise serves. The [git CSI driver](https://git.liken.sh) is one
+franchise works. The [git CSI driver](https://git.liken.sh) is one
 way, and it keeps the checkout current:
 
     apiVersion: v1
@@ -63,8 +63,8 @@ repositories.
 
 The checkout is read-only, so the art a scan downloads needs a claim
 of its own. Every scan `Job` of the library writes it, and every
-screen that shows the library mounts it read-only, so it has to allow
-those mounts at once:
+screen that shows the library mounts it read-only. So the claim has to
+allow those mounts at once:
 
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -101,9 +101,9 @@ Before it reads the rows, the scan downloads the art each file links,
 into the art claim under Kodi's names. A link the last scan already
 read is not read again, and a file the scan did not write is kept.
 
-A member is a provider id, `tmdb:` for a film and `tvdb:` for a
-series, and the browser joins it against every library of the
-namespace at read time. A member no library holds draws as a gap:
+A member is a provider id: `tmdb:` for a film and `tvdb:` for a
+series. The browser joins it against every library of the namespace at
+read time. A member no library holds draws as a gap:
 coming when its release date is ahead, missing otherwise. Add the
 title to a movies or series library, and the gap fills on that
 library's next scan.
