@@ -1,8 +1,9 @@
 ---
-title: A replicated store
-weight: 20
+name: replicated-store
 description: "Run a replicated store as a Deployment on one per-node claim with anti-affinity across nodes and a PodDisruptionBudget. Use when several pods each hold a full copy of one data set and keep the copies in agreement over the network."
 ---
+
+This skill is the guide at https://per-node.liken.sh/docs/guides/replicated-store/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 A replicated store is several pods that each hold a full copy of one
 data set and keep the copies in agreement over the network. Each pod
@@ -108,5 +109,5 @@ a copy has caught up is the workload's fact, and its readiness probe is
 where that belongs. The driver has no caught-up signal.
 
 Each node keeps its copy after the pod leaves. To remove every copy,
-delete the `PersistentVolume`. The [volume reference](../../reference/volume/)
+delete the `PersistentVolume`. The [volume reference](https://per-node.liken.sh/docs/reference/volume/)
 says what deleting removes.

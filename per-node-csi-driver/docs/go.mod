@@ -14,9 +14,10 @@ go 1.26.5
 tool (
 	github.com/gohugoio/hugo
 	github.com/liken-sh/brand/coverage
+	github.com/liken-sh/brand/skills
 )
 
-require github.com/liken-sh/brand v0.0.0-20260905124916-f549935dd193
+require github.com/liken-sh/brand v0.0.0-20260917021826-107cd574b3ba
 
 require (
 	cel.dev/expr v0.25.1 // indirect
@@ -194,6 +195,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
 	software.sslmate.com/src/go-pkcs12 v0.7.0 // indirect
