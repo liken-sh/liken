@@ -1,8 +1,9 @@
 ---
-title: Running on a small machine
-weight: 90
+name: small-machines
 description: "The memory each library-operator pod takes on a one-gigabyte screen machine, and the settings that lower it. Use when a screen pod is evicted or killed for memory, or when sizing a small node."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/small-machines/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Running on a small machine
 

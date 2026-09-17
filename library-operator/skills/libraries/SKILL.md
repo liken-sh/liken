@@ -1,8 +1,9 @@
 ---
-title: Declare a library
-weight: 20
+name: libraries
 description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace decides. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/libraries/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Declare a library
 
@@ -32,18 +33,18 @@ blocks must not. An empty block is a complete one. The kinds are
 `movies`, `series`, and `franchises`. A series library holds one
 folder per series with a season folder inside. A franchises library
 is the one kind whose files are written by people, and
-[Franchises](/docs/guides/franchises/) covers it.
+[Franchises](https://library.liken.sh/docs/guides/franchises/) covers it.
 
 `root` defaults to `/` and must be absolute, so one volume can hold
 several libraries at different roots. The kind and the storage are
 immutable. A different volume, a different root, or a different kind
 is a different `Library`.
 
-[Library](/docs/reference/libraries/) describes every field. The ones
+[Library](https://library.liken.sh/docs/reference/libraries/) describes every field. The ones
 you are likely to set:
 
 * `spec.sources` names the `MetadataProviders` to ask, in order.
-  [Enrichment](/docs/guides/enrichment/) covers them.
+  [Enrichment](https://library.liken.sh/docs/guides/enrichment/) covers them.
 * `spec.ignore` lists path components the scanner skips, such as a
   recycle bin or a staging directory.
 * `spec.scan.schedule` is the cron expression the full walk runs on,
@@ -96,7 +97,7 @@ Four conditions report why the phase is what it is:
 `status.runs` holds the last run of each worker: `scan`, `rescan`,
 `enrich`, and `cleanup`, with its `Job`, its times, and its failure if
 it had one. `status.webhook` is the address that rescans one folder;
-[Webhooks](/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
+[Webhooks](https://library.liken.sh/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
 Jellyfin.
 
 ## The namespace is a boundary

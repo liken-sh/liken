@@ -1,8 +1,9 @@
 ---
-title: Enrich a library
-weight: 60
+name: enrichment
 description: "Enrich a library with titles, plots, ratings, art, and people from metadata providers, written as .nfo sidecars and art files beside the media. Use when declaring a MetadataProvider, naming sources on a Library, or handing metadata to Jellyfin."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/enrichment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Enrich a library
 
@@ -70,7 +71,7 @@ answers. The key reaches an enricher container through a
     omdb    omdb       False   Refused     3d
 
 `spec.facts` narrows what one account serves.
-[MetadataProvider](/docs/reference/metadataproviders/) describes every
+[MetadataProvider](https://library.liken.sh/docs/reference/metadataproviders/) describes every
 field.
 
 ## 2. Name the sources on the Library

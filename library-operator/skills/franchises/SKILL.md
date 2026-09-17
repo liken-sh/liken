@@ -1,8 +1,9 @@
 ---
-title: Franchises
-weight: 80
+name: franchises
 description: "Declare a Library of kind franchises from a git checkout on a claim, and write a franchise file. Use when a namespace should show the films and series of one story in story order with their own calendar."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/franchises/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Franchises
 
@@ -11,7 +12,7 @@ with a calendar of its own. Its files are written by people, in a git
 repository, and a `Library` of kind `franchises` reads a checkout of
 that repository and resolves each member against the other libraries
 of the namespace. This guide gets a checkout onto a claim and declares
-the `Library`. [Franchise files](/docs/reference/franchises/) describes
+the `Library`. [Franchise files](https://library.liken.sh/docs/reference/franchises/) describes
 the file itself.
 
 ## 1. The checkout

@@ -1,8 +1,9 @@
 ---
-title: Install the operator
-weight: 10
+name: install
 description: "Install library-operator on a liken cluster: create the storage, apply the manifests, declare a Catalog, and confirm it runs. Use when a cluster has no library-operator yet, when running a development build, or when removing the operator."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Install the operator
 
@@ -61,7 +62,7 @@ A `ReadWriteOnce` claim works only when every pod that mounts it is
 on the same node, which nothing in the schema enforces.
 
 A franchises library needs a second claim for the art its scan
-downloads. [Franchises](/docs/guides/franchises/) covers it.
+downloads. [Franchises](https://library.liken.sh/docs/guides/franchises/) covers it.
 
 ### The catalog claims
 
@@ -91,7 +92,7 @@ node-local class such as `local-path` fits both.
 ## 2. Apply the manifests
 
 The install is the kustomize base in the repository's
-[`deploy/`](/deploy/kustomization.yaml) directory. Take it into a
+[`deploy/`](https://library.liken.sh/deploy/kustomization.yaml) directory. Take it into a
 kustomization of your own and pin `<tag>` to a release, so the install
 is the same every time it is applied:
 
@@ -111,7 +112,7 @@ The base creates the three `CustomResourceDefinitions`, a
 `ServiceAccount`, a `ClusterRole` with its binding, one `Deployment`,
 and one `Service`. The `Deployment` runs one unprivileged replica with
 every capability dropped. The `Service` is the address every
-`Library`'s [webhook](/docs/guides/webhooks/) is reached at.
+`Library`'s [webhook](https://library.liken.sh/docs/guides/webhooks/) is reached at.
 
 The `ClusterRole` is cluster-wide because a `Library` can be in any
 namespace. Its grants are read and status writes on this operator's
@@ -123,11 +124,11 @@ on the claims, pods, `Jobs`, `CronJobs`, `Services`, and the one
 list every screen reads.
 
 This site serves the same files as raw YAML, so a clone is never
-needed: [`libraries-crd.yaml`](/deploy/libraries-crd.yaml),
-[`catalogs-crd.yaml`](/deploy/catalogs-crd.yaml),
-[`metadataproviders-crd.yaml`](/deploy/metadataproviders-crd.yaml),
-[`rbac.yaml`](/deploy/rbac.yaml), and
-[`operator.yaml`](/deploy/operator.yaml).
+needed: [`libraries-crd.yaml`](https://library.liken.sh/deploy/libraries-crd.yaml),
+[`catalogs-crd.yaml`](https://library.liken.sh/deploy/catalogs-crd.yaml),
+[`metadataproviders-crd.yaml`](https://library.liken.sh/deploy/metadataproviders-crd.yaml),
+[`rbac.yaml`](https://library.liken.sh/deploy/rbac.yaml), and
+[`operator.yaml`](https://library.liken.sh/deploy/operator.yaml).
 
 ## 3. Declare a Catalog
 
@@ -147,8 +148,8 @@ exactly one `Catalog` in the namespace before the first `Library`. A
       storage: {}
 
 An empty `storage` provisions a `1Gi` claim on the default class.
-[Catalog](/docs/reference/catalogs/) describes every field, and
-[The catalog](/docs/guides/catalog/) describes what the pod it creates
+[Catalog](https://library.liken.sh/docs/reference/catalogs/) describes every field, and
+[The catalog](https://library.liken.sh/docs/guides/catalog/) describes what the pod it creates
 does.
 
 ## 4. Confirm it runs
@@ -162,9 +163,9 @@ The operator's log reports its first pass and the bus it reports over:
 
 A missing `LIBRARY_BUS_ADDRESS` or `OPERATOR_NAMESPACE` is an error at
 startup, printed to the log, and the pod exits. The served
-[`operator.yaml`](/deploy/operator.yaml) sets both.
+[`operator.yaml`](https://library.liken.sh/deploy/operator.yaml) sets both.
 
-Now [declare a library](/docs/guides/libraries/). Once it is `Ready`,
+Now [declare a library](https://library.liken.sh/docs/guides/libraries/). Once it is `Ready`,
 the listing shows its counts and its phase:
 
     $ kubectl -n media get libraries

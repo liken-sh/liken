@@ -1,8 +1,9 @@
 ---
-title: Scanning
-weight: 30
+name: scanning
 description: "How a scan walks a library's root into the catalog: what it reads, when it runs, how mark and sweep removes what is gone, and what deleting a Library does. Use when titles are missing from the wall, when a scan seems stuck, or before deleting a Library."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/scanning/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Scanning
 
@@ -130,7 +131,7 @@ directory the walk enters.
 Every scan is a `Job`. The full walk runs from a `CronJob` named
 `<library>-scan` on `spec.scan.schedule`, once an hour by default.
 A walk that runs past its next turn skips that turn, because the
-catalog claim admits one writer. A [webhook](/docs/guides/webhooks/)
+catalog claim admits one writer. A [webhook](https://library.liken.sh/docs/guides/webhooks/)
 runs a one-off `Job` that rescans one folder.
 
     kubectl -n media get cronjob movies-scan

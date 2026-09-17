@@ -1,8 +1,9 @@
 ---
-title: Connect Radarr, Sonarr, and Jellyfin
-weight: 70
+name: webhooks
 description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an import rescans one folder at once. Use when new titles should appear on the wall in seconds instead of on the hourly walk, or to rescan one folder by hand."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/webhooks/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Connect Radarr, Sonarr, and Jellyfin
 
@@ -63,7 +64,7 @@ Radarr and Sonarr write beside the media too. This operator reads the
 `uniqueid` in the Kodi `.nfo` they write, so keep that metadata
 option on. Turn off their image writes and their import of extra
 files, so that the art and subtitle facts are the only writers of
-those. The [Jellyfin guide](/docs/guides/jellyfin/#5-share-the-volume-with-jellyfin)
+those. The [Jellyfin guide](https://library.liken.sh/docs/guides/jellyfin/#5-share-the-volume-with-jellyfin)
 lists the Jellyfin switches.
 
 ## By hand

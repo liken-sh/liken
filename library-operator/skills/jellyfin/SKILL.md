@@ -1,8 +1,9 @@
 ---
-title: Keep progress with Jellyfin
-weight: 85
+name: jellyfin
 description: "Keep playback progress the same in both directions between the progress store and a Jellyfin server through spec.jellyfin on the Catalog. Use when a cluster runs Jellyfin beside the operator, or when a backfill of progress is needed."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/jellyfin/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Keep progress with Jellyfin
 
@@ -42,7 +43,7 @@ Then name the server's address and that `Secret` on the `Catalog`.
 The operator stands one pod and one `Service`, both named after the
 `Catalog` with the suffix `-jellyfin`, beside the progress store. The
 key reaches the pod through a `secretKeyRef`, so the operator never
-reads it. The [Catalog](/docs/reference/catalogs/) reference describes
+reads it. The [Catalog](https://library.liken.sh/docs/reference/catalogs/) reference describes
 every field.
 
 ## 2. Set up the Webhook plugin

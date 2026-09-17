@@ -11,6 +11,9 @@ REFERENCE := content/docs/reference
 
 GENERATED := $(REFERENCE)/libraries.md $(REFERENCE)/catalogs.md $(REFERENCE)/metadataproviders.md
 
+SKILLS := go tool skills
+BASE := https://library.liken.sh
+
 .PHONY: build
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
@@ -19,6 +22,14 @@ build: $(GENERATED)
 .PHONY: test
 test: $(GENERATED)
 	go test ./...
+
+# The skills target emits every guide as an Agent Skill into ../skills,
+# one SKILL.md per guide, with the generator the brand repository
+# publishes (its README says what the output holds). The output is
+# committed, and the root test-docs target fails when it is stale.
+.PHONY: skills
+skills:
+	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
 $(REFERENCE)/libraries.md: ../deploy/libraries-crd.yaml crdref/libraries-preamble.md crdref/libraries-postamble.md go.mod
 	$(CRDREF) -title Libraries -weight 10 -postamble crdref/libraries-postamble.md $< $@ crdref/libraries-preamble.md

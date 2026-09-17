@@ -1,8 +1,9 @@
 ---
-title: The catalog
-weight: 40
+name: catalog
 description: "The Catalog resource: the SQLite database Corrosion replicates, one cluster per namespace, and how pods, Jobs, and screens read and write it. Use when declaring a Catalog, when rows do not land, or when reading the catalog by hand."
 ---
+
+This skill is the guide at https://library.liken.sh/docs/guides/catalog/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # The catalog
 
@@ -37,7 +38,7 @@ Every member holds the whole namespace's catalog, because the cluster
 gossips every row to every peer. So one `size` covers the catalog
 pod, every scan `Job`, and every screen. `spec.storage.claimName`
 names an existing claim for the catalog pod in place of the one the
-operator provisions. [Catalog](/docs/reference/catalogs/) describes
+operator provisions. [Catalog](https://library.liken.sh/docs/reference/catalogs/) describes
 every field.
 
 The listing shows the size and whether the pod runs:
