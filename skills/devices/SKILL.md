@@ -74,7 +74,7 @@ This machine publishes three devices for one GPU.
   because one process at a time can drive a display.
 * `pci-0000-00-02-0-i2c-dev` delivers the i2c monitor-control buses
   that i915 registers for each display output. One claim allocates it,
-  because those buses are raw wires.
+  because two writers on one of those buses have no arbitration.
 
 All three have the same `address`, because they are one card. A claim
 uses that to ask for halves of the same GPU. See
@@ -104,11 +104,10 @@ The hardware report names these modules for you, as comments, when you
 install the machine. See
 [Install a cluster](https://liken.sh/docs/guides/install/#first-run-the-hardware-report).
 
-One module serves a stack rather than a device: `uhid`. Declare it on
+The `uhid` module is for a stack and not for one device. Declare it on
 a machine whose Bluetooth adapter serves BLE input devices, such as a
-remote or a keyboard, and the adapter's claim then delivers
-`/dev/uhid`. The
-[device reference](https://liken.sh/docs/reference/devices/#bluetooth-adapters)
+remote or a keyboard. The adapter's claim then delivers `/dev/uhid`.
+The [device reference](https://liken.sh/docs/reference/devices/#bluetooth-adapters)
 states why.
 
 ## 3. Say what your workload needs
@@ -138,7 +137,7 @@ alone. Every device that `liken` publishes for one GPU has the same
 `driver`, and the card node has the same `subsystem: drm` as the
 render node. A class that matches more than one of them can allocate
 the monitor buses, or the display, to your transcoder. `renderNode`
-is the fact that names the half you want, and only that half has
+is the attribute that names the half you want, and only that half has
 it.
 
 This class matches any GPU with a DRM render node, on any machine in
@@ -190,7 +189,7 @@ Check what the container received:
 
     kubectl exec deploy/transcoder -- ls -l /dev/dri
 
-A device that has `allowMultipleAllocations: true` serves more
+A device that has `allowMultipleAllocations: true` allocates to more
 than one claim: a second deployment writes its own `ResourceClaim`
 against the same `DeviceClass`, and both deployments run. The
 integrated GPU above has it, so more than one transcoder can
@@ -198,7 +197,7 @@ allocate the render node at once.
 
 Give a deployment that holds a claim like this the `Recreate`
 strategy. A rolling update runs the old pod and the new pod at once,
-both name the same claim, and Kubernetes gives a claim's device to
+and both name the same claim. Kubernetes gives a claim's device to
 every pod that names the claim. `Recreate` stops the old pod first,
 so one pod holds the device at a time.
 
@@ -241,10 +240,9 @@ until the first claim ends. This is the correct behavior: the kernel
 gives modesetting to one process for each card, and a second player
 that started would fail when it opened the card node.
 
-Sound is a third device, and a different one: the audio controller
-has its own PCI address, so a player that plays HDMI audio adds a
-request for it. That device is shareable, so a second player does not
-wait for it.
+Sound is a third device. The audio controller has its own PCI
+address, so a player that plays HDMI audio adds a request for it.
+That device is shareable, so a second player does not wait for it.
 
 ### Two requests, one card
 
@@ -327,9 +325,9 @@ that one process must own.
 Do not point two pods at one `ResourceClaim` for a device of this
 kind. Both pods receive it. Kubernetes shares a claim with every pod
 that names it, by design, and `liken` does not refuse the second pod. A
-device node does not grant exclusive access by itself. The kernel is
-what enforces exclusive access, through `O_EXCL` and the driver's own
-open path. Use a template to give the device to one pod only.
+device node does not grant exclusive access by itself. The kernel
+enforces exclusive access, through `O_EXCL` and the driver's own open
+path. Use a template to give the device to one pod only.
 
 ## When a claim does not schedule
 

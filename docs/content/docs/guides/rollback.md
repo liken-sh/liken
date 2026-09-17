@@ -20,7 +20,7 @@ into the new slot one time only, as a trial:
 * If the new kernel panics, the machine resets, and the firmware boots
   the proven slot. No software is involved.
 * If the new version boots but does not rejoin the cluster in ten
-  minutes, a watchdog reboots the machine, and the machine starts
+  minutes, a watchdog reboots the machine. The machine then starts
   again on the proven slot.
 
 In both cases, the machine serves on the version it ran before. Its

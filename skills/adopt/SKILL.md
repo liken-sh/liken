@@ -16,10 +16,10 @@ replication.
 Adoption works with any k3s cluster that uses embedded etcd, on any
 operating system.
 
-Read this behavior before you start. A `liken` server disables the
-bundled k3s components (traefik, servicelb, metrics-server), unless
-your `cluster.yaml` declares them as features. The change applies to
-the whole cluster when the first `liken` server joins. If your
+Read this before you start. A `liken` server disables the bundled k3s
+components (traefik, servicelb, metrics-server), unless your
+`cluster.yaml` declares them as features. The change applies to the
+whole cluster when the first `liken` server joins. If your
 workloads need a bundled component, declare its feature in your
 `cluster.yaml`, or start a replacement before that first join.
 
@@ -70,10 +70,10 @@ into two clusters.
 ### The document claims the whole cluster
 
 [`spec.features`](https://liken.sh/docs/reference/cluster/#spec--features) is an
-opt-in list, and `liken` reads it as a statement
-about the cluster, not only about the machines you install. A feature
-that the document does not name is a feature that the cluster
-retracts, and a retracted feature is one `liken` tears down.
+opt-in list, and `liken` reads it as a statement about the whole
+cluster, which includes the machines you did not install. A feature
+that the document does not name is retracted, and `liken` tears down
+a retracted feature.
 
 The `flux` feature shows what this means for an adopted cluster. If
 the cluster already runs Flux, and your `cluster.yaml` does not
@@ -81,10 +81,10 @@ declare `flux`, that omission reads as a retraction.
 
 `liken` does not delete that Flux. It removes a Flux installation only
 when the `flux-system` namespace has a `liken.sh/feature=flux`
-annotation, and that annotation arrives only when the document
-declares the feature. A document that never declared `flux` never put
-it there, so the teardown deletes nothing and the Cluster reports the
-refusal:
+annotation, and `liken` writes that annotation only when the document
+declares the feature. The annotation is absent when the document never
+declared `flux`, so the teardown deletes nothing and the Cluster
+reports the refusal:
 
     kubectl describe cluster
 
@@ -94,7 +94,7 @@ install the first machine:
 
 * To keep the existing Flux and run it yourself, leave `flux` out of
   `spec.features`. The sync keeps running. The condition stays, and it
-  is the report that `liken` manages none of it.
+  reports that `liken` manages none of it.
 * To run the fleet from git with `liken`, declare the `flux` feature.
   [Run the fleet from git](https://liken.sh/docs/guides/gitops/) has the steps, and
   its last section covers an installation that already exists.

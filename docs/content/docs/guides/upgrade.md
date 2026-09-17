@@ -19,9 +19,8 @@ every release. The cluster also polls the channel:
     kubectl get clusters
 
 The AVAILABLE column shows the latest version that the channel
-announces. To make
-the cluster poll the channel now, set the `liken.sh/check-releases`
-annotation to a new value:
+announces. To make the cluster poll the channel now, set the
+`liken.sh/check-releases` annotation to a new value:
 
     kubectl annotate cluster --all --overwrite liken.sh/check-releases="$(date -Is)"
 
@@ -66,9 +65,10 @@ Each machine that runs a different version:
    verifies each artifact against the digest chain.
 2. Stages the change and asks the cluster for a reboot turn.
 3. Cordons and drains its node when the cluster grants the turn. The
-   PodDisruptionBudgets of the workloads apply during the drain. A pod
-   that holds a DRA claim leaves before the pod that serves its
-   driver. The driver stays to answer the kubelet's unprepare call.
+   PodDisruptionBudgets of the workloads apply during the drain. The
+   drain removes a pod that holds a DRA claim before the pod that runs
+   its driver. The driver stays to answer the kubelet's unprepare
+   call.
 4. Reboots into the new slot one time, as a trial. The trial is a
    success when the OS starts and rejoins the cluster. From that time,
    the machine boots that slot. If the trial fails, the machine
@@ -104,5 +104,5 @@ the Cluster shows Updating during the rollout, and Ready when the
 rollout is complete.
 
 If a machine with a granted turn does not return, the cluster sets its
-`Progressing` condition to `False` with the reason `RolloutStalled`,
-and grants no more turns until you examine the machine.
+`Progressing` condition to `False` with the reason `RolloutStalled`.
+The cluster grants no more turns until you examine the machine.

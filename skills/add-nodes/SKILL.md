@@ -39,8 +39,8 @@ interfaces:
     gateway: 10.0.0.1
 ```
 
-The passphrase is never in the manifest, because the manifest travels
-on sticks and in git. Write it to a file in your identity directory,
+The passphrase is never in the manifest, because sticks and git hold
+copies of the manifest. Write it to a file in your identity directory,
 named exactly like the network, as one line:
 
     mkdir -p mycluster/identity/psk
@@ -52,14 +52,14 @@ has no passphrase file, `liken layer` refuses and names the file to
 create. A network with `security: open` needs no file.
 
 A machine with a working wired interface does not wait for its
-radio. It boots on the wired path, joins the wifi in the background,
-and the interface's status appears in `kubectl get machine` when the
-join settles. During that window the `WirelessJoined` condition is
-`False` with the reason `Joining`, and the machine stays `Ready`. If the machine's only interface is the radio and the
-passphrase is wrong, the machine holds its boot and says so on the
-console and in `kubectl get machines`. A machine with a working
-wired interface joins anyway and reports the wifi failure as a
-condition.
+radio. It boots on the wired path and joins the wifi in the
+background. The interface's status appears in `kubectl get machine`
+when the join settles. During that window the `WirelessJoined`
+condition is `False` with the reason `Joining`, and the machine stays
+`Ready`. If the machine's only interface is the radio and the
+passphrase is wrong, the machine holds its boot. It says so on the
+console and in `kubectl get machines`. A machine with a working wired
+interface joins anyway and reports the wifi failure as a condition.
 
 ## 2. If the new machine is a leader
 

@@ -135,14 +135,14 @@ new catalog entry and `spec.version` in `liken/cluster.yaml`.
   documents.
 * Monitor the memory. The repository sets how many controllers run.
   The `source-controller` and the `kustomize-controller` fit on a 1 GB
-  machine with its workloads. Each controller you add uses memory that the
-  workloads need. Add components one at a time, and look at
+  machine with its workloads. Each controller you add uses memory that
+  the workloads need. Add components one at a time, and look at
   `kubectl top nodes` after each one.
 * A live edit changes field ownership. The API server records you as
-  an owner of each field you change with `kubectl`, and git cannot
-  delete a field that you own. After each manual repair, commit the
-  same state to the repository. If a later commit must remove a field
-  that you changed live, also remove that field live.
+  an owner of each field you change with `kubectl`, and a commit
+  cannot delete a field that you own. After each manual repair, commit
+  the same state to the repository. If a later commit must remove a
+  field that you changed live, also remove that field live.
 
 ## Rotate, retract, recover
 
@@ -178,9 +178,9 @@ teardown reads it before it deletes anything, and removes only what
 has it.
 
 A cluster that never declares the feature never gets the annotation.
-`liken` seeds nothing there, so a Flux that was running before `liken`
-arrived keeps running. Retracting a feature the document never
-declared deletes nothing. The Cluster says so:
+`liken` seeds nothing there, so a Flux that was running before you
+installed `liken` keeps running. Retracting a feature the document
+never declared deletes nothing. The Cluster says so:
 
     kubectl describe cluster
 
@@ -190,7 +190,7 @@ same thing until its namespace has the annotation.
 
 Declaring the feature is how you hand an existing installation to
 `liken`. The namespace does not have to be new: `liken` applies its
-own copy over whatever is there, and the annotation lands with it.
+own copy over whatever is there, and writes the annotation with it.
 From that point retraction removes the engine, its namespace, and the
 deploy key, exactly as it does for an installation `liken` made.
 Writing the annotation by hand does the same thing:

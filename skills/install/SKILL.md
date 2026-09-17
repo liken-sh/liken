@@ -155,11 +155,11 @@ Take the stick to your workstation and read `hardware-report.yaml`. The
 file is a valid Machine manifest. Each line has a comment with the data
 that the report found. The comments give the drivers that each device
 needs, in load order; each disk's size, model, and path; and each
-interface's name, MAC address, and link state. Copy the
-`spec.modules`, `spec.network`, and
-`spec.storage` sections into this machine's manifest in `mycluster/`.
-Edit the parts marked `CHANGE-ME`. Then build the stick again with step
-4, so that it contains the corrected manifest.
+interface's name, MAC address, and link state. Copy the `spec.modules`,
+`spec.network`, and `spec.storage` sections into this machine's
+manifest in `mycluster/`. Edit the parts marked `CHANGE-ME`. Then build
+the stick again with step 4, so that it contains the corrected
+manifest.
 
 Three parts of the proposal need your judgement.
 
@@ -168,11 +168,11 @@ can install with them unchanged. Two roles still need your attention.
 `clusterState` contains the k3s database, the TLS files, and the
 containerd image store. Thus the workloads on the node set its size.
 Increase it if this machine runs many images, or large images. Select
-this number carefully. The Cluster's
+this number carefully: `podStorage` comes after `clusterState` on the
+disk, so `clusterState` cannot become larger after the installation.
+The Cluster's
 [`spec.runtime.kubelet.imageGC`](https://liken.sh/docs/reference/cluster/#specruntimekubeletimagegc)
-section controls how much of this filesystem the image store keeps. `podStorage` comes after
-`clusterState` on the disk, so `clusterState` cannot become larger
-after the installation.
+section controls how much of this filesystem the image store keeps.
 Set `podStorage` to the size that your workloads' volumes need. If the
 report had to decrease either size, it says so in the file.
 
@@ -229,11 +229,10 @@ A reinstallation erases all the data that it claims, on each disk that
 the manifest declares. It erases the cluster state: this node's copy of
 the k3s database, its certificates, and the images that it unpacked. It
 also erases the volumes that your workloads claimed on this node. The
-machine returns as a new member with the same name, and not as the
-member it was.
+machine returns as a new member with the same name.
 
-A disk replacement is different. If you install a new blank system disk
-and select the plain `install as <name>`, the installation claims the
+A disk replacement is different. Install a new blank system disk and
+select the plain `install as <name>`. The installation claims the
 blank disk and recognizes the data disk that it wrote before. Thus the
 cluster state on that disk stays. Only `wipe and reinstall` erases a
 disk that `liken` claimed.

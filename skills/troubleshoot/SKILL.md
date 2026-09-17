@@ -122,8 +122,9 @@ rest of the fleet is safe while you do.
 
 ## A machine crashed
 
-A kernel crash survives the reboot. The next boot reads the crash
-from the machine's crash journal and reports it in the Machine's
+The machine keeps a record of a kernel crash through the reboot. The
+next boot reads the crash from the machine's crash journal and reports
+it in the Machine's
 [`status.lastCrash`](https://liken.sh/docs/reference/machine/#statuslastcrash), with
 the log lines that the kernel wrote as it failed:
 
@@ -150,13 +151,13 @@ If the parameter's name is right but the `ModuleParametersApplied`
 condition is `False`, the condition's message names one of two
 cases. The module is built into the kernel, so no load happened and
 the setting must go elsewhere. Or the module was already loaded
-before the declared modules ran, so the load that carried your
-string was skipped; the message names what loaded it first.
+before the declared modules ran, so the load that would have applied
+your string did not run; the message names what loaded it first.
 
 ## A machine needs a reboot and nothing is staged
 
 A machine converges to its documents, so a machine that already
-matches them stages nothing and reboots for nothing. Some faults
+matches them stages nothing and has no reason to reboot. Some faults
 clear only at boot anyway. A kernel driver that bound the wrong
 device holds it until the machine restarts, and no edit takes it
 back.
@@ -170,7 +171,8 @@ The machine waits for its reboot turn, cordons, and drains, the same
 as a machine applying a staged change. If its `rebootPolicy` is
 `Manual`, it reports `RebootPending` and waits for
 [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot).
-The `RebootRequestHonored` condition reports where the request is.
+The `RebootRequestHonored` condition reports the progress of the
+request.
 
 ## A pod with a device claim stays Pending
 
@@ -192,12 +194,12 @@ each level costs.
 ## Reaching a machine's filesystem
 
 A `liken` machine has no shell and no SSH, and its own images hold
-one binary each, so `kubectl exec` reaches nothing. `kubectl debug`
+one binary each, so `kubectl exec` has nothing to run. `kubectl debug`
 gives a shell on the node itself, with the host's process table and
 the host's filesystem mounted at `/host`:
 
     kubectl debug node/<name> -it --profile=sysadmin --image=busybox:1.37
 
 The pod runs privileged in the host's PID namespace, so `ps` lists
-every process on the machine and `kill` reaches them. Delete the
+every process on the machine and `kill` can signal them. Delete the
 debug pod when you are done; `kubectl debug` does not remove it.
