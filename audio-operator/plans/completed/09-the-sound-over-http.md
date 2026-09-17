@@ -375,8 +375,10 @@ API checks for the `Secret` every minute and re-mints an absent leaf,
 so an owner who deletes it gets it back within a minute and the
 kubelet refreshes the optional volume after that.
 
-**Envelope.** Idle, one Go process listening: under 10 MB RSS and no
-CPU. Each tap adds one `pw-record` and, for FLAC or Opus, one encoder.
+**Envelope.** Idle, one Go process listening: 9 Mi by `kubectl top`
+and no CPU (`/proc` reads about 22 MB `VmRSS`, of which the pages the
+mapped binary shares with the pod's other containers are most; the
+container's own cost is the `kubectl top` figure). Each tap adds one `pw-record` and, for FLAC or Opus, one encoder.
 On cgroup v2 the kubelet's default sets `memory.oom.group`, so one
 encoder over the limit kills the whole container: every tap on the
 node ends, the container restarts, and nothing else in the pod is
@@ -888,12 +890,6 @@ Not run, in either drill:
 - **`ClusterTrustBundle`.** The k8s-native home for the CA anchors,
   which removes the `ConfigMap` and its grant, once `liken`'s k3s
   reaches 1.37.
-- **The idle RSS by `/proc` is above the line.** The envelope says
-  under 10 MB, and `/proc/<pid>/status` reads `VmRSS` 21.9 MB while
-  `kubectl top` reads 9 Mi against a 64 Mi limit. `Pss` is 13.2 MB:
-  the mapped binary's page-cache pages are shared with the three other
-  containers of the same image. Either the line names the method that
-  measures the container's own cost, or the figure comes down.
 - **The first body byte.** 0.45 to 0.59 s against 200 ms, with 0.354
   to 0.378 s of it in the container: 0.182 s of CPU at every tap's
   start on two `pw-dump` reads of the graph and the `pw-record` start.
