@@ -248,7 +248,8 @@ matches, the way `pods/log` is. The discovery and OpenAPI documents
 need authentication and no authorization, and the info route needs
 `get` on `displays`. Every route authorizes before it reads, so a 403
 never says whether a name exists. The base ships a `ClusterRole`
-`display-capture-viewer` with the one `displays/screen` rule and
+`display-capture-viewer` with both rules, `displays/screen` for the
+capture routes and `displays` for the info route beside them, and
 binds it to nobody; a cluster owner binds it:
 
 ```yaml

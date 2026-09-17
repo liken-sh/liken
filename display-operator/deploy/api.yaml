@@ -225,9 +225,12 @@ subjects:
     name: display-api
     namespace: liken-system
 ---
-# The one rule a caller needs to read a screen. The base ships the
-# role and binds it to nobody, because who may look at a screen is
-# the cluster owner's decision. media-operator's media-api holds this
+# The two rules a caller needs to read a screen. The capture routes
+# match displays/screen, and the info route beside them matches
+# displays, so one binding answers the whole grammar and the recipe
+# in the manual works with this role alone. The base ships the role
+# and binds it to nobody, because who may look at a screen is the
+# cluster owner's decision. media-operator's media-api holds this
 # binding, which is how a Player composes a screen with its sound.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -236,4 +239,7 @@ metadata:
 rules:
   - apiGroups: [display.liken.sh]
     resources: [displays/screen]
+    verbs: [get]
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
     verbs: [get]

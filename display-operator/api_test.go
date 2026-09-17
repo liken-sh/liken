@@ -25,6 +25,7 @@ type testCluster struct {
 	allowed       bool
 	screens       map[string]Display
 	events        []Event
+	reviews       []accessReview
 }
 
 func newTestCluster(t *testing.T) *testCluster {
@@ -61,6 +62,9 @@ func (c *testCluster) answer(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"status":{"authenticated":%t,"audiences":["%s"],"error":"%s","user":{"username":"system:serviceaccount:liken-system:viewer","uid":"u-1","groups":["system:authenticated"],"extra":{"scopes":["all"]}}}}`,
 			c.authenticated, apiAudience, refusalWords(c.authenticated))
 	case r.URL.Path == accessReviewsPath:
+		var review accessReview
+		_ = json.NewDecoder(r.Body).Decode(&review)
+		c.reviews = append(c.reviews, review)
 		fmt.Fprintf(w, `{"status":{"allowed":%t,"reason":"no RBAC rule grants displays/screen"}}`, c.allowed)
 	case strings.HasPrefix(r.URL.Path, DisplaysPath+"/"):
 		screen, held := c.screens[strings.TrimPrefix(r.URL.Path, DisplaysPath+"/")]
@@ -89,6 +93,26 @@ func refusalWords(authenticated bool) string {
 		return ""
 	}
 	return "[invalid bearer token, token expired]"
+}
+
+// The part of a SubjectAccessReview a drill reads back: which rule
+// the API asked RBAC to match.
+type accessReview struct {
+	Spec struct {
+		ResourceAttributes struct {
+			Group       string `json:"group"`
+			Resource    string `json:"resource"`
+			Subresource string `json:"subresource"`
+			Verb        string `json:"verb"`
+			Name        string `json:"name"`
+		} `json:"resourceAttributes"`
+	} `json:"spec"`
+}
+
+func (c *testCluster) reviewed() []accessReview {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]accessReview(nil), c.reviews...)
 }
 
 func (c *testCluster) recorded() []Event {
@@ -418,5 +442,59 @@ func TestOptionsAnswersTheMethods(t *testing.T) {
 	}
 	if held := body(t, resp); held != "" {
 		t.Errorf("OPTIONS answered %q, want no body", held)
+	}
+}
+
+// The two rules the owner-facing ClusterRole carries, from the
+// router's side. A capture asks RBAC to match displays/screen, and
+// the info route beside it asks for displays, so a caller bound to
+// display-capture-viewer alone can run the manual's recipe from end
+// to end.
+func TestEachRouteAsksForTheGrantItNeeds(t *testing.T) {
+	cases := []struct {
+		name        string
+		target      string
+		resource    string
+		subresource string
+	}{
+		{"the info route", apiRoot + "/displays/HDMI-A-1", displaysPlural, ""},
+		{"the negotiated screen", apiRoot + "/displays/HDMI-A-1/screen", displaysPlural, screenAspect},
+		{"one frame as PNG", apiRoot + "/displays/HDMI-A-1/screen.png", displaysPlural, screenAspect},
+	}
+	for _, row := range cases {
+		t.Run(row.name, func(t *testing.T) {
+			cluster := newTestCluster(t)
+			server := newTestAPI(t, cluster, newSidecarFixture(t))
+
+			call(t, server, http.MethodGet, row.target, nil)
+
+			reviews := cluster.reviewed()
+			if len(reviews) != 1 {
+				t.Fatalf("the route made %d access reviews, want one", len(reviews))
+			}
+			asked := reviews[0].Spec.ResourceAttributes
+			if asked.Group != DisplayGroup || asked.Resource != row.resource ||
+				asked.Subresource != row.subresource || asked.Verb != "get" || asked.Name != "HDMI-A-1" {
+				t.Errorf("the route asked for %+v, want get on %s/%s named HDMI-A-1 in %s",
+					asked, row.resource, row.subresource, DisplayGroup)
+			}
+		})
+	}
+}
+
+// The two documents need authentication and no authorization, so
+// neither one costs an access review.
+func TestTheDocumentsAskForNoGrant(t *testing.T) {
+	for _, target := range []string{apiRoot, apiRoot + "/openapi.json"} {
+		t.Run(target, func(t *testing.T) {
+			cluster := newTestCluster(t)
+			server := newTestAPI(t, cluster, newSidecarFixture(t))
+
+			call(t, server, http.MethodGet, target, nil)
+
+			if reviews := cluster.reviewed(); len(reviews) != 0 {
+				t.Errorf("the document made %d access reviews, want none", len(reviews))
+			}
+		})
 	}
 }
