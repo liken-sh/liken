@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -732,5 +733,60 @@ func TestTheAPIAnswersTheTypeTheNodeEncodes(t *testing.T) {
 
 	if got := resp.Header.Get("Content-Type"); got != `video/mp4; codecs="avc1.640033"` {
 		t.Errorf("the API answered %q, want the node's own type", got)
+	}
+}
+
+// The public leg puts its headers on the wire as soon as the node
+// has answered, not when the first body byte arrives. Go holds a
+// written header block until the body has bytes, and a capture's
+// first byte waits for the t= begin, so without the flush the
+// headers of t=1,3 arrive a second and a third late. media-api reads
+// the instant they arrive as this API's zero, and a delay there
+// reaches a composed stream as an offset the length of the lead-in.
+func TestTheAPIFlushesItsHeadersBeforeTheFirstByte(t *testing.T) {
+	const begin = 600 * time.Millisecond
+	sidecar := newSidecarFixture(t)
+	sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		_ = http.NewResponseController(w).Flush()
+		select {
+		case <-time.After(begin):
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = w.Write([]byte("fragment"))
+	})
+	api := httptest.NewServer(newTestAPI(t, newTestCluster(t), sidecar))
+	defer api.Close()
+
+	request, err := http.NewRequest(http.MethodGet,
+		api.URL+apiRoot+"/displays/HDMI-A-1/screen.mp4?t=0.6,2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a-caller-token")
+
+	sent := time.Now()
+	resp, err := api.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	headers := time.Since(sent)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the clip answered %d", resp.StatusCode)
+	}
+	if headers >= begin/2 {
+		t.Errorf("the headers reached the caller %s after the request, want well inside the %s beginning",
+			headers, begin)
+	}
+	one := make([]byte, 1)
+	if _, err := io.ReadFull(resp.Body, one); err != nil {
+		t.Fatal(err)
+	}
+	if body := time.Since(sent); body < begin {
+		t.Errorf("the first body byte arrived %s after the request, want it at the %s beginning", body, begin)
 	}
 }

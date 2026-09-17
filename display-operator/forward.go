@@ -282,6 +282,13 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 	}
 	s.captureHeaders(w, route, name, mediaType, served, at)
 	w.WriteHeader(http.StatusOK)
+	// The flush is what puts them on the wire. Go holds a written
+	// header block until the body has bytes, and a capture's first
+	// byte waits for the t= begin, so without this the headers of
+	// t=1,3 arrive a second and a third late. media-api reads the
+	// instant they arrive as this API's zero, so that delay reaches a
+	// composed stream as an offset the length of the lead-in.
+	_ = http.NewResponseController(w).Flush()
 	s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 	s.readings.streaming(route.aspect, 1)
 	defer s.readings.streaming(route.aspect, -1)
