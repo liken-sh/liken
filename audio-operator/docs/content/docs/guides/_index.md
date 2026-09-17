@@ -5,10 +5,11 @@ weight: 10
 
 # Guides
 
-The guides give the steps for the four tasks this operator exists
+The guides give the steps for the five tasks this operator exists
 for: the install, the claim that plays sound to an output, the
 claim that pairs a monitor's speakers with that monitor's screen,
-and the declaration that sets what an endpoint rests at.
+the declaration that sets what an endpoint rests at, and the tap
+that listens to one.
 
 ## How the pieces fit
 
