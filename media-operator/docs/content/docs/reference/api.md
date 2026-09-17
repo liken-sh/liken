@@ -58,8 +58,10 @@ info route needs `get` on `players`.
 
 RBAC does not check that a subresource exists, so an owner grants
 capture with the shipped `ClusterRole` `media-capture-viewer` (`get`
-on the three subresources) bound per namespace, or one rule with
-`resourceNames`.
+on the three subresources and on `players`) bound per namespace, or
+one rule with `resourceNames`. The role carries `players` as well as
+the three aspects, so one binding covers the info route and the
+captures together.
 
 A redirect carries no credentials. The client follows the 307 with
 its own token, and `display-api` checks `displays/screen` for that

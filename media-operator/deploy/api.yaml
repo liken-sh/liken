@@ -275,3 +275,9 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [players/screen, players/audio, players/media]
     verbs: [get]
+  # The info route reads the Player itself, so a subject bound to this
+  # role alone can ask what a Player resolves before it asks for a
+  # capture. Without it the manual's recipe needs a second role.
+  - apiGroups: [media.liken.sh]
+    resources: [players]
+    verbs: [get]
