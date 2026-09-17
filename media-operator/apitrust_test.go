@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,9 +143,8 @@ func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
 	})
 }
 
-// A stream the API server refuses, and a read that fails once, leave
-// the pool current within one pause: the next read takes up the new
-// anchor.
+// A stream that ends, and a read that fails once, leave the pool
+// current within one pause: the next read takes up the new anchor.
 func TestTrustStoreWatchRecoversFromAnEndedStream(t *testing.T) {
 	api := newCoreAPI()
 	was, next := testAuthority(t), testAuthority(t)
@@ -152,9 +152,11 @@ func TestTrustStoreWatchRecoversFromAnEndedStream(t *testing.T) {
 
 	reads := &atomic.Int32{}
 	answer := api.handler()
-	refusing := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ending := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The watch opens and the stream ends at once, which is what a
+		// dropped connection reaches this loop as.
 		if r.URL.Query().Get("watch") == "true" {
-			w.WriteHeader(http.StatusServiceUnavailable)
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		if reads.Add(1) == 2 {
@@ -164,7 +166,7 @@ func TestTrustStoreWatchRecoversFromAnEndedStream(t *testing.T) {
 		answer.ServeHTTP(w, r)
 	})
 
-	store := newTrustStore(testAPIClient(t, refusing), "liken-system", displayCAConfigMapName)
+	store := newTrustStore(testAPIClient(t, ending), "liken-system", displayCAConfigMapName)
 	store.retry = time.Millisecond
 	mustSucceed(t, store.load())
 
@@ -215,4 +217,88 @@ func watchingAPI(api *coreAPI, events <-chan string, watched chan<- *url.URL) ht
 			w.(http.Flusher).Flush()
 		}
 	})
+}
+
+// A cluster that runs one sibling and not the other answers 404 to
+// every watch of the absent one. That costs one line and one request
+// per backoff step, never a line and a request several times a second.
+func TestTrustStoreBacksOffAnAbsentConfigMap(t *testing.T) {
+	api := newCoreAPI()
+	store := newTrustStore(testAPIClient(t, api.handler()), "liken-system", displayCAConfigMapName)
+	mustSucceed(t, store.load())
+
+	waits := make(chan time.Duration, 8)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	var lines []string
+	var said sync.Mutex
+	store.report = func(line string) {
+		said.Lock()
+		defer said.Unlock()
+		lines = append(lines, line)
+	}
+	store.pause = func(_ context.Context, wait time.Duration) bool {
+		select {
+		case waits <- wait:
+			return true
+		default:
+			stop()
+			return false
+		}
+	}
+
+	store.follow(ctx, displayCAConfigMapName)
+
+	close(waits)
+	var stepped []time.Duration
+	for wait := range waits {
+		stepped = append(stepped, wait)
+	}
+	mustMatchAll(t, stepped, []time.Duration{
+		time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+		16 * time.Second, 32 * time.Second, time.Minute, time.Minute,
+	})
+	said.Lock()
+	defer said.Unlock()
+	mustMatch(t, len(lines), 1)
+	mustMatch(t, strings.Contains(lines[0], "404 Not Found"), true)
+	mustMatch(t, strings.Contains(lines[0], "composes no stream through that API"), true)
+}
+
+// A sibling that appears reports once more, and the wait starts over,
+// because the next failure is a new fault.
+func TestTrustStoreReportsASiblingThatAppears(t *testing.T) {
+	api := newCoreAPI()
+	store := newTrustStore(testAPIClient(t, api.handler()), "liken-system", displayCAConfigMapName)
+	store.retry = time.Millisecond
+	mustSucceed(t, store.load())
+
+	var lines []string
+	var said sync.Mutex
+	store.report = func(line string) {
+		said.Lock()
+		defer said.Unlock()
+		lines = append(lines, line)
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	attempts := 0
+	authority := testAuthority(t)
+	store.pause = func(context.Context, time.Duration) bool {
+		attempts++
+		if attempts == 2 {
+			api.seed(t, "configmaps/"+displayCAConfigMapName,
+				caConfigMap(displayCAConfigMapName, authority.certPEM))
+		}
+		return attempts < 4
+	}
+
+	store.follow(ctx, displayCAConfigMapName)
+
+	said.Lock()
+	defer said.Unlock()
+	mustMatch(t, len(lines), 2)
+	mustMatch(t, strings.Contains(lines[0], "404 Not Found"), true)
+	mustMatch(t, strings.Contains(lines[1], "the object is present"), true)
+	mustSucceed(t, chainsTo(t, authority, store.pool()))
 }

@@ -252,3 +252,25 @@ func TestASiblingWithNoProjectedTokenIsAServiceUnavailable(t *testing.T) {
 	mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
 	mustMatch(t, strings.Contains(problemOf(t, recorder).Detail, "reading the audio token"), true)
 }
+
+// A cluster may run this API before it runs the siblings. Every route
+// this API answers for itself still answers, and only a composition
+// through the absent sibling fails, with that sibling's own reason.
+func TestTheApiServesWhileASiblingAnchorIsAbsent(t *testing.T) {
+	fixture := newAPIFixture(t)
+	fixture.server.display = testDisplayBase
+	fixture.server.audio = testAudioBase
+
+	mustMatch(t, fixture.get(apiBasePath).Code, http.StatusOK)
+	mustMatch(t, fixture.get(playerPathFor("")).Code, http.StatusOK)
+	redirect := fixture.get(playerPathFor("screen.png"))
+	mustMatch(t, redirect.Code, http.StatusTemporaryRedirect)
+	mustMatch(t, redirect.Header().Get("Location"),
+		testDisplayBase+"/v1/display/displays/boe-1080/screen.png")
+
+	refused := fixture.get(playerPathFor("media.mp4"))
+
+	mustMatch(t, refused.Code, http.StatusServiceUnavailable)
+	mustMatch(t, refused.Header().Get("Retry-After"), retryAfterSeconds)
+	mustMatch(t, problemOf(t, refused).Detail != "", true)
+}
