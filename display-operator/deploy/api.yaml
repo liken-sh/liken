@@ -1,0 +1,239 @@
+# display-api, the one Deployment of this base, answers a GET on a
+# Display with what its screen shows. This file holds it with its
+# Service and its identity. The API authenticates the caller, finds
+# the Display's node, calls the capture container of the
+# display-operator pod on that node, and streams the answer back. It
+# stores nothing.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: display-api
+spec:
+  # One replica with Recreate, because the API mints the CA and the
+  # two leaves at its first start, and a second pod beside it would
+  # mint a second set. A create that loses the race reads the winner.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: display-api
+  template:
+    metadata:
+      labels:
+        app: display-api
+    spec:
+      serviceAccountName: display-api
+      containers:
+        - name: api
+          # This image is the operator's binary on scratch, and the
+          # argument selects the role, the way every other container
+          # of this base does.
+          image: ghcr.io/liken-sh/display-api:latest
+          args: ["api"]
+          env:
+            # The API serves HTTPS only, because the caller's bearer
+            # token is a ServiceAccount token and a frame of a home's
+            # screen is a picture of the room.
+            - name: API_ADDR
+              value: ":8443"
+            # The port every liken process serves its metrics on.
+            - name: METRICS_ADDR
+              value: ":9200"
+            # PUBLIC_BASE is the base the served OpenAPI document
+            # names in its servers list. An owner who puts the API
+            # behind a name of their own states it here. With no
+            # value, the document names the origin each request
+            # arrived on.
+            # - name: PUBLIC_BASE
+            #   value: "https://display.example"
+            # The namespace the API reads its pods, its Secrets, and
+            # its ConfigMap in. The downward API is where a pod reads
+            # its own.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: api
+              containerPort: 8443
+            - name: metrics
+              containerPort: 9200
+          securityContext:
+            # No privilege and no capability. The API reads the
+            # Kubernetes API and serves two sockets, and neither needs
+            # either.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            # The image is FROM scratch, which names no user, and the
+            # API needs no root, so the container states the user it
+            # runs as.
+            runAsNonRoot: true
+            runAsUser: 65532
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          # Both probes take the metrics port over plain HTTP, because
+          # the API's HTTPS port serves captures and a probe needs no
+          # certificate.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+              scheme: HTTP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+              scheme: HTTP
+          volumeMounts:
+            - name: capture-token
+              mountPath: /var/run/secrets/display-capture
+              readOnly: true
+      volumes:
+        # The token the API sends to the capture container. Its
+        # audience is the sidecar's, not the API's, because the
+        # sidecar's own TokenReview is what checks it. The kubelet
+        # refreshes a projected token before it expires, so an hour
+        # is the life of the credential on disk and not the life of
+        # the pod.
+        - name: capture-token
+          projected:
+            # The API runs as 65532 and reads this file on every
+            # request, so the mode is stated rather than left to a
+            # default.
+            defaultMode: 0644
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: display-capture
+                  expirationSeconds: 3600
+---
+# The Service is the one name a caller reaches, and the API's serving
+# leaf carries this name's four forms, from display-api to
+# display-api.liken-system.svc.cluster.local.
+apiVersion: v1
+kind: Service
+metadata:
+  name: display-api
+spec:
+  selector:
+    app: display-api
+  ports:
+    - name: https
+      port: 443
+      targetPort: api
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: display-api
+---
+# The built-in role that lets a process create a TokenReview and a
+# SubjectAccessReview, the two reviews every request goes through.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: display-api-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: display-api
+    namespace: liken-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: display-api
+rules:
+  # The API reads a Display by name for its node and its mode. No
+  # list and no watch: every request names one.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get]
+  # Every request that produces bytes writes a Captured Event on the
+  # Display, so kubectl describe display answers who looked at a
+  # screen and when.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: display-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: display-api
+subjects:
+  - kind: ServiceAccount
+    name: display-api
+    namespace: liken-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: display-api
+rules:
+  # The list and watch on the display-operator pods, which is how the
+  # API answers "no Ready sidecar on that node" from memory.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list, watch]
+  # The first start mints the CA and the two leaves, and a create
+  # cannot be scoped to a name, so the create is on the collection
+  # and every other verb below names its object.
+  - apiGroups: [""]
+    resources: [secrets, configmaps]
+    verbs: [create]
+  # The API's own serving leaf and the sidecar's: read at start, read
+  # again on a twelve-hour tick, and rewritten under a third of a
+  # leaf's life. The tick is also how a leaf an owner's cert-manager
+  # rotated reaches the listener, so this API is never restarted to
+  # pick one up.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [display-api-tls, display-capture-server]
+    verbs: [get, update, watch]
+  # The CA certificate alone, so a client reads the trust anchor with
+  # an ordinary get and never touches a Secret.
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [display-api-ca]
+    verbs: [get, update, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: display-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: display-api
+subjects:
+  - kind: ServiceAccount
+    name: display-api
+    namespace: liken-system
+---
+# The one rule a caller needs to read a screen. The base ships the
+# role and binds it to nobody, because who may look at a screen is
+# the cluster owner's decision. media-operator's media-api holds this
+# binding, which is how a Player composes a screen with its sound.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: display-capture-viewer
+rules:
+  - apiGroups: [display.liken.sh]
+    resources: [displays/screen]
+    verbs: [get]

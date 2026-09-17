@@ -72,11 +72,13 @@ type metrics struct {
 	panelBrightness             *prometheus.GaugeVec
 }
 
-// newMetrics builds the registry and states this build's identity on
-// it. component and version are the two liken_build_info labels every
-// process in the organization carries, so one panel lists every
-// release running in the cluster.
-func newMetrics(component, version string) *metrics {
+// newProcessRegistry builds the registry and states this build's
+// identity on it. component and version are the two liken_build_info
+// labels every process in the organization carries, so one panel
+// lists every release running in the cluster. Every role of this
+// binary serves the same Go runtime series and the same gauge, and
+// this is the registry each one of them starts from.
+func newProcessRegistry(component, version string) *prometheus.Registry {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(
 		collectors.NewGoCollector(),
@@ -88,6 +90,13 @@ func newMetrics(component, version string) *metrics {
 		Help: "Always 1. The component and version label the release running.",
 	}, []string{"component", "version"})
 	buildInfo.WithLabelValues(component, version).Set(1)
+	registry.MustRegister(buildInfo)
+	return registry
+}
+
+// newMetrics adds the operator's own series to the process registry.
+func newMetrics(component, version string) *metrics {
+	registry := newProcessRegistry(component, version)
 
 	m := &metrics{
 		registry: registry,
@@ -106,7 +115,7 @@ func newMetrics(component, version string) *metrics {
 	}
 	m.newDisplayMetrics()
 
-	registry.MustRegister(buildInfo, m.reconcileDuration, m.reconcileErrors, m.watchRestarts,
+	registry.MustRegister(m.reconcileDuration, m.reconcileErrors, m.watchRestarts,
 		m.outputConnected, m.outputClaimed, m.observationValid, m.observationSuccess,
 		m.outputMode, m.compositorRestarts, m.compositorServing, m.compositorContainerRestarts,
 		m.surfaces, m.panelPower, m.panelBrightness)

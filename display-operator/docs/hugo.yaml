@@ -66,3 +66,8 @@ module:
       target: content
     - source: ../deploy
       target: static/deploy
+    # The generated OpenAPI document is served beside the page that
+    # describes it, so a client reads the description from the site
+    # as well as from the API.
+    - source: content/docs/reference/openapi.json
+      target: static/docs/reference/openapi.json

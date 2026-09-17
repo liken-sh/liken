@@ -98,13 +98,17 @@ spec:
       # stopped process takes no SIGTERM, and it never exits for the
       # kubelet to restart.
       shareProcessNamespace: true
-      # Three containers from one image, ordered by the kubelet: the
-      # declare container writes weston.ini and exits, the weston
-      # container runs the compositor, and the operator container
-      # serves DRA and the slice. The kubelet restarts a dead
-      # compositor alone, the operator taints every output for as long
-      # as nothing answers on the socket, and no process in this pod
-      # supervises another.
+      # Four containers, ordered by the kubelet: the declare container
+      # writes weston.ini and exits, the weston container runs the
+      # compositor, the operator container serves DRA and the slice,
+      # and the capture container serves captures. The capture
+      # container takes frames from the compositor over the layout
+      # module's capture socket and encodes them on the card's render
+      # node. It comes from its own image,
+      # ghcr.io/liken-sh/display-capture, which carries ffmpeg. The
+      # kubelet restarts a dead compositor alone, the operator taints
+      # every output for as long as nothing answers on the socket, and
+      # no process in this pod supervises another.
       initContainers:
         # The connector enumeration and the config write run as an
         # init step, because the compositor parses weston.ini once at
@@ -265,6 +269,71 @@ spec:
             # the socket that places surfaces.
             - name: weston-config
               mountPath: /etc/weston
+        - name: capture
+          # This image is the ffmpeg image plus the same operator
+          # binary, because every capture is encoded by an ffmpeg
+          # process this container starts.
+          image: ghcr.io/liken-sh/display-capture:latest
+          args: ["capture"]
+          env:
+            # One listener serves the captures, the metrics, and the
+            # two probes, on 9201 rather than the 9200 every liken
+            # process takes, because the operator container in this
+            # pod already holds 9200.
+            - name: CAPTURE_ADDR
+              value: ":9201"
+          ports:
+            - name: capture
+              containerPort: 9201
+          securityContext:
+            # No privilege and no capability. The encoder reads frames
+            # from a socket and writes to the card's render node, and
+            # the claim delivers that node.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            # The pod's limits become 64 + 512 + 128 + 384 = 1088Mi,
+            # which is more than a machine with 1 GB of memory holds,
+            # so a 4K clip is scaled to 1080p and the drill on the
+            # hardware decides this number. On a cgroup v2 machine an
+            # ffmpeg that exceeds the limit kills the whole container,
+            # so one runaway encode ends every capture on the node and
+            # the kubelet restarts the container.
+            limits:
+              memory: 384Mi
+            # The encoder needs the render node and nothing else, so
+            # this container names the render request alone: DRM
+            # master and the i2c wires belong to the compositor and
+            # the operator.
+            claims:
+              - name: gpu
+                request: render
+          volumeMounts:
+            # The capture socket the layout module opens is in this
+            # directory, which is why the container that takes frames
+            # mounts the compositor's config volume.
+            - name: weston-config
+              mountPath: /etc/weston
+            - name: capture-tls
+              mountPath: /var/run/display-capture-tls
+              readOnly: true
+          # No readiness probe, because a late credential must not
+          # hold this system-node-critical pod NotReady and stall the
+          # DaemonSet's one-node-at-a-time roll. A restart of this
+          # container ends every running capture on the node and
+          # nothing else.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: capture
+              scheme: HTTPS
+            periodSeconds: 30
+            failureThreshold: 3
       resourceClaims:
         - name: gpu
           resourceClaimTemplateName: display-gpu
@@ -300,3 +369,13 @@ spec:
         # left runs every screen at the mode its monitor prefers.
         - name: weston-config
           emptyDir: {}
+        # The sidecar's serving leaf. The volume is optional because
+        # the pod starts before the API has minted it, and the kubelet
+        # would otherwise hold the pod out of the roll until the
+        # Secret exists. An optional volume also costs the DaemonSet's
+        # ServiceAccount no grant on the Secret, where a watch in the
+        # sidecar would.
+        - name: capture-tls
+          secret:
+            secretName: display-capture-server
+            optional: true

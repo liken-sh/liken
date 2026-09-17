@@ -35,17 +35,31 @@ const (
 	podsResource = "pods"
 )
 
-// Pod holds the part of a pod this operator reads. The labels are
-// what a region's selector matches, and the name and namespace are
-// what status.surfaces reports beside them. The operator never writes
-// a pod.
+// Pod holds the part of a pod this program reads: the labels a
+// region's selector matches, the name and namespace status.surfaces
+// reports beside them, and the node, address, and readiness
+// display-api reaches a sidecar by. Nothing here ever writes a pod.
 type Pod struct {
 	Metadata PodMeta   `json:"metadata"`
+	Spec     PodSpec   `json:"spec,omitempty"`
 	Status   PodStatus `json:"status,omitempty"`
 }
 
 type PodList struct {
-	Items []Pod `json:"items"`
+	Metadata ListMeta `json:"metadata"`
+	Items    []Pod    `json:"items"`
+}
+
+// A watch starts at the version the listing answered with, so no
+// event between the two is missed.
+type ListMeta struct {
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+}
+
+// The node is the only field of a pod's spec this program reads. It
+// answers which node's sidecar a pod is.
+type PodSpec struct {
+	NodeName string `json:"nodeName,omitempty"`
 }
 
 type PodMeta struct {
@@ -58,8 +72,29 @@ type PodMeta struct {
 // native sidecar is an init container whose restartPolicy is Always,
 // so the compositor's count is in initContainerStatuses.
 type PodStatus struct {
+	PodIP                 string            `json:"podIP,omitempty"`
+	Conditions            []PodCondition    `json:"conditions,omitempty"`
 	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
 	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
+}
+
+// The kubelet's own Ready condition is what display-api reads,
+// because it is the one answer that covers every container of the
+// pod.
+type PodCondition struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
+}
+
+// A pod is ready only while the kubelet says so; a pod with no
+// conditions yet is not.
+func (s PodStatus) ready() bool {
+	for _, condition := range s.Conditions {
+		if condition.Type == "Ready" {
+			return condition.Status == conditionTrue
+		}
+	}
+	return false
 }
 
 type ContainerStatus struct {

@@ -1,8 +1,9 @@
 # The operator's identity in the cluster, and deliberately nothing
 # more. It writes one ResourceSlice, writes the status of every
 # Display it created, reads the claims on the screens it drives and
-# the pods that hold them, reads the Layouts a Display names, and
-# reads its own Node.
+# the pods that hold them, reads the Layouts a Display names, reads
+# its own Node, and reviews the token the API sends its capture
+# container.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -81,6 +82,14 @@ rules:
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
+  # The capture container checks the API's bearer token with a
+  # TokenReview for the audience display-capture, so the pod needs
+  # this one verb. It is written out here rather than taken from the
+  # built-in system:auth-delegator role, because that role also
+  # grants a SubjectAccessReview, which this pod never makes.
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

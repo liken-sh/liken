@@ -6,10 +6,12 @@
  * The module is an executor. It creates one ivi layer and one black
  * background view per output, opens and closes one Wayland listening
  * socket per claim, reports every surface it sees, and places surfaces
- * where the operator tells it to. It holds no layout of its own and
- * makes no decision. A surface the operator has not placed is not
- * visible, and when the operator's connection drops the last committed
- * layout stays on screen.
+ * where the operator tells it to. It holds no layout of its own. The
+ * one decision it makes is who may capture an output: the fixed
+ * capture socket below, and the authority that admits the clients on
+ * it and nobody else. A surface the operator has not placed is not
+ * visible, and when the operator's connection drops the last
+ * committed layout stays on screen.
  *
  * The module binds each claim's listening socket itself and hands the
  * descriptor to wl_display_add_socket_fd, rather than naming the socket
@@ -56,6 +58,16 @@
 #define LINE_LEN 1024
 
 #define DEFAULT_CONTROL_PATH "/etc/weston/layout.sock"
+
+/* The fixed path of the capture socket. It is beside the control
+ * socket in the pod's own config volume and never under
+ * XDG_RUNTIME_DIR, because CDI delivers that directory to consumer
+ * pods and the capture socket must never be delivered. */
+#define CAPTURE_SOCKET_PATH "/etc/weston/wayland-capture"
+
+/* The name the capture socket's clients report as, which is the one
+ * name the authority below admits. */
+#define CAPTURE_SOCKET "wayland-capture"
 
 /* The socket every pod prepared before per-claim sockets still holds
  * in WAYLAND_DISPLAY. A surface on it belongs to no claim. */
@@ -146,6 +158,7 @@ static struct wl_listener client_created;
 static struct wl_listener output_created;
 static struct wl_listener output_destroyed;
 static struct wl_listener output_resized;
+static struct wl_listener screenshot_authority;
 
 /* The control connection */
 
@@ -452,10 +465,14 @@ socket_named(const char *name)
 /* A socket name becomes a path under XDG_RUNTIME_DIR that close
  * unlinks, so a name with a slash in it would unlink a file outside
  * that directory. */
+/* The capture socket's name is reserved. A close on it would leave
+ * the socket accepting while the authority stopped admitting anyone,
+ * because read_client_origin matches open entries only. */
 static bool
 name_is_safe(const char *name)
 {
 	return name && name[0] && name[0] != '.' && !strchr(name, '/') &&
+	       strcmp(name, CAPTURE_SOCKET) != 0 &&
 	       strlen(name) < NAME_LEN;
 }
 
@@ -688,6 +705,62 @@ origin_of_surface(struct weston_surface *ws)
 		if (co->client == client)
 			return co->socket_name;
 	return SHARED_SOCKET;
+}
+
+/* The capture door */
+
+/* One socket, bound at module load and never closed, whose clients
+ * the authority admits to weston_capture_v1. A failure here only
+ * logs: the control socket is the module's job, and a compositor
+ * that places surfaces and captures nothing is better than one that
+ * does neither. */
+static void
+start_capture_socket(void)
+{
+	struct listening_socket *ls;
+	int fd;
+
+	ls = calloc(1, sizeof *ls);
+	if (!ls) {
+		weston_log("liken-layout: no memory for the capture socket\n");
+		return;
+	}
+	snprintf(ls->name, sizeof ls->name, "%s", CAPTURE_SOCKET);
+	ls->fd = -1;
+
+	fd = bind_listening_socket(CAPTURE_SOCKET_PATH);
+	if (fd < 0) {
+		free(ls);
+		return;
+	}
+	if (wl_display_add_socket_fd(compositor->wl_display, fd) < 0) {
+		weston_log("liken-layout: the compositor did not take %s: %s\n",
+			   CAPTURE_SOCKET_PATH, strerror(errno));
+		close(fd);
+		free(ls);
+		return;
+	}
+
+	ls->fd = fd;
+	ls->open = true;
+	wl_list_insert(&listening_sockets, &ls->link);
+	weston_log("liken-layout: capture listens on %s on descriptor %d\n",
+		   CAPTURE_SOCKET_PATH, ls->fd);
+}
+
+/* weston denies an attempt no authority authorized, so this function
+ * sets authorized for a client on the capture socket, sets nothing
+ * for every other client, and never sets denied. */
+static void
+authorize_capture(struct wl_listener *listener,
+		  struct weston_output_capture_attempt *attempt)
+{
+	char origin[NAME_LEN];
+
+	(void)listener;
+	read_client_origin(attempt->who->client, origin, sizeof origin);
+	if (strcmp(origin, CAPTURE_SOCKET) == 0)
+		attempt->authorized = true;
 }
 
 /* Surfaces */
@@ -1202,6 +1275,10 @@ wet_module_init(struct weston_compositor *ec, int *argc, char *argv[])
 
 	wl_list_for_each(output, &ec->output_list, link)
 		add_output_layer(output);
+
+	start_capture_socket();
+	weston_compositor_add_screenshot_authority(ec, &screenshot_authority,
+						   authorize_capture);
 
 	configure_surface.notify = on_configure;
 	ivi->add_listener_configure_surface(&configure_surface);

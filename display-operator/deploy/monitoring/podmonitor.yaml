@@ -1,7 +1,11 @@
-# The operator is the only pod this driver runs, so it is the only
-# PodMonitor this component holds. It selects the DaemonSet's own pod
+# This driver runs two pods, the DaemonSet's on every node with a
+# card and the API's once in the cluster, so this component holds one
+# PodMonitor for each. The first selects the DaemonSet's own pod
 # label and reads the container port named metrics, which
 # operator.yaml declares whether or not this component is ever added.
+# The DaemonSet's pod is scraped twice, because the capture container
+# serves its own series on its own port: it cannot share 9200 with
+# the operator container beside it.
 #
 # The relabeling carries the node name onto every series, because this
 # pod runs one per machine and the fleet dashboard groups by the
@@ -19,6 +23,34 @@ spec:
   selector:
     matchLabels:
       app: display-operator
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+    - port: capture
+      scheme: https
+      # The leaf's only SAN is display-capture and its CA is minted
+      # after this file is written, and the series carry no capture
+      # content, so the scrape skips verification.
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+---
+# The API's own pod. It runs once in the cluster, and it carries the
+# node label too, so every series this component collects groups by
+# the machine the reading came from.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: display-api
+  namespace: liken-system
+spec:
+  selector:
+    matchLabels:
+      app: display-api
   podMetricsEndpoints:
     - port: metrics
       relabelings:

@@ -38,6 +38,8 @@ and ends there:
 * [Put a window on a screen](docs/content/docs/guides/claim.md)
 * [Devices](docs/content/docs/reference/devices.md): the class, the
   attributes, and what a claim delivers
+* [API](docs/content/docs/reference/api.md): the routes that answer
+  with what a screen shows
 
 The short version, on a cluster whose machine publishes its graphics
 card, after you create the device classes (the install guide gives
@@ -46,13 +48,14 @@ their YAML):
     kubectl apply -n liken-system \
       -f https://display.liken.sh/deploy/deviceclasses.yaml \
       -f https://display.liken.sh/deploy/rbac.yaml \
-      -f https://display.liken.sh/deploy/operator.yaml
+      -f https://display.liken.sh/deploy/operator.yaml \
+      -f https://display.liken.sh/deploy/api.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
 with the RBAC, the `DaemonSet` whose pod claims the card on its own
-node, and three `DeviceClasses`, `display-gpu`, `display-render`,
-and `display-i2c`, which that claim names and the operator cannot
-start without. The
+node, three `DeviceClasses`, `display-gpu`, `display-render`, and
+`display-i2c`, which that claim names and the operator cannot start
+without, and the `display-api` `Deployment`. The
 class your workloads claim through is cluster policy, yours to
 create; the install guide gives the YAML for `display-output`, the
 one to start with.
@@ -74,9 +77,12 @@ of is documented in `liken`'s repository, in
     docker build --target ffmpeg -t ffmpeg .
     docker build --target mpv -t mpv .
     docker build --target weston -t weston .
-    docker build -t display-operator .
+    docker build --target display-operator -t display-operator .
+    docker build --target display-capture -t display-capture .
+    docker build --target display-api -t display-api .
 
-One `Dockerfile` builds six images, each on the one under it.
+One `Dockerfile` builds eight images. Seven are built on the one
+under them, and the API's is built on nothing.
 `ghcr.io/liken-sh/vulkan` is the Vulkan loader, the Intel and AMD
 drivers, and the client libraries a Wayland program opens, on nothing
 else. It is the base image for every Vulkan client liken ships.
@@ -88,7 +94,10 @@ file it opens by name, and the media operator's player builds on it.
 `ghcr.io/liken-sh/weston` is the vulkan image plus the compositor and
 every library it loads. `ghcr.io/liken-sh/display-operator` is that
 image plus the operator's static binary, and it is the image the
-`DaemonSet` runs. The EDID
+`DaemonSet` runs. `ghcr.io/liken-sh/display-capture` is the ffmpeg
+image plus the same binary, and the pod's capture container runs it.
+`ghcr.io/liken-sh/display-api` is that binary on `scratch`, and the
+`display-api` `Deployment` runs it. The EDID
 fixtures in `testdata` are read off real monitors with
 `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.
 

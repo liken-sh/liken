@@ -115,14 +115,20 @@ reads a missing attribute fails the whole allocation.
 ## 3. Apply the manifests
 
 This site serves the repository's [`deploy/`](/deploy/kustomization.yaml)
-directory as raw YAML, so the install needs no clone. Four files
-are the rest of the install:
+directory as raw YAML, so the install needs no clone. Five files
+are the rest of the install, and `api.yaml` is the one that runs
+once per cluster rather than once per node:
 
     kubectl apply -n liken-system \
       -f https://display.liken.sh/deploy/displays.yaml \
       -f https://display.liken.sh/deploy/deviceclasses.yaml \
       -f https://display.liken.sh/deploy/rbac.yaml \
-      -f https://display.liken.sh/deploy/operator.yaml
+      -f https://display.liken.sh/deploy/operator.yaml \
+      -f https://display.liken.sh/deploy/api.yaml
+
+`api.yaml` holds the `display-api` `Deployment`, its `Service`, and
+its RBAC. It answers the routes the [API reference](/docs/reference/api/)
+describes, and an owner who wants no capture API leaves it out.
 
 `displays.yaml` is the `Display` `CustomResourceDefinition`. The
 operator creates a [`Display`](/docs/reference/displays/) for every
@@ -147,6 +153,7 @@ same URLs. `kustomize` takes a raw YAML URL as a resource:
       - https://display.liken.sh/deploy/deviceclasses.yaml
       - https://display.liken.sh/deploy/rbac.yaml
       - https://display.liken.sh/deploy/operator.yaml
+      - https://display.liken.sh/deploy/api.yaml
 
 A clone works too: `kubectl apply -k deploy/` from the repository
 applies the same base through
@@ -220,9 +227,14 @@ Delete the manifests. Then delete the slice on each node that
 published one:
 
     kubectl delete -n liken-system \
+      -f https://display.liken.sh/deploy/api.yaml \
       -f https://display.liken.sh/deploy/rbac.yaml \
       -f https://display.liken.sh/deploy/operator.yaml
     kubectl delete resourceslice <node>-display.liken.sh
+
+The API's own `Secret`s and `ConfigMap` outlive the `Deployment`.
+Delete `display-api-tls`, `display-capture-server`, and
+`display-api-ca` in `liken-system` by hand.
 
 The slice step is yours because the operator never deletes its
 slice. A device that leaves the inventory while a claim still names

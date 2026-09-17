@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs liken-layout.so against a real weston and a real client, on a
+# Runs liken-layout.so against a real weston and real clients, on a
 # developer machine with docker. CI does not run this: it needs a
 # container that can start a second container, and the release image
 # has no shell and no test clients in it.
@@ -7,16 +7,23 @@
 # The test builds a small image on the same Debian suite as the
 # release, with weston and its demo clients in it, starts weston
 # headless with the pixman renderer, then drives the control socket
-# from a Python client. It asserts that a client on a per-claim socket
-# is reported with that socket's name and a client on the shared
-# socket as wayland-0, that placing each one paints the rectangle the
-# operator asked for and nothing outside it, that moving one leaves
-# the rectangle it came from black, that hiding one leaves the other
-# where it was, that a hide with a fade leaves the rectangle painted
-# and dimmer partway through the fade and black after it, that closing
-# the claim's socket unlinks the path, and that a listen on that same
-# name afterwards opens the path again and reports the client that
-# arrives on it.
+# from a Python client.
+#
+# It asserts that a client on a per-claim socket is reported with that
+# socket's name and a client on the shared socket as wayland-0. It
+# asserts that placing each one paints the rectangle the operator
+# asked for and nothing outside it, that moving one leaves the
+# rectangle it came from black, that hiding one leaves the other where
+# it was, and that a hide with a fade leaves the rectangle painted and
+# dimmer partway through the fade and black after it. It asserts that
+# closing the claim's socket unlinks the path, and that a listen on
+# that same name afterwards opens the path again and reports the
+# client that arrives on it. It asserts that a client on the capture
+# socket reads complete, and that a client on wayland-0 reads failed
+# with weston's own word, unauthorized.
+#
+# weston runs with no --debug, because --debug installs
+# screenshot_allow_all, which would admit the wayland-0 client.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -54,7 +61,7 @@ DOCKERFILE
 # The compositor runs as the developer's own uid, so the sockets and
 # the screenshot it writes are readable from the host.
 mkdir -m 700 "$work/run"
-mkdir -m 755 "$work/control" "$work/shot"
+mkdir -m 755 "$work/control" "$work/shot" "$work/weston-config"
 cat >"$work/weston.ini" <<'INI'
 [core]
 backend=headless
@@ -72,13 +79,14 @@ docker run -d --name "$weston_container" \
 	-v "$work/run:/run/liken" \
 	-v "$work/control:/run/control" \
 	-v "$work/shot:/shot" \
+	-v "$work/weston-config:/etc/weston" \
 	-v "$work/weston.ini:/etc/weston.ini:ro" \
 	-e XDG_RUNTIME_DIR=/run/liken \
 	-e LIKEN_LAYOUT_SOCKET=/run/control/layout.sock \
 	"$image" \
 	weston --config=/etc/weston.ini --backend=headless \
 	--shell=ivi-shell.so --modules=liken-layout.so \
-	--renderer=pixman --socket=wayland-0 --debug >/dev/null
+	--renderer=pixman --socket=wayland-0 >/dev/null
 
 echo "== driving the control socket"
 set +e

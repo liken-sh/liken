@@ -124,12 +124,12 @@ jobs:
     # which builds every image for that commit at the same moment, so
     # this job runs on a pull request only and no layer builds twice.
     if: github.event_name == 'pull_request'
-    # One job per image, so the six build at once and the run is as
+    # One job per image, so the eight build at once and the run is as
     # long as the slowest of them, not the sum.
     #
-    # Every image comes from the one Dockerfile, each stage on the
-    # one under it. Each entry but the operator's names its stage, and
-    # the operator's takes the default, the last stage in the file.
+    # Every image comes from the one Dockerfile, and every entry names
+    # its stage, so no entry depends on which stage the file ends
+    # with.
     strategy:
       fail-fast: false
       matrix:
@@ -145,7 +145,11 @@ jobs:
           - image: weston
             target: weston
           - image: display-operator
-            target: ""
+            target: display-operator
+          - image: display-capture
+            target: display-capture
+          - image: display-api
+            target: display-api
     steps:
       - uses: actions/checkout@v7
 

@@ -223,12 +223,18 @@ func (c *waylandClient) newID() uint32 {
 // A message is the object id, then a word that carries the
 // whole message's size in its high half and the opcode in its low
 // half, then the arguments. The size counts the eight header bytes.
-func (c *waylandClient) request(object uint32, opcode uint16, words waylandWords) error {
+//
+// The bytes are built apart from the write, because the capture
+// client sends the same bytes with a descriptor beside them.
+func waylandMessage(object uint32, opcode uint16, words waylandWords) []byte {
 	message := make([]byte, 0, 8+len(words.body))
 	message = binary.LittleEndian.AppendUint32(message, object)
 	message = binary.LittleEndian.AppendUint32(message, uint32(len(words.body)+8)<<16|uint32(opcode))
-	message = append(message, words.body...)
-	_, err := c.socket.Write(message)
+	return append(message, words.body...)
+}
+
+func (c *waylandClient) request(object uint32, opcode uint16, words waylandWords) error {
+	_, err := c.socket.Write(waylandMessage(object, opcode, words))
 	return err
 }
 
@@ -359,7 +365,14 @@ func westonMode(width, height, refreshMilliHertz uint32) string {
 	if refreshMilliHertz == 0 {
 		return name
 	}
-	return fmt.Sprintf("%s@%d", name, (refreshMilliHertz+500)/1000)
+	return fmt.Sprintf("%s@%d", name, westonRefresh(refreshMilliHertz))
+}
+
+// The compositor states a refresh in millihertz, and every other
+// party in this repository states it in whole hertz, rounded the way
+// the kernel rounds its own vrefresh.
+func westonRefresh(refreshMilliHertz uint32) uint32 {
+	return (refreshMilliHertz + 500) / 1000
 }
 
 // The loop. One session runs for as long as the compositor

@@ -1,4 +1,5 @@
-# Six images from one file, each built on the one under it.
+# Eight images from one file. Seven are built on the one under them,
+# and the API's is built on nothing.
 #
 #   --target vulkan    ghcr.io/liken-sh/vulkan, the Vulkan loader, the
 #                      Intel and AMD drivers, and the client libraries
@@ -15,15 +16,26 @@
 #                      name. The media operator's player builds FROM it.
 #   --target weston    ghcr.io/liken-sh/weston, the vulkan image plus
 #                      the compositor and every library it loads.
-#   the default        ghcr.io/liken-sh/display-operator, the weston
-#                      image plus the operator's binary.
+#   --target display-operator
+#                      ghcr.io/liken-sh/display-operator, the weston
+#                      image plus the operator's binary. The stage
+#                      carries a name because stages follow it.
+#   --target display-capture
+#                      ghcr.io/liken-sh/display-capture, the ffmpeg
+#                      image plus the same binary, which is the
+#                      capture container of the operator's pod.
+#   --target display-api
+#                      ghcr.io/liken-sh/display-api, the same binary
+#                      on nothing else, which is the whole of the
+#                      API's image.
 #
 # Each image is built from the one below it rather than beside it. The
 # compositor that the release starts is the same set of bytes that the
 # pod runs, and a node that draws with the compositor and the clients
 # holds glibc, libdrm and LLVM once. Docker shares a layer only when
 # the whole chain under it matches, which is why the order is fixed:
-# the base first, each image on its base, the operator last.
+# the base first, then each image on its base. display-api is the one
+# image with no base, because the binary is the whole of it.
 #
 # The compositor ships in a workload's image and not in the read-only
 # root that every liken machine boots. That is why the device operator
@@ -173,11 +185,28 @@ COPY --from=layout /liken-layout.so /usr/lib/x86_64-linux-gnu/weston/liken-layou
 # release can start it and read what it says.
 ENTRYPOINT ["/usr/bin/weston"]
 
-FROM weston
-# The operator's binary is the entrypoint of all three of the pod's
-# containers. The argument the manifest passes selects the role: the
-# config write, the compositor it execs, or, with no argument, the
-# DRA driver.
+FROM weston AS display-operator
+# The operator's binary is the entrypoint of every container of the
+# pod. The argument the manifest passes selects the role: the config
+# write, the compositor it execs, the capture server, or, with no
+# argument, the DRA driver.
+COPY --from=build /display-operator /usr/local/bin/display-operator
+
+ENTRYPOINT ["/usr/local/bin/display-operator"]
+
+# The capture sidecar runs an ffmpeg process for every request, so
+# its image is the ffmpeg image plus the binary. It carries no
+# compositor: the sidecar is a Wayland client of the weston container
+# beside it.
+FROM ffmpeg AS display-capture
+COPY --from=build /display-operator /usr/local/bin/display-operator
+
+ENTRYPOINT ["/usr/local/bin/display-operator"]
+
+# The API talks to the Kubernetes API and to the sidecars, and opens
+# no library and no device, so the static binary is the whole image
+# and there is nothing else in it to patch.
+FROM scratch AS display-api
 COPY --from=build /display-operator /usr/local/bin/display-operator
 
 ENTRYPOINT ["/usr/local/bin/display-operator"]

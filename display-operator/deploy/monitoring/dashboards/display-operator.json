@@ -285,6 +285,65 @@
           "datasource": { "type": "prometheus", "uid": "${datasource}" }
         }
       ]
+    },
+    {
+      "id": 15,
+      "title": "Captures",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 62 },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Captures active",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 63 },
+      "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "display_captures_active{node=~\"$node\"}",
+          "legendFormat": "{{aspect}} ({{node}})",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Capture failures by reason",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 63 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(display_capture_failures_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "API request rate by status",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 71 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(display_api_requests_total[5m]))",
+          "legendFormat": "{{status}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
     }
   ]
 }

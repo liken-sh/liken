@@ -144,9 +144,10 @@ var driRoot = "/dev/dri"
 
 // main selects the role from the command line.
 //
-// The pod runs this one image three times. The declare init
-// container and the compositor's container each name their role in
-// an argument, and the operator container runs with none.
+// This one binary is every process of the display domain. The
+// argument the manifest passes selects which: the config write, the
+// compositor, the capture sidecar, the API, or the OpenAPI printer,
+// and no argument runs the driver.
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -155,6 +156,15 @@ func main() {
 			return
 		case compositorMode:
 			compose()
+			return
+		case captureMode:
+			serveCaptureSidecar()
+			return
+		case apiMode:
+			serveAPI()
+			return
+		case openapiMode:
+			printOpenAPI()
 			return
 		}
 	}

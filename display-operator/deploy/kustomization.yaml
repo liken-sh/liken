@@ -20,6 +20,11 @@
 # reads a Layout by the name a Display states and watches the kind for
 # changes.
 #
+# The base also ships api.yaml, the display-api Deployment and its
+# Service, the one thing here that runs once per cluster rather than
+# once per node. An owner who wants no capture API removes that one
+# file from the resources below.
+#
 # kustomize stamps the namespace below onto the DeviceClasses too,
 # because resource.k8s.io/v1 is not in its compiled OpenAPI schema
 # and an unknown kind is treated as namespaced. The stamp is
@@ -37,6 +42,7 @@ resources:
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml
+  - api.yaml
 
 labels:
   - includeSelectors: false
@@ -44,6 +50,13 @@ labels:
       app.kubernetes.io/name: display-operator
       app.kubernetes.io/part-of: liken
 
+# The three images carry the same binary and ship under one version,
+# so a roll sets one tag on all three and never leaves a sidecar from
+# an older release beside a newer operator.
 images:
   - name: ghcr.io/liken-sh/display-operator
+    newTag: latest
+  - name: ghcr.io/liken-sh/display-capture
+    newTag: latest
+  - name: ghcr.io/liken-sh/display-api
     newTag: latest

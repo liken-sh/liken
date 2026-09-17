@@ -82,6 +82,10 @@ jobs:
             echo "images:"
             echo "  - name: ghcr.io/$GITHUB_REPOSITORY"
             echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/liken-sh/display-capture"
+            echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/liken-sh/display-api"
+            echo "    newTag: $VERSION"
             echo "  - name: ghcr.io/liken-sh/weston"
             echo "    newTag: $VERSION"
             echo '```'
@@ -266,6 +270,9 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          # The stage is named because two stages follow it in the
+          # file, and the default target is the last stage.
+          target: display-operator
           load: true
           # The build arg is what reaches main.version through the
           # Dockerfile's -ldflags, so a running pod's liken_build_info
@@ -277,6 +284,49 @@ jobs:
           tags: |
             ghcr.io/liken-sh/display-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/display-operator:latest
+
+      # The two images below carry the same binary as the operator,
+      # so each takes the same build arg and each one's
+      # liken_build_info names this release.
+      - name: Build the capture sidecar
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: display-capture
+          load: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/display-capture:${{ env.VERSION }}
+            ghcr.io/liken-sh/display-capture:latest
+
+      - name: Build the API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: display-api
+          load: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/display-api:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/display-api:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/display-api:${{ env.VERSION }}
+            ghcr.io/liken-sh/display-api:latest
+
+      # The capture sidecar starts one ffmpeg process per request by
+      # absolute path, so a run proves that path is in the image, the
+      # way the weston, ffmpeg, and mpv checks above prove each of
+      # those images.
+      - name: Run the capture image's encoder
+        run: |
+          docker run --rm --entrypoint /usr/bin/ffmpeg \
+            "ghcr.io/liken-sh/display-capture:$VERSION" -version > capture-ffmpeg.txt
+          grep -q '^ffmpeg version ' capture-ffmpeg.txt
 
       # ci.yaml runs beside this workflow on a push to main and holds
       # the coverage floors and the other checks. This step waits for
@@ -316,8 +366,9 @@ jobs:
           echo "the ci run for $commit did not finish within ten minutes" >&2
           exit 1
 
-      # Every image builds on the vulkan base, so the base pushes once
-      # and each image after it sends the layers its base lacks.
+      # Every image but the API builds on the vulkan base, so the base
+      # pushes once and each image after it sends the layers its base
+      # lacks. The API is FROM scratch and sends one layer.
       #
       # :latest marks the newest release and nothing else. A
       # development build pushes its own tag only.
@@ -329,6 +380,8 @@ jobs:
           docker push "ghcr.io/liken-sh/mpv:$VERSION"
           docker push "ghcr.io/liken-sh/weston:$VERSION"
           docker push "ghcr.io/liken-sh/display-operator:$VERSION"
+          docker push "ghcr.io/liken-sh/display-capture:$VERSION"
+          docker push "ghcr.io/liken-sh/display-api:$VERSION"
           if [ "$RELEASE" = true ]; then
             docker push "ghcr.io/liken-sh/vulkan:latest"
             docker push "ghcr.io/liken-sh/vaapi:latest"
@@ -336,4 +389,6 @@ jobs:
             docker push "ghcr.io/liken-sh/mpv:latest"
             docker push "ghcr.io/liken-sh/weston:latest"
             docker push "ghcr.io/liken-sh/display-operator:latest"
+            docker push "ghcr.io/liken-sh/display-capture:latest"
+            docker push "ghcr.io/liken-sh/display-api:latest"
           fi

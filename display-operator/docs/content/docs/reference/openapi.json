@@ -1,0 +1,2575 @@
+{
+  "components": {
+    "schemas": {
+      "Problem": {
+        "properties": {
+          "acceptable": {
+            "items": {
+              "properties": {
+                "href": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "instance"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "bearerFormat": "JWT",
+        "description": "A Kubernetes ServiceAccount token whose audience is display-api.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Identity is in the path, the format is in the extension or in the Accept field, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
+    "summary": "The screen of every Display in this cluster, as one frame, a clip or a stream.",
+    "title": "display-api",
+    "version": "dev"
+  },
+  "openapi": "3.1.1",
+  "paths": {
+    "/v1/display": {
+      "get": {
+        "operationId": "GET_v1_display",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The routes this API serves, as RFC 6570 templates.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-cache. A document is revalidated against its entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this document came from.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The document has not changed since the entity tag the client holds."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          }
+        },
+        "summary": "The discovery document"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The routes this API serves, as RFC 6570 templates.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-cache. A document is revalidated against its entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this document came from.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The document has not changed since the entity tag the client holds."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          }
+        },
+        "summary": "The discovery document"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      }
+    },
+    "/v1/display/displays/{name}": {
+      "get": {
+        "operationId": "GET_v1_display_displays__name_",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The size, scale, refresh and formats of one screen.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-cache. A document is revalidated against its entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this document came from.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The document has not changed since the entity tag the client holds."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          }
+        },
+        "summary": "The screen's size, scale, refresh and formats"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_displays__name_",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The size, scale, refresh and formats of one screen.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-cache. A document is revalidated against its entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this document came from.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The document has not changed since the entity tag the client holds."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          }
+        },
+        "summary": "The screen's size, scale, refresh and formats"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_displays__name_",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      },
+      "parameters": [
+        {
+          "description": "The name of the Display.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/v1/display/displays/{name}/screen": {
+      "get": {
+        "operationId": "GET_v1_display_displays__name__screen",
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The screen in the type Accept selected, image/png by default.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Location": {
+                "description": "The absolute path of the extension form served (RFC 9110 section 8.7).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "The screen in the type Accept selects"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_displays__name__screen",
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The screen in the type Accept selected, image/png by default.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Location": {
+                "description": "The absolute path of the extension form served (RFC 9110 section 8.7).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "The screen in the type Accept selects"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_displays__name__screen",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      },
+      "parameters": [
+        {
+          "description": "The name of the Display.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "in": "query",
+          "name": "t",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "in": "query",
+          "name": "xywh",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Scale the region down to this width, keeping the aspect. A value above the source is refused.",
+          "in": "query",
+          "name": "width",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Scale the region down to this height, keeping the aspect. Given together with width it is refused.",
+          "in": "query",
+          "name": "height",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Frames per second of a clip or a stream, 15 by default, at most the output's refresh.",
+          "in": "query",
+          "name": "framerate",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "JPEG quality from 1 to 100, 85 by default.",
+          "in": "query",
+          "name": "quality",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/v1/display/displays/{name}/screen.jpg": {
+      "get": {
+        "operationId": "GET_v1_display_displays__name__screen_jpg",
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "One frame of the screen, encoded as JPEG.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "One frame of the screen as JPEG"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_displays__name__screen_jpg",
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "One frame of the screen, encoded as JPEG.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "One frame of the screen as JPEG"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_displays__name__screen_jpg",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      },
+      "parameters": [
+        {
+          "description": "The name of the Display.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "in": "query",
+          "name": "t",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "in": "query",
+          "name": "xywh",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Scale the region down to this width, keeping the aspect. A value above the source is refused.",
+          "in": "query",
+          "name": "width",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Scale the region down to this height, keeping the aspect. Given together with width it is refused.",
+          "in": "query",
+          "name": "height",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "JPEG quality from 1 to 100, 85 by default.",
+          "in": "query",
+          "name": "quality",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/v1/display/displays/{name}/screen.mjpeg": {
+      "get": {
+        "operationId": "GET_v1_display_displays__name__screen_mjpeg",
+        "responses": {
+          "200": {
+            "content": {
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "A stream of the screen, one JPEG per frame"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_displays__name__screen_mjpeg",
+        "responses": {
+          "200": {
+            "content": {
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "A stream of the screen, one JPEG per frame"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_displays__name__screen_mjpeg",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      },
+      "parameters": [
+        {
+          "description": "The name of the Display.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "in": "query",
+          "name": "t",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "in": "query",
+          "name": "xywh",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Scale the region down to this width, keeping the aspect. A value above the source is refused.",
+          "in": "query",
+          "name": "width",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Scale the region down to this height, keeping the aspect. Given together with width it is refused.",
+          "in": "query",
+          "name": "height",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Frames per second of a clip or a stream, 15 by default, at most the output's refresh.",
+          "in": "query",
+          "name": "framerate",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "JPEG quality from 1 to 100, 85 by default.",
+          "in": "query",
+          "name": "quality",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/v1/display/displays/{name}/screen.mp4": {
+      "get": {
+        "operationId": "GET_v1_display_displays__name__screen_mp4",
+        "responses": {
+          "200": {
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "A clip of the screen as H.264 in fragmented MP4"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_displays__name__screen_mp4",
+        "responses": {
+          "200": {
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "A clip of the screen as H.264 in fragmented MP4"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_displays__name__screen_mp4",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      },
+      "parameters": [
+        {
+          "description": "The name of the Display.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "in": "query",
+          "name": "t",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "in": "query",
+          "name": "xywh",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Scale the region down to this width, keeping the aspect. A value above the source is refused.",
+          "in": "query",
+          "name": "width",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Scale the region down to this height, keeping the aspect. Given together with width it is refused.",
+          "in": "query",
+          "name": "height",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Frames per second of a clip or a stream, 15 by default, at most the output's refresh.",
+          "in": "query",
+          "name": "framerate",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/v1/display/displays/{name}/screen.png": {
+      "get": {
+        "operationId": "GET_v1_display_displays__name__screen_png",
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "One frame of the screen, encoded as PNG.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "One frame of the screen as PNG"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_displays__name__screen_png",
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "One frame of the screen, encoded as PNG.",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store. A capture is never stored (RFC 9111 section 5.2.2.5).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "inline, with the file name a browser save gets (RFC 6266 section 4).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query the grammar refuses."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The SubjectAccessReview refused the subject."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No Display of that name."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The compositor denied the capture."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar answered something that is not HTTP or not a problem document."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The screen has no node, the compositor is not serving, the output is already being captured, or the sidecar is absent or not ready."
+          },
+          "504": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The sidecar sent no headers within the header timeout."
+          }
+        },
+        "summary": "One frame of the screen as PNG"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_displays__name__screen_png",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      },
+      "parameters": [
+        {
+          "description": "The name of the Display.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "in": "query",
+          "name": "t",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "in": "query",
+          "name": "xywh",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Scale the region down to this width, keeping the aspect. A value above the source is refused.",
+          "in": "query",
+          "name": "width",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "description": "Scale the region down to this height, keeping the aspect. Given together with width it is refused.",
+          "in": "query",
+          "name": "height",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/v1/display/openapi.json": {
+      "get": {
+        "operationId": "GET_v1_display_openapi_json",
+        "responses": {
+          "200": {
+            "content": {
+              "application/openapi+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "This document.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-cache. A document is revalidated against its entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this document came from.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The document has not changed since the entity tag the client holds."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          }
+        },
+        "summary": "The OpenAPI 3.1 description of this API"
+      },
+      "head": {
+        "operationId": "HEAD_v1_display_openapi_json",
+        "responses": {
+          "200": {
+            "content": {
+              "application/openapi+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "This document.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-cache. A document is revalidated against its entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The build this document came from.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Link": {
+                "description": "The service-desc, service-doc and describedby relations (RFC 8288).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Accept. The response was subject to negotiation (RFC 9110 section 12.5.5).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The document has not changed since the entity tag the client holds."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No token, or a token the TokenReview refused."
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A method other than GET, HEAD and OPTIONS."
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Accept field excludes every form this route serves."
+          }
+        },
+        "summary": "The OpenAPI 3.1 description of this API"
+      },
+      "options": {
+        "operationId": "OPTIONS_v1_display_openapi_json",
+        "responses": {
+          "204": {
+            "description": "The methods are in the Allow field (RFC 9110 section 10.2.1).",
+            "headers": {
+              "Allow": {
+                "description": "The methods this route answers.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The methods this route answers"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "servers": [
+    {
+      "description": "The base this API answers on.",
+      "url": "/"
+    }
+  ]
+}

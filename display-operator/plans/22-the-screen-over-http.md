@@ -660,6 +660,7 @@ The drill on liken-1, on stick1, records these when the plan closes:
 | A mode change during a clip | the response ends, the log carries both sizes |
 | A second request during a clip | 503, `Retry-After: 5`, the problem document's words |
 | A capture from a draw claim's socket | `failed` with `unauthorized`, 500 `capture-denied` |
+| Whether a clip ever puts two captures in flight | the compositor's log over a whole clip: no `sequence` protocol error, and the connection lives to the end |
 | The `Captured` `Event` | `kubectl describe display` after one still |
 
 The 4K numbers decide the `framerate` default and the memory limit.

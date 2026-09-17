@@ -11,7 +11,13 @@ REFERENCE := content/docs/reference
 
 GENERATED := \
 	$(REFERENCE)/displays.md \
-	$(REFERENCE)/layouts.md
+	$(REFERENCE)/layouts.md \
+	$(REFERENCE)/openapi.json
+
+# A generated file whose command failed is removed, so a failed build
+# never leaves a half-written page in the tree for the next build to
+# accept.
+.DELETE_ON_ERROR:
 
 .PHONY: build
 build: $(GENERATED)
@@ -27,6 +33,12 @@ test: $(GENERATED)
 
 $(REFERENCE)/displays.md: ../deploy/displays.yaml crdref/displays-preamble.md crdref/displays-postamble.md go.mod
 	$(CRDREF) -title Displays -weight 20 -postamble crdref/displays-postamble.md $< $@ crdref/displays-preamble.md
+
+# The API's description is generated from the router itself, by the
+# operator's own binary, so a route the program serves cannot be
+# missing from the page that describes it.
+$(REFERENCE)/openapi.json: $(wildcard ../*.go) ../go.mod
+	cd .. && go run . openapi > docs/$@
 
 # The Layout page carries no postamble: every rule a reader needs is
 # in the schema's own descriptions, and the guide holds the worked

@@ -24,8 +24,14 @@ CLIENT = os.environ["CLIENT"]
 CONTROL = os.path.join(WORK, "control", "layout.sock")
 RUNTIME = os.path.join(WORK, "run")
 SHOTS = os.path.join(WORK, "shot")
+WESTON_CONFIG = os.path.join(WORK, "weston-config")
 CLAIM_SOCKET = "wayland-claim1"
 CONNECTOR = "headless"
+
+# The capture socket is an absolute WAYLAND_DISPLAY, which libwayland
+# reads as the socket's own path. It is outside XDG_RUNTIME_DIR on
+# purpose, because CDI delivers that directory to consumer pods.
+CAPTURE_DISPLAY = "/etc/weston/wayland-capture"
 
 # Two rectangles that do not overlap, so a screenshot says which
 # surface is where.
@@ -212,9 +218,26 @@ def start_client(name, wayland_display):
         "run", "-d", "--name", name,
         "--user", "%d:%d" % (os.getuid(), os.getgid()),
         "-v", "%s:/run/liken" % RUNTIME,
+        "-v", "%s:/etc/weston" % WESTON_CONFIG,
         "-e", "XDG_RUNTIME_DIR=/run/liken",
         "-e", "WAYLAND_DISPLAY=%s" % wayland_display,
         IMAGE, "weston-simple-shm",
+    )
+
+
+def screenshooter(wayland_display):
+    """Run weston-screenshooter through one socket.
+
+    The tool is itself a weston_capture_v1 client, so the socket it
+    connects through decides whether it reads complete or failed.
+    weston 14.0.2's tool exits 0 either way, so the proof is the
+    stderr and the file, and that is why this runs it without
+    check=True."""
+    return subprocess.run(
+        ("docker", "exec", "-e", "XDG_RUNTIME_DIR=/run/liken",
+         "-e", "WAYLAND_DISPLAY=%s" % wayland_display,
+         "-w", "/shot", WESTON, "weston-screenshooter"),
+        capture_output=True, text=True,
     )
 
 
@@ -225,12 +248,9 @@ def capture(wait=2):
     time.sleep(wait)
     for stale in glob.glob(os.path.join(SHOTS, "*.png")):
         os.remove(stale)
-    docker(
-        "exec", "-e", "XDG_RUNTIME_DIR=/run/liken", "-e", "WAYLAND_DISPLAY=wayland-0",
-        "-w", "/shot", WESTON, "weston-screenshooter",
-    )
+    result = screenshooter(CAPTURE_DISPLAY)
     shots = glob.glob(os.path.join(SHOTS, "*.png"))
-    assert shots, "weston-screenshooter wrote no file"
+    assert shots, "weston-screenshooter wrote no file: %s" % result.stderr.strip()
     frame = Frame(shots[0])
     report("screenshot %s at %dx%d" % (frame.name, frame.width, frame.height))
     return frame
@@ -287,6 +307,25 @@ def main():
     output = control.wait_event("output", timeout=5)
     assert output.split() == ["output", CONNECTOR, "1280", "720", "1"], output
     report("output: %s" % output)
+
+    # The two capture proofs, before any surface is placed: the socket
+    # the capture sidecar uses reads a frame, and a client on any
+    # other socket is refused.
+    frame = capture(wait=0)
+    report("the capture socket: weston-screenshooter wrote %s at %dx%d"
+           % (frame.name, frame.width, frame.height))
+
+    for stale in glob.glob(os.path.join(SHOTS, "*.png")):
+        os.remove(stale)
+    refused = screenshooter("wayland-0")
+    left = glob.glob(os.path.join(SHOTS, "*.png"))
+    report("wayland-0: weston-screenshooter wrote %d files and said: %s"
+           % (len(left), refused.stderr.strip().replace("\n", "; ")))
+    assert "unauthorized" in refused.stderr, (
+        "weston-screenshooter on wayland-0 did not say unauthorized: %s"
+        % refused.stderr.strip()
+    )
+    assert not left, "weston-screenshooter on wayland-0 wrote %s" % left
 
     control.expect_ok("listen %s %s" % (CLAIM_SOCKET, CONNECTOR))
     path = os.path.join(RUNTIME, CLAIM_SOCKET)

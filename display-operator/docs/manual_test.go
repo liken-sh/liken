@@ -19,6 +19,8 @@ var exceptions = []string{
 	"/deploy/displays.yaml",
 	"/deploy/kustomization.yaml",
 	"/deploy/operator.yaml",
+	"/deploy/api.yaml",
+	"/docs/reference/openapi.json",
 }
 
 func TestManualInternalLinks(t *testing.T) {
