@@ -675,8 +675,23 @@ storage, a 1 MiB budget that scaled the picture down, a TTL sweep,
 and a `create secrets` grant, and it had no way to carry a clip.
 
 **`services/proxy` as the public face.** The API server's proxy
-strips the caller's identity. The end state is an aggregated
-`APIService`, below.
+strips the caller's identity.
+
+**An aggregated `APIService`.** A spike on 2026-09-17 registered a
+throwaway extension server in front of this API and measured it
+through the API server. The aggregation layer streams: every chunk
+passed at its own size about 35 ms later, and every header, query
+form and problem body survived. Two things stopped it. The API
+server's `--request-timeout` cuts every stream at 60 s with no
+terminating chunk, and in Kubernetes 1.36 the only exemption is a
+hardcoded set of verbs and subresources (`watch`, `proxy`, `log`,
+`exec`, `attach`, `portforward`); `?timeout=` can only shorten the
+deadline. Keeping the grammar would mean raising the timeout for the
+whole API server, and staying under the default would mean a `proxy`
+or `watch` segment in every path. The API server also refuses any
+3xx with a `Location`. Chris ruled that the duration limit and the
+path it would force are showstoppers, so this hand-rolled front door
+stays.
 
 **Client certificates on the private leg.** Mutual TLS is one more
 `Secret` that has to exist before a capture works, and a second
@@ -789,13 +804,6 @@ conversion on the CPU, a 1080p clip costs about one core at the
 default of 15 fps and about two at 30 fps on `stick-1`, with the
 package at 76 C over a 15 s clip at 30 fps. The 4K numbers were to
 decide the default, and they were not run.
-
-**An aggregated `APIService`.** It needs its own API group, because
-`v1alpha1.display.liken.sh` is served by the CRDs and an `APIService`
-would take it over. It moves the CA into `spec.caBundle` rather than
-removing it. It needs the `extension-apiserver-authentication-reader`
-`Role` in `kube-system`. Its paths are a second vocabulary beside
-v1's, not a move.
 
 **A one-line client.** A `kubectl` plugin, or a `liken` CLI verb, that
 opens the forward, reads the CA, mints the token, and follows a 307
