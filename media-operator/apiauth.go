@@ -42,14 +42,25 @@ const (
 // costs the API server two reviews a minute rather than two a request.
 const verdictWindow = 60 * time.Second
 
-// captureSubject is who the TokenReview said sent the request. The
-// access review copies all four fields, because RBAC binds to groups
-// and to extra attributes as well as to a user name.
+// captureSubject is who the request named, from a TokenReview or from
+// a verified client certificate. The access review copies all four
+// public fields, because RBAC binds to groups and to extra attributes
+// as well as to a user name. A certificate names the user and the
+// groups alone.
+//
+// The two unexported fields are the credential's own, and both paths
+// set them, so authorize keys its cache on the subject alone and
+// never checks which credential arrived. The key is the hash of the
+// credential and never the credential, and nothing logs or reports
+// it.
 type captureSubject struct {
 	User   string
 	Groups []string
 	UID    string
 	Extra  map[string][]string
+
+	key    string
+	lapses time.Time
 }
 
 // unauthenticatedError carries the TokenReview's own words for a token
@@ -179,8 +190,10 @@ func (a *authorizer) authenticate(token string) (captureSubject, error) {
 		Groups: reviewed.Status.User.Groups,
 		UID:    reviewed.Status.User.UID,
 		Extra:  reviewed.Status.User.Extra,
+		key:    key,
+		lapses: a.verdictUntil(token),
 	}
-	a.cache.keepSubject(key, subject, a.verdictUntil(token))
+	a.cache.keepSubject(key, subject, subject.lapses)
 	return subject, nil
 }
 
@@ -200,8 +213,8 @@ func reviewWords(refusal, plain string) string {
 // that named the collection would answer for a Player the rule does
 // not list. A denial is a false answer, not an error, because the API
 // server answered; only a failure to ask is an error.
-func (a *authorizer) authorize(token string, subject captureSubject, namespace, name, subresource string) (bool, error) {
-	key := grantKey(tokenKey(token), namespace, name, subresource)
+func (a *authorizer) authorize(subject captureSubject, namespace, name, subresource string) (bool, error) {
+	key := grantKey(subject.key, namespace, name, subresource)
 	if a.cache.granted(key, a.now()) {
 		return true, nil
 	}
@@ -238,15 +251,23 @@ func (a *authorizer) authorize(token string, subject captureSubject, namespace, 
 	if !reviewed.Status.Allowed {
 		return false, nil
 	}
-	a.cache.keepGrant(key, a.verdictUntil(token))
+	a.cache.keepGrant(key, subject.lapses)
 	return true, nil
 }
 
 // verdictUntil is when a verdict for this token lapses: the end of the
 // window or the token's own expiry, whichever comes first.
 func (a *authorizer) verdictUntil(token string) time.Time {
-	until := a.now().Add(verdictWindow)
-	if expiry, ok := tokenExpiry(token); ok && expiry.Before(until) {
+	expiry, _ := tokenExpiry(token)
+	return verdictLapse(a.now(), expiry)
+}
+
+// verdictLapse is the one rule both credentials lapse by: the end of
+// the window, or the credential's own expiry when that comes first. A
+// credential with no known expiry keeps the full window.
+func verdictLapse(now, expiry time.Time) time.Time {
+	until := now.Add(verdictWindow)
+	if !expiry.IsZero() && expiry.Before(until) {
 		return expiry
 	}
 	return until
@@ -264,8 +285,11 @@ func tokenKey(token string) string {
 // The Player is part of the key because a grant carrying resourceNames
 // answers for one Player and not for the next one in the same
 // namespace.
-func grantKey(token, namespace, name, subresource string) string {
-	return token + "/" + namespace + "/" + name + "/" + subresource
+//
+// The first part is the subject's own key, which is the hash of the
+// credential that named it.
+func grantKey(credential, namespace, name, subresource string) string {
+	return credential + "/" + namespace + "/" + name + "/" + subresource
 }
 
 // tokenExpiry reads the exp claim out of a JWT without verifying it;

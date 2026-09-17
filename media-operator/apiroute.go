@@ -276,17 +276,24 @@ func (e *apiExchange) answerProblem(document problemDocument) {
 	writeProblem(e.writer, e.head, document)
 }
 
-// authenticate reviews the token before anything is read, so an
-// unauthenticated request costs no read and is told nothing. The two
-// refusals follow RFC 6750 section 3: no token gets the realm alone,
-// and a token the review refused gets error="invalid_token" with the
-// review's own words in error_description.
-func (e *apiExchange) authenticate() (string, captureSubject, bool) {
+// authenticate names the caller the way the API server names one: a
+// client certificate this listener verified, and otherwise the token.
+// Either one is read before anything else, so an unauthenticated
+// request costs no read and is told nothing.
+//
+// The two refusals follow RFC 6750 section 3: no token gets the realm
+// alone, and a token the review refused gets error="invalid_token"
+// with the review's own words in error_description.
+func (e *apiExchange) authenticate() (captureSubject, bool) {
+	if subject, named := certificateCaller(e.request.TLS); named {
+		e.subject = subject.User
+		return subject, true
+	}
 	token := bearerToken(e.request.Header.Get("Authorization"))
 	if token == "" {
 		e.writer.Header().Set("WWW-Authenticate", `Bearer realm="`+apiRealm+`"`)
 		e.fail(aboutBlank, http.StatusUnauthorized, "", "no bearer token")
-		return "", captureSubject{}, false
+		return captureSubject{}, false
 	}
 	subject, err := e.server.auth.authenticate(token)
 	var refused unauthenticatedError
@@ -295,14 +302,14 @@ func (e *apiExchange) authenticate() (string, captureSubject, bool) {
 			`Bearer realm="`+apiRealm+`", error="invalid_token", error_description="`+
 				quotedWords(refused.Words)+`"`)
 		e.fail(aboutBlank, http.StatusUnauthorized, "", refused.Words)
-		return "", captureSubject{}, false
+		return captureSubject{}, false
 	}
 	if err != nil {
 		e.unavailable(err.Error())
-		return "", captureSubject{}, false
+		return captureSubject{}, false
 	}
 	e.subject = subject.User
-	return token, subject, true
+	return subject, true
 }
 
 // authorize runs the two reviews in order and answers whether the
@@ -310,11 +317,11 @@ func (e *apiExchange) authenticate() (string, captureSubject, bool) {
 // never says whether the name exists. A denial gets
 // error="insufficient_scope" with the failed check in scope.
 func (e *apiExchange) authorize(subresource string) bool {
-	token, subject, ok := e.authenticate()
+	subject, ok := e.authenticate()
 	if !ok {
 		return false
 	}
-	allowed, err := e.server.auth.authorize(token, subject, e.namespace, e.name, subresource)
+	allowed, err := e.server.auth.authorize(subject, e.namespace, e.name, subresource)
 	if err != nil {
 		e.unavailable(err.Error())
 		return false

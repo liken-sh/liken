@@ -56,7 +56,7 @@ const (
 )
 
 func (s *apiServer) serveDiscovery(e *apiExchange) {
-	if _, _, ok := e.authenticate(); !ok {
+	if _, ok := e.authenticate(); !ok {
 		return
 	}
 	e.document(marshaled(s.discovery(e.request.Context())), jsonDocumentType, e.buildTag())
@@ -149,7 +149,7 @@ func formExtensions(forms []mediaForm) []string {
 // servers list names the origin this request reached, or the
 // configured public base, in place of the committed placeholder.
 func (s *apiServer) serveOpenAPI(e *apiExchange) {
-	if _, _, ok := e.authenticate(); !ok {
+	if _, ok := e.authenticate(); !ok {
 		return
 	}
 	e.document(servedOpenAPI(s.origin(e)), openAPIDocumentType, e.buildTag())

@@ -44,14 +44,51 @@ here: the sibling refuses a token minted for the `media-api`
 audience, so a caller repeats the request by hand with a token for
 the sibling's audience.
 
+A person whose kubeconfig holds a client certificate sends that
+instead, with no `ServiceAccount` and no token to mint. The
+port-forward carries the certificate to the API untouched, because
+the forward is a TCP tunnel and the TLS handshake runs end to end.
+
+```sh
+kubectl config view --raw --minify \
+  -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > client.crt
+kubectl config view --raw --minify \
+  -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > client.key
+curl --cacert media-api-ca.crt --cert client.crt --key client.key \
+  --resolve media-api.liken-system.svc:8443:127.0.0.1 \
+  "https://media-api.liken-system.svc:8443/v1/media/namespaces/media/players/studio/media.mp4?t=0,10" \
+  -o studio.mp4
+```
+
+From a pod on the cluster network the same two files reach
+`https://media-api.liken-system.svc/v1/media/...` with no forward and
+no `--resolve`.
+
 ## Grants
 
-Every request carries a Bearer token. `media-api` validates it with a
-`TokenReview` that names the audience `media-api` and checks
-`status.audiences`, so a pod's default API-server token does not open
-it. A token from an external OIDC issuer must carry that audience
-too. It authorizes with a `SubjectAccessReview` for verb `get` on
-`players/screen`, `players/audio`, or `players/media` in
+A request names its caller two ways, and `media-api` reads them in
+the order the API server reads them.
+
+A connection that carries a client certificate the cluster's own
+authority signed names that certificate's subject. The user is the
+subject's common name and the groups are its organization values,
+which is how the API server reads a client certificate. The
+credentials in a person's kubeconfig therefore name the same subject
+here that they name to `kubectl`. `media-api` reads the authority from
+the `ConfigMap` `extension-apiserver-authentication` in
+`kube-system`, where the API server publishes it, and reads the
+`ConfigMap` again every minute, so a rotated authority opens the door
+with no restart. A certificate from any other authority ends the
+handshake.
+
+A caller that offers no certificate carries a Bearer token.
+`media-api` validates it with a `TokenReview` that names the audience
+`media-api` and checks `status.audiences`, so a pod's default
+API-server token does not open it. A token from an external OIDC
+issuer must carry that audience too.
+
+Either credential then authorizes with a `SubjectAccessReview` for
+verb `get` on `players/screen`, `players/audio`, or `players/media` in
 `media.liken.sh`, with the `Player`'s namespace from the path.
 Discovery and OpenAPI need authentication and no authorization. The
 info route needs `get` on `players`.
@@ -61,7 +98,9 @@ capture with the shipped `ClusterRole` `media-capture-viewer` (`get`
 on the three subresources and on `players`) bound per namespace, or
 one rule with `resourceNames`. The role carries `players` as well as
 the three aspects, so one binding covers the info route and the
-captures together.
+captures together. The same role binds to a person: the subject is
+`kind: User` with the name in their certificate's common name, or
+`kind: Group` with one of its organization values.
 
 A redirect carries no credentials. The client follows the 307 with
 its own token, and `display-api` checks `displays/screen` for that
@@ -69,6 +108,11 @@ subject, so a captor of a `Player` also needs the grant on the
 `Display` and the `Sink`. The composed route is the exception:
 `media-api` calls the siblings under its own ServiceAccount, and the
 caller needs `players/media` alone.
+
+A client certificate needs no second credential at the sibling. The
+three APIs read the same authority, so `curl -L` with `--cert` and
+`--key` follows the 307 and names the same subject at `display-api`
+and `audio-api` that it named here.
 
 `players/media` on a `Player` is a grant on that `Player`'s `Display`
 and `Sink`s, and a role with `resources: ["*"]` in `media.liken.sh`,
@@ -97,7 +141,7 @@ Below, `.../` stands for `/v1/media/namespaces/{ns}/players/{name}/`.
 | `HEAD` on any route | the `GET`'s headers | as the `GET` | no body, no upstream call, no `codecs` parameter |
 | `OPTIONS` on any route | the methods | 204 | `Allow: GET, HEAD, OPTIONS` |
 | any other method | refused | 405 | `Allow`, problem document |
-| no token | refused | 401 | `WWW-Authenticate: Bearer realm="media-api"` |
+| no client certificate and no token | refused | 401 | `WWW-Authenticate: Bearer realm="media-api"` |
 | the TokenReview refuses the token | refused | 401 | `WWW-Authenticate: Bearer realm="media-api", error="invalid_token", error_description="<the TokenReview's words>"` |
 | the SubjectAccessReview denies | refused | 403 | `WWW-Authenticate: Bearer realm="media-api", error="insufficient_scope", scope="players/media"` |
 | no such Player, or an upstream 404 | refused | 404 | problem document, `upstream` member on a relayed one |
@@ -121,6 +165,10 @@ reads, whether or not they changed the answer. A document route
 carries none of the capture headers: no `Content-Disposition`, no
 `Accept-Ranges`, and no chunked body. A `HEAD` on an error carries no
 body, per RFC 9110 section 15.5.
+
+[Routes](/docs/reference/routes/) gives each route from the OpenAPI
+document, with its parameters, its answers, and the fields they
+carry.
 
 ## Media Fragments
 

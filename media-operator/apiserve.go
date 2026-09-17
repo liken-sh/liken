@@ -94,6 +94,11 @@ type apiServer struct {
 
 	certificates sync.Mutex
 	certificate  *tls.Certificate
+
+	// The cluster's client certificate authority. It is a value rather
+	// than a pointer, so every apiServer has one and a handshake never
+	// reads through a nil pointer.
+	anchors clientAnchors
 }
 
 func (s *apiServer) clock() time.Time {
@@ -309,6 +314,16 @@ func runAPI() {
 	metrics.observeExpiry(keeper.expirySeconds())
 	go reviewCertificate(server, keeper, metrics)
 
+	// The cluster's client authority is read before the listener
+	// starts, and again every minute. A read that fails is reported
+	// and never fatal: an API that cannot read the ConfigMap still
+	// answers every caller that sends a token, and the next pass
+	// loads the authority once the grant or the API server is back.
+	if err := server.anchors.load(client); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the cluster's client certificate authority: %v\n", err)
+	}
+	go keepClientAnchors(context.Background(), client, &server.anchors)
+
 	if reviewsAnswer(auth) {
 		server.ready.Store(true)
 	}
@@ -331,11 +346,37 @@ func (s *apiServer) listener(address string) *http.Server {
 		Addr:              address,
 		Handler:           s.handler(),
 		ReadHeaderTimeout: serverReadHeaderTimeout,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return s.servingCertificate()
-			},
+		TLSConfig:         s.tlsConfig(),
+	}
+}
+
+// tlsConfig is what the listener handshakes with. The certificate and
+// the anchors are both read on every handshake, so a re-minted leaf
+// and a rotated client authority each reach the next connection with
+// no restart. GetConfigForClient answers a whole configuration rather
+// than one field written in place, because a tls.Config a handshake
+// is reading must not be written to.
+//
+// VerifyClientCertIfGiven is the policy. A caller that offers no
+// certificate still reaches the token, and a caller that offers one
+// has it verified before any route runs. NextProtos names the two
+// protocols net/http would have negotiated, because the configuration
+// returned here replaces the one net/http built.
+func (s *apiServer) tlsConfig() *tls.Config {
+	certificate := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return s.servingCertificate()
+	}
+	return &tls.Config{
+		MinVersion:     tls.VersionTLS12,
+		GetCertificate: certificate,
+		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			return &tls.Config{
+				MinVersion:     tls.VersionTLS12,
+				GetCertificate: certificate,
+				NextProtos:     []string{"h2", "http/1.1"},
+				ClientAuth:     tls.VerifyClientCertIfGiven,
+				ClientCAs:      s.anchors.held(),
+			}, nil
 		},
 	}
 }

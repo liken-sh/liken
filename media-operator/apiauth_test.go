@@ -129,6 +129,12 @@ func TestAPIAuthRefusesATokenTheReviewDidNotAccept(t *testing.T) {
 	}
 }
 
+// A subject in the shape a credential names one, for a test that
+// drives authorize without authenticating first.
+func namedSubject(user string) captureSubject {
+	return captureSubject{User: user, key: tokenKey(user), lapses: time.Now().Add(verdictWindow)}
+}
+
 func TestAPIAuthCarriesTheAPIServersOwnWords(t *testing.T) {
 	cases := []struct {
 		name string
@@ -139,7 +145,7 @@ func TestAPIAuthCarriesTheAPIServersOwnWords(t *testing.T) {
 			return err
 		}},
 		{name: "the access review fails", call: func(a *authorizer) error {
-			_, err := a.authorize("a-minted-token", captureSubject{User: "alice"}, "media", "studio", "media")
+			_, err := a.authorize(namedSubject("alice"), "media", "studio", "media")
 			return err
 		}},
 	}
@@ -173,7 +179,7 @@ func TestAPIAuthAsksForGetOnPlayersMedia(t *testing.T) {
 	subject, err := auth.authenticate("a-minted-token")
 	mustSucceed(t, err)
 
-	allowed, err := auth.authorize("a-minted-token", subject, "media", "studio", "media")
+	allowed, err := auth.authorize(subject, "media", "studio", "media")
 
 	mustSucceed(t, err)
 	mustMatch(t, allowed, true)
@@ -195,7 +201,7 @@ func TestAPIAuthAsksForThePlayerItselfWithNoSubresource(t *testing.T) {
 	reviews := &reviewServer{tokenStatus: acceptedStatus(), allowed: true}
 	auth := newTestAuthorizer(t, reviews)
 
-	allowed, err := auth.authorize("a-minted-token", captureSubject{User: "alice"}, "media", "studio", "")
+	allowed, err := auth.authorize(namedSubject("alice"), "media", "studio", "")
 
 	mustSucceed(t, err)
 	mustMatch(t, allowed, true)
@@ -218,7 +224,7 @@ func TestAPIAuthCachesAPositiveVerdictPerPlayerAndSubresource(t *testing.T) {
 		{namespace: "media", name: "kitchen", subresource: "media"},
 		{namespace: "studio", name: "studio", subresource: "media"},
 	} {
-		allowed, err := auth.authorize("a-minted-token", subject, ask.namespace, ask.name, ask.subresource)
+		allowed, err := auth.authorize(subject, ask.namespace, ask.name, ask.subresource)
 		mustSucceed(t, err)
 		mustMatch(t, allowed, true)
 	}
@@ -236,12 +242,12 @@ func TestAPIAuthDoesNotServeOnePlayersVerdictForAnother(t *testing.T) {
 	subject, err := auth.authenticate("a-minted-token")
 	mustSucceed(t, err)
 
-	allowed, err := auth.authorize("a-minted-token", subject, "media", "studio", "media")
+	allowed, err := auth.authorize(subject, "media", "studio", "media")
 	mustSucceed(t, err)
 	mustMatch(t, allowed, true)
 
 	reviews.allowed = false
-	refused, err := auth.authorize("a-minted-token", subject, "media", "kitchen", "media")
+	refused, err := auth.authorize(subject, "media", "kitchen", "media")
 
 	mustSucceed(t, err)
 	mustMatch(t, refused, false)
@@ -254,7 +260,7 @@ func TestAPIAuthNeverCachesADenial(t *testing.T) {
 	auth := newTestAuthorizer(t, reviews)
 
 	for range 3 {
-		allowed, err := auth.authorize("a-minted-token", captureSubject{User: "alice"}, "media", "studio", "media")
+		allowed, err := auth.authorize(namedSubject("alice"), "media", "studio", "media")
 		mustSucceed(t, err)
 		mustMatch(t, allowed, false)
 	}
@@ -312,12 +318,12 @@ func TestAPIAuthVerdictsExpire(t *testing.T) {
 
 			subject, err := auth.authenticate(each.token)
 			mustSucceed(t, err)
-			_, err = auth.authorize(each.token, subject, "media", "studio", "media")
+			_, err = auth.authorize(subject, "media", "studio", "media")
 			mustSucceed(t, err)
 			clock = clock.Add(each.step)
-			_, err = auth.authenticate(each.token)
+			subject, err = auth.authenticate(each.token)
 			mustSucceed(t, err)
-			_, err = auth.authorize(each.token, subject, "media", "studio", "media")
+			_, err = auth.authorize(subject, "media", "studio", "media")
 			mustSucceed(t, err)
 
 			mustMatch(t, len(reviews.tokenReviews), each.reviews)

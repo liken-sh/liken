@@ -10,6 +10,14 @@
       "url": "https://media-api.liken-system.svc"
     }
   ],
+  "security": [
+    {
+      "mutualTLS": []
+    },
+    {
+      "bearer": []
+    }
+  ],
   "paths": {
     "/v1/media": {
       "get": {
@@ -23,7 +31,7 @@
             "description": "The document matches the If-None-Match field."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -44,7 +52,7 @@
             "description": "The document matches the If-None-Match field."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -94,7 +102,7 @@
             "description": "The document matches the If-None-Match field."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -136,7 +144,7 @@
             "description": "The document matches the If-None-Match field."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -203,7 +211,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -274,7 +282,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -356,7 +364,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -427,7 +435,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -509,7 +517,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -580,7 +588,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -662,7 +670,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -733,7 +741,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -853,7 +861,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -962,7 +970,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1082,7 +1090,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1191,7 +1199,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1311,7 +1319,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1420,7 +1428,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1530,7 +1538,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1629,7 +1637,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1739,7 +1747,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1838,7 +1846,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -1948,7 +1956,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2047,7 +2055,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2157,7 +2165,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2256,7 +2264,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2366,7 +2374,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2465,7 +2473,7 @@
             "description": "A query the grammar refuses, or an upstream 400."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2515,7 +2523,7 @@
             "description": "The document matches the If-None-Match field."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2536,7 +2544,7 @@
             "description": "The document matches the If-None-Match field."
           },
           "401": {
-            "description": "No token, or a token the TokenReview refused."
+            "description": "No client certificate and no token, or a token the TokenReview refused."
           },
           "403": {
             "description": "The SubjectAccessReview denied the subject."
@@ -2554,6 +2562,20 @@
             "description": "Allow names GET, HEAD, and OPTIONS."
           }
         }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "A Kubernetes ServiceAccount token minted with the audience media-api, which this API checks with a TokenReview."
+      },
+      "mutualTLS": {
+        "type": "mutualTLS",
+        "description": "A client certificate the cluster's own authority signed. The subject's common name is the user and its organization values are the groups, which is how the API server reads one."
       }
     }
   }

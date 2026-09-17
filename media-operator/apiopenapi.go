@@ -31,10 +31,24 @@ var committedOpenAPI []byte
 // route answers. No schemas, because every body is a live capture, a
 // problem document, or one of the three documents the manual shows.
 type openAPISpecification struct {
-	OpenAPI string                    `json:"openapi"`
-	Info    openAPIInfo               `json:"info"`
-	Servers []openAPIServer           `json:"servers"`
-	Paths   map[string]openAPIPathset `json:"paths"`
+	OpenAPI    string                    `json:"openapi"`
+	Info       openAPIInfo               `json:"info"`
+	Servers    []openAPIServer           `json:"servers"`
+	Security   []map[string][]string     `json:"security"`
+	Paths      map[string]openAPIPathset `json:"paths"`
+	Components openAPIComponents         `json:"components"`
+}
+
+// The two ways a caller names itself, as OpenAPI spells them.
+type openAPIComponents struct {
+	SecuritySchemes map[string]openAPISecurityScheme `json:"securitySchemes"`
+}
+
+type openAPISecurityScheme struct {
+	Type         string `json:"type"`
+	Scheme       string `json:"scheme,omitempty"`
+	BearerFormat string `json:"bearerFormat,omitempty"`
+	Description  string `json:"description,omitempty"`
 }
 
 type openAPIInfo struct {
@@ -107,7 +121,31 @@ func openAPIDocument() []byte {
 				"compose the two into one muxed stream.",
 		},
 		Servers: []openAPIServer{{URL: openAPIServerPlaceholder}},
-		Paths:   map[string]openAPIPathset{},
+		// A list of two requirement objects is OpenAPI's OR, so a
+		// route takes the client certificate or the token, in the
+		// order this API reads them.
+		Security: []map[string][]string{
+			{"mutualTLS": {}},
+			{"bearer": {}},
+		},
+		Paths: map[string]openAPIPathset{},
+		Components: openAPIComponents{
+			SecuritySchemes: map[string]openAPISecurityScheme{
+				"mutualTLS": {
+					Type: "mutualTLS",
+					Description: "A client certificate the cluster's own authority signed. " +
+						"The subject's common name is the user and its organization values " +
+						"are the groups, which is how the API server reads one.",
+				},
+				"bearer": {
+					Type:         "http",
+					Scheme:       "bearer",
+					BearerFormat: "JWT",
+					Description: "A Kubernetes ServiceAccount token minted with the audience " +
+						"media-api, which this API checks with a TokenReview.",
+				},
+			},
+		},
 	}
 	for _, template := range routeTemplates() {
 		operation := &openAPIOperation{
@@ -246,7 +284,7 @@ func openAPISummary(template string) string {
 // then the statuses an upstream or the grammar can produce.
 func openAPIResponses(template string) map[string]openAPIResponse {
 	responses := map[string]openAPIResponse{
-		"401": {Description: "No token, or a token the TokenReview refused."},
+		"401": {Description: "No client certificate and no token, or a token the TokenReview refused."},
 		"403": {Description: "The SubjectAccessReview denied the subject."},
 		"405": {Description: "A method other than GET, HEAD, or OPTIONS."},
 	}

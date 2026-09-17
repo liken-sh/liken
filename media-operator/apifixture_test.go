@@ -56,8 +56,11 @@ type controlPlane struct {
 	words         string
 	allowed       bool
 	refuseEvents  bool
-	reviews       []SubjectAccessReview
-	events        []Event
+	// How many token reviews it answered, for a test that proves a
+	// credential never reached the token path.
+	tokenReviews int
+	reviews      []SubjectAccessReview
+	events       []Event
 }
 
 func newControlPlane() *controlPlane {
@@ -75,6 +78,7 @@ func (c *controlPlane) handler() http.Handler {
 		defer c.mutex.Unlock()
 		switch {
 		case r.URL.Path == tokenReviewsPath:
+			c.tokenReviews++
 			var review TokenReview
 			_ = json.NewDecoder(r.Body).Decode(&review)
 			review.Status = TokenReviewStatus{
