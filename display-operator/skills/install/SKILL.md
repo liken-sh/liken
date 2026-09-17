@@ -1,8 +1,9 @@
 ---
-title: Install the operator
-weight: 10
+name: install
 description: "Install display-operator on a liken cluster and confirm it publishes every monitor output as a device. Use when a cluster has no display devices yet, when running a development build, or when removing the operator."
 ---
+
+This skill is the guide at https://display.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Install the operator
 
@@ -47,11 +48,11 @@ by owner:
 
 * `display-gpu`, `display-render`, and `display-i2c` are wiring,
   and the base ships them, served at
-  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
+  [`deviceclasses.yaml`](https://display.liken.sh/deploy/deviceclasses.yaml). The
   operator's own pod claims the graphics card's card node, its
   render node, and its monitor-control wires through them, from the
   devices `liken` publishes, and the `ResourceClaimTemplate` in
-  [`operator.yaml`](/deploy/operator.yaml) names them literally, so
+  [`operator.yaml`](https://display.liken.sh/deploy/operator.yaml) names them literally, so
   the operator cannot start without them. Do not delete them. The
   classes select on the `displayNode` and `renderNode` attributes
   and on the i2c companion's `subsystem`, rather than on a vendor
@@ -74,7 +75,7 @@ by owner:
 
   The `appId` guard is what keeps the class on outputs. The driver
   also publishes each panel's
-  [control device](/docs/reference/devices/#the-control-device),
+  [control device](https://display.liken.sh/docs/reference/devices/#the-control-device),
   which carries no `appId`, and a class that matched the whole
   driver would allocate either.
 
@@ -109,13 +110,13 @@ The example selects by `connector`, an attribute every output
 always publishes; the `appId` guard is there because the panel's
 control device publishes `connector` too. A specific class that selects by a monitor
 attribute, such as `model`, must guard the read with `has()`, the
-way [Put a window on a screen](/docs/guides/claim/) shows. Those
+way [Put a window on a screen](https://display.liken.sh/docs/guides/claim/) shows. Those
 attributes are absent on a dark connector, and a selector that
 reads a missing attribute fails the whole allocation.
 
 ## 3. Apply the manifests
 
-This site serves the repository's [`deploy/`](/deploy/kustomization.yaml)
+This site serves the repository's [`deploy/`](https://display.liken.sh/deploy/kustomization.yaml)
 directory as raw YAML, so the install needs no clone. Five files
 are the rest of the install, and `api.yaml` is the one that runs
 once per cluster rather than once per node:
@@ -128,11 +129,11 @@ once per cluster rather than once per node:
       -f https://display.liken.sh/deploy/api.yaml
 
 `api.yaml` holds the `display-api` `Deployment`, its `Service`, and
-its RBAC. It answers the routes the [API reference](/docs/reference/api/)
+its RBAC. It answers the routes the [API reference](https://display.liken.sh/docs/reference/api/)
 describes, and an owner who wants no capture API leaves it out.
 
 `displays.yaml` is the `Display` `CustomResourceDefinition`. The
-operator creates a [`Display`](/docs/reference/displays/) for every
+operator creates a [`Display`](https://display.liken.sh/docs/reference/displays/) for every
 monitor it probes, and it cannot do that on a cluster the kind is
 missing from.
 
@@ -158,7 +159,7 @@ same URLs. `kustomize` takes a raw YAML URL as a resource:
 
 A clone works too: `kubectl apply -k deploy/` from the repository
 applies the same base through
-[`deploy/kustomization.yaml`](/deploy/kustomization.yaml).
+[`deploy/kustomization.yaml`](https://display.liken.sh/deploy/kustomization.yaml).
 
 ## 4. Watch the operator find the screens
 
@@ -186,7 +187,7 @@ into a `ResourceSlice` named `<node>-display.liken.sh`:
 A connector with a monitor carries the monitor's attributes. An
 empty connector publishes too, with a `disconnected` taint, so a
 claim on it parks until a monitor arrives.
-[Devices](/docs/reference/devices/) describes every attribute.
+[Devices](https://display.liken.sh/docs/reference/devices/) describes every attribute.
 
 The operator also creates one `Display` per monitor, the
 cluster-scoped resource that carries the panel's controls and takes
@@ -194,9 +195,9 @@ declarations:
 
     kubectl get displays
 
-[Displays](/docs/reference/displays/) describes the resource.
+[Displays](https://display.liken.sh/docs/reference/displays/) describes the resource.
 
-Now [put a window on a screen](/docs/guides/claim/).
+Now [put a window on a screen](https://display.liken.sh/docs/guides/claim/).
 
 ## Running a development build
 

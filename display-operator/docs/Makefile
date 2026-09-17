@@ -14,6 +14,9 @@ GENERATED := \
 	$(REFERENCE)/layouts.md \
 	$(REFERENCE)/openapi.json
 
+SKILLS := go tool skills
+BASE := https://display.liken.sh
+
 # A generated file whose command failed is removed, so a failed build
 # never leaves a half-written page in the tree for the next build to
 # accept.
@@ -30,6 +33,14 @@ build: $(GENERATED)
 .PHONY: test
 test: $(GENERATED)
 	go test ./...
+
+# The skills target emits every guide as an Agent Skill into ../skills,
+# one SKILL.md per guide, with the generator the brand repository
+# publishes (its README says what the output holds). The output is
+# committed, and the root test-docs target fails when it is stale.
+.PHONY: skills
+skills:
+	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 
 $(REFERENCE)/displays.md: ../deploy/displays.yaml crdref/displays-preamble.md crdref/displays-postamble.md go.mod
 	$(CRDREF) -title Displays -weight 20 -postamble crdref/displays-postamble.md $< $@ crdref/displays-preamble.md

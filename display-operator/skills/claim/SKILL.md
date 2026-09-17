@@ -1,15 +1,16 @@
 ---
-title: Put a window on a screen
-weight: 20
+name: claim
 description: "Run one fullscreen program on one monitor from a Deployment through a ResourceClaim. Use when a pod needs a screen, a specific mode or refresh rate, the panel's brightness or power, or when a monitor moves or unplugs."
 ---
+
+This skill is the guide at https://display.liken.sh/docs/guides/claim/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Put a window on a screen
 
 This guide runs one fullscreen program on one monitor, from a
 `Deployment`: a kiosk. It works the same for a dashboard or a video
 player. You need the operator
-[installed](/docs/guides/install/) on your
+[installed](https://display.liken.sh/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
 The claim names the screen. The scheduler places the pod, and the
@@ -21,7 +22,7 @@ that claim. A window on that socket is a window on that screen.
 If the
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 objects are new to you, read
-[How the pieces fit](/docs/guides/#how-the-pieces-fit) first.
+[How the pieces fit](https://display.liken.sh/docs/guides/#how-the-pieces-fit) first.
 
 List what a node offers:
 
@@ -47,7 +48,7 @@ Guard `model` and `widthPixels` with `has()`, as above. They come
 from the monitor and are absent on an empty connector, and a
 selector that reads a missing attribute fails the whole allocation.
 `connector` needs no guard, because every device publishes it.
-[Devices](/docs/reference/devices/) lists every attribute.
+[Devices](https://display.liken.sh/docs/reference/devices/) lists every attribute.
 
 ## 2. Write the claim
 
@@ -141,12 +142,12 @@ client draws through the compositor, which holds the card.
 
 The socket is the identity. The compositor opened it for this claim
 and for no other, so every window that arrives on it belongs to this
-claim, and the [`Display`](/docs/reference/displays/) reports the
+claim, and the [`Display`](https://display.liken.sh/docs/reference/displays/) reports the
 window under the claim's name in `status.surfaces`. What keeps two
 workloads off one screen is the allocation: the second pod cannot
 claim an output the first holds, so it parks until the first
 releases it. What puts two workloads on one screen on purpose is a
-[`Layout`](/docs/guides/layout/).
+[`Layout`](https://display.liken.sh/docs/guides/layout/).
 
 ## Ask for a mode
 
@@ -216,7 +217,7 @@ A claim can state the panel's own brightness and power the way it
 states a mode, with two more parameters in the same opaque block.
 The parameters follow the claim's lifetime. For a setting the panel
 should hold with no claim attached, declare it on the panel's
-[`Display`](/docs/reference/displays/) instead.
+[`Display`](https://display.liken.sh/docs/reference/displays/) instead.
 
     config:
       - opaque:
@@ -259,7 +260,7 @@ The parameters above are set once, at prepare. A pod that speaks the
 panel's protocol itself while it runs claims the connector's control
 device instead, and receives the raw i2c node. Most pods never need
 the wire: setting or temporarily overriding the panel goes through
-the [`Display`](/docs/reference/displays/), and the operator writes
+the [`Display`](https://display.liken.sh/docs/reference/displays/), and the operator writes
 the bus. One claim can take a screen and its control channel
 together, with a `matchAttribute` constraint tying the two requests
 to one monitor:
@@ -288,7 +289,7 @@ to one monitor:
 
 The `display-control` class is yours to create, like
 `display-output`;
-[Devices](/docs/reference/devices/#the-control-device) gives its
+[Devices](https://display.liken.sh/docs/reference/devices/#the-control-device) gives its
 YAML. The container that names the `control` request receives
 `/dev/i2c-N` and `DISPLAY_CONTROL_BUS` holding that path. An init
 container that sets the brightness to 87 before the player starts,
@@ -310,7 +311,7 @@ request when the claim also holds a control request, because those
 parameters act on outputs and a control request takes none.
 
 Do not write to any i2c address other than `0x37`. The
-[reference](/docs/reference/devices/#the-control-device) explains
+[reference](https://display.liken.sh/docs/reference/devices/#the-control-device) explains
 what lives at `0x50` and why a write there follows the monitor to
 every machine it ever plugs into.
 
