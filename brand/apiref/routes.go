@@ -35,8 +35,14 @@ func emitPaths(b *strings.Builder, document *node, paths *node) {
 	})
 }
 
+// emitOperation writes one section. The heading holds the method and
+// the path in the code face, and an attribute with the method, which
+// the theme draws the badge from. Goldmark strips the attribute
+// before it computes the heading's id, and the code marks render as
+// nothing, so the id is the one a plain "GET /v1/thing" heading gets
+// and the page's table of contents still lists the route.
 func emitOperation(b *strings.Builder, document *node, method, path string, item, operation *node) {
-	fmt.Fprintf(b, "## %s %s\n\n", method, path)
+	fmt.Fprintf(b, "## `%s` `%s` {data-method=%s}\n\n", method, path, method)
 	if summary := foldText(operation.member("summary").value()); summary != "" {
 		b.WriteString(summary + "\n\n")
 	}

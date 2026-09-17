@@ -7,13 +7,20 @@ import (
 
 // Goldmark computes a heading's id from its rendered text, so the
 // inline syntax has to disappear before Anchor sees it: backticks and
-// emphasis markers render as nothing, and a link renders as its text.
+// emphasis markers render as nothing, a link renders as its text, and
+// a trailing attribute block sets attributes and renders nothing. A
+// braced path template is text, and stays.
 func TestStripInline(t *testing.T) {
 	for raw, want := range map[string]string{
-		"The `liken` command":             "The liken command",
-		"Some *emphasis* and _more_":      "Some emphasis and more",
-		"A [link](https://example.com/x)": "A link",
-		"plain":                           "plain",
+		"The `liken` command":                         "The liken command",
+		"Some *emphasis* and _more_":                  "Some emphasis and more",
+		"A [link](https://example.com/x)":             "A link",
+		"plain":                                       "plain",
+		"`GET` `/v1/thing` {data-method=GET}":         "GET /v1/thing",
+		"`GET` `/v1/things/{name}` {data-method=GET}": "GET /v1/things/{name}",
+		"A heading {#its-own-id}":                     "A heading",
+		"A heading {.a-class}":                        "A heading",
+		"Take one of {this, that}":                    "Take one of {this, that}",
 	} {
 		if got := stripInline(raw); got != want {
 			t.Errorf("stripInline(%q) = %q, want %q", raw, got, want)

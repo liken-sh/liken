@@ -93,7 +93,7 @@ func TestOnlyMethodsGetSections(t *testing.T) {
 		"summary":"The path", "description":"What it is for",
 		"parameters":[{"name":"name","in":"path","required":true,"schema":{"type":"string"}}],
 		"trace":{"responses":{"200":{"description":"The trace."}}}}}}`)
-	if want := "## TRACE /a\n"; !strings.Contains(page, want) {
+	if want := "## `TRACE` `/a` {data-method=TRACE}\n"; !strings.Contains(page, want) {
 		t.Errorf("the page is missing %q:\n%s", want, page)
 	}
 	for _, unwanted := range []string{"## SUMMARY", "## PARAMETERS", "## DESCRIPTION"} {

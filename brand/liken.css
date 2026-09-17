@@ -20,7 +20,10 @@
  * The colors come from the mark (README.md). The greens are the
  * lichen palette, and links take the darkest green on a light page
  * and the palest on a dark one, so the accent is the same color
- * family in both schemes.
+ * family in both schemes. --warm is the mark's one orange tile, and
+ * it follows the same rule: a darker orange on a light page, the
+ * tile's own color on a dark one, so both are legible as text. The
+ * theme uses it for an HTTP method that changes state.
  */
 
 :root {
@@ -28,8 +31,10 @@
   --ink: #1a1a1a;
   --ink-muted: #555;
   --panel: #f6f6f6;
+  --row: #f8f8f8;
   --rule: #ccc;
   --link: #4a5d3a;
+  --warm: #8a5316;
   --measure: 44rem;
 }
 
@@ -42,15 +47,26 @@
     --ink: #e8e8e8;
     --ink-muted: #a0a6ad;
     --panel: #22252b;
+    --row: #1d2026;
     --rule: #333940;
     --link: #b4c49a;
+    --warm: #e0872f;
   }
 }
+
+/* The gutter for the scrollbar is always reserved, on both edges so
+   the centered column stays centered. Without this, a short page and
+   a long page center differently, and navigation between them
+   shifts the whole layout sideways. */
+html { scrollbar-gutter: stable both-edges; }
 
 body {
   max-width: var(--measure);
   margin: 2rem auto 4rem;
   padding: 0 1rem;
+  /* One notch above the browser default of 16px. The measure is in
+     rem, so the column's width holds and the text alone grows. */
+  font-size: 1.0625rem;
   font-family: system-ui, sans-serif;
   line-height: 1.6;
   color: var(--ink);
@@ -81,19 +97,62 @@ a[href^="http"]:not([href*="//liken.sh/"]):not([href*=".liken.sh/"]):not([href$=
 
 h1, h2, h3 { line-height: 1.25; }
 
+/* Prose names a URL or a long identifier in full, and a phone is
+   narrower than some of them. Such a word breaks rather than
+   pushing the whole page sideways. A table cell is not prose and is
+   left out: a table has its own sideways scroll, and a name broken
+   across two lines in a reference table reads as two names. */
+p, li { overflow-wrap: break-word; }
+
 /* Tables hold reference material on both sites: a CRD's fields in
    the manual, a release's artifacts on the channel. Every column is
    left-aligned, because the content is names and identifiers rather
    than quantities, and the whole table scrolls sideways instead of
-   forcing the page to. */
-table { border-collapse: collapse; display: block; overflow-x: auto; }
+   forcing the page to. A reference table has four or five columns,
+   so its type is a notch under the prose around it and more columns
+   fit before the scroll starts. */
+table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.9em;
+  margin: 0.75rem 0 1.75rem;
+  /* The sideways scroll belongs to the table, and a reader who
+     cannot see the bar does not know the row continues. A thin bar
+     in the rule color shows in both schemes and costs little
+     height. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
 
 th, td {
   border: 1px solid var(--rule);
-  padding: 0.3rem 0.6rem;
+  padding: 0.35rem 0.7rem;
   text-align: left;
   vertical-align: top;
 }
+
+/* The header names the columns a reader scrolls sideways through,
+   so it takes the panel fill and a heavier rule under it. A wrapped
+   label reads as two columns, and every label here is one or two
+   words, so they stay on one line. */
+thead th {
+  background: var(--panel);
+  border-bottom-width: 2px;
+  white-space: nowrap;
+}
+
+/* Alternating fills mark where one row ends and the next begins,
+   which a wide row needs. This fill is lighter than the header's, so
+   the header keeps the strongest fill on the table. */
+tbody tr:nth-child(even) { background: var(--row); }
+
+/* The first column names what the row describes: a field, a
+   parameter, a response header. Browsers break a long name after a
+   slash or a hyphen, and a name split over two lines reads as two
+   names, so the first column scrolls with the table instead of
+   wrapping. Every other cell wraps as prose does. */
+td:first-child code { white-space: nowrap; }
 
 code { font-size: 0.95em; }
 

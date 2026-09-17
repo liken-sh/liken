@@ -16,7 +16,7 @@ Every Widget in this cluster, and the sound one makes.
 
 Identity is in the path, and the format is in the extension. The manual is at https://widget.example/docs/reference/api/.
 
-## GET /v1/widget/widgets
+## `GET` `/v1/widget/widgets` {data-method=GET}
 
 Every Widget this API serves
 
@@ -35,7 +35,7 @@ The list is the whole of it. There is no paging, because a cluster holds tens of
 | --- | --- | --- | --- |
 | `widget` | 200 | `getWidget` | One Widget of the list. |
 
-## POST /v1/widget/widgets
+## `POST` `/v1/widget/widgets` {data-method=POST}
 
 Take a new Widget
 
@@ -63,7 +63,7 @@ The request body is required.
 | --- | --- | --- |
 | `Location` | 201 | The path of the new Widget (RFC 9110 section 10.2.2). |
 
-## GET /v1/widget/widgets/{name}/sound
+## `GET` `/v1/widget/widgets/{name}/sound` {data-method=GET}
 
 The sound the Widget makes
 
@@ -82,7 +82,7 @@ The sound the Widget makes
 | 200 | `audio/wav` | string (binary) | The sound, in the form the extension or the Accept field names. |
 | 404 | `application/problem+json` | [Problem](#problem) | No Widget of that name. |
 
-## OPTIONS /v1/widget/widgets/{name}/sound
+## `OPTIONS` `/v1/widget/widgets/{name}/sound` {data-method=OPTIONS}
 
 The methods this route answers
 

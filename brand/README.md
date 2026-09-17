@@ -173,9 +173,10 @@ shrunk to a favicon, and it would print cleanly in one ink.
 releases.liken.sh share: the colors, the type, and the few elements
 that prose and reference tables need. It has both a light and a
 dark scheme, chosen by the reader's system setting, and it takes its
-accent from the greens above. Anything about the shape of one site,
-the manual's sidebar or the channel's digest columns, stays with that
-site.
+accent from the greens above. The orange tile is a second accent,
+which the theme gives to an HTTP method that changes state. Anything
+about the shape of one site, the manual's sidebar or the channel's
+digest columns, stays with that site.
 
 No site links the file over the network. Each one inlines it into
 every page. The channel needs this: it is in object storage, apart
@@ -245,6 +246,20 @@ those come the component schemas, as the same field tables `crdref`
 writes for a CRD, and the credentials the document declares. The
 page is Markdown and nothing else: no Swagger UI, no JavaScript, and
 every section is a heading the manual's link check can resolve.
+
+A route's heading is written like this:
+
+```markdown
+## `GET` `/v1/widget/widgets/{name}` {data-method=GET}
+```
+
+The attribute gives the method to the theme, which draws it as a
+badge. Goldmark takes the attribute off before it computes the
+heading's id, and the code marks render as nothing. The id is
+therefore the one the plain heading `GET /v1/widget/widgets/{name}`
+gets, and Hugo's table of contents still lists the route. A theme
+that draws no badge renders the heading as the method and the path,
+which is what the heading says.
 
 The preamble and the postamble are hand-written files that land
 verbatim, at the top and the bottom. They carry what the document

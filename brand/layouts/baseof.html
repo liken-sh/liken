@@ -52,8 +52,13 @@ chrome excluded.
   figure img { width: 100%; height: auto; }
   figcaption { font-size: 0.75em; font-style: italic; line-height: 1.4;
                color: var(--ink-muted); text-align: center; }
+  /* A route reference heads each section with a path, so the list
+     holds entries longer than a phone is wide. A path has no space
+     to break at, so the break goes anywhere rather than pushing the
+     whole page sideways. */
   nav.toc { font-size: 0.9em; background: var(--panel);
-            padding: 0.6rem 1rem; margin: 1.5rem 0; }
+            padding: 0.6rem 1rem; margin: 1.5rem 0;
+            overflow-wrap: anywhere; }
   /* A wide listing, such as command output, reads best unwrapped.
      The text keeps its measure. A pre that needs more room is
      centered on the column and widens toward the viewport
@@ -71,14 +76,58 @@ chrome excluded.
   body:not(.manual) main pre code { font-size: 0.875em; }
   nav.toc ul { list-style: none; margin: 0; padding-left: 0; }
   nav.toc ul ul { padding-left: 1rem; }
+  /* apiref writes a route's heading as the method and the path, and
+     marks the heading with the method. The method reads as a
+     badge, which is how an API reference writes one, and the path
+     reads as the text a caller would type. RFC 9110 calls GET,
+     HEAD, OPTIONS and TRACE safe: they read and change nothing.
+     Those take the accent green, and a method that changes state
+     takes the warm color, so a reader can tell which routes write
+     from the color alone. The attribute is what limits the badge
+     to these headings: a manual's CLI reference also heads a
+     section with a code span, and that heading is prose. */
+  main h2[data-method] > code:first-child {
+    display: inline-block;
+    padding: 0 0.4em;
+    border: 1px solid currentColor;
+    border-radius: 0.2em;
+    font-size: 0.65em;
+    letter-spacing: 0.06em;
+    vertical-align: 0.2em;
+    color: var(--link);
+  }
+  main h2[data-method="POST"] > code:first-child,
+  main h2[data-method="PUT"] > code:first-child,
+  main h2[data-method="PATCH"] > code:first-child,
+  main h2[data-method="DELETE"] > code:first-child { color: var(--warm); }
+  main h2[data-method] > code:last-child { font-size: 0.85em; }
+  /* A route's section holds three or four tables in a row, and
+     apiref puts a bold line over each one to name it. That line is
+     its table's caption: it belongs to the table under it, not to
+     the table above it. */
+  main p:has(> strong:only-child):has(+ table) {
+    margin: 1.5rem 0 0;
+    font-size: 0.9em;
+  }
   /* The sidebar appears only when the viewport can hold it beside
      the text column without squeezing either. Below that width it
      stays hidden, and the breadcrumbs orient the reader. */
   aside { display: none; }
   @media (min-width: 70rem) {
-    body.manual { max-width: 63rem; display: grid;
-                  grid-template-columns: 15rem minmax(0, 44rem);
+    /* The manual's column is wider than its text. A reference table
+       has four or five columns, and a CRD's descriptions are
+       sentences, so a column at the text's measure turns every row
+       into a paragraph and hides the last column behind a scroll.
+       The column below is wide enough for those tables, and the
+       rules after it hold the prose to the measure, so a table gains
+       the room and the text reads as it did. */
+    body.manual { max-width: 80rem; display: grid;
+                  grid-template-columns: 15rem minmax(0, 60rem);
                   column-gap: 3rem; align-items: start; }
+    /* Tables and code blocks take the whole column. Everything else
+       keeps the measure, and every block starts at the same left
+       edge, so the page still reads as one column. */
+    body.manual main > :not(table):not(pre) { max-width: var(--measure); }
     body.manual > nav.site { grid-column: 1 / -1; }
     body.manual > footer { grid-column: 2; }
     body.manual > aside { display: block; position: sticky; top: 2rem;

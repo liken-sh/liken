@@ -29,6 +29,16 @@ var (
 	// ids are link targets exactly like heading ids.
 	explicitID = regexp.MustCompile(`\bid="([^"]+)"`)
 
+	// A heading may end in an attribute block, which sets attributes
+	// on the rendered heading and renders no text of its own. apiref
+	// writes one on every route heading to hold the method. The
+	// renderer takes the block off before it computes the id, so this
+	// reading takes it off too. A block counts only when it holds an
+	// id, a class, or a key and a value, which is what the renderer
+	// accepts. A route path ends in a braced template such as
+	// {name}, and that is text.
+	headingAttributes = regexp.MustCompile(`\s*\{\s*(?:[#.][^{}]*|[^{}]*=[^{}]*)\}\s*$`)
+
 	// A link's target is at its end, so matching from the closing
 	// bracket finds a link whose text wraps across lines. The three
 	// groups are the opening, the target, and the optional quoted
@@ -38,10 +48,12 @@ var (
 	linkTarget = regexp.MustCompile(`(\]\(\s*)([^)\s]*)((?:\s+"[^"]*")?\))`)
 )
 
-// stripInline reduces a heading line to its rendered text: backticks
-// and asterisks render as nothing, a link renders as its text, and
-// underscore emphasis renders as its content.
+// stripInline reduces a heading line to its rendered text: an
+// attribute block and the backticks and asterisks render as nothing,
+// a link renders as its text, and underscore emphasis renders as its
+// content.
 func stripInline(s string) string {
+	s = headingAttributes.ReplaceAllString(s, "")
 	s = inlineLink.ReplaceAllString(s, "$1")
 	s = strings.NewReplacer("`", "", "*", "").Replace(s)
 	s = underscoreEmphasis.ReplaceAllString(s, "$1$2$3")
