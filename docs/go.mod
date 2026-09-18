@@ -24,7 +24,7 @@ tool (
 )
 
 require (
-	github.com/liken-sh/brand v0.0.0-20260917021826-107cd574b3ba
+	github.com/liken-sh/brand v0.0.0-20260917175004-3475e2fbf5af
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

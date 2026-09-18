@@ -17,8 +17,8 @@ Two families exist today. The hardware operators publish the
 machine's hardware as devices a workload can claim. The media
 operators compose those devices into media playback, and keep the
 libraries that playback draws from. The families layer in one direction: a
-media operator claims devices the way any workload does, and no
-hardware operator knows what runs above it.
+media operator claims devices the way any workload does. No
+hardware operator depends on the workloads above it.
 
 ## The hardware operators
 
