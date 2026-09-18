@@ -327,6 +327,11 @@ patch. A design question needs agreement on behavior before implementation.
 * [Keep system pods compatible during rollouts](open-problems/system-pod-template-compatibility.md).
   The recorded mount failure has targeted mitigations. The remaining
   question is how future template changes stay compatible across releases.
+* [Change a machine's storage layout without a stick](open-problems/storage-layout-changes-need-a-reinstall.md).
+  Storage roles are partitions sized at installation, so any other
+  split is a `wipe and reinstall` with a person at the keyboard. The
+  ideal is a declared layout the machine applies to itself, once the
+  person acknowledges the erase.
 * [Version system images without blocking scheduling](open-problems/system-image-versioning.md).
   Immutable image references need a scheduling and credential design that
   works during upgrades, fallback, image-store recovery, and old-media joins.
