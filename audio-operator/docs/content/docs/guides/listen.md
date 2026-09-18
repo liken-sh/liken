@@ -69,7 +69,7 @@ verifies it with a `TokenReview` that requires the audience
 `audio-api`. A pod's ordinary API server token does not have that
 audience, so it does not work here.
 
-After it knows who you are, the API sends a `SubjectAccessReview`
+After it identifies you, the API sends a `SubjectAccessReview`
 for the verb `get` on `sinks/audio` or `sources/audio` in the group
 `audio.liken.sh`, with the name of the object and an empty
 namespace, because both kinds are cluster-scoped. Every route
@@ -280,7 +280,7 @@ info route reports:
 
 A WAV or Opus file reports the `t=` span as its duration. A FLAC
 file reports no duration, because the encoder writes the header
-before it knows the length of a live tap. Decode it to measure it:
+before the live tap ends. Decode it to measure it:
 
     ffmpeg -i speaker.flac -f null -
 

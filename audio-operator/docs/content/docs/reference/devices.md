@@ -368,8 +368,8 @@ while this pod runs and holds the bus.
 ## Choosing the codec
 
 WirePlumber picks the codec when a speaker connects. The `codecs`
-attribute says what else the speaker offers, and a claim states the
-one it wants in an opaque config block, the channel DRA gives a
+attribute says what else the speaker offers. A claim selects its
+codec in an opaque config block, the channel DRA gives a
 driver for its own parameters:
 
     apiVersion: resource.k8s.io/v1

@@ -62,7 +62,7 @@ person on OIDC also has to mint a `ServiceAccount` token.
 
 ### Authorization
 
-After it knows who you are, the API sends a `SubjectAccessReview` for
+After it identifies you, the API sends a `SubjectAccessReview` for
 the verb `get` on `sinks/audio` or `sources/audio` in the API group
 `audio.liken.sh`, with the name of the object and an empty namespace,
 because both kinds are cluster-scoped. An info route needs `get` on
