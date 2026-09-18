@@ -450,6 +450,60 @@ func TestAShortStderrIsKeptWhole(t *testing.T) {
 	mustMatch(t, writer.tail(), "Output file is empty, nothing was encoded")
 }
 
+// PROSE: an idle Player that resolves a screen and no sink is one
+// video stream. The composed route streams that screen through this
+// API and never answers a 307, so a caller behind one port-forward
+// reads the bytes without reaching display-api by name.
+func TestAScreenOnlyMediaStreamsWithNoRedirect(t *testing.T) {
+	fixture := newAPIFixture(t)
+	fixture.server.now = time.Now
+	fixture.server.ffmpeg = copyingFFmpegOne(t)
+	fixture.display.body = []byte("screen")
+	fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 0, false)
+
+	recorder := fixture.get(playerPathFor("media.mp4"))
+
+	mustMatch(t, recorder.Code, http.StatusOK)
+	mustMatch(t, recorder.Header().Get("Location"), "")
+	mustMatch(t, recorder.Body.String(), "screen")
+	mustMatch(t, len(fixture.display.made()), 1)
+	mustMatch(t, len(fixture.audio.made()), 0)
+	mustMatch(t, recorder.Header().Get("Content-Type"), "video/mp4")
+}
+
+// PROSE: a Player that resolves one sink and no screen is one audio
+// stream. The composed route streams that sink through this API and
+// never answers a 307, and its Content-Type names Opus with no video
+// element.
+func TestASinkOnlyMediaStreamsWithNoRedirect(t *testing.T) {
+	fixture := newAPIFixture(t)
+	fixture.server.now = time.Now
+	fixture.server.ffmpeg = copyingFFmpegOne(t)
+	fixture.audio.contentType = "audio/ogg"
+	fixture.audio.body = []byte("sound")
+	fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 1, true)
+
+	recorder := fixture.get(playerPathFor("media.mp4"))
+
+	mustMatch(t, recorder.Code, http.StatusOK)
+	mustMatch(t, recorder.Header().Get("Location"), "")
+	mustMatch(t, recorder.Body.String(), "sound")
+	mustMatch(t, len(fixture.audio.made()), 1)
+	mustMatch(t, len(fixture.display.made()), 0)
+	mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="Opus"`)
+}
+
+// PROSE: copyingFFmpegOne is a stand-in ffmpeg for a one-input
+// composition. It copies the single inherited body on fd 3 to stdout,
+// so a screen-only or sink-only stream reaches the recorder unchanged.
+func copyingFFmpegOne(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\ncat <&3\n"
+	mustSucceed(t, os.WriteFile(path, []byte(script), 0o755))
+	return path
+}
+
 // A zero-stream 409 names the action for the whole unit, because a
 // Player that resolves neither a screen nor a sink is not answered by
 // a sentence about sound alone.

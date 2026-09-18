@@ -230,6 +230,11 @@ jobs:
             target: display
           - image: media-operator-api
             file: Dockerfile.api
+          # The -cli image, the workstation plugin the base
+          # binary pulls. Multi-arch and pushed only in release.yaml;
+          # here it builds for the runner's architecture alone.
+          - image: media-operator-cli
+            file: Dockerfile.cli
     steps:
       # The idle image compiles liken-iced out of the brand submodule
       # at docs/themes/brand, so the context needs it checked out.

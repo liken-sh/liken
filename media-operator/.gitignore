@@ -21,3 +21,4 @@
 # writes one target tree at the root and rebuilds anything it needs. It
 # never belongs to the tree.
 /target/
+/cli/dist/

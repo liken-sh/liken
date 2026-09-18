@@ -400,13 +400,13 @@ for the `Player`'s media, and the `Player` has one answer.
 
 The same rule applies to every `media.*` request. `media-api` counts
 the streams the `Player` resolves: one video for `status.screen`, and
-one audio per `status.sinks` entry while a `Play` runs. More than one
-composes, so two sinks and no screen compose too: that composition
-carries no video input and no video map, and the first sink is the
-reference clock. Exactly one redirects with 307 to that stream's own
-route: a screen with no sink, or with no running `Play`, goes to the
-Display route; a sink with no screen goes to the Sink route. Zero is
-a 409 whose `detail` says to run a `Play`.
+one audio per `status.sinks` entry while a `Play` runs. One or more
+streams compose, so two sinks and no screen compose too: that
+composition carries no video input and no video map, and the first
+sink is the reference clock. A single stream composes from that one
+input: a screen alone, or one sink alone. `media-api` serves the
+composition itself, so the caller never follows a redirect to a
+sibling. Zero is a 409 whose `detail` says to run a `Play`.
 
 ### A worked example
 
@@ -644,7 +644,7 @@ The `screen` and `audio` lists are copied from the siblings'
 documents at request time. The info route answers the `Display` name
 and node, each `Sink` name, whether a `Play` runs, and the stream
 count, with `related` links to every capture route, so a client
-reads first whether `media.mp4` will compose or redirect.
+reads first whether `media.mp4` will compose a stream or answer 409.
 
 The OpenAPI 3.1 document enumerates each extension path as its own
 path item, with no `{.ext}`. The served copy injects `servers:

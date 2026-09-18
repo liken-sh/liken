@@ -471,7 +471,7 @@ URL.
 **The info route.** It returns the `Display` name and node, each
 `Sink` name, whether a `Play` is running, and the number of streams,
 with `related` links to every capture route. So a client can find out
-first whether `media.mp4` will compose or redirect.
+first whether `media.mp4` will compose a stream or answer 409.
 
 **Health and metrics.** `/healthz` and `/readyz` answer 200 or 503 as
 `text/plain`. `/metrics` on port 9200 answers 200 as

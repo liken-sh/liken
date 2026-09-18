@@ -294,9 +294,9 @@ func TestThePercentEncodedSpansReachTheUpstream(t *testing.T) {
 	}
 }
 
-// The stream count rule from zero to three streams: zero is a 409,
-// one redirects to that stream's own route, and more than one
-// composes. Sinks with no running Play count for nothing.
+// PROSE: the stream count rule from zero to three streams: zero is a
+// 409, and one or more the composed route serves itself with no
+// redirect. Sinks with no running Play count for nothing.
 func TestTheStreamCountRuleAnswersZeroToThreeStreams(t *testing.T) {
 	rows := []struct {
 		name     string
@@ -308,14 +308,11 @@ func TestTheStreamCountRuleAnswersZeroToThreeStreams(t *testing.T) {
 	}{
 		{name: "nothing at all", status: http.StatusConflict},
 		{name: "a screen with no sink", screen: true, playing: true,
-			status:   http.StatusTemporaryRedirect,
-			location: testDisplayBase + "/v1/display/displays/boe-1080/screen.mp4"},
+			status: http.StatusOK},
 		{name: "a screen with sinks but no Play", screen: true, sinks: 2,
-			status:   http.StatusTemporaryRedirect,
-			location: testDisplayBase + "/v1/display/displays/boe-1080/screen.mp4"},
+			status: http.StatusOK},
 		{name: "one sink and no screen", sinks: 1, playing: true,
-			status:   http.StatusTemporaryRedirect,
-			location: testAudioBase + "/v1/audio/sinks/hdmi-0-pch/audio.opus"},
+			status: http.StatusOK},
 		{name: "two sinks and no screen", sinks: 2, playing: true, status: http.StatusOK},
 		{name: "a screen and one sink", screen: true, sinks: 1, playing: true, status: http.StatusOK},
 		{name: "a screen and two sinks", screen: true, sinks: 2, playing: true, status: http.StatusOK},

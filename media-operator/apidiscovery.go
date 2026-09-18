@@ -157,9 +157,10 @@ func (s *apiServer) serveOpenAPI(e *apiExchange) {
 
 // playerInfoDocument is what a client reads before it asks for a
 // capture: the Display and its node, each Sink the Player remembers,
-// whether a Play runs, and the stream count. The count is the stream
-// count rule applied for the client, which then reads whether
-// media.mp4 will compose or redirect before it asks.
+// whether a Play runs, and the stream count. The count is the
+// stream-count rule applied for the client, so the client reads
+// whether media.mp4 will compose a stream or answer 409 before it
+// asks.
 type playerInfoDocument struct {
 	Namespace string             `json:"namespace"`
 	Name      string             `json:"name"`

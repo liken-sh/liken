@@ -48,28 +48,27 @@ const (
 // convention, and the manual records which spelling each takes.
 const composedAudioCodec = "Opus"
 
-// serveComposed applies the stream count rule. The API counts the
-// streams the Player resolves: one video for status.screen, and one
-// audio per sink while a Play runs. Zero is a 409 whose detail says to
-// run a Play. Exactly one redirects with 307 to that stream's own
-// route, the Display route or the Sink route. More than one composes.
-// A unit with two sinks and no screen therefore composes too: it has
-// two streams, and the Player plays through both.
+// serveComposed applies the stream-count rule. The API counts the
+// streams the Player resolves: one video for `status.screen`, and one
+// audio per sink while a `Play` runs. Zero streams is a 409 whose
+// detail says to run a `Play`. One or more streams the API composes
+// and serves itself, so a client that reached this API never follows
+// a redirect to a sibling's in-cluster name. A single stream is a
+// one-input composition: a screen alone, or one sink alone.
 func (s *apiServer) serveComposed(e *apiExchange, player *Player, form mediaForm, query captureQuery, negotiated bool) {
 	monitor := rememberedMonitor(player)
 	sinks := tappableSinks(player)
-	switch {
-	case monitor == "" && len(sinks) == 0:
+	if monitor == "" && len(sinks) == 0 {
 		e.fail(problemNotPlaying, http.StatusConflict, "This Player plays nothing",
 			notPlayingDetail(player, mediaAspectName))
 		return
-	case monitor != "" && len(sinks) == 0:
-		e.redirect(displayTarget(s.display, monitor, composedMP4Extension, query, 0), query)
-		return
-	case monitor == "" && len(sinks) == 1:
-		e.redirect(audioTarget(s.audio, sinks[0].Name, "opus", query, 0), query)
-		return
 	}
+
+	// One or more resolved streams are composed and served here, never
+	// redirected, so the caller reaches only media-api. This widens
+	// `players/media`: it now also captures the idle screen, a screen
+	// with no running `Play`, with no separate `displays/screen` check,
+	// because media-api opens the sibling under its own ServiceAccount.
 
 	// A screenless unit opens no display request at all. A request
 	// against an empty Display name would be a 404 from the sibling,
