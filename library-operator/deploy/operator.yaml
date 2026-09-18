@@ -15,6 +15,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: library-operator
+  labels:
+    # The base binary selects on this label to find the
+    # operator's Deployment, read its image version, and pull the
+    # matching -cli image.
+    cli.liken.sh/plugin: library
 spec:
   replicas: 1
   selector:

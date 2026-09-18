@@ -21,3 +21,4 @@
 
 # Agent worktrees this session tool keeps beside the checkout.
 /.claude/
+/cli/dist/

@@ -238,6 +238,11 @@ starts an enricher on the next pass without a walk behind it, and a
 refresh set while an enricher runs starts another one after it. The fact
 rewrites its own files and rows in place, and nothing is deleted.
 
+`kubectl liken library reenrich movies` writes that field for you and
+asks every fact again. Add `--only overview` to reopen one fact, and
+`-n` to select the namespace. The command reads your kubeconfig, and
+in bash it completes the library names.
+
 ## 4. The Jellyfin handover
 
 Jellyfin reads the sidecars and art this operator writes, under the

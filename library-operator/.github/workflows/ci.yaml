@@ -201,7 +201,7 @@ jobs:
   images:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # One job per image, so the four build at once and the run is as
+    # One job per image, so the five build at once and the run is as
     # long as the slowest of them, not the sum.
     strategy:
       fail-fast: false
@@ -219,6 +219,11 @@ jobs:
           - image: library-operator-corrosion
             context: corrosion
             file: corrosion/Dockerfile
+          # The -cli image, kubectl-liken-library, built from
+          # Dockerfile.cli at the repository root.
+          - image: library-operator-cli
+            context: .
+            file: Dockerfile.cli
     steps:
       # The media browser image builds liken-iced from the submodule at
       # media-browser/brand, inside the build context. A checkout
