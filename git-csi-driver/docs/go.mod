@@ -17,7 +17,7 @@ tool (
 	github.com/liken-sh/brand/skills
 )
 
-require github.com/liken-sh/brand v0.0.0-20260917021826-107cd574b3ba
+require github.com/liken-sh/brand v0.0.0-20260917175004-3475e2fbf5af
 
 require (
 	cel.dev/expr v0.25.1 // indirect
