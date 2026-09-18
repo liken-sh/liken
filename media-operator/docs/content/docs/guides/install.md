@@ -140,7 +140,7 @@ says, set one variable on the operator:
 kubectl set env deployment/media-operator MEDIA_PLAYER_VERBOSE=1
 ```
 
-The switch removes `--quiet` and adds nothing else. It reaches every
+The switch removes `--quiet` and adds nothing else. It applies to every
 playback pod created after it, so it takes effect on the next `Play`.
 A pod already running keeps the setting it started with. Read the
 log with `kubectl logs <play>-playback -c player`. To turn the switch

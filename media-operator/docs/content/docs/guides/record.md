@@ -1,7 +1,7 @@
 ---
 title: Record what a player is playing
 weight: 40
-description: "Record a Player's screen with its sound as one MP4 or MKV over HTTP with kubectl and curl. Use to capture what a media unit is playing right now."
+description: "Capture a Player's screen and sound as one MP4 or MKV with the kubectl liken media capture command, or over HTTP with kubectl and curl. Use to record what a media unit is playing right now."
 ---
 
 # Record what a player is playing
@@ -22,6 +22,33 @@ routes combine the two into one muxed stream, which no other API
 does. The [API reference](/docs/reference/api/) has the full
 contract. This guide is the short path through it.
 
+## The `kubectl liken media capture` command
+
+The short path is the CLI. `kubectl liken media capture` streams a
+`Player`'s composed video and sound to stdout as one MP4, so a file
+or a pipe is a single command:
+
+    kubectl liken media capture living-room -n house > living-room.mp4
+    kubectl liken media capture living-room -n house | mpv -
+
+`--format mkv` writes Matroska instead, and `-n` (or `--namespace`)
+names the `Player`'s namespace.
+
+The CLI authenticates with the client certificate in your
+kubeconfig, the same subject `kubectl` uses, so the grant that step
+1 describes is all it needs. It opens its own port-forward to
+`media-api` and reads the composed stream through it, so it needs no
+in-cluster routing and runs from a laptop.
+
+The `Player` argument completes to the names the cluster reports.
+`kubectl` runs the plugin's completion shim on its own, so
+`kubectl liken media capture <TAB>` lists the `Player`s in the
+namespace. For a direct call to `kubectl-liken-media`, load the
+script with `source <(kubectl liken media completion bash)`.
+
+The numbered steps below are the HTTP contract the CLI calls, for an
+application in the cluster or a capture the CLI does not cover.
+
 ## 1. Who may record
 
 You can identify yourself with a client certificate or with a
@@ -41,7 +68,7 @@ verifies it with a `TokenReview` for the audience `media-api` and
 checks `status.audiences`. A pod's default API server token does
 not have that audience, so it does not work here.
 
-After it knows who you are, `media-api` sends a
+After it identifies you, `media-api` sends a
 `SubjectAccessReview` for the verb `get` on `players/screen`,
 `players/audio`, or `players/media` in the group `media.liken.sh`,
 with the `Player`'s namespace from the path.

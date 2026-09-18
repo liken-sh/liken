@@ -60,7 +60,7 @@ OIDC issuer must also have that audience.
 
 ### Authorization
 
-After it knows who you are, `media-api` sends a
+After it identifies you, `media-api` sends a
 `SubjectAccessReview` for the verb `get` on `players/screen`,
 `players/audio`, or `players/media` in the API group
 `media.liken.sh`, with the `Player`'s namespace from the path. The
