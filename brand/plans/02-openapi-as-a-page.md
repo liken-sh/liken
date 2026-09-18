@@ -10,12 +10,12 @@ no JavaScript.
 
 The display, audio, and media operators each serve a capture API,
 and each API renders its own OpenAPI document from its router, so
-the document cannot miss a route the program answers. Each manual
+the document cannot omit a route the program serves. Each manual
 then has a hand-written page that tells the story of the API: how it
 negotiates a format, how it reads a time span, who may capture, and
-what each error means. What no page holds is the list: the routes,
-their parameters, the statuses each one answers, and the fields each
-answer carries. That list is in the document, which a reader reaches
+what each error means. The hand-written page does not list the routes,
+their parameters, the statuses each operation returns, or the fields
+in each response. That list is in the document, which a reader reaches
 today as raw JSON.
 
 A rendered viewer was the first idea. Swagger UI and Redoc are
@@ -48,17 +48,17 @@ It takes the same flags and the same three positional arguments as
 The page opens with the hand-written preamble, then the document's
 own title, version, summary, and description. Then it gives one
 section for each operation, headed with the method and the path, as
-in `## GET /v1/display/displays/{name}/screen.png`. A section is one
-method on one path, and not one path, because the parameters and the
-answers of a `GET` are not those of an `OPTIONS` on the same path.
-Each section holds the summary, the description, and up to five
-tables: the parameters, the request body, the answers, the header
-fields those answers carry, and the link relations they declare. A
+in `## GET /v1/display/displays/{name}/screen.png`. A section
+represents one method on one path. The parameters and responses of a
+`GET` are different from those of an `OPTIONS` on the same path.
+Each section lists the summary, the description, and up to five
+tables: the parameters, the request body, the responses, the header
+fields in those responses, and the link relations they declare. A
 bold line names each table, because four tables under one heading
 otherwise read as one table with four header rows. A table appears
 only when the operation has that part, and its line appears with it.
-A document whose answers declare no content, because every body is a
-live capture, gets a two-column answer table instead of four.
+A document whose responses declare no `content` member, because every
+body is a live capture, gets a two-column response table instead of four.
 
 Under the sections come the component schemas, rendered as the field
 tables `crdref` writes for a CRD: the same four columns, the same
@@ -68,7 +68,7 @@ come the security schemes and the requirement over every route, then
 the hand-written postamble.
 
 Every link the page writes lands on a heading or a row of the same
-page, and both ends come from `linkcheck.Anchor`, which holds the one
+page, and both ends come from `linkcheck.Anchor`, which contains the one
 implementation of Hugo's id algorithm. A test renders the display
 manual's own document and resolves every link on the result.
 
@@ -100,7 +100,7 @@ the reference section.
 ### How it is proved
 
 `make test` in this repository runs the generator's tests: a golden
-page from a small document that holds every shape (an operation with
+page from a small document that exercises every shape (an operation with
 no parameters, a path parameter an operation overrides, several media
 types under one status, an enum, a reference chain, a request body,
 response headers, a link relation, a nested object, a map, a type

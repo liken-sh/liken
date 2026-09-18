@@ -67,8 +67,8 @@ func emitSchemaSection(b *strings.Builder, document *node, path string, schema *
 	b.WriteString("| Field | Type | Required | Description |\n")
 	b.WriteString("| --- | --- | --- | --- |\n")
 	properties.each(func(name string, field *node) {
-		// A field written as a reference alone carries no words of
-		// its own, so its cell takes the words of the component it
+		// A field written as a reference alone has no description of
+		// its own, so its cell uses the description of the component it
 		// names.
 		text := cellText(field)
 		if text == "" {

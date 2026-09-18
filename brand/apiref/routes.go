@@ -2,7 +2,7 @@
 //
 // A section is one method on one path, because that is the unit the
 // document describes and the unit a caller writes: the parameters, the
-// answers, and the fields of a GET are not the ones of an OPTIONS on
+// responses, and the fields of a GET are not the ones of an OPTIONS on
 // the same path. The heading is the method and the path together, so
 // the text a reader searches for is the text they would type into
 // curl.
@@ -135,10 +135,10 @@ func emitRequestBody(b *strings.Builder, document *node, body *node) {
 	b.WriteString("\n")
 }
 
-// emitResponses writes what an operation answers, one row per media
-// type, in the document's order. A document whose responses carry no
-// content, because every body is a live capture or a document the
-// manual shows, gets the two columns that hold its facts.
+// emitResponses writes each operation's response data, one row per media
+// type, in the document's order. When no response declares OpenAPI
+// content, the table needs only two columns. This includes APIs whose
+// bodies are live captures or documents described elsewhere in the manual.
 func emitResponses(b *strings.Builder, document *node, responses *node) {
 	if responses == nil || len(responses.members) == 0 {
 		return
@@ -181,7 +181,7 @@ func anyResponseHasContent(document *node, responses *node) bool {
 	return found
 }
 
-// emitResponseHeaders writes the fields the answers carry. The table
+// emitResponseHeaders writes the response header fields. The table
 // has no type column: every header value is text, and the grammar a
 // field follows is in the field's own description.
 func emitResponseHeaders(b *strings.Builder, document *node, responses *node) {
@@ -202,7 +202,7 @@ func emitResponseHeaders(b *strings.Builder, document *node, responses *node) {
 	b.WriteString("\n")
 }
 
-// emitResponseLinks writes the link relations an answer declares:
+// emitResponseLinks writes the link relations a response declares:
 // the other operation a caller reaches from this one, which OpenAPI
 // names by operationId or by a reference to it.
 func emitResponseLinks(b *strings.Builder, document *node, responses *node) {

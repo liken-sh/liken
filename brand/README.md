@@ -6,8 +6,8 @@ stylesheet, the Hugo theme, and the voice rules. Every `liken` site
 uses the theme, and every word those sites publish follows the
 voice rules. The main manual at
 [liken.sh](https://liken.sh) and the operators' sites use the same
-shell, the same nav, and the same stylesheet, so the family reads as
-one place.
+shell, navigation, and stylesheet, so their pages share the same
+presentation.
 
 Three kinds of consumer read this repository:
 
@@ -29,6 +29,10 @@ project publishes, on the sites and in the source files' comments.
 It needs no other file. A consuming repo references it from its
 `docs/AGENTS.md` with the import line `@themes/brand/voice.md`, so
 the writing rules arrive in the same submodule as the theme.
+
+[`editing-prompt.md`](editing-prompt.md) is a reusable assignment
+template for reviewing repository prose. It keeps factual review and
+source-boundary checks with the writing rules.
 
 ## Using the theme
 
@@ -116,13 +120,14 @@ and copies nothing.
 
 ![The liken mark](liken.svg)
 
-The pun holds at more than one level.
+The mark refers to lichen biology and to the way `liken` combines
+Linux and Kubernetes.
 
-A lichen is not one organism. It is a fungus and a photosynthetic
-partner (an alga or a cyanobacterium) living so closely that the
-pair is named and classified as a single thing. That is what `liken`
-is: the Linux kernel and `k3s`, each its own upstream project,
-assembled so tightly that a machine boots the pair as one system.
+A lichen is a fungus and a photosynthetic partner, an alga or a
+cyanobacterium, living so closely that the pair is named and
+classified as one lichen. `liken` combines the Linux kernel and `k3s`,
+which remain separate upstream projects, so a machine boots them as
+one system.
 
 Lichens are also pioneers. They are among the first living things to
 take hold on bare rock. They endure drought, heat, and bare mineral
@@ -143,21 +148,20 @@ thallus built this way is *areolate*. The cracking forms a natural
 mosaic of small plates. The icon reproduces that mosaic, one areole to
 a tile.
 
-Drawing the areoles as hexagons adds a second reference. The
-Kubernetes community commonly uses the hexagon shape, from Helm's logo
-to the backdrops of community talks. Because of this, the same
-picture reads as lichen on rock to a botanist, and as a
-Kubernetes shape to someone from that community.
+Drawing the areoles as hexagons adds a second reference to Kubernetes.
+The Kubernetes community uses hexagons in Helm's logo and in the
+backdrops of community talks. The same picture therefore refers to
+lichen on rock and to Kubernetes.
 
 One tile is orange, not green. Some of the most common rock lichens,
 the *Xanthoria*, are a vivid orange. This single warm tile gives the
 mark a focal point.
 
-The tiles grow smaller toward one edge of the mark. This detail is an
-invention and not biology: real areoles do not reliably shrink toward
-the margin, because the cracking tends to start in the older center.
-The gradient suggests a colony still spreading into bare rock, though
-real lichens do not grow that way.
+The tiles grow smaller toward one edge of the mark. This size pattern
+is an invention, not biology. Real areoles do not reliably shrink
+toward the margin, because cracking tends to start in the older center.
+The pattern suggests a colony still spreading into bare rock, although
+real lichens do not grow this way.
 
 ## The colors
 
@@ -189,10 +193,11 @@ about the shape of one site, the manual's sidebar or the channel's
 digest columns, stays with that site.
 
 No site links the file over the network. Each one inlines it into
-every page. The channel needs this: it is in object storage, apart
-from any cluster, because machines upgrade themselves from it and it
-has to answer when the cluster does not. A stylesheet fetched from
-liken.sh would put the website back in that path.
+every page. The release channel stores its pages in object storage
+outside the cluster, because machines upgrade themselves from that
+channel and must still reach it when the cluster is unavailable.
+Fetching the stylesheet from liken.sh would add the website to that
+upgrade path.
 
 The consumers read the file two ways. The Hugo theme inlines the
 committed copy in `assets/`. The release channel's pages read the
@@ -215,8 +220,8 @@ go tool coverage -title "media-operator" -label Go -label Rust \
 An input is a Go coverage profile (`go test -coverprofile`) or a
 Cobertura report (`cargo llvm-cov --cobertura`). The program reads
 the format from the content, so a repository names its files what it
-likes, and one page holds a program in each language. Go counts
-statements, and its total is the number `go-test-coverage` reports,
+likes, and one page reports coverage for a program in each language.
+Go counts statements, and its total is the number `go-test-coverage` reports,
 so the page and the coverage gate agree. Cobertura counts lines. The
 page says which unit every number is in.
 
@@ -250,9 +255,9 @@ go tool apiref -title Routes -weight 55 \
 ```
 
 The page opens with the document's own summary, then gives one
-section per operation, headed with the method and the path, with the
-parameters, the answers, and the fields each answer carries. Under
-those come the component schemas, as the same field tables `crdref`
+section per operation, headed with the method and the path. Each
+section lists the parameters, the responses, and the fields in each
+response. Under those come the component schemas, as the same field tables `crdref`
 writes for a CRD, and the credentials the document declares. The
 page is Markdown and nothing else: no Swagger UI, no JavaScript, and
 every section is a heading the manual's link check can resolve.
@@ -296,7 +301,7 @@ guide stays the one source, and the output directory is the
 generator's: a renamed or deleted guide leaves no stale skill.
 
 Each repository commits its `skills/` directory, so a checkout
-carries its skills and CI fails when they are stale. An agent loads
+includes its skills and CI fails when they are stale. An agent loads
 them with `claude --plugin-dir <checkout>` or `npx skills add
 liken-sh/<repository>`. `plans/01-guides-as-skills.md` is the
 design.
@@ -305,7 +310,7 @@ design.
 
 `iced/` is a Rust crate, `liken-iced`, for a program that draws the
 brand with the [`iced`](https://iced.rs/) toolkit, such as an idle
-screen on a television. The crate carries four things:
+screen on a television. The crate provides four things:
 
 * **The mark.** It embeds `liken.svg` and parses the fourteen
   polygons out of it. A caller reads the six vertices, the fill, and
@@ -314,11 +319,11 @@ screen on a television. The crate carries four things:
   canvas frame at any center and any width.
 * **The palette.** It embeds `liken.css` and parses `--ink`,
   `--ink-muted`, `--page`, and `--link` out of both schemes.
-* **The pulse.** `motion.md` states the loop, and the crate holds its
-  numbers: two sines for each hexagon, first rates between 0.22 and
+* **The pulse.** `motion.md` states the loop, and the crate defines
+  its numbers: two sines for each hexagon, first rates between 0.22 and
   0.40 cycles a second spread by the golden ratio, and a ten percent
   swing at full energy. At energy 0 the mark is still.
-* **The faces.** `fonts/` holds Source Sans 3, the family every liken
+* **The faces.** `fonts/` contains Source Sans 3, the family every liken
   page and screen sets its text in, as two static faces for programs
   (upright and italic, release 3.052) and two variable faces for the
   web. The crate embeds the two static files and loads them into
@@ -326,11 +331,11 @@ screen on a television. The crate carries four things:
   of its own binary and not out of whatever a machine has installed.
 
 No value in the crate is a copy of a value in `liken.svg` or
-`liken.css`. An edit to either original reaches a screen with no
-second edit, so the mark on a screen and the mark on a page cannot
-drift.
+`liken.css`. The next build reads both originals, so an edit to either
+file needs no second source edit. The mark on a screen and the mark on
+a page therefore use the same source values.
 
-The crate carries no type scale, no margins, and no layout. Those
+The crate defines no type scale, no margins, and no layout. Those
 belong to the display that draws the mark, and a ten-foot screen and
 a web page do not share them.
 

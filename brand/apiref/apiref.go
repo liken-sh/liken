@@ -2,8 +2,8 @@
 // page.
 //
 // Each operator's API describes itself. The document is generated
-// from the router the program serves, so a route the program answers
-// cannot be missing from it, and a description in it is written to be
+// from the router the program serves, so every served route appears
+// in it, and a description in it is written to be
 // read. This program arranges those descriptions into a page, so a
 // manual's route reference can never drift from the routes the API
 // serves. The page is Markdown and nothing else: a reader needs no
