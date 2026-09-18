@@ -155,7 +155,7 @@ func openAPIPathItem(route apiRoute) map[string]any {
 			"in":       "path",
 			"required": true,
 			"description": "The Sink or Source name. The operator builds this name from " +
-					"the hardware identity.",
+				"the hardware identity.",
 			"schema": map[string]any{"type": "string"},
 		}}
 	}

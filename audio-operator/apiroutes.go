@@ -227,7 +227,7 @@ func buildRoutes() []apiRoute {
 			Template: base,
 			Kind:     routeInfo,
 			Resource: resource,
-			Answers: "The " + singular(resource) + " format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
+			Answers:  "The " + singular(resource) + " format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
 			Methods:  apiMethods,
 			Serves:   []representation{{MediaType: documentType, ContentType: documentType, Accepted: []string{documentType}}},
 			Problems: infoProblems,
