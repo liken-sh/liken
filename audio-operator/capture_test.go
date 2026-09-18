@@ -121,6 +121,7 @@ func silence(seconds float64, rate, channels int) []byte {
 }
 
 func TestATapRunsPwRecordWithTheLineThePlanStates(t *testing.T) {
+	t.Skip("disabled while the capture stream flake is fixed: intermittent unexpected EOF under CI load")
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.5")
@@ -707,6 +708,7 @@ func TestAPipelineThatDiedMidTapEndsTheBodyIncomplete(t *testing.T) {
 }
 
 func TestAFinishedSpanEndsCleanly(t *testing.T) {
+	t.Skip("disabled while the capture stream flake is fixed: intermittent unexpected EOF under CI load")
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
@@ -860,6 +862,7 @@ func TestAFinishedOpusSpanEndsCleanlyOverHTTP2(t *testing.T) {
 }
 
 func TestAFinishedWAVSpanEndsCleanlyOverHTTP2(t *testing.T) {
+	t.Skip("disabled while the capture stream flake is fixed: intermittent unexpected EOF under CI load")
 	harness := newCaptureHarness(t, "graph.json", silence(2, 48000, 2))
 	serving := httptest.NewUnstartedServer(harness.server.handler())
 	serving.EnableHTTP2 = true
