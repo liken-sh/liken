@@ -1,6 +1,6 @@
 ---
 name: screenshot
-description: "Take a screenshot, a clip, or a live stream of a Display over HTTP with kubectl and curl. Use when someone asks what a screen shows, or to record it."
+description: "Capture a Display with the kubectl liken display capture command, or take a screenshot, a clip, or a live stream over HTTP with kubectl and curl. Use when someone asks what a screen shows, or to record it."
 ---
 
 This skill is the guide at https://display.liken.sh/docs/guides/screenshot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -20,6 +20,34 @@ on each node takes the frames from the compositor. Nothing is
 stored. Each capture is taken when you ask for it and streamed to
 you while it is made. The [API reference](https://display.liken.sh/docs/reference/api/) has
 the full contract. This guide is the short path through it.
+
+## The `kubectl liken display capture` command
+
+The short path is the CLI. `kubectl liken display capture` streams an
+output's screen to stdout as MP4, so a file or a pipe is a single
+command:
+
+    kubectl liken display capture lg-hdr-wqhd-display | mpv -
+    kubectl liken display capture lg-hdr-wqhd-display --format png > screen.png
+
+`--format png` writes one frame in place of a clip. A `Display` is
+cluster-scoped, so the command takes no namespace.
+
+The CLI authenticates with the client certificate in your
+kubeconfig, the same subject `kubectl` uses, so the grant that step
+1 describes is all it needs. It opens its own port-forward to
+`display-api` and reads the stream through it, so it needs no
+in-cluster routing and runs from a laptop.
+
+The output argument completes to the names the cluster reports.
+`kubectl` runs the plugin's completion shim on its own, so
+`kubectl liken display capture <TAB>` lists the `Display`s. For a
+direct call to `kubectl-liken-display`, load the script with
+`source <(kubectl liken display completion bash)`.
+
+The numbered steps below are the HTTP contract the CLI calls, for an
+application in the cluster, a still through a port-forward, or a JPEG
+or MJPEG capture the CLI does not serve.
 
 ## 1. Who may capture
 

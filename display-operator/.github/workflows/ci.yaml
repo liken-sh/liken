@@ -135,21 +135,34 @@ jobs:
       matrix:
         include:
           - image: vulkan
+            file: Dockerfile
             target: vulkan
           - image: vaapi
+            file: Dockerfile
             target: vaapi
           - image: ffmpeg
+            file: Dockerfile
             target: ffmpeg
           - image: mpv
+            file: Dockerfile
             target: mpv
           - image: weston
+            file: Dockerfile
             target: weston
           - image: display-operator
+            file: Dockerfile
             target: display-operator
           - image: display-capture
+            file: Dockerfile
             target: display-capture
           - image: display-api
+            file: Dockerfile
             target: display-api
+          # The CLI image comes from its own Dockerfile
+          # and names no stage, so the build reads the file and the
+          # target from the matrix.
+          - image: display-operator-cli
+            file: Dockerfile.cli
     steps:
       - uses: actions/checkout@v7
 
@@ -165,7 +178,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache

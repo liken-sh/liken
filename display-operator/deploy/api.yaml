@@ -9,6 +9,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: display-api
+  labels:
+    # The base binary selects on this label to find
+    # the operator's Deployment and read its image version.
+    cli.liken.sh/plugin: display
 spec:
   # One replica with Recreate, because the API mints the CA and the
   # two leaves at its first start, and a second pod beside it would
