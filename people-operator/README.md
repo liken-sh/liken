@@ -20,9 +20,10 @@ facts to it. The `Watch` in
 names the people who watch a series together, and a `Play` names the
 people who watched it, through owner references.
 
-Two fields wait for a controller. `uid` is the Linux uid that owns a
-person's files. `identity` is a login at an outside identity provider,
-as an OIDC issuer and subject. Nothing reads either yet.
+`uid` and `identity` have no consumer yet. `uid` is the Linux uid that
+owns a person's files. `identity` is a login at an outside identity
+provider, identified by an OIDC issuer and subject. Nothing reads
+either field yet.
 
 The manual is at [people.liken.sh](https://people.liken.sh/).
 `plans/00-design.md` is the design, and `plans/README.md` indexes the

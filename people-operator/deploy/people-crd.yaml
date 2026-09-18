@@ -1,9 +1,9 @@
 # A Person names one person who uses the cluster. It is cluster-scoped
-# because the same person appears in every namespace. The resource
-# holds little on its own; other operators refer to it by name and
-# attach their own facts to it. A `Play` names the people who watched
-# it, and a `Watch` names the people who watch a series together. No
-# controller ships with this CRD.
+# because the same person can appear in every namespace. Other
+# operators refer to it by name and attach their own facts to it. A
+# `Play` names the people who watched it, and a `Watch` names the
+# people who watch a series together. No controller ships with this
+# CRD.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -50,21 +50,21 @@ spec:
                 displayName:
                   type: string
                   minLength: 1
-                  description: "The name a screen shows for this person."
+                  description: "The name a screen displays for this person."
                 nickname:
                   type: string
                   minLength: 1
                   description: >-
-                    A short name, one word, for a screen with little
+                    A short, one-word name for a screen with little
                     room: a first name, or what people call this
-                    person. Optional. A screen shows the display name
-                    when this is unset.
+                    person. Optional. A screen displays the display
+                    name when this is unset.
                 avatar:
                   type: string
                   description: >-
                     This person's picture, as a `claim://<claim>/<path>`
-                    reference to a file on a claim. It is the same
-                    form a `Play` uses to name media. Optional.
+                    reference to a file on a claim. A `Play` uses the
+                    same form to name media. Optional.
                 uid:
                   type: integer
                   format: int64
@@ -91,7 +91,7 @@ spec:
                     subject:
                       type: string
                       minLength: 1
-                      description: "The subject claim, `sub`, that the issuer gives this person."
+                      description: "The subject claim, `sub`, that the issuer assigns to this person."
             status:
               type: object
               # Nothing writes this yet. It is declared so a controller
