@@ -66,10 +66,9 @@ spec:
           type: object
           description: >-
             A Player is one named unit of equipment. A Play names a
-            Player to run media on it, and the media operator turns
-            the Player into device claims: the display's claim
-            stands between runs, for the idle screen, and the other
-            devices are claimed only while a Play runs.
+            Player to run media on it. The media operator retains the
+            display claim between playback runs for the idle screen and
+            claims the other devices only while a Play runs.
           properties:
             spec:
               type: object
@@ -155,7 +154,8 @@ spec:
                           x-kubernetes-preserve-unknown-fields: true
                           description: >-
                             The parameters themselves. The driver
-                            defines them; this operator carries them.
+                            defines them, and this operator copies them
+                            to the claim.
                 sinks:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -308,8 +308,8 @@ spec:
                         which is the default and draws the idle screen
                         this operator ships, and media.liken.sh/none,
                         under which nothing draws an idle screen on this
-                        unit and no claim stands. Any other name hands
-                        the screen to the operator that answers to it,
+                        unit and no claim exists. Any other name hands
+                        the screen to the operator that handles it,
                         which reads status.idle for the claim to
                         reference, the requests it carries, the two
                         windows, and the bus it joins; image has
@@ -322,9 +322,9 @@ spec:
                         The container image that draws this unit's idle
                         screen. The image starts with its own entrypoint
                         and reads the unit's state from the bus. It
-                        holds the fade and off windows, the focus gate,
-                        the shade, the volume step, and the panel desire
-                        in its own process. Omit it to inherit the
+                        implements the fade and off windows, the focus
+                        gate, the shade, the volume step, and the panel
+                        desire in its own process. Omit it to inherit the
                         default from MediaPreferences. Where no tier
                         names an image, the screen runs the idle client
                         the media operator ships.
@@ -382,7 +382,7 @@ spec:
                   description: >-
                     What the screen's Display last observed:
                     On, BacklightOff, or Off. Empty until a Display
-                    carries an observation for the unit's screen.
+                    reports an observation for the unit's screen.
                 receiver:
                   type: object
                   description: >-
@@ -532,7 +532,7 @@ spec:
                         screen, in the Player's namespace. The pod that
                         draws references it by name in its
                         resourceClaims. Empty under
-                        media.liken.sh/none, where no claim stands.
+                        media.liken.sh/none, where no claim exists.
                     requests:
                       type: array
                       x-kubernetes-list-type: atomic

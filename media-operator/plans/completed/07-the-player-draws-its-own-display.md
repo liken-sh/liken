@@ -387,10 +387,11 @@ Everything `libass` draws is one capability, and everything that needs
 
 The slices follow those seams:
 
-* [07-a, The scrubber a remote summons](07-a-the-scrubber-a-remote-summons.md).
+* [07-a, The remote commands the scrubber](07-a-the-remote-commands-the-scrubber.md).
   The core. A script directory over `mpv` that draws a `liken` scrubber
-  from `mpv`'s own properties, summoned by a press and scrubbed by a
-  remote. It adds the navigation actions to the command vocabulary.
+  from `mpv`'s own properties, shows it after a press, and accepts seek
+  commands from a remote. It adds the navigation actions to the command
+  vocabulary.
 * [07-b, The stack and the choosers](07-b-the-stack-and-the-choosers.md).
   The vertical focus stack, the chapter scrubber, and the audio and
   subtitle choosers, all from `mpv`'s properties.

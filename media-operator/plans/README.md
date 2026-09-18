@@ -10,7 +10,7 @@ hardware. The pattern is documented in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md).
 
 The README states what the operator is. These documents state why it
-is built the way it is, and what it still owes an answer to.
+is built this way and which questions still need an answer.
 [`completed/`](completed/) holds the plans that are built.
 
 A plan closes in the commit that builds it. That commit moves the
@@ -121,7 +121,7 @@ These plans are designed. Each keeps its number and moves to
 * [08, Preferred languages and subtitles](completed/08-preferred-languages.md).
   Built. The on-hardware drill on `liken-1` runs with the next release.
   `MediaPreferences` states the audio and subtitle languages a viewer
-  wants and whether subtitles show. One cluster resource holds the
+  wants and whether subtitles show. One cluster resource stores the
   household default, and a `Player` or a `Play` overrides it. The
   operator resolves the fields at `Play` start and passes them to `mpv`.
 * [09, The idle screen](completed/09-the-idle-screen.md). Built
@@ -159,7 +159,7 @@ These plans are designed. Each keeps its number and moves to
   `liken` mark in motion per the brand's `motion.md`. The full cycle
   was read off the broker in order, and a `displayName` edit showed
   with no restart.
-* [13, Standing pods follow the template](completed/13-standing-pods-follow-the-template.md).
+* [13, Recreate long-running pods when templates change](completed/13-recreate-pods-on-template-changes.md).
   Built, and drilled on `liken-1` on 2026-08-24 by its own rollouts.
   The 2026.08.24-007 apply rolled every unstamped standing pod and
   claim once, and the 2026.08.24-008 apply rolled only the pods and
@@ -232,8 +232,7 @@ These plans are designed. Each keeps its number and moves to
   parked `Pending` with an empty message, so 2026.09.01-003 reads
   the scheduler's message from the `PodScheduled` condition into the
   status, which now names the claim.
-* [21, A remote that teaches its
-  keymap](completed/21-a-remote-that-teaches-its-keymap.md). Built,
+* [21, Remote discovery reports keymap entries](completed/21-remote-discovery-reports-keymap-entries.md). Built,
   and drilled on the testbed on 2026-09-01 in release
   2026.09.01-001. `spec.discovery` on the `Remote` keeps every node
   and logs each event with a paste-ready `Keymap` entry, the button
@@ -274,8 +273,7 @@ These plans are designed. Each keeps its number and moves to
   remaps and disables, and every consumer binds keys itself. The two
   cluster `Keymap`s dropped to two rows and to remaps with repeats,
   and the X6 drove the browser through them.
-* [25, The screen client holds the
-  rules](completed/25-the-screen-client-holds-the-rules.md). Built,
+* [25, Move idle-screen behavior into `media-screen`](completed/25-idle-screen-behavior-in-media-screen.md). Built,
   and drilled on `liken-1` on 2026-09-02 in release 2026.09.02-002.
   The idle command pod is gone. The `media-screen` crate holds its
   timers, its gates, its shade, and its publishes inside each screen
@@ -285,7 +283,7 @@ These plans are designed. Each keeps its number and moves to
 * [26, Prometheus metrics](completed/26-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10.
   Playback outcomes, startup delay, and report freshness per `Player`,
   with explicit rules for retained reports, pause, and normal endings.
-* [27, One tile in flight](completed/27-one-tile-in-flight.md). Built,
+* [27, Drop stale trickplay requests](completed/27-drop-stale-trickplay-requests.md). Built,
   and drilled on `liken-1` and in the house on 2026-09-08 in release
   2026.09.08-001. The scrubber keeps one trickplay request in flight
   and the bridge serves the newest, so a held scan stops on the
@@ -313,8 +311,7 @@ These plans are designed. Each keeps its number and moves to
   Built on 2026-09-11. The player image leaves its Ubuntu base for the
   display operator's mpv image, a closure on scratch, and answers the
   open problem "the player image is still a distribution".
-* [30, The film leaves with the
-  lights](completed/30-the-film-leaves-with-the-lights.md). Built, and
+* [30, Delay playback exit for a fade](completed/30-delay-playback-exit-for-fade.md). Built, and
   drilled on `liken-1` on 2026-09-10 in release 2026.09.10-001. A
   playback pod carries `media.liken.sh/ending` from the moment its run
   reports the ending, and the sidecar holds `mpv` alive for 500 ms after

@@ -14,7 +14,7 @@ The hardware half is the display-operator's
 
 ## The problem
 
-[Plan 17](completed/17-the-idle-screen-powers-the-panel.md) put the
+[Plan 17](17-the-idle-screen-powers-the-panel.md) put the
 remembered brightness in the sidecar's process memory, and only the
 in-process wake restores it. A sidecar restart while the panel is
 dark starts a process that has no stored value and reports the panel

@@ -103,13 +103,13 @@ spec:
                           x-kubernetes-preserve-unknown-fields: true
                           description: >-
                             The parameters themselves. The driver
-                            defines them, and this operator carries
-                            them.
+                            defines them, and this operator copies them
+                            to the claim.
                 keymap:
                   type: string
                   description: >-
                     The Keymap for this controller's model, by name. A
-                    Keymap is cluster-scoped, so the name carries no
+                    Keymap is cluster-scoped, so the name has no
                     namespace. The field is optional and rarely needed:
                     the base already passes every KEY_* code and turns
                     the hats into the arrows, so a Keymap is for a device
@@ -136,7 +136,7 @@ spec:
               description: >-
                 What the operator reports about this controller: the
                 unit its presses reach now, the bonded device its claim
-                holds, and the declared codes its Keymap leaves unbound.
+                allocated, and the declared codes its Keymap leaves unbound.
               properties:
                 player:
                   type: string
@@ -151,7 +151,7 @@ spec:
                     allocated. The name is the device's address in
                     lowercase with dashes. Read that object for the
                     link and the battery level. The field is empty
-                    while the claim carries no allocation, and for a
+                    while the claim has no allocation, and for a
                     controller another driver publishes.
                 # The map is keyed on code and type together, because
                 # one number can name both a key and an axis: KEY_Q and
@@ -169,8 +169,8 @@ spec:
                     reports nothing here, and the field is absent while
                     no standing pod has reported. The list shrinks as
                     the Keymap grows, so it measures a mapping's
-                    progress during discovery and stands as a
-                    completeness check after.
+                    progress during discovery and provides a
+                    completeness check after discovery.
                   items:
                     type: object
                     required: [code, type]

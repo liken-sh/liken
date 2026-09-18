@@ -84,7 +84,7 @@ func playOwner(play *Play) OwnerReference {
 // plays without one, which is what an audio-only unit is.
 //
 // The playback claim holds the player's own devices and no controller.
-// A Remote reconciles into its own standing pod, which holds the
+// A Remote reconciles into its own persistent pod, which uses the
 // controller's claim, so a controller on one machine and a display on
 // another still pair.
 func buildClaim(play *Play, player *Player) *ResourceClaim {

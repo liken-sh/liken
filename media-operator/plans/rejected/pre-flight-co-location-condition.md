@@ -4,11 +4,11 @@ The founding design asks for one. A `Player` whose devices cannot
 share one machine should get a status condition that says so "before
 anyone plays to it" ([00-design.md](../00-design.md), the section
 "One machine owns a player's devices"). This document rejects that
-condition. The juice is not worth the squeeze.
+condition because its value is small relative to its cost.
 
 ## What already answers the question
 
-The scheduler already answers it, one step later and with no new
+The scheduler already reports it, one step later and with no new
 code. A `Play` builds a single `ResourceClaim` whose named requests
 are the `Player`'s roles, and the set allocates as a unit: one
 machine satisfies every request, or the pod parks `Pending`. The
@@ -17,7 +17,7 @@ claimed device". So a person who plays to an unsatisfiable `Player`
 learns why within one reconcile, in the words of the resource they
 just created.
 
-The design's word was "before". The only thing a pre-flight condition
+The design's requirement was "before". The only thing a pre-flight condition
 adds is learning the same fact without first creating a `Play`. That
 is the whole of the value, and it is small.
 

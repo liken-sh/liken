@@ -96,8 +96,8 @@ alone. [Players](/docs/reference/players/) describes every field.
 
 ## 3. Read the status
 
-The operator turns the `Player` into a standing claim on the screen
-and a pod that draws the idle screen, named `<player>-idle`:
+The operator creates a persistent claim for the screen and a pod that
+draws the idle screen, named `<player>-idle`:
 
     kubectl get player den
     NAME   ZONE   ACTIVITY   PLAY   IDLE                          SCREEN    AGE
@@ -133,7 +133,8 @@ The `Screen` condition says why:
         kubectl describe resourceclaim den-idle-devices
 
 A selector that reads an attribute without `has()` fails on every
-device that lacks it, which reads as a claim that matches nothing.
+device that lacks it. If every candidate lacks that attribute, the
+resulting claim matches no device.
 
 ## 5. Prove it plays
 

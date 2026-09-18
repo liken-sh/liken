@@ -2,9 +2,9 @@ A `Player` is one named unit of equipment: a lone speaker, a TV
 with its built-in speakers, a TV with a receiver. The spec selects
 the unit's devices out of what the hardware operators publish, with
 the same CEL selectors a hand-written `ResourceClaim` would use.
-Between runs, the operator holds one claim on the unit's display
-for the idle screen. It claims the other devices only while a
-[Play](/docs/reference/plays/) runs on it.
+Between runs, the operator keeps one claim on the unit's display for
+the idle screen. It claims the other devices only while a
+[Play](/docs/reference/plays/) runs on the unit.
 
 The resource is namespaced, and everything a `Player` becomes is
 created in its namespace: the claims, the playback pod, and the

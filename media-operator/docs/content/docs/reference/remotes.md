@@ -49,7 +49,7 @@ The controller, and the Keymap for its model where its model needs one.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--device"></span>`device` | [object](#specdevice) | yes | The controller itself, selected out of the devices the hardware operators publish, and the parameters its driver prepares it with. |
-| <span id="spec--keymap"></span>`keymap` | string | no | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name carries no namespace. The field is optional and rarely needed: the base already passes every KEY_* code and turns the hats into the arrows, so a Keymap is for a device the kernel names wrongly. A device maps one way on every unit, as it does under hwdb. |
+| <span id="spec--keymap"></span>`keymap` | string | no | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name has no namespace. The field is optional and rarely needed: the base already passes every KEY_* code and turns the hats into the arrows, so a Keymap is for a device the kernel names wrongly. A device maps one way on every unit, as it does under hwdb. |
 | <span id="spec--discovery"></span>`discovery` | boolean | no | The teaching mode for unknown hardware. The standing pod keeps every input node the claim delivered and logs each event the way a Keymap names it, so a person presses every button and reads the codes out of the pod log. The pod folds and publishes keys in discovery exactly as it does outside it, so a controller a person maps still drives its unit. Turning the mode on or off replaces the standing pod, which drops controller input for a few seconds. A pod in discovery reads every event the claim delivers. Outside discovery the pod reads only the keys and hats it publishes. |
 
 ### spec.device
@@ -69,21 +69,21 @@ Opaque configuration for the driver that prepares the controller, carried onto t
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdeviceparameters--driver"></span>`driver` | string | yes | The driver the parameters are for, such as bluetooth.liken.sh. |
-| <span id="specdeviceparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them, and this operator carries them. |
+| <span id="specdeviceparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them, and this operator copies them to the claim. |
 
 ## status
 
-What the operator reports about this controller: the unit its presses reach now, the bonded device its claim holds, and the declared codes its Keymap leaves unbound.
+What the operator reports about this controller: the unit its presses reach now, the bonded device its claim allocated, and the declared codes its Keymap leaves unbound.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--player"></span>`player` | string | no | The Player this Remote's focus mark names now: the unit its presses reach, idle or playing. It is empty while no Player lists this Remote. |
-| <span id="status--peripheral"></span>`peripheral` | string | no | The Peripheral for the device this Remote's claim allocated. The name is the device's address in lowercase with dashes. Read that object for the link and the battery level. The field is empty while the claim carries no allocation, and for a controller another driver publishes. |
-| <span id="status--unbound"></span>`unbound` | [\[\]object](#statusunbound) | no | The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and stands as a completeness check after. |
+| <span id="status--peripheral"></span>`peripheral` | string | no | The Peripheral for the device this Remote's claim allocated. The name is the device's address in lowercase with dashes. Read that object for the link and the battery level. The field is empty while the claim has no allocation, and for a controller another driver publishes. |
+| <span id="status--unbound"></span>`unbound` | [\[\]object](#statusunbound) | no | The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and provides a completeness check after discovery. |
 
 ### status.unbound[]
 
-The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and stands as a completeness check after.
+The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and provides a completeness check after discovery.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -104,8 +104,8 @@ every consumer at once.
 
 The pod asks the kernel for only the keys and the hats it publishes,
 so a device that reports motion while it rests costs the pod nothing.
-What reaches the node at all is the driver's decision, and the claim's
-`parameters` are where a `Remote` states it. A pod in `spec.discovery`
+The driver decides which events reach the node, and the claim's
+`parameters` configure that choice. A pod in `spec.discovery`
 asks for no narrowing and reads every event the claim delivers.
 
 The claim tolerates the `bluetooth.liken.sh/disconnected`

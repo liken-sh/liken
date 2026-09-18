@@ -5,8 +5,8 @@ subscribe to any topic. Nothing checks that a remote sidecar publishes
 only its own events, that a command on a `Play`'s command topic came
 from a bound remote, or that a keymap on a keymap topic came from the
 operator. The trust boundary is the whole cluster: a workload that can
-open a TCP connection to the broker holds the full media control
-plane.
+open a TCP connection to the broker has access to the full media
+control plane.
 
 For a single home cluster this is a deliberate simplification, not an
 oversight. Every workload on the cluster is one the owner installed,
@@ -31,7 +31,7 @@ An answer looks like broker ACLs keyed to a credential per role:
   only its own status.
 * the operator publishes the keymap and focus marks, and reads status.
 
-The shape is known. The work waits until a cluster runs something the
+The design is known. The work waits until a cluster runs something the
 owner does not already trust, or until a second tenant shares one
 broker, whichever comes first. It shares that trigger with
 [the broker is not configurable](the-broker-is-not-configurable.md).

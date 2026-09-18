@@ -1,9 +1,9 @@
 package main
 
-// This file holds the two questions the API asks the API server about
+// This file implements the two questions the API asks the API server about
 // every request: a TokenReview, which says who sent the token, and a
 // SubjectAccessReview, which says whether that subject may read the
-// aspect it asked for. The API server answers both rather than this
+// aspect it requested. The API server answers both rather than this
 // process reading the token itself, because the API server holds the
 // signing keys, the ServiceAccount state, and the RBAC rules, and a
 // verdict from anywhere else would drift from them. The TokenReview
@@ -129,8 +129,8 @@ type SubjectAccessReviewStatus struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// authorizer answers both questions for every request. One lives for
-// the life of the process, so its cache serves every request.
+// authorizer answers both questions for every request. One authorizer instance
+// owns the verdict cache for the life of the process, so every request shares it.
 type authorizer struct {
 	client *Client
 	// The clock is a field so a test drives the cache's window

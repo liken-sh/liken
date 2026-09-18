@@ -12,8 +12,8 @@ The guides give the steps to operate this project: the
 codes no one has written down,
 [handing the idle screen to another controller](/docs/guides/handing-the-idle-screen-to-another-controller/),
 and [recording what a player is playing](/docs/guides/record/).
-After those, the work is declaring resources, and the
-[reference](/docs/reference/) describes each one.
+After those guides, declare the resources you need. The
+[reference](/docs/reference/) describes each resource.
 
 ## How the pieces fit
 
@@ -32,6 +32,6 @@ stop. The operator deletes a finished `Play` after its
 `ttlSecondsAfterFinished`.
 
 The operator turns a `Play` into one playback pod beside the
-hardware, and it creates the device claims only while that `Play`
-runs. An idle `Player` holds only its display claim, so the other
-devices are free for any workload between runs.
+hardware. It creates the other device claims only while that `Play`
+runs. An idle `Player` keeps only its display claim, so other
+workloads can use the remaining devices between runs.

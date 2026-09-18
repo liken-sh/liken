@@ -111,8 +111,8 @@ spec:
                         default, which draws the idle screen this
                         operator ships, and media.liken.sh/none, under
                         which nothing draws an idle screen and no claim
-                        stands. Any other name hands each screen to the
-                        operator that answers to it, which reads a
+                        exists. Any other name hands each screen to the
+                        operator that handles it, which reads a
                         Player's status.idle for the claim to reference,
                         the requests it carries, the two windows, and the
                         bus it joins.
@@ -122,9 +122,9 @@ spec:
                         The container image that draws every idle
                         screen. The image starts with its own entrypoint
                         and reads each unit's state from the bus. It
-                        holds the fade and off windows, the focus gate,
-                        the shade, the volume step, and the panel desire
-                        in its own process. Unset, every screen the
+                        implements the fade and off windows, the focus
+                        gate, the shade, the volume step, and the panel
+                        desire in its own process. Unset, every screen the
                         household does not override runs the idle client
                         the media operator ships.
                     fadeAfterSeconds:

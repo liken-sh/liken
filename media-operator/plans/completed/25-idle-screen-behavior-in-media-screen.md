@@ -1,13 +1,13 @@
-# 25, The screen client holds the rules
+# 25, Move idle-screen behavior into `media-screen`
 
 Plan 22 put the idle screen's timers, its focus gate, and its shade in
 a pod of their own, the idle command pod, because the pod also held the
 keymaps and a client must not grow a keymap. Plan 24 moved the keymaps
 into the standing remote pod and put the kernel's key names on the bus.
-What the command pod still held was small, and every client that draws
-a screen is now a Rust program with a bus reader of its own. This plan
-moves the rest of the pod into the clients, through one crate they
-share, and deletes the pod.
+The command pod still implemented a small set of screen rules. Every
+client that draws a screen is now a Rust program with its own bus
+reader. This plan moves the remaining rules into those clients through
+one shared crate and deletes the pod.
 
 ## What the command pod held
 
@@ -20,27 +20,29 @@ presses to a delegate's client on the `Player`'s commands topic. It
 told the client each of those moments on a screen topic, and it read
 the client's one request, a sleep, off the commands topic.
 
-Each of those is a rule over what arrived and what time it is. None of
-them needs a process of its own once the client can read the bus, and
-both clients can: the idle screen in this repository and the library
-layer's media browser. A press that crossed two processes and two
-topics now crosses none.
+Each operation uses received messages and the current time.
+None needs a separate process once the client can read the bus. Both
+clients can do so: the idle screen in this repository and the library
+layer's media browser. A press now stays within the client instead of
+crossing two processes and two topics.
 
 ## The crate
 
-`media-screen` is a Rust library in this repository, a Cargo workspace
-member next to the idle client. It is the bus half of a screen client
-for one `Player`, and it names no toolkit, so a client draws with
-whatever it chose.
+`media-screen` is a Rust library in this repository and a Cargo
+workspace member next to the idle client. It provides bus integration
+for one `Player`'s screen client. It names no toolkit, so each client
+draws with the toolkit it chose.
 
-It has two halves. `Screen` is pure: it takes each message with the
-time it arrived and returns what the client draws and what the crate
-publishes. `Reader` is the thread over the broker. It subscribes on
-every session, folds each message through `Screen`, runs the two
-deadlines on a clock of its own, performs the publishes, and hands the
-client the moments it draws: a press under the kernel's key name, the
-shade down or up, a focus, and a fresh surface. The client asks for
-one thing, the shade, and publishes on one kind of topic, its own.
+It has two halves. `Screen` is pure. It takes each message with the
+time when it arrived and returns what the client draws and what the
+crate publishes. `Reader` runs in a thread and reads messages from the
+broker. It subscribes on every session and folds each message through
+`Screen`. It runs the two deadlines on its own clock and performs the
+publishes. It gives the client the events it draws: a press under the
+kernel's key name, the shade down or up, a focus, and a fresh surface.
+The client requests the shade through the crate's local API. This is
+the only behavior it requests. Separately, the client publishes on only
+its own topic.
 
 The rules are the command pod's rules, and its tests moved with them.
 A press acts only while the controller's mark names this `Player`,
@@ -59,19 +61,19 @@ repository, the same pin discipline a cluster's overlay keeps.
 
 ## What the operator writes
 
-The operator stands one pod fewer. Under its own controller it stands
-the claim and the idle client pod, and that pod's container carries
-the whole contract the crate reads: the bus address, the `Player`'s
-object name, the status, volume, commands, and panel topics, each
-controller's events and focus topics in `spec.remotes` order, and the
-two resolved windows. Under a delegate the operator stands the claim
-alone, and `status.idle` carries the same contract, so a delegate's
+The operator runs one fewer pod. Under its own controller, it maintains
+the claim and runs the idle client pod. The pod's container receives the
+complete contract the crate reads. That contract is the bus address, the
+`Player`'s object name, the status, volume, commands, and panel topics,
+each controller's events and focus topics in `spec.remotes` order, and
+the two resolved windows. Under a delegate, the operator maintains only
+the claim. `status.idle` carries the same contract, so the delegate's
 operator sets the same variables on its own container.
 
 The screen topic is gone, and so is the `sleep` request. The commands
 topic carries the operator's `re-present` and nothing else. For one
 release the reconcile also deletes the `<player>-idle-command` pod an
-older release stood, because a live one would step the volume beside
+older release created, because a live one would step the volume beside
 the client.
 
 ## Considered and set aside
@@ -98,25 +100,26 @@ against canned connection events and a listener on loopback. The Go
 tests prove the pod carries the contract, the status carries the same
 one, and a pod from an older release is deleted once.
 
-On `liken-1`: a unit's idle screen fades and wakes on its own timers
-with no command pod in the namespace, the panel goes dark at the off
-window and lights on a press, a volume key steps the level once per
-press, the cycle key moves the mark, a film ends and the clock returns
-on a fresh surface, and the media browser on the same crate navigates,
-sleeps at its top level, and plays a film from the list.
+On `liken-1`, a unit's idle screen fades and wakes on its own timers
+with no command pod in the namespace. The panel goes dark at the off
+window and lights on a press. A volume key steps the level once per
+press, and the cycle key moves the mark. When a film ends, the clock
+returns on a fresh surface. The media browser on the same crate
+navigates, sleeps at its top level, and plays a film from the list.
 
 ### The drill record
 
 Released as media-operator 2026.09.02-002 and library-operator
 2026.09.02-002, and rolled to `liken-1` together on 2026-09-02. The
 first pass deleted the two `-idle-command` pods an older release
-stood, and the idle screen and the browser came back on the new images
+created. The idle screen and the browser started on the new images
 with the whole contract in their environment. `status.idle` on the
 delegated unit carried both windows, both remotes, and the panel and
-volume topics. Drilled the same day from the X6: the browser navigated,
-a film played from a chosen cover, and on its end the browser was back
-at once, where the old path took five to fifteen seconds and a restart.
-The one wait left is the start of a film, one to five seconds from
+volume topics.
+
+The X6 drill ran the same day. The browser navigated, and a film played
+from a chosen cover. When it ended, the browser returned at once. The
+old path took five to fifteen seconds and required a restart. The
+remaining wait was the start of a film: one to five seconds from
 select to the `Play` running, which is the playback pod's own start.
-The fade, the off window, and the volume keys were not timed in this
-drill.
+The drill did not time the fade, the off window, or the volume keys.

@@ -1,7 +1,7 @@
 # The stack and the choosers
 
 Plan 07-b, the second slice of [plan 07](07-the-player-draws-its-own-display.md).
-It completes the navigation model on top of [07-a](07-a-the-scrubber-a-remote-summons.md):
+It completes the navigation model on top of [07-a](07-a-the-remote-commands-the-scrubber.md):
 the vertical stack of focus regions, the chapter scrubber, and the
 control strip with the audio and subtitle choosers. When this slice
 lands, a remote walks the OSD from the scrubber to the chapters to the

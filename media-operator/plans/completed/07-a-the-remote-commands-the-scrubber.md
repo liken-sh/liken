@@ -1,27 +1,27 @@
-# The scrubber a remote summons
+# The remote commands the scrubber
 
 Plan 07-a, the first slice of [plan 07](07-the-player-draws-its-own-display.md).
-It is the core the rest of the display grows from: a script `liken`
-writes, drawn over `mpv` through `libass`, summoned by a press and
-scrubbed by a remote. When this slice lands, a film plays under a
-`liken` scrubber that shows the time, the playhead, and a seek that
-glides, and a plain `mpv` OSD is gone.
+Later display slices build on its path: the `liken` script draws over
+`mpv` through `libass` and handles remote presses. When this slice lands,
+a film plays under a `liken` scrubber that shows the time, the playhead,
+and a seek that moves smoothly. The
+plain `mpv` OSD is gone.
 
 ## The problem
 
-The whole display in plan 07 rests on one path that does not exist yet:
-a script `liken` owns, loaded into `mpv`, drawing through `libass`, and
-driven by a press that arrives over the command bus. Until that path
-runs end to end, none of the layout, the choosers, or the art can be
-built or drilled. This slice builds the path and proves it with the one
-element that needs nothing but `mpv` itself: the fine scrubber.
+The display in plan 07 depends on a path that does not exist yet.
+`mpv` must load a `liken` script. The script draws through `libass` and
+handles presses from the command bus. Until that path runs end to end,
+the layout, choosers, and art cannot be built or drilled. This slice
+builds the path and proves it with the one element that needs only
+`mpv`: the fine scrubber.
 
 ## The script directory
 
-The display is a script directory, `main.lua` and a few modules, loaded
-as one `mpv` client. The parent design states why: one client so the
-modules share state by a function call, and a directory so `main.lua`
-reaches its parts with plain `require`. This slice creates the
+The display is a script directory with `main.lua` and a few modules,
+loaded as one `mpv` client. The parent design chooses one client so the
+modules share state through function calls. It chooses a directory so
+`main.lua` reaches its parts with plain `require`. This slice creates the
 directory with the modules the scrubber needs and no others:
 
 * `main.lua`, the frame loop that gathers each module's ASS and updates
@@ -49,12 +49,12 @@ the values it is given and runs no timer of its own for them.
 The time-of-day cluster is out of this slice, because it is a separate
 module and adds nothing to the path this slice proves.
 
-## The seek glides
+## Accelerate seeking while a direction is held
 
-`left` and `right` seek, and the seek accelerates the longer a
-direction is held. A tap nudges the position a few seconds, and a hold
-ramps the step so the cursor glides across an hour. Playback follows
-the cursor with a short debounce, so there is no separate commit step.
+`left` and `right` seek, and the seek accelerates while a direction is
+held. A tap nudges the position a few seconds, and a hold ramps the
+step so the cursor moves across an hour. Playback follows the cursor
+with a short debounce, so there is no separate commit step.
 This is the scrub behavior the parent design states, built here as the
 first thing the remote drives.
 
@@ -64,7 +64,7 @@ This slice adds the navigation actions to the command vocabulary the
 bus already carries: `up`, `down`, `left`, `right`, `select`, and
 `back`. A `Keymap` binds a controller's buttons to them exactly as it
 binds `play-pause` today. This slice uses `left`, `right`, and the
-summon and dismiss; the later slices use the rest, and defining the
+show and hide actions; the later slices use the rest, and defining the
 whole set now keeps one change to the vocabulary rather than six.
 
 A press reaches the display over the path plan 05 built. The translator
@@ -73,10 +73,10 @@ drives the display over `mpv`'s IPC socket with `script-message-to`.
 The display is one more consumer of the command topic, so a gamepad and
 a remote both drive the scrubber with no new path.
 
-## The OSD is summoned
+## Show and hide the OSD
 
-The OSD is hidden while the film plays. A press summons it, and a pause
-summons it. It hides again after a few idle seconds of play. The main
+The OSD is hidden while the film plays. A press shows it, and pausing
+shows it. It hides again after a few idle seconds of play. The main
 button stays play-pause, and pausing brings the scrubber up, so the one
 press both pauses and shows where the film is.
 
@@ -99,12 +99,12 @@ DualSense. A film plays from a `Play`.
 The drill checks each claim:
 
 * The film plays under a `liken` scrubber, not the plain `mpv` OSD. The
-  script `liken` owns is on screen.
-* A press summons the scrubber, and it hides again after a few idle
-  seconds. The summon path runs.
+  `liken` script draws the visible OSD.
+* A press shows the scrubber, and it hides again after a few idle
+  seconds. The display path runs.
 * `left` and `right` scrub, and a hold accelerates the seek. The
   playhead and the time labels follow. The remote drives the display
   over the bus.
-* The operator is killed, and a press still summons the scrubber and
+* The operator is killed, and a press still shows the scrubber and
   scrubs, because the bridge and the translator run in the pod. The
   data plane outlives the control plane.

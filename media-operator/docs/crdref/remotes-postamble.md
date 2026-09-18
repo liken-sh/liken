@@ -11,8 +11,8 @@ every consumer at once.
 
 The pod asks the kernel for only the keys and the hats it publishes,
 so a device that reports motion while it rests costs the pod nothing.
-What reaches the node at all is the driver's decision, and the claim's
-`parameters` are where a `Remote` states it. A pod in `spec.discovery`
+The driver decides which events reach the node, and the claim's
+`parameters` configure that choice. A pod in `spec.discovery`
 asks for no narrowing and reads every event the claim delivers.
 
 The claim tolerates the `bluetooth.liken.sh/disconnected`

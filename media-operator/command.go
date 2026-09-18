@@ -12,8 +12,8 @@ package main
 // each controller the unit names, gated on the focus mark, and binds
 // the kernel's key names itself in keybindings.go. And it reads the
 // commands topic, which stays the surface any other program publishes
-// to, so it answers a phone or a Home Assistant integration the same
-// way it answers a gamepad. The report carries no API object: the Play
+// to, so it serves a phone or a Home Assistant integration the same
+// way it serves a gamepad. The report contains no API object: the Play
 // it belongs to is named by the topic, not by the body.
 
 import (
@@ -32,8 +32,8 @@ import (
 // reportInterval is the ceiling on how often the command sidecar
 // publishes a position while it advances. mpv sends a time-pos event
 // several times a second, and one report is a small QoS 0 message, so
-// the bus carries a live position at one report a second. The Play
-// resource does not move that fast: the operator wakes its reconcile
+// the command sidecar publishes the current position to the bus once
+// a second. The Play resource updates less often: the operator wakes its reconcile
 // loop only on a pause or an item change, and a bare position advance
 // waits for the backstop tick. So the bus is the live plane and the
 // resource is the throttled one, and a consumer that wants a smooth
@@ -131,7 +131,7 @@ type commander struct {
 	volume      volumeState
 	haveVolume  bool
 
-	// volumeOwned is the owner mark: equipment holds the level, so a state
+	// volumeOwned is the owner mark: equipment controls the level, so a state
 	// the topic delivers is recorded and never written to mpv.
 	volumeOwned bool
 
@@ -569,15 +569,14 @@ func (c *commander) blockForItem(item int) json.RawMessage {
 }
 
 // send publishes one report to the status topic, retained, and holds it
-// as the last-known report. A restarted operator reads the retained
+// as the last known report. A restarted operator reads the retained
 // report back from the broker, and a reconnect re-publishes the held
 // report through onConnect, so neither loses a running Play's place.
 func (c *commander) send(report playReport) error {
 	c.reportMutex.Lock()
-	// The reporter folds mpv's property changes alone and carries no
-	// ending, so the mark is stamped here. Every report after the ending
-	// carries it, and a subscriber that reads any one of them reads the
-	// same ending.
+	// The reporter processes mpv's property changes without setting the
+	// ending flag. Set it here so every report after playback ends includes
+	// the flag, whichever report a subscriber receives.
 	if c.ended {
 		report.Ended = true
 	}

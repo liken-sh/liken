@@ -22,12 +22,12 @@ const (
 	podAPIVersion   = "v1"
 )
 
-// ObjectMeta carries what this operator reads or writes: name and
+// ObjectMeta contains what this operator reads or writes: name and
 // namespace for the URL, resourceVersion for the conditional write, uid
 // with ownerReferences for garbage collection, and labels so a watch
 // selects the operator's own playback pods.
 //
-// Annotations carry the template hash the operator stamps on a standing
+// Annotations contain the template hash the operator stamps on a persistent
 // claim and a standing pod, which is how a pass tells a live object from
 // the object it would build now. deletionTimestamp is set by the API
 // server on an object that is on its way out, and a standing pair with
@@ -58,13 +58,13 @@ type ObjectMeta struct {
 // deletion, so a pass tears it down instead of reconciling it.
 func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
 
-// holds reports whether this object carries the named finalizer.
+// holds reports whether this object has the named finalizer.
 func (m ObjectMeta) holds(finalizer string) bool {
 	return slices.Contains(m.Finalizers, finalizer)
 }
 
-// with answers the finalizer list with one added, and without answers it
-// with one removed. Both answer a new slice, so a patch that fails leaves
+// with adds the finalizer to the list, and without removes it. Both return
+// a new slice, so a patch that fails leaves
 // the caller's copy of the object alone. Every other finalizer on the
 // object, another operator's included, is carried through unchanged.
 func (m ObjectMeta) with(finalizer string) []string {
@@ -120,8 +120,8 @@ type PlayerStatus struct {
 	Activity string `json:"activity,omitempty"`
 	Play     string `json:"play,omitempty"`
 
-	// Panel is what the screen's Display last observed, empty
-	// until a Display carries an observation.
+	// Panel is what the screen's Display last observed. It is empty
+	// until a Display reports an observation.
 	Panel string `json:"panel,omitempty"`
 
 	// Receiver is the equipment this unit's cable lands on and the input
@@ -130,15 +130,15 @@ type PlayerStatus struct {
 	Receiver *PlayerReceiverStatus `json:"receiver,omitempty"`
 
 	// Idle is the resolved idle screen controller and, where a
-	// controller draws, the standing claim a delegate references and the
-	// requests that claim carries. It is nil for a Player that drives no
+	// controller draws, the persistent claim a delegate references and the
+	// requests in that claim. It is nil for a Player that drives no
 	// screen and for a cluster that names no display-draw class.
 	Idle *PlayerIdleStatus `json:"idle,omitempty"`
 
 	// Screen is the last screen the idle claim resolved to: the machine
 	// that publishes the draw device and the monitor id, which is the
 	// name of its Display. It is kept when the claim deallocates, so a
-	// unit whose panel is away still knows which Display to read.
+	// unit whose panel is away can still identify which Display to read.
 	Screen *PlayerScreenStatus `json:"screen,omitempty"`
 
 	// Sinks is the sink memory: the Sink each spec.sinks selection
@@ -422,7 +422,7 @@ type PlaySpec struct {
 	// interval, and it defaults to 10s when this is empty.
 	TrickplayInterval string `json:"trickplayInterval,omitempty"`
 
-	// How long a Finished Play stands before the operator deletes it, in
+	// How long a Finished Play remains before the operator deletes it, in
 	// seconds. The field is a pointer because zero and absent mean
 	// different things: zero deletes the Play on the pass that sees it
 	// finished, and absent takes defaultTTLSecondsAfterFinished. A plain
@@ -430,7 +430,7 @@ type PlaySpec struct {
 	// once.
 	//
 	// The window is the Play's own affair and not operator configuration,
-	// because whoever creates a Play knows how long the record is worth
+	// because the program that creates a Play chooses how long the record is worth
 	// keeping: a library app sets the window its continue-watching feature
 	// reads, and two apps on one cluster choose differently.
 	TTLSecondsAfterFinished *int64 `json:"ttlSecondsAfterFinished,omitempty"`
@@ -457,7 +457,7 @@ type PlaySpec struct {
 
 // PlayNext is the offer: three lines of text the display draws as given,
 // an art reference the operator resolves the way it resolves an item's
-// art, and a request the operator never reads and carries back on the bus
+// art, and a request the operator never reads and copies to the bus
 // when a person takes the offer.
 type PlayNext struct {
 	Reason string `json:"reason,omitempty"`
@@ -470,9 +470,9 @@ type PlayNext struct {
 	Request json.RawMessage `json:"request,omitempty"`
 }
 
-// PlayVolume is a Play's starting level, its muted flag, or both.
+// PlayVolume contains a Play's starting level, its muted flag, or both.
 // Each field is a pointer because absent and zero differ: an absent
-// level carries nothing and leaves the unit where it stands, and a
+// level contains no request and leaves the unit unchanged, and a
 // level of zero is silence the Play asked for.
 type PlayVolume struct {
 	Level *int  `json:"level,omitempty"`
@@ -687,7 +687,7 @@ type MediaPreferencesList struct {
 	Items    []MediaPreferences `json:"items"`
 }
 
-// A Remote is one physical controller: the device it is and, where
+// A Remote is one physical controller: its device and, where
 // its model needs one, the Keymap for its model. The operator reads the
 // spec to build the standing pod and to hand each Play's command
 // sidecar its topics, and writes the status to report which unit the
@@ -788,7 +788,7 @@ type KeymapList struct {
 }
 
 // A KeymapRepeat makes a row repeat while the control is held. The
-// standing remote pod publishes the press, waits the delay, then
+// remote pod publishes the press, waits the delay, then
 // publishes value 2 every interval until the release. The delay and
 // the interval are durations, like 400ms or 1s, and each takes a
 // default when it is empty. A control with no block reports only what

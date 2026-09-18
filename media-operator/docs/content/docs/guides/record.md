@@ -126,10 +126,10 @@ An application gets the grant through its `ServiceAccount`:
 
 The composed route needs `players/media` and nothing else, because
 `media-api` calls the sibling APIs under its own `ServiceAccount`. A
-redirect carries no credentials. You follow the 307 with your own,
-and `display-api` checks `displays/screen` for your subject. So to
-use the plain screen and audio routes, you also need the grant on
-the `Display` and on each `Sink`. The
+redirect includes no credentials. You must follow the 307 with your
+own credentials. `display-api` then checks `displays/screen` for your
+subject. To use the plain screen and audio routes, you also need a
+grant on the `Display` and on each `Sink`. The
 [display](https://display.liken.sh/docs/guides/screenshot/) and
 [audio](https://audio.liken.sh/docs/guides/listen/) guides show
 those grants.

@@ -41,7 +41,7 @@ const (
 // convention for a kubernetes.io/tls Secret, so other tooling reads
 // the pair. ca.crt and ca.key are kept beside them so the keeper can
 // re-mint a leaf under the same CA a year later, and an owner's pair
-// with no ca.key is served as it stands.
+// with no ca.key is served unchanged.
 const (
 	apiTLSCertKey    = "tls.crt"
 	apiTLSKeyKey     = "tls.key"
@@ -50,8 +50,8 @@ const (
 	apiTLSSecretType = "kubernetes.io/tls"
 )
 
-// The lifetimes. The CA lives ten years, longer than a machine. The
-// leaf lives one year, and the keeper re-mints it when under a third
+// The lifetimes. The CA is valid for ten years, longer than a machine. The
+// leaf is valid for one year, and the keeper re-mints it when under a third
 // of that life remains, so a rotation has months of margin and a
 // clock that is off by days changes nothing.
 const (

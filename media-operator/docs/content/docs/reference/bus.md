@@ -6,10 +6,10 @@ toc: true
 
 # The media bus
 
-The resources say what should exist. The bus carries what happens
-while it runs: reports, commands, button events, and state. It is
-one MQTT broker, and it is a contract in the same sense the CRDs
-are: this page gives the rules every topic follows and lists every
+The resources declare what should exist. The components exchange
+reports, commands, button events, and state through one MQTT broker.
+The bus has a defined interface, like the CRDs.
+This page gives the rules every topic follows and lists every
 topic under the media operator's tree, with its writer, its readers,
 and its payload. Each resource page links here for the rules and
 gives the payload shapes for its own topics.
@@ -38,17 +38,17 @@ seconds.
 
 Every topic extends one base. The media operator's base is
 `liken/media` by default, and the library operator's is
-`liken/library`. Each operator holds its base as one string and
-passes it to every pod it creates, so a whole tree moves together
+`liken/library`. Each operator stores its base as one string and
+passes it to every pod it creates. A whole tree moves together
 when a cluster chooses another base. The pages in this reference
 write topics without the base.
 
 ## Retained state and events
 
-State is retained and events are not. A retained topic always holds
-the current value, so a program that just connected reads the live
-state without asking. An event topic carries one moment: a button
-press, a command, a request to move focus.
+State is retained and events are not. The broker retains the current
+value for a state topic and sends it to new subscribers. Event topics
+deliver individual button presses, commands, and requests to move
+focus without retaining them.
 
 An empty retained payload clears a topic. The writer of a retained
 topic clears it that way when the object it described is gone, and a
@@ -68,9 +68,9 @@ never received.
 
 ## The topic names the object
 
-The topic names the object and the payload does not. A `Play`'s
-namespace and name are segments of its topic path, and its report
-body carries only the playback numbers. Parse the topic path to learn
+The topic identifies the object; the payload does not. A `Play`'s
+namespace and name are segments of its topic path, while its report
+body contains only playback numbers. Parse the topic path to identify
 which object a message belongs to.
 
 ## Availability

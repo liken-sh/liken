@@ -28,7 +28,7 @@ const (
 	readyTemplate     = "/readyz"
 )
 
-// apiAllowedMethods is the three methods this API answers, as Allow
+// apiAllowedMethods is the three methods this API permits, as Allow
 // states them.
 const apiAllowedMethods = "GET, HEAD, OPTIONS"
 
@@ -46,7 +46,7 @@ type apiRoute struct {
 	handle   func(*apiExchange)
 }
 
-// apiExchange holds one request for its length: the route it matched,
+// apiExchange stores one request for its lifetime: the route it matched,
 // the path variables, the request id, and the facts the log line
 // carries. The handlers fill the facts as they learn them, and finish
 // writes the one log line, so every route logs the same fields and
@@ -146,7 +146,7 @@ func matchTemplate(template, path string) (namespace, name string, ok bool) {
 	return namespace, name, true
 }
 
-// handler is the one entry point. It answers the two probe paths
+// handler is the one entry point. It handles the two probe paths
 // first, with no auth and no links. Every other path gets Vary and
 // the service links, then the first template that matches, then the
 // method rules every route shares. A path no row matches is a 404

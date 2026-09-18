@@ -10,9 +10,9 @@ A `Player` is one named unit of equipment: a lone speaker, a TV
 with its built-in speakers, a TV with a receiver. The spec selects
 the unit's devices out of what the hardware operators publish, with
 the same CEL selectors a hand-written `ResourceClaim` would use.
-Between runs, the operator holds one claim on the unit's display
-for the idle screen. It claims the other devices only while a
-[Play](/docs/reference/plays/) runs on it.
+Between runs, the operator keeps one claim on the unit's display for
+the idle screen. It claims the other devices only while a
+[Play](/docs/reference/plays/) runs on the unit.
 
 The resource is namespaced, and everything a `Player` becomes is
 created in its namespace: the claims, the playback pod, and the
@@ -44,7 +44,7 @@ The class names here are the cluster's own vocabulary: consumer
 `DeviceClass` objects are yours to create, and each hardware
 operator's manual gives the YAML for its class.
 
-A Player is one named unit of equipment. A Play names a Player to run media on it, and the media operator turns the Player into device claims: the display's claim stands between runs, for the idle screen, and the other devices are claimed only while a Play runs.
+A Player is one named unit of equipment. A Play names a Player to run media on it. The media operator retains the display claim between playback runs for the idle screen and claims the other devices only while a Play runs.
 
 ## spec
 
@@ -81,7 +81,7 @@ Opaque configuration for the driver that prepares the device, carried onto the c
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdisplayparameters--driver"></span>`driver` | string | yes | The driver the parameters are for, such as display.liken.sh. |
-| <span id="specdisplayparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them; this operator carries them. |
+| <span id="specdisplayparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them, and this operator copies them to the claim. |
 
 ### spec.sinks[]
 
@@ -128,8 +128,8 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specidle--controller"></span>`controller` | string | no | The operator that draws this unit's idle screen, as a domain-qualified name. Two names belong to the media operator: media.liken.sh/idle-screen, which is the default and draws the idle screen this operator ships, and media.liken.sh/none, under which nothing draws an idle screen on this unit and no claim stands. Any other name hands the screen to the operator that answers to it, which reads status.idle for the claim to reference, the requests it carries, the two windows, and the bus it joins; image has no effect under such a name, because that operator brings its own pod. Omit it to inherit the default MediaPreferences. Pattern: `^[a-z0-9.-]+/[a-z0-9-]+$`. |
-| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus. It holds the fade and off windows, the focus gate, the shade, the volume step, and the panel desire in its own process. Omit it to inherit the default from MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
+| <span id="specidle--controller"></span>`controller` | string | no | The operator that draws this unit's idle screen, as a domain-qualified name. Two names belong to the media operator: media.liken.sh/idle-screen, which is the default and draws the idle screen this operator ships, and media.liken.sh/none, under which nothing draws an idle screen on this unit and no claim exists. Any other name hands the screen to the operator that handles it, which reads status.idle for the claim to reference, the requests it carries, the two windows, and the bus it joins; image has no effect under such a name, because that operator brings its own pod. Omit it to inherit the default MediaPreferences. Pattern: `^[a-z0-9.-]+/[a-z0-9-]+$`. |
+| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus. It implements the fade and off windows, the focus gate, the shade, the volume step, and the panel desire in its own process. Omit it to inherit the default from MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
 | <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
@@ -142,7 +142,7 @@ What plays on this Player now, written only by the media operator. It is derived
 | --- | --- | --- | --- |
 | <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
 | <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
-| <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display carries an observation for the unit's screen. |
+| <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display reports an observation for the unit's screen. |
 | <span id="status--receiver"></span>`receiver` | [object](#statusreceiver) | no | The equipment this unit's cable lands on, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel. |
 | <span id="status--screen"></span>`screen` | [object](#statusscreen) | no | The last screen the idle claim resolved to. The operator keeps it while the panel is away, so it can still read the screen's Display and say why the idle pod waits. Absent until the claim has resolved once. |
 | <span id="status--sinks"></span>`sinks` | [\[\]object](#statussinks) | no | The Sink each spec.sinks selection resolved to, in spec order. The operator writes the list from an allocated playback claim and keeps it after the Play retires, the way it keeps status.screen. A tap through these names still needs a running Play. |
@@ -196,7 +196,7 @@ What draws this unit's idle screen, and everything the operator that draws it ne
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusidle--controller"></span>`controller` | string | no | The resolved controller name, after spec.idle.controller, the default MediaPreferences, and the built-in media.liken.sh/idle-screen resolve in that order. |
-| <span id="statusidle--claim"></span>`claim` | string | no | The standing ResourceClaim on this unit's screen, in the Player's namespace. The pod that draws references it by name in its resourceClaims. Empty under media.liken.sh/none, where no claim stands. |
+| <span id="statusidle--claim"></span>`claim` | string | no | The standing ResourceClaim on this unit's screen, in the Player's namespace. The pod that draws references it by name in its resourceClaims. Empty under media.liken.sh/none, where no claim exists. |
 | <span id="statusidle--requests"></span>`requests` | []string | no | The claim's request names, in claim order: draw, and render where the Player states a render node. The container that draws states one resources.claims entry per name. Empty under media.liken.sh/none. |
 | <span id="statusidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | The resolved seconds of quiet before the screen fades to black. Zero means the screen never fades on its own. The client that draws holds this timer, so the field is always written: zero is a policy, and an absent field is not one. |
 | <span id="statusidle--offafterseconds"></span>`offAfterSeconds` | integer | no | The resolved seconds of quiet before the panel goes dark, at least fadeAfterSeconds. Zero means the panel never goes dark on its own. It is always written, for the reason fadeAfterSeconds is. |
@@ -307,13 +307,13 @@ film and the idle screen client between films, and each computes the
 next state from the last message the topic delivered. The
 [equipment operator](https://equipment.liken.sh/docs/reference/receivers/)'s
 receiver session writes the receiver's true level here whenever its
-mark on `volume/owner` stands: the position it adopts when the
+mark on `volume/owner` is non-empty: the position it adopts when the
 session starts, and the position the receiver reports after a press
 or a turn of its own knob.
 
 Every pod for the unit subscribes and applies what it reads, so the
-unit plays at the one level the topic holds. While the owner mark
-stands, no pod applies the level: each holds `mpv` at unity, volume
+unit plays at the one level the topic holds. While the owner mark is
+non-empty, no pod applies the level: each holds `mpv` at unity, volume
 100 and unmuted, and the equipment applies the level instead. A
 press still publishes the next state here, and the equipment reads
 it as a press and moves one step in its direction.
@@ -343,15 +343,15 @@ level themselves. The value inside names the owner and nothing reads
 it: every reader tests only whether the payload is empty.
 
 Three readers subscribe. The playback pod's command sidecar holds
-`mpv` at unity while the mark stands and applies the level the topic
+`mpv` at unity while the mark is non-empty and applies the level the topic
 last delivered when the mark clears. It re-applies the held state
 once `mpv`'s socket opens, because the broker delivers the retained
 mark and level within milliseconds of the subscribe and `mpv` opens
 its socket seconds later. The operator builds a playback pod with no
-`--volume` flag while the mark stands, so `mpv` starts at its own
+`--volume` flag while the mark is non-empty, so `mpv` starts at its own
 default, unity. A delegate's idle screen client reads the topic from
 `status.idle.bus.volumeOwnerTopic` and draws no level of its own
-while the mark stands.
+while the mark is non-empty.
 
 ### `panel`
 

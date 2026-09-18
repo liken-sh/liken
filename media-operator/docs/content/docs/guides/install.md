@@ -26,10 +26,11 @@ You need:
 
 ## The device classes are yours
 
-The base ships no `DeviceClass`. The operator claims no devices for
-itself, and the classes a `Player` names are the cluster owner's
-vocabulary, the same classes a hand-written `ResourceClaim` would
-use. Each hardware operator's manual gives the YAML for its class:
+The install manifests define no `DeviceClass` objects. The operator
+claims no devices for itself. The classes a `Player` names are the
+cluster owner's vocabulary, the same classes a hand-written
+`ResourceClaim` would use. Each hardware operator's manual gives the
+YAML for its class:
 [displays](https://display.liken.sh/docs/guides/install/),
 [audio outputs](https://audio.liken.sh/docs/guides/install/), and
 [Bluetooth devices](https://bluetooth.liken.sh/docs/guides/install/).

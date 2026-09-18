@@ -80,13 +80,13 @@ film and the idle screen client between films, and each computes the
 next state from the last message the topic delivered. The
 [equipment operator](https://equipment.liken.sh/docs/reference/receivers/)'s
 receiver session writes the receiver's true level here whenever its
-mark on `volume/owner` stands: the position it adopts when the
+mark on `volume/owner` is non-empty: the position it adopts when the
 session starts, and the position the receiver reports after a press
 or a turn of its own knob.
 
 Every pod for the unit subscribes and applies what it reads, so the
-unit plays at the one level the topic holds. While the owner mark
-stands, no pod applies the level: each holds `mpv` at unity, volume
+unit plays at the one level the topic holds. While the owner mark is
+non-empty, no pod applies the level: each holds `mpv` at unity, volume
 100 and unmuted, and the equipment applies the level instead. A
 press still publishes the next state here, and the equipment reads
 it as a press and moves one step in its direction.
@@ -116,15 +116,15 @@ level themselves. The value inside names the owner and nothing reads
 it: every reader tests only whether the payload is empty.
 
 Three readers subscribe. The playback pod's command sidecar holds
-`mpv` at unity while the mark stands and applies the level the topic
+`mpv` at unity while the mark is non-empty and applies the level the topic
 last delivered when the mark clears. It re-applies the held state
 once `mpv`'s socket opens, because the broker delivers the retained
 mark and level within milliseconds of the subscribe and `mpv` opens
 its socket seconds later. The operator builds a playback pod with no
-`--volume` flag while the mark stands, so `mpv` starts at its own
+`--volume` flag while the mark is non-empty, so `mpv` starts at its own
 default, unity. A delegate's idle screen client reads the topic from
 `status.idle.bus.volumeOwnerTopic` and draws no level of its own
-while the mark stands.
+while the mark is non-empty.
 
 ### `panel`
 

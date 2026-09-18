@@ -855,7 +855,7 @@
             "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
           },
           "307": {
-            "description": "The one stream this Player resolves, where it resolves only one."
+            "description": "The stream's route, returned when this Player resolves exactly one stream."
           },
           "400": {
             "description": "A query the grammar refuses, or an upstream 400."
@@ -964,7 +964,7 @@
             "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
           },
           "307": {
-            "description": "The one stream this Player resolves, where it resolves only one."
+            "description": "The stream's route, returned when this Player resolves exactly one stream."
           },
           "400": {
             "description": "A query the grammar refuses, or an upstream 400."
@@ -1084,7 +1084,7 @@
             "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
           },
           "307": {
-            "description": "The one stream this Player resolves, where it resolves only one."
+            "description": "The stream's route, returned when this Player resolves exactly one stream."
           },
           "400": {
             "description": "A query the grammar refuses, or an upstream 400."
@@ -1193,7 +1193,7 @@
             "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
           },
           "307": {
-            "description": "The one stream this Player resolves, where it resolves only one."
+            "description": "The stream's route, returned when this Player resolves exactly one stream."
           },
           "400": {
             "description": "A query the grammar refuses, or an upstream 400."
@@ -1313,7 +1313,7 @@
             "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
           },
           "307": {
-            "description": "The one stream this Player resolves, where it resolves only one."
+            "description": "The stream's route, returned when this Player resolves exactly one stream."
           },
           "400": {
             "description": "A query the grammar refuses, or an upstream 400."
@@ -1422,7 +1422,7 @@
             "description": "The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order."
           },
           "307": {
-            "description": "The one stream this Player resolves, where it resolves only one."
+            "description": "The stream's route, returned when this Player resolves exactly one stream."
           },
           "400": {
             "description": "A query the grammar refuses, or an upstream 400."
@@ -1553,7 +1553,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1652,7 +1652,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1762,7 +1762,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1861,7 +1861,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -1971,7 +1971,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -2070,7 +2070,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -2180,7 +2180,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -2279,7 +2279,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -2389,7 +2389,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."
@@ -2488,7 +2488,7 @@
             "description": "Nothing this route serves is acceptable."
           },
           "409": {
-            "description": "The Player carries no status.screen."
+            "description": "The Player has no status.screen."
           },
           "502": {
             "description": "An upstream answer this API cannot relay."

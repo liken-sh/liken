@@ -45,7 +45,7 @@ func captureAspects() []captureAspect {
 	}
 }
 
-// serveCapture answers one capture request. The checks run in cost
+// serveCapture handles one capture request. The checks run in cost
 // order: the access review, the Accept field, the query, then the
 // Player read. A refused query answers 400 before any upstream is
 // called, so a bad request opens no capture on a sidecar and takes no
@@ -118,7 +118,7 @@ func (s *apiServer) redirectToScreen(e *apiExchange, player *Player, form mediaF
 }
 
 // redirectToSink sends the client to the Sink route of the Player's
-// first sink. The memory in status.sinks stands between runs, but a
+// first sink. The memory in status.sinks remains between runs, but a
 // tap through it needs a running Play: a remembered Sink that another
 // unit is using is never tapped through this one, so with no Play the
 // answer is 409 not-playing.

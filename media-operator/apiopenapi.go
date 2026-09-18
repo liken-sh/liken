@@ -300,7 +300,7 @@ func openAPIResponses(template string) map[string]openAPIResponse {
 	switch aspect.name {
 	case screenAspectName:
 		responses["307"] = openAPIResponse{Description: "The display-api route for this Player's Display."}
-		responses["409"] = openAPIResponse{Description: "The Player carries no status.screen."}
+		responses["409"] = openAPIResponse{Description: "The Player has no status.screen."}
 	case audioAspectName:
 		responses["307"] = openAPIResponse{Description: "The audio-api route for this Player's Sink."}
 		responses["409"] = openAPIResponse{Description: "No Play runs on this Player, or it resolves no Sink."}
@@ -309,7 +309,7 @@ func openAPIResponses(template string) map[string]openAPIResponse {
 			Description: "The composed stream: one video track where the Player has a screen, " +
 				"and one audio track per Sink in spec.sinks order.",
 		}
-		responses["307"] = openAPIResponse{Description: "The one stream this Player resolves, where it resolves only one."}
+		responses["307"] = openAPIResponse{Description: "The stream's route, returned when this Player resolves exactly one stream."}
 		responses["409"] = openAPIResponse{Description: "The Player resolves no stream at all."}
 	}
 	responses["400"] = openAPIResponse{Description: "A query the grammar refuses, or an upstream 400."}

@@ -50,7 +50,7 @@ under a kernel name already work:
     kubectl patch remote den-remote --type=merge \
       -p '{"spec":{"discovery":true}}'
 
-The patch replaces the standing pod, which drops controller input
+The patch replaces the controller pod, which drops controller input
 for a few seconds. The new pod stays `Pending` until the controller
 connects for the first time, so press a button to wake it.
 
@@ -87,11 +87,11 @@ that makes it `KEY_ENTER`.
     kubectl get remote den-remote -o yaml
 
 `status.unbound` lists every declared control that the base and the
-`Keymap` together map to nothing. The list holds a hat axis with no
-row, a control a row set to `none`, and a code the kernel gives no
-name. A declared `KEY_*` code passes as itself, so it is never on the
-list, and a keyboard remote starts with an empty list. Each entry has
-the code, its evdev name, and its event type.
+`Keymap` together map to nothing. It includes a hat axis with no row,
+a control whose row sets `none`, and a code the kernel gives no name.
+A declared `KEY_*` code passes as itself, so it never appears in the
+list. A keyboard remote starts with an empty list. Each entry has the
+code, its evdev name, and its event type.
 
 ## Write the Keymap
 
@@ -127,6 +127,6 @@ Then name it on the `Remote` and turn discovery off:
     kubectl patch remote den-remote --type=merge \
       -p '{"spec":{"keymap":"handheld-remote","discovery":false}}'
 
-`status.unbound` stays after discovery ends, so it always answers
-which of the controller's controls do nothing. On a keyboard remote
-it holds only the controls you dropped with `none`.
+`status.unbound` remains after discovery ends, so it continues to show
+which controller controls do nothing. On a keyboard remote, it lists
+only the controls you dropped with `none`.

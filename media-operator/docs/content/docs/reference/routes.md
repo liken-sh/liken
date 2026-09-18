@@ -406,7 +406,7 @@ The Player's screen and sound in one stream, in the format chosen by Accept.
 | Status | Description |
 | --- | --- |
 | 200 | The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order. |
-| 307 | The one stream this Player resolves, where it resolves only one. |
+| 307 | The stream's route, returned when this Player resolves exactly one stream. |
 | 400 | A query the grammar refuses, or an upstream 400. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -441,7 +441,7 @@ The Player's screen and sound in one stream, in the format chosen by Accept. The
 | Status | Description |
 | --- | --- |
 | 200 | The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order. |
-| 307 | The one stream this Player resolves, where it resolves only one. |
+| 307 | The stream's route, returned when this Player resolves exactly one stream. |
 | 400 | A query the grammar refuses, or an upstream 400. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -486,7 +486,7 @@ The Player's screen and sound in one stream, as video/matroska.
 | Status | Description |
 | --- | --- |
 | 200 | The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order. |
-| 307 | The one stream this Player resolves, where it resolves only one. |
+| 307 | The stream's route, returned when this Player resolves exactly one stream. |
 | 400 | A query the grammar refuses, or an upstream 400. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -521,7 +521,7 @@ The Player's screen and sound in one stream, as video/matroska. The headers alon
 | Status | Description |
 | --- | --- |
 | 200 | The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order. |
-| 307 | The one stream this Player resolves, where it resolves only one. |
+| 307 | The stream's route, returned when this Player resolves exactly one stream. |
 | 400 | A query the grammar refuses, or an upstream 400. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -566,7 +566,7 @@ The Player's screen and sound in one stream, as video/mp4.
 | Status | Description |
 | --- | --- |
 | 200 | The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order. |
-| 307 | The one stream this Player resolves, where it resolves only one. |
+| 307 | The stream's route, returned when this Player resolves exactly one stream. |
 | 400 | A query the grammar refuses, or an upstream 400. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -601,7 +601,7 @@ The Player's screen and sound in one stream, as video/mp4. The headers alone, wi
 | Status | Description |
 | --- | --- |
 | 200 | The composed stream: one video track where the Player has a screen, and one audio track per Sink in spec.sinks order. |
-| 307 | The one stream this Player resolves, where it resolves only one. |
+| 307 | The stream's route, returned when this Player resolves exactly one stream. |
 | 400 | A query the grammar refuses, or an upstream 400. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -651,7 +651,7 @@ The Player's screen, in the format chosen by Accept.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -684,7 +684,7 @@ The Player's screen, in the format chosen by Accept. The headers alone, with no 
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -727,7 +727,7 @@ The Player's screen, as image/jpeg.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -760,7 +760,7 @@ The Player's screen, as image/jpeg. The headers alone, with no body, no capture,
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -803,7 +803,7 @@ The Player's screen, as multipart/x-mixed-replace.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -836,7 +836,7 @@ The Player's screen, as multipart/x-mixed-replace. The headers alone, with no bo
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -879,7 +879,7 @@ The Player's screen, as video/mp4.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -912,7 +912,7 @@ The Player's screen, as video/mp4. The headers alone, with no body, no capture, 
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -955,7 +955,7 @@ The Player's screen, as image/png.
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
@@ -988,7 +988,7 @@ The Player's screen, as image/png. The headers alone, with no body, no capture, 
 | 404 | No Player of that name, or an upstream 404. |
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
-| 409 | The Player carries no status.screen. |
+| 409 | The Player has no status.screen. |
 | 502 | An upstream answer this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |

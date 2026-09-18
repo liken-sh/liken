@@ -75,7 +75,7 @@ What to play and where. The spec is immutable: a different film or a different p
 | <span id="spec--start"></span>`start` | string | no | Where in the first item the run begins, as a time the player accepts, such as 0:10:00 or 600. Omitted, the run begins at the start. Later items always begin at their own start. This is also how a run resumes: a new Play with the position a finished or deleted one reported. |
 | <span id="spec--next"></span>`next` | [object](#specnext) | no | The work that follows this run. The display offers it on the scrubber as a chip, and as a card in the last ten percent of the run. A select on the offer publishes the request below on the Player's commands topic, where the program that wrote the Play reads it back and creates the next Play. A Play with no next block offers nothing. |
 | <span id="spec--trickplayinterval"></span>`trickplayInterval` | string | no | The seconds one trickplay tile covers, as a Go duration like 10s. Jellyfin writes no manifest beside the sheets, so the Play declares it. Omitted, it defaults to 10s, the Jellyfin default. |
-| <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How long this Play stays after it finishes, in seconds, the meaning a Job gives the name. While it stays, kubectl get plays still answers what just played and where it stopped; deleting the Play deletes that record. Omitted, it is 300 seconds. Zero deletes the Play as soon as it finishes. The playback pod does not wait for this window: it is deleted as soon as the run finishes. |
+| <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How long this Play remains after it finishes, in seconds, the meaning a Job gives the name. While it remains, kubectl get plays still shows what just played and where it stopped; deleting the Play deletes that record. Omitted, it is 300 seconds. Zero deletes the Play as soon as it finishes. The playback pod does not wait for this window: it is deleted as soon as the run finishes. |
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order, the most specific tier; omit it to inherit the Player. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order, the most specific tier; omit it to inherit the Player. |
 | <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show, the most specific tier; omit it to inherit the Player. One of: `on`, `off`, `auto`. |
@@ -151,8 +151,8 @@ What the playback pod reports, written only by the media operator. The playback 
 | <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The resolved audio language order this run applied, the record of what the three tiers settled on. |
 | <span id="status--subtitlelanguages"></span>`subtitleLanguages` | []string | no | The resolved subtitle language order this run applied. |
 | <span id="status--subtitles"></span>`subtitles` | string | no | The resolved subtitle setting this run applied, one of on, off, or auto. |
-| <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file carries it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
-| <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language of the subtitle track mpv chose; empty when none plays. The value is the track's own tag as the file carries it, the way audioLanguage reports its track. |
+| <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file contains it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
+| <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language of the subtitle track mpv chose; empty when none plays. The value is the track's own tag as the file contains it, the way audioLanguage reports its track. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The run's conditions. There is one, DisplayAlive, and it reports the playback pod's display container, the native sidecar that draws the on-screen display. It is True with reason Running while the container runs, at any restart count, and False with reason Restarting only while the container is down after an exit the kubelet recorded. The message states the restart count with the reason and exit code of the last termination, and a display that has never restarted has no message. More than two restarts in one run set the phase to Finished with the same message, and the run retires the way a finished film does. The condition is absent while the pod reports no display container or the container has not started yet. lastTransitionTime moves only when the status does. |
 
 ### status.conditions[]
@@ -170,8 +170,8 @@ The run's conditions. There is one, DisplayAlive, and it reports the playback po
 
 ## On the bus
 
-The `plays` tree carries one run's commands, its report, and its
-availability. [The media bus](/docs/reference/bus/) gives the rules
+The `plays` tree contains one run's commands, report, and availability.
+[The media bus](/docs/reference/bus/) gives the rules
 every topic follows and lists every writer and reader of each.
 
 | Topic | Writer | Retained | Carries |
@@ -237,8 +237,8 @@ running `Play`'s place back from the broker.
 player has read the item's header, and the two language fields are
 absent while no track of that kind plays. The language values are
 the track's own tags as the file carries them, for Matroska the
-three-letter ISO 639-2 codes, whatever form the preference used. One more field, `ended`,
-appears when the run is over and stays set in every later report of
+three-letter ISO 639-2 codes, whatever form the preference used. The
+`ended` field appears when the run is over and remains set in every later report of
 the same run. The pod takes seconds to terminate, so the operator
 reads this mark and returns the unit to idle at once instead of
 waiting out the pod.
@@ -250,11 +250,11 @@ one.
 Two writers clear the topic. The pod clears it with an empty retained
 payload when its run ends cleanly. The operator clears it as well, which
 is what a pod that died uncleanly needs, and it does so on its
-finalizer: it holds `media.liken.sh/bus-topics` on every `Play`, and
+finalizer: it adds `media.liken.sh/bus-topics` to every `Play`, and
 when the `Play` is deleted it deletes the pod, waits for the pod to be
 gone, publishes an empty retained payload on `status` and on
 `availability`, and only then takes its finalizer off. So the `Play` is
-never gone while its topics still stand, and a deleted `Play` leaves no
+never gone while its topics remain, and a deleted `Play` leaves no
 report on the broker.
 
 ### `availability`

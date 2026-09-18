@@ -1,24 +1,23 @@
-# 13, Standing pods follow the template
+# 13, Recreate long-running pods when templates change
 
 The operator owns two kinds of standing pods: the idle pod per
 `Player` and the reader pod per `Remote`. Both are created when they
 are missing and never touched again. So an operator release leaves
-every standing pod on the old image until a hand deletes it, and a
+every standing pod on the old image until a person deletes it, and a
 `Player` or `Remote` edit that changes the pod's environment or its
 claim's selector leaves a pod that no longer matches its spec. Plan
 12's rollout showed both: the idle pods and the reader pod all needed
-hand deletes to pick up the release.
+manual deletes to pick up the release.
 
-This plan makes the standing pods follow the template. The operator
-already builds the desired pod and the desired claim on every pass.
-Now it remembers what it built, notices when what it would build has
-changed, and replaces the stale object. A release rolls its standing
-pods on its own, and so does a spec edit.
+The operator already builds the desired pod and claim on every pass.
+This plan records a hash of each generated template, detects template
+changes, and replaces the stale object. An operator release or spec
+edit that changes a pod's template recreates that long-running pod.
 
 ## The template hash
 
 A `Deployment` detects a stale pod by stamping a hash of the template
-it built (`pod-template-hash`) and comparing, never by comparing live
+it built (`pod-template-hash`) and comparing it, never by comparing live
 specs, because the API server defaults fields the builder never set.
 The operator does the same with one annotation,
 `media.liken.sh/template-hash`, on each object it stands up:
@@ -42,21 +41,20 @@ On every pass, for each standing pod and its claim:
 
 A roll interrupts. Recreating a reader pod drops controller input for
 a few seconds, and recreating an idle pod blinks the idle screen
-once. That is the honest shape of an upgrade: a release is a
-deliberate act, and the interruption is the release arriving.
+once. An upgrade therefore includes this brief interruption.
 
 ## The delete verbs
 
-The operator already holds delete on pods and claims, granted for
-the path that recreates a reshaped playback pod. This plan reuses
-those verbs for the standing pairs and adds none. The owner
+The operator already has delete permission on pods and claims, granted
+for the path that recreates a reshaped playback pod. This plan uses
+those permissions for the standing pairs and adds none. The owner
 references stay, and they remain the whole teardown for a deleted
 `Player` or `Remote`.
 
 ## Considered and set aside
 
-* **A `Deployment` per `Player` and per `Remote`.** The k8s-native
-  reflex, and it fails on the claims. A workload template references
+* **A `Deployment` per `Player` and per `Remote`.** A workload template
+  references
   claims through a `ResourceClaimTemplate`, which mints a fresh claim
   per pod and gives up the standing claim. And a selector edit still
   needs the operator to delete and recreate the immutable claim,
@@ -68,16 +66,16 @@ references stay, and they remain the whole teardown for a deleted
   hash compares the operator's own output across passes and nothing
   else.
 * **Holding a roll while a controller holds focus on a running
-  film.** A guard that defers the reader pod's roll would trade a
-  few seconds of input for a pod whose age nobody can predict.
-  Releases are deliberate and rolls are expected.
+  film.** A guard that defers the reader pod's roll would trade a few
+  seconds of input for a delay whose duration depends on the running
+  controller. Releases are deliberate and rolls are expected.
 
 ## Proof
 
 On `liken-1`, the release of this plan is its own drill:
 
 * Apply the release. The idle pods and the reader pod roll on their
-  own, with no hand delete, and come back on the new image.
+  own, with no manual delete, and come back on the new image.
 * Edit a `Player`'s idle-relevant spec. The idle pod rolls; the
   claim stays.
 * A second pass after the rolls deletes nothing, because the hashes

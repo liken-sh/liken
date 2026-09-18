@@ -1,39 +1,39 @@
-# A remote that teaches its keymap
+# 21, Remote discovery reports keymap entries
 
 ## The problem
 
 Writing a `Keymap` for hardware the project has not seen is
 guesswork. A new controller emits key codes the vendor documents
 poorly or not at all, and the raw numbers already reach the events
-topic, so a person with `mosquitto_sub` can watch them. What is
-missing is everything around that: the names a `Keymap` binds, an
-answer in `kubectl`, reach to the nodes the reader rejects, and a
-documented flow. Worse, the old button vocabulary held fifteen
-gamepad names, so a media remote's `KEY_*` codes could not be bound
-at all, and the old node selection kept only nodes that declared
-one of those fifteen, so such a remote read as absent: connected,
-emitting, and reported as away.
+topic, so a person with `mosquitto_sub` can watch them. The project
+still needs the names that a `Keymap` binds, a result in `kubectl`,
+access to nodes the reader rejects, and a documented mapping flow.
+The old button vocabulary held fifteen gamepad names, so a media
+remote's `KEY_*` codes could not be bound. The old node selection kept
+only nodes that declared one of those fifteen names, so such a remote
+appeared absent and its status reported it as away even when it was
+connected and emitting events.
 
 ## The design
 
-The whole `EV_KEY` name space becomes bindable. A generated table,
+The `Keymap` can bind every name in the `EV_KEY` name space. A generated table,
 `keycodes.go`, holds every `BTN_*` and `KEY_*` name from the
-kernel's `input-event-codes.h`, written by `make codes` and
-committed. The `Keymap` schema replaces its fifteen-name list with a
-pattern, and the compile stays the real gate. The axes stay the two
-hats: no action takes an analog value, and a resting stick reports
-constantly. The node selection widens in the same release, to any
-node that declares a key code or a hat axis, because a `Keymap` that
-may bind `KEY_PLAYPAUSE` needs the node that carries it. The two
-changes are one change: a vocabulary the selection rule cannot
-deliver is a promise the translator cannot keep.
+kernel's `input-event-codes.h`, written by `make codes` and committed.
+The `Keymap` schema replaces its fifteen-name list with a pattern, and
+the compiler remains the final validation step. The design still
+supports two hat axes. No action takes an analog value, and a resting
+stick reports constantly. The node selection widens in the same
+release to any node that declares a key code or a hat axis. A
+`Keymap` that may bind `KEY_PLAYPAUSE` therefore reaches the node that
+carries it. The expanded vocabulary requires the wider node selection;
+without it, the translator could not receive every bindable code.
 
-`spec.discovery`, a boolean on the `Remote`, is the teaching mode.
+`spec.discovery`, a boolean on the `Remote`, enables mapping mode.
 The reader pod receives it as one environment variable, so the
 toggle replaces the pod and the claim survives, the pod-only tier of
 plan 13. In discovery the reader keeps every node the claim
-delivered, because the point of discovery is to see what the rule
-rejects, and it logs each event with the code's evdev name, the
+delivered, so discovery includes the nodes that normal selection would
+reject. It logs each event with the code's evdev name, the
 value as a press, a release, or a repeat, and a paste-ready `Keymap`
 entry. Publishing is unchanged: the translator already drops
 unbound events, and a reader that went silent would stop waking a
@@ -42,20 +42,20 @@ plays.
 
 In both modes the reader logs one verdict line per node at each
 open, with the keep or reject decision and the counts behind it, so
-a controller that reaches nothing shows why. It logs the picture
-once and repeats nothing while a sleeping controller keeps the
-two-second scan busy.
+a controller that reaches nothing shows why. It logs this verdict once
+and does not repeat it while a sleeping controller keeps the two-second
+scan busy.
 
 The reader also publishes what the controller declares. A node's
 capability bitmaps state every code it can report, complete with no
 button pressed, so at each node open the pod publishes the union
 over its kept nodes to a retained `codes` topic, shaped like the
 presence topic beside it: republished on reconnect, cleared with an
-empty payload when the nodes vanish. The operator folds it into a
-desk and reports the gap on the `Remote`: `status.unbound`, every
+empty payload when the nodes vanish. The operator stores the received
+codes and derives `status.unbound` on the `Remote`, which lists every
 declared code the `Keymap` does not bind. The gap is derived on
 every pass and never accumulated, so it needs no reset, empties as
-the `Keymap` grows, and stands afterward as a completeness check.
+the `Keymap` grows, and provides a completeness check.
 The list is a map keyed on code and type together, because one
 number can name both a key and an axis, and it carries no cap: the
 evdev ABI bounds a node at 768 key codes, and a real remote can
@@ -88,11 +88,11 @@ that controller translates nothing and nothing fails.
 - The reader pod writing status itself. The pod holds no API
   credentials by design, and a second writer would race the
   operator's per-pass write.
-- The full name list as a CRD enum. Six hundred names would bury
-  the generated reference page; the pattern catches a typo's shape
-  and the compile catches the rest.
-- Raw numeric codes on the `Keymap`'s left side. The names are the
-  API and the numbers are the wire.
+- The full name list as a CRD enum. Six hundred names would make the
+  generated reference page difficult to use. The pattern catches a
+  typo's shape, and the compiler catches the rest.
+- Raw numeric codes on the `Keymap`'s left side. The names are the API
+  input, and the numbers are the wire representation.
 - Infrared and CEC remotes. No hardware operator publishes an input
   device for them, so there is nothing for a `Remote` to select.
   That is a hardware-operator problem, not a mapping problem.
@@ -118,7 +118,8 @@ assumed all passed:
    lifted from the log. `status.unbound` fell from 275 to 265, the
    keyboard on the shell's back that stays deliberately unbound.
 
-The drill also surfaced what the mode exists to surface. The
+The drill also showed the hardware details this mode is designed to
+report. The
 verdict lines showed the X6's OK button is a mouse click and its
 house-glyph button emits `KEY_BACK`, facts no vendor document
 states. And the first `KEY_*` device on the testbed flushed out two

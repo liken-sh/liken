@@ -1,6 +1,6 @@
 # The broker is not configurable
 
-Plan 03 stands up one MQTT broker, a `Deployment` and a `Service`
+Plan 03 creates one MQTT broker, a `Deployment` and a `Service`
 named `bus` in the operator's namespace, and points every pod at it
 under one topic base, `liken/media`. Both the address and the base are
 fixed. A home that already runs a broker gets a second one beside it,
@@ -21,7 +21,7 @@ each operator reads the other's reports as its own. One cluster with
 its own in-cluster broker has one publisher per topic and never sees
 it.
 
-The operator holds the broker's address, its credentials, and the
+The operator stores the broker's address, its credentials, and the
 topic base as configuration, so both fixes are a matter of where those
 values come from. The in-cluster `bus` supplies its own defaults. An
 external broker supplies an address, a username, and a password, which

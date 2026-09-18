@@ -290,9 +290,9 @@ spec:
                   format: int64
                   minimum: 0
                   description: >-
-                    How long this Play stays after it finishes, in
+                    How long this Play remains after it finishes, in
                     seconds, the meaning a Job gives the name. While it
-                    stays, kubectl get plays still answers what just
+                    remains, kubectl get plays still shows what just
                     played and where it stopped; deleting the Play
                     deletes that record. Omitted, it is 300 seconds.
                     Zero deletes the Play as soon as it finishes. The
@@ -449,14 +449,14 @@ spec:
                     The language of the audio track mpv chose, so
                     you can see when a code matched no track. The
                     value is the track's own tag as the file
-                    carries it, for Matroska the three-letter ISO
+                    contains it, for Matroska the three-letter ISO
                     639-2 code, whatever form the preference used.
                 subtitleLanguage:
                   type: string
                   description: >-
                     The language of the subtitle track mpv chose;
                     empty when none plays. The value is the track's
-                    own tag as the file carries it, the way
+                    own tag as the file contains it, the way
                     audioLanguage reports its track.
                 conditions:
                   type: array

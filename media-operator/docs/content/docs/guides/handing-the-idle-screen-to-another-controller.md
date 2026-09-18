@@ -149,7 +149,7 @@ Set these variables on your container. Each value comes from
   is present whenever `bus.volumeTopic` is. The topic holds the
   retained [owner mark](/docs/reference/players/#volumeowner): a
   non-empty payload means equipment applies the unit's level, and an
-  empty payload means no owner holds it. While the mark stands, draw
+  empty payload means no owner holds it. While the mark is non-empty, draw
   no level of your own and apply none to any audio the client plays.
   A press still publishes the next state on the volume topic, and the
   equipment moves one step in its direction.
@@ -159,7 +159,7 @@ Set these variables on your container. Each value comes from
   It publishes `{"action": "home"}` there when a person presses home
   during a film, just before the `Play` ends. The client reads that
   message as a press of the home key. When a `Play` ends, the client's
-  own surface is on the screen again without it asking, and the
+  own surface is on the screen again without a command from the client, and the
   retained status is the cue. Nothing else arrives, and the client
   publishes nothing back.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
@@ -199,8 +199,8 @@ same happens when a `Player` switches to `media.liken.sh/none`: the
 claim's holders go, then the claim.
 
 When the `Player` switches away from your name, `status.idle` changes
-and your pod is yours to remove. The operator deletes it only when it
-replaces the claim.
+and your client no longer controls the screen. Remove its pod. The
+operator deletes it only when it replaces the claim.
 
 ## What stays with the operator
 
