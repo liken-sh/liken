@@ -69,7 +69,7 @@ is the declaration of your cluster.
     ./liken mint mycluster/identity
 
 The identity is the set of certificate authorities and the join token
-that make your machines into one cluster. The files include private
+that identify your machines as one cluster. The files include private
 keys. The scaffold's `.gitignore` file keeps them out of version
 control. If you already run a k3s cluster, do not run `liken mint`. Use
 `liken adopt` instead, to join machines to that cluster. To list and
@@ -128,7 +128,7 @@ with step 4. The manual gives the steps:
 
 To install, select `install as <name>` for the machine in front of you.
 The machine partitions its blank disks, copies the operating system
-onto them, registers itself with its firmware, then it holds:
+onto them, registers itself with its firmware, then it waits:
 
     liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
 
@@ -141,8 +141,8 @@ that liken made, select `wipe and reinstall as <name>`. That entry
 erases the disks that the machine's manifest declares, then it installs
 the machine.
 
-The machines find each other at the addresses that you declared. The
-leaders make the control plane, and the followers join it.
+Each machine contacts its peers at the addresses that you declared. The
+leaders form the control plane, and the followers join it.
 
 ## 6. Talk to your cluster
 

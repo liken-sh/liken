@@ -5,12 +5,12 @@
 // The choice of where a fact goes depends on who must agree on it.
 // Every fact in a ClusterSpec is one of two kinds. Either every node
 // must hold the fact identically (which machines run control
-// planes, the address ranges pods and services live in), or the
+// planes, the address ranges that pods and services use), or the
 // fact belongs to the group and no single machine owns it (the
 // endpoint followers join through). Every fact specific to one
 // machine (its interfaces, its addresses, its disks) stays on the
 // Machine. The two document packages never import each other. The
-// grammar they share (ObjectMeta, Phase, Condition, Role) lives in
+// grammar they share (ObjectMeta, Phase, Condition, Role) is in
 // the api package underneath both.
 //
 // Like the Machine manifest, the Cluster manifest arrives as a file
@@ -18,7 +18,7 @@
 // custom resource once the API is up. Unlike the Machine manifest,
 // every machine's image includes the same cluster.yaml. The document
 // is cluster-scoped, so there is exactly one. liken already treats
-// "same image" as "same cluster": the image carries the cluster's CA
+// "same image" as "same cluster": the image contains the cluster's CA
 // and join token.
 //
 // The type names repeat a word (cluster.ClusterSpec), for the same
@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// ClusterManifestPath is where the image carries the cluster's
+// ClusterManifestPath is where the image contains the cluster's
 // manifest. Init reads it for this machine's role. The operator
 // reads the same file through a hostPath mount, to seed the
 // in-cluster Cluster resource.

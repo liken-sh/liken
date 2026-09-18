@@ -2,7 +2,7 @@
 
 <img src="https://liken.sh/brand/liken.svg" alt="The liken mark: a patch of lichen drawn as hexagonal tiles" width="130" align="right">
 
-**liken** *(v.)* — to represent one thing as similar to another; to compare.
+**liken** *(v.)*: to represent one thing as similar to another; to compare.
 
 Homophone of *[lichen](https://en.wikipedia.org/wiki/Lichen)*: a symbiont
 of two organisms living as one, and one of the first things to colonize
@@ -64,8 +64,8 @@ teach the domain: why the kernel does not mount `/proc` on its own, why
 who reads the repository from top to bottom learns how a Linux system
 boots, and how Kubernetes takes control after that.
 
-This is why a file here carries far more commentary than the same file
-would carry in another project. The commentary is deliberate, and it is
+This is why files here contain more commentary than the same files
+would contain in another project. The commentary is deliberate, and it is
 the documentation. The idea is
 [literate programming](https://en.wikipedia.org/wiki/Literate_programming),
 which Donald Knuth described in 1984. His original form builds the
@@ -74,7 +74,7 @@ not do that. It keeps the goal, which is a repository that explains
 itself, and it uses ordinary files that run as they are.
 
 An explanation that is too big for a comment goes in a markdown
-document beside the thing it describes. [`plans/`](plans/) holds the
+document beside the thing it describes. [`plans/`](plans/) contains the
 design overview and one document for each milestone.
 
 ## Prior art
@@ -130,9 +130,9 @@ a physical machine can prove.
 
 The plans directory has three parts:
 
-* [`plans/completed/`](plans/completed/) holds the milestones that are
+* [`plans/completed/`](plans/completed/) contains the milestones that are
   built.
-* [`plans/rejected/`](plans/rejected/) holds a milestone that was built
+* [`plans/rejected/`](plans/rejected/) contains a milestone that was built
   and then removed.
 * The markdown files in [`plans/`](plans/) are the design overview and
   the proposals that are not built.
@@ -142,7 +142,7 @@ The plans directory has three parts:
 Everything in this repository is `liken`'s own work, under the MIT
 license. The build fetches the kernel, `k3s`, and the other vendored
 components at build time. The repository never commits them, so it
-carries no third-party code.
+contains no third-party code.
 
 A built release does redistribute those components, each under its own
 license. Every release bundles a `LICENSES.md` file that names each

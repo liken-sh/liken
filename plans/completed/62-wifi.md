@@ -81,7 +81,7 @@ AP, and a machine parked out of range. The supplicant's
 `CTRL-EVENT-SSID-TEMP-DISABLED reason=WRONG_KEY` names the one case
 that no amount of waiting will fix.
 
-The protocol is plain text over one datagram socket, so init carries
+The protocol is plain text over one datagram socket, so init includes
 its own small client instead of vendoring `wpa_cli`. The events
 drive three things: the gate that tells init the join finished, the
 console lines, and the facts that become `Machine` status. The
@@ -100,8 +100,8 @@ not what the machine may join.
 
 ## The passphrase
 
-The passphrase rides where the join token rides. The image already
-carries `/etc/liken/token` and the cluster CA under the rule "same
+The passphrase is another cluster-level credential, like the join token.
+The image already contains `/etc/liken/token` and the cluster CA under the rule "same
 image means same cluster", and a wifi passphrase is the same class of
 fact: a cluster-level credential the machine needs before the cluster
 can give it anything. The installer writes one file per network at
@@ -128,7 +128,7 @@ A deterministic credential failure parks the boot only when the
 machine has no other path to the cluster. After every interface
 settles, init asks whether any healthy interface gives a route toward
 the cluster's endpoint. If one does, the boot proceeds, the node runs
-degraded, and a condition carries the supplicant's reason. If none
+degraded, and a condition records the supplicant's reason. If none
 does, and the supplicant reported a deterministic failure such as
 `WRONG_KEY`, the boot parks with the reason on the console.
 

@@ -59,10 +59,9 @@ these three conditions are true:
    disk belongs to the machine, through a storage role, or to the
    workloads, through a claim, but never to both.
 
-The slice is an offer, and not a full record of the machine's
-hardware. The
-scheduler can allocate only what a slice lists, so the contents of
-the slice are the control.
+The slice is an allocation offer, not a full record of the machine's
+hardware. The scheduler can allocate only what a slice lists, so the
+slice contents control which devices workloads can claim.
 
 The slice does not list the bus structure. Hubs, PCIe ports, and the
 USB core's own devices are the structure that peripherals attach to,
@@ -150,8 +149,8 @@ nodes except the ones a sound card holds. It has
 `subsystem: sound` and `sound.liken.sh/supportsSound: true`, and it
 is exclusive. In practice one sound server
 owns every PCM on a card and mixes its clients' streams through them,
-so the card belongs to one claim. A second claimant waits in the
-scheduler, where a person can see it wait, instead of receiving ALSA's
+so the card belongs to one claim. A second claimant stays pending in the
+scheduler, and Kubernetes reports that state instead of returning ALSA's
 `EBUSY` at play time.
 
 A claim on an audio controller delivers the card's whole subtree,
@@ -167,8 +166,8 @@ device. The name of that device is the primary name plus `-display`,
 and it has `displayNode: true`. This device is exclusive, because
 DRM master is one for each card: the kernel gives modesetting to one
 open card node, and a second display program on the same card fails
-when it starts. An exclusive device makes the second claim wait in
-the scheduler instead, where a person can see it wait. A workload
+when it starts. An exclusive device makes the second claim stay pending
+in the scheduler, where Kubernetes reports its pending state. A workload
 that modesets and also renders claims both devices, with one request
 for each. On a machine with two cards, a constraint of
 `matchAttribute: liken.sh/address` on those two requests keeps both on
@@ -186,10 +185,10 @@ holding it grants display takeover, and no workload claims a bare
 framebuffer.
 
 A device that delivers one kind of node publishes as one device,
-unless it is a GPU. A device that delivers a mix `liken` has no name
-for publishes whole and exclusive, and names no `subsystem`. A
-Bluetooth adapter publishes the same way, whole and exclusive with no
-`subsystem`, because the only node it delivers is its usbfs node.
+unless it is a GPU. When a device delivers a mix that `liken` has no
+name for, `liken` publishes the whole device as exclusive and omits
+`subsystem`. A Bluetooth adapter is also published whole and exclusive
+with no `subsystem`, because its only delivered node is its usbfs node.
 
 A DRM render node has a multiplexing contract in the kernel: the
 driver arbitrates between concurrent clients. A drill measured this
@@ -203,7 +202,8 @@ Only the driver can state this, because only the driver writes a
 marked as shareable, two workloads get the same hardware while each
 one operates as the only user, and no DeviceClass, claim, or workload
 can correct it. If a device is incorrectly marked as exclusive, a
-claim waits, and a person can see that it waits.
+claim stays pending in the scheduler, where Kubernetes reports its
+pending state.
 
 ### Sharing a claim is not the same thing
 
@@ -276,10 +276,10 @@ holds that workload on the machine the radio is in. A stack that drives the
 radio through the kernel opens its socket with the capabilities of its
 own container, because a claim grants no privilege.
 
-`/dev/uhid` rides the adapter's claim because it is the kernel's
-inlet for a HID stack that runs in userspace. BlueZ carries HID over
+`/dev/uhid` belongs to the adapter's claim because it is the kernel's
+inlet for a HID stack that runs in userspace. BlueZ sends HID over
 GATT there and writes this node to present a BLE peripheral as an
-input device, while classic Bluetooth HID rides `hidp` inside the
+input device, while classic Bluetooth HID passes through `hidp` inside the
 kernel and needs no node. Declare the `uhid` module on a machine
 whose adapter serves BLE input devices. Without it, such a device
 pairs and connects, but no input node ever appears, and `bluetoothd`

@@ -125,7 +125,7 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Machine is one computer that runs liken. It holds the
+            A Machine is one computer that runs liken. It records the
             declared state of the operating system below this
             cluster, and the observed facts about the hardware that
             the operating system runs on.
@@ -400,8 +400,8 @@ spec:
                         applies these entries at boot, and the liken
                         operator applies them again on every pass, so
                         an edit here takes effect without a reboot.
-                        status.hostEntries reports the entries as the
-                        hosts file holds them, read back after each
+                        status.hostEntries reports the entries that the
+                        hosts file contains, read back after each
                         pass.
                       # One line of the file per address: a map keyed
                       # by address. The API server enforces that key,
@@ -522,7 +522,7 @@ spec:
                     boot, in addition to the fixed list that the
                     operating system needs. These are the drivers for
                     the hardware that this machine's workloads use.
-                    The image carries the kernel build's whole module
+                    The image includes the kernel build's whole module
                     tree, so any name that kernel has is loadable
                     here, whatever manifests existed when the image
                     was built. status.modules reports the result for
@@ -688,12 +688,12 @@ spec:
                   maxItems: 64
                   description: >-
                     The taints that this machine's Node object
-                    carries. A taint repels every pod that does not
+                    has. A taint repels every pod that does not
                     tolerate it, which is how a machine that is
                     dedicated to one job keeps other work off it. The
                     system writes these taints into the k3s boot
                     configuration, so a node that registers for the
-                    first time carries them from its first moment. The
+                    first time has them from registration. The
                     kubelet applies those registration taints only
                     when it creates the Node object, on a first boot
                     or after a reinstall. On every later boot the Node

@@ -57,7 +57,7 @@ background. The interface's status appears in `kubectl get machine`
 when the join settles. During that window the `WirelessJoined`
 condition is `False` with the reason `Joining`, and the machine stays
 `Ready`. If the machine's only interface is the radio and the
-passphrase is wrong, the machine holds its boot. It says so on the
+passphrase is wrong, the machine blocks the boot and waits. It says so on the
 console and in `kubectl get machines`. A machine with a working wired
 interface joins anyway and reports the wifi failure as a condition.
 
@@ -104,7 +104,7 @@ disks, interfaces, and drivers before you install. [Install a
 cluster](https://liken.sh/docs/guides/install/#5-boot-each-machine-from-the-stick)
 describes the report and the held console messages fully.
 
-Select `install as <name>`. The machine installs itself and holds the
+Select `install as <name>`. The machine installs itself and waits at the
 console:
 
     liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.

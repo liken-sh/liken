@@ -25,9 +25,9 @@ package kubernetes
 // that cost. liken has used a lease for its heartbeats from the
 // start, for the same reason. The leases live in the liken-system
 // namespace, not in a copy of kube-node-lease's dedicated namespace.
-// This means everything liken coordinates through sits in the one
-// namespace that the OS owns: the command `kubectl get leases -n
-// liken-system` shows the fleet's entire liveness picture.
+// All objects that liken coordinates through this API use the
+// namespace that the OS owns. The command `kubectl get leases -n
+// liken-system` shows the fleet's complete liveness state.
 
 import (
 	"encoding/json"
@@ -42,7 +42,7 @@ import (
 const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
 
 // HeartbeatRenewAfter sets how old the heartbeat must be before the
-// machine's own operator renews it. The value sits just under the
+// machine's own operator renews it. The value is just under the
 // ten-second reconcile ticker, so every ticker pass renews the
 // lease, and the event-driven passes in between only need to read
 // it. HeartbeatStaleAfter sets how long a machine may then stay
@@ -54,7 +54,7 @@ const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/lease
 // lease every ten seconds, and the node controller waits forty
 // seconds for a silent kubelet before its Node goes NotReady. A dead
 // machine stops renewing both leases at the same moment, so matching
-// the two thresholds means both verdicts land together. This way,
+// the two thresholds means both systems report the loss together. This way,
 // `kubectl get nodes` never disagrees with `kubectl get machines` for
 // a minute about a machine that just died.
 const (

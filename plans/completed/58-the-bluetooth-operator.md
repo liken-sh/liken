@@ -29,21 +29,20 @@ both are wrong.
   means the keyboard and the mouse as well. Nothing says which node is
   which controller, and the numbers change on every boot.
 
-One fact governs the design: where the pairing state is. bluetoothd
-holds it, which is the paired set, the link keys, and the HID sessions.
-It is not in sysfs and it is not on the Machine. So the layer that
-publishes controllers must be the layer that runs bluetoothd, which is
-the pattern milestone 56 states.
+bluetoothd maintains the pairing state: the paired devices, link keys,
+and HID sessions. Neither sysfs nor the Machine contains that state.
+The operator that runs bluetoothd must therefore publish the
+controllers, following milestone 56's pattern.
 
 ## What the pod runs and what it may do
 
 The pod runs BlueZ's `bluetoothd`. bluetoothd owns pairing, the link
 keys, and the HID sessions on top of them, and the lab proved the
 ownership is not shareable: killing bluetoothd disconnects every
-controller at once. The link keys outlive the pod, because a bond that
-dies with the pod turns every restart into a re-pairing with a
-person's hands on the controller. This milestone proposed a volume for
-them. The operator ships a Secret instead, named for the adapter's own
+controller at once. The link keys outlive the pod so that a person
+does not have to pair the controller again after every restart. This
+milestone proposed a volume for them. The operator ships a Secret
+instead, named for the adapter's own
 address, which answers the last of the
 [open questions](#open-questions) below.
 

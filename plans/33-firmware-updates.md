@@ -17,7 +17,7 @@ machine changes when the image changes.
 This milestone is about the other kind: the firmware that the machine
 itself runs before any kernel loads. The UEFI firmware on the board, a
 network card's NVRAM, an SSD's controller, a dock. Vendors ship
-updates to these, and on Linux the program that finds and applies them
+updates to these, and on Linux the program that detects and applies them
 is fwupd, using the Linux Vendor Firmware Service (LVFS) as its
 catalog. A vendor signs each update. LVFS serves it.
 
@@ -186,7 +186,7 @@ record-and-compare check did not.
 
 ## The fwupd design
 
-Everything below is proposed. It stands on the four prerequisites
+Everything below is proposed. It depends on the four prerequisites
 above.
 
 ### fwupd asks; init writes

@@ -93,7 +93,7 @@ spec:
           type: object
           description: >-
             A Cluster is the group that liken machines form together.
-            It holds the topology, which is the set of machines that
+            It records the topology, which is the set of machines that
             run control planes, and the network facts that every node
             must agree on.
           properties:
@@ -267,7 +267,7 @@ spec:
                     founder of a founded cluster can create the
                     datastore again. Only a boot reads this field, so
                     the edit costs no reboot and no restart. Each
-                    machine holds the new document and applies it at
+                    machine stages the new document and applies it at
                     its next boot, and reports StagedForNextBoot on
                     its ClusterConverged condition until then.
                 leaders:
@@ -302,7 +302,7 @@ spec:
                     machine that has joined keeps the address of every
                     leader and never asks the endpoint again. So an
                     edit costs no reboot and no restart. Each machine
-                    holds the new document and applies it at its next
+                    stages the new document and applies it at its next
                     boot, and reports StagedForNextBoot on its
                     ClusterConverged condition until then. Two things
                     still hold the old address until a machine boots. A
@@ -341,11 +341,11 @@ spec:
                       maxLength: 64
                       pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
-                        The subnet that the nodes use to address each
-                        other. On each machine, the interface with an
-                        address inside this subnet carries the cluster
-                        traffic, and that address becomes the
-                        machine's node IP.
+                        The subnet that nodes use to address each
+                        other. On each machine, init selects the
+                        interface whose address is inside this subnet
+                        for cluster traffic and uses that address as
+                        the machine's node IP.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
                           message: nodeCIDR is immutable after it is set; a new address plan for the node network needs new Machine manifests, not a Cluster edit
@@ -511,7 +511,7 @@ spec:
                     no daemons, and version 4 only. flux is GitOps
                     sync through Flux: the fleet's declared state is
                     in a git repository, and the cluster applies what
-                    the repository holds. flux is the first feature in
+                    the repository contains. flux is the first feature in
                     the vocabulary that takes parameters. Its
                     repository parameter is required: the git URL the
                     fleet syncs from, for example
@@ -528,7 +528,7 @@ spec:
                     repository no longer produces. Pruning is right
                     for a cluster that liken founds, because every
                     object in it came from the repository. A
-                    repository that carries its own copy of the
+                    repository that contains its own copy of the
                     flux-system Kustomization must declare prune:
                     "false". That Kustomization appears in its own
                     inventory, so the first build that stops producing
@@ -537,7 +537,7 @@ spec:
                     repository is expected to be private, and the
                     cluster makes its own SSH deploy key. The private
                     half never leaves the cluster, and
-                    status.flux.publicKey carries the half to register
+                    status.flux.publicKey reports the half to register
                     at the forge. If you remove flux from this object,
                     the cluster retracts the whole feature: the sync
                     stops, the engine and its namespace go, and the

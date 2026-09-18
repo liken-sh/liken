@@ -4,11 +4,11 @@ package main
 // own PCI, SATA, USB, or virtio bus.
 //
 // A by-id name follows the disk. A by-path name follows the port: it
-// stays the same when the disk moves, because it names the wire the
-// disk sits on rather than the disk's own firmware. This is why a
+// stays the same when the disk moves, because it names the wire that
+// connects the disk rather than the disk's own firmware. This is why a
 // port name matters at all, on top of the identity names diskids.go
 // already builds. Wiping and swapping in a spare drive is easier when
-// an operator can say "whatever sits in the bay wired here" instead
+// an operator can say "whatever disk uses this bay" instead
 // of tracking a serial number, and a spec that says so keeps working
 // after the swap.
 //
@@ -45,7 +45,7 @@ var virtioSegmentPattern = regexp.MustCompile(`^virtio\d+$`)
 // usbPortSegmentPattern matches a USB device's own directory, named
 // for its position in the bus: the bus number, a dash, and the port
 // path down through any hubs to reach it. A USB device's interface
-// sits one level below, in a directory named the same way with
+// is one level below it, in a directory named the same way with
 // ":<interface>" appended, which this pattern excludes on purpose so
 // it never matches the interface by mistake.
 var usbPortSegmentPattern = regexp.MustCompile(`^\d+-[0-9.]+$`)
@@ -71,7 +71,7 @@ var iscsiSessionPattern = regexp.MustCompile(`^session\d+$`)
 var nvmeNsidPattern = regexp.MustCompile(`n(\d+)$`)
 
 // mmcHostSegment is the directory the mmc core creates under a host
-// controller to hold the cards on it. It sits directly below the
+// controller for the cards it manages. It is directly below the
 // controller's own device, so the segment before it names the
 // controller.
 const mmcHostSegment = "mmc_host"
@@ -87,7 +87,7 @@ const mmcHostSegment = "mmc_host"
 // is the name of its controller and nothing else. A controller the
 // firmware enumerates through ACPI or a device tree is a platform
 // device, and path_id names a platform device platform-<name>, with
-// the PCI slot ahead of it when the platform device sits under a PCI
+// the PCI slot ahead of it when the platform device is below a PCI
 // function. That is where an eMMC's by-path name comes from.
 //
 // A controller that enumerates over PCI on its own, which is what

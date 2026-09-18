@@ -8,11 +8,11 @@ it is installed. No stick is involved.
 ## The problem
 
 Every machine today starts from a stick. The CLI composes one per
-machine, a person carries it to the hardware, and the firmware boots
+machine, a person brings it to the hardware, and the firmware boots
 it. That works, and milestone 36 made the stick teach the operator
 what it found. But carrying media does not scale past a handful of
-machines, and a machine in a rack far from the drawer waits on a
-person with media. The cluster already holds everything that is on
+machines, and a machine in a rack far from the drawer needs a
+person to bring the media. The cluster already contains everything that is on
 the stick: the artifacts are on every boot slot, and the declarations
 are in the API. This milestone serves both from the leaders.
 
@@ -66,7 +66,7 @@ The feature pod mounts the leader's boot slot read-only and serves
 the same pieces a stick boot loads: the kernel, the microcode cpio,
 and the whole-OS payload, concatenated as initrds the way the
 stick's boot entries load them. The command line includes
-`rootfstype=ramfs`, because this is a boot whose initrd holds the
+`rootfstype=ramfs`, because this is a boot whose initrd contains the
 OS. Serving from the slot gives two properties without further
 machinery. The version a machine joins on is exactly the version the
 leader runs, so a join can never pull a version the cluster is not
@@ -118,11 +118,12 @@ for every megabyte.
 
 ## Trust
 
-The installer payload holds the material a machine needs to join,
-so netboot depends on the layer-2 segment the way the operator depends
-on the drawer that holds the sticks. Anyone who can plug into the
+The installer payload contains the material a machine needs to join.
+Netboot exposes that material to the layer-2 segment. For installation
+from a stick, physical access to the stick controls access to the same
+material. Anyone who can plug into the
 segment and present a declared MAC can receive what that machine
-would receive. The report image holds no secret; it is the same
+would receive. The report image contains no secret; it is the same
 public bytes the release channel serves. The manual states this
 plainly, so an operator can decide whether to turn the feature on for
 a segment.

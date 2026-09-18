@@ -5,7 +5,7 @@
 An operator gives a cluster a capability, and a person or an agent
 needs a short command to use it: pair a controller, capture a stream,
 ask a library to rescan. Today the only workstation command is the
-`liken` toolkit binary, and every operator carries its verbs inside
+`liken` toolkit binary, and every operator exposes its verbs inside
 the cluster with no local face.
 
 We want one command surface, `kubectl liken ...`, that reaches every
@@ -17,35 +17,35 @@ to install six things.
 ## The shape
 
 `kubectl` already dispatches by longest prefix. For
-`kubectl liken audio capture room`, `kubectl` finds
+`kubectl liken audio capture room`, `kubectl` selects
 `kubectl-liken-audio` on `PATH` and runs it with `capture room`. So
 each operator ships one binary named `kubectl-liken-<domain>`, and the
 two-layer command falls out of `kubectl`'s own rule with no code.
 
 Three names reach the same binary:
 
-* `kubectl liken audio capture` — `kubectl` walks the prefix.
-* `kubectl-liken-audio capture` — an agent runs the binary directly.
-* `liken audio capture` — the base binary walks the prefix itself, so
+* `kubectl liken audio capture`: `kubectl` walks the prefix.
+* `kubectl-liken-audio capture`: an agent runs the binary directly.
+* `liken audio capture`: the base binary walks the prefix itself, so
   the toolkit name keeps working.
 
 The base binary, `kubectl-liken`, is the existing `liken` toolkit
 binary under a second name. It owns the `plugins` command group and
 the machine verbs it already has (`request-reboot`, `approve-reboot`).
-It is installed the normal way — a release download or a package — not
+It is installed the normal way, from a release download or a package, not
 from the cluster, because it is the thing that reaches the cluster.
 
 ### Who ships a CLI
 
 Six repositories, and no others:
 
-* **liken** — the base binary. Machine verbs already exist. New: the
+* **liken**: the base binary. Machine verbs already exist. New: the
   `plugins` group and the second name.
-* **audio** — capture a sink to stdout.
-* **display** — capture an output to stdout.
-* **media** — capture what a Player shows to stdout.
-* **bluetooth** — interactive pairing, and unpair.
-* **library** — request a re-enrichment pass. (A full rescan trigger is deferred; see the open problem.)
+* **audio**: capture a sink to stdout.
+* **display**: capture an output to stdout.
+* **media**: capture what a Player shows to stdout.
+* **bluetooth**: interactive pairing, and unpair.
+* **library**: request a re-enrichment pass. (A full rescan trigger is deferred; see the open problem.)
 
 git-csi, per-node, equipment, and people ship no CLI. There is no
 local verb worth a binary there yet.
@@ -92,10 +92,10 @@ workstation pulls its own architecture regardless of the node's.
 
 ## The `plugins` command group
 
-* `kubectl liken plugins sync` — the step above. Idempotent.
-* `kubectl liken plugins list` — what is installed, each one's version,
+* `kubectl liken plugins sync`: the step above. Idempotent.
+* `kubectl liken plugins list`: what is installed, each one's version,
   and the operator version it faces, with drift marked.
-* `kubectl liken plugins remove <domain>` — delete one installed CLI.
+* `kubectl liken plugins remove <domain>`: delete one installed CLI.
 * Cold start: when `kubectl liken audio` finds no plugin, `kubectl`
   reports a raw "not found". The base binary cannot intercept that,
   so `kubectl liken plugins list` names the operators that run in the
@@ -108,9 +108,9 @@ the one line to add it to `PATH` when it is not already there.
 
 Each CLI is stamped with its own version at build time, through the
 same `-ldflags "-X main.version=..."` the operator images use. Before
-it runs a command, it learns the operator's version cheaply — the
+it runs a command, it reads the operator's version cheaply. The
 Deployment's image tag is the universal source, and an operator that
-serves a version route may use that — and compares:
+serves a version route may use that. It then compares:
 
 * Same version: run.
 * Different release: warn on stderr, name `plugins sync`, and run.
@@ -134,10 +134,10 @@ site and one label. A CLI:
 * takes the cluster's identity from the standard kube flags and the
   environment, the same as `kubectl`.
 
-One workload carries the label the base binary selects on: the
+One workload has the label the base binary selects on: the
 workload that runs the operator's own image at the release version.
-That is a Deployment for some operators and a DaemonSet for others —
-bluetooth runs only a DaemonSet — so `plugins sync` selects on the
+That is a Deployment for some operators and a DaemonSet for others.
+Bluetooth runs only a DaemonSet, so `plugins sync` selects on the
 label across Deployments, DaemonSets, and StatefulSets, and reads the
 image from the pod template of whichever it finds.
 

@@ -53,7 +53,7 @@ integrity reference outside that download.
 - Pin external actions by full commit SHA, with the human-readable version
   retained for maintenance. Keep local composite-action references local.
 - Add a reviewable update process for both kinds of pin. Version reporting
-  can follow [milestone 48](../completed/48-watching-the-pins.md), but
+  can follow [milestone 48](../completed/48-check-and-update-dependency-pins.md), but
   action pins are outside that milestone's existing watched table.
 
 Pinning does not make upstream code trustworthy by itself. The selected

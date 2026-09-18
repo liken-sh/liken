@@ -25,11 +25,11 @@ records.
 
 ## The Enrollment CRD
 
-An Enrollment holds one machine's proposal. It is a new
+An Enrollment contains one machine's proposal. It is a new
 cluster-scoped kind in `liken.sh/v1alpha1`, one per enrolling
 machine, named from the machine's MAC. The controller writes it and
 the operator only reads it, so the proposal is in `status`,
-following the rule that the system owns status. Status holds the
+following the rule that the system owns status. Status contains the
 proposed Machine document and the hardware report behind it, so the
 operator can read why the proposal says what it says.
 
@@ -55,14 +55,14 @@ Enrollments, which the operator can list and delete. The trust
 boundary is the layer-2 segment, the same boundary milestone 50
 states for the installer payload.
 
-## The report gains one output
+## Send the hardware report to the boot server
 
 The report boot writes to the console and, when it booted from a
 stick, to the stick. When it booted from the network there is no
-stick, so it posts the report to the server it booted from, whose
-address the boot already holds. The console print stays in every
-case. That keeps console parity: the operator at the screen and the
-operator at the API read the same facts.
+stick, so it posts the report to the server it booted from, using the
+server address recorded during boot. It still prints the report to
+the console, so the person at the machine and the person reading the
+API receive the same facts.
 
 ## The CLI verb
 

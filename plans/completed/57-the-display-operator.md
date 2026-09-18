@@ -33,10 +33,10 @@ The lab ran two clients on the two monitors at once, each on the output
 its app-id named, with a transcode running on the same GPU through the
 render node's separate shareable device.
 
-## What nothing arbitrates
+## Output allocation is not enforced
 
-The app-id routing works, and it is a naming convention with nothing
-behind it. Two failures follow from that, and the lab met both.
+The app-id routing works, but it does not allocate outputs or prevent
+clients from using the same app-id. The lab observed two failures.
 
 * **Two clients may present the same app-id.** Nothing refuses the
   second one. The lab started a second chromium with the same
@@ -89,12 +89,11 @@ on the kitchen monitor takes. Or a claim can select on the attributes
 and take any output that fits, which is the claim a video player takes:
 any output at 1920x1080 or better, whichever one is free.
 
-A published output is exclusive. That is the whole point of publishing
-it: one fullscreen client on one screen stops being a convention and
-becomes a property the scheduler holds. A second pod that asks for the
-same screen parks until the first one ends, and a second pod that asks
-for any 1080p screen lands on the other monitor. Nothing covers a
-running client.
+A published output is exclusive, so the scheduler enforces one
+fullscreen client per screen. A second pod that asks for the same
+screen stays pending until the first one ends. A second pod that asks
+for any 1080p screen runs on the other monitor. It cannot cover the
+running client's window.
 
 The claim places the client as well. Only the machine with the
 monitors publishes an output, so a pod that claims a screen runs on

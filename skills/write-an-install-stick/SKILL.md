@@ -10,7 +10,7 @@ This skill is the guide at https://liken.sh/docs/guides/write-an-install-stick/,
 [`liken stick`](https://liken.sh/docs/reference/cli/#liken-stick) writes a bootable
 disk image to a file. This guide puts that file on a USB stick and
 checks the copy, so that a machine that refuses to boot is a machine
-problem and never a stick problem. At the end, the stick holds the
+problem and never a stick problem. At the end, the stick contains the
 image byte for byte, and its partitions are visible to the
 workstation.
 
@@ -69,8 +69,8 @@ is the fix.
     sudo partprobe /dev/YOUR-STICK
     lsblk /dev/YOUR-STICK
 
-The kernel still holds the partitions the stick had before the
-write, until something asks it to read the table again. The listing
+The kernel still uses the partition table that the stick had before the
+write until something asks it to read the table again. The listing
 now shows the image's partitions. A workstation that automounts
 removable media may mount the stick's EFI partition here; unmount it
 before you remove the stick.
@@ -97,7 +97,7 @@ distribution names them differently.
 
 The stick's menu has two entries for each machine.
 `install as <name>` claims blank disks only and refuses a disk it
-does not recognize. A machine that carries another operating system
+does not recognize. A machine that has another operating system
 on the disk the manifest declares needs `wipe and reinstall as
 <name>` for its first install, and so does a machine that `liken`
 installed before. The [install](https://liken.sh/docs/guides/install/#5-boot-each-machine-from-the-stick)

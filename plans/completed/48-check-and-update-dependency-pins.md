@@ -1,4 +1,4 @@
-# Watching the pins
+# Check and update dependency pins
 
 Milestone 48. Built. Every domain that vendors something has a
 `latest.sh` beside its `fetch.sh`. It says what the domain pins and

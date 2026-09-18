@@ -29,7 +29,7 @@ package machine
 //
 // A store deals in bytes, never in parsed documents. The lifecycle's
 // whole job is to make the right bytes survive reboots and power
-// loss. Which kind of document those bytes hold, a Machine or a
+// loss. Which kind of document those bytes contain, a Machine or a
 // Cluster, is the caller's business. This is also why rejections
 // hash the raw bytes: a document that will not even parse must still
 // be identifiable as exactly the bytes that init refused.
@@ -37,8 +37,8 @@ package machine
 // Every write here is both atomic and durable: a temp file, an fsync
 // of the file, a rename, and an fsync of the directory. A rename
 // alone makes a write atomic against a crash of the writer, but not
-// against power loss. The rename itself lives in the directory, and
-// an unsynced directory update can vanish when the power goes out.
+// against power loss. The directory records the rename, and an
+// unsynced directory update can vanish when power fails.
 // The facts tree skips the fsyncs, because /run is tmpfs. These lifecycle files
 // exist precisely to survive a power loss, so they perform both
 // fsyncs every time.
@@ -92,7 +92,7 @@ func ClusterManifests(root string) ManifestStore {
 }
 
 // A Rejection records why a staged document was refused. One type
-// serves as both rejection.yaml's schema and the facts entry, so the
+// is both rejection.yaml's schema and the facts entry, so the
 // console message, the on-disk record, and the cluster's status all
 // carry the same record. The hash identifies exactly which bytes were
 // rejected. The operator refuses to re-stage a document that matches

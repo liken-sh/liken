@@ -200,7 +200,7 @@ interface names, and the drivers that a datasheet does not give.
 
 Select `install as <name>` for the machine in front of you. The machine
 partitions its blank disks, copies the operating system onto them,
-registers itself with its firmware, then it holds:
+registers itself with its firmware, then it waits:
 
     liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
 
@@ -252,9 +252,9 @@ accepts the edit only after the machine reports them. Also change the
 machine's manifest in `mycluster/` to the same layout, because the next
 stick and the next reinstallation start from that copy.
 
-Use the same stick for each machine. Start with the first leader. The
-machines find each other at the addresses that you declared. The
-leaders make the control plane, and the followers join it.
+Use the same stick for each machine. Start with the first leader. Each
+machine contacts its peers at the addresses that you declared. The
+leaders form the control plane, and the followers join it.
 
 ## 6. Talk to your cluster
 

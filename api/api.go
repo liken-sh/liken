@@ -6,7 +6,7 @@
 // smaller records that use the same machinery. Kubernetes resources
 // shape all of them, and this package defines that shape. It
 // declares the group and version, and the metadata each document
-// carries. It declares the conditions and phases each status uses,
+// contains. It declares the conditions and phases each status uses,
 // the role vocabulary both documents use, and the version grammar
 // that names releases. The machine package and the cluster package
 // each own one document, and both build on this package. Neither

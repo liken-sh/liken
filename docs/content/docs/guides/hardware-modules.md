@@ -7,7 +7,7 @@ description: "Make a machine's hardware appear as devices by naming its drivers 
 # Load the drivers for a machine's hardware
 
 A `liken` machine loads only the drivers its manifest names. Nothing
-loads a driver on demand. This guide finds the hardware a machine
+loads a driver on demand. This guide identifies the hardware a machine
 cannot drive, names the drivers for it in load order, sets the
 parameters they need, and confirms the device appears. At the end,
 the hardware operator that owns the device publishes it.
@@ -20,7 +20,7 @@ You need:
 
 ## Why nothing loads on its own
 
-A Linux distribution loads most drivers on demand: the kernel finds a
+A Linux distribution loads most drivers on demand: the kernel detects a
 device, asks userspace for the driver that matches it, and `modprobe`
 or `udev` loads it. `liken` ships neither. The manifest is the whole
 truth about what a machine runs, and the boot loads
@@ -50,7 +50,7 @@ the wrong thing, which the next section covers.
 ## 2. Work out the driver set
 
 A candidate module is the controller's driver. A controller often
-needs sub-drivers loaded before it, or it binds what it finds to a
+needs sub-drivers loaded before it, or it binds the device to a
 generic driver and the device never appears the way the operator
 expects. The cases that come up:
 
@@ -134,10 +134,10 @@ Read the result of every declared module:
 
 `Loaded` and `Builtin` are the good states. `Missing` means this
 kernel has no module by that name, which is usually a misspelling,
-because the image carries the kernel's whole module tree. `Failed`
+because the image includes the kernel's whole module tree. `Failed`
 means the kernel refused a module it has, and the message names the
 correction. `status.modules[].parameters` shows what the kernel
-holds for each declared parameter, in the kernel's own rendering.
+reports the value for each declared parameter, in the kernel's own rendering.
 
 Then read the operator that owns the device. A screen appears in
 the display operator's slice, an output in the audio operator's, a

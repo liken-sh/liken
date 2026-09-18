@@ -1,8 +1,8 @@
-# Turning a feature off turns it off
+# Remove a feature's resources before stopping its controller
 
-Milestone 42. Completed. Retraction becomes an ordered act with an
-owner, so a feature that leaves `spec.features` stops running instead
-of losing its controller and keeping its effects.
+Milestone 42. Completed. Removing a feature from `spec.features`
+removes its resources before stopping the controller responsible for
+them. Previously, the controller stopped but its resources remained.
 
 Declaring a feature is a runtime act. Init renders the boot
 configuration, seeds the manifests, and loads the modules, and every

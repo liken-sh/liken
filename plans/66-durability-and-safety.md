@@ -30,7 +30,7 @@ device, and an fsync of the directory does not reach them.
 `init/slotloader.go` explains this at length, and the lab found it on
 the first promotion drill of plan 33's built half. The GRUB arm takes
 the same path with no flush. A power cut after the arm can lose the
-arm while the attempted marker stands, and the next boot reads that as
+arm while the attempted marker remains, and the next boot reads that as
 a release that ran and fell back. The `grub.cfg` heal in the same
 file has the same gap, and a boot home with a `.partial` file and no
 `grub.cfg` drops GRUB to a rescue prompt.
@@ -158,7 +158,7 @@ Node to cordon. A 500 or a timeout on one pass has the same effect: an
 approved reboot skips eviction. No test covers the gate. This is the
 open problem [node-read-errors-bypass-draining](open-problems/node-read-errors-bypass-draining.md).
 The fix distinguishes the two: a 404 during a demotion skips the
-drain, and any other error holds the reboot and reports why.
+drain, and any other error stops the reboot and reports why.
 
 **Conditions this pass did not check get stamped as current.** The
 status writer sets `observedGeneration` on every condition at the end
@@ -194,7 +194,7 @@ reason other than not-found. Both return the error instead.
 ## Part four: the CRD and CI contracts match the code
 
 **`status.boot.network` prunes half the record.** The Go type is
-`*NetworkSpec`, which carries `hostEntries` and each interface's
+`*NetworkSpec`, which contains `hostEntries` and each interface's
 `wireless` block. The CRD schema declares only `interfaces` with four
 fields. The API server prunes the rest. Drift detection works only
 because the operator reads the facts tree and never the API object.

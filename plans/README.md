@@ -126,7 +126,7 @@ milestone number because their implementation scope is not settled.
 * **41.** [Editing the network spec](completed/41-editing-the-network-spec.md).
   The boot records the network it came up under, so an edit to
   `spec.network` drifts, stages, and applies.
-* **42.** [Turning a feature off turns it off](completed/42-turning-a-feature-off.md).
+* **42.** [Remove a feature's resources before stopping its controller](completed/42-turning-a-feature-off.md).
   A retraction waits for the cluster, reboots when it leaves kernel
   state, and stops leaving a controller's work behind.
 * **43.** [A browsable release channel](completed/43-a-browsable-release-channel.md).
@@ -144,7 +144,7 @@ milestone number because their implementation scope is not settled.
   The image includes IANA's zone files, so a `CronJob` can name the
   zone its schedule means, and a weekly job in CI opens the pull
   request that moves the pin.
-* **48.** [Watching the pins](completed/48-watching-the-pins.md).
+* **48.** [Check and update dependency pins](completed/48-check-and-update-dependency-pins.md).
   Every domain that vendors something reports what it pins and what
   its upstream has now, and moves the pin when asked. One `latest.sh`
   beside each `fetch.sh`, and `make versions` for the whole table.

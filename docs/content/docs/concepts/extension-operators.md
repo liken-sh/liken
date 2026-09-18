@@ -29,18 +29,18 @@ privilege and no host path.
 
 Each operator is a DRA driver of its own, separate from the
 operating system's driver that [Devices](/docs/reference/devices/)
-describes. The operating system publishes the hardware a machine
-holds, such as a Bluetooth radio, a GPU, or a sound card. A hardware
+describes. The operating system publishes hardware present on a
+machine, such as a Bluetooth radio, a GPU, or a sound card. A hardware
 operator publishes what that hardware serves, at the grain a
 workload asks for: a paired controller, a monitor output, an audio
 output.
 
 A device can also take parameters from the claim. A `ResourceClaim`
-carries an opaque config block per driver, the operator reads it
-when it prepares the claim, and it puts the device into the state
+contains an opaque config block per driver. The operator reads the
+block when it prepares the claim and puts the device into the state
 the block asks for before the pod starts. The audio operator takes
 `codec` on a Bluetooth speaker, and the display operator takes
-`mode` on a monitor output. A `DeviceClass` can carry the same
+`mode` on a monitor output. A `DeviceClass` can contain the same
 block as cluster policy, and the claim's own block wins. Each
 operator's manual documents its parameters beside its attributes.
 
@@ -77,9 +77,9 @@ source is
 The library operator declares the media libraries of that cluster as
 Kubernetes resources: a root directory of movies or series on a
 volume, the catalog its scanners keep of what is there, and a media
-browser that takes the place of the idle screen on a `Player` the
-media operator owns. It publishes no devices, and it claims the
-display only through the `Player`'s own standing claim. The media
+browser that replaces the idle screen on a `Player` the media operator
+owns. It publishes no devices, and it claims the display only through
+the `Player`'s own claim. The media
 operator never reads the library operator's resources. Its manual is
 [library.liken.sh](https://library.liken.sh): the resources, the
 install, the scanners, and the browser. The source is

@@ -171,5 +171,5 @@ Each pin belongs to a domain, so the knowledge of where its upstream
 lives is a `latest.sh` beside that domain's `fetch.sh`. Run it alone
 and it reports its own pins. Run it with `--bump` and it writes the
 new version, the new digest, and the matching source pin.
-`plans/completed/48-watching-the-pins.md` gives the reasons, and each
+`plans/completed/48-check-and-update-dependency-pins.md` gives the reasons, and each
 script explains what its own upstream calls a release.

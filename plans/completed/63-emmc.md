@@ -17,7 +17,7 @@ three parts:
   recommendation and no unclaimed listing. It is invisible in the
   proposal and in the warnings.
 * **The boot archive has no eMMC driver.** `image/boot-modules.conf`
-  carries `ahci` and `nvme` as the only real disk controllers, and
+  includes `ahci` and `nvme` as the only real disk controllers, and
   boot-disk drivers cannot come from `spec.modules`, because the
   install claims disks long before declared modules load. The system
   image already ships the modules (`sdhci`, `sdhci-pci`,
@@ -92,7 +92,7 @@ budget guard prices it.
 `init/diskids.go` builds `mmc-<name>_<serial>` beside the `ata-` and
 `nvme-` names, from the same sysfs attributes udev's rules read: the
 card's `name` and `serial`, published on the mmc device under the
-block directory. The CID a card answers with lives in the card's own
+block directory. The CID a card answers with is stored in the card's own
 controller, not in its flash, so the name survives an image write
 the way the `ata-` names do.
 
@@ -101,7 +101,7 @@ The by-path name is smaller than the rule elsewhere. udev's
 alone does not qualify a block device for an `ID_PATH`, so udev
 itself publishes no by-path link for a card on a PCI `sdhci`
 controller. liken reproduces udev's names rather than inventing
-ones no other tool agrees with, so a PCI-attached eMMC carries its
+ones no other tool agrees with, so a PCI-attached eMMC has its
 by-id name only, and milestone 44's two-names rule has this one
 documented exception. A platform-enumerated host (what
 `sdhci-acpi` binds) does get the `platform-...` name udev builds
@@ -118,7 +118,7 @@ its own early stages, and RPMB is an authenticated mailbox, not
 storage. The marker is structural: the mmc block driver registers
 each hardware area as a child of the data area's own block device,
 so an area's `device` link leads into the block subsystem, where a
-real disk's leads to the bus device that carries it. That one check
+real disk's leads to the bus device for the disk. That one check
 covers every kernel: from 3.8 to 4.14 RPMB's block device had the
 same parent as the boot areas, and from 4.15 on RPMB is a character
 device that never reaches the walk. Only the mmc driver builds the
@@ -144,7 +144,7 @@ The shape gets its own machine manifest the way the metal shape has
 one, and a `smoke-emmc` drill beside `smoke-uefi` and `smoke-bios`
 keeps the path proven.
 
-One risk sits outside liken: whether OVMF's firmware ships an SD/MMC
+One risk remains outside liken: whether OVMF's firmware ships an SD/MMC
 host driver for QEMU's controller. Real firmware reads its own eMMC
 (the field case proved it on `stick-1`), but if OVMF cannot, the
 from-disk boot leg of the drill proves on metal instead, and the lab
@@ -186,7 +186,7 @@ behind the second.
   emulation writes at about 32 MiB per second, which sets the
   drill's 420-second bounds.
 * The disk walk lists `/dev/mmcblk0` and nothing else, and the
-  by-id tree carries `mmc-QEMU___0xdeadbeef` for it.
+  by-id tree contains `mmc-QEMU___0xdeadbeef` for it.
 * OVMF reads the card both ways: it loads the installed slot entry
   from the card's GPT, and with a vendor-default varstore it
   enumerates the card on its own and takes the fallback path. The
@@ -210,10 +210,10 @@ behind the second.
 
 ## Noted for the fleet rollout
 
-Every live machine carries a class `0805` controller with no card
+Every live machine has a class `0805` controller with no card
 behind it, and this milestone makes all of them bind `sdhci-pci` at
-every boot where before the device sat unclaimed. The drill's guest
-carries a second, empty `sdhci-pci` controller so the no-card bind
+every boot where before the device was unclaimed. The drill's guest
+includes a second, empty `sdhci-pci` controller so the no-card bind
 is drilled beside the card-present one, and the testbed roll proves
 it on Intel metal. One caution stands for the NUC rotation: two
 NUCs carry BayHub `8086:9DF5` controllers that fall to `sdhci-pci`'s
