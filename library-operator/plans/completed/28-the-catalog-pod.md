@@ -1,8 +1,8 @@
 # The catalog pod
 
-Plan 28. One standing pod per namespace holds the durable catalog and
-reports what it holds, every scanner becomes a `Job` with an agent of
-its own, and a `Job` knows it is done when the standing pod says so.
+Plan 28. One long-running pod per namespace stores the durable catalog
+and reports its contents. Every scanner becomes a `Job` with an agent
+of its own. A `Job` finishes when the catalog pod confirms its rows.
 This is the first build of [plan 27](27-enrichment.md), and it changes
 what plans 02, 04, 15, 19, and 21 built.
 
@@ -28,10 +28,10 @@ last write can leave those rows on its own claim until its next run.
 
 ## The contract
 
-- **The `Catalog` owns one pod.** It holds a Corrosion agent on the
+- **The `Catalog` owns one pod.** It runs a Corrosion agent on the
   namespace's one durable claim, sized from `Catalog.spec.storage` or
   bound to an existing claim named in `spec.storage.claimName`. It is
-  the standing member of the gossip cluster. It answers on no port.
+  the long-running member of the gossip cluster. It answers on no port.
 - **The catalog pod reports.** Beside the agent, a container from the
   operator's image reads the loopback API and publishes over the bus:
   the counts per library that the scanner publishes today, the `runs`
@@ -56,7 +56,7 @@ last write can leave those rows on its own claim until its next run.
   );
   ```
 
-- **A `Job` exits when the standing pod holds its rows.** After its
+- **A `Job` exits when the catalog pod holds its rows.** After its
   last write, the `Job`'s main container reads its own agent's item
   and file counts for its library, subscribes to the reporter's
   message on the bus, and waits until the `runs` row for its worker
@@ -67,7 +67,7 @@ last write can leave those rows on its own claim until its next run.
   exits, and the kubelet stops the sidecar. The wait has a timeout,
   and a `Job` that times out fails, so the rows stay on its claim and
   the next run carries them. A folder scan writes a `rescan` row, so
-  the full walk's numbers stand beside it.
+  the full walk's numbers remain beside it.
 - **A scan is a `Job`.** It runs the scanner beside a Corrosion agent,
   as a native sidecar with the exec probe from plan 04, on the
   `Library`'s existing catalog claim. The claim keeps the agent's

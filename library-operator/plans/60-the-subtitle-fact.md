@@ -38,7 +38,7 @@ a `Secret` the way the other providers hold theirs. A download needs
 an account, and an account has a daily download cap. The cap is a
 first-class limit of the fact: the container reads the remaining
 count from each answer, stops at zero, records nothing for the videos
-it did not reach, and the next run carries on. A run never spends the
+it did not reach, and the next run continues. A run never spends the
 cap on the same video twice, because a fetched file closes the gap.
 
 **The search.** By the file's hash and size first, which OpenSubtitles

@@ -4,8 +4,8 @@ Open problem. [Plan 46](../completed/46-the-power-key-brings-the-room-up.md)
 built the receiver half on 2026-09-07: a press of the X6's power key
 raises the panel desire, the `Receiver` session carries an `awake`
 flag, and the equipment operator powers the receiver on and selects
-the input. The plan's other half, that the media browser is the thing
-on the screen when the panel lights and holds the focus, is drilled in
+the input. The plan's other half, that the media browser is visible
+and has focus when the panel lights, is drilled in
 neither case the plan names.
 
 ## The evidence

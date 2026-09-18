@@ -1,7 +1,7 @@
 # 62, Intro and credits marks
 
 A stub from a 2026-09-14 conversation. Nothing here is built, and this
-plan proposes nothing. It states two problems that share one missing
+plan proposes no design. It records two problems that share one missing
 fact.
 
 ## The problem

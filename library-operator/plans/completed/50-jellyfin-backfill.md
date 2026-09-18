@@ -73,15 +73,15 @@ same backoff limit and TTL as a scan Job. Its pod is the jellyfin
 role's container with the different subcommand, no port, and no
 readiness probe.
 
-### The operator stands it
+### Create and reconcile the backfill `Job`
 
-The catalog pass gains one step after the jellyfin pair stands. It
+The catalog pass gains one step after the Jellyfin pair exists. It
 reads the `Catalog`'s status and the worker Jobs of the pass:
 
 * The status says the backfill finished against this server, and the
   Job is absent: nothing to do.
-* The status does not say so, and no Job stands: create the Job.
-* The Job stands and is active: wait.
+* The status does not say so, and no `Job` exists: create the `Job`.
+* The `Job` exists and is active: wait.
 * The Job succeeded: write the status, and let the TTL remove the Job.
 * The Job failed past its backoff: delete it, so the next pass creates
   it again, with the cleanup Job's recreate backoff.

@@ -136,10 +136,10 @@ runs a one-off `Job` that rescans one folder.
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=scan
     kubectl -n media create job movies-scan-now --from=cronjob/movies-scan
 
-A scan `Job` writes a `runs` row when it starts and another when it
+A scan `Job` writes a `runs` row when it starts and updates it when it
 finishes. Then it waits until a catalog pod confirms that run, and
 exits. So a `Job` that completed is a `Job` whose rows reached a
-standing copy of the catalog.
+durable copy of the catalog.
 
 ## Mark and sweep
 

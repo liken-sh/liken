@@ -52,7 +52,7 @@ with a message that says so. One copy on any class is unchanged,
 with one claim of its own name.
 
 **The heal deletes the pod alone.** A store copy stranded on a node
-NotReady past the grace is force-deleted, and the next pass stands it
+NotReady past the grace is force-deleted, and the next pass creates it
 again on another node. On a per-node class the claim is shared and
 stays. On any other class the operator deletes the claim after the
 pod, as today.

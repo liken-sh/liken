@@ -35,7 +35,7 @@ already raises that energy while a `Play` starts.
 - Every element but the backdrop and the logo leaves: the text, the
   covers, the set strip, the episode list, the header, and the focus
   outline. They fade or slide away in one short motion.
-- The logo moves from where it sits to the centre of the screen and
+- The logo moves from its current position to the centre of the screen and
   scales to a fixed share of the width. The backdrop stays, and its
   shade lifts so the art shows through as the page's own image.
 - Beneath the logo, the mark appears and pulses at full energy, as it

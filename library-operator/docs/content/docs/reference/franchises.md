@@ -8,10 +8,10 @@ weight: 40
 A franchise is the films and series of one story, in the order the
 story plays. A set is smaller: the chain of sequels a film's sidecar
 names, in release order. A franchise is the long storyline those
-chains sit inside, with the series that run between the films and
+chains belong to, with the series that run between the films and
 the prequels that play first. No metadata provider holds that order.
 TMDB collections hold films only, in release order, and no source
-agrees on where a series sits between two films. So a person or an
+agrees on where a series appears between two films. So a person or an
 agent writes the order into a file, and the file is the truth.
 
 A `Library` of kind `franchises` names a claim under

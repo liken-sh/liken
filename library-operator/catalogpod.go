@@ -3,7 +3,7 @@ package main
 // The catalog pods are what a Catalog becomes at run time: one durable
 // copy per replica the Catalog asks for, owned by the Catalog, every one
 // of them on the store's one claim. The first copy reports
-// what it holds over the bus. They are the standing members of the gossip
+// what it holds over the bus. They are the long-running members of the gossip
 // cluster, and every worker Job joins that cluster for the length of its
 // run. The agent's write API is loopback only, and the reporter reads it
 // from inside its own pod. The agent also answers on the pod network,
@@ -34,7 +34,7 @@ func catalogPodLabels() map[string]string {
 	})
 }
 
-// The pod the Catalog stands. It is a function of the Catalog
+// The pod that the Catalog creates. It is a function of the Catalog
 // and the operator's own settings alone, so two passes over an
 // unchanged Catalog build the same pod, which is what makes the
 // template hash mean anything.
@@ -58,7 +58,7 @@ func buildCatalogPod(catalog *NamespaceCatalog, index int, scannerImage, corrosi
 			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},
 		},
 		Spec: PodSpec{
-			// The catalog pod is a standing service and not a run to
+			// The catalog pod is a long-running service and not a run to
 			// completion, so the kubelet restarts a container that
 			// exits rather than letting the pod end.
 			RestartPolicy:                 "Always",
@@ -136,14 +136,13 @@ func reporterSidecar(catalog *NamespaceCatalog, image, busAddress, topicBase str
 	}
 }
 
-// Stand every durable copy of the catalog this Catalog asks for, in index
-// order, and take down the copies above that count. A failure on one copy
-// ends the stand, and the pass reports it with the copies that already
-// stood.
+// Reconcile each requested catalog replica in index order, then remove
+// replicas above the requested count. On failure, return the error with
+// the pod results from the replicas already processed.
 //
-// The claim is stood once, before any pod, because every copy mounts it.
-// A Catalog that asks for copies on a class that is not per-node stands
-// one, because a claim on such a class binds to one node.
+// Create the claim before the pods, because every replica mounts it.
+// With a class other than per-node, run only one replica because the
+// claim binds to one node.
 func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatalog) ([]*Pod, error) {
 	store := catalogStoreOf(catalog)
 	wanted, err := o.storeCopies(ctx, store, catalogReplicaCount(catalog))
@@ -164,10 +163,9 @@ func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatal
 	return pods, o.sweepStoreReplicas(ctx, catalog, store, wanted)
 }
 
-// The pod that stands for one Catalog after this pass, on the
-// same terms as every other pod this operator stands: the live pod when
-// it matches the template, the created pod when there was none, and nil
-// when this pass deleted a stale one.
+// Return the existing pod if it matches the template, or create and
+// return a pod if none exists. If this pass deletes an outdated pod,
+// return nil, as the operator does for its other pods.
 func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalog, index int) (*Pod, error) {
 	desired := buildCatalogPod(catalog, index, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
 	return o.standPod(ctx, desired)

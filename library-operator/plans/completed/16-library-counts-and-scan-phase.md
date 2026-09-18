@@ -1,9 +1,8 @@
-# The counts and the phase
+# Library counts and scan phase
 
-Plan 16. What `kubectl get libraries` says. At the end of this plan one
-line per library says how many titles it holds, how many items are in
-it, how many files the volume holds, and whether a walk is running right
-now.
+Plan 16. At the end of this plan, `kubectl get libraries` reports each
+library's title count, item count, file count, and current scan phase.
+Each library appears on one line.
 
 ## The problem
 
@@ -16,8 +15,8 @@ holds one item per series and one per episode, so its item count runs
 many times its title count, and the titles column reports the smaller
 one. The catalog holds both numbers and the status reports one.
 
-A library's file count is nowhere. The volume holds the video files, and
-after [plan 17](17-every-file-a-title-carries.md) it holds the `.nfo`
+A library has no reported file count. The volume holds the video files, and
+after [plan 17](17-file-rows-and-metadata.md) it holds the `.nfo`
 files, the art, the subtitles, and the trickplay directories as well.
 The catalog counts them and nothing reports the count.
 
@@ -121,7 +120,7 @@ The drill runs on `liken-1`. Roll the operator, watch `kubectl get
 libraries` through a full walk, and record the line the printer shows
 before, during, and after. Confirm the `Items` count matches the
 catalog's own count for a series library, and that the `Files` count
-matches the file rows after [plan 17](17-every-file-a-title-carries.md).
+matches the file rows after [plan 17](17-file-rows-and-metadata.md).
 Delete the scanner pod and confirm the phase reads `Pending`, then
 `Scanning`, then `Idle`.
 

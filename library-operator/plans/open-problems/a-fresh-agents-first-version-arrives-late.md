@@ -42,7 +42,7 @@ path to the catalog pod: its broadcasts to one busy sibling agent
 timed out at the five-second deadline for the whole wait, and the
 catalog pod's periodic sync did not reach the new actor for two and a
 half minutes, because a sync picks three of six random members sorted
-by what it already knows it needs, and it knows nothing about an actor
+by the versions it already needs, and it has no version information about an actor
 it has just met.
 
 Three changes answer it. The Job writes its finished run row again

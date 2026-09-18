@@ -137,7 +137,7 @@ person's strip opens the person's page.
 
 Three things the drill added the same day. The home page's band shows
 Search alone, because sort and filter act on a query it does not
-have. A clock sits top-right on every screen, drawn from one layer of
+have. A clock appears at top-right on every screen, drawn from one layer of
 the browser's own, in the household's zone: the screen pod carries
 `TZ` from the default `MediaPreferences`, the same field media-operator
 stamps on its own pods. The clock's reading draws over a halo of dark

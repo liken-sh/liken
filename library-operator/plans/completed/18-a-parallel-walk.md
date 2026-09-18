@@ -9,7 +9,7 @@ time it takes today, and the catalog it writes is the same one.
 The walk reads one title folder at a time. For each folder it reads the
 directory, reads the sidecar, and reads the size and the time of every
 file in it, and after
-[plan 17](17-every-file-a-title-carries.md) it reads the extras folder
+[plan 17](17-file-rows-and-metadata.md) it reads the extras folder
 too. Every one of those is a round trip to a network volume, and the
 scanner does nothing while it waits.
 

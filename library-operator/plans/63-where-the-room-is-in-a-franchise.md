@@ -9,7 +9,7 @@ Designed 2026-09-14.
 ## The problem
 
 **A split series opens at the wrong episode.** A franchise file cuts a
-series into runs, so one show can stand at two places in the story.
+series into runs, so one show can occur at two places in the story.
 The page opens every series member with the same call, which lands on
 the next unwatched episode of the whole show. A press on the second
 half of a show lands in its first half.
@@ -50,7 +50,7 @@ time the room's thread reached.
 A series row draws the share of its run's episodes: an episode the
 room finished counts whole, the episode the room is in the middle of
 counts its fraction, and the total is the episodes the catalog holds
-inside the run. Two halves of one show carry two bars. The count stands
+inside the run. Two halves of one show carry two bars. The count represents
 in for a time-based share because the catalog holds no duration for
 many episodes, and a count reads the same to a person.
 
@@ -60,7 +60,7 @@ A thin row draws no bar.
 ### A column of who is where
 
 The lane gains one column, between the metro strip and the cards, the
-width of one circle. It takes room only when a thread stands, the way
+width of one circle. It takes room only when a thread exists, the way
 the time column takes room only when a row carries a time.
 
 The leaves are the ones the home page builds for a franchise
@@ -75,8 +75,8 @@ The column draws two kinds of marker:
   circles of everyone present draw on that row, side by side, with a
   small overlap.
 * **A solo circle.** One walk per person, alone. A person whose own
-  thread stands on a row other than the room's row draws one circle
-  there. A person whose solo thread stands on the room's row draws
+  thread points to a row other than the room's row draws one circle
+  there. A person whose solo thread points to the room's row draws
   nothing extra.
 
 A circle is the initial in a circle that the audience screen draws for

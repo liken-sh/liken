@@ -19,15 +19,15 @@ it names, and prunes within that folder. A payload it cannot map to the
 volume falls back to a full walk, so a hook is never worse than the
 timer.
 
-Nothing can reach it. The port is on the pod and no `Service` stands in
-front of it, so the address is a pod IP that changes with every roll.
+Nothing can reach it. The port is on the pod and no `Service` exposes
+it, so the address is a pod IP that changes with every roll.
 Nothing tells a person the address either. The one path a new file takes
 into the catalog today is the five-minute timer, and the fast path is
 built and unused.
 
 ## The Service and the address
 
-The operator stands one `Service` per `Library`, in the `Library`'s
+The operator creates one `Service` per `Library`, in the `Library`'s
 namespace, named for the scanner pod it fronts and owned by the
 `Library`. Deleting the `Library` takes it, the way deleting a `Library`
 takes its pod.

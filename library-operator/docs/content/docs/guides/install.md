@@ -28,8 +28,8 @@ You need:
   `ClusterRole` and three `CustomResourceDefinitions`.
 
 This operator publishes no devices and needs no `DeviceClass`. The
-screen it draws claims the display through the `Player`'s own standing
-claim, which `media-operator` holds.
+screen it draws uses the `Player`'s existing display claim, which
+`media-operator` holds.
 
 ## 1. Create the storage
 
@@ -80,9 +80,9 @@ provisions every catalog claim as `ReadWriteOnce`, and the namespace's
 
 A class left empty binds to the cluster's default class.
 
-The catalog of record and the progress store are the two claims worth
-keeping. Give them a class that survives a lost node, such as block
-storage from a SAN. A SQLite file on NFS can corrupt when its
+Keep the catalog of record and the progress store on classes that
+survive a lost node, such as block storage from a SAN. A SQLite file on
+NFS can corrupt when its
 node is lost, so do not use an NFS class. A `Library`'s claims are
 working copies that a `Job` rebuilds from the catalog of record, and a
 screen pod is pinned to the machine that holds its display. A

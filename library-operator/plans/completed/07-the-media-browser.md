@@ -15,8 +15,8 @@ per kind. It moves focus on a handful of key names, `up`, `down`,
 workstation and from the scripted timeline in a headless run. A
 remote in a room reaches none of that.
 
-The remotes speak the bus. `media-operator`'s idle command pod stands
-for every unit, whatever draws its screen, and holds the unit's
+The remotes speak the bus. `media-operator`'s idle command pod handles
+each unit, whatever draws its screen, and stores the unit's
 keymaps, the focus mark of each controller, and the shade. Its plan 23
 does two things for a delegate: it publishes the broker and the two
 topics on `status.idle.bus`, and it forwards each navigation press on

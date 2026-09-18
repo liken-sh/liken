@@ -78,14 +78,14 @@ that starts matching the `ignore` list, both leave the catalog on the
 next walk, and the scanner never holds more than one title folder in
 memory.
 
-The mark lives in a local table the catalog agent does not gossip, a
+The scanner stores the mark in a local table the catalog agent does not gossip, a
 `seen` table beside the replicated `items`, `files`, and `aliases`. A
 mark on a replicated row would gossip to every reader on every walk, and
 a new column on a populated cr-sqlite table backfills a clock row for
 every existing row. The scanner creates `seen` at runtime, not in the
 schema file, because Corrosion makes every table a schema file names a
 replicated table. A table created through the write API stays a plain
-local table. So the local table carries the epoch, a walk marks freely,
+local table. The local table stores the epoch. A walk can update it freely,
 and the readers see only real content changes and real deletions.
 The prune streams the ids the current epoch did not mark out of the
 catalog with a bounded query, and deletes them by id in batches. It holds
@@ -111,9 +111,9 @@ walk prunes. The report carries the count of rows the last sweep removed,
 so a false mass delete is visible on the bus without a shell.
 
 A `Library` spec change reaches the scanner as a pod roll. The scanner's
-container carries the root, the `ignore` list, and the settings block in
+container receives the root, the `ignore` list, and the settings block in
 its environment, so a change to any of them changes the pod template. The
-operator stands the scanner pod itself and replaces it when the template
+operator creates the scanner pod itself and replaces it when the template
 hash changes, and the new pod's startup walk is the new scan. The
 replacement is also the queue: a scan already in flight ends with its
 pod. The catalog volume the new pod mounts, and the handoff as one pod's

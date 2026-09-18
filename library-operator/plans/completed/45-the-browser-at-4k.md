@@ -18,7 +18,7 @@ and the whole point of a 4K panel is the art.
 
 The browser drew sixty frames a second under every film. A `Play`
 press enters a loading state whose mark pulses, and while that state
-stands the browser asks for a frame on every pass. The state ends
+is active, the browser asks for a frame on every pass. The state ends
 only on the bus's `Present` or `Wake` moment, which arrives when the
 `Play` ends. The present mode is `AutoNoVsync` on purpose, because a
 FIFO surface blocks a covered client and it goes deaf. So for the

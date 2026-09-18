@@ -1,4 +1,4 @@
-# 59, The map nothing reads
+# 59, Trickplay removes WebVTT maps
 
 Built on 2026-09-11. The trickplay fact no longer writes a WebVTT map
 beside its sheets, and it removes the maps earlier runs wrote. The
@@ -37,19 +37,21 @@ interval, as the extraction does. Whether to file it is open.
 **No map.** The fact stages the sheets alone and lands them with one
 rename, as before.
 
-**The sweep.** The write package gains one narrow door: it removes a
-file only when the file is named `tiles.vtt` inside a layout folder
-inside a `.trickplay` directory, and it refuses every other name. At
-the start of each run the fact lists the videos whose catalog row
-names a tile directory, and removes the map in each one that has it.
+**The sweep.** The write package gains a deletion operation with a
+restricted path pattern. It removes a file only when the file is named `tiles.vtt`
+inside a layout folder inside a `.trickplay` directory, and it refuses
+every other name. At the start of each run the fact lists the videos
+whose catalog row names a tile directory, and removes the map in each
+one that has it.
 The sweep is one `stat` per tiled video per run and no decode, so the
 first run after this change clears every map with no extraction.
 
 **Beside Jellyfin.** With the map gone, a directory this fact makes and
 a directory Jellyfin makes are the same sheets under the same names.
-The fact treats a directory it finds as done, whoever made it, and the
-scanner records it. So the race for a new title has no loser: the
-first extractor's sheets serve both.
+The fact treats a directory it finds as complete, regardless of which
+process created it, and the scanner records it. If this fact and
+Jellyfin process a new title at the same time, the first extractor's
+sheets serve both processes.
 
 ## How the work is proved
 

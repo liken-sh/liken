@@ -58,7 +58,7 @@ func (o *operator) depart(ctx context.Context, library *Library, choice catalogC
 }
 
 // departureStage reads every release rule before it acts, so a
-// departure that is already complete stands nothing, and a release
+// departure that is already complete changes nothing, and a release
 // that failed repeats on the next pass without more churn.
 func (o *operator) departureStage(ctx context.Context, library *Library, choice catalogChoice, jobs []Job) (departure, error) {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name

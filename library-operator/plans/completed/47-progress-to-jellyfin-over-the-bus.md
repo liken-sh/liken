@@ -57,13 +57,13 @@ spec:
       key: token
 ```
 
-`spec.jellyfin` is optional. When it is set, the operator stands one
+`spec.jellyfin` is optional. When it is set, the operator creates one
 pod per namespace beside the progress pods, `<catalog>-jellyfin`,
 owned by the `Catalog`, running `/library-operator jellyfin`, with the
 API key through a `secretKeyRef`, the way the enricher takes a
-provider key. The operator also stands a `Service` of the same name on
+provider key. The operator also creates a `Service` of the same name on
 port 8080, which is where Jellyfin's webhook posts. The pod holds no
-Kubernetes credential, like every pod this operator stands.
+Kubernetes credential, like every pod this operator creates.
 
 The role's environment: the namespace, the bus address, the two topic
 bases, `LIBRARY_JELLYFIN_URL`, `LIBRARY_JELLYFIN_API_KEY`, and

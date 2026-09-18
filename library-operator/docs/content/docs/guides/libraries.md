@@ -34,10 +34,10 @@ folder per series with a season folder inside. A franchises library
 is the one kind whose files are written by people, and
 [Franchises](/docs/guides/franchises/) covers it.
 
-`root` defaults to `/` and must be absolute, so one volume can hold
-several libraries at different roots. The kind and the storage are
-immutable. A different volume, a different root, or a different kind
-is a different `Library`.
+`root` defaults to `/` and must be absolute. One volume can therefore
+hold several libraries at different roots. The kind and the storage
+are immutable. A different volume, root, or kind is a different
+`Library`.
 
 [Library](/docs/reference/libraries/) describes every field. The ones
 you are likely to set:

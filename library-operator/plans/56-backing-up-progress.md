@@ -19,7 +19,7 @@ sync fills gaps in no fixed order, and nothing in the file says "every
 row the cluster holds is here". A backup taken a minute after the
 sidecar starts can be missing a week.
 
-The same question stands for a restore. A restored file with a stale
+Restore raises the same question. A restored file with a stale
 site id or a truncated clock table would gossip its state back into a
 live cluster, and the CRDT merge would take it as new.
 

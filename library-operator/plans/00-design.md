@@ -186,7 +186,7 @@ The media browser is one native Wayland client, built with
 [Iced](https://iced.rs) in Rust. At rest it draws the idle screen that
 `media-operator` defines: the mark, the clock, the unit's name and
 parts, and their animations. On a press it draws the home page. It runs
-in a pod this operator stands for a `Player` whose `spec.idle.controller`
+in a pod this operator creates for a `Player` whose `spec.idle.controller`
 names this operator, and it reads the same bus topics the idle screen
 reads, which `media-operator` names in the `Player`'s `status.idle.bus`:
 the `Player`'s status, volume, volume owner mark, commands, and panel

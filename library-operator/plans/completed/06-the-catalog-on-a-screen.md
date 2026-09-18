@@ -19,8 +19,8 @@ this layer's pod definition without naming it.
 
 `media-operator`'s plan 22 answers it the other way. A `Player` names
 its idle controller, `spec.idle.controller`, and when the name is not
-`media-operator`'s own, `media-operator` stands the display claim and
-the idle command pod and no client pod. It publishes what a delegate
+`media-operator`'s own, `media-operator` maintains the display claim and
+runs the idle command pod with no client pod. It publishes what a delegate
 needs on the `Player` status:
 
     status:
@@ -43,7 +43,7 @@ inherit its controller from `MediaPreferences`, and only
 `media-operator` resolves the tiers. A `Player` whose
 `status.idle.controller` is this operator's name gets a screen pod. Any
 other value, or no `status.idle` at all, gets none, and a screen pod
-that stands for such a `Player` is deleted. `media-operator` deletes
+that belongs to such a `Player` is deleted. `media-operator` deletes
 this operator's pod itself when the claim must be replaced, so the
 switch away is the only delete this plan adds.
 

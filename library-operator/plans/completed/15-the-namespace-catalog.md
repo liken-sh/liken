@@ -49,7 +49,7 @@ their real owner: they describe the namespace's one Corrosion cluster.
 
 The operator uses the single `Catalog` in a namespace. When a namespace
 has more than one, the operator marks every `Catalog` in it `Blocked`,
-with a condition that names the conflict, and stands no catalog cluster
+with a condition that names the conflict, and creates no catalog cluster
 until one remains. One cluster per namespace is the rule a second
 `Catalog` would break, so the operator refuses rather than build two.
 
@@ -69,7 +69,7 @@ rather than share a file. The claim is owned by the `Library`, not by the
 pod, so it survives a pod roll and holds the catalog the next pod starts
 from, and it is garbage-collected when the `Library` is deleted.
 
-The operator stands the scanner pod itself and rolls it by a template
+The operator creates the scanner pod itself and rolls it by a template
 hash. Because the claim is `ReadWriteOnce`, the operator deletes the old
 pod and waits for it to release the claim before it creates the new pod.
 A new pod that mounted the claim while the old pod still held it would
@@ -81,7 +81,7 @@ peak, is the screen plan's ground and the ingest-memory problem's.
 
 ## The `Catalog` status
 
-`Catalog.status` reports the cluster the `Catalog` stands: the agent
+`Catalog.status` reports the cluster the `Catalog` owns: the agent
 pods that are members, and the storage the agents were given. A person
 reads one object to see the namespace's catalog, rather than reading
 every `Library` to piece it together.
@@ -97,7 +97,7 @@ transparent to it.
 ## Proof
 
 On `liken-1`: a namespace with one `Catalog` and two `Library` objects
-stands one catalog cluster, and both `Library` objects reach `Ready`. A
+creates one catalog cluster, and both `Library` objects reach `Ready`. A
 namespace with a `Library` and no `Catalog` holds the `Library`
 `Pending` with the no-catalog reason, and the `Library` reaches `Ready`
 within seconds of a `Catalog` being declared. A second `Catalog` in a

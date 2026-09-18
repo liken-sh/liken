@@ -1,4 +1,4 @@
-# The rail and the strip
+# Wall rails and sort order
 
 Plan 40. A right-hand rail on long walls that jumps through the list
 and cycles its order, a seasons rail on long series pages, a search

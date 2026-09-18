@@ -90,9 +90,9 @@ The provider this account is with, and the facts it may serve. A spec that names
 | --- | --- | --- | --- |
 | <span id="spec--tmdb"></span>`tmdb` | [object](#spectmdb) | no | The account is with The Movie Database, which serves movies, series, and people. |
 | <span id="spec--omdb"></span>`omdb` | [object](#specomdb) | no | The account is with OMDb. OMDb answers on an IMDb id, and it serves the plot, the US certification, and the ratings of IMDb, Rotten Tomatoes, and Metacritic. |
-| <span id="spec--fanart"></span>`fanart` | [object](#specfanart) | no | The account is with Fanart.tv, which serves art alone. It is the only provider of the clearart, the banner, the landscape, the discart, and the season banner. |
+| <span id="spec--fanart"></span>`fanart` | [object](#specfanart) | no | The account is with Fanart.tv, which provides art only. It is the only provider of clearart, banner, landscape, discart, and season-banner files. |
 | <span id="spec--tvmaze"></span>`tvmaze` | object | no | The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze. |
-| <span id="spec--peertube"></span>`peertube` | [object](#specpeertube) | no | The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address. |
+| <span id="spec--peertube"></span>`peertube` | [object](#specpeertube) | no | The account is with one PeerTube instance, which provides only the trailer fact and needs no account. Many people run PeerTube, so this block identifies the instance by its address. |
 | <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second. |
 | <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists. |
 
@@ -132,7 +132,7 @@ The Secret in this namespace that holds the OMDb key, and the key inside it. The
 
 ### spec.fanart
 
-The account is with Fanart.tv, which serves art alone. It is the only provider of the clearart, the banner, the landscape, the discart, and the season banner.
+The account is with Fanart.tv, which provides art only. It is the only provider of clearart, banner, landscape, discart, and season-banner files.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -149,7 +149,7 @@ The Secret in this namespace that holds the Fanart.tv project key, and the key i
 
 ### spec.peertube
 
-The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address.
+The account is with one PeerTube instance, which provides only the trailer fact and needs no account. Many people run PeerTube, so this block identifies the instance by its address.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

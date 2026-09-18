@@ -1,7 +1,7 @@
 package main
 
 // The rescan verb. A full walk of a Library runs on the CronJob
-// the operator stands from spec.scan.schedule, or on the webhook the
+// the operator creates from spec.scan.schedule, or on the webhook the
 // *arr tools and Jellyfin post to. Neither is a field a person patches
 // on the Library, and this CLI writes only the Library resource, so
 // this verb is a stub. Design the server side, a field the reconcile

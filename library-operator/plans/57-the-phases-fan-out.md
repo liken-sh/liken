@@ -11,11 +11,11 @@ phases that do not share a file run at the same time.
 
 Plan 30 drew the art, contributors, and trickplay phases as regular
 containers running at once, and built them as init containers in a
-row, because the enrich container must run last and nothing told it
-when a regular container beside it was done. Plan 34 made every fact
+row, because the enrich container must run last and the Job had no
+completion mark for a regular container beside it. Plan 34 made every fact
 write its own rows, so a phase no longer waits on the next walk for
-what another phase wrote. The order stands only because nothing marks
-a phase as done.
+what another phase wrote. The phases still run in order because
+nothing marks a phase as complete.
 
 ## The phases
 
@@ -44,12 +44,12 @@ phase is the only writer of the sidecar body, so it runs alone on that
 file and beside everything else.
 
 A phase runs its gap loop until the loop finds nothing and every phase
-it depends on is done, then writes its mark, a file named for the
-phase on the shared `emptyDir`. Art and trickplay depend on nothing
-in the fan-out, so they run once. Contributors depends on nfo: it
-loops, and each pass finds the people the credits fact has created
-since the last pass, because those rows are already in the pod's own
-catalog. It stops when nfo's mark is there and a pass finds nothing.
+it depends on is done. It then writes its mark, a file named for the
+phase on the shared `emptyDir`. Art and trickplay have no dependencies
+in the fan-out, so each runs once. Contributors depends on nfo. It
+loops, and each pass finds the people that the credits fact created
+since the previous pass because those rows are already in the pod's
+own catalog. It stops when nfo's mark exists and a pass finds nothing.
 
 The closer waits for every mark the Job named in its environment, then
 writes the runs row and hands off to a catalog pod, as today. The marks are

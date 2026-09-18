@@ -40,10 +40,9 @@ The browser starts after the agent's startup probe passes.
 
 The pod mounts every `Library` of the namespace read-only, whatever
 the browser does. It mounts its own catalog claim and its own art
-claim, where the browser keeps every piece of art it scaled. It
-claims the display through the standing
-`ResourceClaim` that `media-operator` holds for the `Player`, so no
-second claim on the display is created.
+claim, where the browser keeps every piece of art it scaled. It uses
+the existing `ResourceClaim` that `media-operator` holds for the
+`Player`, so no second claim on the display is created.
 
     kubectl -n media get player living-room-player
     kubectl -n media get pod living-room-player-media-browser

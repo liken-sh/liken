@@ -6,13 +6,13 @@ description: "Declare a Library of kind franchises from a git checkout on a clai
 
 # Franchises
 
-A franchise is the films and series of one story, in story order,
-with a calendar of its own. Its files are written by people, in a git
-repository. A `Library` of kind `franchises` reads a checkout of that
-repository, and it resolves each member against the other libraries of
-the namespace. This guide gets a checkout onto a claim and declares
-the `Library`. [Franchise files](/docs/reference/franchises/) describes
-the file itself.
+A franchise contains the films and series of one story, in story order,
+with its own calendar. People write its files in a git repository. A
+`Library` of kind `franchises` reads a checkout of that repository and
+resolves each member against the other libraries in the namespace. This
+guide puts a checkout on a claim and declares the `Library`.
+[Franchise files](/docs/reference/franchises/) describes the file
+format.
 
 ## 1. The checkout
 

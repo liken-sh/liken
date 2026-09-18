@@ -1,6 +1,6 @@
 package main
 
-// One pass over one Library: resolve the storage it names, stand
+// One pass over one Library: resolve the storage it names, create
 // the schedule its full walk runs on, create a Job for every webhook
 // path it holds, and write what all of it says into its status.
 //
@@ -39,10 +39,10 @@ type binding struct {
 // carried, so the same facts reach the same status whatever order the
 // events arrived in.
 //
-// The catalog is a precondition beside the storage. A Library stands a
+// The catalog is a precondition beside the storage. A Library gets a
 // schedule only when its storage is bound and its namespace holds
-// exactly one Catalog, because every scan Job's catalog agent joins the
-// cluster the Catalog stands and takes a volume the Catalog sizes.
+// exactly one Catalog. Every scan Job's catalog agent joins the
+// cluster that Catalog creates and uses a volume that it sizes.
 func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice,
 	jobs []Job, providers providerSet, now time.Time) error {
 	if err := o.holdLibrary(ctx, library); err != nil {
@@ -71,8 +71,8 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 			return err
 		}
 		o.holdFirstWalk(library, report, jobs)
-		// The render template stands before either scheduler, because a pod
-		// that names a template nothing has created never starts.
+		// The render template must exist before either scheduler creates a
+		// pod. A pod that names a missing template never starts.
 		if err := o.standTrickplayTemplate(ctx, library); err != nil {
 			return err
 		}
@@ -87,12 +87,12 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 			if err := o.enrich(ctx, library, choice.catalog, report, jobs, providers, now); err != nil {
 				return err
 			}
-			// The trickplay Job stands beside the enricher and waits on none of its
-			// work.
+			// The trickplay Job runs beside the enricher and waits for none of
+			// its work.
 			if err := o.trickplay(ctx, library, choice.catalog, report, jobs, now); err != nil {
 				return err
 			}
-			// The trailers Job stands beside both of them, for the same reason.
+			// The trailers Job runs beside both of them for the same reason.
 			if err := o.trailers(ctx, library, choice.catalog, report, jobs, providers, now); err != nil {
 				return err
 			}

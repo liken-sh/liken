@@ -100,7 +100,7 @@ spec:
                 fanart:
                   type: object
                   required: [secretRef]
-                  description: "The account is with Fanart.tv, which serves art alone. It is the only provider of the clearart, the banner, the landscape, the discart, and the season banner."
+                  description: "The account is with Fanart.tv, which provides art only. It is the only provider of clearart, banner, landscape, discart, and season-banner files."
                   properties:
                     secretRef:
                       type: object
@@ -122,7 +122,7 @@ spec:
                 peertube:
                   type: object
                   required: [endpoint]
-                  description: "The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address."
+                  description: "The account is with one PeerTube instance, which provides only the trailer fact and needs no account. Many people run PeerTube, so this block identifies the instance by its address."
                   properties:
                     endpoint:
                       type: string

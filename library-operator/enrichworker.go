@@ -41,7 +41,7 @@ type enricher struct {
 	// empty where the Job covers the whole library.
 	scope string
 	// How long a container waits for its own copy to hold the walk
-	// the standing pods hold.
+	// that the catalog pods hold.
 	syncTimeout time.Duration
 	// The providers a container can ask, built once and held here, so a provider
 	// that spends its day in one fact is not asked again in the next fact of the
@@ -117,7 +117,7 @@ func (e *enricher) narrowedScope() string {
 }
 
 // How a narrowed Job tells a path it owns from one it does not: the path is
-// the scope or sits under it.
+// the scope or has the scope as its directory prefix.
 func (e *enricher) inScope(relative string) bool {
 	if e.scope == "" || e.scope == "." {
 		return true
@@ -182,7 +182,7 @@ func (e *enricher) logf(format string, args ...any) {
 
 // The folder whose .liken directory records a file fact's attempt: the
 // folder the walk reads a sidecar from, which is the title folder even where
-// the file sits in a movie's extras.
+// the file is in a movie's extras.
 func likenFolderFor(kind, absolute string) (string, string) {
 	dir := filepath.Dir(absolute)
 	if folder := likenFolderOf(kind, dir); folder != dir {

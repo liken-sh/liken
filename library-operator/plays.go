@@ -4,8 +4,8 @@ package main
 // credential, so it cannot read a Play's owner references or
 // annotations. The operator reads them and publishes the audience on
 // the bus, retained. The bus drops what nobody hears, so when a Play
-// ends the operator also publishes its last status off the API server,
-// which is where the position stands after the last report. The
+// ends the operator also publishes its last status from the API server,
+// which records the position after the last report. The
 // finalizer library.liken.sh/progress stays on the Play until the
 // store says that last position is written, so a delete cannot
 // outrun the record of it.
@@ -30,10 +30,9 @@ func (o *operator) reconcileProgress(ctx context.Context, plays []Play, people [
 	o.reconcilePeople(ctx, people, stores, now)
 }
 
-// storeNamespaces is the set of namespaces a progress store stands in.
-// It is the rule the catalog pod stands on, one Catalog and no more,
-// because a namespace with none and a namespace with two both stand no
-// cluster and so record nothing.
+// storeNamespaces is the set of namespaces with a progress store.
+// A namespace must have exactly one Catalog, because a namespace with
+// none or with two cannot create a cluster and records nothing.
 func storeNamespaces(byNamespace map[string][]*NamespaceCatalog) map[string]bool {
 	namespaces := map[string]bool{}
 	for namespace, catalogs := range byNamespace {
@@ -52,7 +51,7 @@ func (o *operator) reconcilePlays(ctx context.Context, plays []Play, stores map[
 	live := map[string]bool{}
 	for index := range plays {
 		play := &plays[index]
-		// A namespace that stands no store records nothing, so a Play
+		// A namespace with no store records nothing, so a Play
 		// there that carries the finalizer is one nobody will ever
 		// release. The operator releases it itself.
 		if !stores[play.Metadata.Namespace] {

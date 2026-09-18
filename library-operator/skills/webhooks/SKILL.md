@@ -13,7 +13,7 @@ a new title is on the wall in seconds.
 
 ## The address
 
-Every standing `Library` reports its webhook address:
+Every existing `Library` reports its webhook address:
 
     $ kubectl -n media get library movies -o jsonpath='{.status.webhook}'
     http://library-operator.liken-system.svc/webhook/media/movies

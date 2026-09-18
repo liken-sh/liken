@@ -2,7 +2,7 @@ package main
 
 // The hand-off is the last thing a worker Job does. A Corrosion agent
 // drops the broadcasts it has not sent when it receives SIGTERM, so a Job
-// must not exit until a standing catalog pod holds what it wrote. The Job
+// must not exit until a catalog pod holds what it wrote. The Job
 // writes its finished runs row, writes it again with the actor and version
 // that write answered with, and waits for a confirmations row that names
 // it at that version. confirmations.go holds the proof the confirmer

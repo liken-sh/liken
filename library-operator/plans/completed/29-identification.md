@@ -41,7 +41,7 @@ rarely carry a useful one.
 
 - **`MetadataProvider`.** The resource from plan 27, with a `tmdb`
   block first, because TMDb serves movies, series, and people. It
-  lives in the `Library`'s namespace and names a `Secret` there. The
+  is in the `Library`'s namespace and names a `Secret` there. The
   operator mounts the key into the enricher `Job` as an environment
   variable, the normal way, so a worker never reads the API server.
   The operator checks the provider once per pass with one cheap call,
@@ -95,8 +95,7 @@ rarely carry a useful one.
   `candidates`, `nothing`, or `error`. Only `found`, `candidates`, and
   `nothing` are facts with a date, and the retry interval applies to
   them. An `error` is a provider that was down, a key that was
-  refused, or a file that would not open, and the next run tries
-  again.
+  refused, or a file that would not open, and the next run retries.
 - **The write package.** One package holds every write to the volume:
   create through a temporary file and a rename, an edit of a `.nfo`
   that inserts or replaces one element and leaves every other byte as

@@ -65,7 +65,7 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 These plans are named so the design accounts for them. Each is a stub
 for a later agent to shape.
 
-* [48, Larger type on banners and headings](48-larger-type-on-banners-and-headings.md).
+* [48, Larger type on banners and headings](completed/48-larger-type-on-banners-and-headings.md).
   One step up on the brand's type scale for banners, headings, and
   franchise cards, with wall captions unchanged. Waits for a UI round.
 * [12, The organizer](12-the-organizer.md). Renaming and moving files to
@@ -113,7 +113,7 @@ they share, and plans 28 to 31 build them in order.
   the story, every held member carries a bar, and a press on a split
   series member opens inside its run.
 
-Plan 32 stands apart from the enrichment work.
+Plan 32 covers a separate part of the system from the enrichment work.
 
 
 ## Completed
@@ -223,11 +223,11 @@ Plan 32 stands apart from the enrichment work.
   Built on 2026-09-11. The ladder reads the episode titles off the
   file names and matches them against each candidate's season on
   TMDb, so a bare series folder identifies without a sidecar.
-* [59, The map nothing reads](completed/59-the-map-nothing-reads.md).
+* [59, Trickplay removes WebVTT maps](completed/59-trickplay-removes-webvtt-maps.md).
   Built on 2026-09-11. The trickplay fact writes no WebVTT map, sweeps
   the maps earlier runs wrote, and leaves the tile directory Jellyfin's
   own extraction leaves.
-* [55, Lights down, lights up](completed/55-lights-down-lights-up.md).
+* [55, Browser dimming during playback](completed/55-browser-dimming-during-playback.md).
   Built and drilled on `liken-1` on 2026-09-10 in release
   2026.09.10-002, and on the house the same evening. The browser dims
   its whole frame to an eighth of full over 1.2 s from the `Player`
@@ -247,12 +247,12 @@ drill. The drills found two defects, both fixed in 2026.08.30-013: a
 stale title that the prune never removed, and a subtitle language read
 that took a hearing-impaired flag for Hindi.
 
-* [16, The counts and the phase](completed/16-the-counts-and-the-phase.md).
+* [16, Library counts and scan phase](completed/16-library-counts-and-scan-phase.md).
   Built, and released in 2026.08.30-012. `status.items`, `status.files`,
   and `status.phase`, with the printer columns that show them and the
   two that move behind `-o wide`. The counts are the catalog's own,
   read after the prune.
-* [17, Every file a title carries](completed/17-every-file-a-title-carries.md).
+* [17, File rows and metadata](completed/17-file-rows-and-metadata.md).
   Built, and released in 2026.08.30-012. The `type`, `role`, `language`,
   and `modified` columns on `files`, the walk that reads the season and
   extras folders, and the classification that opens no file. The
@@ -307,7 +307,7 @@ that took a hearing-impaired flag for Hindi.
   2026-09-04. The home page reads off the frame thread, every genre
   gets a strip and a page, "see all" opens the page a strip is about
   and only where there is more to see, the home band shows Search
-  alone, and a clock in the household's zone sits top-right on every
+  alone, and a clock in the household's zone appears at top-right on every
   screen.
 * [39, Search and the keyboard](completed/39-search-and-the-keyboard.md).
   Shaped and built on 2026-09-05 and 2026-09-06 in the working tree and
@@ -315,7 +315,7 @@ that took a hearing-impaired flag for Hindi.
   keys, a search wall that answers as a person types from an in-memory
   index, and an on-screen keyboard that hides when a physical letter
   arrives. The `liken-1` drill with the X6's Keymap rows is still owed.
-* [40, The rail and the strip](completed/40-the-rail-and-the-strip.md).
+* [40, Wall rails and sort order](completed/40-wall-rails-and-sort-order.md).
   Shaped and built on 2026-09-06 and drilled on this workstation from
   `local/browse`. A right-hand rail on long walls that jumps by letter,
   year, or decade and cycles the order from its button, a seasons rail
@@ -358,7 +358,7 @@ that took a hearing-impaired flag for Hindi.
   scale 2: the 1080p layout with art at the panel's resolution, and a
   browser that draws no frame under a film. The memory reading at the
   end of a film is still owed to the plan.
-* [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
+* [32, Screen catalog persistence](completed/32-screen-catalog-persistence.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds
   the full catalog in one second where it took 157 s on an `emptyDir`.

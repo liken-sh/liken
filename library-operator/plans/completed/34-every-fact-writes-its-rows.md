@@ -28,8 +28,8 @@ biographies, and headshots in the next run, an hour later.
 
 Plan 30 drew the art, contributors, and trickplay phases as regular
 containers running at once, and built them as init containers in a
-row, because the enrich container must run last and nothing told it
-when a regular container beside it was done.
+row, because the enrich container must run last and had no way to
+detect when a neighboring regular container had finished.
 
 Both problems have one root: the scan is the only writer of rows.
 That rule kept one way to make a row. This plan keeps that, and adds

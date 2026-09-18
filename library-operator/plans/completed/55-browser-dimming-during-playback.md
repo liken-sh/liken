@@ -1,14 +1,14 @@
-# 55, Lights down, lights up
+# 55, Browser dimming during playback
 
 Built, and drilled on `liken-1` on 2026-09-10 in release 2026.09.10-002,
 which rolled to the house the same evening. The browser dims its whole
-frame when a film is on its way and brightens it when the film is over,
-in step with the curtain it already draws. This is library-operator's
-part of the theater transition: display-operator's
+frame when the `Player` status leaves `Idle` and restores it when the
+status returns to `Idle`, in step with the curtain it already draws.
+This is library-operator's part of the theater transition: display-operator's
 [plan 18](https://github.com/liken-sh/display-operator/blob/main/plans/completed/18-a-surface-leaves-with-a-fade.md)
 fades the film's surface in over the dimmed page and out again, and
 media-operator's
-[plan 30](https://github.com/liken-sh/media-operator/blob/main/plans/completed/30-the-film-leaves-with-the-lights.md)
+[plan 30](https://github.com/liken-sh/media-operator/blob/main/plans/completed/30-delay-playback-exit-for-fade.md)
 holds the film for the fade out.
 
 ## The problem
@@ -16,13 +16,12 @@ holds the film for the fade out.
 A select on a film draws the loading curtain: the page departs and the
 logo waits at full brightness until the film's surface covers it. With
 the film fading in over the page for 600 ms, a page at full brightness
-under a half-transparent film is a muddle. And when the film fades out
-at the end, a page that snaps to full brightness under it is a light
-switch, not a theater.
+under a half-transparent film makes the film harder to see. When the film fades out
+at the end, the page must return to full brightness gradually.
 
 ## The design
 
-**Lights down.** From the second the `Player` status moves away from
+**Dim the frame.** From the second the `Player` status moves away from
 `Idle`, the whole frame dims from full to a floor over
 `look::LIGHTS_DOWN`, about 1.2 s, with the curtain's logo pulsing on
 top at full brightness. The curtain is the select's, the lights are the
@@ -39,7 +38,7 @@ dead screen. It is an eighth of full, and the renderer composites in
 linear light, so an eighth reads as about a third of the sRGB value on
 the panel.
 
-**Lights up.** On the status's move to `Idle`, the scrim lifts over
+**Restore the frame.** On the status's move to `Idle`, the scrim lifts over
 `look::LIGHTS_UP`, about 0.3 s, on the same frames as the curtain's
 exit, which already runs `look::RETURN` at 0.4 s. The film fades out
 above over 250 ms, so the page is most of the way back up as the last
@@ -70,9 +69,9 @@ dim with a title's page.
 
 The full sequence with the `theater` `Layout` (display-operator plan
 18, media-operator plan 30) was seen by eye on the portable panel: the
-logo comes in on the select, the page dims as the `Play` arrives, the
+logo appears on the select, the page dims as the `Play` arrives, the
 film fades in over it, and on the way out the film fades out while the
-page comes back up and the logo goes out. With media-operator's latency
+page brightens and the logo disappears. With media-operator's latency
 fix, the `Player`'s `Idle` reaches the browser 2 ms after the ending
 report.
 

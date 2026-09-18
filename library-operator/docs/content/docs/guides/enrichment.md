@@ -6,16 +6,16 @@ description: "Enrich a library with titles, plots, ratings, art, and people from
 
 # Enrich a library
 
-Enrichment fills what the volume does not hold: which title a folder
-is, its plot, its ratings, its art, and its people. The operator asks
-metadata providers and writes the answers beside the media, as the
-`.nfo` sidecars and art files Kodi and Jellyfin read. The volume stays
-the source of truth, and the catalog is derived from it.
+Enrichment adds the information that the volume does not hold: a media
+folder's title, plot, ratings, art, and people. The operator asks
+metadata providers and writes their answers beside the media. Kodi and
+Jellyfin read the resulting `.nfo` sidecars and art files. The volume
+remains the source of truth, and the catalog is derived from it.
 
 ## 1. Declare a provider
 
-A `MetadataProvider` is one account with one provider. The key is in
-a `Secret` in the same namespace:
+A `MetadataProvider` configures one provider. For providers that require
+an API key, store the key in a `Secret` in the same namespace:
 
     apiVersion: v1
     kind: Secret
@@ -60,9 +60,9 @@ The providers, and the facts each one serves:
   with an empty block, `archive: {}`. It holds trailers for many older
   films, and the operator asks it no faster than four times a second.
 
-The operator reads the `Secret` once per pass, to check the provider
-answers. The key reaches an enricher container through a
-`secretKeyRef`, so no standing pod holds it.
+The operator reads the `Secret` once per pass to check the provider
+answers. A `secretKeyRef` passes the key to an enricher container, so
+no long-running pod stores it.
 
     $ kubectl -n media get metadataproviders
     NAME    PROVIDER   READY   REASON      AGE
@@ -139,9 +139,12 @@ in `.liken/identity.yaml`, and the title counts in `status.waiting`
 until a person names the right `uniqueid` in the `.nfo`. A title no
 provider can name counts in `status.unresolved`.
 
-Once a title has a TMDb id, one more call writes every other
-database's id into the sidecar. OMDb and Fanart.tv then become
-reachable with no account of their own.
+After identifying a title through TMDb, the enricher requests its IMDb
+and TVDB ids and writes any returned ids into the sidecar. OMDb uses
+the IMDb id to look up the title. Fanart.tv uses the TMDb id for a
+movie and the TVDB id for a series. These ids identify the title;
+OMDb and Fanart.tv still require their own API keys, configured through
+each provider's `secretRef`.
 
 ### The write rule
 
@@ -149,10 +152,11 @@ Each fact owns a fixed group of elements in the sidecar and writes
 nothing outside it. The `overview` fact owns the plot, the tagline,
 the genres, the studios, the premiere date, and the runtime. Each
 rating owns its one element. `credits` owns the actors, directors,
-and writers. Before a fact writes, it checks that the group still
-hashes to what it wrote last time. If another writer changed it, the
-fact records a fight and writes nothing. `status.fights` counts
-them.
+and writers. Before a fact writes again, it hashes the group as it is
+now and compares that hash with the one it recorded after its last
+write. If the hashes differ, another writer changed that group. The
+fact records a fight and does not write the group. `status.fights`
+counts the fights.
 
 An art file that already exists is never replaced. The fact records it
 as answered and downloads nothing.

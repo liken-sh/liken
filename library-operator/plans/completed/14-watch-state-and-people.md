@@ -156,7 +156,7 @@ the browser starts with progress already on disk the way it starts with
 the catalog.
 
 One standing pod per namespace, the progress pod, holds the durable
-copy on a claim of its own. The operator stands it beside the catalog
+copy on a claim of its own. The operator creates it beside the catalog
 pod, owned by the same `Catalog`, and it is the pod a rebuilt cluster
 starts from. It has its own pod, claim, and cluster rather than a
 place in the catalog pod, so nothing in it shares a lifecycle with the
@@ -184,7 +184,7 @@ catalog at read time, alias to alias, across its two local files.
 ### The progress pod reads the bus and writes the rows
 
 The progress pod holds no Kubernetes credential, like every pod this
-operator stands. The operator is the only API client, so every fact
+operator creates. The operator is the only API client, so every fact
 the store needs from the API crosses the bus, retained, and every mark
 the operator needs from the store crosses it back. `progressbus.go`
 names the topics and the payloads.
@@ -294,7 +294,7 @@ nothing in this plan.
   `status.members` follow the catalog pod and its agents alone. A
   progress pod that never starts is invisible in `kubectl get
   catalogs`.
-- **The local harness.** `local/catalog` stands one catalog agent and
+- **The local harness.** `local/catalog` starts one catalog agent and
   one reporter, and no progress agent. A local round on the browser's
   continue-watching row needs one.
 - **The write cadence.** The playback sidecar reports every second,

@@ -1,9 +1,8 @@
-# Every file a title carries
+# File rows and metadata
 
-Plan 17. The rest of the folder. At the end of this plan the catalog
-holds every file a title carries, each one classified by what it is, and
-the media browser draws a title's art, its subtitles, and its extras
-from the catalog alone.
+Plan 17. At the end of this plan, the catalog records and classifies
+every file associated with a title. The media browser reads the title's
+art, subtitles, and extras from the catalog alone.
 
 ## The problem
 

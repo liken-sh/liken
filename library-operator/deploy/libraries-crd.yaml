@@ -460,7 +460,7 @@ spec:
                 gaps:
                   type: object
                   x-kubernetes-map-type: atomic
-                  description: "One count per fact of the rows that fact has left to fill, counted by the namespace's reporter. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher. A row a fact tried leaves the count until its attempt has passed a window: thirty days for a miss, and one day for an error. An attempt made before the item's release date stands only until that date, so an episode a fact asked about before it aired is in the count again on the day it airs."
+                  description: "The namespace reporter counts the catalog rows still missing each fact. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher. After a fact attempts a row, the row is excluded from that fact's count while its attempt window is active: thirty days for a miss and one day for an error. The row becomes eligible for the count again when that window expires. An attempt made before the item's release date excludes the row only until that date, so an episode a fact asked about before it aired is in the count again on the day it airs."
                   additionalProperties:
                     type: integer
                     minimum: 0

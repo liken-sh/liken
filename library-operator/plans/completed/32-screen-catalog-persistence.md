@@ -1,10 +1,11 @@
-# A screen keeps its catalog
+# Screen catalog persistence
 
-Plan 32. A screen's Corrosion agent takes a `PersistentVolumeClaim`
-instead of an `emptyDir`, so a screen that restarts syncs a delta and
-the media browser draws the wall at once. The `Catalog` sizes the
-claim as it sizes every agent's and may name its `StorageClass`, and a
-screen that cannot keep its claim on its node gets a new one. This changes what plans 06 and 15 built, and it answers
+Plan 32. The screen pod's Corrosion agent uses a
+`PersistentVolumeClaim` instead of an `emptyDir`. After a restart, the
+agent syncs a delta and the media browser draws the wall at once. The
+`Catalog` sizes the claim as it sizes every agent's and may name its
+`StorageClass`. If the screen cannot keep its claim on its node, the
+operator creates a new claim. This changes what plans 06 and 15 built, and it answers
 the screen half of the [ingest memory
 problem](../open-problems/ingest-memory-and-restart.md).
 
@@ -94,13 +95,13 @@ comes back to the same node and the same volume.
   to the class or the size reaches a new claim, not a bound one.
   Volume expansion is not built, here or anywhere else in this
   operator.
-- **The claim stands before the pod.** `standCatalogPod` already
-  creates its claim before it stands its pod, and the screen pass does
-  the same. A pod that named a claim nothing had created would sit
+- **The claim exists before the pod.** `standCatalogPod` already
+  creates its claim before it creates its pod, and the screen pass does
+  the same. A pod that names a claim that does not exist would remain
   Pending until the next pass.
-- **A namespace with no single `Catalog` keeps its `emptyDir`.** A
-  screen stands today whether or not the namespace holds exactly one
-  `Catalog`, and this plan does not change that. With no `Catalog`
+- **A namespace with no single `Catalog` keeps its `emptyDir`.** The
+  existing reconciliation creates a screen whether or not the namespace
+  has exactly one `Catalog`, and this plan does not change that. With no `Catalog`
   there is no size to read, so the pod holds an `emptyDir` and the
   screen works as it does now. This is the one `emptyDir` left.
 - **The screen pod needs the `ReadWriteOnce` handoff.** The claim is
