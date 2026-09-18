@@ -6,22 +6,22 @@ toc: true
 
 <!-- Generated from deploy/receivers-crd.yaml by crdref. Do not edit. -->
 
-One piece of A/V equipment on the far end of a machine's cable: the protocol that reaches it, the inputs liken machines feed, and the session a Player holds on it.
+One piece of A/V equipment on the far end of a machine's cable. The resource declares the protocol that reaches it, the inputs liken machines feed, and the session that currently uses it.
 
 ## spec
 
-How to reach the receiver and how it is wired. The cluster owner writes every field but session, which the media operator applies.
+How to reach the receiver and how its inputs are wired. The cluster owner writes every field except session. The media operator applies session.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--denon"></span>`denon` | [object](#specdenon) | no | The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain commands such as MV50, and events in the same form. |
-| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon. |
-| <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver's inputs that liken machines feed. Nothing can discover this wiring, so the cluster owner declares it. A receiver forwards one EDID on every input, so the monitor id alone cannot tell two machines apart, and every entry names the machine. |
-| <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time, and marks itself the owner on the topic plus /owner. Power and input go out once, each time active or awake turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster. |
+| <span id="spec--denon"></span>`denon` | [object](#specdenon) | no | The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form. |
+| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max. |
+| <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine. |
+| <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. The operator sends power and input commands once each time active or awake changes to true. It does not re-assert those commands. A person using the receiver's remote can therefore change them. |
 
 ### spec.denon
 
-The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain commands such as MV50, and events in the same form.
+The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -29,7 +29,7 @@ The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain
 
 ### spec.volume
 
-How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon.
+The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ How loud this receiver may be driven and how far one press moves it, both in the
 
 ### spec.inputs[]
 
-The receiver's inputs that liken machines feed. Nothing can discover this wiring, so the cluster owner declares it. A receiver forwards one EDID on every input, so the monitor id alone cannot tell two machines apart, and every entry names the machine.
+The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -48,15 +48,15 @@ The receiver's inputs that liken machines feed. Nothing can discover this wiring
 
 ### spec.session
 
-The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time, and marks itself the owner on the topic plus /owner. Power and input go out once, each time active or awake turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster.
+The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. The operator sends power and input commands once each time active or awake changes to true. It does not re-assert those commands. A person using the receiver's remote can therefore change them.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specsession--player"></span>`player` | string | yes | The Player, as namespace/name. Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. |
 | <span id="specsession--input"></span>`input` | string | yes | The input the Player plays through, by its name in spec.inputs. |
-| <span id="specsession--volumetopic"></span>`volumeTopic` | string | yes | The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session stands, and writes the receiver's true level back to it. |
-| <span id="specsession--active"></span>`active` | boolean | no | Whether a Play stands on the Player. When it turns on, the receiver is powered on and its input selected, once. While it is off, the session owns the level and sends the receiver nothing, so an idle screen never wakes the room. Absent means off. |
-| <span id="specsession--awake"></span>`awake` | boolean | no | Whether the room's screen is awake. It is the second trigger for the same one-shots as active: each time it turns on, the receiver is powered on and its input selected, once, whatever active says. Turning off sends the receiver nothing. Absent means asleep. |
+| <span id="specsession--volumetopic"></span>`volumeTopic` | string | yes | The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it. |
+| <span id="specsession--active"></span>`active` | boolean | no | Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false. |
+| <span id="specsession--awake"></span>`awake` | boolean | no | Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep. |
 
 ## status
 
@@ -70,7 +70,7 @@ What the receiver last said, in its own units. Only the operator writes it.
 | <span id="status--volumemax"></span>`volumeMax` | string | no | The last MVMAX line the receiver sent, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume. |
 | <span id="status--mute"></span>`mute` | boolean | no | Whether the receiver last reported itself muted. |
 | <span id="status--soundmode"></span>`soundMode` | string | no | The sound mode the receiver last reported, such as MULTI CH IN or STEREO. |
-| <span id="status--service"></span>`service` | string | no | The Service that stands in for the receiver on the cluster network, once the operator makes one. Empty until then. |
+| <span id="status--service"></span>`service` | string | no | The Service that represents the receiver on the cluster network after the operator creates it. Empty until then. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. |
 
 ### status.conditions[]

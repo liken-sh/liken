@@ -15,7 +15,7 @@ Prometheus at all; an owner who runs the prometheus-operator adds the
 | equipment-operator | `equipment_observation_valid{source}`, `equipment_observation_last_success_timestamp_seconds{source}` | gauge | the session went stale |
 | equipment-operator | `equipment_receiver_power{receiver}`, `equipment_receiver_volume{receiver}` | gauge | what the room is set to |
 | equipment-operator | `equipment_receiver_input_info{receiver, input}` | gauge, info | which input is selected |
-| equipment-operator | `equipment_commands_total{status}` | counter | commands that fail |
+| equipment-operator | `equipment_commands_total{status}` | counter | commands by outcome: sent, failed, or timed out |
 
 ```yaml
 resources:

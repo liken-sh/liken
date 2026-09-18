@@ -41,12 +41,12 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One piece of A/V equipment on the far end of a machine's cable: the protocol that reaches it, the inputs liken machines feed, and the session a Player holds on it."
+          description: "One piece of A/V equipment on the far end of a machine's cable. The resource declares the protocol that reaches it, the inputs liken machines feed, and the session that currently uses it."
           required: [spec]
           properties:
             spec:
               type: object
-              description: "How to reach the receiver and how it is wired. The cluster owner writes every field but session, which the media operator applies."
+              description: "How to reach the receiver and how its inputs are wired. The cluster owner writes every field except session. The media operator applies session."
               # One protocol block names the receiver, and this rule
               # holds a Receiver to one of them. A second protocol is
               # one more entry in this list.
@@ -62,7 +62,7 @@ spec:
                 denon:
                   type: object
                   required: [address]
-                  description: "The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain commands such as MV50, and events in the same form."
+                  description: "The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form."
                   properties:
                     address:
                       type: string
@@ -71,7 +71,7 @@ spec:
                       description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
                 volume:
                   type: object
-                  description: "How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon."
+                  description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max."
                   # A ceiling of zero would mute the room, and a step of
                   # zero would freeze it, so both must be above zero
                   # when stated.
@@ -91,7 +91,7 @@ spec:
                   type: array
                   maxItems: 32
                   x-kubernetes-list-type: atomic
-                  description: "The receiver's inputs that liken machines feed. Nothing can discover this wiring, so the cluster owner declares it. A receiver forwards one EDID on every input, so the monitor id alone cannot tell two machines apart, and every entry names the machine."
+                  description: "The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine."
                   # A name is how a session asks for an input, so two
                   # entries under one name name two different inputs
                   # and the request is ambiguous. maxItems bounds the
@@ -121,7 +121,7 @@ spec:
                 session:
                   type: object
                   required: [player, input, volumeTopic]
-                  description: "The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time, and marks itself the owner on the topic plus /owner. Power and input go out once, each time active or awake turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster."
+                  description: "The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. The operator sends power and input commands once each time active or awake changes to true. It does not re-assert those commands. A person using the receiver's remote can therefore change them."
                   properties:
                     player:
                       type: string
@@ -138,13 +138,13 @@ spec:
                       type: string
                       minLength: 1
                       maxLength: 1024
-                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session stands, and writes the receiver's true level back to it."
+                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
                     active:
                       type: boolean
-                      description: "Whether a Play stands on the Player. When it turns on, the receiver is powered on and its input selected, once. While it is off, the session owns the level and sends the receiver nothing, so an idle screen never wakes the room. Absent means off."
+                      description: "Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false."
                     awake:
                       type: boolean
-                      description: "Whether the room's screen is awake. It is the second trigger for the same one-shots as active: each time it turns on, the receiver is powered on and its input selected, once, whatever active says. Turning off sends the receiver nothing. Absent means asleep."
+                      description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
             status:
               type: object
               description: "What the receiver last said, in its own units. Only the operator writes it."
@@ -169,7 +169,7 @@ spec:
                   description: "The sound mode the receiver last reported, such as MULTI CH IN or STEREO."
                 service:
                   type: string
-                  description: "The Service that stands in for the receiver on the cluster network, once the operator makes one. Empty until then."
+                  description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."
                 conditions:
                   type: array
                   description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone."

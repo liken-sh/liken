@@ -78,22 +78,24 @@ is how far one press moves the volume, and half steps are allowed.
 
 ## Put it under a Player
 
-You declare nothing more. The `media-operator` resolves each
-`Player`'s screen to a machine and a monitor id, then finds the
-input that matches both. It applies `spec.session` for as long as
-the `Player` has that screen, the idle screen included. The session
-takes the level from the `Player`'s volume topic the whole time. So
-the remote's volume keys change the receiver's level whether a film
-plays or not. The topic and its payload are the `media-operator`'s,
-given on its
-[players page](https://media.liken.sh/docs/reference/players/).
-What this operator reads and writes there is on
-[the receiver on the bus](https://equipment.liken.sh/docs/reference/bus/). When a `Play`
-starts, the session powers the receiver on and selects the input,
-once. An idle screen never powers the receiver on.
+You declare no session by hand. The `media-operator` resolves each
+`Player` screen to a machine and monitor ID, then finds the input that
+matches both values. It applies `spec.session` while the `Player` has
+that screen, including the idle screen. The session reads the level
+from the `Player` volume topic for that whole period. The room remote
+therefore changes the receiver's level while a film plays and while
+the screen is idle. The topic and payload belong to `media-operator`.
+Its [players page](https://media.liken.sh/docs/reference/players/)
+defines them. This operator's reads and writes on that topic are
+described on [the receiver on the bus](https://equipment.liken.sh/docs/reference/bus/). When a
+`Play` starts, the session powers the receiver on and selects the input
+once. Waking the screen also triggers those commands through
+`spec.session.awake`, even with no `Play`. Starting an idle screen after
+a reboot does not by itself power the receiver on.
 
-A person at the receiver's own remote overrides the cluster. If they
-select another input, the status records it and nothing switches
-back until the next `Play` starts. If they turn the knob, the
-operator writes the new level back to the volume topic, so the next
-press steps from there.
+A person at the receiver's own remote can change the receiver without
+the cluster changing it back immediately. If the person selects
+another input, the status records that input. The operator selects the
+configured input again only when `active` or `awake` changes from false
+to true. If the person turns the volume knob, the operator writes the
+new level to the volume topic, so the next press starts from that level.

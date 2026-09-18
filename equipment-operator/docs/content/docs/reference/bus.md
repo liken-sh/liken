@@ -21,11 +21,12 @@ writes both topics in full.
 | Topic | Payload | Retained | This operator |
 |---|---|---|---|
 | `liken/media/players/{namespace}/{name}/volume` | `{"level": 40, "muted": false}` | yes | reads every message, and writes the receiver's true level |
-| `liken/media/players/{namespace}/{name}/volume/owner` | `{"owner": "receiver/{receiver}"}`, or empty | yes | writes the mark while a session stands |
+| `liken/media/players/{namespace}/{name}/volume/owner` | `{"owner": "receiver/{receiver}"}`, or empty | yes | writes the mark while a session exists |
 
 ## The owner mark
 
-The mark says that equipment applies the level and the pods do not.
+The mark says that the equipment operator applies the level and the
+playback pods do not.
 Its topic is the volume topic plus `/owner`, and its payload names
 the `Receiver`:
 
@@ -35,21 +36,20 @@ An empty payload clears the mark. An empty retained publish removes
 the retained message from the broker, so a subscriber that connects
 after the clear receives nothing on the topic.
 
-The `media-operator` and each playback pod's command sidecar read
-the mark. While it stands, every playback pod for the unit holds
-`mpv` at unity and applies no level, and the `media-operator` starts
-a playback pod with no level of its own. When the mark clears, the
-pods apply the level the volume topic holds. The players page states
-what each reader does with the mark.
+The `media-operator` and each playback pod's command sidecar read the
+mark. While the mark exists, every playback pod for the unit keeps
+`mpv` at unity and applies no level. The `media-operator` also starts
+each playback pod with no level of its own. When the mark clears, the
+pods apply the level stored on the volume topic. The players page
+defines what each reader does with the mark.
 
-The operator sets the mark when a session starts, on the session's
-own broker connection. It publishes the mark again on every fresh
-connection to the broker, because a broker that restarted holds no
-retained state.
+The operator sets the mark when a session starts, using the session's
+broker connection. It publishes the mark again after every new broker
+connection because a restarted broker has no retained state.
 
 The operator clears the mark on two paths:
 
-* A stop. The `media-operator` lifts `spec.session`, or writes a
+* A stop. The `media-operator` removes `spec.session`, or writes a
   session that names another `Player`, input, or volume topic. The
   same stop runs when the `Receiver` is deleted, when
   `spec.denon.address` changes, and when the operator shuts down.
@@ -67,7 +67,7 @@ pods write it, and the payload is the `media-operator`'s: `level`
 runs 0 to 100, and `muted` is a boolean. The players page gives the
 payload's rules.
 
-While a session stands, the operator subscribes to the volume topic
+While a session exists, the operator subscribes to the volume topic
 and reads each message as a direction. A level above the one it
 holds moves the receiver up one `spec.volume.step`, a level below
 moves it down one step, and `muted` is applied as the receiver's
@@ -75,7 +75,7 @@ own mute. The receiver moves from where it stands, in its own
 scale, and never to the level the message carries.
 
 The operator also writes the volume topic, retained. A pod writes
-the topic only for a press it handled. While the mark stands the
+the topic only for a press it handled. While the mark exists, the
 receiver is the level's owner, so the operator writes the topic on
 three occasions:
 
@@ -96,6 +96,6 @@ three occasions:
 
 A position the operator already published is not published again.
 
-So while a session stands, the topic holds the receiver's true
-level in the bus scale. The same level in the receiver's own scale
-is in `status.volume`.
+While a session exists, the topic stores the receiver's true level in
+the bus scale. `status.volume` stores the same level in the receiver's
+own scale.

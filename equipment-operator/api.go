@@ -24,9 +24,9 @@ type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// A Receiver is one piece of A/V equipment on the far end of a
-// machine's cable. It is cluster-scoped, because the machines that feed
-// it are the cluster's.
+// A Receiver describes one piece of A/V equipment on the far end of a
+// machine's cable. It is cluster-scoped because the machines that feed
+// it belong to the cluster.
 type Receiver struct {
 	APIVersion string         `json:"apiVersion,omitempty"`
 	Kind       string         `json:"kind,omitempty"`
@@ -40,8 +40,8 @@ type ReceiverList struct {
 	Items    []Receiver `json:"items"`
 }
 
-// The spec names one protocol block, the inputs liken machines feed,
-// and the session that holds the receiver now.
+// The spec names one protocol block, the inputs that liken machines
+// feed, and the session that currently uses the receiver.
 type ReceiverSpec struct {
 	Denon   *DenonProtocol   `json:"denon,omitempty"`
 	Volume  *ReceiverVolume  `json:"volume,omitempty"`
@@ -71,13 +71,13 @@ type ReceiverInput struct {
 	Monitor string `json:"monitor"`
 }
 
-// What a session names: the Player, the input it plays through, the
-// topic it takes the level from and marks itself the owner of, and the
-// two flags the media operator flips on it. Active says a Play stands.
-// Awake says the room's screen
-// is awake. The media operator holds a session whenever the Player has
-// a screen, the idle screen included, so a session with both flags off
-// owns the level and sends the equipment nothing.
+// A session names the Player, the input it uses, and the topic from
+// which it reads the level. The operator derives the owner-mark topic
+// by adding /owner to VolumeTopic.
+// Active says that a Play is present. Awake says that the room's screen
+// is awake. The media operator keeps a session while the Player has a
+// screen, including the idle screen. A session with both flags false
+// owns the level but sends no power or input command to the receiver.
 type ReceiverSession struct {
 	Player      string `json:"player"`
 	Input       string `json:"input"`
@@ -86,17 +86,17 @@ type ReceiverSession struct {
 	Awake       bool   `json:"awake,omitempty"`
 }
 
-// withoutFlags is the session apart from Active and Awake, which is
-// what tells one session from another. A flip of either flag reaches
-// the session that already stands. Anything else replaces it.
+// withoutFlags removes Active and Awake before comparing sessions. A
+// change to either flag updates the existing session. Any other change
+// replaces the session.
 func (s ReceiverSession) withoutFlags() ReceiverSession {
 	s.Active = false
 	s.Awake = false
 	return s
 }
 
-// What the receiver last said, in its own units, and the Reachable
-// condition.
+// What the receiver last reported in its own units, the Service that
+// represents it when one exists, and the Reachable condition.
 type ReceiverStatus struct {
 	Power      string      `json:"power,omitempty"`
 	Input      string      `json:"input,omitempty"`

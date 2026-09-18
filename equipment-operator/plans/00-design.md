@@ -2,10 +2,10 @@
 
 ## The problem
 
-A liken machine plays a film through a cable. On the far end of that
-cable sits equipment the machine does not own: an A/V receiver, a
-television, a projector, an amplifier. The machine sees some of it
-through the cable. An HDMI receiver sends an EDID, so the display
+A liken machine plays a film through a cable. Equipment that the
+machine does not own connects to the far end of that cable: an A/V
+receiver, a television, a projector, or an amplifier. The machine sees
+some of it through the cable. An HDMI receiver sends an EDID, so the display
 operator and the audio operator both publish it under one monitor id.
 The cable carries no control. The receiver's volume, its power, and
 which input it shows come from its own remote or from a control
@@ -28,8 +28,8 @@ protocol is `denon`.
 The operator is not a second Home Assistant. Lights, blinds, a
 thermostat, and a motorized screen stay with Home Assistant, which
 reacts to the media bus. A network stream target, such as a Chromecast
-or a Sonos, is not equipment either: equipment sits on the cable and
-never receives the stream over the network.
+or a Sonos, is not equipment either. Equipment is connected to the
+cable and never receives the stream over the network.
 
 The name says nothing about the wire on purpose. A receiver with an
 RS-232 port, or a television behind an IR blaster, is the same
@@ -38,9 +38,9 @@ it chooses no shape that forbids it.
 
 ## The `Receiver`
 
-`Receiver` is a cluster-scoped CRD. It holds three things: how to
-reach the equipment, how it is wired to liken machines, and the
-session a `Player` currently holds on it.
+`Receiver` is a cluster-scoped CRD. It records how to reach the
+equipment, how it is wired to liken machines, and the session a
+`Player` currently uses.
 
 ```yaml
 apiVersion: equipment.liken.sh/v1alpha1
@@ -93,18 +93,19 @@ server-side apply under its own field manager, the way it applies
 `spec.override` on a `Display` today, and it lifts it when the unit
 goes away. The cluster owner never writes it.
 
-A session means: own the level from the named volume topic, and,
-each time `active` or `awake` turns on, power the receiver on and
-select the input. The media operator holds the session whenever the
-Player has the screen, the idle screen included. It sets `active`
-while a Play stands, and `awake` while the room's screen is on, which
-the remote's power key controls. So a volume press at the idle screen
-turns the receiver, the power key wakes the receiver and brings the
-browser up, and an idle screen that comes up after a reboot never
-wakes it. Power and input are one-shots. The operator sends them when
-a flag turns on, and never holds them. If a person selects another input on the receiver's own
-remote, the status records it and nothing fights back. A hand on the
-equipment outranks the cluster.
+A session makes the receiver operator own the level from the named
+volume topic. Each time `active` or `awake` turns on, it also powers
+the receiver on and selects the input. The media operator keeps the
+session whenever the Player has the screen, including the idle screen.
+It sets `active` while a Play is present and `awake` while the room's
+screen is on, which the remote's power key controls. A volume press at
+the idle screen changes the receiver's volume. The power key wakes the receiver
+and brings the browser up. An idle screen that comes up after a reboot
+does not wake the receiver. Power and input are one-shot commands. The
+operator sends them when a flag turns on and never holds them. If a
+person selects another input on the receiver's remote, the status
+records it and the operator does not change it back. A person using the
+equipment can therefore override the cluster.
 
 ### The status
 
@@ -123,7 +124,7 @@ next state, retained, on the `Player`'s volume topic, and every pod
 for the unit applies what it reads. mpv is one subscriber of that
 state and not its owner. The receiver is a second subscriber.
 
-While a session stands, the operator subscribes to the volume topic.
+While a session exists, the operator subscribes to the volume topic.
 A press is a direction, not a level: the operator moves the receiver
 one step from where it actually stands, in the receiver's own units,
 and writes the true position back to the topic. The scale is 0 to
@@ -135,13 +136,13 @@ receiver's own mute.
 
 The operator also publishes an owner mark, retained, on the topic
 `<volumeTopic>/owner`, and registers an MQTT last will that clears
-it. While the mark stands, mpv starts at unity, applies no level, and
+it. While the mark exists, mpv starts at unity, applies no level, and
 draws no volume indicator. If the operator dies, the will clears the
 mark and mpv takes the level back. A dead receiver degrades to
 software gain, not to a deaf room.
 
 One rule bends. The volume topic's rule is that no observer writes
-back what it saw. While the mark stands, the receiver is the level's
+back what it saw. While the mark exists, the receiver is the level's
 owner and not an observer. When a person turns the receiver's knob,
 the operator publishes the new position back to the topic, so the
 retained state stays true and the next press steps from where the
@@ -157,8 +158,8 @@ directly and leaves Home Assistant alone. The front below is the
 second plan, for receivers that enforce the one-client rule, and for
 a house that wants one name for the receiver.
 
-The operator owns the socket and makes a Service, named for the
-`Receiver`, that stands in for the receiver on the network.
+The operator owns the socket and makes a Service named for the
+`Receiver`. The Service represents the receiver on the network.
 
 Ports 8080, 60006, and 1255 pass straight through to the receiver's
 own address: the Service has no selector, and an EndpointSlice the

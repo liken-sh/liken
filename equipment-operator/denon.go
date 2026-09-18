@@ -1,8 +1,9 @@
 package main
 
-// One receiver's control connection: the ASCII protocol a Denon speaks
-// on port 23, the state the operator folds every line into, and the
-// reconnect that keeps the socket honest.
+// This file handles one receiver's control connection. It parses the
+// Denon ASCII protocol on port 23, records the state each line reports,
+// and reconnects when the read deadline or a socket error ends the
+// connection.
 // The protocol reference is https://assets.denon.com/documentmaster/uk/
 // avr1713_avr1613_protocol_v860.pdf. The lines this file parses were
 // also read from a live AVR-X1700H.
@@ -42,10 +43,11 @@ const (
 	powerStandby = "standby"
 )
 
-// The timings of one connection. The heartbeat is a query the receiver
-// answers. Silence longer than the limit ends the session even though
-// the socket is still open, because a half-open socket reads as live
-// and swallows every write.
+// These values bound one connection. The heartbeat asks the receiver
+// for a reply when no other command has gone out. The silence limit
+// ends a session after the socket carries no reply, even if the TCP
+// socket remains open. A half-open socket can accept writes without
+// delivering them, so an open socket alone does not prove reachability.
 var (
 	denonDialTimeout  = 5 * time.Second
 	denonHeartbeat    = 30 * time.Second
@@ -69,8 +71,9 @@ const (
 	denonReachableField = "reachable"
 )
 
-// denonState is what the receiver last said, in the receiver's own
-// units, and whether the operator can still reach it.
+// denonState stores the latest values the receiver reported in its own
+// units. Reachable becomes true on a recognized reply and changes when
+// the connection fails.
 type denonState struct {
 	Power     string
 	Input     string
@@ -198,17 +201,18 @@ func (d *denonClient) reportCommand(status string) {
 	d.readings.reportCommand(status)
 }
 
-// State answers what the receiver last said, from any goroutine.
+// State returns the latest receiver state and can run concurrently with
+// the reader and writer goroutines.
 func (d *denonClient) State() denonState {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	return d.state
 }
 
-// Send queues one command. While the client is disconnected the queue
-// does not exist and the command is dropped. Every command this
-// operator sends is a one-shot, and a stale one sent after a reconnect
-// would fight a hand on the equipment.
+// Send queues one command for the current connection. A disconnected
+// client has no queue, so it drops the command. Commands are one-shot.
+// Replaying one after a reconnect could overwrite a change made at the
+// receiver while the connection was down.
 func (d *denonClient) Send(command string) {
 	d.mutex.Lock()
 	out := d.out
@@ -224,10 +228,10 @@ func (d *denonClient) Send(command string) {
 	}
 }
 
-// Run holds the connection open until ctx ends, and waits a backoff
-// between sessions. A session that got an answer resets the backoff, so
-// a receiver that was unplugged for an hour reconnects at once, while
-// an address that never answers is retried more and more slowly.
+// Run keeps reconnecting until ctx ends and waits between sessions. A
+// session that receives a recognized reply resets the backoff. A
+// session that does not receive a recognized reply increases the
+// backoff up to denonMaxBackoff.
 func (d *denonClient) Run(ctx context.Context) {
 	backoff := denonMinBackoff
 	for ctx.Err() == nil {
@@ -253,9 +257,10 @@ func (d *denonClient) Run(ctx context.Context) {
 	}
 }
 
-// runSession dials, asks the five queries, and reads until the receiver
-// falls silent or the socket fails. It answers whether the receiver
-// ever replied, which is what tells Run to reset the backoff.
+// runSession dials, sends the five queries, and reads until the read
+// deadline or a socket error ends the session. It reports whether any
+// recognized reply arrived. Run uses that result to reset or increase
+// the reconnect backoff.
 func (d *denonClient) runSession(parent context.Context) (answered bool) {
 	dialer := &net.Dialer{Timeout: denonDialTimeout}
 	conn, err := dialer.DialContext(parent, "tcp", d.address)
@@ -298,9 +303,8 @@ func (d *denonClient) runSession(parent context.Context) (answered bool) {
 	return answered
 }
 
-// writeLoop is the one goroutine that writes the socket. It sends the
-// heartbeat query whenever nothing else has gone out for a heartbeat's
-// time.
+// writeLoop is the only goroutine that writes the socket. It sends a
+// heartbeat query after a heartbeat interval with no other write.
 func (d *denonClient) writeLoop(ctx context.Context, conn net.Conn, out <-chan string) {
 	ticker := time.NewTicker(denonHeartbeat)
 	defer ticker.Stop()
@@ -333,8 +337,8 @@ func (d *denonClient) writeLoop(ctx context.Context, conn net.Conn, out <-chan s
 	}
 }
 
-// readLoop folds every line into the state until the receiver falls
-// silent longer than the limit or the socket fails.
+// readLoop folds each complete line into the state. It returns when the
+// read deadline expires or the socket reports an error.
 func (d *denonClient) readLoop(conn net.Conn) (answered bool) {
 	reader := bufio.NewReader(conn)
 	for {
@@ -355,9 +359,8 @@ func (d *denonClient) readLoop(conn net.Conn) (answered bool) {
 	}
 }
 
-// fold applies one line under the lock, hands the listener the state
-// that came out, and answers whether the line was one this operator
-// reads.
+// fold applies one recognized line under the lock, sends the resulting
+// state to the listener, and reports whether the line was recognized.
 func (d *denonClient) fold(line string) bool {
 	d.mutex.Lock()
 	folded, field, known := applyDenonLine(d.state, line)
@@ -365,8 +368,8 @@ func (d *denonClient) fold(line string) bool {
 		d.mutex.Unlock()
 		return false
 	}
-	// A line the operator reads is the answered round trip that Reachable
-	// stands on.
+	// A recognized line proves that the receiver answered, so it makes
+	// Reachable true.
 	folded.Reachable = ConditionTrue
 	d.state = folded
 	d.mutex.Unlock()
@@ -375,8 +378,8 @@ func (d *denonClient) fold(line string) bool {
 	return true
 }
 
-// record moves the reachability verdict and tells the listener, which
-// is how a dropped connection reaches the status.
+// record changes the reachability verdict and notifies the listener.
+// This is how a dropped connection reaches the Receiver status.
 func (d *denonClient) record(status ConditionStatus) {
 	d.mutex.Lock()
 	if d.state.Reachable == status {
@@ -390,8 +393,8 @@ func (d *denonClient) record(status ConditionStatus) {
 	d.notify(denonEvent{Field: denonReachableField, State: state})
 }
 
-// notify runs on the reading goroutine, so a listener that blocks holds
-// up every later line on the connection.
+// notify runs on the reading goroutine. A blocking listener therefore
+// delays processing of every later line on the connection.
 func (d *denonClient) notify(event denonEvent) {
 	if d.listener != nil {
 		d.listener(event)
