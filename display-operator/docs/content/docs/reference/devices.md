@@ -260,7 +260,7 @@ that refused the probe is asked again about once a minute, because
 DDC/CI can arrive later than the panel: an input switch or a menu
 toggle turns it on with no event the operator could see.
 
-A claim states what it wants with two opaque parameters, beside
+A claim sets two opaque parameters, beside
 `mode`:
 
     spec:

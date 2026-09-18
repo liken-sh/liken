@@ -67,7 +67,7 @@ verifies it with a `TokenReview` for the audience `display-api`, and
 checks that the answer names that audience. A pod's ordinary API
 server token does not have that audience, so it does not work here.
 
-After it knows who you are, the API sends a `SubjectAccessReview`
+After it identifies you, the API sends a `SubjectAccessReview`
 for the verb `get` on `displays/screen` in the group
 `display.liken.sh`. Every route authorizes before it reads anything,
 so a 403 never tells you whether a name exists.

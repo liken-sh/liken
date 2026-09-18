@@ -65,7 +65,7 @@ under [Examples](#examples) does.
 
 ### Authorization
 
-After it knows who you are, the API sends a `SubjectAccessReview` for
+After it identifies you, the API sends a `SubjectAccessReview` for
 the verb `get` on the resource `displays/screen` in the API group
 `display.liken.sh`, with the name of the `Display`. That subresource
 does not exist in any CRD. It is a string that RBAC rules match, like
