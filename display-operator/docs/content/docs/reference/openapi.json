@@ -67,7 +67,7 @@
     }
   },
   "info": {
-    "description": "The path names the Display, the extension or Accept chooses the format, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
+    "description": "The path names the Display. The extension or Accept header selects the format. The query can select a region and time range with W3C Media Fragments 1.0 syntax. The API stores no capture. The manual is at https://display.liken.sh/docs/reference/api/.",
     "summary": "The screen of every Display in this cluster, as one frame, a clip, or a stream.",
     "title": "display-api",
     "version": "dev"
@@ -255,7 +255,7 @@
                 }
               }
             },
-            "description": "The size, scale, refresh, formats and clip codecs of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
+            "description": "The size, scale, refresh, formats, and clip codecs of one screen, read from the node. If the compositor is not serving or this API cannot reach the node, the response still includes the name, node, and mode from the Display object. The compositor or sidecar field identifies the failure, and the response omits the other fields.",
             "headers": {
               "Cache-Control": {
                 "description": "no-cache. A document is revalidated against its entity tag.",
@@ -360,7 +360,7 @@
                 }
               }
             },
-            "description": "The size, scale, refresh, formats and clip codecs of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
+            "description": "The size, scale, refresh, formats, and clip codecs of one screen, read from the node. If the compositor is not serving or this API cannot reach the node, the response still includes the name, node, and mode from the Display object. The compositor or sidecar field identifies the failure, and the response omits the other fields.",
             "headers": {
               "Cache-Control": {
                 "description": "no-cache. A document is revalidated against its entity tag.",
@@ -858,7 +858,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "description": "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
           "in": "query",
           "name": "t",
           "required": false,
@@ -867,7 +867,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "description": "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels.",
           "in": "query",
           "name": "xywh",
           "required": false,
@@ -1240,7 +1240,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "description": "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
           "in": "query",
           "name": "t",
           "required": false,
@@ -1249,7 +1249,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "description": "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels.",
           "in": "query",
           "name": "xywh",
           "required": false,
@@ -1299,7 +1299,7 @@
                 }
               }
             },
-            "description": "A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up.",
+            "description": "A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection.",
             "headers": {
               "Accept-Ranges": {
                 "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
@@ -1448,7 +1448,7 @@
                 }
               }
             },
-            "description": "A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up.",
+            "description": "A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection.",
             "headers": {
               "Accept-Ranges": {
                 "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
@@ -1613,7 +1613,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "description": "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
           "in": "query",
           "name": "t",
           "required": false,
@@ -1622,7 +1622,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "description": "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels.",
           "in": "query",
           "name": "xywh",
           "required": false,
@@ -1681,7 +1681,7 @@
                 }
               }
             },
-            "description": "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that.",
+            "description": "A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that.",
             "headers": {
               "Accept-Ranges": {
                 "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
@@ -1830,7 +1830,7 @@
                 }
               }
             },
-            "description": "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that.",
+            "description": "A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that.",
             "headers": {
               "Accept-Ranges": {
                 "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
@@ -1995,7 +1995,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "description": "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
           "in": "query",
           "name": "t",
           "required": false,
@@ -2004,7 +2004,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "description": "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels.",
           "in": "query",
           "name": "xywh",
           "required": false,
@@ -2368,7 +2368,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
+          "description": "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two.",
           "in": "query",
           "name": "t",
           "required": false,
@@ -2377,7 +2377,7 @@
           }
         },
         {
-          "description": "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels.",
+          "description": "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels.",
           "in": "query",
           "name": "xywh",
           "required": false,

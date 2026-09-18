@@ -18,8 +18,8 @@ A screen with no `Layout` shows every window fullscreen, with the
 newest on top. A `Layout` divides the screen into regions, and each
 region shows the window of a pod whose labels match the region's
 selector. A pod never receives its position on the screen. The
-`Layout` is the only place that states the arrangement, and one
-`Layout` works for any number of screens.
+`Layout` is the only resource that stores the arrangement, and one
+`Layout` can apply to any number of screens.
 
 ## 1. Write the `Layout`
 
@@ -49,7 +49,7 @@ another draws over it where they overlap, which is how a small
 picture appears in the corner of a large one.
 
 The selector matches labels the way a `Service` does, and any label
-counts. The candidates are only the pods that hold a claim on this
+counts. The candidates are only pods that hold a claim on this
 screen, so a `panel` label on a pod elsewhere in the cluster matches
 nothing here. A region shows one program: the first claim to arrive
 from a matching pod. Every window of that claim is drawn in the

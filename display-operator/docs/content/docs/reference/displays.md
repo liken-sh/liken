@@ -52,28 +52,28 @@ states once at prepare, and the control device a standing pod claims
 for the raw wire. The `Display` is the declarative path: state what
 the panel should hold, and the operator keeps it there.
 
-One monitor, what it carries, and what it rests at.
+One monitor, the controls it reports, and the settings the operator maintains.
 
 ## spec
 
-The settings the panel rests at, and the override above them. Every field is optional: the operator writes a declared field back when the panel diverges from it, and it never writes a field the spec leaves out.
+The settings the panel should maintain and a temporary override above them. Every field is optional. The operator writes a declared field when the panel diverges from it and does not write a field that spec leaves out.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--brightness"></span>`brightness` | integer | no | The panel's own brightness number, up to status.capabilities.brightness.max. |
+| <span id="spec--brightness"></span>`brightness` | integer | no | The panel's brightness value. It must not exceed status.capabilities.brightness.max. |
 | <span id="spec--contrast"></span>`contrast` | integer | no | The panel's own contrast number. |
 | <span id="spec--sharpness"></span>`sharpness` | integer | no | The panel's own sharpness number. |
-| <span id="spec--colorpreset"></span>`colorPreset` | string | no | One of status.capabilities.colorPreset.values. |
-| <span id="spec--input"></span>`input` | string | no | One of status.capabilities.input.values: the resting declaration that forces the panel to show that input. On a shared panel it writes the panel back to this machine within a poll window of every switch away, so declare it only on a panel that should always show this machine. |
+| <span id="spec--colorpreset"></span>`colorPreset` | string | no | One value from status.capabilities.colorPreset.values. |
+| <span id="spec--input"></span>`input` | string | no | One value from status.capabilities.input.values. This resting declaration forces the panel to show that input. On a shared panel, the operator writes the panel back to this machine within one polling window after each switch away. Declare it only on a panel that should always show this machine. |
 | <span id="spec--audiovolume"></span>`audioVolume` | integer | no | The panel's own volume number. |
 | <span id="spec--audiomute"></span>`audioMute` | boolean | no | Whether the panel's own speakers are muted. |
-| <span id="spec--mode"></span>`mode` | string | no | The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card. |
-| <span id="spec--layout"></span>`layout` | string | no | The Layout this screen shows, by name. A screen that names none shows every window fullscreen with the newest on top. A name that matches no Layout shows the same and reports the name under the LayoutResolved condition. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
-| <span id="spec--override"></span>`override` | [object](#specoverride) | no | The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none. |
+| <span id="spec--mode"></span>`mode` | string | no | The resting screen mode, in the 1920x1080@60 form, and one of status.modes. A claim's mode parameter takes precedence while the claim holds the screen. An edit here waits for the claim to end. Applying the mode restarts the compositor once and ends every Wayland client on this card. |
+| <span id="spec--layout"></span>`layout` | string | no | The Layout this screen shows, by name. If this field is absent, the screen shows every window fullscreen with the newest on top. If the name matches no Layout, the screen shows that same arrangement and reports the name under the LayoutResolved condition. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
+| <span id="spec--override"></span>`override` | [object](#specoverride) | no | A temporary layer above the resting settings. When a writer adds this block, the operator saves the current values and applies the override. When the writer deletes it, the operator restores the declared value or the saved value when spec declares none. |
 
 ### spec.override
 
-The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none.
+A temporary layer above the resting settings. When a writer adds this block, the operator saves the current values and applies the override. When the writer deletes it, the operator restores the declared value or the saved value when spec declares none.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -96,9 +96,9 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--mode"></span>`mode` | [object](#statusmode) | no | The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows. |
 | <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
-| <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels. |
-| <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator. |
-| <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids. |
+| <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels. |
+| <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart. |
+| <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs. |
 | <span id="status--layout"></span>`layout` | [object](#statuslayout) | no | The arrangement the screen is drawn to, and what each region shows. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. |
 
@@ -122,7 +122,7 @@ The controls the panel declares, of the MCCS common core. A control with a value
 
 ### status.observed
 
-The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels.
+The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -137,7 +137,7 @@ The last value the operator read or wrote for each control. The operator reads t
 
 ### status.surfaces[]
 
-Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids.
+Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

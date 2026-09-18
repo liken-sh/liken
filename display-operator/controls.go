@@ -1,16 +1,14 @@
 package main
 
-// A monitor's own controls: what a claim's brightness and power
-// parameters become on the wire.
+// This file translates a claim's brightness and power parameters into
+// DDC/CI exchanges with the monitor.
 //
-// Brightness and power live in the panel, not in the graphics card.
+// Brightness and power belong to the panel, not to the graphics card.
 // The card can blank its signal, but only the panel can dim its
-// backlight or shut itself down, and DDC/CI over the connector's i2c
-// wire is the one channel a host has into those settings (ddc.go
-// speaks the protocol). This file turns a claim's parameters into
-// those messages: it probes each panel for what it carries, publishes
-// the answers as device attributes, and sets what a claim states,
-// with a readback after every write.
+// backlight or power itself down. DDC/CI on the connector's I2C wire
+// is the host's channel to those settings (ddc.go speaks the protocol).
+// The operator probes each panel, publishes its supported controls as
+// device attributes, and applies each claimed value with a readback.
 //
 // The probe is cached because discoverOutputs runs on every prepare
 // and every slice publish, and a panel that carries no DDC/CI costs
@@ -46,14 +44,13 @@ const (
 )
 
 // The power mode's values are the DPM and DPMS states written as one
-// byte: 0x01 on, 0x02 standby, 0x03 suspend, 0x04 off, 0x05 a
-// write-only off (VESA MCCS 2.2a, table 8-9). A display implements
-// the subset of a non-continuous code that it chooses, and the
-// subsets differ on real panels: the lab's BOE panel lists 01, 04,
-// and 05 in its capability string and refuses standby outright. So a
-// power-down writes standby first, reads the mode back, and writes
-// off when the panel kept running. Standby is the gentler state, and
-// off is the one this common subset carries.
+// byte: 0x01 on, 0x02 standby, 0x03 suspend, 0x04 off, and 0x05 a
+// write-only off (VESA MCCS 2.2a, table 8-9). Each display supports a
+// subset of this non-continuous code. Real panels differ: the lab's
+// BOE panel lists 01, 04, and 05, and refuses standby. A power-down
+// therefore writes standby first, reads the mode, and writes off if
+// the panel remains on. Standby is preferred because it is gentler;
+// off covers panels that support the common fallback value.
 const (
 	powerModeOn      = 0x01
 	powerModeStandby = 0x02
@@ -88,11 +85,11 @@ const (
 // side.
 var claimParameterNames = []string{modeParameter, brightnessParameter, powerParameter}
 
-// The record of the panels a claim must put back to standby. It
-// shares the mode record's volume for the mode record's reason: the
-// file outlives a restart of the operator's container and dies with
-// the pod, so a fresh pod that prepared no such claim owes no panel a
-// power-down.
+// This file records panels that a claim must put back into standby. It
+// shares the mode record's volume so the record survives an operator
+// container restart. The file belongs to the pod and disappears with
+// it, so a new pod that prepared no such claim has no recorded panel
+// to power down.
 var powerRecordPath = "/etc/weston/power.json"
 
 // The failure both parsers report for a key this driver does not
@@ -491,16 +488,16 @@ func setPower(ddc *DDC, connector string, mode uint16) error {
 	return nil
 }
 
-// standby powers a panel down at the end of a claim, in two steps
-// because the panels disagree about how. The write of standby comes
-// first. Then a readback sorts the panels into three cases: a panel
-// that stopped answering went dark and is done, a panel that reads
-// back standby took the value, and a panel that reads back anything
-// else refused it, which is what a panel whose 0xD6 subset omits
-// standby does. That last panel gets off instead. The off write reads
-// nothing back, because the panel is leaving the state where it
-// answers, and a readback that failed would report a failure for a
-// panel that did as it was told.
+// standby powers a panel down at the end of a claim. Panels differ in
+// which values they accept for the power code, so the operator first
+// writes standby and then reads the result. A panel that stops
+// answering may have gone dark. A panel that reports standby accepted
+// the value. Any other reported value means the panel refused standby,
+// which is what a panel whose 0xD6 subset omits standby does. The
+// operator writes off for that last case. It does not read after the
+// off write because the panel may stop answering as it powers down. A
+// failed read is treated as success for this same reason. Reporting it
+// as a failure would call a successful power-down an error.
 func (c *panelControls) standby(connector string) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -547,10 +544,10 @@ func (p *draPlugin) applyControls(output Output, want requestedControls) error {
 	return p.recordPower(output.Connector, want.Power)
 }
 
-// RecordPower writes down which panels a claim promised to put back.
-// An operator container that restarts holds no memory of the claims
-// it prepared, and the panel still owes a power-down when the claim
-// ends, so the promise has to live in a file.
+// RecordPower records which panels need a power-down when their claim
+// ends. An operator container restart removes the process memory of
+// prepared claims, but the claim still needs release handling. The
+// file preserves that release record across the restart.
 //
 // The write happens on divergence only. Every prepare of every claim
 // passes through here, most state nothing about power, and a record
@@ -574,13 +571,13 @@ func (p *draPlugin) recordPower(connector, power string) error {
 	return writePowerRecord(p.powerPath, record)
 }
 
-// ReleasePower powers down the panels this claim promised to put
-// back. A failure on the wire is reported to stderr and not returned,
-// because the kubelet repeats an unprepare it has no answer for, and
-// a panel that will not go down would hold the claim open with no
-// end. The entry leaves the record whether the panel answered or not,
-// for the same reason: the retry would write the same value to the
-// same silence.
+// ReleasePower powers down the panels recorded for this claim. A wire
+// failure goes to stderr and does not abort the other releases.
+// Returning the error would prevent the kubelet from completing the
+// unprepare, so a panel that cannot power down could keep the claim open
+// indefinitely. The operator deletes each entry from the record before
+// the attempt, writes the resulting record after all attempts, and does
+// not retain an entry when an attempt fails.
 func (p *draPlugin) releasePower(devices []string) {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -609,10 +606,10 @@ func (p *draPlugin) releasePower(devices []string) {
 	}
 }
 
-// ReadPowerRecord treats a file that is not there as an empty record,
-// because a pod that prepared no such claim owes no panel anything. A
-// file that will not parse is an error, because this operator is its
-// only writer and garbage in it means something went wrong.
+// ReadPowerRecord treats a missing file as an empty record. A pod that
+// prepared no recorded claim has no panel to release. A file that
+// cannot be parsed is an error because this operator is its only
+// writer, so invalid JSON means the record is damaged.
 func readPowerRecord(path string) (map[string]string, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -629,8 +626,8 @@ func readPowerRecord(path string) (map[string]string, error) {
 }
 
 // WritePowerRecord replaces the file atomically. The operator's
-// container can end between a truncate and a write, and the file that
-// is left is the only thing an unprepare after the restart reads.
+// container can end between a truncate and a write. An unprepare after
+// that restart reads only the file that remains.
 func writePowerRecord(path string, record map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

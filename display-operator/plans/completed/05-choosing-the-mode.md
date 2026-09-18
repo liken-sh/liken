@@ -94,7 +94,7 @@ compositor declined the mode.
 
 ## What survives what
 
-The rewritten config lives in the pod's config volume, so a
+The rewritten config is in the pod's config volume, so a
 compositor restart applies it and a pod restart erases it. That is
 the right death: when the pod restarts, the kubelet re-prepares
 the claims of every consumer that comes back, and the re-prepare

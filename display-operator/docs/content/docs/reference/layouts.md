@@ -19,7 +19,7 @@ pods never learn where they are drawn: the `Layout` is the only place
 the arrangement lives, so a moved region moves every screen that
 names the `Layout` and changes no pod.
 
-The regions of a screen, each a rectangle in fractions of the screen and a label selector that picks the pod whose window it shows. A Display names a Layout in spec.layout, and one Layout serves any number of screens.
+The regions of a screen. Each region is a rectangle in fractions of the screen and a label selector that chooses the pod whose window it shows. A Display names a Layout in spec.layout, and one Layout can apply to any number of screens.
 
 ## spec
 
@@ -27,18 +27,18 @@ The regions, in stacking order.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--regions"></span>`regions` | [\[\]object](#specregions) | yes | The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top, and the region reports the window on top on the Display's status.layout. |
+| <span id="spec--regions"></span>`regions` | [\[\]object](#specregions) | yes | The screen's regions in stacking order. A region written after another draws over it where they overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top. The Display's status.layout reports the window on top. |
 
 ### spec.regions[]
 
-The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top, and the region reports the window on top on the Display's status.layout.
+The screen's regions in stacking order. A region written after another draws over it where they overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top. The Display's status.layout reports the window on top.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specregions--name"></span>`name` | string | yes | The region's name, unique in this Layout. The Display's status.layout reports it beside the surface the region shows, and status.surfaces names it on the surface. Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. |
 | <span id="specregions--rect"></span>`rect` | [object](#specregionsrect) | yes | The region's rectangle, as four fractions of the screen, so one Layout fits a 1080p panel and a 4K one. The compositor tells the window its rectangle's size in pixels, and the program redraws at that size. |
-| <span id="specregions--selector"></span>`selector` | [object](#specregionsselector) | yes | Which pod's window the region shows, as a label selector over the pods that hold a claim on this screen, the way a Service selects pods. Any label counts. The candidates are only the pods with a claim on the screen, so a matching label elsewhere in the cluster matches nothing here. A window that arrived on the shared socket holds no claim and matches no selector. |
-| <span id="specregions--transition"></span>`transition` | [object](#specregionstransition) | no | How a window enters the region and how it leaves. The compositor draws both, because the program never knows where it is. Both halves are optional, and where a half is absent the window enters or leaves at once. |
+| <span id="specregions--selector"></span>`selector` | [object](#specregionsselector) | yes | Which pod's window the region shows, as a label selector over pods that hold a claim on this screen, like a Service selector. Any label counts. Candidates are only pods that hold a claim on this screen, so a matching label elsewhere in the cluster matches nothing here. A window on the shared socket belongs to no claim and matches no selector. |
+| <span id="specregions--transition"></span>`transition` | [object](#specregionstransition) | no | How a window enters and leaves the region. The compositor draws both transitions, because the program does not know its region. Both halves are optional. An absent half makes the window enter or leave at once. |
 
 #### spec.regions[].rect
 
@@ -53,7 +53,7 @@ The region's rectangle, as four fractions of the screen, so one Layout fits a 10
 
 #### spec.regions[].selector
 
-Which pod's window the region shows, as a label selector over the pods that hold a claim on this screen, the way a Service selects pods. Any label counts. The candidates are only the pods with a claim on the screen, so a matching label elsewhere in the cluster matches nothing here. A window that arrived on the shared socket holds no claim and matches no selector.
+Which pod's window the region shows, as a label selector over pods that hold a claim on this screen, like a Service selector. Any label counts. Candidates are only pods that hold a claim on this screen, so a matching label elsewhere in the cluster matches nothing here. A window on the shared socket belongs to no claim and matches no selector.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -72,12 +72,12 @@ Requirements on the pod's labels. Every requirement must hold, and they combine 
 
 #### spec.regions[].transition
 
-How a window enters the region and how it leaves. The compositor draws both, because the program never knows where it is. Both halves are optional, and where a half is absent the window enters or leaves at once.
+How a window enters and leaves the region. The compositor draws both transitions, because the program does not know its region. Both halves are optional. An absent half makes the window enter or leave at once.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specregionstransition--enter"></span>`enter` | [object](#specregionstransitionenter) | no | How a window enters the region. It runs when a window arrives in the region, whether the pod is new or its labels started matching. |
-| <span id="specregionstransition--exit"></span>`exit` | [object](#specregionstransitionexit) | no | How a window leaves the region. It runs when a window that is still drawing stops matching the region, which is what a label a controller removes does. A program that ends takes its window with it, and a window the compositor no longer holds leaves at once whatever this states. |
+| <span id="specregionstransition--exit"></span>`exit` | [object](#specregionstransitionexit) | no | How a window leaves the region. The transition runs when a still-drawing window stops matching the region, such as after a controller removes a label. A program that ends takes its window with it. A window the compositor no longer holds leaves at once, whatever this field states. |
 
 #### spec.regions[].transition.enter
 
@@ -90,7 +90,7 @@ How a window enters the region. It runs when a window arrives in the region, whe
 
 #### spec.regions[].transition.exit
 
-How a window leaves the region. It runs when a window that is still drawing stops matching the region, which is what a label a controller removes does. A program that ends takes its window with it, and a window the compositor no longer holds leaves at once whatever this states.
+How a window leaves the region. The transition runs when a still-drawing window stops matching the region, such as after a controller removes a label. A program that ends takes its window with it. A window the compositor no longer holds leaves at once, whatever this field states.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

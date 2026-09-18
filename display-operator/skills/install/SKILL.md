@@ -42,9 +42,9 @@ operator refines it into outputs.
 
 ## 2. The device classes
 
-A `DeviceClass` is cluster-scoped policy: you name and curate the
-classes, the same convention as a `StorageClass`. The classes split
-by owner:
+A `DeviceClass` is cluster-scoped policy. You name and curate the
+classes, using the same convention as a `StorageClass`. The classes
+split by owner:
 
 * `display-gpu`, `display-render`, and `display-i2c` are wiring,
   and the base ships them, served at
@@ -102,9 +102,9 @@ policy you control:
               has(device.attributes["display.liken.sh"].appId) &&
               device.attributes["display.liken.sh"].connector == "HDMI-A-1"
 
-Start generic. When several workloads repeat the same selector, or
-when you want the choice of screen in cluster policy rather than in
-each workload's manifest, create a specific class.
+Start with a generic class. When several workloads repeat the same
+selector, or when cluster policy should choose the screen instead of
+each workload manifest, create a specific class.
 
 The example selects by `connector`, an attribute every output
 always publishes. The `appId` guard is there because the panel's

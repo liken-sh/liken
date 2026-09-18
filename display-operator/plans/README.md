@@ -163,7 +163,7 @@ say why it is built the way it is.
   bench proved the answer is a mirror: the shared monitor names the
   port the question arrived on, always. The attached input is
   removed entirely, a darkening override actuates whenever the
-  panel answers, and the decision the guard guessed at lives in the
+  panel answers, and the decision the guard guessed at belongs in the
   media layer's per-`Player` idle policy, where the screen's owner
   states it once.
 
@@ -281,7 +281,7 @@ decided yet what work they become.
 * [A stuck mode prepare restarts the compositor without bound](open-problems/a-stuck-mode-prepare-restarts-the-compositor-without-bound.md).
   A claim stating a mode the panel will not sync loops the kubelet's
   prepare retries through compositor restarts until the whole card
-  taints and the compositor sits in restart backoff.
+  taints and the compositor enters restart backoff.
 * [An external layout engine](open-problems/an-external-layout-engine.md).
   Plan 17 decides every placement in one function. The seam where a
   different engine would go is the `Service`, `EndpointSlice`, and

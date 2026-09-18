@@ -20,7 +20,7 @@ each error means.
 
 The screen of every Display in this cluster, as one frame, a clip, or a stream.
 
-The path names the Display, the extension or Accept chooses the format, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.
+The path names the Display. The extension or Accept header selects the format. The query can select a region and time range with W3C Media Fragments 1.0 syntax. The API stores no capture. The manual is at https://display.liken.sh/docs/reference/api/.
 
 ## `GET` `/v1/display` {data-method=GET}
 
@@ -98,7 +98,7 @@ The screen's size, scale, refresh and formats
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | object | The size, scale, refresh, formats and clip codecs of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out. |
+| 200 | `application/json` | object | The size, scale, refresh, formats, and clip codecs of one screen, read from the node. If the compositor is not serving or this API cannot reach the node, the response still includes the name, node, and mode from the Display object. The compositor or sidecar field identifies the failure, and the response omits the other fields. |
 | 304 | none | | The document has not changed since the entity tag the client holds. |
 | 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
@@ -130,7 +130,7 @@ The screen's size, scale, refresh and formats
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | object | The size, scale, refresh, formats and clip codecs of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out. |
+| 200 | `application/json` | object | The size, scale, refresh, formats, and clip codecs of one screen, read from the node. If the compositor is not serving or this API cannot reach the node, the response still includes the name, node, and mode from the Display object. The compositor or sidecar field identifies the failure, and the response omits the other fields. |
 | 304 | none | | The document has not changed since the entity tag the client holds. |
 | 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
@@ -179,8 +179,8 @@ The screen, in the format chosen by Accept
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -225,8 +225,8 @@ The screen, in the format chosen by Accept
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -271,8 +271,8 @@ The methods this route allows
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -299,8 +299,8 @@ One frame of the screen as JPEG
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `quality` | query | no | integer | JPEG quality from 1 to 100, 85 by default. |
@@ -340,8 +340,8 @@ One frame of the screen as JPEG
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `quality` | query | no | integer | JPEG quality from 1 to 100, 85 by default. |
@@ -381,8 +381,8 @@ The methods this route allows
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `quality` | query | no | integer | JPEG quality from 1 to 100, 85 by default. |
@@ -408,8 +408,8 @@ A stream of the screen, one JPEG per frame
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -419,7 +419,7 @@ A stream of the screen, one JPEG per frame
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `multipart/x-mixed-replace` | string (binary) | A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up. |
+| 200 | `multipart/x-mixed-replace` | string (binary) | A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection. |
 | 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
 | 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
@@ -450,8 +450,8 @@ A stream of the screen, one JPEG per frame
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -461,7 +461,7 @@ A stream of the screen, one JPEG per frame
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `multipart/x-mixed-replace` | string (binary) | A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up. |
+| 200 | `multipart/x-mixed-replace` | string (binary) | A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection. |
 | 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
 | 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
@@ -492,8 +492,8 @@ The methods this route allows
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -520,8 +520,8 @@ A clip of the screen as H.264 in fragmented MP4
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -530,7 +530,7 @@ A clip of the screen as H.264 in fragmented MP4
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `video/mp4` | string (binary) | A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that. |
+| 200 | `video/mp4` | string (binary) | A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that. |
 | 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
 | 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
@@ -561,8 +561,8 @@ A clip of the screen as H.264 in fragmented MP4
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -571,7 +571,7 @@ A clip of the screen as H.264 in fragmented MP4
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `video/mp4` | string (binary) | A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that. |
+| 200 | `video/mp4` | string (binary) | A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that. |
 | 400 | `application/problem+json` | [Problem](#problem) | A query the grammar refuses. |
 | 401 | `application/problem+json` | [Problem](#problem) | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | `application/problem+json` | [Problem](#problem) | The SubjectAccessReview refused the subject. |
@@ -602,8 +602,8 @@ The methods this route allows
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 | `framerate` | query | no | integer | Frames per second of a clip or a stream, 15 by default, at most the output's refresh. |
@@ -629,8 +629,8 @@ One frame of the screen as PNG
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 
@@ -669,8 +669,8 @@ One frame of the screen as PNG
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 
@@ -709,8 +709,8 @@ The methods this route allows
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
 | `name` | path | yes | string | The name of the Display. |
-| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
-| `xywh` | query | no | string | A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels. |
+| `t` | query | no | string | A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two. |
+| `xywh` | query | no | string | A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels. |
 | `width` | query | no | integer | Scale the region down to this width, keeping the aspect. A value above the source is refused. |
 | `height` | query | no | integer | Scale the region down to this height, keeping the aspect. Given together with width it is refused. |
 

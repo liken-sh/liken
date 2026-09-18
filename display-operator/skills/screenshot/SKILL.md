@@ -14,12 +14,12 @@ of any of those. You need the operator
 [`liken`](https://liken.sh/docs/) cluster and a connected
 [`Display`](https://display.liken.sh/docs/reference/displays/).
 
-`display-api` serves the captures. It is a `Deployment` in
+`display-api` serves the captures from a `Deployment` in
 `liken-system`. The capture container in the `display-operator` pod
-on each node takes the frames from the compositor. Nothing is
-stored. Each capture is taken when you ask for it and streamed to
-you while it is made. The [API reference](https://display.liken.sh/docs/reference/api/) has
-the full contract. This guide is the short path through it.
+on each node reads frames from the compositor. The API stores no
+capture. It creates each capture after you ask for it and streams the
+result while it encodes it. The [API reference](https://display.liken.sh/docs/reference/api/)
+has the full contract. This guide is the short path through it.
 
 ## The `kubectl liken display capture` command
 

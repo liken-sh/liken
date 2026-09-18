@@ -140,14 +140,14 @@ client draws through the compositor, which holds the card.
 | `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
 | `DISPLAY_APP_ID` | the allocated output's name, such as `hdmi-a-1`; nothing reads it, and a later release stops delivering it |
 
-The socket is the identity. The compositor opened it for this claim
-and for no other, so every window that arrives on it belongs to this
-claim, and the [`Display`](/docs/reference/displays/) reports the
-window under the claim's name in `status.surfaces`. What keeps two
-workloads off one screen is the allocation: the second pod cannot
-claim an output the first holds, so it parks until the first
-releases it. What puts two workloads on one screen on purpose is a
-[`Layout`](/docs/guides/layout/).
+The socket identifies the claim. The compositor opened it for this
+claim and no other, so every window that arrives on it belongs to this
+claim. The [`Display`](/docs/reference/displays/) reports the window
+under the claim's name in `status.surfaces`. Allocation keeps two
+workloads off one screen: the second pod cannot claim an output the
+first holds, so it remains pending until the first releases it. Use a
+[`Layout`](/docs/guides/layout/) when two workloads must share one
+screen.
 
 ## Ask for a mode
 

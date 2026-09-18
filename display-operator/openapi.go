@@ -51,7 +51,7 @@ func openAPIDocument(server string) map[string]any {
 			"title":       "display-api",
 			"version":     version,
 			"summary":     "The screen of every Display in this cluster, as one frame, a clip, or a stream.",
-			"description": "The path names the Display, the extension or Accept chooses the format, and a region and a time span are W3C Media Fragments 1.0 in the query. Nothing is stored. The manual is at https://display.liken.sh/docs/reference/api/.",
+			"description": "The path names the Display. The extension or Accept header selects the format. The query can select a region and time range with W3C Media Fragments 1.0 syntax. The API stores no capture. The manual is at https://display.liken.sh/docs/reference/api/.",
 		},
 		"servers": []any{map[string]any{
 			"url":         server,
@@ -156,8 +156,8 @@ func routeParameters(route apiRoute) []any {
 	}
 	answered := routeKnobs(route)
 	for _, knob := range []struct{ name, kind, note string }{
-		{"t", "string", "A W3C Media Fragments 1.0 time range in NPT, whose zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two."},
-		{"xywh", "string", "A W3C Media Fragments 1.0 region of the frame, pixel: by default and percent: on request, in the frame's own physical pixels."},
+		{"t", "string", "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two."},
+		{"xywh", "string", "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels."},
 		{"width", "integer", "Scale the region down to this width, keeping the aspect. A value above the source is refused."},
 		{"height", "integer", "Scale the region down to this height, keeping the aspect. Given together with width it is refused."},
 		{"framerate", "integer", "Frames per second of a clip or a stream, 15 by default, at most the output's refresh."},

@@ -23,7 +23,7 @@ the pattern the operator was built for.
 Three things on the lab cluster already want more than one program
 on a screen at once, and each has a workaround that costs something:
 
-- The idle screen sits under a film. When the film's surface goes,
+- The idle screen remains behind a film. When the film's surface goes,
   kiosk-shell reveals the lower surface only on a code path gated on
   a seat, and a `liken` machine has none, so the media layer
   publishes a re-present and the idle client maps a fresh surface

@@ -44,7 +44,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "The regions of a screen, each a rectangle in fractions of the screen and a label selector that picks the pod whose window it shows. A Display names a Layout in spec.layout, and one Layout serves any number of screens."
+          description: "The regions of a screen. Each region is a rectangle in fractions of the screen and a label selector that chooses the pod whose window it shows. A Display names a Layout in spec.layout, and one Layout can apply to any number of screens."
           required: [spec]
           properties:
             spec:
@@ -54,7 +54,7 @@ spec:
               properties:
                 regions:
                   type: array
-                  description: "The regions of the screen, in stacking order: a region written after another draws over it where the two overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top, and the region reports the window on top on the Display's status.layout."
+                  description: "The screen's regions in stacking order. A region written after another draws over it where they overlap. Each region shows one program: the first claim to arrive whose holders' labels match the selector. Every window of that claim is drawn in the region, newest on top. The Display's status.layout reports the window on top."
                   minItems: 1
                   # maxItems bounds the uniqueness rule below. The API
                   # server estimates a rule's worst-case cost from the
@@ -112,7 +112,7 @@ spec:
                             message: "A region's bottom edge is at or inside the screen's bottom edge."
                       selector:
                         type: object
-                        description: "Which pod's window the region shows, as a label selector over the pods that hold a claim on this screen, the way a Service selects pods. Any label counts. The candidates are only the pods with a claim on the screen, so a matching label elsewhere in the cluster matches nothing here. A window that arrived on the shared socket holds no claim and matches no selector."
+                        description: "Which pod's window the region shows, as a label selector over pods that hold a claim on this screen, like a Service selector. Any label counts. Candidates are only pods that hold a claim on this screen, so a matching label elsewhere in the cluster matches nothing here. A window on the shared socket belongs to no claim and matches no selector."
                         properties:
                           matchLabels:
                             type: object
@@ -148,7 +148,7 @@ spec:
                         x-kubernetes-map-type: atomic
                       transition:
                         type: object
-                        description: "How a window enters the region and how it leaves. The compositor draws both, because the program never knows where it is. Both halves are optional, and where a half is absent the window enters or leaves at once."
+                        description: "How a window enters and leaves the region. The compositor draws both transitions, because the program does not know its region. Both halves are optional. An absent half makes the window enter or leave at once."
                         properties:
                           enter:
                             type: object
@@ -165,7 +165,7 @@ spec:
                                 minimum: 0
                           exit:
                             type: object
-                            description: "How a window leaves the region. It runs when a window that is still drawing stops matching the region, which is what a label a controller removes does. A program that ends takes its window with it, and a window the compositor no longer holds leaves at once whatever this states."
+                            description: "How a window leaves the region. The transition runs when a still-drawing window stops matching the region, such as after a controller removes a label. A program that ends takes its window with it. A window the compositor no longer holds leaves at once, whatever this field states."
                             required: [kind]
                             properties:
                               kind:

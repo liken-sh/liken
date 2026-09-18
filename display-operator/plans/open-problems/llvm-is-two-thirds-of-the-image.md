@@ -2,7 +2,7 @@
 
 Open problem. The compositor image is already `FROM scratch`, and it is
 still 234,346,900 bytes. Since [plan 16](../completed/16-the-vulkan-base-image.md)
-that LLVM sits in the `vulkan` base layer, where the AMD Vulkan driver
+that LLVM is in the `vulkan` base layer, where the AMD Vulkan driver
 links it too, and the media browser and the idle screen share the one
 copy with the compositor. The cost per node is one LLVM instead of
 three. The cost per image is unchanged, and this document is about

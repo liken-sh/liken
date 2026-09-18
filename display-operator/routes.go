@@ -116,7 +116,7 @@ var apiRoutes = []apiRoute{
 		kind:      infoRoute,
 		mediaType: jsonMediaType,
 		summary:   "The screen's size, scale, refresh and formats",
-		answer:    "The size, scale, refresh, formats and clip codecs of one screen, read from the node. A screen whose compositor is not serving, or whose node this API cannot reach, answers the name, the node and the mode from the Display object, with compositor or sidecar naming what is wrong and the rest left out.",
+		answer:    "The size, scale, refresh, formats, and clip codecs of one screen, read from the node. If the compositor is not serving or this API cannot reach the node, the response still includes the name, node, and mode from the Display object. The compositor or sidecar field identifies the failure, and the response omits the other fields.",
 	},
 	{
 		template: apiRoot + "/" + displaysPlural + "/{name}/" + screenAspect,
@@ -150,7 +150,7 @@ var apiRoutes = []apiRoute{
 		ext:       "mp4",
 		aspect:    screenAspect,
 		summary:   "A clip of the screen as H.264 in fragmented MP4",
-		answer:    "A clip of the screen, H.264 in fragmented MP4, until the t= end or the client hangs up. The Content-Type carries the codecs parameter RFC 6381 defines: avc1.640029, High profile at level 4.1, up to 1920x1080 at 60 fps, and avc1.640033, level 5.1, above that.",
+		answer:    "A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that.",
 	},
 	{
 		template:  apiRoot + "/" + displaysPlural + "/{name}/" + screenAspect + ".mjpeg",
@@ -159,7 +159,7 @@ var apiRoutes = []apiRoute{
 		ext:       "mjpeg",
 		aspect:    screenAspect,
 		summary:   "A stream of the screen, one JPEG per frame",
-		answer:    "A stream of the screen, one image/jpeg part per frame, until the t= end or the client hangs up.",
+		answer:    "A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection.",
 	},
 }
 

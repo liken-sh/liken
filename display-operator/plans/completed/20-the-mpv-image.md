@@ -38,7 +38,7 @@ reads no data file on trixie.
 
 **What is left out.** glibc's gconv modules, 8 MB, so a subtitle file
 in a legacy charset does not convert; the player plays embedded tracks
-and UTF-8 files. The EGL and GL stack, which lives in the weston tree
+and UTF-8 files. The EGL and GL stack, which is in the weston tree
 and not this chain, so mpv's `gpu` video output no longer works on this
 image; the player runs `dmabuf-wayland`, which draws through the
 compositor and needs no GL of its own.

@@ -58,11 +58,11 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One monitor, what it carries, and what it rests at."
+          description: "One monitor, the controls it reports, and the settings the operator maintains."
           properties:
             spec:
               type: object
-              description: "The settings the panel rests at, and the override above them. Every field is optional: the operator writes a declared field back when the panel diverges from it, and it never writes a field the spec leaves out."
+              description: "The settings the panel should maintain and a temporary override above them. Every field is optional. The operator writes a declared field when the panel diverges from it and does not write a field that spec leaves out."
               # A writer lifts an override by applying a spec with
               # nothing in it. Server-side apply prunes the empty
               # object away, and validation would then read spec as
@@ -74,7 +74,7 @@ spec:
                   type: integer
                   minimum: 0
                   maximum: 65535
-                  description: "The panel's own brightness number, up to status.capabilities.brightness.max."
+                  description: "The panel's brightness value. It must not exceed status.capabilities.brightness.max."
                 contrast:
                   type: integer
                   minimum: 0
@@ -87,10 +87,10 @@ spec:
                   description: "The panel's own sharpness number."
                 colorPreset:
                   type: string
-                  description: "One of status.capabilities.colorPreset.values."
+                  description: "One value from status.capabilities.colorPreset.values."
                 input:
                   type: string
-                  description: "One of status.capabilities.input.values: the resting declaration that forces the panel to show that input. On a shared panel it writes the panel back to this machine within a poll window of every switch away, so declare it only on a panel that should always show this machine."
+                  description: "One value from status.capabilities.input.values. This resting declaration forces the panel to show that input. On a shared panel, the operator writes the panel back to this machine within one polling window after each switch away. Declare it only on a panel that should always show this machine."
                 audioVolume:
                   type: integer
                   minimum: 0
@@ -101,15 +101,15 @@ spec:
                   description: "Whether the panel's own speakers are muted."
                 mode:
                   type: string
-                  description: "The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card."
+                  description: "The resting screen mode, in the 1920x1080@60 form, and one of status.modes. A claim's mode parameter takes precedence while the claim holds the screen. An edit here waits for the claim to end. Applying the mode restarts the compositor once and ends every Wayland client on this card."
                 layout:
                   type: string
-                  description: "The Layout this screen shows, by name. A screen that names none shows every window fullscreen with the newest on top. A name that matches no Layout shows the same and reports the name under the LayoutResolved condition."
+                  description: "The Layout this screen shows, by name. If this field is absent, the screen shows every window fullscreen with the newest on top. If the name matches no Layout, the screen shows that same arrangement and reports the name under the LayoutResolved condition."
                   maxLength: 253
                   pattern: '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'
                 override:
                   type: object
-                  description: "The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none."
+                  description: "A temporary layer above the resting settings. When a writer adds this block, the operator saves the current values and applies the override. When the writer deletes it, the operator restores the declared value or the saved value when spec declares none."
                   properties:
                     backlight:
                       type: string
@@ -178,7 +178,7 @@ spec:
                         description: "Every value the panel accepts for a non-continuous control."
                 observed:
                   type: object
-                  description: "The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels."
+                  description: "The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels."
                   properties: &values
                     brightness:
                       type: integer
@@ -198,11 +198,11 @@ spec:
                       type: string
                 captured:
                   type: object
-                  description: "The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator."
+                  description: "The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart."
                   properties: *values
                 surfaces:
                   type: array
-                  description: "Every window the compositor holds on this screen, in the order they arrived, whether or not a region shows it. A window with no region is running and not on the screen, which is the first thing to read when a program draws nothing you can see. An id lasts as long as the compositor that assigned it: a compositor restart ends every window, and the programs reconnect and are placed again under new ids."
+                  description: "Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs."
                   # The operator writes the whole of this list, and
                   # the order is the order the surfaces arrived in, so
                   # the list is one value and not a merged map.

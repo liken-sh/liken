@@ -29,10 +29,10 @@ itself.
 The client is not the stuck party: `mpv` obeys every configure the
 compositor sends. A fresh compositor places every surface at its
 output's true size, and since the media layer's window watchdog
-(its release 2026.08.27-003), every standing idle client rides a
-compositor restart on its own: it exits when its window dies and
-the kubelet brings it back. What was missing is the restart itself,
-fired at the right moment.
+(its release 2026.08.27-003), each idle client recovers from a
+compositor restart: it exits when its window dies and the kubelet
+brings it back. What was missing is the restart itself, fired at the
+right moment.
 
 ## The design
 

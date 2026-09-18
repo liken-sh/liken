@@ -20,7 +20,7 @@ window's scale factor on every resize, and iced lays text and
 geometry out in logical pixels and rasters them at physical size. mpv
 sets its buffer scale from the output. What none of them can do is
 decide the scale, because the scale is a fact about the panel and the
-distance a person sits from it, and the compositor is the one place
+viewer's distance from it, and the compositor is the one place
 that fact is stated for every client at once.
 
 Weston 14 takes that fact as `scale=` in an output section, an

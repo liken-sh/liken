@@ -62,8 +62,8 @@ free, and a `spec.mode` edit during a claim waits for the claim to
 end. When a claim's unprepare frees the output and the screen's
 mode differs from a declared resting mode, the operator restores
 the resting mode, which restarts the compositor once. Every
-standing draw client rides that restart the way it rides a mode
-prepare: the kubelet supervises the compositor, and the media
+long-running draw client recovers from this restart as it does from a
+mode prepare: the kubelet supervises the compositor, and the media
 layer's idle clients exit and reconnect on their own.
 
 `spec.mode` is a resting declaration, not an override. A temporary
