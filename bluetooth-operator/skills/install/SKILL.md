@@ -1,17 +1,19 @@
 ---
 name: install
-description: "Install bluetooth-operator on a liken cluster and verify that it holds the radio. Use when a cluster has no Bluetooth devices yet, when running a development build, or when removing the operator."
+description: "Install bluetooth-operator on a liken cluster and verify that it claims the radio. Use when a cluster has no Bluetooth devices yet, when running a development build, or when removing the operator."
 ---
 
 This skill is the guide at https://bluetooth.liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-# Install the operator
+<a id="install-the-operator"></a>
+
+# Install and verify the operator
 
 This guide installs `bluetooth-operator` on a
-[`liken`](https://liken.sh/docs/) cluster and verifies that it holds
-the radio. The operator is an ordinary workload: everything it needs
-is in one `kustomize` base, and nothing here touches a machine over
-SSH.
+[`liken`](https://liken.sh/docs/) cluster and verifies that its pod
+claims the radio. The operator is an ordinary workload. Everything it
+needs is in one `kustomize` base, and nothing here touches a machine
+over SSH.
 
 ## What you need
 
@@ -26,7 +28,9 @@ SSH.
   radios built into a board. You do not have to say which machine has
   the radio: the claim places the pod where the radio is.
 
-## The device classes
+<a id="the-device-classes"></a>
+
+## Create the device classes
 
 A [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
 is cluster-scoped policy, the same convention a `StorageClass`
@@ -202,7 +206,9 @@ controllers appears when the first controller is paired:
 [Pair a controller and give it to a pod](https://bluetooth.liken.sh/docs/guides/pair-a-controller/) is
 the next step.
 
-## Look inside the stack
+<a id="look-inside-the-stack"></a>
+
+## Inspect the Bluetooth stack
 
 The `bluetoothd` image holds four tools for a person. Each runs as
 a direct `kubectl exec`, with no shell between, and every one of

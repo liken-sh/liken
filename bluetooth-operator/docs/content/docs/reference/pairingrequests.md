@@ -38,15 +38,15 @@ What the operator observes during the window.
 | --- | --- | --- | --- |
 | <span id="status--phase"></span>`phase` | string | no | Open while the window runs. Paired when the approved device bonded, and Expired when the window closed with no approval. Neither end state retries. One of: `Open`, `Paired`, `Expired`. |
 | <span id="status--windowclosesat"></span>`windowClosesAt` | string | no | When the window closes if nobody approves a device. |
-| <span id="status--seen"></span>`seen` | [\[\]object](#statusseen) | no | The devices the radio observed during this window that the cluster holds no bond with. The list is capped at 16 entries, because it is written from radio observations, and a busy room would otherwise grow the object without limit. |
-| <span id="status--seentruncated"></span>`seenTruncated` | boolean | no | Whether the cap of 16 entries stopped a device from reaching status.seen. True means the room held more devices than the list reports; false means the whole list fit. |
+| <span id="status--seen"></span>`seen` | [\[\]object](#statusseen) | no | The devices the radio observed during this window for which the cluster has no bond. The list is capped at 16 entries, because it is written from radio observations, and a busy room would otherwise grow the object without limit. |
+| <span id="status--seentruncated"></span>`seenTruncated` | boolean | no | Whether the limit of 16 entries excluded a device from status.seen. True means the radio observed more eligible, unbonded devices than the list reports. False means every eligible, unbonded device fit in the list. |
 | <span id="status--peripheral"></span>`peripheral` | string | no | The name of the Peripheral this request produced. |
 | <span id="status--finishedat"></span>`finishedAt` | string | no | When the request reached Paired or Expired, which is what ttlSecondsAfterFinished counts from. |
 | <span id="status--message"></span>`message` | string | no | Why the request has not done what it was asked to do, such as a pairing bluetoothd refused. It is empty when there is nothing to report. |
 
 ### status.seen[]
 
-The devices the radio observed during this window that the cluster holds no bond with. The list is capped at 16 entries, because it is written from radio observations, and a busy room would otherwise grow the object without limit.
+The devices the radio observed during this window for which the cluster has no bond. The list is capped at 16 entries, because it is written from radio observations, and a busy room would otherwise grow the object without limit.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

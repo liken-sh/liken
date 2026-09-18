@@ -1,8 +1,8 @@
-A `Peripheral` is one bonded device: this controller or speaker
-holds link keys with this adapter, and the object reports what the
-radio observes about it. The operator creates the object when a
-pairing succeeds, and when it finds a bond `bluetoothd` already
-held. The keys are in a `Secret` this object owns. Read
+A `Peripheral` is one bonded device. The controller or speaker has
+link keys for this adapter, and the object reports what the radio
+observes about it. The operator creates the object when pairing
+succeeds and when it finds a bond that `bluetoothd` already stores.
+The keys are in a `Secret` this object owns. Read
 `status.conditions` for the link, `status.battery` for the charge
 the device reports, and `status.bond` for the keys. Deleting a
 `Peripheral` is the unpair: the operator disconnects the device,

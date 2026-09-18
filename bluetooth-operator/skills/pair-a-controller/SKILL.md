@@ -14,7 +14,9 @@ pod. The example is a DualSense and a game in a namespace named
 API call, so RBAC controls who may do each one, and nobody needs a
 shell on a node or in a pod.
 
-## The interactive shortcut
+<a id="the-interactive-shortcut"></a>
+
+## Use the pairing command
 
 `kubectl liken bluetooth pair` runs steps 1 through 3 from a laptop.
 It opens a window on the radio, lists the devices the radio reports as
@@ -60,7 +62,9 @@ A device appears in `status.seen` when the scan finds it and the
 cluster holds no bond with it. The entry has its address, its name,
 and when the radio first observed it.
 
-## 3. Approve the device you meant
+<a id="3-approve-the-device-you-meant"></a>
+
+## 3. Approve the device
 
 Approval is a write to the request's spec:
 

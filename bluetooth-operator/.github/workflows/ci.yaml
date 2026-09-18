@@ -113,7 +113,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The layer cache lives in ghcr, as a :buildcache tag beside each
+  # The layer cache is in ghcr, as a :buildcache tag beside each
   # image, not in the GitHub Actions cache. A registry cache has no
   # 10 GB ceiling, and it outlives a branch. release.yaml writes it
   # on every push to main and every tag, and this workflow only reads

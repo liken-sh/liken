@@ -25,10 +25,11 @@ notes that no Secret stores the adapter's own identity file.
 
 ## The design
 
-Three objects in `bluetooth.liken.sh/v1alpha1`. One rule sets what
-becomes an object and what stays status: spec is desired state, status
-is observed state, and a session is never an object. Radio observations
-appear only in the status of an object a person created.
+The API has three object kinds in `bluetooth.liken.sh/v1alpha1`. One
+rule separates desired and observed state: `spec` is desired state,
+`status` is observed state, and a pairing session is not an object.
+Radio observations appear only in the status of an object a person
+created.
 
 ### Adapter
 

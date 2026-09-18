@@ -12,7 +12,7 @@ pairing API, and what a claim delivers.
 
 The operator publishes each paired Bluetooth device as a
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device. A workload claims an input device through the
+device. A workload claims one input device through the
 `bluetooth-input` device class, the way
 [Give a workload a device](https://liken.sh/docs/guides/devices/)
 shows for `liken`'s own devices.

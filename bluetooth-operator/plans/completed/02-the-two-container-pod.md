@@ -24,7 +24,7 @@ that do the work. A Debian bluetoothd opens fifteen shared libraries,
 and each one is a file whose version has to agree with the binary that
 opens it.
 
-## The two images
+## The image contents
 
 The pod is two images now, both `FROM scratch`.
 

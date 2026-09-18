@@ -148,9 +148,9 @@ const (
 	absMTPositionY = 0x36
 )
 
-// busI2C is the bus a pointing stick sits on. There is no such thing
-// as a mouse on i2c, which is the one identity test input_id makes
-// that reads the device id rather than the bitmaps.
+// busI2C is the bus a pointing stick uses. The input_id identity test
+// treats a device on this bus as a pointing stick because a mouse does
+// not use I2C. This test reads the device id rather than the bitmaps.
 const busI2C = 0x18
 
 // wellKnownKeyboardKeys is input_id's randomly picked set of key

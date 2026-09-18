@@ -11,11 +11,12 @@ on the machine.
 
 Everything runs through the Kubernetes API. You create a
 `PairingRequest`, hold the controller's pairing buttons, and approve
-the address the radio reported. Your game or emulator pod claims that
-address, and only that pod reads the controller. The bond's keys are
-in a `Secret`, so after a pod restart or a reboot the controller
-reconnects with one button. This needs no SSH, no host configuration,
-and no shell in any pod.
+the address the radio reports. Your game or emulator pod claims that
+address. Only that pod can read the controller because the allocation
+is exclusive, and the operator delivers only that controller's evdev
+nodes to it. The bond's keys are in a `Secret`, so the controller
+reconnects with one button after a pod restart or a reboot. This
+needs no SSH, no host configuration, and no shell in any pod.
 
 The operator publishes one more device beside the paired
 controllers: the media bus, the claimable permission to connect a
@@ -28,10 +29,10 @@ in the manual has the attributes and the delivery.
 
 `liken`'s own DRA driver publishes the raw hardware: the Bluetooth
 adapter itself, as a `btusb` device. This operator claims that adapter
-and publishes the higher grain, one device for each paired controller.
-It uses no private interface into `liken`. The claim, the
-`ResourceSlices` it writes, and the CDI files it leaves for the
-runtime are the public contracts any DRA driver gets.
+and publishes one device for each paired controller. It uses no
+private interface into `liken`. The claim, the `ResourceSlices` it
+writes, and the CDI files it writes for the runtime are the public
+contracts available to any DRA driver.
 
 The operator is one of `liken`'s optional
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/),

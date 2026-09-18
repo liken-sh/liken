@@ -229,7 +229,7 @@ bus and runs no sound server itself.
 | `sound.liken.sh/supportsSound` | bool | always `true` |
 
 `sound.liken.sh/supportsSound` is the one qualified name in this
-driver's attributes. It lives in a domain neither driver owns, so a
+driver's attributes. It uses a domain neither driver owns, so a
 selector reads it as
 `device.attributes["sound.liken.sh"].supportsSound`, where every
 other attribute here reads under `bluetooth.liken.sh`.

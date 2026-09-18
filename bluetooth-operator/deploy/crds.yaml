@@ -166,7 +166,7 @@ spec:
           jsonPath: .status.bond.paired
         - name: Connected
           type: string
-          description: Whether the device holds a connection now.
+          description: Whether BlueZ reports the device as connected now.
           jsonPath: '.status.conditions[?(@.type=="Connected")].status'
         - name: Node
           type: string
@@ -180,8 +180,8 @@ spec:
           type: object
           description: >-
             One bonded Bluetooth device, named for its own address in
-            the same form the ResourceSlice names it. The object owns
-            the Secret that holds this bond's keys.
+            the same form the ResourceSlice uses. The object owns the
+            Secret that stores this bond's keys.
           properties:
             spec:
               type: object
@@ -245,10 +245,10 @@ spec:
                     held:
                       type: boolean
                       description: >-
-                        Whether bluetoothd still holds this bond. It
-                        goes false when the keys are gone from the
-                        daemon, which the operator reports and never
-                        acts on.
+                        Whether bluetoothd still has this bond. It is
+                        false when the daemon no longer has the keys.
+                        The operator reports this state but does not
+                        act on it.
                     paired:
                       type: boolean
                       description: >-
@@ -276,7 +276,7 @@ spec:
                     secret:
                       type: string
                       description: >-
-                        The namespace and name of the Secret that holds
+                        The namespace and name of the Secret that stores
                         this bond's keys. The Secret is owned by this
                         object, so deleting the Peripheral collects it.
                     pairedAt:
@@ -330,7 +330,7 @@ spec:
                   type: array
                   maxItems: 8
                   description: >-
-                    Connected reports whether the device holds a link
+                    Connected reports whether the device has a link
                     now. Its reason is LinkUp when the link is up,
                     Asleep for a Low Energy device that drops its link
                     between presses and pages the radio again on the
@@ -349,7 +349,7 @@ spec:
                       status:
                         type: string
                         enum: ["True", "False", "Unknown"]
-                        description: Whether the state holds.
+                        description: Whether the reported state is true, false, or unknown.
                       reason:
                         type: string
                         maxLength: 1024
@@ -490,7 +490,7 @@ spec:
                   maxItems: 16
                   description: >-
                     The devices the radio observed during this window
-                    that the cluster holds no bond with. The list is
+                    for which the cluster has no bond. The list is
                     capped at 16 entries, because it is written from
                     radio observations, and a busy room would
                     otherwise grow the object without limit.
@@ -517,10 +517,11 @@ spec:
                 seenTruncated:
                   type: boolean
                   description: >-
-                    Whether the cap of 16 entries stopped a device
-                    from reaching status.seen. True means the room held
-                    more devices than the list reports; false means the
-                    whole list fit.
+                    Whether the limit of 16 entries excluded a device
+                    from status.seen. True means the radio observed more
+                    eligible, unbonded devices than the list reports.
+                    False means every eligible, unbonded device fit in
+                    the list.
                 peripheral:
                   type: string
                   description: The name of the Peripheral this request produced.

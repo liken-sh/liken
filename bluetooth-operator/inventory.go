@@ -394,7 +394,7 @@ func eachDeliveredDevice(visit func(prepared deliveredDevice)) {
 // A person can name a controller in any script, the limits here count
 // bytes, and a cut through the middle of a multi-byte rune produces a
 // string the API server rejects as invalid UTF-8. That would fail the
-// whole status write, not just the one name.
+// whole status write, not only the one name.
 func truncateRunes(s string, limit int) string {
 	if len(s) <= limit {
 		return s

@@ -1,12 +1,12 @@
 # Plans
 
-This directory holds the operator's design documents. Each one is
+This directory contains the operator's design documents. Each one is
 numbered in sequence and keeps its number for life.
 
 The form follows liken's own `plans/`. A document states a problem,
-states the design that answers it, and states what was considered and
-set aside. It separates what was measured from what was only read, and
-it names where the measurement ran.
+the design that addresses it, and the alternatives that were
+considered and set aside. It separates measurements from source
+readings and names where each measurement ran.
 
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab
@@ -19,11 +19,11 @@ The pattern these documents follow is documented in liken's repository:
 and this operator's own instance,
 [milestone 58](https://github.com/liken-sh/liken/blob/main/plans/completed/58-the-bluetooth-operator.md).
 
-[`open-problems/`](open-problems/) holds the questions this operator
-owes an answer to. Those documents have no number, because nobody has
-decided yet what work they become.
+[`open-problems/`](open-problems/) contains the questions this
+operator still needs to answer. Those documents have no number because
+nobody has decided yet what work they become.
 
-[`rejected/`](rejected/) holds the designs that were set aside,
+[`rejected/`](rejected/) contains the designs that were set aside,
 superseded or removed. Each document stays as the record of what was
 considered and why.
 

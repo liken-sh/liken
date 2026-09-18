@@ -13,11 +13,11 @@ publishes each paired controller as a device under the driver name
 and receives that controller's evdev nodes, and no other input device
 on the machine.
 
-With it you can:
+The operator supports these workflows:
 
-* **Pair a DualSense from your desk.** Create a `PairingRequest`, hold
-  the controller's pairing buttons, and approve the address the radio
-  reported. Pairing is an API, so RBAC controls who may pair, and
+* **Pair a DualSense from your desk.** Create a `PairingRequest`, put
+  the controller in pairing mode, and approve the address the radio
+  reports. Pairing is an API, so RBAC controls who may pair, and
   nobody needs a shell on a node or in a pod.
 * **Give the controller to one pod.** A game or emulator pod claims
   the controller by address and receives its `/dev/input/event*`
@@ -28,8 +28,8 @@ With it you can:
   `Unschedulable`, and the pod starts when somebody turns the
   controller on.
 * **Keep the pairing across restarts.** The bond's keys are in
-  `Secrets`, so one button reconnects the controller after a pod
-  restart, an upgrade, or a reboot.
+  `Secrets`, so the controller can reconnect after a pod restart, an
+  upgrade, or a reboot.
 
 The operator is one of `liken`'s optional
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/),
