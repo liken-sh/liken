@@ -78,15 +78,15 @@ func newOpenAPI(server string) openAPIDocument {
 		Info: openAPIInfo{
 			Title:   "audio.liken.sh capture API",
 			Version: "v1",
-			Summary: "Taps what a Sink plays and what a Source hears, and streams it as " +
+			Summary: "Capture audio from a Sink or Source, and stream it as " +
 				"WAV, FLAC, or Ogg Opus.",
-			Description: "The path names the Sink or Source, the extension or Accept " +
-				"chooses the format, and a W3C Media Fragments t= in the query sets " +
-				"the span. Authenticate with a client certificate signed by the " +
-				"cluster's authority, or with a ServiceAccount token for the audience " +
-				"audio-api. A tap needs get on sinks/audio or sources/audio in the " +
-				"group audio.liken.sh. Nothing is stored. Every response streams " +
-				"from the node the endpoint is on.",
+			Description: "The path identifies the Sink or Source. The extension or Accept " +
+				"header selects the format. A W3C Media Fragments t= query parameter " +
+				"selects the time span. Authenticate with a client certificate signed " +
+				"by the cluster's authority, or with a ServiceAccount token for the " +
+				"audio-api audience. A tap requires get on sinks/audio or sources/audio " +
+				"in the audio.liken.sh group. The API stores no audio. Each response " +
+				"streams from the node that hosts the endpoint.",
 		},
 		Servers: []openAPIServer{{URL: server}},
 		Paths:   map[string]any{},
@@ -154,8 +154,8 @@ func openAPIPathItem(route apiRoute) map[string]any {
 			"name":     "name",
 			"in":       "path",
 			"required": true,
-			"description": "The Sink's or Source's own name, which the operator builds " +
-				"from the hardware's identity.",
+			"description": "The Sink or Source name. The operator builds this name from " +
+					"the hardware identity.",
 			"schema": map[string]any{"type": "string"},
 		}}
 	}

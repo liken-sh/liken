@@ -40,7 +40,7 @@ Start here:
 * [Play sound to an output](/docs/guides/claim/): the claim, the
   `Deployment`, and what the container receives.
 * [Pair sound with its screen](/docs/guides/pair/): one claim that
-  holds a monitor's screen and that monitor's speakers.
+  allocates a monitor's screen and that monitor's speakers together.
 * [Devices](/docs/reference/devices/): every attribute a claim can
   select on, the taints, and the delivery.
 

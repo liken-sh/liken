@@ -260,10 +260,9 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 				speakerSink = switched
 				node = switched.Node
 			}
-			// The unity write sits on the delivery path, not inside
-			// the switch, so a claim that states no codec and a claim
-			// that states the codec already playing deliver the same
-			// sink in the same state.
+			// The unity write is part of delivery, not codec switching.
+			// A claim with no codec and a claim that selects the codec
+			// already playing therefore receive the sink in the same state.
 			if err := p.deliverAtUnity(ctx, address, speakerSink); err != nil {
 				return fail("%v", err)
 			}

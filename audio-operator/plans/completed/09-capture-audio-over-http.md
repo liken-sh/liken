@@ -1,4 +1,4 @@
-# 09, The sound over HTTP
+# 09, Capture audio over HTTP
 
 Plan 09. Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
 2026-09-17.

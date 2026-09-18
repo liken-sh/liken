@@ -64,7 +64,7 @@ and ends there:
 * [Pair sound with its screen](docs/content/docs/guides/pair.md):
   one claim that holds a monitor's screen and that monitor's
   speakers
-* [Set what an endpoint rests at](docs/content/docs/guides/rest.md):
+* [Set endpoint volume and controls](docs/content/docs/guides/rest.md):
   the level, the mute, and the card's own controls, without a claim
 * [Devices](docs/content/docs/reference/devices.md): the classes,
   the attributes, the taints, and what a claim delivers

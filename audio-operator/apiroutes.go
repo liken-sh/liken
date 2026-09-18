@@ -203,7 +203,7 @@ func buildRoutes() []apiRoute {
 		{
 			Template: apiPrefix,
 			Kind:     routeDiscovery,
-			Answers:  "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.",
+			Answers:  "The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect.",
 			Methods:  apiMethods,
 			Serves:   []representation{{MediaType: documentType, ContentType: documentType, Accepted: []string{documentType}}},
 			Problems: documentProblems,
@@ -211,7 +211,7 @@ func buildRoutes() []apiRoute {
 		{
 			Template: apiPrefix + "/openapi.json",
 			Kind:     routeOpenAPI,
-			Answers:  "This document.",
+			Answers:  "The OpenAPI 3.1 document for this API.",
 			Methods:  apiMethods,
 			Serves:   []representation{{MediaType: openAPIType, ContentType: openAPIType, Accepted: []string{openAPIType, documentType}}},
 			Problems: documentProblems,
@@ -219,16 +219,15 @@ func buildRoutes() []apiRoute {
 	}
 	for _, resource := range apiResources {
 		base := apiPrefix + "/" + resource + "/{name}"
-		heard := "what the speakers play now"
+		heard := "the audio the speakers play now"
 		if resource == "sources" {
-			heard = "what the microphone hears now"
+			heard = "the audio the microphone captures now"
 		}
 		routes = append(routes, apiRoute{
 			Template: base,
 			Kind:     routeInfo,
 			Resource: resource,
-			Answers: "The " + singular(resource) + "'s format and the routes that tap it: " +
-				"the node a tap targets, the rate and channel count it would use, and the forms served.",
+			Answers: "The " + singular(resource) + " format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
 			Methods:  apiMethods,
 			Serves:   []representation{{MediaType: documentType, ContentType: documentType, Accepted: []string{documentType}}},
 			Problems: infoProblems,
@@ -238,7 +237,7 @@ func buildRoutes() []apiRoute {
 			Kind:     routeTap,
 			Resource: resource,
 			Aspect:   audioAspect,
-			Answers:  title(heard[:1]) + heard[1:] + ", in the format chosen by Accept.",
+			Answers:  title(heard[:1]) + heard[1:] + ". The Accept header selects the format.",
 			Methods:  apiMethods,
 			Serves:   audioRepresentations,
 			Query:    []queryParameter{spanParameter, bitrateParameter},

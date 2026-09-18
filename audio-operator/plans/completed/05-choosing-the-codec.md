@@ -50,16 +50,17 @@ Two halves, inventory and selection, in one release.
 
 Every speaker device that has a sink node publishes `codecs`: the
 `PropInfo` list, space-joined, in the graph's own vocabulary. The
-existing `codec` attribute already publishes the negotiated codec
-as `api.bluez5.codec` spells it, lowercase with underscores, and
+existing `codec` attribute already publishes the negotiated codec in
+the form `api.bluez5.codec` uses, with lowercase letters and
+underscores, and
 the list must speak the same language so a reader can find the
 current codec in it. `PropInfo` labels spell for humans (`aptX`,
 `SBC-XQ`), so the operator lowercases each label and turns dashes
 into underscores. The transform is total and needs no table that
 could drift from PipeWire's.
 
-The list joins the space-separated-string convention that
-`lpcmBitDepths` set: the attribute language has no array type, so
+The list uses the space-separated-string convention that
+`lpcmBitDepths` sets: the attribute language has no array type, so
 a list is one string and a selector asks with `.contains()`.
 
 ### Selection through the claim

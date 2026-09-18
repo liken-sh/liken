@@ -6,8 +6,8 @@ title: Manual
 
 This manual tells you how to install `audio-operator` on a
 [`liken`](https://liken.sh/docs/) cluster, how to play a workload's
-sound through a physical output, and how to set what an output
-rests at. The guides give the steps. The reference describes the
+sound through a physical output, and how to set an output's volume,
+mute, and card controls. The guides give the steps. The reference describes the
 devices, their attributes, what a claim delivers, and the `Sink`
 and `Source` resources.
 

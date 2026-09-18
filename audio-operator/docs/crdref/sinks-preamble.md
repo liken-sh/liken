@@ -62,5 +62,5 @@ card's own controls. Because it is an ordinary Kubernetes resource,
 anything with the right RBAC can change it. A pod that only wants
 to mute the kitchen needs no claim, and a rule that lowers every
 speaker at night is one patch per `Sink`.
-[Set what an endpoint rests at](/docs/guides/rest/) walks through
+[Set endpoint volume and controls](/docs/guides/rest/) walks through
 it.

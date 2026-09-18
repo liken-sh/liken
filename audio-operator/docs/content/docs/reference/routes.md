@@ -18,19 +18,19 @@ means.
 
 `audio.liken.sh capture API`, version `v1`, described in OpenAPI 3.1.1.
 
-Taps what a Sink plays and what a Source hears, and streams it as WAV, FLAC, or Ogg Opus.
+Capture audio from a Sink or Source, and stream it as WAV, FLAC, or Ogg Opus.
 
-The path names the Sink or Source, the extension or Accept chooses the format, and a W3C Media Fragments t= in the query sets the span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audience audio-api. A tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored. Every response streams from the node the endpoint is on.
+The path identifies the Sink or Source. The extension or Accept header selects the format. A W3C Media Fragments t= query parameter selects the time span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audio-api audience. A tap requires get on sinks/audio or sources/audio in the audio.liken.sh group. The API stores no audio. Each response streams from the node that hosts the endpoint.
 
 ## `GET` `/v1/audio` {data-method=GET}
 
-The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.
+The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect.
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [discovery](#discovery) | The discovery document: every resource this API serves, with an RFC 6570 template for each aspect. |
+| 200 | `application/json` | [discovery](#discovery) | The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -49,13 +49,13 @@ The discovery document: every resource this API serves, with an RFC 6570 templat
 
 ## `HEAD` `/v1/audio` {data-method=HEAD}
 
-The headers of the discovery document: every resource this API serves, with an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [discovery](#discovery) | The discovery document: every resource this API serves, with an RFC 6570 template for each aspect. |
+| 200 | `application/json` | [discovery](#discovery) | The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -90,13 +90,13 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/openapi.json` {data-method=GET}
 
-This document.
+The OpenAPI 3.1 document for this API.
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/openapi+json` | string (binary) | This document. |
+| 200 | `application/openapi+json` | string (binary) | The OpenAPI 3.1 document for this API. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -115,13 +115,13 @@ This document.
 
 ## `HEAD` `/v1/audio/openapi.json` {data-method=HEAD}
 
-The headers of this document. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the OpenAPI 3.1 document for this API. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/openapi+json` | string (binary) | This document. |
+| 200 | `application/openapi+json` | string (binary) | The OpenAPI 3.1 document for this API. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -156,19 +156,19 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sinks/{name}` {data-method=GET}
 
-The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.
+The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. |
+| 200 | `application/json` | [endpoint](#endpoint) | The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -192,19 +192,19 @@ The sink's format and the routes that tap it: the node a tap targets, the rate a
 
 ## `HEAD` `/v1/audio/sinks/{name}` {data-method=HEAD}
 
-The headers of the sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. |
+| 200 | `application/json` | [endpoint](#endpoint) | The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -234,7 +234,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -250,13 +250,13 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sinks/{name}/audio` {data-method=GET}
 
-What the speakers play now, in the format chosen by Accept.
+The audio the speakers play now. The Accept header selects the format.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -264,9 +264,9 @@ What the speakers play now, in the format chosen by Accept.
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the speakers play now, in the format chosen by Accept. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, in the format chosen by Accept. |
-| 200 | `audio/wav` | string (binary) | What the speakers play now, in the format chosen by Accept. |
+| 200 | `audio/flac` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
+| 200 | `audio/wav` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -292,13 +292,13 @@ What the speakers play now, in the format chosen by Accept.
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio` {data-method=HEAD}
 
-The headers of what the speakers play now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the speakers play now. The Accept header selects the format. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -306,9 +306,9 @@ The headers of what the speakers play now, in the format chosen by Accept. HEAD 
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the speakers play now, in the format chosen by Accept. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, in the format chosen by Accept. |
-| 200 | `audio/wav` | string (binary) | What the speakers play now, in the format chosen by Accept. |
+| 200 | `audio/flac` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
+| 200 | `audio/wav` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -340,7 +340,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -356,20 +356,20 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sinks/{name}/audio.flac` {data-method=GET}
 
-What the speakers play now, as FLAC.
+The audio the speakers play now, as FLAC.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the speakers play now, as FLAC. |
+| 200 | `audio/flac` | string (binary) | The audio the speakers play now, as FLAC. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -394,20 +394,20 @@ What the speakers play now, as FLAC.
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.flac` {data-method=HEAD}
 
-The headers of what the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the speakers play now, as FLAC. |
+| 200 | `audio/flac` | string (binary) | The audio the speakers play now, as FLAC. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -438,7 +438,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -454,13 +454,13 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sinks/{name}/audio.opus` {data-method=GET}
 
-What the speakers play now, as Ogg Opus.
+The audio the speakers play now, as Ogg Opus.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -468,7 +468,7 @@ What the speakers play now, as Ogg Opus.
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, as Ogg Opus. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now, as Ogg Opus. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -493,13 +493,13 @@ What the speakers play now, as Ogg Opus.
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.opus` {data-method=HEAD}
 
-The headers of what the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -507,7 +507,7 @@ The headers of what the speakers play now, as Ogg Opus. HEAD takes no sample and
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the speakers play now, as Ogg Opus. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now, as Ogg Opus. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -538,7 +538,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -554,20 +554,20 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sinks/{name}/audio.wav` {data-method=GET}
 
-What the speakers play now, as PCM in a RIFF WAVE stream.
+The audio the speakers play now, as PCM in a RIFF WAVE stream.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | What the speakers play now, as PCM in a RIFF WAVE stream. |
+| 200 | `audio/wav` | string (binary) | The audio the speakers play now, as PCM in a RIFF WAVE stream. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -592,20 +592,20 @@ What the speakers play now, as PCM in a RIFF WAVE stream.
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.wav` {data-method=HEAD}
 
-The headers of what the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | What the speakers play now, as PCM in a RIFF WAVE stream. |
+| 200 | `audio/wav` | string (binary) | The audio the speakers play now, as PCM in a RIFF WAVE stream. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -636,7 +636,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -652,19 +652,19 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sources/{name}` {data-method=GET}
 
-The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.
+The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. |
+| 200 | `application/json` | [endpoint](#endpoint) | The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -688,19 +688,19 @@ The source's format and the routes that tap it: the node a tap targets, the rate
 
 ## `HEAD` `/v1/audio/sources/{name}` {data-method=HEAD}
 
-The headers of the source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. |
+| 200 | `application/json` | [endpoint](#endpoint) | The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
 | 304 | none | | The If-None-Match field matches this document's ETag. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
@@ -730,7 +730,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -746,13 +746,13 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sources/{name}/audio` {data-method=GET}
 
-What the microphone hears now, in the format chosen by Accept.
+The audio the microphone captures now. The Accept header selects the format.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -760,9 +760,9 @@ What the microphone hears now, in the format chosen by Accept.
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
-| 200 | `audio/wav` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
+| 200 | `audio/flac` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
+| 200 | `audio/wav` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -788,13 +788,13 @@ What the microphone hears now, in the format chosen by Accept.
 
 ## `HEAD` `/v1/audio/sources/{name}/audio` {data-method=HEAD}
 
-The headers of what the microphone hears now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the microphone captures now. The Accept header selects the format. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -802,9 +802,9 @@ The headers of what the microphone hears now, in the format chosen by Accept. HE
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
-| 200 | `audio/wav` | string (binary) | What the microphone hears now, in the format chosen by Accept. |
+| 200 | `audio/flac` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
+| 200 | `audio/wav` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -836,7 +836,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -852,20 +852,20 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sources/{name}/audio.flac` {data-method=GET}
 
-What the microphone hears now, as FLAC.
+The audio the microphone captures now, as FLAC.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the microphone hears now, as FLAC. |
+| 200 | `audio/flac` | string (binary) | The audio the microphone captures now, as FLAC. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -890,20 +890,20 @@ What the microphone hears now, as FLAC.
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.flac` {data-method=HEAD}
 
-The headers of what the microphone hears now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the microphone captures now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | What the microphone hears now, as FLAC. |
+| 200 | `audio/flac` | string (binary) | The audio the microphone captures now, as FLAC. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -934,7 +934,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -950,13 +950,13 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sources/{name}/audio.opus` {data-method=GET}
 
-What the microphone hears now, as Ogg Opus.
+The audio the microphone captures now, as Ogg Opus.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -964,7 +964,7 @@ What the microphone hears now, as Ogg Opus.
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, as Ogg Opus. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now, as Ogg Opus. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -989,13 +989,13 @@ What the microphone hears now, as Ogg Opus.
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.opus` {data-method=HEAD}
 
-The headers of what the microphone hears now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the microphone captures now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 | `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
 
@@ -1003,7 +1003,7 @@ The headers of what the microphone hears now, as Ogg Opus. HEAD takes no sample 
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | What the microphone hears now, as Ogg Opus. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now, as Ogg Opus. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -1034,7 +1034,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 
@@ -1050,20 +1050,20 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 ## `GET` `/v1/audio/sources/{name}/audio.wav` {data-method=GET}
 
-What the microphone hears now, as PCM in a RIFF WAVE stream.
+The audio the microphone captures now, as PCM in a RIFF WAVE stream.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | What the microphone hears now, as PCM in a RIFF WAVE stream. |
+| 200 | `audio/wav` | string (binary) | The audio the microphone captures now, as PCM in a RIFF WAVE stream. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -1088,20 +1088,20 @@ What the microphone hears now, as PCM in a RIFF WAVE stream.
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.wav` {data-method=HEAD}
 
-The headers of what the microphone hears now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers of the audio the microphone captures now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 | `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | What the microphone hears now, as PCM in a RIFF WAVE stream. |
+| 200 | `audio/wav` | string (binary) | The audio the microphone captures now, as PCM in a RIFF WAVE stream. |
 | 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
 | 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
 | 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
@@ -1132,7 +1132,7 @@ The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink's or Source's own name, which the operator builds from the hardware's identity. |
+| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
 
 **Answers**
 

@@ -70,21 +70,21 @@ card's own controls. Because it is an ordinary Kubernetes resource,
 anything with the right RBAC can change it. A pod that only wants
 to mute the kitchen needs no claim, and a rule that lowers every
 speaker at night is one patch per `Sink`.
-[Set what an endpoint rests at](/docs/guides/rest/) walks through
+[Set endpoint volume and controls](/docs/guides/rest/) walks through
 it.
 
-One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card's playback side, or a Bluetooth speaker. It carries what the hardware declares and what the endpoint rests at.
+One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card's playback side, or a Bluetooth speaker. Its status reports hardware facts and the values the operator last read. Its spec declares desired endpoint settings.
 
 ## spec
 
-The settings the endpoint rests at. Every field is optional: the operator writes a declared field back when the endpoint diverges from it, and it never writes a field the spec leaves out.
+The desired settings for the endpoint. Every field is optional. The operator writes a declared field back when the endpoint diverges from it. It never writes a field that the spec leaves out.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. It applies at once, under a claim or not, and a claim holder's own stream fader is a separate level above it. |
-| <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. It lands where volume lands, and it applies at once. |
-| <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range, a boolean control takes on or off, and an enumerated control takes one of its values. The operator writes a control only when it is stated here, and a card with two endpoints that share a control obeys the write that came last, because the hardware has one register. |
-| <span id="spec--codec"></span>`codec` | string | no | The A2DP codec a Bluetooth speaker rests at, one of status.bluetooth.codecs. A claim's own codec parameter wins while the claim holds the speaker, and a change here waits for the claim to end, because a codec switch replaces the speaker's node and interrupts playback. It is ignored on an ALSA endpoint. |
+| <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. The operator applies this setting at the same layer as volume, and it takes effect at once. |
+| <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register. |
+| <span id="spec--codec"></span>`codec` | string | no | The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint. |
 
 ## status
 
@@ -101,10 +101,10 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--bluetooth"></span>`bluetooth` | [object](#statusbluetooth) | no | The speaker behind a Bluetooth endpoint. Absent on every other connection type. |
 | <span id="status--nodename"></span>`nodeName` | string | no | The PipeWire node a consumer's streams target, the same value a prepared claim delivers as PIPEWIRE_NODE. Absent while PipeWire holds no node for the endpoint. |
 | <span id="status--format"></span>`format` | [object](#statusformat) | no | The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running. |
-| <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Playback control goes to the card's analog and USB sinks, and so does a control that names no direction, such as Auto-Mute Mode. An IEC958 Playback Switch goes to the HDMI slot of the same ordinal, and it is the only control an HDMI slot lists, because an HDMI PCM has no volume element. A jack control is not listed because it is read-only and feeds the Connected condition. A Bluetooth speaker lists nothing. |
-| <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll. |
-| <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that holds the endpoint now, and absent between holders. It answers which workload has the speakers. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports that the endpoint can play now: a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and always on USB. Ready reports that PipeWire holds a node for it. The two carry the same facts as the no-monitor and no-sink taints on the device, for a person rather than the scheduler. |
+| <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The card's own controls for this endpoint, keyed by the kernel's control name. A Playback control applies to the card's analog and USB sinks. A control with no direction, such as Auto-Mute Mode, also applies to those sinks. An IEC958 Playback Switch applies to the HDMI slot with the same ordinal. It is the only control an HDMI slot lists because an HDMI PCM has no volume element. The operator omits read-only jack controls because they feed the Connected condition. A Bluetooth speaker lists no card controls. |
+| <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling. |
+| <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. |
 
 ### status.card
 
@@ -161,7 +161,7 @@ The format the node runs at, from PipeWire's own Format parameter. Absent while 
 
 ### status.capabilities.*
 
-The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Playback control goes to the card's analog and USB sinks, and so does a control that names no direction, such as Auto-Mute Mode. An IEC958 Playback Switch goes to the HDMI slot of the same ordinal, and it is the only control an HDMI slot lists, because an HDMI PCM has no volume element. A jack control is not listed because it is read-only and feeds the Connected condition. A Bluetooth speaker lists nothing.
+The card's own controls for this endpoint, keyed by the kernel's control name. A Playback control applies to the card's analog and USB sinks. A control with no direction, such as Auto-Mute Mode, also applies to those sinks. An IEC958 Playback Switch applies to the HDMI slot with the same ordinal. It is the only control an HDMI slot lists because an HDMI PCM has no volume element. The operator omits read-only jack controls because they feed the Connected condition. A Bluetooth speaker lists no card controls.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -176,7 +176,7 @@ The card's own controls that belong to this endpoint, keyed by the kernel's cont
 
 ### status.observed
 
-The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll.
+The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -187,7 +187,7 @@ The last value the operator read for each setting. The operator reads the card's
 
 ### status.claim
 
-The claim that holds the endpoint now, and absent between holders. It answers which workload has the speakers.
+The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -196,7 +196,7 @@ The claim that holds the endpoint now, and absent between holders. It answers wh
 
 ### status.conditions[]
 
-Connected reports that the endpoint can play now: a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and always on USB. Ready reports that PipeWire holds a node for it. The two carry the same facts as the no-monitor and no-sink taints on the device, for a person rather than the scheduler.
+Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

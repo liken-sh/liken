@@ -229,7 +229,7 @@ The switch takes a second or two, and the pod's start waits for
 it. The speaker's sink arrives at unity volume on every prepare, so
 set loudness in your player's own stream volume. The level the
 speaker itself rests at is declared on its `Sink`, which
-[Set what an endpoint rests at](/docs/guides/rest/) shows. A codec
+[Set endpoint volume and controls](/docs/guides/rest/) shows. A codec
 declared there is the resting choice, and a claim's own parameter
 overrides it.
 

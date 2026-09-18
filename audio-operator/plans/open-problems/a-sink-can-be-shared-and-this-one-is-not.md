@@ -7,14 +7,13 @@ the first.
 
 ## Why exclusive was chosen
 
-Milestone 59 chose it for two reasons, and both still hold. The first
-is that the other two operators are exclusive, and one owner for one
-piece of hardware is the clearest thing a claim can mean. The second
-is that a claim on a shared sink gives a workload no say over what
-else plays through it. A pod that holds the television's speakers has
-no way to say that it holds them alone, and a video player sharing a
-sink with a notification sound is a worse default than a video player
-that waits.
+Milestone 59 chose it for two reasons, and both still apply. First,
+the other two operators are exclusive, so one owner for one piece of
+hardware gives a claim a clear meaning. Second, a claim on a shared
+sink gives a workload no control over what else plays through it. A
+pod that allocates the television's speakers cannot require exclusive
+use. A video player that shares a sink with a notification sound is a
+worse default than a video player that waits.
 
 Neither reason says a shared sink is wrong. They say exclusive is the
 right default, which is a smaller claim.

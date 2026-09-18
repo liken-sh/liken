@@ -1,28 +1,31 @@
 ---
 name: rest
-description: "Set an output's resting volume, mute it, close a microphone, or set a sound card control with kubectl, with no claim and no interruption to a playing pod. Use when a speaker is too loud or too quiet at rest, or when handing volume control to another operator."
+description: "Set endpoint volume, mute an output, close a microphone, or set a sound card control with kubectl, with no claim and no interruption to a playing pod. Use when a speaker needs a different default level or when another operator needs volume control."
 ---
 
 This skill is the guide at https://audio.liken.sh/docs/guides/rest/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-# Set what an endpoint rests at
+<a id="set-what-an-endpoint-rests-at"></a>
 
-This guide shows you how to change the volume of a speaker, mute
-an output, close a microphone, and set a sound card's own controls
-with `kubectl`. None of it needs a claim, and none of it interrupts
-a pod that is playing or recording. You need the operator
+# Set endpoint volume and controls
+
+This guide shows how to change an endpoint's volume, mute an output,
+close a microphone, and set a sound card's controls with `kubectl`.
+These changes do not need a claim. They do not interrupt a pod that
+is playing or recording. You need the operator
 [installed](https://audio.liken.sh/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
-Every output and input the operator publishes has a resource of its
-own: a [`Sink`](https://audio.liken.sh/docs/reference/sinks/) for something that plays,
-and a [`Source`](https://audio.liken.sh/docs/reference/sources/) for something that
-records. The operator fills in `status` with the facts about the
-hardware and the values it last read from it. You fill in `spec`
-with what you want, and the operator keeps the hardware there. A pod
-that plays through the speaker still holds it through a claim, and
-still has its own stream volume. Your declaration is the level the
-speaker itself rests at, underneath that.
+Every output and input the operator publishes has its own resource:
+a [`Sink`](https://audio.liken.sh/docs/reference/sinks/) for playback and a
+[`Source`](https://audio.liken.sh/docs/reference/sources/) for capture. The operator writes
+hardware facts and the latest readings to `status`. You write desired
+settings to `spec`, and the operator reapplies each declared setting
+when the hardware differs from it. A pod can still claim the speaker
+while the operator applies these settings. The pod's stream volume is
+separate from the endpoint volume. A claim's codec parameter takes
+precedence while it allocates a Bluetooth speaker. A codec declared on
+the `Sink` takes effect after that claim ends.
 
 ## 1. See what is there
 
@@ -37,9 +40,10 @@ reports about one, read the whole resource:
     kubectl get sink kitchen-pci-0000-00-1f-3-hdmi-0 -o yaml
 
 Read two parts of `status`. `capabilities` lists the controls the
-sound card itself offers for this endpoint, with the range or the
-choices each one takes. `observed` is the last value the operator
-read for each setting. It keeps up with the hardware on its own.
+sound card offers for this endpoint, including the range or choices
+for each control. `observed` is the last value the operator read for
+each setting. The operator updates it when the hardware reports a
+change.
 Turn a knob on a USB DAC, press the volume button on a Bluetooth
 speaker, or let a client change the graph, and the new value shows
 here within about a second. An endpoint that nothing is playing
@@ -107,7 +111,9 @@ Not every endpoint has controls. An HDMI output has only its
 of its own. Use `volume` for its level. A Bluetooth speaker has
 none.
 
-## 5. Take a declaration back
+<a id="5-take-a-declaration-back"></a>
+
+## 5. Remove a declared setting
 
 Remove the field, and the operator stops enforcing it. The hardware
 keeps whatever value it has at that moment, because the operator
@@ -116,7 +122,9 @@ never makes up a value on its own:
     kubectl patch sink a0-ab-51-33-b7-12 --type json \
       -p '[{"op":"remove","path":"/spec/volume"}]'
 
-## Give someone else the remote
+<a id="give-someone-else-the-remote"></a>
+
+## Grant volume control
 
 Because the resources are ordinary Kubernetes objects, RBAC decides
 who may change them. A role that can patch `sinks` but not

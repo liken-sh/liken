@@ -1,20 +1,20 @@
 # Plans
 
-This directory holds the operator's design documents. Each one is
+This directory contains the operator's design documents. Each one is
 numbered in sequence and keeps its number for life.
 
 The form follows liken's own `plans/`. A document states a problem,
-states the design that answers it, and states what was considered and
-set aside. It also states how the work was proved, and a proof runs on
-hardware.
+the design that addresses it, and the alternatives that were
+considered and set aside. It also records how the work was proved. A
+proof runs on hardware.
 
 The pattern these documents follow is documented in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
 [milestone 59](https://github.com/liken-sh/liken/blob/main/plans/completed/59-the-audio-operator.md).
 
-The README states how to use the operator. These documents state why it
-is built the way it is, and what it still owes an answer to.
+The README states how to use the operator. These documents state why
+the operator is built this way and which questions remain open.
 
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab
@@ -73,8 +73,8 @@ Nothing is planned right now.
   playback endpoint and a `Source` for every capture endpoint, with
   a `status` that reports the card's own controls and what the
   operator last observed, and a `spec` that declares what the
-  endpoint rests at. A claim stays the channel for bytes, and the
-  resource becomes the channel for state. The device name is built
+  endpoint rests at. A claim remains responsible for delivering audio
+  bytes. The resource stores endpoint settings and observations. The device name is built
   from the hardware's identity, and `observed` follows the control
   device's events and `pw-dump -m` in place of a poll. The drill
   covered the names, the DAC's controls, the level and mute under a
@@ -85,7 +85,7 @@ Nothing is planned right now.
   Built, and drilled on liken-1 on 2026-09-10. Claimed endpoint
   availability, failed control operations, and observation health,
   with optional Prometheus collection.
-* [09, The sound over HTTP](completed/09-the-sound-over-http.md).
+* [09, Capture audio over HTTP](completed/09-capture-audio-over-http.md).
   Built on 2026-09-16, and drilled on liken-1 on 2026-09-16 and
   2026-09-17. An HTTP API that taps what a `Sink` plays and what a
   `Source` hears, as WAV, FLAC, or Ogg Opus, with a W3C Media

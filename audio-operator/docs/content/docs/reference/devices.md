@@ -352,7 +352,7 @@ that variable, and writes the WirePlumber fragment that turns the
 bluez monitor on only when the variable is set.
 
 WirePlumber names the node from `bluez_output`, the peer MAC with
-underscores, and an object id, so the name can change when the
+underscores, and an object id. The name can change when the
 speaker reconnects. The operator republishes the name and rewrites
 every prepared claim's file from the same graph read, the same way
 it does for a sink that a profile change renamed.
@@ -427,7 +427,7 @@ percent, a desktop guard that would cost resolution on a machine
 that plays only what a claim delivers. A consumer's stream fader is
 the consumer's own level. The endpoint's level is declared on its
 `Sink` as `spec.volume`, which
-[Set what an endpoint rests at](/docs/guides/rest/) shows, and an
+[Set endpoint volume and controls](/docs/guides/rest/) shows, and an
 endpoint with no declaration rests at unity.
 
 A prepare on a Bluetooth speaker also writes unity on every

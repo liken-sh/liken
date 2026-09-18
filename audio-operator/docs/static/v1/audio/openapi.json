@@ -3,8 +3,8 @@
   "info": {
     "title": "audio.liken.sh capture API",
     "version": "v1",
-    "summary": "Taps what a Sink plays and what a Source hears, and streams it as WAV, FLAC, or Ogg Opus.",
-    "description": "The path names the Sink or Source, the extension or Accept chooses the format, and a W3C Media Fragments t= in the query sets the span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audience audio-api. A tap needs get on sinks/audio or sources/audio in the group audio.liken.sh. Nothing is stored. Every response streams from the node the endpoint is on."
+    "summary": "Capture audio from a Sink or Source, and stream it as WAV, FLAC, or Ogg Opus.",
+    "description": "The path identifies the Sink or Source. The extension or Accept header selects the format. A W3C Media Fragments t= query parameter selects the time span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audio-api audience. A tap requires get on sinks/audio or sources/audio in the audio.liken.sh group. The API stores no audio. Each response streams from the node that hosts the endpoint."
   },
   "servers": [
     {
@@ -25,7 +25,7 @@
                 }
               }
             },
-            "description": "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.",
+            "description": "The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -72,7 +72,7 @@
             "$ref": "#/components/responses/notAcceptable"
           }
         },
-        "summary": "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect."
+        "summary": "The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect."
       },
       "head": {
         "operationId": "discoveryHead",
@@ -86,7 +86,7 @@
                 }
               }
             },
-            "description": "The discovery document: every resource this API serves, with an RFC 6570 template for each aspect.",
+            "description": "The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -133,7 +133,7 @@
             "$ref": "#/components/responses/notAcceptable"
           }
         },
-        "summary": "The headers of the discovery document: every resource this API serves, with an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "discoveryOptions",
@@ -167,7 +167,7 @@
                 }
               }
             },
-            "description": "This document.",
+            "description": "The OpenAPI 3.1 document for this API.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -214,7 +214,7 @@
             "$ref": "#/components/responses/notAcceptable"
           }
         },
-        "summary": "This document."
+        "summary": "The OpenAPI 3.1 document for this API."
       },
       "head": {
         "operationId": "openapiHead",
@@ -229,7 +229,7 @@
                 }
               }
             },
-            "description": "This document.",
+            "description": "The OpenAPI 3.1 document for this API.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -276,7 +276,7 @@
             "$ref": "#/components/responses/notAcceptable"
           }
         },
-        "summary": "The headers of this document. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the OpenAPI 3.1 document for this API. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "openapiOptions",
@@ -309,7 +309,7 @@
                 }
               }
             },
-            "description": "The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "description": "The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -371,7 +371,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served."
+        "summary": "The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve."
       },
       "head": {
         "operationId": "getSinkHead",
@@ -385,7 +385,7 @@
                 }
               }
             },
-            "description": "The sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "description": "The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -447,7 +447,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of the sink's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSinkOptions",
@@ -468,7 +468,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -523,7 +523,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, in the format chosen by Accept.",
+            "description": "The audio the speakers play now. The Accept header selects the format.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -597,7 +597,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the speakers play now, in the format chosen by Accept."
+        "summary": "The audio the speakers play now. The Accept header selects the format."
       },
       "head": {
         "operationId": "getSinkAudioHead",
@@ -643,7 +643,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, in the format chosen by Accept.",
+            "description": "The audio the speakers play now. The Accept header selects the format.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -717,7 +717,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the speakers play now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the speakers play now. The Accept header selects the format. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSinkAudioOptions",
@@ -738,7 +738,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -772,7 +772,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, as FLAC.",
+            "description": "The audio the speakers play now, as FLAC.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -840,7 +840,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the speakers play now, as FLAC."
+        "summary": "The audio the speakers play now, as FLAC."
       },
       "head": {
         "operationId": "getSinkAudioFlacHead",
@@ -865,7 +865,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, as FLAC.",
+            "description": "The audio the speakers play now, as FLAC.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -933,7 +933,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSinkAudioFlacOptions",
@@ -954,7 +954,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -997,7 +997,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, as Ogg Opus.",
+            "description": "The audio the speakers play now, as Ogg Opus.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1065,7 +1065,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the speakers play now, as Ogg Opus."
+        "summary": "The audio the speakers play now, as Ogg Opus."
       },
       "head": {
         "operationId": "getSinkAudioOpusHead",
@@ -1099,7 +1099,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, as Ogg Opus.",
+            "description": "The audio the speakers play now, as Ogg Opus.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1167,7 +1167,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSinkAudioOpusOptions",
@@ -1188,7 +1188,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -1222,7 +1222,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, as PCM in a RIFF WAVE stream.",
+            "description": "The audio the speakers play now, as PCM in a RIFF WAVE stream.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1290,7 +1290,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the speakers play now, as PCM in a RIFF WAVE stream."
+        "summary": "The audio the speakers play now, as PCM in a RIFF WAVE stream."
       },
       "head": {
         "operationId": "getSinkAudioWavHead",
@@ -1315,7 +1315,7 @@
                 }
               }
             },
-            "description": "What the speakers play now, as PCM in a RIFF WAVE stream.",
+            "description": "The audio the speakers play now, as PCM in a RIFF WAVE stream.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1383,7 +1383,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSinkAudioWavOptions",
@@ -1404,7 +1404,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -1427,7 +1427,7 @@
                 }
               }
             },
-            "description": "The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "description": "The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -1489,7 +1489,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served."
+        "summary": "The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve."
       },
       "head": {
         "operationId": "getSourceHead",
@@ -1503,7 +1503,7 @@
                 }
               }
             },
-            "description": "The source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served.",
+            "description": "The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.",
             "headers": {
               "Cache-Control": {
                 "description": "Always no-cache. A client revalidates with If-None-Match and gets a 304.",
@@ -1565,7 +1565,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of the source's format and the routes that tap it: the node a tap targets, the rate and channel count it would use, and the forms served. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSourceOptions",
@@ -1586,7 +1586,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -1641,7 +1641,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, in the format chosen by Accept.",
+            "description": "The audio the microphone captures now. The Accept header selects the format.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1715,7 +1715,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the microphone hears now, in the format chosen by Accept."
+        "summary": "The audio the microphone captures now. The Accept header selects the format."
       },
       "head": {
         "operationId": "getSourceAudioHead",
@@ -1761,7 +1761,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, in the format chosen by Accept.",
+            "description": "The audio the microphone captures now. The Accept header selects the format.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1835,7 +1835,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the microphone hears now, in the format chosen by Accept. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the microphone captures now. The Accept header selects the format. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSourceAudioOptions",
@@ -1856,7 +1856,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -1890,7 +1890,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, as FLAC.",
+            "description": "The audio the microphone captures now, as FLAC.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -1958,7 +1958,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the microphone hears now, as FLAC."
+        "summary": "The audio the microphone captures now, as FLAC."
       },
       "head": {
         "operationId": "getSourceAudioFlacHead",
@@ -1983,7 +1983,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, as FLAC.",
+            "description": "The audio the microphone captures now, as FLAC.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -2051,7 +2051,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the microphone hears now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the microphone captures now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSourceAudioFlacOptions",
@@ -2072,7 +2072,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -2115,7 +2115,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, as Ogg Opus.",
+            "description": "The audio the microphone captures now, as Ogg Opus.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -2183,7 +2183,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the microphone hears now, as Ogg Opus."
+        "summary": "The audio the microphone captures now, as Ogg Opus."
       },
       "head": {
         "operationId": "getSourceAudioOpusHead",
@@ -2217,7 +2217,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, as Ogg Opus.",
+            "description": "The audio the microphone captures now, as Ogg Opus.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -2285,7 +2285,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the microphone hears now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the microphone captures now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSourceAudioOpusOptions",
@@ -2306,7 +2306,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,
@@ -2340,7 +2340,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, as PCM in a RIFF WAVE stream.",
+            "description": "The audio the microphone captures now, as PCM in a RIFF WAVE stream.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -2408,7 +2408,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "What the microphone hears now, as PCM in a RIFF WAVE stream."
+        "summary": "The audio the microphone captures now, as PCM in a RIFF WAVE stream."
       },
       "head": {
         "operationId": "getSourceAudioWavHead",
@@ -2433,7 +2433,7 @@
                 }
               }
             },
-            "description": "What the microphone hears now, as PCM in a RIFF WAVE stream.",
+            "description": "The audio the microphone captures now, as PCM in a RIFF WAVE stream.",
             "headers": {
               "Accept-Ranges": {
                 "description": "Always none. A live capture has no byte identity: offset 44 of two requests is two different moments.",
@@ -2501,7 +2501,7 @@
             "$ref": "#/components/responses/gatewayTimeout"
           }
         },
-        "summary": "The headers of what the microphone hears now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
+        "summary": "The headers of the audio the microphone captures now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2)."
       },
       "options": {
         "operationId": "getSourceAudioWavOptions",
@@ -2522,7 +2522,7 @@
       },
       "parameters": [
         {
-          "description": "The Sink's or Source's own name, which the operator builds from the hardware's identity.",
+          "description": "The Sink or Source name. The operator builds this name from the hardware identity.",
           "in": "path",
           "name": "name",
           "required": true,

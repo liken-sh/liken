@@ -149,13 +149,11 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 	return writes, refusals
 }
 
-// plannedCodec answers which codec the speaker must switch to, and
-// nothing at all while a claim holds it.
-//
-// The claim holds the switch back because a codec switch destroys the
-// speaker's node and builds another, so it always interrupts what
-// plays. A claim's own codec parameter is what wins while the claim
-// lasts, and the resting codec is applied when the claim ends.
+// plannedCodec returns the codec to apply, or no change while a claim
+// allocates the speaker. Switching codecs replaces the speaker's node
+// and interrupts playback. A claim's codec parameter takes precedence
+// for the duration of the claim. The operator applies the codec from
+// the Sink spec after the claim ends.
 func plannedCodec(spec declaration, facts endpointFacts) (string, string) {
 	if spec.Codec == nil || facts.Speaker == nil || !facts.Speaker.HasSink {
 		return "", ""
