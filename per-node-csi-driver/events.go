@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// The three reasons an Event carries, one per refusal a person has to
+// These three reasons identify each refusal a person has to
 // read: a handle the driver cannot put under the store, a handle
 // another pod on the node holds, and a copy or target the driver could
 // not make or bind.

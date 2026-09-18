@@ -1,19 +1,19 @@
 # Plans
 
-This directory holds the driver's design documents. Each one is
-numbered in sequence and keeps its number for life.
+This directory contains the driver's design documents. Each document is
+numbered in sequence, and its number never changes.
 
 [`00-design.md`](00-design.md) is the design. The numbered plans build
-it, in order. A plan states a problem, states the contracts that answer
-it, and states how the work is proved. It leaves the shape of the code
-to whoever builds it. Each plan starts at low fidelity, and it is
-raised to full fidelity before anyone builds it.
+it, in order. Each plan states a problem, the contracts that address it,
+and how the work is proved. It leaves the shape of the code to whoever
+builds it. Each plan starts at low fidelity and reaches full fidelity
+before implementation.
 
 A plan moves to `completed/` when it is built.
 A plan that is set aside moves to `rejected/` with the reasons that
 decided it. A question the current work cannot answer is written to
-`open-problems/`; those documents have no number, because nobody has
-decided yet what work they become.
+`open-problems/`. Those documents have no number because no work item
+exists for them yet.
 
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab

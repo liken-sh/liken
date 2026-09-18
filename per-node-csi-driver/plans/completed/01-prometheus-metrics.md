@@ -23,8 +23,8 @@ as the CSI operation.
 | per-node-csi-driver | `per_node_csi_mount_failures_total` | counter | mounts that fail |
 | per-node-csi-driver | `per_node_csi_copy_bytes{volume}` | gauge | the bytes each copy holds, from the walk `NodeGetVolumeStats` makes |
 
-The monitoring component at `deploy/monitoring/` holds a PodMonitor for
-each pod the driver runs.
+The monitoring component at `deploy/monitoring/` defines a `PodMonitor`
+for each pod the driver runs.
 
 ## Proof
 

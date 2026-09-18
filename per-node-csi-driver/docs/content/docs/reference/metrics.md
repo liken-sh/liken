@@ -5,8 +5,9 @@ weight: 30
 
 ## The listener
 
-The node plugin serves its metrics at `/metrics` on the port named
-`metrics`, `9200` by default, the port every process serves metrics on.
+The node plugin serves metrics at `/metrics` on the port named
+`metrics`. The default port is `9200`, which every process in the base
+uses for metrics.
 The base in `deploy/` needs no Prometheus and applies without one. A
 cluster owner who runs the prometheus-operator adds the
 `deploy/monitoring` component beside the base to scrape the pod:
@@ -33,13 +34,13 @@ CSI operations as the reconcile layer, and the driver's own gauges.
 | `per_node_csi_watch_restarts_total` | `kind` | Times the sweep's `PersistentVolume` watch closed and opened again. |
 | `per_node_csi_volumes` | | The volumes this node holds a copy of. |
 | `per_node_csi_mount_failures_total` | | Publishes that failed at the mount. |
-| `per_node_csi_copy_bytes` | `volume` | The bytes this node's copy of the volume holds, from the same walk `NodeGetVolumeStats` makes. The label is the volume handle. The gauge carries a volume from the first time the kubelet asks for its stats on that node until the pod unpublishes it or the sweep removes the copy. |
+| `per_node_csi_copy_bytes` | `volume` | The bytes in this node's copy, from the walk that `NodeGetVolumeStats` makes. The label is the volume handle. The gauge starts when the kubelet first requests stats on that node and ends when the pod unpublishes the volume or the sweep removes the copy. |
 
 ## The kubelet's own numbers
 
-The driver answers `NodeGetVolumeStats` with the copy's bytes as used,
-and the filesystem that holds the store as available and total. The
-kubelet carries those numbers on its own metrics.
+The driver returns the copy's bytes as used space in
+`NodeGetVolumeStats`. It returns the store's filesystem as available and
+total space. The kubelet exports those values in its own metrics.
 `kubelet_volume_stats_used_bytes` is the copy.
 `kubelet_volume_stats_available_bytes` and
 `kubelet_volume_stats_capacity_bytes` are the filesystem, which every

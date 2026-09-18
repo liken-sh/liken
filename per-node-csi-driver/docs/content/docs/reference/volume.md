@@ -5,11 +5,11 @@ weight: 10
 
 A person or an operator writes two objects. The `PersistentVolume`
 names the driver, the handle, the class, `ReadWriteMany`, a capacity,
-`Retain`, and a `claimRef`. The capacity is a hint, not a limit: the
-driver enforces no size. The `claimRef` binds the volume to one claim
-and no other. The claim names the class, `ReadWriteMany`, and the same
-size. Many nodes mount this one volume read-write, and each node holds
-its own copy.
+`Retain`, and a `claimRef`. The capacity is a hint, not a limit. The
+driver enforces no size limit. The `claimRef` binds the volume to one
+claim and no other. The claim names the class, `ReadWriteMany`, and the
+same size. Many nodes mount this one volume read-write, and each node
+keeps its own copy.
 
 ```yaml
 apiVersion: v1

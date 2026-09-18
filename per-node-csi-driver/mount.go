@@ -1,7 +1,7 @@
 package main
 
-// mount.go holds the bind mount that puts a copy at the target path the
-// kubelet names, and the unmount that takes it away.
+// mount.go implements the bind mount that puts a copy at the target path
+// the kubelet names and the unmount that removes it.
 
 import (
 	"errors"
@@ -64,9 +64,8 @@ func bind(calls mountSyscalls, source, target string, readOnly bool) error {
 	return bindReadWrite(calls, source, target)
 }
 
-// unbind detaches the mount at target. A target that holds no mount is
-// not an error, so an unpublish the kubelet repeats answers the same
-// way twice.
+// unbind detaches the mount at target. A target with no mount is not an
+// error, so a repeated unpublish has the same result as the first one.
 func unbind(calls mountSyscalls, target string) error {
 	err := calls.Unmount(target, unix.MNT_DETACH)
 	if err == nil || errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOENT) {

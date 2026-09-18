@@ -1,6 +1,6 @@
 package main
 
-// metrics.go holds the registry, every gauge and counter the driver
+// metrics.go defines the registry, every gauge and counter the driver
 // reports on it, and the listener that serves it. Layers 1 and 2 are
 // liken's shared contract, milestone 65: the Go runtime's own numbers,
 // the release the binary was built from, and the CSI operation the
@@ -31,13 +31,13 @@ const component = "per-node-csi-driver"
 // which is the name a person looks the PersistentVolume up by.
 var copyLabels = []string{"volume"}
 
-// kindLabel is the one label layer 2 carries: the CSI operation a gRPC
-// call named, or the resource kind a watch follows. liken's shared
+// kindLabel is the one label layer 2 uses: the CSI operation a gRPC
+// call names, or the resource kind a watch follows. liken's shared
 // dashboard reads every repository's layer 2 under this same name.
 var kindLabel = []string{"kind"}
 
 // metrics is the registry the listener serves and every gauge and
-// counter the driver reports on it.
+// counter the driver updates in it.
 type metrics struct {
 	registry *prometheus.Registry
 
@@ -47,7 +47,7 @@ type metrics struct {
 
 	// reconcileDuration and reconcileErrors are layer 2. The kubelet's
 	// call is this driver's reconcile: there is no other loop that
-	// changes a volume's state, so every gRPC handler answers both.
+	// changes a volume's state, so every gRPC handler updates both.
 	reconcileDuration *prometheus.HistogramVec
 	reconcileErrors   *prometheus.CounterVec
 	// watchRestarts counts a restart of the one watch the sweep holds,
@@ -67,17 +67,17 @@ func newMetrics() *metrics {
 		copyBytes: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "per_node_csi_copy_bytes",
-				Help: "Bytes this node's copy of the volume holds.",
+				Help: "Bytes in this node's copy of the volume.",
 			}, copyLabels),
 		reconcileDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name: "per_node_csi_reconcile_duration_seconds",
-				Help: "How long a CSI operation took to answer.",
+				Help: "Time until a CSI operation returns a response.",
 			}, kindLabel),
 		reconcileErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "per_node_csi_reconcile_errors_total",
-				Help: "CSI operations that answered with an error.",
+				Help: "CSI operations that returned an error.",
 			}, kindLabel),
 		watchRestarts: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -122,7 +122,7 @@ func buildInfo() prometheus.Collector {
 }
 
 // record puts the copy's bytes on the gauge, from the same walk the
-// stats answer reports.
+// stats response reports.
 func (m *metrics) record(handle string, bytes int64) {
 	m.copyBytes.WithLabelValues(handle).Set(float64(bytes))
 }
@@ -133,8 +133,8 @@ func (m *metrics) forget(handle string) {
 	m.copyBytes.DeleteLabelValues(handle)
 }
 
-// recordCall puts a CSI operation's answer time on the histogram, and
-// counts it as an error when the handler answered one. kind is the
+// recordCall puts a CSI operation's duration on the histogram, and
+// counts it as an error when the handler returned one. kind is the
 // operation name, such as NodePublishVolume.
 func (m *metrics) recordCall(kind string, duration time.Duration, err error) {
 	m.reconcileDuration.WithLabelValues(kind).Observe(duration.Seconds())
@@ -176,7 +176,7 @@ func (m *metrics) handler() http.Handler {
 	return served
 }
 
-// serveMetrics answers on the listener until the run ends.
+// serveMetrics serves metrics on the listener until the run ends.
 func serveMetrics(ctx context.Context, listener net.Listener, readings *metrics, logger *slog.Logger) {
 	serving := &http.Server{
 		Handler:           readings.handler(),

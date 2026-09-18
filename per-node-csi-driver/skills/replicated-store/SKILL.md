@@ -65,9 +65,9 @@ spec:
       labels:
         app: store
     spec:
-      # One pod per node. The driver refuses a second pod that asks for
-      # a handle another pod on the same node holds, and this
-      # anti-affinity keeps the scheduler from placing one.
+      # Required anti-affinity allows at most one store pod on each
+      # node. The driver refuses a second pod that asks for a handle
+      # another pod on the same node holds.
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -92,9 +92,8 @@ metadata:
   name: store
   namespace: example
 spec:
-  # A fresh copy catches up from its peers. A drain that took two pods
-  # at once would leave one copy to serve alone and to seed both
-  # replacements.
+  # A fresh copy catches up from its peers. Limiting a drain to one pod
+  # leaves at least two existing copies to serve and seed replacements.
   maxUnavailable: 1
   selector:
     matchLabels:

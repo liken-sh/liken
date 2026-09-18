@@ -3,9 +3,9 @@ title: The class
 weight: 20
 ---
 
-The `StorageClass` is `per-node`, and the kustomize base in `deploy/`
-carries it. It takes no parameters: a volume of this driver carries
-everything it needs in its `PersistentVolume`.
+The kustomize base in `deploy/` defines the `StorageClass` named
+`per-node`. It takes no parameters. A volume of this driver gets all of
+its configuration from its `PersistentVolume`.
 
 ```yaml
 apiVersion: storage.k8s.io/v1

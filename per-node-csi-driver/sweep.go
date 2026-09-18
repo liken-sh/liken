@@ -47,7 +47,7 @@ func newSweeping(answering *node, client kubernetes.Interface,
 	}
 }
 
-// follow holds the watch for the driver's whole run. A driver outside a
+// follow keeps the watch for the driver's whole run. A driver outside a
 // cluster, and one whose cache never syncs, sweeps nothing. Without
 // the list of volumes every copy would look like an orphan.
 func (s *sweeping) follow(ctx context.Context) {

@@ -1,6 +1,6 @@
 package main
 
-// handle.go decides which volume handles the driver accepts. A handle
+// handle.go validates the volume handles the driver accepts. A handle
 // is one path element under the store, so a handle the filesystem
 // would read as a path, or as a step out of the store, is refused.
 

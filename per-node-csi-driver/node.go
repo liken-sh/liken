@@ -1,7 +1,7 @@
 package main
 
-// node.go holds the CSI Node service: the calls the kubelet makes to
-// put a volume under a pod and take it away.
+// node.go implements the CSI Node service. The kubelet calls it to mount a
+// volume in a pod and to remove that mount.
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// node answers the Node service and holds what this node has published.
+// node implements the Node service and records this node's published copies.
 type node struct {
 	csi.UnimplementedNodeServer
 	nodeID   string
@@ -58,8 +58,8 @@ func newNode(cfg *config, posting *events, readings *metrics, logger *slog.Logge
 	return answering
 }
 
-// NodeGetInfo names the node and declares no topology. Every node holds
-// a copy of its own, so no node is closer to a volume than another.
+// NodeGetInfo returns the node name and declares no topology. Every node
+// keeps its own copy, so no node is closer to a volume than another.
 func (n *node) NodeGetInfo(
 	context.Context, *csi.NodeGetInfoRequest,
 ) (*csi.NodeGetInfoResponse, error) {
@@ -86,8 +86,8 @@ func (n *node) NodeGetCapabilities(
 // NodePublishVolume gives the pod this node's copy of the handle, and
 // makes the directory on the first publish on this node. A second pod
 // that asks for a handle another pod holds is refused. The pod that
-// holds the handle can publish the same target as often as the kubelet
-// asks, and it can move to a new target.
+// holds the handle can publish the same target repeatedly as the kubelet
+// retries, and it can publish the copy at a new target.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -155,7 +155,7 @@ func (n *node) mount(
 	return nil
 }
 
-// NodeUnpublishVolume takes the mount away and gives the hold up. It
+// NodeUnpublishVolume removes the mount and releases the hold. It
 // removes nothing under copies/, because the copy outlives its pod.
 func (n *node) NodeUnpublishVolume(
 	ctx context.Context, request *csi.NodeUnpublishVolumeRequest,

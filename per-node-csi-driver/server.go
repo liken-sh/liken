@@ -1,7 +1,7 @@
 package main
 
-// server.go holds the socket the kubelet connects to, the gRPC server
-// that answers on it, and the log line every call writes.
+// server.go creates the socket the kubelet connects to, the gRPC server
+// that listens on it, and the log line for each call.
 
 import (
 	"context"
@@ -118,7 +118,7 @@ func (s *server) serve(ctx context.Context) error {
 	}
 }
 
-// metricsInterceptor times every RPC and counts the ones that answer
+// metricsInterceptor times every RPC and counts the ones that return
 // with an error, under the kind label liken's shared dashboard reads:
 // the CSI operation the kubelet or the registrar called.
 func metricsInterceptor(readings *metrics) grpc.UnaryServerInterceptor {
@@ -135,7 +135,7 @@ func metricsInterceptor(readings *metrics) grpc.UnaryServerInterceptor {
 	}
 }
 
-// operationName is the CSI operation a gRPC method name carries, the
+// operationName is the CSI operation a gRPC method name contains, the
 // part after its last slash: NodePublishVolume out of
 // /csi.v1.Node/NodePublishVolume.
 func operationName(fullMethod string) string {
