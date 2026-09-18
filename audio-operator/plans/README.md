@@ -108,3 +108,6 @@ decided yet what work they become.
 * [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
   PipeWire mixes streams and every device this operator publishes is
   exclusive, so the second pod to claim a sink waits behind the first.
+* [The capture stream tests flake in CI](open-problems/the-capture-stream-tests-flake-in-ci.md).
+  Three capture tests fail now and then in CI with an `unexpected EOF`,
+  and are skipped until the stream-shutdown race is found and fixed.
