@@ -1,7 +1,7 @@
 package main
 
-// identity.go holds the CSI Identity service: the three calls a plugin
-// answers before it holds any volume.
+// identity.go implements the CSI Identity service. The plugin receives
+// these calls before it publishes a volume.
 
 import (
 	"context"
@@ -15,9 +15,9 @@ import (
 // select this driver.
 const driverName = "git.liken.sh"
 
-// identity answers the Identity service. Its only state is the store
-// path, because readiness is whether the store takes a write, and
-// whether this process is the controller.
+// identity implements the Identity service. Its state includes the store
+// path and whether this process is the controller. Readiness depends on
+// whether the store accepts a write.
 type identity struct {
 	csi.UnimplementedIdentityServer
 	store string
@@ -51,9 +51,9 @@ func (i *identity) GetPluginCapabilities(
 	return answer, nil
 }
 
-// Probe reports ready when the store takes a write. Every repository
-// and work tree lives in the store, so a driver that cannot write there
-// can do nothing.
+// Probe reports ready when the store accepts a write. The store contains
+// every repository and work tree, so the driver cannot operate without
+// write access to it.
 func (i *identity) Probe(context.Context, *csi.ProbeRequest) (*csi.ProbeResponse, error) {
 	return &csi.ProbeResponse{Ready: wrapperspb.Bool(i.storeIsWriteable())}, nil
 }

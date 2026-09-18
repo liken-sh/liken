@@ -79,7 +79,7 @@ func walkTreeMetadata(tree string) ([]metadataRecord, error) {
 	return records, err
 }
 
-// pathRecord answers the record for one path and whether the
+// pathRecord returns the record for one path and whether the
 // checkout already gives what it says.
 func pathRecord(name, path string, info os.FileInfo, uid, gid int) (metadataRecord, bool) {
 	owner, group := ownerOf(info)
@@ -203,7 +203,7 @@ type gitSteps struct {
 	err  error
 }
 
-// run answers the invocation's one line of output, and does nothing
+// run returns the invocation's one line of output and does nothing
 // once a step before it has failed.
 func (s *gitSteps) run(ctx context.Context, env []string, args ...string) string {
 	if s.err != nil {

@@ -1,6 +1,6 @@
 package main
 
-// readonly.go holds the calls the kubelet makes for a read-only claim:
+// readonly.go implements the calls the kubelet makes for a read-only claim:
 // the stage that places the ref in the volume's own tree, and the
 // publishes that bind that one tree under every pod on the node.
 

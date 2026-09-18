@@ -1,7 +1,7 @@
 package main
 
-// server.go holds the socket the kubelet connects to, the gRPC server
-// that answers on it, and the log line every call writes.
+// server.go creates the socket the kubelet connects to, the gRPC server
+// that listens on it, and the log line for each call.
 
 import (
 	"context"

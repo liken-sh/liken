@@ -1,7 +1,7 @@
 package main
 
-// controller.go holds the CSI Controller service, which
-// validates a class and changes nothing.
+// controller.go implements the CSI Controller service, which validates a
+// class and changes no volume.
 
 import (
 	"context"
@@ -38,17 +38,17 @@ func clusterClient(logger *slog.Logger, load func() (*rest.Config, error)) kuber
 }
 
 // controllerNode exists because the external-resizer sidecar calls
-// NodeGetCapabilities on the controller's own socket to learn whether the plugin expands a volume
-// on the node, and a socket that serves no Node service answers
-// Unimplemented for the service itself, which the sidecar treats as a
-// failure and exits on. This is the Node service the controller serves:
-// no capability, so nothing expands, and no node of its own.
+// NodeGetCapabilities on the controller's socket to check whether the
+// plugin expands volumes. A socket without a Node service returns
+// Unimplemented, which the sidecar treats as a failure and exits on.
+// This Node service declares no capability, so nothing expands and the
+// controller claims no node of its own.
 type controllerNode struct {
 	csi.UnimplementedNodeServer
 }
 
-// NodeGetCapabilities declares nothing, the answer of a plugin that expands nothing
-// and stages nothing on the node where the controller runs.
+// NodeGetCapabilities declares no capability. The controller expands no
+// volume and stages nothing on the node where it runs.
 func (controllerNode) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {

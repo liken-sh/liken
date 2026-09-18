@@ -1,6 +1,6 @@
 package main
 
-// Policy.go reads a VolumeAttributesClass's parameters into the
+// policy.go reads a VolumeAttributesClass's parameters into the
 // rules an armed volume commits and pushes under.
 
 import (
@@ -38,8 +38,7 @@ const (
 // duration. It resolves to no maximum.
 const neverLatency = "never"
 
-// policy is a class as the driver holds it. A nil policy is an unarmed
-// volume.
+// policy is a parsed class. A nil policy marks an unarmed volume.
 type policy struct {
 	quiesce     time.Duration
 	maxLatency  time.Duration

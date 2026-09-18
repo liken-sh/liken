@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// The reasons, one per state change a person has to see.
+// The reasons identify state changes a person has to see.
 const (
 	reasonRefused = "GitVolumeRefused"
 	reasonStale   = "GitVolumeStale"
@@ -91,7 +91,7 @@ func (e *events) post(ctx context.Context, pod podReference, kind, reason, messa
 }
 
 // postClaim creates the same Event on the claim, where a person who
-// describes the claim learns whether the volume is armed.
+// describes the claim can check whether the volume is armed.
 func (e *events) postClaim(ctx context.Context, claim claimReference, kind, reason, message string) {
 	if claim.name == "" || claim.namespace == "" {
 		return

@@ -1,19 +1,18 @@
 # Plans
 
-This directory holds the driver's design documents. Each one is
-numbered in sequence and keeps its number for life.
+This directory contains the driver's design documents. Each document is
+numbered in sequence, and its number never changes.
 
 [`00-design.md`](00-design.md) is the design. The numbered plans build
-it, in order. A plan states a problem, states the contracts that answer
-it, and states how the work is proved. It leaves the shape of the code
-to whoever builds it. Each plan starts at low fidelity, and it is
-raised to full fidelity before anyone builds it.
+it, in order. Each plan states a problem, the contracts that address it,
+and how the work is proved. It leaves the shape of the code to whoever
+builds it. Each plan starts at low fidelity and reaches full fidelity
+before implementation.
 
 A plan moves to [`completed/`](completed/) when it is built. A plan that is set aside moves to [`rejected/`](rejected/)
 with the reasons that decided it. A question the current work cannot
-answer is written to [`open-problems/`](open-problems/); those
-documents have no number, because nobody has decided yet what work
-they become.
+answer is written to [`open-problems/`](open-problems/). Those
+documents have no number because no work item exists for them yet.
 
 A plan closes in the commit that builds it. That commit moves the
 document to `completed/`, dates its header, and states what the lab
@@ -81,10 +80,10 @@ Nothing is planned. The next work comes out of
   with a stripped binary, 79.9 MB where the release before was 263 MB,
   and the release gate runs git in it before a push.
 * [13, Prometheus metrics](completed/13-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10. The
-  driver serves Prometheus metrics on port 9200 under liken's shared
+  driver serves Prometheus metrics on port 9200 under `liken`'s shared
   contract: CSI operations as the reconcile layer, volumes mounted,
-  fetch duration and failures per repository, and store size. Answers
-  the open problem "Monitoring".
+  fetch duration and failures per repository, and store size. This
+  closes the open problem "Monitoring".
 
 ## Open problems
 

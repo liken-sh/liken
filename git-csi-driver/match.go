@@ -1,6 +1,6 @@
 package main
 
-// match.go decides which PersistentVolumes a push moves, and writes
+// match.go selects which PersistentVolumes a push moves and writes
 // the demand on them. The Secret the path named narrows the list
 // first, so a push that verifies against one team's Secret can only
 // ever mark that team's volumes.
@@ -17,8 +17,8 @@ import (
 )
 
 // mark writes the demand on every PersistentVolume the push matches
-// and answers how many it marked. A person who configures a webhook
-// reads that count, so a list the API server refuses answers the error
+// and returns how many it marked. A person who configures a webhook
+// reads that count, so a list the API server refuses returns the error
 // and not a count of zero.
 func (w *webhook) mark(
 	ctx context.Context, namespace, secret string, pushed push,

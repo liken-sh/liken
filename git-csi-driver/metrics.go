@@ -1,6 +1,6 @@
 package main
 
-// Metrics.go holds the gauges the node plugin exports and the
+// metrics.go defines the gauges the node plugin exports and the
 // listener that serves them. Every fact the driver reports reaches the
 // Events, the driver's log, and these numbers.
 
@@ -31,8 +31,8 @@ const metricsComponent = "git-csi-driver"
 // fetch are the same question on the same graph.
 var callBuckets = []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60}
 
-// metrics is the registry the listener serves and the gauges
-// every volume reports itself on.
+// metrics is the registry the listener serves and the gauges the driver
+// updates for each volume.
 type metrics struct {
 	registry *prometheus.Registry
 
@@ -48,7 +48,7 @@ type metrics struct {
 	watchRestarts *prometheus.CounterVec
 	// Layer 3, plan 13: the forge behind a fetch, and the store's own
 	// growth. Only the node plugin fetches or holds a store, so only
-	// its registry ever carries these past their zero value.
+	// its registry reports nonzero values for these metrics.
 	volumes       *volumesCollector
 	fetchDuration *prometheus.HistogramVec
 	fetchFailures *prometheus.CounterVec
@@ -66,7 +66,7 @@ type metrics struct {
 	// What a diverged volume adds: the side branch it pushes to
 	// instead of its ref.
 	diverged *prometheus.GaugeVec
-	// What every volume carries, read-only volumes included:
+	// What every volume reports, including read-only volumes:
 	// whether the volume's report says something is wrong with it.
 	abnormal *prometheus.GaugeVec
 	// The pulls a demand started, per volume.
@@ -117,7 +117,7 @@ func newMetrics() *metrics {
 		// nothing as one run.
 		callDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{Name: "git_csi_reconcile_duration_seconds",
-				Help: "How long a CSI call took to answer.", Buckets: callBuckets}, callLabels),
+				Help: "Time until a CSI call returns a response.", Buckets: callBuckets}, callLabels),
 		callErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_reconcile_errors_total",
 				Help: "CSI calls that answered an error."}, callLabels),

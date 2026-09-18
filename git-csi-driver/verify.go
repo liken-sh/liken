@@ -1,8 +1,7 @@
 package main
 
-// verify.go checks a push against the Secret the path named. Each
-// forge signs its request differently, and the header the request
-// carries decides which check runs.
+// verify.go checks a push against the Secret the path names. Each forge
+// signs its request differently, so the request header selects the check.
 
 import (
 	"crypto/hmac"
@@ -22,7 +21,7 @@ const (
 	forgejoSignatureHeader = "X-Forgejo-Signature"
 )
 
-// The forge names the log line carries.
+// The forge name used in log lines.
 const (
 	forgeGitHub  = "github"
 	forgeGitLab  = "gitlab"
@@ -33,7 +32,7 @@ const (
 // githubPrefix is what GitHub writes before the hex digest.
 const githubPrefix = "sha256="
 
-// verify names the forge whose header the request carries, and reports
+// verify names the forge whose header the request contains, and reports
 // whether the request verified against the secret. A request with none
 // of the four headers names no forge and verifies against nothing.
 func verify(header http.Header, body []byte, secret string) (string, bool) {

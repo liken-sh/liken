@@ -37,14 +37,14 @@ the application starts from its last push.
 
 ## The invariants
 
-1. **The driver is the only committer.** The repository lives in the
+1. **The driver is the only committer.** The repository is in the
    driver's store on the node. The pod gets a bind mount of the work
    tree, with no `.git` inside it.
-2. **While a pod holds the tree, only the application changes it,
-   and a rejected push.** Upstream changes reach the tree at stage,
-   before the pod starts, and after a push the remote rejects. The
-   rebase then happens beside the pod's tree, and the tree takes the
-   result in one step that rewrites only the files upstream changed.
+2. **While a pod holds the tree, only the application changes it, except
+   when the driver applies a rebase after a rejected push.** Upstream
+   changes reach the tree at stage, before the pod starts. The rebase
+   runs beside the pod's tree, and the tree then takes its result in one
+   step that rewrites only the files upstream changed.
 3. **The driver merges nothing and loses nothing.** It fast-forwards,
    or it rebases local commits onto upstream. A rebase that conflicts
    is aborted, and the volume moves to a side branch.
@@ -65,7 +65,7 @@ the application starts from its last push.
 The design uses only the objects CSI already has. It defines no custom
 resource.
 
-### The `PersistentVolume` is identity
+### Repository and credentials in the `PersistentVolume`
 
 The `csi` block of a `PersistentVolume` is immutable after creation, so
 it holds only what defines the volume: the repository, the ref, and the
@@ -94,7 +94,7 @@ spec:
 `capacity` is required by the API and means nothing to git. The
 driver reports the real size of the tree through `NodeGetVolumeStats`.
 
-### The `VolumeAttributesClass` is policy
+### Commit and push policy in the `VolumeAttributesClass`
 
 A `VolumeAttributesClass` is the cluster owner's word for how a
 writeable volume commits and pushes. The claim names one, and that
@@ -125,7 +125,7 @@ parameters:
 | `ignore` | Patterns the driver adds to the repository's own `.gitignore`. |
 | `metadata` | `true` to record modes, owners, and empty directories. The default. |
 
-### The `PersistentVolumeClaim` binds and chooses
+### Binding and policy selection in the `PersistentVolumeClaim`
 
 The claim names the volume and the class. Setting the class arms the
 volume. The binder pairs a claim and a static volume only when both
@@ -149,7 +149,7 @@ spec:
 ### An inline volume is the read-only form
 
 A read-only volume needs no `PersistentVolume` and no claim. The pod
-spec is the mutable home, so read-only policy lives in the attributes.
+spec is mutable, so read-only policy is in the attributes.
 The claim form at the end of this section takes the same attributes.
 
 ```yaml
@@ -202,10 +202,11 @@ commits, and pushes. Its store holds one bare repository per URL and
 one work tree per writeable volume. On `liken` the store is on the
 pod-storage partition, beside every other volume on the node. The plugin watches the claims bound to its
 volumes to learn their current class.
-Once an hour it sweeps the store: work trees nothing stages, bare
-repositories nothing names, the refs under `refs/git-csi/` that no
-volume follows, and a `git gc` in each repository that stays, so a node
-that serves one repository for a year stays bounded.
+Once an hour it sweeps the store. It removes work trees that no volume
+has staged for the configured age, bare repositories that no work tree
+uses, and refs under `refs/git-csi/` that no volume follows. It runs
+`git gc` in each remaining repository. This bounds storage for a node
+that serves one repository over a long period.
 
 **The controller plugin** is one small `Deployment`. It implements
 `ControllerModifyVolume` and nothing else. It validates a class and
@@ -308,10 +309,11 @@ without it reads the events.
   for `--sweep-after`. An object stays reachable from the followed
   ref's history until upstream rewrites that history, and a rewrite
   older than the sweep age is the one case the store does not protect.
-- **A forge inside the cluster is a loop.** A cluster that hosts its
-  own forge cannot restore a volume onto a fresh node while the forge
-  is down. `offline: allowStale` and the node's cache cover a restart.
-  A forge outside the cluster covers a restore.
+- **A forge inside the cluster creates a restore dependency.** A cluster
+  that hosts its own forge cannot restore a volume onto a fresh node
+  while the forge is down. `offline: allowStale` and the node's cache
+  cover a restart. A forge outside the cluster avoids depending on the
+  in-cluster forge being up for a restore.
 
 ## `liken` integration
 

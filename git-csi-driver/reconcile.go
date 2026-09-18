@@ -1,6 +1,6 @@
 package main
 
-// reconcile.go brings a work tree the node already holds to the
+// reconcile.go brings a work tree the node already has to the
 // ref the remote holds now, at stage and after a rejected push. The
 // rebase runs in a scratch tree in both cases, because a pod may hold
 // the tree, and a rebase in the pod's tree would rewrite its files.
@@ -125,7 +125,7 @@ func (n *node) replayTaken(ctx context.Context, held *volume, changed []string) 
 	}
 }
 
-// replay runs the rebase in the scratch tree and answers the commit
+// replay runs the rebase in the scratch tree and returns the commit
 // it landed on. A commit git cannot read is the empty string, which
 // take refuses like any other commit it cannot resolve.
 func replay(ctx context.Context, dir string, author []string, upstream string) (string, error) {

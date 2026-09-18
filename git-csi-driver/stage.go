@@ -1,7 +1,7 @@
 package main
 
-// stage.go holds the calls the kubelet makes for a volume it stages: the
-// access mode that decides the kind, the stage that brings a writeable
+// stage.go implements the calls the kubelet makes for a volume it stages:
+// the access mode that selects the kind, the stage that brings a writeable
 // volume's work tree to the ref, and the publish that binds it under the
 // pod. readonly.go holds what a read-only claim does with the same calls.
 
@@ -93,7 +93,7 @@ func (n *node) NodeStageVolume(
 
 // stageKind reads the kind of volume the access mode asks for.
 //
-// The access mode decides the kind. ReadWriteOncePod stages a writeable
+// The access mode selects the kind. ReadWriteOncePod stages a writeable
 // volume. ReadOnlyMany, and the single-node read-only mode beside it,
 // stage a read-only claim. Every other mode is refused, because the
 // driver serves no other.

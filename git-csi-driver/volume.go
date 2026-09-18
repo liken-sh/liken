@@ -1,6 +1,6 @@
 package main
 
-// volume.go holds one volume this node has and everything the driver
+// volume.go defines one volume this node has and the state the driver
 // reports about it.
 
 import (
@@ -25,10 +25,10 @@ const (
 	writeableVolume
 )
 
-// volume is one volume this node holds: the commit its tree stands on,
-// the trouble since the last good fetch, what the pod wrote and the
-// driver has not committed, and the claim and class that say whether it
-// may commit.
+// volume is one volume this node holds. It records the commit its tree
+// references, the trouble since the last good fetch, the uncommitted
+// writes, and the claim and class that determine whether commits are
+// allowed.
 type volume struct {
 	id          string
 	attributes  *attributes
@@ -94,7 +94,7 @@ func (v *volume) reportDiverged(branch string) {
 	v.diverged = branch
 }
 
-// reportHealed records that the ref holds the work again.
+// reportHealed records that the volume has returned to its configured ref.
 func (v *volume) reportHealed() {
 	v.mu.Lock()
 	defer v.mu.Unlock()

@@ -1,7 +1,7 @@
 package main
 
-// push.go decides when the driver sends its commits to the
-// remote, and sends them.
+// push.go selects when the driver sends its commits to the remote and
+// performs those pushes.
 
 import (
 	"context"
@@ -13,11 +13,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// pushedRef is the mark the driver moves after a push that
-// worked, so what is unpushed is what stands after it.
+// pushedRef is the mark the driver moves after a successful push. The
+// commits after this mark are unpushed.
 const pushedRef = refPrefix + "pushed"
 
-// unpushed is what the work tree holds that the remote does not,
+// unpushed is what the work tree contains that the remote does not,
 // and when the oldest of those commits was made.
 func (w *workTree) unpushed(ctx context.Context, ref string) (int, time.Time, error) {
 	output, err := w.git(ctx, "log", "--format=%ct", "--reverse", "--end-of-options",
@@ -184,8 +184,8 @@ func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 const rebaseAttempts = 3
 
 // rebaseAndRetry puts the volume's commits on top of the ref the
-// remote holds now and pushes again. It answers the commit that
-// landed, or false when the volume has to take its side branch.
+// remote holds now and pushes again. It returns the commit that landed,
+// or false when the volume has to take its side branch.
 func (n *node) rebaseAndRetry(ctx context.Context, held *volume, count int) (string, bool) {
 	for range rebaseAttempts {
 		upstream, err := n.fetchUpstream(ctx, held)

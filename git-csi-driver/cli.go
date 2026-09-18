@@ -1,7 +1,6 @@
 package main
 
-// cli.go holds the command line and the run that serves the
-// socket until the pod stops.
+// cli.go parses the command line and runs the server until the pod stops.
 
 import (
 	"context"
@@ -94,7 +93,7 @@ const (
 )
 
 // parse reads the command line and reports every problem to out. When
-// the arguments ask for the version alone, it prints it and answers a
+// the arguments ask for the version alone, it prints it and returns a
 // nil config with a nil error, because there is nothing to run.
 //
 // Each subcommand parses its own flags, so no flag of one plugin is
@@ -140,7 +139,7 @@ func parseBare(args []string, out io.Writer) (*config, error) {
 	return nil, nil
 }
 
-// parseNode takes the node plugin's flags. The node plugin holds the
+// parseNode takes the node plugin's flags. The node plugin owns the
 // store and stages every volume the kubelet asks it for.
 func parseNode(args []string, out io.Writer) (*config, error) {
 	flags := flag.NewFlagSet(nodeCommand, flag.ContinueOnError)

@@ -1,7 +1,7 @@
 package main
 
-// node.go holds the CSI Node service: the calls the kubelet makes to
-// put a volume under a pod and take it away.
+// node.go implements the CSI Node service. The kubelet calls it to mount a
+// volume in a pod and to remove that mount.
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// node answers the Node service and holds what this node has published.
+// node implements the Node service and records what this node has published.
 type node struct {
 	csi.UnimplementedNodeServer
 	nodeID string
@@ -99,8 +99,8 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 	return answering
 }
 
-// NodeGetInfo names the node and no topology. A checkout is made on
-// whichever node publishes it, so no node is closer to a volume than
+// NodeGetInfo returns the node name and no topology. A checkout is made
+// on whichever node publishes it, so no node is closer to a volume than
 // another.
 func (n *node) NodeGetInfo(
 	context.Context, *csi.NodeGetInfoRequest,
@@ -139,7 +139,7 @@ func (n *node) NodeGetCapabilities(
 // tree is a checkout of the ref made here. For a staged volume it is the
 // tree the stage made, bound read-only for a claim and read-write for a
 // writeable volume. A repeated call for a published volume answers
-// success, because the kubelet retries.
+// success, because the kubelet may retry the call.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -364,7 +364,7 @@ func (n *node) NodeUnpublishVolume(
 // NodeGetVolumeStats reports the tree's size as used. A git volume has
 // no free space to report, so available is zero.
 //
-// The answer carries the usage and nothing else; the volume's
+// The response returns usage and nothing else. The volume's
 // health reaches a person through git_csi_volume_abnormal, the Events,
 // and the driver's log, because CSI spec 1.13 removed the condition
 // this answer used to carry.
@@ -436,7 +436,7 @@ func (n *node) refused(ctx context.Context, pod podReference, err error) {
 }
 
 // podOf reads the pod straight from the volume context, so a refused
-// parse still knows where its Event goes.
+// parse still identifies the pod that receives its Event.
 func podOf(context map[string]string) podReference {
 	return podReference{
 		name:      context[podNameKey],
@@ -453,9 +453,9 @@ func short(commit string) string {
 	return commit
 }
 
-// unimplemented answers a call the driver does not serve yet. The
-// message names the plan that adds it, so a reader of the log learns
-// when the call will work, not only that it does not.
+// unimplemented returns an error for a call the driver does not serve
+// yet. The message names the plan that adds the call, so the log
+// identifies the work needed to make it available.
 func unimplemented(rpc, when string) error {
 	return status.Errorf(codes.Unimplemented, "%s: %s", rpc, when)
 }

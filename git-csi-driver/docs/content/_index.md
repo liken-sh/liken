@@ -7,7 +7,7 @@ sees a plain directory. The driver keeps a read-only volume current
 with its ref. For a writeable volume, it commits what the application
 writes and pushes it to the repository.
 
-Two things want this:
+Two uses fit this driver:
 
 - **Data a repository already holds.** A tree of YAML, a set of
   templates, a static site. Any pod in any namespace mounts it as an
@@ -16,7 +16,8 @@ Two things want this:
 - **Application configuration.** Many self-hosted applications keep
   their configuration as text in one directory and edit it through
   their own user interface. On this driver that directory is a
-  repository with history and a restore path.
+  repository with history and a restore path. A new claim against the
+  same repository restores the last pushed configuration.
 
 The driver defines no custom resources. A `PersistentVolume` names the
 repository, a `VolumeAttributesClass` names the commit and push policy,
