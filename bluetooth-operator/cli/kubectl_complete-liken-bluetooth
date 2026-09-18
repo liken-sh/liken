@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+exec kubectl-liken-bluetooth __complete "$@"

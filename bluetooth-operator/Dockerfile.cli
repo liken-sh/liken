@@ -1,0 +1,37 @@
+# The -cli image. It carries one static binary,
+# kubectl-liken-bluetooth, over a distroless base, and it is built for
+# both amd64 and arm64 so a workstation of either kind pulls its own.
+
+# The build stage runs on the builder's own architecture and
+# cross-compiles, so no target-architecture code runs here and the
+# build needs no emulation.
+FROM --platform=$BUILDPLATFORM golang:1.27.0-bookworm AS build
+WORKDIR /src
+# The module files come first so a source edit reuses the
+# cached download layer.
+COPY go.mod go.sum ./
+RUN go mod download
+# Only the CLI package and the module files reach the build.
+# The CLI shares no code with the operator package.
+COPY cli/ ./cli/
+# The version reaches the binary through -ldflags, the same way
+# the operator image is stamped.
+ARG VERSION=dev
+# Buildx passes the target platform through these two, and the
+# Go toolchain cross-compiles from them.
+ARG TARGETOS
+ARG TARGETARCH
+# CGO_ENABLED=0 with -trimpath is liken's build discipline: a
+# static binary with no paths from the build machine in it.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-X main.version=${VERSION}" \
+    -o /kubectl-liken-bluetooth ./cli
+
+# Distroless static carries a CA bundle and nonroot user and no
+# shell, which is all a static Go binary that calls the Kubernetes API
+# needs.
+FROM gcr.io/distroless/static:nonroot
+COPY --from=build /kubectl-liken-bluetooth /usr/local/bin/kubectl-liken-bluetooth
+# The binary is the entrypoint, so docker run passes the verbs
+# straight to it and a Job in the cluster runs it the same way.
+ENTRYPOINT ["/usr/local/bin/kubectl-liken-bluetooth"]

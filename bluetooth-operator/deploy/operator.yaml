@@ -45,6 +45,11 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: bluetooth-operator
+  labels:
+    # The base binary selects on this label to find the
+    # operator's DaemonSet, read its image version, and pull the
+    # matching -cli image.
+    cli.liken.sh/plugin: bluetooth
 spec:
   selector:
     matchLabels:

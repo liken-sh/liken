@@ -17,3 +17,4 @@
 # profile. CI builds it from the commit it publishes and copies it
 # into the site, so a committed copy could only be stale.
 /coverage.html
+/cli/dist/

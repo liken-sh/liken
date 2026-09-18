@@ -14,6 +14,15 @@ pod. The example is a DualSense and a game in a namespace named
 API call, so RBAC controls who may do each one, and nobody needs a
 shell on a node or in a pod.
 
+## The interactive shortcut
+
+`kubectl liken bluetooth pair` runs steps 1 through 3 from a laptop.
+It opens a window on the radio, lists the devices the radio reports as
+they appear, and approves the one you pick. It drives the same
+`PairingRequest` flow the numbered steps write by hand, and it reads
+your kubeconfig, so RBAC governs it like every other call. The steps
+below are the way to script the flow or to read each object it writes.
+
 ## 1. Open a pairing window
 
 Read the name of the adapter first. It is the radio's address in
@@ -176,6 +185,9 @@ needs a new allocation, which the taints block.
 Deleting the `Peripheral` is the unpair:
 
     kubectl delete peripheral a0-ab-51-33-b7-12
+
+`kubectl liken bluetooth unpair a0-ab-51-33-b7-12` deletes the same
+`Peripheral`. In bash it completes the paired device names.
 
 The operator disconnects the controller, waits for any claim on it to
 release, retires the device from the slice, and removes the bond. The

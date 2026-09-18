@@ -202,3 +202,36 @@ jobs:
             docker push "ghcr.io/liken-sh/bluetooth-bondfetch:latest"
             docker push "ghcr.io/liken-sh/bluetoothd:latest"
           fi
+
+      # The -cli image carries the same version as the operator,
+      # so the base binary pulls a CLI that never drifts from the
+      # operator it faces. :latest follows the operator's own rule: a
+      # release moves it and a development build does not.
+      - name: Name the CLI image tags
+        run: |
+          image=ghcr.io/liken-sh/bluetooth-operator-cli
+          {
+            echo "CLI_TAGS<<EOF"
+            echo "$image:$VERSION"
+            if [ "$RELEASE" = true ]; then
+              echo "$image:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      # The -cli image is built for both architectures and
+      # pushed after the gate, so nothing ships from a red gate. A
+      # multi-architecture build cannot load into the daemon, so this
+      # step pushes what it builds. The build reads and writes its own
+      # :buildcache tag, beside the other images'.
+      - name: Build and push the CLI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cli
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache,mode=max
+          tags: ${{ env.CLI_TAGS }}

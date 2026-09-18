@@ -137,6 +137,8 @@ jobs:
             file: bondfetch/Dockerfile
           - image: bluetoothd
             file: bluetoothd/Dockerfile
+          - image: bluetooth-operator-cli
+            file: Dockerfile.cli
     steps:
       - uses: actions/checkout@v7
 
