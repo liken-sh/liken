@@ -19,5 +19,5 @@
 profile: coverage.out
 
 threshold:
-  # One package, so the total is the whole gate.
+  # The total spans every package, so it is the whole gate.
   total: 75

@@ -163,6 +163,10 @@ metadata:
   name: audio-api
   labels:
     app: audio-api
+    # The base binary selects on this label to find the
+    # operator's Deployment, read its image version, and pull the
+    # matching -cli image.
+    cli.liken.sh/plugin: audio
 spec:
   replicas: 1
   strategy:

@@ -1,6 +1,6 @@
 ---
 name: listen
-description: "Tap a Sink or a Source over HTTP with kubectl and curl, and save a span as WAV, FLAC, or Opus. Use to hear what a speaker plays or what a microphone records."
+description: "Tap a Sink or a Source with the kubectl liken audio capture command, or over HTTP with kubectl and curl, and save the sound as WAV, FLAC, or Opus. Use to hear what a speaker plays or what a microphone records."
 ---
 
 This skill is the guide at https://audio.liken.sh/docs/guides/listen/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -21,6 +21,35 @@ that finds the endpoint's node and forwards the stream. The
 the sound from PipeWire. Nothing is stored on either side. The
 [API reference](https://audio.liken.sh/docs/reference/api/) has the full contract. This
 guide is the short path through it.
+
+## The `kubectl liken audio capture` command
+
+The short path is the CLI. `kubectl liken audio capture` streams a
+`Sink`'s sound to stdout as WAV, so a file or a pipe is a single
+command:
+
+    kubectl liken audio capture kitchen-pci-0000-00-1f-3-hdmi-0 > kitchen.wav
+    kubectl liken audio capture kitchen-pci-0000-00-1f-3-hdmi-0 | mpv -
+
+`--format flac` and `--format opus` write those forms instead, and
+`--source` taps a `Source`, a microphone, in place of a `Sink`. A
+`Sink` and a `Source` are cluster-scoped, so the command takes no
+namespace.
+
+The CLI authenticates with the client certificate in your
+kubeconfig, the same subject `kubectl` uses, so the grant that step
+1 describes is all it needs. It opens its own port-forward to
+`audio-api` and reads the stream through it, so it needs no
+in-cluster routing and runs from a laptop.
+
+The endpoint argument completes to the names the cluster reports.
+`kubectl` runs the plugin's completion shim on its own, so
+`kubectl liken audio capture <TAB>` lists the `Sink`s. For a direct
+call to `kubectl-liken-audio`, load the script with
+`source <(kubectl liken audio completion bash)`.
+
+The numbered steps below are the HTTP contract the CLI calls, for an
+application in the cluster or a tap you bound with `t=`.
 
 ## 1. Who may listen
 

@@ -12,3 +12,4 @@
 # never belong to the tree.
 /coverage.out
 /coverage.html
+/cli/dist/
