@@ -18,7 +18,7 @@ with a fixed gap between requests that fits each provider's stated
 limits, and a quarter second for the Internet Archive.
 
 `spec.facts` is optional. A provider that names none serves every
-fact the operator knows how to ask it for, and `status.facts`, shown
+fact the operator can request, and `status.facts`, shown
 in the `FACTS` column, lists what it serves right now. That list is
 empty while the provider is not `Ready`.
 

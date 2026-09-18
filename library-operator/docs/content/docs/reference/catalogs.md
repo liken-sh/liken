@@ -8,7 +8,7 @@ toc: true
 
 A `Catalog` is a namespace's shared catalog: one Corrosion cluster that
 every `Library` in the namespace writes into. Declare one `Catalog` in a
-namespace. It stands the catalog pod, the one standing member of that
+namespace. It runs the catalog pod, the one durable member of that
 cluster, which holds the namespace's catalog on a durable claim and
 reports what it holds over the bus. It sizes that claim, the claim
 every `Library`'s `Job`s take, and the claim every screen's agent runs
@@ -30,7 +30,7 @@ namespace, on the `Catalog`, in place of a size on each `Library`.
 
 A namespace has exactly one `Catalog`. A `Library` in a namespace with no
 `Catalog` waits until one exists, and more than one `Catalog` marks every
-`Catalog` in the namespace `Blocked` and stands no cluster. An empty
+`Catalog` in the namespace `Blocked` and runs no cluster. An empty
 `storageClassName` binds each catalog volume to the cluster's default
 `StorageClass`. A `claimName` names an existing claim for the catalog
 pod to mount in place of the one the operator provisions. A SQLite
@@ -51,7 +51,7 @@ Where the catalog is stored and how large each agent's copy is.
 | <span id="spec--progress"></span>`progress` | [object](#specprogress) | no | The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size. |
 | <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. |
 | <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
-| <span id="spec--jellyfin"></span>`jellyfin` | [object](#specjellyfin) | no | The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator stand a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, neither stands, and the operator deletes the pair it stood before. |
+| <span id="spec--jellyfin"></span>`jellyfin` | [object](#specjellyfin) | no | The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator run a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, the operator runs neither and deletes the previous pair. |
 
 ### spec.storage
 
@@ -70,7 +70,7 @@ The claim the progress store runs on: who watched what, and how far. Each field 
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specprogress--size"></span>`size` | string | no | The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change reaches a new claim and not a standing one, because a bound claim's spec is immutable; delete the standing claim and the next pass creates it at the new size. |
+| <span id="specprogress--size"></span>`size` | string | no | The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change applies to a new claim, not an existing one, because a bound claim's spec is immutable. Delete the existing claim, and the next pass creates it at the new size. |
 | <span id="specprogress--storageclassname"></span>`storageClassName` | string | no | The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it. A per-node class lets the namespace stand more than one copy of the progress store, on the same terms as storage.storageClassName. |
 | <span id="specprogress--replicas"></span>`replicas` | integer | no | How many durable copies of the progress store the namespace stands, on the same terms as storage.replicas, against the class this block names. Every copy mounts one claim, named after the Catalog with the suffix -progress. More than one copy needs a per-node class here as well, and on any other class the Ready condition is False with the reason ClassNotPerNode. The first copy records what crosses the bus, and every copy after it holds the rows. Default: `1`. |
 
@@ -97,15 +97,15 @@ The volume each screen's browser keeps its scaled art on: posters, backdrops, ep
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specscreensartcache--size"></span>`size` | string | no | The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change reaches new screens and not standing ones, because a bound claim's spec is immutable; delete a standing screen's claim and the next pass creates it at the new size. Default: `2Gi`. |
+| <span id="specscreensartcache--size"></span>`size` | string | no | The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change applies to new screens, not existing ones, because a bound claim's spec is immutable. Delete an existing screen's claim, and the next pass creates it at the new size. Default: `2Gi`. |
 
 ### spec.jellyfin
 
-The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator stand a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, neither stands, and the operator deletes the pair it stood before.
+The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator run a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, the operator runs neither and deletes the previous pair.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specjellyfin--url"></span>`url` | string | yes | The Jellyfin server's address, as the cluster reaches it, such as http://jellyfin.jellyfin.svc:8096. |
+| <span id="specjellyfin--url"></span>`url` | string | yes | The Jellyfin server's address on the cluster network, such as http://jellyfin.jellyfin.svc:8096. |
 | <span id="specjellyfin--secretref"></span>`secretRef` | [object](#specjellyfinsecretref) | yes | The Secret in this namespace that holds a Jellyfin API key, and the key inside it. The API key is one an administrator issues on the server, because the pod writes the playback position of any user. |
 
 #### spec.jellyfin.secretRef
@@ -127,7 +127,7 @@ The cluster the Catalog stands, written only by the library operator.
 | <span id="status--storagesize"></span>`storageSize` | string | no | The storage size the agents were given. |
 | <span id="status--replicas"></span>`replicas` | [object](#statusreplicas) | no | The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for. |
 | <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim. |
-| <span id="status--jellyfin"></span>`jellyfin` | [object](#statusjellyfin) | no | The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, where it stands, and when it finished. Present only while spec.jellyfin names a server. |
+| <span id="status--jellyfin"></span>`jellyfin` | [object](#statusjellyfin) | no | The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, its current phase, and when it finished. Present only while spec.jellyfin names a server. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. |
 
 ### status.replicas
@@ -171,12 +171,12 @@ One entry per screen pod in the namespace, in Player order: the Player it draws 
 
 ### status.jellyfin
 
-The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, where it stands, and when it finished. Present only while spec.jellyfin names a server.
+The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, its current phase, and when it finished. Present only while spec.jellyfin names a server.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusjellyfin--server"></span>`server` | string | no | The server address the backfill ran against, from spec.jellyfin.url. A Catalog that changes the address runs the backfill again against the new one. |
-| <span id="statusjellyfin--backfill"></span>`backfill` | string | no | Where the backfill stands. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin. |
+| <span id="statusjellyfin--backfill"></span>`backfill` | string | no | The backfill's current phase. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin. |
 | <span id="statusjellyfin--backfilled"></span>`backfilled` | string | no | When the backfill finished, in UTC. Absent until it did. |
 
 ### status.conditions[]

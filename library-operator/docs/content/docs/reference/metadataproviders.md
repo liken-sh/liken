@@ -26,7 +26,7 @@ with a fixed gap between requests that fits each provider's stated
 limits, and a quarter second for the Internet Archive.
 
 `spec.facts` is optional. A provider that names none serves every
-fact the operator knows how to ask it for, and `status.facts`, shown
+fact the operator can request, and `status.facts`, shown
 in the `FACTS` column, lists what it serves right now. That list is
 empty while the provider is not `Ready`.
 
@@ -84,7 +84,7 @@ One account with one metadata provider, named by the Libraries of its namespace 
 
 ## spec
 
-The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator knows how to ask this provider for.
+The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator can request from this provider.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -94,7 +94,7 @@ The provider this account is with, and the facts it may serve. A spec that names
 | <span id="spec--tvmaze"></span>`tvmaze` | object | no | The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze. |
 | <span id="spec--peertube"></span>`peertube` | [object](#specpeertube) | no | The account is with one PeerTube instance, which serves the trailer fact alone and needs no account. PeerTube is software that many people run, so the block names the instance by its address. |
 | <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second. |
-| <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator knows how to ask this provider for. Omit it to serve all of that. A Library asks this provider only for a fact that status.facts lists. |
+| <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
 
@@ -162,8 +162,8 @@ What the operator's own check found, written only by the library operator.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--provider"></span>`provider` | string | no | The provider block this account names. The PROVIDER column reads it here, because no printer column can read which block a spec holds. |
-| <span id="status--facts"></span>`facts` | []string | no | The facts this provider serves right now: what the operator knows how to ask this provider for, narrowed by spec.facts. The list is empty while the Ready condition is not True, because a provider the operator cannot reach serves nothing. |
-| <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. It stands after the key works again, so a person reads that it once failed. |
+| <span id="status--facts"></span>`facts` | []string | no | The facts this provider serves now: what the operator can request from this provider, narrowed by spec.facts. The list is empty while the Ready condition is not True, because an unreachable provider serves nothing. |
+| <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. The time remains after the key works again, so a person can see that it once failed. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. |
 
 ### status.conditions[]

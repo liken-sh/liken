@@ -1,6 +1,6 @@
 A `Catalog` is a namespace's shared catalog: one Corrosion cluster that
 every `Library` in the namespace writes into. Declare one `Catalog` in a
-namespace. It stands the catalog pod, the one standing member of that
+namespace. It runs the catalog pod, the one durable member of that
 cluster, which holds the namespace's catalog on a durable claim and
 reports what it holds over the bus. It sizes that claim, the claim
 every `Library`'s `Job`s take, and the claim every screen's agent runs
@@ -22,7 +22,7 @@ namespace, on the `Catalog`, in place of a size on each `Library`.
 
 A namespace has exactly one `Catalog`. A `Library` in a namespace with no
 `Catalog` waits until one exists, and more than one `Catalog` marks every
-`Catalog` in the namespace `Blocked` and stands no cluster. An empty
+`Catalog` in the namespace `Blocked` and runs no cluster. An empty
 `storageClassName` binds each catalog volume to the cluster's default
 `StorageClass`. A `claimName` names an existing claim for the catalog
 pod to mount in place of the one the operator provisions. A SQLite

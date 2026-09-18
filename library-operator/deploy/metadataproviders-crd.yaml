@@ -44,7 +44,7 @@ spec:
           properties:
             spec:
               type: object
-              description: "The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator knows how to ask this provider for."
+              description: "The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator can request from this provider."
               # The block names the provider, the way a Library's kind
               # names its settings block. Each provider is one block
               # here, and the rule below holds an account to one of
@@ -137,7 +137,7 @@ spec:
                   x-kubernetes-list-type: atomic
                   minItems: 1
                   maxItems: 30
-                  description: "The facts this account may serve, from the fixed vocabulary. The list narrows what the operator knows how to ask this provider for. Omit it to serve all of that. A Library asks this provider only for a fact that status.facts lists."
+                  description: "The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists."
                   items:
                     type: string
                     # The fact vocabulary of the enrichment design. A
@@ -181,13 +181,13 @@ spec:
                   type: array
                   x-kubernetes-list-type: atomic
                   maxItems: 30
-                  description: "The facts this provider serves right now: what the operator knows how to ask this provider for, narrowed by spec.facts. The list is empty while the Ready condition is not True, because a provider the operator cannot reach serves nothing."
+                  description: "The facts this provider serves now: what the operator can request from this provider, narrowed by spec.facts. The list is empty while the Ready condition is not True, because an unreachable provider serves nothing."
                   items:
                     type: string
                 lastRefusal:
                   type: string
                   format: date-time
-                  description: "When the provider last refused the key. It stands after the key works again, so a person reads that it once failed."
+                  description: "When the provider last refused the key. The time remains after the key works again, so a person can see that it once failed."
                 conditions:
                   type: array
                   description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code."

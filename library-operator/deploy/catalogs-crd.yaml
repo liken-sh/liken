@@ -112,7 +112,7 @@ spec:
                   properties:
                     size:
                       type: string
-                      description: "The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change reaches a new claim and not a standing one, because a bound claim's spec is immutable; delete the standing claim and the next pass creates it at the new size."
+                      description: "The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change applies to a new claim, not an existing one, because a bound claim's spec is immutable. Delete the existing claim, and the next pass creates it at the new size."
                     storageClassName:
                       type: string
                       minLength: 1
@@ -158,17 +158,17 @@ spec:
                         size:
                           type: string
                           default: 2Gi
-                          description: "The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change reaches new screens and not standing ones, because a bound claim's spec is immutable; delete a standing screen's claim and the next pass creates it at the new size."
+                          description: "The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change applies to new screens, not existing ones, because a bound claim's spec is immutable. Delete an existing screen's claim, and the next pass creates it at the new size."
                 jellyfin:
                   type: object
                   required: [url, secretRef]
-                  description: "The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator stand a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, neither stands, and the operator deletes the pair it stood before."
+                  description: "The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator run a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, the operator runs neither and deletes the previous pair."
                   properties:
                     url:
                       type: string
                       format: uri
                       minLength: 1
-                      description: "The Jellyfin server's address, as the cluster reaches it, such as http://jellyfin.jellyfin.svc:8096."
+                      description: "The Jellyfin server's address on the cluster network, such as http://jellyfin.jellyfin.svc:8096."
                     secretRef:
                       type: object
                       required: [name]
@@ -247,14 +247,14 @@ spec:
                         description: "The screen pod's phase, as the kubelet reports it."
                 jellyfin:
                   type: object
-                  description: "The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, where it stands, and when it finished. Present only while spec.jellyfin names a server."
+                  description: "The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, its current phase, and when it finished. Present only while spec.jellyfin names a server."
                   properties:
                     server:
                       type: string
                       description: "The server address the backfill ran against, from spec.jellyfin.url. A Catalog that changes the address runs the backfill again against the new one."
                     backfill:
                       type: string
-                      description: "Where the backfill stands. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin."
+                      description: "The backfill's current phase. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin."
                     backfilled:
                       type: string
                       format: date-time

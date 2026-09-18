@@ -113,7 +113,7 @@ The thumbnail sheets a scrub bar reads, built beside each video from the file al
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, the operator stands a trickplay Job beside the enricher, and that Job fills the gap one feature after another. Default: `false`. |
+| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, the operator runs a trickplay Job beside the enricher, and that Job fills the gap one feature after another. Default: `false`. |
 | <span id="spectrickplay--render"></span>`render` | [object](#spectrickplayrender) | no | The render node the trickplay Job decodes on. Set, the operator keeps a ResourceClaimTemplate for the Library and the Job's pod claims one device of the class. Unset, the Job decodes in software. |
 
 #### spec.trickplay.render
@@ -131,7 +131,7 @@ The trailer files this library pulls beside its titles, from the links the trail
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectrailers--enabled"></span>`enabled` | boolean | no | Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the operator stands a trailers Job beside the enricher, and that Job pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder. Default: `false`. |
+| <span id="spectrailers--enabled"></span>`enabled` | boolean | no | Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the operator runs a trailers Job beside the enricher, and that Job pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder. Default: `false`. |
 
 ## status
 

@@ -53,7 +53,7 @@ answer is meant to outlive the process that wrote it.
 The writers are the roles of this operator's pods. The reporter is
 the container beside the standing catalog agent in the namespace's
 catalog pod. The progress role is the container beside the standing
-progress agent. The jellyfin role is the pod the operator stands
+progress agent. The jellyfin role is the pod the operator runs
 beside the progress store when the namespace's `Catalog` names a
 server in [`spec.jellyfin`](/docs/reference/catalogs/#specjellyfin).
 The operator itself holds the one API credential.
