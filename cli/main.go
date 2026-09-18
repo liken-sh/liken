@@ -29,6 +29,7 @@ import (
 	"github.com/liken-sh/liken/identity"
 	"github.com/liken-sh/liken/image"
 	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/plugins"
 	"github.com/liken-sh/liken/releases"
 	"github.com/liken-sh/liken/scaffold"
 )
@@ -43,13 +44,13 @@ func (c *consoleList) Set(v string) error {
 	return nil
 }
 
-const usage = `liken — the toolkit for setting up and running a liken cluster
+const usage = `liken: the toolkit for setting up and running a liken cluster
 
 usage:
 
   liken new <directory>
       Start a deployment: answer a few questions and get a directory
-      of manifests — cluster.yaml and one file per machine — with
+      of manifests: cluster.yaml and one file per machine, with
       comments that teach every field. The other commands build on
       this directory.
 
@@ -142,6 +143,18 @@ usage:
       rendering it again over the same channel repairs whatever is
       stale.
 
+  liken plugins sync|list|remove [-server URL] <deployment-dir>
+      The plugins group. sync reads the operators the cluster
+      runs, pulls each one's CLI from the registry into
+      ~/.liken/plugins/bin, and prints the line to add that directory
+      to PATH. list reports each installed CLI's version and the
+      operator version it faces, and marks drift. remove <domain>
+      deletes one installed CLI. A domain that names no command, like
+      "liken audio capture", walks to kubectl-liken-<domain>.
+
+  liken completion bash
+      Print the bash completion script for this toolkit.
+
   liken version
       Print this toolkit's version.
 
@@ -168,6 +181,12 @@ func main() {
 }
 
 func run(args []string) error {
+	// The __complete verb answers the shell's completion request. It
+	// runs before the command check, because a request for the first
+	// word carries no command and a person waits on the answer.
+	if len(args) > 0 && args[0] == "__complete" {
+		return runComplete(args[1:], os.Stdout)
+	}
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		return fmt.Errorf("a command is required")
@@ -205,6 +224,8 @@ func run(args []string) error {
 		return approveReboot(args[1:], os.Stdout)
 	case "request-reboot":
 		return requestReboot(args[1:], os.Stdout)
+	case "plugins":
+		return pluginsCommand(args[1:], os.Stdout)
 	case "layer":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <output.cpio>")
@@ -284,7 +305,22 @@ func run(args []string) error {
 	case "version":
 		fmt.Println(machine.Version)
 		return nil
+	case "completion":
+		shell := ""
+		if len(args) > 1 {
+			shell = args[1]
+		}
+		return completionScript(shell, os.Stdout)
 	default:
+		// A first argument that names no command is read as a plugin
+		// domain: liken audio capture walks the prefix to
+		// kubectl-liken-audio and runs it, the same walk kubectl runs
+		// for kubectl liken audio capture.
+		if binDir, err := plugins.BinDir(); err == nil {
+			if dispatched, err := dispatchPlugin(binDir, args[0], args[1:]); dispatched {
+				return err
+			}
+		}
 		fmt.Fprint(os.Stderr, usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}

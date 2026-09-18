@@ -244,6 +244,133 @@ The pages hold no information of their own. Each one is a view of a
 document that the channel already serves, and no machine reads a page.
 To repair a page, run the command again over the same channel.
 
+## The operator plugins
+
+An operator gives a cluster a capability, and a short command uses it:
+capture a sink, pair a controller, enrich a library.
+`kubectl liken <domain> <verb>` reaches each operator's command.
+
+`kubectl` dispatches by longest prefix. For
+`kubectl liken audio capture room`, `kubectl` finds
+`kubectl-liken-audio` on `PATH` and runs it with `capture room`. So
+each operator ships one binary named `kubectl-liken-<domain>`, and the
+two-layer command needs no code of its own.
+
+`kubectl-liken` is the `liken` toolkit under a second name. It owns
+the `plugins` group, and it walks the same prefix, so three commands
+reach the same binary:
+
+* `kubectl liken audio capture room`. `kubectl` walks the prefix.
+* `liken audio capture room`. The toolkit walks the prefix itself.
+* `kubectl-liken-audio capture room`. An agent runs the binary
+  directly.
+
+You install the base binary the normal way, from a release download or
+a package, because it is the thing that reaches the cluster. You
+install the per-operator CLIs from the cluster, with `plugins sync`.
+
+### The `plugins` group
+
+    liken plugins sync   [-server URL] <deployment-dir>
+    liken plugins list   [-server URL] <deployment-dir>
+    liken plugins remove <domain>
+
+`plugins sync` installs one CLI per operator. It lists the workloads
+that carry the `cli.liken.sh/plugin` label across the cluster's
+Deployments, DaemonSets, and StatefulSets, reads each one's operator
+image and its version tag, and pulls the matching `-cli` image for this
+workstation's architecture into `~/.liken/plugins/bin`. The CLI comes
+from the same version as the running operator, so the two never drift.
+The command is idempotent: a second run installs the same versions over
+the same files.
+
+`plugins list` reports each installed CLI's version and the operator
+version it faces, and marks a CLI whose version has drifted from its
+operator. It also names an operator that runs in the cluster with no
+local CLI, so a cold start (`kubectl liken audio` with no plugin, which
+`kubectl` reports as "not found") has a place to look.
+
+`plugins remove <domain>` deletes one installed CLI.
+
+Five domains ship a CLI today: `audio`, `bluetooth`, `display`,
+`library`, and `media`. Each one's own site documents its verbs. The
+first cut:
+
+* `audio capture <sink>` streams a sink's sound to stdout (wav, and
+  `--format flac|opus`). `--source` captures a Source instead.
+* `display capture <output>` streams an output's framebuffer to stdout
+  (mp4, or png with `--format`).
+* `media capture <player>` streams what a Player shows to stdout (mp4
+  or mkv).
+* `bluetooth pair` opens the pairing window so you pick a device to
+  approve. `bluetooth unpair <device>` removes one.
+* `library reenrich <library>` requests an enrichment pass. `--only
+  <fact>` limits it to one fact.
+
+Each capture verb is a thin client over its operator's stream API. It
+authenticates with the credential you already hold: the API verifies
+your kubeconfig client certificate against the cluster's client
+authority, or it accepts a bearer token. A capture needs no in-cluster
+routing, so it works from a workstation over one port-forward.
+
+### Install the plugins
+
+Install the base binary from a release or a package. It is `liken`,
+and it answers to `kubectl-liken` as well. Then pull the CLIs the
+cluster's operators ship:
+
+    liken plugins sync <deployment-dir>
+    installed kubectl-liken-audio from ghcr.io/liken-sh/audio-operator-cli:2026.09.03-007
+    installed kubectl-liken-media from ghcr.io/liken-sh/media-operator-cli:2026.09.03-007
+    export PATH="/home/you/.liken/plugins/bin:$PATH"
+
+Add `~/.liken/plugins/bin` to `PATH`. `plugins sync` prints the line
+to add when the directory is not on `PATH` yet. `kubectl` and the base
+binary both find the CLIs there.
+
+Now the command reaches the operator. One capture, a sink's sound to a
+file:
+
+    kubectl liken audio capture living-room --format flac > living-room.flac
+
+### Tab completion
+
+Completion is a step apart from `plugins sync`, because the shell reads
+it from its own files, not from the plugin directory.
+
+Turn on `kubectl`'s completion first, because the plugin completion
+builds on it:
+
+    source <(kubectl completion bash)
+
+Install the base binary's completion, which serves `liken` and
+`kubectl-liken`:
+
+    liken completion bash > ~/.local/share/bash-completion/completions/liken
+
+Install each operator CLI's completion, one file per domain:
+
+    kubectl-liken-audio completion bash \
+      > ~/.local/share/bash-completion/completions/kubectl-liken-audio
+
+A `kubectl_complete-liken-<domain>` shim on `PATH` enables
+`kubectl liken <domain> <TAB>`. Completion of an object name (a sink, a
+display, a Player, a peripheral, a library) reads the cluster
+read-only, and it honors `--context` and `--namespace`.
+
+### Maintain the plugins
+
+An operator upgrade moves the operator to a new version, and the CLI
+that faces it must move with it. Re-run `plugins sync` after every
+operator upgrade:
+
+    liken plugins sync <deployment-dir>
+
+`plugins list` shows the state, and marks a CLI whose version has
+drifted from its operator:
+
+    liken plugins list <deployment-dir>
+
 ## `liken version`
 
     liken version

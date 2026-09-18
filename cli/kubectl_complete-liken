@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The completion shim kubectl runs to complete "kubectl liken
+# <TAB>". kubectl completes a plugin by running an executable named
+# kubectl_complete-<plugin> on PATH, so this file installs beside
+# kubectl-liken. kubectl hands it the words after the plugin name, and it
+# forwards them to the binary's hidden __complete verb, which answers in
+# the completion protocol kubectl reads.
+exec kubectl-liken __complete "$@"
