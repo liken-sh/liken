@@ -5,6 +5,7 @@ package main
 // receives, and the claim its catalog agent runs on.
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -660,5 +661,26 @@ func TestEveryEnricherContainerNamesItself(t *testing.T) {
 			t.Errorf("%s of %s = %q, want %q",
 				libraryContainerVariable, container.Name, got, container.Name)
 		}
+	}
+}
+
+// The walk is not a fact and no container runs it, so it does not travel to
+// the enricher pod's LIBRARY_REFRESH.
+func TestRefreshValueSendsTheFactsAlone(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Refresh = map[string]time.Time{
+		factCredits: testNow,
+		refreshWalk: testNow,
+	}
+
+	sent := map[string]string{}
+	if err := json.Unmarshal([]byte(refreshValue(library)), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if _, held := sent[factCredits]; !held {
+		t.Errorf("refreshValue sent %v, want the fact", sent)
+	}
+	if _, held := sent[refreshWalk]; held {
+		t.Errorf("refreshValue sent %v, want no walk", sent)
 	}
 }

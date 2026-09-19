@@ -81,6 +81,9 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		// a partial source list, and the enricher would close a refresh entry
 		// with that list.
 		if providers.everySourceChecked(namespace, library.Spec.Sources) {
+			if err := o.serveRequestedWalk(ctx, library, report, jobs); err != nil {
+				return err
+			}
 			if err := o.serveHeldPaths(ctx, library, jobs, now); err != nil {
 				return err
 			}

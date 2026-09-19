@@ -4,6 +4,8 @@ package main
 // the CRD's own list read one vocabulary. probe and identity are in
 // enrich.go, beside the gap queries they carry.
 
+import "slices"
+
 // The facts of the file group, the nfo group, the art group, and the people
 // group. A fact is one gap in the catalog, one name in a container's
 // LIBRARY_FACTS, and one ledger file in .liken/.
@@ -45,10 +47,11 @@ const (
 	factContributorHeadshot  = "contributor.headshot"
 )
 
-// Every fact spec.refresh and a MetadataProvider may name, in the order the
-// groups run. The CRD's spec.facts enum holds the same names, and a test reads
-// the two against each other, so a person cannot name a fact the operator
-// does not hold.
+// Every fact a MetadataProvider may name, in the order the groups run. The
+// CRD's spec.facts enum holds the same names, and a test reads the two
+// against each other, so a person cannot name a fact the operator does not
+// hold. spec.refresh takes one time for each of these, and one more for the
+// walk below.
 var factVocabulary = []string{
 	factProbe,
 	factArrival,
@@ -75,4 +78,21 @@ var factVocabulary = []string{
 	factContributorIDs,
 	factContributorBiography,
 	factContributorHeadshot,
+}
+
+// The one refresh target that is not a fact. A time under this key asks for
+// one full walk of the library, and a walk that starts at or after the time
+// answers it. The word is the scan worker's own, so a person reads the
+// request, the Job, and the runs row as one thing.
+const refreshWalk = "scan"
+
+// Every key spec.refresh accepts: the facts, then the walk. The CRD's
+// refresh rule holds these names, and a test reads the two together.
+var refreshVocabulary = append(slices.Clone(factVocabulary), refreshWalk)
+
+// Whether a refresh target is work a container runs. The walk is not, so
+// the code that hands spec.refresh to an enricher, or reads it for an
+// enrichment cause, skips it.
+func isContainerFact(name string) bool {
+	return slices.Contains(factVocabulary, name)
 }

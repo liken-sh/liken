@@ -107,7 +107,7 @@ func TestReenrichPatchesTheLibrary(t *testing.T) {
 	}
 
 	var stderr strings.Builder
-	if err := reenrich(context.Background(), clientset, dyn, "media", "movies", false, patch, &stderr); err != nil {
+	if err := patchLibraryRefresh(context.Background(), clientset, dyn, "media", "movies", false, patch, &stderr); err != nil {
 		t.Fatalf("reenrich: %v", err)
 	}
 	if stderr.Len() != 0 {
@@ -127,7 +127,7 @@ func TestReenrichWarnsOnDrift(t *testing.T) {
 	}
 
 	var stderr strings.Builder
-	if err := reenrich(context.Background(), clientset, dyn, "media", "movies", false, patch, &stderr); err != nil {
+	if err := patchLibraryRefresh(context.Background(), clientset, dyn, "media", "movies", false, patch, &stderr); err != nil {
 		t.Fatalf("reenrich: %v", err)
 	}
 	if !strings.Contains(stderr.String(), syncCommand) {
@@ -147,7 +147,7 @@ func TestReenrichForceSilencesTheWarning(t *testing.T) {
 	}
 
 	var stderr strings.Builder
-	if err := reenrich(context.Background(), clientset, dyn, "media", "movies", true, patch, &stderr); err != nil {
+	if err := patchLibraryRefresh(context.Background(), clientset, dyn, "media", "movies", true, patch, &stderr); err != nil {
 		t.Fatalf("reenrich: %v", err)
 	}
 	if stderr.Len() != 0 {
@@ -164,7 +164,7 @@ func TestReenrichWithoutADeploymentStillPatches(t *testing.T) {
 	}
 
 	var stderr strings.Builder
-	if err := reenrich(context.Background(), clientset, dyn, "media", "movies", false, patch, &stderr); err != nil {
+	if err := patchLibraryRefresh(context.Background(), clientset, dyn, "media", "movies", false, patch, &stderr); err != nil {
 		t.Fatalf("reenrich: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "operator version") {
@@ -182,7 +182,7 @@ func TestReenrichSurfacesAMissingLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refreshPatch: %v", err)
 	}
-	if err := reenrich(context.Background(), clientset, dyn, "media", "ghost", false, patch, io.Discard); err == nil {
+	if err := patchLibraryRefresh(context.Background(), clientset, dyn, "media", "ghost", false, patch, io.Discard); err == nil {
 		t.Fatal("reenrich returned no error for a Library that is not there")
 	}
 }

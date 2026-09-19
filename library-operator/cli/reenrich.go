@@ -67,10 +67,11 @@ func refreshPatch(only string, now time.Time) ([]byte, error) {
 	return json.Marshal(map[string]any{"spec": map[string]any{"refresh": refresh}})
 }
 
-// reenrich reads the operator version and warns or
-// refuses on drift, then patches spec.refresh so the operator's next
-// pass reopens the named facts.
-func reenrich(ctx context.Context, clientset kubernetes.Interface, dyn dynamic.Interface,
+// patchLibraryRefresh reads the operator version and warns or refuses on
+// drift, then patches spec.refresh. Both refresh verbs write through here,
+// because the version check and the write are the same whichever target the
+// patch names.
+func patchLibraryRefresh(ctx context.Context, clientset kubernetes.Interface, dyn dynamic.Interface,
 	namespace, name string, force bool, patch []byte, stderr io.Writer) error {
 	operator, err := operatorVersion(ctx, clientset)
 	if err != nil {
@@ -101,22 +102,10 @@ func runReenrich(ctx context.Context, getter genericclioptions.RESTClientGetter,
 		return err
 	}
 
-	config, err := getter.ToRESTConfig()
-	if err != nil {
-		return err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return err
-	}
-	dyn, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return err
-	}
-	namespace, _, err := getter.ToRawKubeConfigLoader().Namespace()
+	clientset, dyn, namespace, err := libraryClients(getter)
 	if err != nil {
 		return err
 	}
 
-	return reenrich(ctx, clientset, dyn, namespace, opts.Name, opts.Force, patch, stderr)
+	return patchLibraryRefresh(ctx, clientset, dyn, namespace, opts.Name, opts.Force, patch, stderr)
 }

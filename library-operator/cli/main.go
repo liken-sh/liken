@@ -27,6 +27,7 @@ const (
 
 Verbs:
   reenrich <library>   fetch the metadata again, or one fact with --only <fact>
+  rescan <library>     walk the whole library once
   completion bash      print the bash completion script
 
 Example:
@@ -103,7 +104,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	switch positional[0] {
 	case "rescan":
-		return runRescan(config, rescanOptions{Name: argAt(positional, 1)}, stderr)
+		return runRescan(ctx, config, rescanOptions{Name: argAt(positional, 1)}, *force, stderr)
 	case "reenrich":
 		return runReenrich(ctx, config, reenrichOptions{
 			Name:  argAt(positional, 1),

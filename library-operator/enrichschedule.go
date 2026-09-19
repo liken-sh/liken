@@ -256,10 +256,14 @@ func enrichUnfinished(jobs []Job, namespace, library string) bool {
 
 // The cause of the next enricher: the later of the last walk's finish and the
 // newest refresh time that has come. A refresh in the future waits for its
-// time, the way refreshSeconds makes it wait.
+// time, the way refreshSeconds makes it wait. A refresh of the walk is not a
+// fact and runs no enricher, so it is skipped here.
 func enrichCause(library *Library, runs []libraryRun, now time.Time) time.Time {
 	cause := lastScanFinish(runs)
-	for _, refresh := range library.Spec.Refresh {
+	for fact, refresh := range library.Spec.Refresh {
+		if !isContainerFact(fact) {
+			continue
+		}
 		if !refresh.After(now) && refresh.After(cause) {
 			cause = refresh
 		}

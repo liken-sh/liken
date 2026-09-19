@@ -367,3 +367,140 @@ func TestStandScanCronJobAnswersARacedUpdate(t *testing.T) {
 		})
 	}
 }
+
+// A walk request is answered by a full walk that started at or after it. A
+// walk that began before the request does not count, because that walk may
+// have read the volume before the person asked, and no second Job stands
+// while a scan Job of the Library is unfinished.
+func TestWalkRequestedReadsTheLastWalk(t *testing.T) {
+	at := testNow
+	cases := []struct {
+		name      string
+		request   time.Time
+		report    *libraryReport
+		jobs      []Job
+		requested bool
+	}{
+		{name: "no request at all", report: &libraryReport{}},
+		{
+			name:    "a request after the last walk",
+			request: at.Add(time.Hour),
+			report:  &libraryReport{Runs: walkedRuns(at)}, requested: true,
+		},
+		{
+			name:    "a request before the last walk",
+			request: at.Add(-time.Hour),
+			report:  &libraryReport{Runs: walkedRuns(at)},
+		},
+		{
+			name:    "a request at the last walk's start",
+			request: at.Add(-time.Minute),
+			report:  &libraryReport{Runs: walkedRuns(at)},
+		},
+		{name: "a request and no walk yet", request: at, report: &libraryReport{}, requested: true},
+		{name: "a request and no report", request: at, requested: true},
+		{
+			name:    "a request while a scan runs",
+			request: at.Add(time.Hour),
+			report:  &libraryReport{Runs: walkedRuns(at)},
+			jobs:    []Job{walkJob(JobStatus{Active: 1})},
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			library := studioMovies()
+			if !one.request.IsZero() {
+				library.Spec.Refresh = map[string]time.Time{refreshWalk: one.request}
+			}
+
+			if got := walkRequested(library, one.report, one.jobs); got != one.requested {
+				t.Errorf("walkRequested = %v, want %v", got, one.requested)
+			}
+		})
+	}
+}
+
+// One walk request becomes one Job: the full walk the CronJob runs, labeled
+// for the scan worker, owned by the Library, and named from the request time
+// so two passes over one request build the same Job.
+func TestBuildRequestedWalkJobIsAFullWalk(t *testing.T) {
+	requested := testNow.Add(time.Hour)
+	job := buildRequestedWalkJob(studioMovies(), requested, testScannerImage, testCorrosionImage)
+
+	if !strings.HasPrefix(job.Metadata.Name, "movies-walk-") {
+		t.Errorf("name = %q, want a name under the Library's walk prefix", job.Metadata.Name)
+	}
+	if job.Metadata.Labels[workerLabelKey] != workerScan {
+		t.Errorf("labels = %v, want the scan worker label", job.Metadata.Labels)
+	}
+	if len(job.Metadata.OwnerReferences) != 1 || job.Metadata.OwnerReferences[0].Kind != "Library" {
+		t.Errorf("ownerReferences = %+v, want the Library", job.Metadata.OwnerReferences)
+	}
+	if got := containerEnvironment(job.Spec.Template.Spec.Containers[0])[scanPathVariable]; got != "" {
+		t.Errorf("%s = %q, want no folder, which is the full walk", scanPathVariable, got)
+	}
+	if job.Metadata.Annotations[chainAnnotation] != "" {
+		t.Errorf("annotations = %v, want no chain marks on a walk", job.Metadata.Annotations)
+	}
+
+	same := buildRequestedWalkJob(studioMovies(), requested, testScannerImage, testCorrosionImage)
+	if same.Metadata.Name != job.Metadata.Name {
+		t.Errorf("names %q and %q, want one namesake per request time",
+			job.Metadata.Name, same.Metadata.Name)
+	}
+	later := buildRequestedWalkJob(studioMovies(), requested.Add(time.Nanosecond),
+		testScannerImage, testCorrosionImage)
+	if later.Metadata.Name == job.Metadata.Name {
+		t.Errorf("two request times name one Job %q", job.Metadata.Name)
+	}
+}
+
+// The request stands one Job, and the pass that lists that Job stands none,
+// so one request makes one walk.
+func TestServeRequestedWalkCreatesOneJob(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	operator := testOperator(t, cluster)
+	library.Spec.Refresh = map[string]time.Time{refreshWalk: testNow.Add(time.Hour)}
+	report := &libraryReport{Runs: walkedRuns(testNow)}
+
+	if err := operator.serveRequestedWalk(t.Context(), library, report, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cluster.heldJobs()); got != 1 {
+		t.Fatalf("jobs = %d, want the one walk", got)
+	}
+
+	if err := operator.serveRequestedWalk(t.Context(), library, report, cluster.heldJobs()); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cluster.heldJobs()); got != 1 {
+		t.Errorf("jobs = %d, want no second walk for a request already stood", got)
+	}
+}
+
+// A Library that names no walk request stands no walk.
+func TestServeRequestedWalkDoesNothingWithoutARequest(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+
+	if err := testOperator(t, cluster).serveRequestedWalk(t.Context(), library, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cluster.heldJobs()); got != 0 {
+		t.Errorf("jobs = %d, want none without a request", got)
+	}
+}
+
+// A create another writer got to first is success, the way it is for every
+// other Job this operator stands.
+func TestServeRequestedWalkAcceptsAConflict(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	cluster.refuseCreate = true
+	library.Spec.Refresh = map[string]time.Time{refreshWalk: testNow}
+
+	if err := testOperator(t, cluster).serveRequestedWalk(t.Context(), library, nil, nil); err != nil {
+		t.Fatalf("err = %v, want a conflict to read as success", err)
+	}
+}

@@ -136,6 +136,14 @@ runs a one-off `Job` that rescans one folder.
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=scan
     kubectl -n media create job movies-scan-now --from=cronjob/movies-scan
 
+A person can ask for a walk without waiting for the schedule.
+`kubectl liken library rescan movies` writes the walk's time into
+`spec.refresh.scan`, and the operator stands one `Job` for it, the same
+walk the `CronJob` runs. A walk that starts at or after the time answers
+the request, so asking again is a matter of setting a later time. It is
+the same map the [enrichment guide](/docs/guides/enrichment/) uses for
+facts, and the key for a full walk is `scan`.
+
 A scan `Job` writes a `runs` row when it starts and updates it when it
 finishes. Then it waits until a catalog pod confirms that run, and
 exits. So a `Job` that completed is a `Job` whose rows reached a

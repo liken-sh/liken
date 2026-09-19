@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
@@ -42,6 +43,28 @@ func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (strin
 		return "", fmt.Errorf("the operator Deployment declares no container")
 	}
 	return imageTag(containers[0].Image), nil
+}
+
+// The clients and the namespace every verb writes through, built from the
+// standard kube flags.
+func libraryClients(getter genericclioptions.RESTClientGetter) (kubernetes.Interface, dynamic.Interface, string, error) {
+	config, err := getter.ToRESTConfig()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	dyn, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	namespace, _, err := getter.ToRawKubeConfigLoader().Namespace()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return clientset, dyn, namespace, nil
 }
 
 // listLibraries lists the Library names in a namespace through a

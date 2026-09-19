@@ -233,12 +233,19 @@ func factsContainer(library *Library, name string, facts []string,
 
 // The refresh times travel as one JSON value, the way the ignore list
 // does, so a fact of any name reaches the container whole. A Library
-// that names none writes an empty value.
+// that names none writes an empty value. The walk is not a fact and no
+// container runs it, so it does not travel.
 func refreshValue(library *Library) string {
-	if len(library.Spec.Refresh) == 0 {
+	facts := refreshTimes{}
+	for name, at := range library.Spec.Refresh {
+		if isContainerFact(name) {
+			facts[name] = at
+		}
+	}
+	if len(facts) == 0 {
 		return ""
 	}
-	refresh, _ := json.Marshal(library.Spec.Refresh)
+	refresh, _ := json.Marshal(facts)
 	return string(refresh)
 }
 

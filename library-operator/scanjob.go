@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -231,4 +232,68 @@ func (o *operator) serveHeldPaths(ctx context.Context, library *Library, jobs []
 		o.paths.release(namespace, name, path)
 	}
 	return nil
+}
+
+// The walk a spec.refresh request asks for, created once. The create is
+// what answers the request; the Job's own run row is what a later pass reads
+// to see the request answered. A create another pass got to first is
+// success, the way it is for every other Job this operator stands.
+func (o *operator) serveRequestedWalk(ctx context.Context, library *Library,
+	report *libraryReport, jobs []Job) error {
+	if !walkRequested(library, report, jobs) {
+		return nil
+	}
+	job := buildRequestedWalkJob(library, library.Spec.Refresh[refreshWalk],
+		o.scannerImage, o.corrosionImage)
+	if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {
+		return fmt.Errorf("creating the requested walk job %s: %w", job.Metadata.Name, err)
+	}
+	return nil
+}
+
+// Whether spec.refresh asks for a walk this pass has not answered. A walk
+// that started at or after the request answers it, and a walk that began
+// before the request does not count, because that walk may have read the
+// volume before the person asked. No second Job stands while a scan Job of
+// this Library is unfinished.
+func walkRequested(library *Library, report *libraryReport, jobs []Job) bool {
+	requested, named := library.Spec.Refresh[refreshWalk]
+	if !named {
+		return false
+	}
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	if scanUnfinished(jobs, namespace, name) {
+		return false
+	}
+	if report == nil {
+		return true
+	}
+	walk, ran := runOf(report.Runs, workerScan)
+	return !ran || requested.After(walk.Started)
+}
+
+// The Job one walk request becomes: the full walk the CronJob runs, as a Job
+// of its own. It carries the scan worker's label and no chain marks, because
+// this is a walk and not the webhook's scan, enrich, and rescan chain.
+func buildRequestedWalkJob(library *Library, requested time.Time,
+	scannerImage, corrosionImage string) *Job {
+	return &Job{
+		APIVersion: batchAPIVersion,
+		Kind:       "Job",
+		Metadata: ObjectMeta{
+			Name:            requestedWalkJobName(library.Metadata.Name, requested),
+			Namespace:       library.Metadata.Namespace,
+			Labels:          workerLabels(library.Metadata.Name, workerScan),
+			OwnerReferences: []OwnerReference{libraryOwner(library)},
+		},
+		Spec: scanJobSpec(library, "", scannerImage, corrosionImage),
+	}
+}
+
+// The name one walk request becomes. The request time is the whole of the
+// input, so a pass that races another pass names the same Job and the loser
+// reads the conflict as success. The nanoseconds keep two requests in one
+// second apart.
+func requestedWalkJobName(library string, requested time.Time) string {
+	return library + "-walk-" + strconv.FormatInt(requested.UnixNano(), 36)
 }

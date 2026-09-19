@@ -349,16 +349,18 @@ spec:
                     minLength: 1
                 refresh:
                   type: object
-                  maxProperties: 25
+                  maxProperties: 26
                   additionalProperties:
                     type: string
                     format: date-time
                     maxLength: 30
                     description: >-
-                      The time to ask again from, as RFC 3339. An attempt
-                      this fact made before it does not count. A time
-                      that has not come yet waits, and the fact runs once
-                      when it arrives.
+                      The time to ask again from, as RFC 3339. A fact
+                      reopens its gap for the titles it attempted
+                      before this time. The scan key asks for one full
+                      walk, answered by a walk that starts at or after
+                      this time. A time that has not come yet waits,
+                      and the work runs once when it arrives.
                   x-kubernetes-validations:
                     - rule: >-
                         self.all(fact, fact in ['probe', 'arrival', 'trickplay',
@@ -369,19 +371,24 @@ spec:
                         'clearart', 'banner', 'landscape', 'discart',
                         'season-poster', 'season-banner',
                         'episode-thumb', 'trailer', 'contributor.ids',
-                        'contributor.biography', 'contributor.headshot'])
+                        'contributor.biography', 'contributor.headshot',
+                        'scan'])
                       message: >-
                         every key of spec.refresh must name a fact the
-                        operator runs
+                        operator runs, or scan for a full walk
                   description: >-
-                    One time per fact, by the names status.gaps uses. For that fact, an attempt whose time is before
-                    the refresh does not count: the title is in that
-                    fact's gap again although its file and its rows are
-                    there, the fact asks a provider again, and it
-                    rewrites its own files and rows in place. Nothing is
-                    deleted, and a fact this map does not name is
-                    untouched. A time that has not come yet waits, and
-                    the fact runs once when it arrives.
+                    One time per refresh target. A key named for a fact,
+                    by the names status.gaps uses, reopens that fact's
+                    gap: an attempt whose time is before the refresh does
+                    not count, so the title is in the gap again although
+                    its file and its rows are there, the fact asks a
+                    provider again, and it rewrites its own files and
+                    rows in place. The key scan asks for one full walk
+                    of the library, and a walk that starts at or after
+                    the time answers it. Nothing is deleted, and a
+                    target this map does not name is untouched. A time
+                    that has not come yet waits, and the work runs once
+                    when it arrives.
             status:
               type: object
               description: >-

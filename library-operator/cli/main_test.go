@@ -59,12 +59,9 @@ func TestRunHelpIsNotAnError(t *testing.T) {
 
 func TestRunDispatchesRescan(t *testing.T) {
 	var stdout, stderr strings.Builder
-	err := run(context.Background(), []string{"rescan", "movies"}, &stdout, &stderr)
+	err := run(context.Background(), []string{"rescan"}, &stdout, &stderr)
 	if err == nil {
-		t.Fatal("run dispatched rescan without surfacing the stub")
-	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Fatalf("error %q does not say rescan is a stub", err)
+		t.Fatal("run dispatched rescan without surfacing the missing library")
 	}
 }
 

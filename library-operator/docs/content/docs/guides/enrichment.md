@@ -247,6 +247,10 @@ asks every fact again. Add `--only overview` to reopen one fact, and
 `-n` to select the namespace. The command reads your kubeconfig, and
 in bash it completes the library names.
 
+The same map takes one key that is not a fact: `scan` asks for a full
+walk of the library, and `kubectl liken library rescan movies` writes
+it. The [scanning guide](/docs/guides/scanning/) describes what it does.
+
 ## 4. The Jellyfin handover
 
 Jellyfin reads the sidecars and art this operator writes, under the

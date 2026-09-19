@@ -686,3 +686,14 @@ func enrichedRuns(walked, started, ended time.Time) []libraryRun {
 	return append(runs, libraryRun{Worker: workerEnrich, Job: "movies-enrich",
 		Started: started, Finished: ended})
 }
+
+// A refresh of the walk runs no enricher, so it is no enrichment cause: the
+// cause is the last walk's finish and the facts alone.
+func TestEnrichCauseSkipsTheWalk(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Refresh = map[string]time.Time{refreshWalk: testNow.Add(time.Hour)}
+
+	if cause := enrichCause(library, walkedRuns(testNow), testNow); !cause.Equal(testNow) {
+		t.Errorf("cause = %v, want the last walk's finish %v", cause, testNow)
+	}
+}
