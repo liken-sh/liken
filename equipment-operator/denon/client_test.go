@@ -72,8 +72,16 @@ func waitForField(t *testing.T, events <-chan equipment.Event, field string) equ
 	}
 }
 
+// drainQueries reads until the client has sent the last of its connect
+// queries, so a test that follows sees only its own command.
+func drainQueries(t *testing.T, harness *clientHarness) {
+	t.Helper()
+	harness.receiver.waitForCommands(t, Queries[len(Queries)-1])
+}
+
 // connectedState is the state the fake receiver reports once it has
-// answered all five queries.
+// answered the queries. The fake never answers a sleep query, so the
+// timer reads as unknown.
 func connectedState() equipment.State {
 	return equipment.State{
 		Reachable: equipment.ConditionTrue,
@@ -84,15 +92,16 @@ func connectedState() equipment.State {
 				SoundMode: "MULTI CH IN",
 				Volume:    100,
 				VolumeMax: 139,
+				Sleep:     equipment.Unknown,
 			},
 		},
 	}
 }
 
-func TestTheClientAsksTheFiveQueriesOnConnect(t *testing.T) {
+func TestTheClientAsksEveryQueryOnConnect(t *testing.T) {
 	harness := startHarness(t)
 
-	sent := harness.receiver.waitForCommands(t, "MS?")
+	sent := harness.receiver.waitForCommands(t, Queries[len(Queries)-1])
 
 	mustMatch(t, strings.Join(sent, " "), strings.Join(Queries, " "))
 }
@@ -209,7 +218,7 @@ func shortenHeartbeat(t *testing.T) {
 func TestTheHeartbeatKeepsAskingOnAnIdleConnection(t *testing.T) {
 	shortenHeartbeat(t)
 	harness := startHarness(t)
-	harness.receiver.waitForCommands(t, "MS?")
+	drainQueries(t, harness)
 
 	mustMatch(t, harness.receiver.waitForCommand(t), "PW?")
 }
@@ -238,7 +247,7 @@ func TestSetVolumeHoldsTheReceiverToItsOwnScale(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			harness := startHarness(t)
-			harness.receiver.waitForCommands(t, "MS?")
+			drainQueries(t, harness)
 
 			harness.client.SetVolume(equipment.MainZone, one.halves)
 

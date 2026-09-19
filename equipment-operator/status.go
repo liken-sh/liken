@@ -5,6 +5,8 @@ package main
 // it.
 
 import (
+	"bytes"
+	"encoding/json"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -56,28 +58,50 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 }
 
 // buildReceiverStatus is the whole status one receiver's state makes,
-// in the receiver's own units. status.service stays empty until the
-// operator makes the Service front.
-func buildReceiverStatus(state equipment.State, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
-	main, _ := state.Zone(equipment.MainZone)
+// in the receiver's own units, plus the protocol's own settings
+// snapshot. status.service stays empty until the operator makes the
+// Service front.
+func buildReceiverStatus(state equipment.State, protocol json.RawMessage, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
+	zones := make(map[string]ZoneStatus, len(state.Zones))
+	for name, zone := range state.Zones {
+		zones[name] = ZoneStatus{
+			Power:     string(zone.Power),
+			Input:     zone.Input,
+			SoundMode: zone.SoundMode,
+			Mute:      zone.Mute,
+			Volume:    formatSteps(zone.Volume, resolution),
+			VolumeMax: formatSteps(zone.VolumeMax, resolution),
+			Sleep:     sleepMinutes(zone.Sleep),
+		}
+	}
 	return ReceiverStatus{
-		Power:      string(main.Power),
-		Input:      main.Input,
-		Volume:     formatSteps(main.Volume, resolution),
-		VolumeMax:  formatSteps(main.VolumeMax, resolution),
-		Mute:       main.Mute,
-		SoundMode:  main.SoundMode,
+		Zones:      zones,
+		Denon:      protocol,
 		Conditions: []Condition{reachable(state.Reachable, generation, previous, now)},
 	}
 }
 
+// sleepMinutes writes one zone's sleep timer the way the status carries
+// it. A driver that has not reported the timer reads as off, because a
+// zero the receiver never said would read as a real answer.
+func sleepMinutes(minutes int) int {
+	if minutes < 0 {
+		return 0
+	}
+	return minutes
+}
+
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Power != b.Power || a.Input != b.Input || a.Volume != b.Volume ||
-		a.VolumeMax != b.VolumeMax || a.Mute != b.Mute ||
-		a.SoundMode != b.SoundMode || a.Service != b.Service ||
-		len(a.Conditions) != len(b.Conditions) {
+	if a.Service != b.Service || !bytes.Equal(a.Denon, b.Denon) ||
+		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false
+	}
+	for name, zone := range a.Zones {
+		other, held := b.Zones[name]
+		if !held || zone != other {
+			return false
+		}
 	}
 	for index := range a.Conditions {
 		if a.Conditions[index] != b.Conditions[index] {

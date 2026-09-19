@@ -30,9 +30,10 @@ var (
 	maxBackoff   = 30 * time.Second
 )
 
-// The write queue for one connection. A command that would overflow it
-// is dropped, because the operator re-asserts nothing.
-const queueDepth = 32
+// The write queue for one connection. It holds every connect query and
+// a burst of commands. A command that would overflow it is dropped,
+// because the operator re-asserts nothing.
+const queueDepth = 64
 
 // The three outcomes a command can carry. The root wires Reporter to
 // equipment_commands_total, so these strings are the label values that
@@ -89,20 +90,31 @@ func (d *Client) State() equipment.State {
 }
 
 // equipmentState maps the receiver's own units onto the equipment
-// contract: one zone named main, with volume in half steps.
+// contract: the main zone always, and a second or third zone only once
+// the receiver has named it.
 func (d *Client) equipmentState(s denonState) equipment.State {
-	return equipment.State{
-		Reachable: s.Reachable,
-		Zones: map[string]equipment.ZoneState{
-			equipment.MainZone: {
-				Power:     equipment.Power(s.Power),
-				Input:     s.Input,
-				SoundMode: s.SoundMode,
-				Mute:      s.Mute,
-				Volume:    s.Volume,
-				VolumeMax: s.VolumeMax,
-			},
-		},
+	zones := map[string]equipment.ZoneState{
+		equipment.MainZone: zoneFor(s.Main),
+	}
+	if s.Zone2.seen {
+		zones[zone2] = zoneFor(s.Zone2)
+	}
+	if s.Zone3.seen {
+		zones[zone3] = zoneFor(s.Zone3)
+	}
+	return equipment.State{Reachable: s.Reachable, Zones: zones}
+}
+
+// zoneFor translates one Denon zone into the equipment contract.
+func zoneFor(zone zoneState) equipment.ZoneState {
+	return equipment.ZoneState{
+		Power:     zone.Power,
+		Input:     zone.Input,
+		SoundMode: zone.SoundMode,
+		Mute:      zone.Mute,
+		Volume:    zone.Volume,
+		VolumeMax: zone.VolumeMax,
+		Sleep:     zone.Sleep,
 	}
 }
 
@@ -111,19 +123,19 @@ func (d *Client) VolumeResolution() int {
 	return 2
 }
 
-// ProtocolStatus is the driver's own snapshot for status.denon.
+// ProtocolStatus is the driver's own snapshot for status.denon: the
+// system settings, the tone trims, the Audyssey settings, the audio
+// settings, and the channel volumes. The zones travel on
+// status.zones, which every driver reports.
 func (d *Client) ProtocolStatus() json.RawMessage {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	raw, err := json.Marshal(denonSnapshot{
-		Address:   d.address,
-		Power:     d.state.Power,
-		Input:     d.state.Input,
-		SoundMode: d.state.SoundMode,
-		Mute:      d.state.Mute,
-		Volume:    d.state.Volume,
-		VolumeMax: d.state.VolumeMax,
-		Reachable: d.state.Reachable,
+	raw, err := json.Marshal(protocolSnapshot{
+		System:         d.state.System,
+		Tone:           d.state.Tone,
+		Audyssey:       d.state.Audyssey,
+		Audio:          d.state.Audio,
+		ChannelVolumes: d.state.Channels,
 	})
 	if err != nil {
 		return nil
@@ -131,17 +143,15 @@ func (d *Client) ProtocolStatus() json.RawMessage {
 	return raw
 }
 
-// denonSnapshot is the driver's own view of the receiver, in the units
-// the wire speaks.
-type denonSnapshot struct {
-	Address   string                    `json:"address"`
-	Power     string                    `json:"power"`
-	Input     string                    `json:"input"`
-	SoundMode string                    `json:"soundMode"`
-	Mute      bool                      `json:"mute"`
-	Volume    int                       `json:"volume"`
-	VolumeMax int                       `json:"volumeMax"`
-	Reachable equipment.ConditionStatus `json:"reachable"`
+// protocolSnapshot is the driver's own view of the receiver for the
+// status. The zones are not here, because the controller reports them
+// from equipment.State and a second driver would report its own.
+type protocolSnapshot struct {
+	System         systemState        `json:"system"`
+	Tone           toneState          `json:"tone"`
+	Audyssey       audysseyState      `json:"audyssey"`
+	Audio          audioState         `json:"audio"`
+	ChannelVolumes map[string]float64 `json:"channelVolumes,omitempty"`
 }
 
 // SetPower turns the main zone on or to standby. The zone argument is
@@ -336,7 +346,7 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 // state to the listener, and reports whether the line was recognized.
 func (d *Client) fold(line string) bool {
 	d.mutex.Lock()
-	folded, field, known := applyDenonLine(d.state, line)
+	folded, zone, field, known := applyDenonLine(d.state, line)
 	if !known {
 		d.mutex.Unlock()
 		return false
@@ -348,7 +358,7 @@ func (d *Client) fold(line string) bool {
 	state := d.equipmentState(folded)
 	d.mutex.Unlock()
 
-	d.notify(equipment.Event{Zone: equipment.MainZone, Field: equipmentField(field), State: state})
+	d.notify(equipment.Event{Zone: zone, Field: equipmentField(field), State: state})
 	return true
 }
 

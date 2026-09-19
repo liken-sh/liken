@@ -1,6 +1,10 @@
 package main
 
-import "github.com/liken-sh/equipment-operator/equipment"
+import (
+	"encoding/json"
+
+	"github.com/liken-sh/equipment-operator/equipment"
+)
 
 // The wire types are hand-written, the way liken and the sibling
 // operators write theirs. The Kubernetes API is HTTPS that serves
@@ -66,11 +70,13 @@ type DenonProtocol struct {
 }
 
 // One input of the receiver, and the machine and monitor id that feed
-// it.
+// it. SoundMode, when present, is the mode the receiver selects with
+// this input, so a Play brings the picture and the mode together.
 type ReceiverInput struct {
-	Name    string `json:"name"`
-	Machine string `json:"machine"`
-	Monitor string `json:"monitor"`
+	Name      string `json:"name"`
+	Machine   string `json:"machine"`
+	Monitor   string `json:"monitor"`
+	SoundMode string `json:"soundMode,omitempty"`
 }
 
 // A session names the Player, the input it uses, and the topic from
@@ -97,17 +103,27 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 	return s
 }
 
-// What the receiver last reported in its own units, the Service that
-// represents it when one exists, and the Reachable condition.
+// What the receiver last reported, grouped by zone, the protocol's own
+// settings snapshot, the Service that represents the receiver when one
+// exists, and the Reachable condition.
 type ReceiverStatus struct {
-	Power      string      `json:"power,omitempty"`
-	Input      string      `json:"input,omitempty"`
-	Volume     string      `json:"volume,omitempty"`
-	VolumeMax  string      `json:"volumeMax,omitempty"`
-	Mute       bool        `json:"mute,omitempty"`
-	SoundMode  string      `json:"soundMode,omitempty"`
-	Service    string      `json:"service,omitempty"`
-	Conditions []Condition `json:"conditions,omitempty"`
+	Zones      map[string]ZoneStatus `json:"zones,omitempty"`
+	Denon      json.RawMessage       `json:"denon,omitempty"`
+	Service    string                `json:"service,omitempty"`
+	Conditions []Condition           `json:"conditions,omitempty"`
+}
+
+// ZoneStatus is one zone in the receiver's own units. Volume and
+// VolumeMax are the counts the driver reports, written the way a person
+// reads them.
+type ZoneStatus struct {
+	Power     string `json:"power,omitempty"`
+	Input     string `json:"input,omitempty"`
+	SoundMode string `json:"soundMode,omitempty"`
+	Mute      bool   `json:"mute,omitempty"`
+	Volume    string `json:"volume,omitempty"`
+	VolumeMax string `json:"volumeMax,omitempty"`
+	Sleep     int    `json:"sleep,omitempty"`
 }
 
 // ConditionStatus is the three-valued verdict a condition carries. It

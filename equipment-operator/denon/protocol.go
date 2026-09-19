@@ -9,12 +9,6 @@
 // also read from a live AVR-X1700H.
 package denon
 
-import (
-	"strings"
-
-	"github.com/liken-sh/equipment-operator/equipment"
-)
-
 // Port is the control port a Denon answers on, used when the declared
 // address names none.
 const Port = "23"
@@ -23,9 +17,18 @@ const Port = "23"
 // return.
 const Terminator = '\r'
 
-// Queries are the five queries the operator sends on every connect.
-// Their answers are the whole of the status.
-var Queries = []string{"PW?", "MV?", "MU?", "SI?", "MS?"}
+// Queries are the status queries the driver sends on every connect,
+// front-loaded with the zone and volume lines. A model that does not
+// answer one simply ignores it, so the set is a union and not a
+// requirement.
+var Queries = []string{
+	"PW?", "ZM?", "Z2?", "MV?", "MU?", "Z2MU?", "SI?", "MS?",
+	"SLP?", "Z2SLP?", "ECO?", "DIM ?", "STBY?", "SPPR ?", "SD?", "SV?", "CV?",
+	"PSMULTEQ: ?", "PSDYNEQ ?", "PSREFLEV ?", "PSDYNVOL ?", "PSTONE CTRL ?",
+	"PSBAS ?", "PSTRE ?", "PSDRC ?", "PSLFE ?", "PSEFF ?", "PSDEL ?", "PSDELAY ?",
+	"PSSWR ?", "PSRSTR ?", "PSLOM ?", "PSGEQ ?", "PSHEQ ?", "PSSPV ?", "PSDEH ?",
+	"BTTX ?",
+}
 
 // The set commands this operator sends.
 const (
@@ -53,69 +56,6 @@ const (
 	muteField      = "mute"
 	soundModeField = "soundMode"
 )
-
-// denonState stores the latest values the receiver reported in its own
-// units. Reachable becomes true on a recognized reply and changes when
-// the connection fails.
-type denonState struct {
-	Power     string
-	Input     string
-	SoundMode string
-	Mute      bool
-	Volume    int
-	VolumeMax int
-	Reachable equipment.ConditionStatus
-}
-
-// newDenonState is the state before the receiver has said anything.
-func newDenonState() denonState {
-	return denonState{
-		Volume:    unknownHalves,
-		VolumeMax: unknownHalves,
-		Reachable: equipment.ConditionUnknown,
-	}
-}
-
-// applyDenonLine folds one line into the state and answers which field
-// it named. A line this operator does not know is ignored, because a
-// Denon volunteers dozens of settings nothing here reads.
-func applyDenonLine(state denonState, line string) (denonState, string, bool) {
-	switch {
-	case line == "PWON":
-		state.Power = powerOn
-		return state, powerField, true
-	case line == "PWSTANDBY":
-		state.Power = powerStandby
-		return state, powerField, true
-	case line == MuteOnCommand:
-		state.Mute = true
-		return state, muteField, true
-	case line == MuteOffCommand:
-		state.Mute = false
-		return state, muteField, true
-	case strings.HasPrefix(line, "MVMAX "):
-		halves, ok := ParseHalfSteps(strings.TrimSpace(line[len("MVMAX "):]))
-		if !ok {
-			return state, "", false
-		}
-		state.VolumeMax = halves
-		return state, volumeMaxField, true
-	case strings.HasPrefix(line, VolumePrefix):
-		halves, ok := ParseHalfSteps(line[len(VolumePrefix):])
-		if !ok {
-			return state, "", false
-		}
-		state.Volume = halves
-		return state, volumeField, true
-	case strings.HasPrefix(line, InputPrefix) && len(line) > 2:
-		state.Input = line[2:]
-		return state, inputField, true
-	case strings.HasPrefix(line, SoundModePrefix) && len(line) > 2:
-		state.SoundMode = line[2:]
-		return state, soundModeField, true
-	}
-	return state, "", false
-}
 
 // VolumeCommand is the set command for one half-step count.
 func VolumeCommand(halves int) string {

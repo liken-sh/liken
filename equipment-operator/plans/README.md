@@ -27,6 +27,10 @@ becomes a new plan or an open problem.
   operator serves Prometheus metrics on port 9200 under liken's shared
   contract: the receiver connected and claimed, power, volume, the
   selected input, and commands by status.
+* [02, The Denon driver and the full receiver mirror](02-denon-driver.md).
+  The protocol moves into `denon/` behind the `equipment.Driver`
+  contract, the parser covers every line the house's AVR-X1700H emits,
+  and the status carries both zones and the receiver's own settings.
 
 ## Completed
 

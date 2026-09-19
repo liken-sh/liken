@@ -45,6 +45,7 @@ The receiver inputs that liken machines feed. The cluster owner declares this wi
 | <span id="specinputs--name"></span>`name` | string | yes | The input's name on the receiver, as its protocol spells it: MPLAY, GAME, TV, CBL/SAT. |
 | <span id="specinputs--machine"></span>`machine` | string | yes | The liken machine whose HDMI output lands on this input, by node name. |
 | <span id="specinputs--monitor"></span>`monitor` | string | yes | The monitor id the display and audio operators publish for this cable, such as don-0070-denon-avr. It is the check that the wire is really there. |
+| <span id="specinputs--soundmode"></span>`soundMode` | string | no | The sound mode the receiver selects with this input, when present. The session selects it in the same one-shot that selects the input, so a Play brings the picture and the mode together. |
 
 ### spec.session
 
@@ -60,18 +61,28 @@ The Player that currently uses the receiver. The media operator applies this blo
 
 ## status
 
-What the receiver last said, in its own units. Only the operator writes it.
+What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--power"></span>`power` | string | no | The power state the receiver last reported: on or standby. |
-| <span id="status--input"></span>`input` | string | no | The input the receiver last reported as selected, whether liken selected it or a person did. |
-| <span id="status--volume"></span>`volume` | string | no | The master volume the receiver last reported, in its own scale. A Denon counts 0 to 98 in half steps. |
-| <span id="status--volumemax"></span>`volumeMax` | string | no | The last MVMAX line the receiver sent, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume. |
-| <span id="status--mute"></span>`mute` | boolean | no | Whether the receiver last reported itself muted. |
-| <span id="status--soundmode"></span>`soundMode` | string | no | The sound mode the receiver last reported, such as MULTI CH IN or STEREO. |
+| <span id="status--zones"></span>`zones` | [map\[string\]object](#statuszones) | no | One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main. |
+| <span id="status--denon"></span>`denon` | object | no | The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it. |
 | <span id="status--service"></span>`service` | string | no | The Service that represents the receiver on the cluster network after the operator creates it. Empty until then. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. |
+
+### status.zones.*
+
+One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuszones--power"></span>`power` | string | no | The power state the zone last reported: on, standby, or off. |
+| <span id="statuszones--input"></span>`input` | string | no | The input the zone last reported as selected, whether liken selected it or a person did. |
+| <span id="statuszones--soundmode"></span>`soundMode` | string | no | The sound mode the zone last reported, such as STEREO or MULTI CH IN. |
+| <span id="statuszones--mute"></span>`mute` | boolean | no | Whether the zone last reported itself muted. |
+| <span id="statuszones--volume"></span>`volume` | string | no | The zone's volume in the receiver's own scale. A Denon counts 0 to 98 in half steps. |
+| <span id="statuszones--volumemax"></span>`volumeMax` | string | no | The last volume limit the receiver sent for this zone, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume. |
+| <span id="statuszones--sleep"></span>`sleep` | integer | no | Minutes until the zone sleeps, and zero when no sleep timer stands. |
 
 ### status.conditions[]
 

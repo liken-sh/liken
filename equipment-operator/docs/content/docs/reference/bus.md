@@ -97,5 +97,5 @@ three occasions:
 A position the operator already published is not published again.
 
 While a session exists, the topic stores the receiver's true level in
-the bus scale. `status.volume` stores the same level in the receiver's
-own scale.
+the bus scale. `status.zones.main.volume` stores the same level in the
+receiver's own scale.

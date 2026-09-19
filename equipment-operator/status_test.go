@@ -4,9 +4,10 @@ package main
 // said.
 
 import (
-	"github.com/liken-sh/equipment-operator/equipment"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // The moment every status test stamps, and one from before it.
@@ -35,27 +36,38 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 	cases := []struct {
 		name      string
 		state     equipment.State
+		power     string
 		volume    string
 		volumeMax string
 	}{
-		{"whole steps", testState(equipment.PowerOn, 100, 139), "50", "69.5"},
-		{"half steps", testState(equipment.PowerOn, 131, 139), "65.5", "69.5"},
-		{"zero", testState(equipment.PowerStandby, 0, 139), "0", "69.5"},
-		{"unknown volume", testState(equipment.PowerStandby, equipment.Unknown, equipment.Unknown), "", ""},
+		{"whole steps", testState(equipment.PowerOn, 100, 139), "on", "50", "69.5"},
+		{"half steps", testState(equipment.PowerOn, 131, 139), "on", "65.5", "69.5"},
+		{"zero", testState(equipment.PowerStandby, 0, 139), "standby", "0", "69.5"},
+		{"unknown volume", testState(equipment.PowerStandby, equipment.Unknown, equipment.Unknown), "standby", "", ""},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			status := buildReceiverStatus(one.state, 2, 3, nil, statusNow)
+			status := buildReceiverStatus(one.state, nil, 2, 3, nil, statusNow)
+			main := status.Zones[equipment.MainZone]
 
-			mustMatch(t, status.Power, string(mainZone(one.state).Power))
-			mustMatch(t, status.Input, "MPLAY")
-			mustMatch(t, status.Volume, one.volume)
-			mustMatch(t, status.VolumeMax, one.volumeMax)
-			mustMatch(t, status.SoundMode, "MULTI CH IN")
+			mustMatch(t, main.Power, one.power)
+			mustMatch(t, main.Input, "MPLAY")
+			mustMatch(t, main.Volume, one.volume)
+			mustMatch(t, main.VolumeMax, one.volumeMax)
+			mustMatch(t, main.SoundMode, "MULTI CH IN")
 			mustMatch(t, status.Service, "")
 			mustMatch(t, len(status.Conditions), 1)
 		})
 	}
+}
+
+func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
+	state := testState(equipment.PowerOn, 100, 139)
+	protocol := []byte(`{"system":{"eco":"auto"}}`)
+
+	status := buildReceiverStatus(state, protocol, 2, 1, nil, statusNow)
+
+	mustMatch(t, string(status.Denon), string(protocol))
 }
 
 func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
@@ -64,7 +76,7 @@ func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
 	zone.Mute = true
 	state.Zones[equipment.MainZone] = zone
 
-	mustMatch(t, buildReceiverStatus(state, 2, 1, nil, statusNow).Mute, true)
+	mustMatch(t, buildReceiverStatus(state, nil, 2, 1, nil, statusNow).Zones[equipment.MainZone].Mute, true)
 }
 
 func TestReachableNamesEachVerdict(t *testing.T) {
@@ -108,13 +120,22 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 
 func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	held := ReceiverStatus{
-		Power: string(equipment.PowerOn), Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN",
+		Zones: map[string]ZoneStatus{
+			equipment.MainZone: {Power: "on", Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
+		},
 		Conditions: []Condition{{Type: reachableConditionType, Status: ConditionTrue}},
 	}
 	movedVolume := held
-	movedVolume.Volume = "51"
-	muted := held
-	muted.Mute = true
+	movedVolume.Zones = map[string]ZoneStatus{
+		equipment.MainZone: {Power: "on", Input: "MPLAY", Volume: "51", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
+	}
+	addedZone := held
+	addedZone.Zones = map[string]ZoneStatus{
+		equipment.MainZone: {Power: "on", Input: "MPLAY", Volume: "50"},
+		"zone2":            {Power: "on", Input: "PHONO", Volume: "90"},
+	}
+	movedProtocol := held
+	movedProtocol.Denon = []byte(`{"system":{"eco":"auto"}}`)
 	unreached := held
 	unreached.Conditions = []Condition{{Type: reachableConditionType, Status: ConditionFalse}}
 	noConditions := held
@@ -127,7 +148,8 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	}{
 		{"identical", held, true},
 		{"volume moved", movedVolume, false},
-		{"mute moved", muted, false},
+		{"a zone appeared", addedZone, false},
+		{"the protocol snapshot moved", movedProtocol, false},
 		{"verdict moved", unreached, false},
 		{"condition dropped", noConditions, false},
 	}

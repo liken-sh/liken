@@ -30,3 +30,39 @@ every `MV` response, so the parser reads it and nothing acts on it.
 
 The driver implements `equipment.Driver` and reports volume in half
 steps, two per display unit.
+
+## The state and the snapshot
+
+The driver reads the receiver into its own state: one entry per zone,
+the unit-wide settings, the tone and Audyssey settings, the audio
+settings, and the channel volumes. `equipment.State` carries the
+reachability verdict and the zones, which every driver reports.
+`ProtocolStatus` carries the rest, and the controller writes it under
+`status.denon`.
+
+The snapshot shape, which the driver's transcript test pins:
+
+```json
+{
+  "system": {"power": "on", "eco": "auto", "dimmer": "bright", "autoStandby": "off", "speakerPreset": 1, "audioInputMode": "hdmi", "videoSelect": "off", "bluetoothTransmitter": "off", "bluetoothOutput": "speakers"},
+  "tone": {"control": false, "bass": 0, "treble": 0},
+  "audyssey": {"multeq": "reference", "dynamicEq": true, "referenceLevelOffset": 0, "dynamicVolume": "off", "loudnessManagement": true},
+  "audio": {"drc": "off", "lfe": 0, "effect": 0, "delay": 0, "audioDelay": 0, "subwoofer": true, "restorer": "off", "graphicEq": "off", "headphoneEq": "off", "speakerVirtualizer": true, "dialogEnhancer": "off"},
+  "channelVolumes": {"FL": 0, "FR": 0, "C": 0, "SW": 0}
+}
+```
+
+The tone and channel values are in display units, so the wire's 50
+reads as 0. The LFE level is negative decibels.
+
+Main-zone power comes from `ZM` when a model reports it, and from `PW`
+otherwise. A model that has a second zone names it with `Z2` lines, and
+the driver reports that zone only once the receiver has named it.
+
+## What is not read
+
+The parser ignores the tuner (`TF`, `TM`, `TP`), the network player
+(`NS`, `NSA`, `NSE`), the video controls (`VSASP`, `VSMONI`), the
+trigger outputs (`TR`), the speaker presets beyond the number, and the
+`OPINF` capability bitmaps. The house's AVR-X1700H answers none of the
+first four, so there is no way to prove a parser for them here.

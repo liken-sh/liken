@@ -14,9 +14,11 @@ spec:
     - name: MPLAY
       machine: node-1
       monitor: hdmi-a-1
+      soundMode: MULTI CH IN
     - name: GAME
       machine: node-2
       monitor: hdmi-a-1
+      soundMode: MULTI CH IN
   session:
     player: house/theater
     input: MPLAY

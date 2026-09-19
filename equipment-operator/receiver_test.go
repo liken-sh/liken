@@ -132,7 +132,7 @@ func TestCRDSchema(t *testing.T) {
 
 	t.Run("the status holds what the operator reads back", func(t *testing.T) {
 		status := schema.Properties["status"]
-		for _, name := range []string{"power", "input", "volume", "volumeMax", "mute", "soundMode", "service", "conditions"} {
+		for _, name := range []string{"zones", "denon", "service", "conditions"} {
 			if _, held := status.Properties[name]; !held {
 				t.Errorf("status has no property %s", name)
 			}
@@ -150,9 +150,9 @@ func TestCRDPrinterColumns(t *testing.T) {
 	}
 
 	cases := []struct{ name, jsonPath string }{
-		{"Power", ".status.power"},
-		{"Input", ".status.input"},
-		{"Volume", ".status.volume"},
+		{"Power", ".status.zones.main.power"},
+		{"Input", ".status.zones.main.input"},
+		{"Volume", ".status.zones.main.volume"},
 		{"Reachable", `.status.conditions[?(@.type=="Reachable")].status`},
 	}
 	for _, c := range cases {
@@ -288,6 +288,45 @@ func TestCRDValidatesExamples(t *testing.T) {
 				"denon":  map[string]any{"address": "receiver.example"},
 				"volume": map[string]any{"max": 75.0, "step": 0.5},
 			}),
+		},
+		{
+			name: "an input that names the sound mode it selects",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"inputs": []any{
+					map[string]any{"name": "MPLAY", "machine": "node-1", "monitor": "hdmi-a-1", "soundMode": "MULTI CH IN"},
+				},
+				"session": map[string]any{
+					"player":      "house/theater",
+					"input":       "MPLAY",
+					"volumeTopic": "liken/media/house/theater/volume",
+				},
+			}),
+		},
+		{
+			name: "a session that names an input the wiring does not declare",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"inputs": []any{
+					map[string]any{"name": "MPLAY", "machine": "node-1", "monitor": "hdmi-a-1"},
+				},
+				"session": map[string]any{
+					"player":      "house/theater",
+					"input":       "GAME",
+					"volumeTopic": "liken/media/house/theater/volume",
+				},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "a volume ceiling above the receiver's own scale",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 120.0},
+			}),
+			wantErr: true,
 		},
 		{
 			name: "a volume block that states only a ceiling",

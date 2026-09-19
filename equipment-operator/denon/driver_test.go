@@ -51,18 +51,24 @@ func TestProtocolStatusIsTheDriversOwnSnapshot(t *testing.T) {
 	if len(raw) == 0 {
 		t.Fatal("the protocol snapshot is empty")
 	}
-	var snapshot map[string]any
+	var snapshot struct {
+		System struct {
+			Power string `json:"power"`
+		} `json:"system"`
+		Tone struct {
+			Bass int `json:"bass"`
+		} `json:"tone"`
+	}
 	mustSucceed(t, json.Unmarshal(raw, &snapshot))
-	mustMatch(t, snapshot["power"], "standby")
-	mustMatch(t, snapshot["input"], "MPLAY")
-	mustMatch(t, snapshot["soundMode"], "MULTI CH IN")
+	mustMatch(t, snapshot.System.Power, "standby")
+	mustMatch(t, snapshot.Tone.Bass, 0)
 }
 
 // Every setter reaches the wire. The zone argument is main for now, and
 // the receiver's own command is what the fake reads back.
 func TestTheSettersSendEveryCommand(t *testing.T) {
 	harness := startHarness(t)
-	harness.receiver.waitForCommands(t, "MS?")
+	drainQueries(t, harness)
 
 	cases := []struct {
 		name string
@@ -106,4 +112,22 @@ func TestACommandReportsItsOutcomeToTheWiredReporter(t *testing.T) {
 
 	mustMatch(t, len(statuses), 1)
 	mustMatch(t, statuses[0], CommandFailed)
+}
+
+// A second zone appears in the equipment state only once the receiver
+// has named it.
+func TestStateCarriesASecondZoneOnceTheReceiverNamesIt(t *testing.T) {
+	client := NewClient("192.0.2.1", nil)
+	client.fold("Z2ON")
+	client.fold("Z290")
+
+	state := client.State()
+	zone, held := state.Zone("zone2")
+	mustMatch(t, held, true)
+	mustMatch(t, zone.Power, equipment.PowerOn)
+	mustMatch(t, zone.Volume, 180)
+
+	if _, held := state.Zone("zone3"); held {
+		t.Error("a third zone the receiver never named is held")
+	}
 }

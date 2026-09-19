@@ -25,13 +25,13 @@ spec:
       additionalPrinterColumns:
         - name: Power
           type: string
-          jsonPath: .status.power
+          jsonPath: .status.zones.main.power
         - name: Input
           type: string
-          jsonPath: .status.input
+          jsonPath: .status.zones.main.input
         - name: Volume
           type: string
-          jsonPath: .status.volume
+          jsonPath: .status.zones.main.volume
         - name: Reachable
           type: string
           jsonPath: .status.conditions[?(@.type=="Reachable")].status
@@ -58,6 +58,11 @@ spec:
                 # ceiling the owner states.
                 - rule: "!has(self.denon) || (has(self.volume) && has(self.volume.max))"
                   message: "a Denon receiver states spec.volume.max"
+                # An input name is how a session asks for an input, so a
+                # session that names an input the wiring does not declare
+                # would select nothing.
+                - rule: "!has(self.session) || (has(self.inputs) && self.inputs.exists(input, input.name == self.session.input))"
+                  message: "a session names an input the wiring declares"
               properties:
                 denon:
                   type: object
@@ -83,6 +88,7 @@ spec:
                   properties:
                     max:
                       type: number
+                      maximum: 98
                       description: "The loudest a press may drive this receiver, in its own scale. A Denon counts 0 to 98 and this is capped there. 100 on the bus means this value. A hand on the receiver's own remote can still go past it."
                     step:
                       type: number
@@ -118,6 +124,10 @@ spec:
                         minLength: 1
                         maxLength: 253
                         description: "The monitor id the display and audio operators publish for this cable, such as don-0070-denon-avr. It is the check that the wire is really there."
+                      soundMode:
+                        type: string
+                        maxLength: 63
+                        description: "The sound mode the receiver selects with this input, when present. The session selects it in the same one-shot that selects the input, so a Play brings the picture and the mode together."
                 session:
                   type: object
                   required: [player, input, volumeTopic]
@@ -147,26 +157,39 @@ spec:
                       description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
             status:
               type: object
-              description: "What the receiver last said, in its own units. Only the operator writes it."
+              description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."
               properties:
-                power:
-                  type: string
-                  description: "The power state the receiver last reported: on or standby."
-                input:
-                  type: string
-                  description: "The input the receiver last reported as selected, whether liken selected it or a person did."
-                volume:
-                  type: string
-                  description: "The master volume the receiver last reported, in its own scale. A Denon counts 0 to 98 in half steps."
-                volumeMax:
-                  type: string
-                  description: "The last MVMAX line the receiver sent, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume."
-                mute:
-                  type: boolean
-                  description: "Whether the receiver last reported itself muted."
-                soundMode:
-                  type: string
-                  description: "The sound mode the receiver last reported, such as MULTI CH IN or STEREO."
+                zones:
+                  type: object
+                  description: "One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main."
+                  additionalProperties:
+                    type: object
+                    properties:
+                      power:
+                        type: string
+                        description: "The power state the zone last reported: on, standby, or off."
+                      input:
+                        type: string
+                        description: "The input the zone last reported as selected, whether liken selected it or a person did."
+                      soundMode:
+                        type: string
+                        description: "The sound mode the zone last reported, such as STEREO or MULTI CH IN."
+                      mute:
+                        type: boolean
+                        description: "Whether the zone last reported itself muted."
+                      volume:
+                        type: string
+                        description: "The zone's volume in the receiver's own scale. A Denon counts 0 to 98 in half steps."
+                      volumeMax:
+                        type: string
+                        description: "The last volume limit the receiver sent for this zone, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume."
+                      sleep:
+                        type: integer
+                        description: "Minutes until the zone sleeps, and zero when no sleep timer stands."
+                denon:
+                  type: object
+                  description: "The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it."
+                  x-kubernetes-preserve-unknown-fields: true
                 service:
                   type: string
                   description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."

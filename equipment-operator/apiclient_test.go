@@ -107,7 +107,7 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 					VolumeTopic: "liken/media/house/theater/volume",
 				},
 			},
-			Status: ReceiverStatus{Power: "On", Input: "MPLAY", Volume: "-30.5"},
+			Status: ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On", Input: "MPLAY", Volume: "-30.5"}}},
 		},
 	}}
 
@@ -116,7 +116,7 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 
 	mustMatch(t, receiver.Metadata.ResourceVersion, "12")
 	mustMatch(t, receiver.Spec.Session.Player, "house/theater")
-	mustMatch(t, receiver.Status.Volume, "-30.5")
+	mustMatch(t, receiver.Status.Zones["main"].Volume, "-30.5")
 	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
 }
 
@@ -156,13 +156,11 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater/status": Receiver{
 			Metadata: ObjectMeta{Name: "theater"},
-			Status:   ReceiverStatus{Power: "On"},
+			Status:   ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On"}}},
 		},
 	}}
 	status := ReceiverStatus{
-		Power:  "On",
-		Input:  "MPLAY",
-		Volume: "-30.5",
+		Zones: map[string]ZoneStatus{"main": {Power: "On", Input: "MPLAY", Volume: "-30.5"}},
 		Conditions: []Condition{{
 			Type:               "Reachable",
 			Status:             ConditionTrue,
@@ -173,7 +171,7 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 
 	written, err := ApplyReceiverStatus(testAPIClient(t, api.handler()), "theater", status)
 	mustSucceed(t, err)
-	mustMatch(t, written.Status.Power, "On")
+	mustMatch(t, written.Status.Zones["main"].Power, "On")
 
 	if len(api.requests) != 1 {
 		t.Fatalf("requests = %+v", api.requests)

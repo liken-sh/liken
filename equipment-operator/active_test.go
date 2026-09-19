@@ -8,6 +8,7 @@ package main
 import (
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
+	"slices"
 	"testing"
 	"time"
 )
@@ -212,9 +213,25 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 	h.waitUntil(t, func(state equipment.State) bool {
 		return mainZone(state).Power != "" && mainZone(state).VolumeMax != equipment.Unknown
 	})
+	h.equipment.waitForCommands(t, denon.Queries[len(denon.Queries)-1])
 
 	h.begin(t, "GAME")
 
 	h.equipment.waitForCommands(t, "SIGAME")
 	requireSeries(t, scrape(t, readings), `equipment_commands_total{status="timeout"} 1`)
+}
+
+// An input may name the sound mode it wants, and the session selects it
+// in the same one-shot that selects the input.
+func TestAnInputsSoundModeIsSelectedWithTheInput(t *testing.T) {
+	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+	h.powerOn(t)
+	h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
+
+	h.begin(t, "GAME")
+
+	sent := h.equipment.waitForCommands(t, "MSMULTI CH IN")
+	if !slices.Contains(sent, "SIGAME") {
+		t.Fatalf("the input was not selected before the mode: %v", sent)
+	}
 }

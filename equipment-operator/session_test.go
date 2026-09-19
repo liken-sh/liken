@@ -60,11 +60,12 @@ func (h *sessionHolder) set(started *session) {
 // sessionHarness is a running connection to a fake receiver and a fake
 // broker, ready for a session.
 type sessionHarness struct {
-	equipment *fakeDenon
-	brokers   *fakeBrokerServer
-	denon     *denon.Client
-	holder    *sessionHolder
-	readings  *metrics
+	equipment  *fakeDenon
+	brokers    *fakeBrokerServer
+	denon      *denon.Client
+	holder     *sessionHolder
+	readings   *metrics
+	soundModes map[string]string
 
 	rules sync.Mutex
 	rule  ReceiverVolume
@@ -82,6 +83,12 @@ func (h *sessionHarness) volumeRule() ReceiverVolume {
 	h.rules.Lock()
 	defer h.rules.Unlock()
 	return h.rule
+}
+
+// inputSoundMode answers the sound mode an input names, which a test
+// states before the session starts.
+func (h *sessionHarness) inputSoundMode(input string) string {
+	return h.soundModes[input]
 }
 
 func newSessionHarness(t *testing.T) *sessionHarness {
@@ -103,6 +110,9 @@ func newSessionHarnessWith(t *testing.T, rule ReceiverVolume) *sessionHarness {
 	h.waitUntil(t, func(state equipment.State) bool {
 		return mainZone(state).Power != "" && mainZone(state).VolumeMax != equipment.Unknown
 	})
+	// The connect queries keep arriving behind the volume, so the
+	// harness reads to the last of them before a test sends its own.
+	h.equipment.waitForCommands(t, denon.Queries[len(denon.Queries)-1])
 	return h
 }
 
@@ -148,7 +158,7 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.brokers.address(), h.volumeRule)
+	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.brokers.address(), h.volumeRule, h.inputSoundMode)
 	h.holder.set(started)
 	return started
 }
@@ -283,7 +293,7 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
 	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, listener.Addr().String(),
-		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} })
+		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil)
 
 	will := connectWill(t, waitForFrame(t, frames))
 	mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))

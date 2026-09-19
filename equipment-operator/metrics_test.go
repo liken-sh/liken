@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 	"io"
@@ -359,14 +360,15 @@ func TestCommandsCountByOutcome(t *testing.T) {
 	})
 
 	receiver.waitForCommand(t)
+	wanted := fmt.Sprintf(`equipment_commands_total{status="ok"} %d`, len(denon.Queries))
 	deadline := time.After(testTimeout)
 	for {
-		if slices.Contains(series(scrape(t, m), "equipment_commands_total"), `equipment_commands_total{status="ok"} 5`) {
+		if slices.Contains(series(scrape(t, m), "equipment_commands_total"), wanted) {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("the five queries never counted ok: %q", series(scrape(t, m), "equipment_commands_total"))
+			t.Fatalf("the connect queries never counted ok: %q", series(scrape(t, m), "equipment_commands_total"))
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

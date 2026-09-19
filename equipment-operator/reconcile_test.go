@@ -211,14 +211,14 @@ func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 
 	status := api.waitForStatus(t, func(status ReceiverStatus) bool {
-		return connected(status) && status.SoundMode != ""
+		return connected(status) && status.Zones["main"].SoundMode != ""
 	})
-	mustMatch(t, status.Power, "standby")
-	mustMatch(t, status.Input, "MPLAY")
-	mustMatch(t, status.Volume, "50")
-	mustMatch(t, status.VolumeMax, "69.5")
-	mustMatch(t, status.Mute, false)
-	mustMatch(t, status.SoundMode, "MULTI CH IN")
+	mustMatch(t, status.Zones["main"].Power, "standby")
+	mustMatch(t, status.Zones["main"].Input, "MPLAY")
+	mustMatch(t, status.Zones["main"].Volume, "50")
+	mustMatch(t, status.Zones["main"].VolumeMax, "69.5")
+	mustMatch(t, status.Zones["main"].Mute, false)
+	mustMatch(t, status.Zones["main"].SoundMode, "MULTI CH IN")
 	mustMatch(t, status.Service, "")
 	mustMatch(t, status.Conditions[0].Reason, reasonConnected)
 	mustMatch(t, status.Conditions[0].ObservedGeneration, int64(4))
@@ -235,7 +235,7 @@ func TestTheConnectBurstMakesOneStatusWrite(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 
 	api.waitForStatus(t, func(status ReceiverStatus) bool {
-		return connected(status) && status.SoundMode != ""
+		return connected(status) && status.Zones["main"].SoundMode != ""
 	})
 	mustMatch(t, api.writeCount(), 1)
 }
@@ -253,7 +253,7 @@ func TestABurstOfKnobTurnsMakesOneStatusWrite(t *testing.T) {
 	equipment.turnKnob(120)
 	equipment.turnKnob(130)
 
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.Volume == "65" })
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.Zones["main"].Volume == "65" })
 	mustMatch(t, api.writeCount(), before+1)
 }
 
@@ -412,7 +412,7 @@ func TestARefusedStatusWriteIsTriedAgain(t *testing.T) {
 	api.breakTheStatus(false)
 	equipment.turnKnob(120)
 
-	mustMatch(t, api.waitForStatus(t, connected).Volume, "60")
+	mustMatch(t, api.waitForStatus(t, connected).Zones["main"].Volume, "60")
 }
 
 // serve reads the collection once before it runs, and answers the error
@@ -583,4 +583,17 @@ func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 	mustMatch(t, heldSession(t, operator, "theater"), before)
 	broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
 	mustMatch(t, len(brokers.sessions), 0)
+}
+
+// The sound-mode lookup reads the declared inputs and answers nothing
+// for an input the wiring does not name.
+func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
+	unit := &receiverUnit{}
+	unit.setInputs([]ReceiverInput{{Name: "MPLAY", SoundMode: "STEREO"}})
+
+	mustMatch(t, unit.inputSoundMode("MPLAY"), "STEREO")
+	mustMatch(t, unit.inputSoundMode("GAME"), "")
+
+	empty := &receiverUnit{}
+	mustMatch(t, empty.inputSoundMode("MPLAY"), "")
 }

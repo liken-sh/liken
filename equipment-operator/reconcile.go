@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,9 @@ type receiverUnit struct {
 	// The ceiling and the step live here and not on the session, so an
 	// edit to them reaches a standing session with no restart.
 	volume atomic.Pointer[ReceiverVolume]
+	// The declared inputs live here for the same reason: the sound mode
+	// an input names is read when the session selects it.
+	inputs atomic.Pointer[[]ReceiverInput]
 
 	mutex   sync.Mutex
 	session *session
@@ -96,7 +100,7 @@ func (u *receiverUnit) write() {
 	// what a person reads in status.
 	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
 
-	status := buildReceiverStatus(state, u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
+	status := buildReceiverStatus(state, u.driver.ProtocolStatus(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}
@@ -133,7 +137,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		u.readings.setClaimed(u.name, false)
 		return
 	}
-	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.busAddress, u.volumeRule)
+	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.busAddress, u.volumeRule, u.inputSoundMode)
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
@@ -157,6 +161,28 @@ func (u *receiverUnit) volumeRule() ReceiverVolume {
 		return *held
 	}
 	return ReceiverVolume{}
+}
+
+// setInputs records the declared inputs and the sound mode each names,
+// which a later input selection reads.
+func (u *receiverUnit) setInputs(inputs []ReceiverInput) {
+	held := slices.Clone(inputs)
+	u.inputs.Store(&held)
+}
+
+// inputSoundMode answers the sound mode one declared input names, and
+// an empty string when it names none.
+func (u *receiverUnit) inputSoundMode(input string) string {
+	held := u.inputs.Load()
+	if held == nil {
+		return ""
+	}
+	for _, one := range *held {
+		if one.Name == input {
+			return one.SoundMode
+		}
+	}
+	return ""
 }
 
 // stop lifts the session and closes the connection, which is what a
@@ -253,6 +279,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	}
 	unit.generation.Store(receiver.Metadata.Generation)
 	unit.setVolume(receiver.Spec.Volume)
+	unit.setInputs(receiver.Spec.Inputs)
 	unit.setSession(ctx, receiver.Spec.Session)
 }
 

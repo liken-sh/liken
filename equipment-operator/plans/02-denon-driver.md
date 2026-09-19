@@ -162,10 +162,6 @@ status:
       FR: 0
       C: 0
       SW: 0
-    capabilities:
-      zones: ["main", "zone2"]
-      inputs: ["PHONO", "CD", "TUNER", "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "AUX1", "AUX2", "NET"]
-      soundModes: ["STEREO", "MULTI CH IN"]
   conditions:
     - type: Reachable
       status: "True"
@@ -173,6 +169,10 @@ status:
 
 The tone and channel numbers are in display units, so `50` from the
 wire reads as `0`. A value the receiver has not sent is absent.
+
+`status.denon` is the driver's own shape and the schema does not type
+it field by field, because a second protocol reports a different shape
+under its own name. The driver's tests pin it.
 
 ### The queries
 
@@ -186,11 +186,10 @@ query set is a union and not a requirement.
 ### The model's own inputs and modes
 
 The operator cannot discover which machine feeds which input, and
-that stays in `spec.inputs`. It can read the input names and the
-sound modes the receiver offers, from `OPINF` and the `SI` and `MS`
-replies, and report them in `status.denon.capabilities`. Nothing
-matches on them yet. They are the check that a session's declared
-input is one the receiver has.
+that stays in `spec.inputs`. Reading the input names and the sound
+modes a model offers, from `OPINF` and the `SI` and `MS` replies, is
+an open problem: the `OPINF` bitmaps name capabilities by position
+rather than by name, and no liken workflow matches on them yet.
 
 ### Control
 
@@ -228,13 +227,17 @@ and no code.
 
 ## Proof
 
-Failing tests first. The transcripts fold into the expected state,
-the session selects the input and the mode in one go, and the status
-carries both zones and the settings. The drill runs on 44stonypoint,
-the house cluster, where the receiver is reachable: apply the
-operator, read `kubectl get receiver living-room-denon -o yaml`, and
-change a setting at the receiver's own remote and watch the status
-follow.
+Failing tests first. The transcript folds into the expected state, the
+session selects the input and the mode in one go, and the status
+carries both zones and the settings.
+
+The drill runs on 44stonypoint, the house cluster, where the receiver
+is reachable. The cluster's Flux pins this repository at a release tag
+and applies `deploy/`, and its `ImageUpdateAutomation` advances the pin
+when a release is tagged, so a drill is a merge, a tag, and a read:
+`kubectl get receiver living-room-denon -o yaml` shows both zones and
+the `status.denon` settings. A change made at the receiver's own remote
+must then move the status.
 
 ## What this leaves for later
 

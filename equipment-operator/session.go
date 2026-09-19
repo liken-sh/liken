@@ -70,6 +70,9 @@ type session struct {
 	// scale is read on every press and never held, so a spec edit reaches
 	// a standing session with no restart.
 	scale func() ReceiverVolume
+	// inputSoundMode answers the sound mode a declared input names, read
+	// when the session selects it.
+	inputSoundMode func(input string) string
 
 	mutex      sync.Mutex
 	latest     volumeState
@@ -89,20 +92,24 @@ type session struct {
 // Power and input go out once for a session that starts with either
 // flag on, and once only when both are on at the start. A session that
 // starts with both off owns the level and sends the equipment nothing.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, busAddress string, scale func() ReceiverVolume) *session {
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string) *session {
 	ctx, cancel := context.WithCancel(ctx)
+	if inputSoundMode == nil {
+		inputSoundMode = func(string) string { return "" }
+	}
 	s := &session{
-		receiver:  receiver,
-		spec:      spec.withoutFlags(),
-		driver:    driver,
-		readings:  readings,
-		ctx:       ctx,
-		cancel:    cancel,
-		scale:     scale,
-		powered:   make(chan struct{}),
-		reached:   make(chan struct{}),
-		complete:  make(chan struct{}),
-		connected: make(chan struct{}),
+		receiver:       receiver,
+		spec:           spec.withoutFlags(),
+		driver:         driver,
+		readings:       readings,
+		ctx:            ctx,
+		cancel:         cancel,
+		scale:          scale,
+		inputSoundMode: inputSoundMode,
+		powered:        make(chan struct{}),
+		reached:        make(chan struct{}),
+		complete:       make(chan struct{}),
+		connected:      make(chan struct{}),
 	}
 	s.mark(driver.State())
 
@@ -421,4 +428,7 @@ func (s *session) selectInput(ctx context.Context) {
 		return
 	}
 	s.driver.SetInput(equipment.MainZone, s.spec.Input)
+	if mode := s.inputSoundMode(s.spec.Input); mode != "" {
+		s.driver.SetSoundMode(equipment.MainZone, mode)
+	}
 }
