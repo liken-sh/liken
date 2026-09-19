@@ -1,6 +1,7 @@
-# The operator's identity in the cluster, and deliberately nothing
-# more. It reads every Receiver and writes each one's status, and it
-# holds no other grant.
+# The operator's identity in the cluster, and deliberately little
+# more. It reads every Receiver, writes each one's status, and owns
+# one spec field, power, which it flips when the room's remote toggles
+# the equipment.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -14,14 +15,17 @@ metadata:
   name: equipment-operator
 rules:
   # The receivers. The watch is the wake signal; every pass re-reads
-  # with a list. No create and no delete: a person declares a
-  # Receiver, and this operator only reads one.
+  # with a list. patch lets this operator own spec.power through
+  # server-side apply, whose body states that one field and nothing
+  # else. No create and no delete: a person declares a Receiver, and
+  # this operator only reads one.
   - apiGroups: [equipment.liken.sh]
     resources: [receivers]
-    verbs: [get, list, watch]
-  # Only the status half. The API server's subresource split is what
-  # keeps this operator from ever rewriting a spec a person declared.
-  # patch is the verb server-side apply uses.
+    verbs: [get, list, watch, patch]
+  # The status half, written with its own patch. The API server's
+  # subresource split keeps the status write out of the spec, and the
+  # operator's apply body states spec.power alone, so no other declared
+  # spec field is ever in an apply.
   - apiGroups: [equipment.liken.sh]
     resources: [receivers/status]
     verbs: [get, patch, update]
