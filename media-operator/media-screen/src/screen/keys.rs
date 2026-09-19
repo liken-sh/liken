@@ -28,6 +28,13 @@ pub const MUTE: &str = "KEY_MUTE";
 /// [`super::Screen::sleep`].
 pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
 
+/// The three power synonyms. A shell sends whichever one it was built
+/// with, so a client reads all three. A unit whose screen is wired
+/// through a Receiver answers a power press itself as a toggle on the
+/// bus; a unit that is not forwards the key, and the client's shade
+/// stands as it did.
+pub const POWER: [&str; 3] = ["KEY_POWER", "KEY_SLEEP", "KEY_POWER2"];
+
 /// The key name a home ask reaches the client under. The playback pod
 /// publishes the ask on the `Player`'s commands topic during a film, and
 /// this crate turns it into a press, so a client binds one name for home
@@ -44,6 +51,11 @@ pub fn owned(key: &str) -> bool {
 /// Whether one kernel key name is a back synonym.
 pub fn back(key: &str) -> bool {
     BACK.contains(&key)
+}
+
+/// Whether one kernel key name is a power synonym.
+pub fn power(key: &str) -> bool {
+    POWER.contains(&key)
 }
 
 /// What one press means for the level, and nothing for a key that names no
@@ -101,6 +113,16 @@ mod tests {
             assert!(!owned(key));
         }
         assert!(!back("KEY_UP"));
+    }
+
+    #[test]
+    fn the_three_power_synonyms_are_none_of_the_crates_own() {
+        for key in POWER {
+            assert!(power(key));
+            assert!(!owned(key));
+        }
+        assert!(!power("KEY_UP"));
+        assert!(!power("KEY_BACK"));
     }
 
     #[test]

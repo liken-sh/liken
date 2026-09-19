@@ -237,6 +237,7 @@ func TestAnIdleUnitReportsItsReceiverAndHoldsAnIdleSession(t *testing.T) {
 		Input:       "GAME",
 		Awake:       true,
 		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
 	})
 }
 
@@ -250,6 +251,46 @@ func TestAUnitWiredToNoReceiverReportsNoBlock(t *testing.T) {
 
 	if status := cluster.players["theater"].Status.Receiver; status != nil {
 		t.Errorf("the status named receiver %+v", status)
+	}
+}
+
+// The idle bus carries the power topic only when the unit's screen is
+// wired through a Receiver, and the session carries the same topic. That
+// is the gate a client reads: no topic, and a power press keeps the shade
+// exactly as it has it today.
+func TestTheIdleBusCarriesThePowerTopicOnlyWithAReceiver(t *testing.T) {
+	cases := []struct {
+		name    string
+		cluster func() *fakeCluster
+		session bool
+		want    string
+	}{
+		{
+			name:    "a unit wired through a receiver",
+			cluster: receiverCluster,
+			session: true,
+			want:    playerPowerTopic(defaultTopicBase, "house", "theater"),
+		},
+		{name: "a unit straight into a panel", cluster: screenCluster},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := each.cluster()
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+			media.idleDisplayClass = "display-draw"
+
+			runPlayers(media, []Player{*housePlayer()}, nil)
+
+			bus := cluster.players["theater"].Status.Idle.Bus
+			if bus.PowerTopic != each.want {
+				t.Errorf("powerTopic = %q, want %q", bus.PowerTopic, each.want)
+			}
+			if each.session && len(cluster.sessions) == 1 &&
+				cluster.sessions[0].session.PowerTopic != each.want {
+				t.Errorf("session powerTopic = %q, want %q",
+					cluster.sessions[0].session.PowerTopic, each.want)
+			}
+		})
 	}
 }
 
@@ -287,6 +328,7 @@ func TestAStandingPlayHoldsOneSessionOnTheReceiver(t *testing.T) {
 		Active:      true,
 		Awake:       true,
 		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
 	})
 	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
 }
@@ -357,6 +399,7 @@ func TestThePanelDesireMovesTheAwakeFlag(t *testing.T) {
 				Input:       "GAME",
 				Awake:       each.want,
 				VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+				PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
 			})
 		})
 	}

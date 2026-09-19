@@ -69,13 +69,13 @@ func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 		pod  *Pod
 	}{
 		{"the idle image", base, buildIdlePod(player, claim, testBusAddress,
-			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"), nil)},
+			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"), nil, "")},
 		{"the timezone", base, plainIdlePod(player, claim, testBusAddress, testTopicBase, "Europe/Berlin")},
 		{"the fade policy", base, buildIdlePod(player, claim, testBusAddress,
-			testTopicBase, "America/New_York", resolveIdle(fadeAfter(60), nil, testIdleImage), nil)},
+			testTopicBase, "America/New_York", resolveIdle(fadeAfter(60), nil, testIdleImage), nil, "")},
 		{"a remote", base, buildIdlePod(player, claim, testBusAddress,
 			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage),
-			[]idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}})},
+			[]idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}}, "")},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

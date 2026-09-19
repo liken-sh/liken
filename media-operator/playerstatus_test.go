@@ -486,7 +486,7 @@ func TestDeriveIdleStatus(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			got := deriveIdleStatus(one.player, one.controller, testBusAddress, testTopicBase,
 				one.claim, resolveIdle(nil, nil, testIdleImage),
-				gatherIdleRemotes(one.player, testTopicBase))
+				gatherIdleRemotes(one.player, testTopicBase), false)
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("idle = %+v, want %+v", got, one.want)
 			}
@@ -565,7 +565,7 @@ func TestTheIdleBusCarriesTheOwnerTopicWithTheLevelTopic(t *testing.T) {
 
 			got := deriveIdleStatus(player, idleControllerOwn, testBusAddress, testTopicBase,
 				buildIdleClaim(player, "display-draw"), resolveIdle(nil, nil, testIdleImage),
-				gatherIdleRemotes(player, testTopicBase))
+				gatherIdleRemotes(player, testTopicBase), false)
 
 			mustMatch(t, got.Bus.VolumeTopic, each.wantVolume)
 			mustMatch(t, got.Bus.VolumeOwnerTopic, each.wantOwner)
@@ -583,7 +583,7 @@ func TestDeriveIdleStatusCarriesTheLevelAndTheRemotes(t *testing.T) {
 
 	got := deriveIdleStatus(player, idleControllerOwn, testBusAddress, testTopicBase,
 		buildIdleClaim(player, "display-draw"), resolveIdle(nil, nil, testIdleImage),
-		gatherIdleRemotes(player, testTopicBase))
+		gatherIdleRemotes(player, testTopicBase), false)
 
 	mustMatch(t, got.Bus.VolumeTopic, playerVolumeTopic(testTopicBase, "house", "theater"))
 	want := []PlayerIdleRemote{

@@ -35,6 +35,12 @@ const PLAY_NEXT: &str = "play-next";
 /// `Play` ends.
 const HOME: &str = "home";
 
+/// The toggle a power press on a unit whose screen is wired through a
+/// Receiver publishes on the power topic, not retained, because a
+/// toggle is an event and not a state. The equipment operator answers
+/// it by flipping the receiver's power and selecting the input.
+const POWER_TOGGLE: &[u8] = br#"{"action":"toggle"}"#;
+
 /// One thing the client draws.
 ///
 /// Each one is a fact the screen shows or a moment it moves on, and
@@ -148,6 +154,9 @@ pub struct Screen {
     volume_owner_topic: Option<String>,
     commands_topic: String,
     panel_topic: String,
+    /// The topic a power press publishes a toggle on. Empty is the receiver
+    /// gate: the key forwards and the client keeps its shade.
+    power_topic: String,
     /// The unit's controllers, in `spec.remotes` order, so a controller's
     /// index in this list is the index a focus moment carries.
     remotes: Vec<Remote>,
@@ -203,6 +212,7 @@ impl Screen {
             volume_owner_topic: wiring.volume_owner_topic.clone(),
             commands_topic: wiring.commands_topic.clone(),
             panel_topic: wiring.panel_topic.clone(),
+            power_topic: wiring.power_topic.clone(),
             marks: vec![Mark::default(); wiring.remotes.len()],
             remotes: wiring.remotes.clone(),
             client_topics: Vec::new(),
@@ -427,10 +437,13 @@ impl Screen {
     }
 
     /// Fold one key event. The checks run in this order. The cycle key
-    /// asks the operator to move the mark and does nothing else. A
-    /// sleeping screen wakes on any other press, so a person gets the
-    /// screen back with whatever control they touched, and that press
-    /// does nothing else. A level key, while the unit plays nothing,
+    /// asks the operator to move the mark and does nothing else. A power
+    /// key, on a unit whose screen is wired through a Receiver, reaches the
+    /// equipment and never the client: it publishes the toggle, and it
+    /// wakes a screen that had gone dark so the room lights with the
+    /// equipment. A sleeping screen wakes on any other press, so a person
+    /// gets the screen back with whatever control they touched, and that
+    /// press does nothing else. A level key, while the unit plays nothing,
     /// publishes the unit's next level. Every other key, while the unit
     /// plays nothing, reaches the client. Every press restarts the quiet
     /// window.
@@ -453,6 +466,27 @@ impl Screen {
         let mut publish = None;
         if self.idle && press.down() && press.key == keys::CYCLE {
             publish = self.cycle(index);
+        } else if self.idle && keys::power(&press.key) && !self.power_topic.is_empty() {
+            // A room with a receiver answers the power key itself, so the
+            // key never reaches the client and the shade never operates:
+            // power turns the equipment, and nothing else. The press
+            // publishes the toggle, and a screen that had gone dark wakes
+            // on the same press so the room lights as the equipment turns
+            // on. A held key that repeated would flip the equipment on and
+            // off under the hand, so only the press publishes. A unit with
+            // no receiver falls through to the ordinary rules below, and
+            // the client keeps its shade.
+            if self.asleep {
+                self.asleep = false;
+                moment = Some(Moment::Wake);
+            }
+            if press.down() {
+                publish = Some(Publish {
+                    topic: self.power_topic.clone(),
+                    payload: POWER_TOGGLE.to_vec(),
+                    retained: false,
+                });
+            }
         } else if self.asleep {
             self.asleep = false;
             moment = Some(Moment::Wake);

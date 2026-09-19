@@ -988,7 +988,8 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
-			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase))
+			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase),
+			desired.Receiver != nil)
 		o.seedVolume(player, key)
 		// The retained status is what says the film is over, and the idle
 		// screen client draws its return from it. The client subscribes to

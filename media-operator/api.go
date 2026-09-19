@@ -246,6 +246,12 @@ type PlayerIdleBus struct {
 	// applies none.
 	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
 
+	// PowerTopic is the topic a power press on this unit publishes a
+	// toggle on, present only when the unit's screen is wired through a
+	// Receiver. A unit with none carries no topic, and its client keeps
+	// the shade on a power press exactly as it has it today.
+	PowerTopic string `json:"powerTopic,omitempty"`
+
 	CommandsTopic string             `json:"commandsTopic"`
 	PanelTopic    string             `json:"panelTopic"`
 	Remotes       []PlayerIdleRemote `json:"remotes,omitempty"`

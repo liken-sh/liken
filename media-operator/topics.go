@@ -251,6 +251,15 @@ func playerPanelTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPanelKind
 }
 
+// playerPowerTopic carries the toggle a power press on a unit whose
+// screen is wired through a Receiver publishes, not retained, because a
+// toggle is an event and not a state. The equipment operator reads it
+// and flips the receiver's power. It is the same string the session it
+// applies carries, so the equipment and the idle client answer one key.
+func playerPowerTopic(base, namespace, name string) string {
+	return base + "/players/" + namespace + "/" + name + "/power"
+}
+
 // playerPanelFilter is the operator's one subscription that reaches
 // every unit's panel topic.
 func playerPanelFilter(base string) string {

@@ -73,6 +73,7 @@ type ReceiverSession struct {
 	Active      bool   `json:"active"`
 	Awake       bool   `json:"awake"`
 	VolumeTopic string `json:"volumeTopic,omitempty"`
+	PowerTopic  string `json:"powerTopic,omitempty"`
 }
 
 type ReceiverStatus struct {
@@ -246,6 +247,7 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 		Active:      active,
 		Awake:       awake,
 		VolumeTopic: playerVolumeTopic(o.topicBase, namespace, name),
+		PowerTopic:  playerPowerTopic(o.topicBase, namespace, name),
 	}
 	held, tracked := o.receiverSessions[key]
 	if tracked && held.receiver == receiver.Metadata.Name && held.session == session {

@@ -185,6 +185,7 @@ func (o *operator) publishPlayerStatuses(players []Player, plays []Play) {
 func deriveIdleStatus(
 	player *Player, controller, busAddress, topicBase string,
 	claim *ResourceClaim, idle resolvedIdle, remotes []idleRemoteTopics,
+	receiver bool,
 ) *PlayerIdleStatus {
 	if claim == nil {
 		return nil
@@ -205,6 +206,13 @@ func deriveIdleStatus(
 	// command sidecar. A unit with no sinks names neither topic.
 	if bus.VolumeTopic != "" {
 		bus.VolumeOwnerTopic = playerVolumeOwnerTopic(topicBase, namespace, name)
+	}
+	// A power press turns the equipment only when the unit's screen is
+	// wired through a Receiver, so the bus carries the power topic for
+	// such a unit and nothing for one that is not. That is the gate the
+	// client reads: no topic, and the power key keeps its shade.
+	if receiver {
+		bus.PowerTopic = playerPowerTopic(topicBase, namespace, name)
 	}
 	return &PlayerIdleStatus{
 		Controller:       controller,

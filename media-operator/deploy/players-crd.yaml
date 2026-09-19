@@ -624,6 +624,16 @@ spec:
                             API credentials, so the operator reads the
                             desire here and overrides the screen's
                             Display.
+                        powerTopic:
+                          type: string
+                          description: |-
+                            The topic a power press on this unit publishes
+                            a toggle on, present only when the unit's
+                            screen is wired through a Receiver. The
+                            equipment operator answers it by flipping the
+                            receiver's power. A unit with none carries no
+                            topic, and its client keeps the shade on a
+                            power press exactly as it has it today.
                         remotes:
                           type: array
                           x-kubernetes-list-type: atomic

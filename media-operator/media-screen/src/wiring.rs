@@ -57,6 +57,12 @@ pub const COMMANDS_TOPIC: &str = "MEDIA_PLAYER_COMMANDS_TOPIC";
 /// parses no topic.
 pub const PANEL_TOPIC: &str = "MEDIA_PLAYER_PANEL_TOPIC";
 
+/// The topic a power press on a unit whose screen is wired through a
+/// Receiver publishes a toggle on. The operator sets it only for such a
+/// unit, so an empty value is the receiver gate: a unit with none
+/// forwards the power key and the client keeps its shade.
+pub const POWER_TOPIC: &str = "MEDIA_PLAYER_POWER_TOPIC";
+
 /// The two lists of the unit's controllers, newline-joined and aligned by
 /// position: each controller's events topic and the focus topic that carries
 /// its mark. They are the same two variables the playback pod's command
@@ -95,6 +101,10 @@ pub struct Wiring {
     pub volume_owner_topic: Option<String>,
     pub commands_topic: String,
     pub panel_topic: String,
+    /// The topic a power press publishes a toggle on, present only when
+    /// the unit's screen is wired through a Receiver. Empty forwards the
+    /// key, so the client keeps the shade.
+    pub power_topic: String,
     /// The controllers in `spec.remotes` order.
     pub remotes: Vec<Remote>,
     /// The quiet window. Zero never arms the timer.
@@ -138,6 +148,7 @@ impl Wiring {
             volume_owner_topic,
             commands_topic: read(COMMANDS_TOPIC),
             panel_topic: read(PANEL_TOPIC),
+            power_topic: read(POWER_TOPIC),
             remotes: remotes(&read(REMOTE_EVENTS_TOPICS), &read(REMOTE_FOCUS_TOPICS)),
             fade_after,
             // A window of zero is the panel never going dark, whatever the
@@ -226,6 +237,7 @@ mod tests {
             (VOLUME_OWNER_TOPIC, "media/players/den/tv/volume/owner"),
             (COMMANDS_TOPIC, "media/players/den/tv/commands"),
             (PANEL_TOPIC, "media/players/den/tv/panel"),
+            (POWER_TOPIC, "media/players/den/tv/power"),
             (REMOTE_EVENTS_TOPICS, "events/sofa\nevents/armchair"),
             (REMOTE_FOCUS_TOPICS, "focus/sofa\nfocus/armchair"),
             (FADE_AFTER_SECONDS, "600"),
@@ -244,6 +256,7 @@ mod tests {
         );
         assert_eq!(read.commands_topic, "media/players/den/tv/commands");
         assert_eq!(read.panel_topic, "media/players/den/tv/panel");
+        assert_eq!(read.power_topic, "media/players/den/tv/power");
         assert_eq!(read.fade_after, Duration::from_secs(600));
         assert_eq!(read.off_after, Duration::from_secs(1800));
         assert_eq!(read.metrics_address, "0.0.0.0:9200");

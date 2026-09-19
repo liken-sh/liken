@@ -11,6 +11,7 @@ const VOLUME: &str = "liken/media/players/house/theater/volume";
 const VOLUME_OWNER: &str = "liken/media/players/house/theater/volume/owner";
 const COMMANDS: &str = "liken/media/players/house/theater/commands";
 const PANEL: &str = "liken/media/players/house/theater/panel";
+const POWER: &str = "liken/media/players/house/theater/power";
 const SOFA_EVENTS: &str = "liken/media/remotes/house/sofa/events";
 const SOFA_FOCUS: &str = "liken/media/remotes/house/sofa/focus";
 const ARMCHAIR_EVENTS: &str = "liken/media/remotes/house/armchair/events";
@@ -30,6 +31,16 @@ fn wiring() -> Wiring {
             focus: SOFA_FOCUS.into(),
         }],
         ..Wiring::default()
+    }
+}
+
+/// The same unit with its screen wired through a Receiver, so a power press
+/// publishes a toggle on the bus instead of reaching the client. A unit
+/// without one keeps the shade on a power press, the way it does today.
+fn powered() -> Wiring {
+    Wiring {
+        power_topic: POWER.into(),
+        ..wiring()
     }
 }
 
@@ -572,10 +583,121 @@ fn a_back_press_reaches_the_client_and_leaves_the_shade_up() {
     }
 }
 
+// The power press, for a unit whose screen is wired through a Receiver.
+
+#[test]
+fn a_power_press_publishes_the_toggle_and_reaches_no_client() {
+    let now = Instant::now();
+    for name in keys::POWER {
+        let mut screen = idling(&powered(), now);
+
+        let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
+
+        assert!(moments(effects.clone()).is_empty(), "{name}");
+        assert_eq!(
+            publishes(effects),
+            [Publish {
+                topic: POWER.into(),
+                payload: br#"{"action":"toggle"}"#.to_vec(),
+                retained: false,
+            }],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_power_repeat_publishes_no_toggle() {
+    let now = Instant::now();
+    let mut screen = idling(&powered(), now);
+
+    assert!(
+        screen
+            .deliver(SOFA_EVENTS, &key("KEY_POWER", 2), false, now)
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_power_press_on_a_unit_with_no_receiver_reaches_the_client() {
+    let now = Instant::now();
+    for name in keys::POWER {
+        let mut screen = idling(&wiring(), now);
+
+        assert_eq!(
+            moments(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now)),
+            [Moment::Press(name.into())],
+            "{name}"
+        );
+        assert!(publishes(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now)).is_empty());
+    }
+}
+
+#[test]
+fn a_power_press_on_a_sleeping_screen_wakes_it_and_publishes_the_toggle() {
+    let now = Instant::now();
+    for name in keys::POWER {
+        let mut screen = idling(&powered(), now);
+        screen.asleep = true;
+
+        let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
+
+        assert_eq!(moments(effects.clone()), [Moment::Wake], "{name}");
+        assert_eq!(
+            publishes(effects),
+            [Publish {
+                topic: POWER.into(),
+                payload: br#"{"action":"toggle"}"#.to_vec(),
+                retained: false,
+            }],
+            "{name}"
+        );
+        assert!(!screen.asleep, "{name}");
+    }
+}
+
+#[test]
+fn a_power_press_on_a_sleeping_unit_with_no_receiver_only_wakes_it() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+    screen.asleep = true;
+
+    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
+
+    assert_eq!(moments(effects.clone()), [Moment::Wake]);
+    assert!(publishes(effects).is_empty());
+}
+
+#[test]
+fn a_power_press_from_an_unfocused_controller_publishes_nothing() {
+    let now = Instant::now();
+    let mut screen = idling(&powered(), now);
+    screen.deliver(SOFA_FOCUS, b"cinema", true, now);
+
+    assert!(
+        screen
+            .deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now)
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_power_press_publishes_no_toggle_while_a_play_runs() {
+    let now = Instant::now();
+    let mut screen = focused(&powered());
+    screen.deliver(STATUS, &status("Playing"), true, now);
+
+    assert!(
+        screen
+            .deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now)
+            .is_empty()
+    );
+}
+
 #[test]
 fn a_press_on_a_sleeping_screen_only_wakes_it() {
     let now = Instant::now();
-    for name in ["KEY_UP", "KEY_A", "KEY_HOMEPAGE"] {
+    for name in ["KEY_UP", "KEY_A", "KEY_HOMEPAGE", "KEY_POWER"] {
         let mut screen = idling(&wiring(), now);
         screen.asleep = true;
 
