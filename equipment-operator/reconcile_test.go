@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
@@ -31,11 +34,13 @@ type fakeAPI struct {
 	client  *Client
 	written chan ReceiverStatus
 	watched chan string
+	powers  chan equipment.Power
 
 	mutex     sync.Mutex
 	list      ReceiverList
 	broken    bool
 	statuses  []ReceiverStatus
+	powersSet []equipment.Power
 	refusing  bool
 	events    []string
 	endStream bool
@@ -43,7 +48,7 @@ type fakeAPI struct {
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	api := &fakeAPI{written: make(chan ReceiverStatus, 64), watched: make(chan string, 8)}
+	api := &fakeAPI{written: make(chan ReceiverStatus, 64), watched: make(chan string, 8), powers: make(chan equipment.Power, 64)}
 	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
 	return api
 }
@@ -51,6 +56,10 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 func (a *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/status") {
 		a.recordStatus(w, r)
+		return
+	}
+	if r.Method == http.MethodPatch {
+		a.recordPower(w, r)
 		return
 	}
 	if r.Method == http.MethodGet && r.URL.Path == receiversPath {
@@ -128,6 +137,21 @@ func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
 	default:
 	}
 	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Status: applied.Status})
+}
+
+// recordPower answers the operator's apply on the main resource, which
+// owns spec.power, and records the value it settled on.
+func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
+	var applied receiverPowerApply
+	_ = json.NewDecoder(r.Body).Decode(&applied)
+	a.mutex.Lock()
+	a.powersSet = append(a.powersSet, applied.Spec.Power)
+	a.mutex.Unlock()
+	select {
+	case a.powers <- applied.Spec.Power:
+	default:
+	}
+	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Spec: applied.Spec})
 }
 
 func (a *fakeAPI) setReceivers(items ...Receiver) {
@@ -596,4 +620,35 @@ func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 
 	empty := &receiverUnit{}
 	mustMatch(t, empty.inputSoundMode("MPLAY"), "")
+}
+
+// A declarative spec.power change is applied once the receiver is
+// reachable, and a re-list with the same value sends nothing further:
+// the operator owns the field and never re-asserts it.
+func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.Power = equipment.PowerOn
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	// The first pass starts the driver, which connects asynchronously, so
+	// the change waits for a reachable receiver.
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+
+	// Once reachable, the change applies once.
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, denon.PowerOnCommand)
+	mustMatch(t, <-api.powers, equipment.PowerOn)
+
+	// A re-list with the same value sends nothing.
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+	select {
+	case power := <-api.powers:
+		t.Fatalf("the operator re-applied power %q", power)
+	case <-time.After(quietPeriod):
+	}
 }

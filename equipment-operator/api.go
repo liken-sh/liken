@@ -53,6 +53,11 @@ type ReceiverSpec struct {
 	Volume  *ReceiverVolume  `json:"volume,omitempty"`
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
+	// Power is the power state the operator should drive the receiver
+	// to. It is the operator's own field, applied once per change and
+	// never re-asserted, so a GitOps manifest that omits it leaves the
+	// receiver wherever the operator last put it.
+	Power equipment.Power `json:"power,omitempty"`
 }
 
 // How loud the room may get and how far one press moves it, both in the
@@ -90,6 +95,7 @@ type ReceiverSession struct {
 	Player      string `json:"player"`
 	Input       string `json:"input"`
 	VolumeTopic string `json:"volumeTopic"`
+	PowerTopic  string `json:"powerTopic,omitempty"`
 	Active      bool   `json:"active,omitempty"`
 	Awake       bool   `json:"awake,omitempty"`
 }

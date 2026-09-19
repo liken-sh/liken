@@ -149,12 +149,21 @@ spec:
                       minLength: 1
                       maxLength: 1024
                       description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
+                    powerTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it and flips the receiver's power on a {\"action\":\"toggle\"} message, updating spec.power to match. An absent topic subscribes the session to nothing."
                     active:
                       type: boolean
                       description: "Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false."
                     awake:
                       type: boolean
                       description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
+                power:
+                  type: string
+                  enum: ["on", "off", "standby"]
+                  description: "The power state the operator drives the receiver to. The operator owns this field: it applies it once per change and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it. A toggle from the session's power topic rewrites it. The Denon cannot tell standby from off, so both mean standby."
             status:
               type: object
               description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."

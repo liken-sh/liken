@@ -45,6 +45,9 @@ type receiverUnit struct {
 	// The declared inputs live here for the same reason: the sound mode
 	// an input names is read when the session selects it.
 	inputs atomic.Pointer[[]ReceiverInput]
+	// The last power the operator applied, so a reconcile and a toggle
+	// share one memory of what was sent and neither re-asserts it.
+	power atomic.Pointer[equipment.Power]
 
 	mutex   sync.Mutex
 	session *session
@@ -137,7 +140,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		u.readings.setClaimed(u.name, false)
 		return
 	}
-	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.busAddress, u.volumeRule, u.inputSoundMode)
+	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower)
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
@@ -183,6 +186,46 @@ func (u *receiverUnit) inputSoundMode(input string) string {
 		}
 	}
 	return ""
+}
+
+// setPower drives the receiver to the power a person declared. The
+// operator owns this field, so it sends one command and applies the
+// spec once per change, and never re-asserts while the value stands. A
+// command sent before the connection is open is dropped, so the change
+// waits for a reachable receiver rather than applying a value the
+// equipment never saw. A Denon cannot tell standby from off, so both
+// mean standby and the interface's two-way SetPower is enough; a
+// protocol that could would need a richer method. An empty value is no
+// declarative intent, and the receiver is left where it is.
+func (u *receiverUnit) setPower(power equipment.Power) {
+	if power == "" || u.powerApplied() == power {
+		return
+	}
+	if u.driver.State().Reachable != equipment.ConditionTrue {
+		return
+	}
+	u.driver.SetPower(equipment.MainZone, power != equipment.PowerStandby && power != equipment.PowerOff)
+	u.applyPower(power)
+}
+
+// powerApplied answers the last power the operator settled on.
+func (u *receiverUnit) powerApplied() equipment.Power {
+	if held := u.power.Load(); held != nil {
+		return *held
+	}
+	return ""
+}
+
+// applyPower records the power the receiver now stands at and writes it
+// to the spec, so the next reconcile sees no change to re-assert. The
+// session calls it after a toggle settles; setPower calls it after a
+// declarative change.
+func (u *receiverUnit) applyPower(power equipment.Power) {
+	if _, err := ApplyReceiverPower(u.client, u.name, power); err != nil {
+		fmt.Fprintf(os.Stderr, "writing the power of receiver %s: %v\n", u.name, err)
+		return
+	}
+	u.power.Store(&power)
 }
 
 // stop lifts the session and closes the connection, which is what a
@@ -280,6 +323,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	unit.generation.Store(receiver.Metadata.Generation)
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
+	unit.setPower(receiver.Spec.Power)
 	unit.setSession(ctx, receiver.Spec.Session)
 }
 

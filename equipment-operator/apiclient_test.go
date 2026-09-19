@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // The credentials are empty, so the client sends no bearer token and
@@ -190,6 +192,42 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 	}
 	mustMatch(t, body["apiVersion"], any(equipmentAPIVersion))
 	mustMatch(t, body["kind"], any("Receiver"))
+}
+
+// The power write is a server-side apply on the main resource: the
+// apply media type, this operator's field manager, and a body that
+// carries the one spec field this operator owns and nothing else.
+func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{
+			Metadata: ObjectMeta{Name: "theater"},
+			Spec:     ReceiverSpec{Power: equipment.PowerOn},
+		},
+	}}
+
+	written, err := ApplyReceiverPower(testAPIClient(t, api.handler()), "theater", equipment.PowerOn)
+	mustSucceed(t, err)
+	mustMatch(t, written.Spec.Power, equipment.PowerOn)
+
+	if len(api.requests) != 1 {
+		t.Fatalf("requests = %+v", api.requests)
+	}
+	sent := api.requests[0]
+	mustMatch(t, sent.Method, http.MethodPatch)
+	mustMatch(t, sent.Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
+	mustMatch(t, sent.ContentType, applyContentType)
+	mustMatch(t, sent.Query.Get("fieldManager"), fieldManager)
+	mustMatch(t, sent.Query.Get("force"), "true")
+
+	body := map[string]any{}
+	mustSucceed(t, json.Unmarshal(sent.Body, &body))
+	mustMatch(t, body["apiVersion"], any(equipmentAPIVersion))
+	mustMatch(t, body["kind"], any("Receiver"))
+	if _, held := body["status"]; held {
+		t.Errorf("the apply body carries a status: %s", sent.Body)
+	}
+	spec, _ := body["spec"].(map[string]any)
+	mustMatch(t, spec["power"], any("on"))
 }
 
 // An absent object and a losing write are answers, not failures; the

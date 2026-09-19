@@ -5,9 +5,11 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +20,7 @@ import (
 // a message that must not arrive.
 const (
 	testVolumeTopic = "liken/players/theater/volume"
+	testPowerTopic  = "liken/equipment/receivers/theater/power"
 	quietPeriod     = 300 * time.Millisecond
 )
 
@@ -66,6 +69,12 @@ type sessionHarness struct {
 	holder     *sessionHolder
 	readings   *metrics
 	soundModes map[string]string
+	// powerTopic is the topic a test's session subscribes to for the
+	// remote's power toggle. Empty means the session subscribes to none.
+	powerTopic string
+	// applyPower records the power a toggle settled on, wired to the API
+	// in a test that asserts the PATCH.
+	applyPower func(power equipment.Power)
 
 	rules sync.Mutex
 	rule  ReceiverVolume
@@ -157,8 +166,8 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	t.Helper()
 	h.drainCommands()
 	h.holder.forget()
-	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.brokers.address(), h.volumeRule, h.inputSoundMode)
+	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, PowerTopic: h.powerTopic, Active: active, Awake: awake}
+	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.brokers.address(), h.volumeRule, h.inputSoundMode, h.applyPower)
 	h.holder.set(started)
 	return started
 }
@@ -293,7 +302,7 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
 	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, listener.Addr().String(),
-		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil)
+		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil)
 
 	will := connectWill(t, waitForFrame(t, frames))
 	mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))
@@ -685,4 +694,138 @@ func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
 	broker.push(testVolumeTopic, []byte(`{"level":80,"muted":false}`))
 	h.equipment.waitForCommands(t, "MV51")
 	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
+}
+
+// A standby receiver whose session holds a power topic turns on and
+// selects the input, with its sound mode, when the remote's power button
+// toggles.
+func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
+	h := newSessionHarness(t)
+	h.powerTopic = testPowerTopic
+	h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
+	h.beginIdle(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+
+	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+	mustMatch(t, h.equipment.waitForCommand(t), denon.SoundModeCommand("MULTI CH IN"))
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
+}
+
+// A receiver that is already on goes to standby on a toggle, and selects
+// no input.
+func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
+	h := newSessionHarness(t)
+	h.powerTopic = testPowerTopic
+	h.powerOn(t)
+	h.beginIdle(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+
+	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
+	h.refuseCommands(t, quietPeriod, "SIGAME")
+}
+
+// A second toggle on the receiver the first put to standby turns it back
+// on and selects the input again.
+func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
+	h := newSessionHarness(t)
+	h.powerTopic = testPowerTopic
+	h.powerOn(t)
+	h.beginIdle(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+	mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerStandby })
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
+}
+
+// A session with no power topic subscribes to nothing and reads nothing
+// as a toggle.
+func TestASessionWithNoPowerTopicIgnoresAToggle(t *testing.T) {
+	h := newSessionHarness(t)
+	h.beginIdle(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	mustMatch(t, waitForString(t, broker.subs), testVolumeTopic)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+
+	h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
+}
+
+// A message the session cannot read as a toggle leaves the receiver
+// alone, so another program's traffic on the power topic never moves the
+// room's power.
+func TestAMessageTheSessionCannotReadAsAToggleMovesNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{"a different action", `{"action":"off"}`},
+		{"a payload that is not a state", `not json`},
+		{"an empty payload", ``},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			h := newSessionHarness(t)
+			h.powerTopic = testPowerTopic
+			h.beginIdle(t, "GAME")
+			broker := h.brokers.waitForSession(t)
+
+			broker.push(testPowerTopic, []byte(one.payload))
+
+			h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY")
+		})
+	}
+}
+
+// A toggle writes the power it settled on back to the spec, so the next
+// reconcile sees no change to re-assert.
+func TestAToggleWritesTheSpecsPower(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater": Receiver{Metadata: ObjectMeta{Name: "theater"}},
+	}}
+	client := testAPIClient(t, api.handler())
+	h := newSessionHarness(t)
+	h.powerTopic = testPowerTopic
+	applied := make(chan equipment.Power, 1)
+	h.applyPower = func(power equipment.Power) {
+		_, err := ApplyReceiverPower(client, "theater", power)
+		mustSucceed(t, err)
+		applied <- power
+	}
+	h.beginIdle(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
+
+	mustMatch(t, <-applied, equipment.PowerOn)
+
+	if len(api.requests) != 1 {
+		t.Fatalf("requests = %+v", api.requests)
+	}
+	sent := api.requests[0]
+	mustMatch(t, sent.Method, http.MethodPatch)
+	mustMatch(t, sent.Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
+	mustMatch(t, sent.Query.Get("fieldManager"), fieldManager)
+	mustMatch(t, sent.Query.Get("force"), "true")
+	body := map[string]any{}
+	mustSucceed(t, json.Unmarshal(sent.Body, &body))
+	spec, _ := body["spec"].(map[string]any)
+	mustMatch(t, spec["power"], any("on"))
 }

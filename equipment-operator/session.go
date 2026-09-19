@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -58,6 +59,16 @@ type session struct {
 	powerMutex sync.Mutex
 	powered    chan struct{}
 
+	// oneShot serializes the power and input one-shots. A toggle and a
+	// flag flip could otherwise drive the receiver at the same moment,
+	// and a standby landing mid power-on would leave the receiver off
+	// while the flags still say on, with nothing left to re-assert.
+	oneShot sync.Mutex
+	// applyPower records the power the session settled on and writes it
+	// to the spec, wired to the unit that owns the receiver. It is nil in
+	// a test that never toggles.
+	applyPower func(power equipment.Power)
+
 	reachedOnce sync.Once
 	reached     chan struct{}
 
@@ -92,7 +103,7 @@ type session struct {
 // Power and input go out once for a session that starts with either
 // flag on, and once only when both are on at the start. A session that
 // starts with both off owns the level and sends the equipment nothing.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string) *session {
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power)) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	if inputSoundMode == nil {
 		inputSoundMode = func(string) string { return "" }
@@ -106,6 +117,7 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 		cancel:         cancel,
 		scale:          scale,
 		inputSoundMode: inputSoundMode,
+		applyPower:     applyPower,
 		powered:        make(chan struct{}),
 		reached:        make(chan struct{}),
 		complete:       make(chan struct{}),
@@ -118,6 +130,12 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 	will := &busWill{Topic: ownerTopic(spec.VolumeTopic), Retained: true}
 	s.bus = newBus(busAddress, "equipment-operator-"+receiver, will, s.claim, s.receive)
 	s.bus.Subscribe(spec.VolumeTopic)
+	// The remote's power button publishes its toggle on the power topic,
+	// and the session subscribes to it only when the media operator
+	// named one. An absent topic subscribes the session to nothing.
+	if spec.PowerTopic != "" {
+		s.bus.Subscribe(spec.PowerTopic)
+	}
 	go s.bus.Run(ctx)
 	go s.adopt(ctx)
 	s.setFlags(spec.Active, spec.Awake)
@@ -176,8 +194,15 @@ func (s *session) publishOwner(payload []byte) {
 
 // receive reads one message off the topic. A message that differs from
 // the state the session holds is a press, and the session moves the
-// receiver one step in its direction.
+// receiver one step in its direction. A message on the power topic is a
+// toggle, and the session flips the receiver's power. The power topic is
+// routed first, so a power topic that happens to equal the volume topic
+// still reads as a toggle.
 func (s *session) receive(topic string, payload []byte) {
+	if topic == s.spec.PowerTopic {
+		go s.togglePower(payload)
+		return
+	}
 	if topic != s.spec.VolumeTopic {
 		return
 	}
@@ -398,12 +423,57 @@ func (s *session) publishPosition() bool {
 	return true
 }
 
+// togglePower flips the receiver's power on a toggle event. The remote's
+// power button publishes {"action":"toggle"} on the power topic, and
+// the operator answers it the way the receiver's own power button would:
+// off to select the session's input, on to standby. The spec's power
+// field is updated so the next reconcile sees no change to re-assert.
+// Anything else on the topic, a malformed body, an empty payload, or a
+// receiver the operator cannot reach does nothing.
+func (s *session) togglePower(payload []byte) {
+	var event struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil || event.Action != "toggle" {
+		return
+	}
+	state := s.driver.State()
+	// A receiver the operator cannot reach has no power to read, and
+	// nothing to command, so the toggle is dropped and never queued.
+	if state.Reachable != equipment.ConditionTrue {
+		return
+	}
+	s.oneShot.Lock()
+	defer s.oneShot.Unlock()
+	// The power is read again under the lock, so the decision is made
+	// against the receiver as it stands after any in-flight one-shot
+	// settles, not a snapshot taken a moment earlier.
+	if mainZone(s.driver.State()).Power == equipment.PowerOn {
+		s.driver.SetPower(equipment.MainZone, false)
+		if s.applyPower != nil {
+			s.applyPower(equipment.PowerStandby)
+		}
+		return
+	}
+	s.selectInputLocked(s.ctx)
+	if s.applyPower != nil {
+		s.applyPower(equipment.PowerOn)
+	}
+}
+
 // selectInput powers the receiver on, waits for it to say so, and
-// selects the input once for whoever asked.
-//
-// It runs once per flip of either flag, and never re-asserts inside
-// one: a hand on the equipment outranks the cluster.
+// selects the input once for whoever asked. The power one-shot is
+// serialized against a toggle, so the two never drive the receiver at
+// the same moment.
 func (s *session) selectInput(ctx context.Context) {
+	s.oneShot.Lock()
+	defer s.oneShot.Unlock()
+	s.selectInputLocked(ctx)
+}
+
+// selectInputLocked is the power-and-input one-shot, called with oneShot
+// held by either a flag flip or a toggle.
+func (s *session) selectInputLocked(ctx context.Context) {
 	// A command sent before the connection is open is dropped, and a one-
 	// shot is never re-asserted, so the wait for the connection is what
 	// makes the one-shot land. The session's own lifetime is the bound: a

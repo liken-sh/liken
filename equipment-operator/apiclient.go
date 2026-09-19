@@ -25,6 +25,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // serviceAccountDir is a variable so a test points it at a directory
@@ -241,6 +243,42 @@ func ApplyReceiverStatus(c *Client, name string, status ReceiverStatus) (*Receiv
 		return nil, err
 	}
 	path := receiverPath(name) + "/status?fieldManager=" + fieldManager + "&force=true"
+	written := &Receiver{}
+	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// receiverPowerApply is the partial object an apply sends to own the
+// spec.power field: the identity, and the one field this operator
+// manages. It carries no status and no other spec field, so an apply
+// can never overwrite what a person or the media operator declared.
+type receiverPowerApply struct {
+	APIVersion string       `json:"apiVersion"`
+	Kind       string       `json:"kind"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       ReceiverSpec `json:"spec"`
+}
+
+// ApplyReceiverPower writes spec.power on the main resource under this
+// operator's own field manager, the way the media operator owns
+// spec.session. Server-side apply keeps the write to the field the body
+// states, so a GitOps manifest that does not declare power never
+// touches the value this operator settled on. force settles a conflict
+// in this manager's favour, because nothing else writes a Receiver's
+// power.
+func ApplyReceiverPower(c *Client, name string, power equipment.Power) (*Receiver, error) {
+	body, err := json.Marshal(&receiverPowerApply{
+		APIVersion: equipmentAPIVersion,
+		Kind:       "Receiver",
+		Metadata:   ObjectMeta{Name: name},
+		Spec:       ReceiverSpec{Power: power},
+	})
+	if err != nil {
+		return nil, err
+	}
+	path := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
 	written := &Receiver{}
 	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
 		return nil, err
