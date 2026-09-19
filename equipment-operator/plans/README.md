@@ -27,10 +27,7 @@ becomes a new plan or an open problem.
   operator serves Prometheus metrics on port 9200 under liken's shared
   contract: the receiver connected and claimed, power, volume, the
   selected input, and commands by status.
-* [02, The Denon driver and the full receiver mirror](02-denon-driver.md).
-  The protocol moves into `denon/` behind the `equipment.Driver`
-  contract, the parser covers every line the house's AVR-X1700H emits,
-  and the status carries both zones and the receiver's own settings.
+* [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on 44stonypoint on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the house's AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
 
 ## Completed
 
@@ -42,3 +39,10 @@ becomes a new plan or an open problem.
   design: the Denon's `MVMAX` line is not a limit, a session must
   adopt the receiver's position before it applies any level, and a
   press is a direction and not a level.
+
+* Plan 02, the Denon driver and the full receiver mirror. Drilled on
+  44stonypoint on 2026-09-19: the live `living-room-denon` Receiver
+  reported both zones (main on MPLAY at 65, zone2 on PHONO at 90) and
+  every setting under `status.denon`, and a dimmer change made at the
+  receiver itself moved `status.denon.system.dimmer` from bright to
+  dark and back. Release 2026.09.19-001.
