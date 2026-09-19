@@ -160,6 +160,17 @@ func (e tapExit) failed() bool {
 	return e.Recorder > 0 || e.Encoder > 0
 }
 
+// encoderFailed says the encoder ended on its own with something to
+// report. The encoder can consume every sample of a span and still
+// fail to write its last frame, so this is the one process status a
+// delivered body still depends on. The recorder is deliberately not
+// consulted: a recorder that died before the end already shows as a
+// span that was not delivered, and one that died after the end cannot
+// take back bytes the client holds.
+func (e tapExit) encoderFailed() bool {
+	return e.Encoder > 0
+}
+
 // String is the log line's ended field: the two exit statuses, and the
 // last line either process wrote.
 func (e tapExit) String() string {
@@ -468,8 +479,12 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	ended := tapExit{}
 	finish := func(drain bool) tapExit {
 		if !stopped {
-			_ = tap.Body.Close()
+			// The processes are stopped before their pipes are
+			// closed. Closing first sends SIGPIPE to a recorder still
+			// blocked on a write, so the container's own teardown
+			// arrives as the process's failure.
 			ended = tap.stop(drain)
+			_ = tap.Body.Close()
 			stopped = true
 		}
 		return ended
@@ -531,12 +546,9 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 		s.readings.failed(failureEncoder)
 	}
 
-	// A body ends cleanly when there was no more of it to send: the
-	// span ran out, or the client stopped reading. Anything else is
-	// the pipeline ending under the tap, which the client has to be
-	// told about.
-	complete := tap.delivered() || errors.Is(copyErr, errClientGone)
-	cut := !complete || exit.failed()
+	cut := bodyCut(tap.delivered(),
+		endedByClient(copyErr, r.Context().Err() != nil),
+		exit.encoderFailed())
 
 	words := exit.String()
 	if copyErr != nil {
@@ -626,6 +638,24 @@ func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID
 // normal end of a tap, and it is told apart from the pipeline ending
 // on its own, which is not.
 var errClientGone = errors.New("the client stopped reading")
+
+// endedByClient says a copy stopped because whoever was reading the
+// response left. The write error names the departure directly. When
+// the read side fails first, the departure is named by the request's
+// own context instead: the process killed for that context reports its
+// death as a read error on this goroutine, and the two errors race.
+func endedByClient(copyErr error, requestDone bool) bool {
+	return requestDone || errors.Is(copyErr, errClientGone)
+}
+
+// bodyCut says a response body ended without the client getting what
+// it asked for. A body is complete when the span ran out or the client
+// stopped reading. Anything else is the pipeline ending under the tap,
+// which the client has to be told about. The encoder is the one
+// process whose failure cuts a body it already delivered.
+func bodyCut(delivered, left, encoderFailed bool) bool {
+	return (!delivered && !left) || encoderFailed
+}
 
 // copyFlushing copies the pipeline to the response, flushing each
 // block, so a client hears the tap as it arrives rather than when a

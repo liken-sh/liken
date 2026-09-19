@@ -12,11 +12,17 @@
 # CAPTURE_FAKE_ONCE is how a test asks for the other case: the samples
 # run out and this process ends, which is what a pw-record that died
 # under a tap looks like to the container.
+#
+# The loop keeps a child's death from ending this process. When the
+# container closes the pipe it reads, cat dies of SIGPIPE, and set -e
+# would then end this shell with a status of its own. A real recorder
+# dies of the signal instead, which the container reads as a process it
+# stopped and not one that failed.
 set -eu
 printf '%s\n' "$@" > "$CAPTURE_FAKE_ARGS"
 if [ "${CAPTURE_FAKE_ONCE:-no}" = yes ]; then
 	exec cat "$CAPTURE_FAKE_SAMPLES"
 fi
 while :; do
-	cat "$CAPTURE_FAKE_SAMPLES"
+	cat "$CAPTURE_FAKE_SAMPLES" || true
 done

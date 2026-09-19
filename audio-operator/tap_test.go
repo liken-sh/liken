@@ -175,6 +175,46 @@ func TestAnEncoderThatExitedZeroIsNoFailure(t *testing.T) {
 	}
 }
 
+// A body must not be called cut because a process was still being
+// stopped when the last bytes went out. A recorder this container is
+// signalling, or one a pipe close kills, is not evidence that the
+// client got less than it asked for.
+func TestABodyIsCutOnlyWhenItCarriesLessThanItAskedFor(t *testing.T) {
+	cases := []struct {
+		name          string
+		delivered     bool
+		left          bool
+		encoderFailed bool
+		cut           bool
+	}{
+		{"a span that ran out", true, false, false, false},
+		{"a span that ran out under a failing encoder", true, false, true, true},
+		{"a client that left", false, true, false, false},
+		{"a pipeline that died under a client that stayed", false, false, false, true},
+		{"a pipeline that died under a failing encoder", false, false, true, true},
+	}
+	for _, row := range cases {
+		if got := bodyCut(row.delivered, row.left, row.encoderFailed); got != row.cut {
+			t.Errorf("%s reads as cut=%v, want %v", row.name, got, row.cut)
+		}
+	}
+}
+
+// A departure reaches the copy as a write error, or, when the read
+// side fails first, as the request's own context. Both name it, and
+// neither alone is enough.
+func TestTheRequestContextNamesTheDepartureTheWriteErrorMissed(t *testing.T) {
+	if !endedByClient(errClientGone, false) {
+		t.Error("a copy that ended in errClientGone did not read as the client leaving")
+	}
+	if !endedByClient(errors.New("the sample pipe was closed"), true) {
+		t.Error("a read that failed with the request done did not read as the client leaving")
+	}
+	if endedByClient(errors.New("the sample pipe was closed"), false) {
+		t.Error("a read that failed with the request still live read as the client leaving")
+	}
+}
+
 func TestTheLoggedEndCarriesTheExitStatusAndOneLine(t *testing.T) {
 	ended := tapExit{Recorder: -1, Encoder: 0, Words: "the last thing it said"}
 	got := ended.String()

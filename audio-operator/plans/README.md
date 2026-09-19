@@ -98,6 +98,13 @@ Nothing is planned right now.
   439.5 Hz peak in all three formats, a first byte at 0.45 to 0.59 s,
   and 3.67 MB more closure on the node, and left the idle RSS by
   `/proc` and the first byte as open problems in the plan.
+* [10, A capture body ends cleanly](completed/10-a-capture-body-ends-cleanly.md).
+  Built on 2026-09-19. A tap decides its body is complete from the
+  body itself, so stopping the recorder never marks a delivered body
+  as cut, and a client hangup is read from the request's own context.
+  The encoder is the only process status a delivered body still
+  depends on. Closes the open problem "The capture stream tests flake
+  in CI", and the three skipped tests are enabled again.
 
 ## Open problems
 
@@ -108,6 +115,3 @@ decided yet what work they become.
 * [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
   PipeWire mixes streams and every device this operator publishes is
   exclusive, so the second pod to claim a sink waits behind the first.
-* [The capture stream tests flake in CI](open-problems/the-capture-stream-tests-flake-in-ci.md).
-  Three capture tests fail now and then in CI with an `unexpected EOF`,
-  and are skipped until the stream-shutdown race is found and fixed.
