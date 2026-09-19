@@ -6,6 +6,8 @@ package main
 // is in session_test.go.
 
 import (
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 	"testing"
 	"time"
 )
@@ -25,9 +27,9 @@ func idleListening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
 func TestAnIdleSessionSendsNoPowerOrInput(t *testing.T) {
 	h, _, _ := idleListening(t)
 
-	h.refuseCommands(t, quietPeriod, denonPowerOnCommand, "SIGAME")
+	h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "SIGAME")
 
-	mustMatch(t, h.denon.State().Power, powerStandby)
+	mustMatch(t, mainZone(h.denon.State()).Power, equipment.PowerStandby)
 }
 
 // The level is the idle session's whole job, and it does it with the
@@ -38,7 +40,7 @@ func TestAnIdleSessionStillStepsTheVolume(t *testing.T) {
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
 	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
 }
 
 func TestAFlipToActivePowersOnThenSelectsTheInput(t *testing.T) {
@@ -46,9 +48,9 @@ func TestAFlipToActivePowersOnThenSelectsTheInput(t *testing.T) {
 
 	held.setFlags(true, false)
 
-	h.equipment.waitForCommands(t, denonPowerOnCommand)
+	h.equipment.waitForCommands(t, denon.PowerOnCommand)
 	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state denonState) bool { return state.Power == powerOn })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
 }
 
 // A Play that ends returns the Player to its idle screen. The room may
@@ -60,7 +62,7 @@ func TestAFlipOutOfActiveSendsNothing(t *testing.T) {
 
 	held.setFlags(false, false)
 
-	h.refuseCommands(t, quietPeriod, denonPowerOnCommand, "PWSTANDBY", "SIGAME")
+	h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY", "SIGAME")
 }
 
 // A person can select another input between two Plays, so the next Play
@@ -71,12 +73,12 @@ func TestASecondFlipToActiveSelectsTheInputAgain(t *testing.T) {
 	h.equipment.waitForCommands(t, "SIGAME")
 	held.setFlags(false, false)
 	handOnTheRemote(t, h.equipment, "SIDVD")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "DVD" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
 	held.setFlags(true, false)
 
 	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "GAME" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
 }
 
 // A flip is not a new session. One broker connection stands across the
@@ -105,9 +107,9 @@ func TestAFlipToAwakePowersOnThenSelectsTheInput(t *testing.T) {
 
 	held.setFlags(false, true)
 
-	h.equipment.waitForCommands(t, denonPowerOnCommand)
+	h.equipment.waitForCommands(t, denon.PowerOnCommand)
 	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state denonState) bool { return state.Power == powerOn })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
 }
 
 // A person can select another input while the screen sleeps, so the
@@ -118,12 +120,12 @@ func TestASecondFlipToAwakeSelectsTheInputAgain(t *testing.T) {
 	h.equipment.waitForCommands(t, "SIGAME")
 	held.setFlags(false, false)
 	handOnTheRemote(t, h.equipment, "SIDVD")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "DVD" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
 	held.setFlags(false, true)
 
 	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "GAME" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
 }
 
 // The flags are independent, so a screen that wakes under a standing
@@ -135,12 +137,12 @@ func TestAFlipToAwakeSelectsAgainUnderAStandingPlay(t *testing.T) {
 	held.setFlags(true, false)
 	h.equipment.waitForCommands(t, "SIGAME")
 	handOnTheRemote(t, h.equipment, "SIDVD")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "DVD" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
 	held.setFlags(true, true)
 
 	h.equipment.waitForCommands(t, "SIGAME")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "GAME" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "GAME" })
 }
 
 // playingOnAWokenScreen is a harness whose session starts with both
@@ -194,20 +196,21 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 	sessionPowerWait = 50 * time.Millisecond
 	t.Cleanup(func() { sessionPowerWait = waited })
 
-	equipment := startFakeDenon(t)
-	equipment.ignorePowerOn()
+	receiver := startFakeDenon(t)
+	receiver.ignorePowerOn()
 	readings := testMetrics(t)
 	h := &sessionHarness{
 		rule:      ReceiverVolume{Max: 69.5},
-		equipment: equipment,
+		equipment: receiver,
 		brokers:   startFakeBrokerServer(t),
 		holder:    &sessionHolder{},
+		readings:  readings,
 	}
-	h.denon = newDenonClient(equipment.address(), h.holder.observe)
-	h.denon.readings = readings
+	h.denon = denon.NewClient(receiver.address(), h.holder.observe)
+	h.denon.Reporter = readings.reportCommand
 	go h.denon.Run(t.Context())
-	h.waitUntil(t, func(state denonState) bool {
-		return state.Power != "" && state.VolumeMax != unknownHalves
+	h.waitUntil(t, func(state equipment.State) bool {
+		return mainZone(state).Power != "" && mainZone(state).VolumeMax != equipment.Unknown
 	})
 
 	h.begin(t, "GAME")

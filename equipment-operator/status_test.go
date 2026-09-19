@@ -4,6 +4,7 @@ package main
 // said.
 
 import (
+	"github.com/liken-sh/equipment-operator/equipment"
 	"testing"
 	"time"
 )
@@ -15,34 +16,38 @@ var (
 )
 
 // testState is a state whose fields each case overrides.
-func testState(power string, volume, volumeMax int) denonState {
-	state := newDenonState()
-	state.Power = power
-	state.Volume = volume
-	state.VolumeMax = volumeMax
-	state.Input = "MPLAY"
-	state.SoundMode = "MULTI CH IN"
-	state.Reachable = ConditionTrue
-	return state
+func testState(power equipment.Power, volume, volumeMax int) equipment.State {
+	return equipment.State{
+		Reachable: ConditionTrue,
+		Zones: map[string]equipment.ZoneState{
+			equipment.MainZone: {
+				Power:     power,
+				Input:     "MPLAY",
+				SoundMode: "MULTI CH IN",
+				Volume:    volume,
+				VolumeMax: volumeMax,
+			},
+		},
+	}
 }
 
 func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 	cases := []struct {
 		name      string
-		state     denonState
+		state     equipment.State
 		volume    string
 		volumeMax string
 	}{
-		{"whole steps", testState(powerOn, 100, 139), "50", "69.5"},
-		{"half steps", testState(powerOn, 131, 139), "65.5", "69.5"},
-		{"zero", testState(powerStandby, 0, 139), "0", "69.5"},
-		{"unknown volume", testState(powerStandby, unknownHalves, unknownHalves), "", ""},
+		{"whole steps", testState(equipment.PowerOn, 100, 139), "50", "69.5"},
+		{"half steps", testState(equipment.PowerOn, 131, 139), "65.5", "69.5"},
+		{"zero", testState(equipment.PowerStandby, 0, 139), "0", "69.5"},
+		{"unknown volume", testState(equipment.PowerStandby, equipment.Unknown, equipment.Unknown), "", ""},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			status := buildReceiverStatus(one.state, 3, nil, statusNow)
+			status := buildReceiverStatus(one.state, 2, 3, nil, statusNow)
 
-			mustMatch(t, status.Power, one.state.Power)
+			mustMatch(t, status.Power, string(mainZone(one.state).Power))
 			mustMatch(t, status.Input, "MPLAY")
 			mustMatch(t, status.Volume, one.volume)
 			mustMatch(t, status.VolumeMax, one.volumeMax)
@@ -54,10 +59,12 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 }
 
 func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
-	state := testState(powerOn, 100, 139)
-	state.Mute = true
+	state := testState(equipment.PowerOn, 100, 139)
+	zone := state.Zones[equipment.MainZone]
+	zone.Mute = true
+	state.Zones[equipment.MainZone] = zone
 
-	mustMatch(t, buildReceiverStatus(state, 1, nil, statusNow).Mute, true)
+	mustMatch(t, buildReceiverStatus(state, 2, 1, nil, statusNow).Mute, true)
 }
 
 func TestReachableNamesEachVerdict(t *testing.T) {
@@ -101,7 +108,7 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 
 func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	held := ReceiverStatus{
-		Power: powerOn, Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN",
+		Power: string(equipment.PowerOn), Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN",
 		Conditions: []Condition{{Type: reachableConditionType, Status: ConditionTrue}},
 	}
 	movedVolume := held

@@ -4,7 +4,11 @@ package main
 // and the one condition that says whether the operator can still reach
 // it.
 
-import "time"
+import (
+	"time"
+
+	"github.com/liken-sh/equipment-operator/equipment"
+)
 
 // The one condition this operator reports, and the reason for each
 // verdict.
@@ -54,14 +58,15 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 // buildReceiverStatus is the whole status one receiver's state makes,
 // in the receiver's own units. status.service stays empty until the
 // operator makes the Service front.
-func buildReceiverStatus(state denonState, generation int64, previous []Condition, now time.Time) ReceiverStatus {
+func buildReceiverStatus(state equipment.State, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
+	main, _ := state.Zone(equipment.MainZone)
 	return ReceiverStatus{
-		Power:      state.Power,
-		Input:      state.Input,
-		Volume:     formatHalfSteps(state.Volume),
-		VolumeMax:  formatHalfSteps(state.VolumeMax),
-		Mute:       state.Mute,
-		SoundMode:  state.SoundMode,
+		Power:      string(main.Power),
+		Input:      main.Input,
+		Volume:     formatSteps(main.Volume, resolution),
+		VolumeMax:  formatSteps(main.VolumeMax, resolution),
+		Mute:       main.Mute,
+		SoundMode:  main.SoundMode,
 		Conditions: []Condition{reachable(state.Reachable, generation, previous, now)},
 	}
 }

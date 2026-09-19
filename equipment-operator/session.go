@@ -12,6 +12,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // How long the operator waits for the receiver to answer PWON before it
@@ -33,8 +36,10 @@ var sessionStopGrace = 200 * time.Millisecond
 type session struct {
 	receiver string
 	spec     ReceiverSession
-	denon    *denonClient
+	driver   equipment.Driver
 	bus      *Bus
+	// readings counts a timeout this session's own power wait produced.
+	readings *metrics
 	// The session's own context, held because a flip of either flag starts
 	// the one-shots long after the session started, and they stop when it
 	// does.
@@ -84,12 +89,13 @@ type session struct {
 // Power and input go out once for a session that starts with either
 // flag on, and once only when both are on at the start. A session that
 // starts with both off owns the level and sends the equipment nothing.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, denon *denonClient, busAddress string, scale func() ReceiverVolume) *session {
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, busAddress string, scale func() ReceiverVolume) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &session{
 		receiver:  receiver,
 		spec:      spec.withoutFlags(),
-		denon:     denon,
+		driver:    driver,
+		readings:  readings,
 		ctx:       ctx,
 		cancel:    cancel,
 		scale:     scale,
@@ -98,7 +104,7 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, de
 		complete:  make(chan struct{}),
 		connected: make(chan struct{}),
 	}
-	s.mark(denon.State())
+	s.mark(driver.State())
 
 	// The will clears the mark, so an operator that dies hands the level
 	// back to the pods that were leaving it alone.
@@ -204,15 +210,15 @@ func (s *session) receive(topic string, payload []byte) {
 // step from where it actually stands, never to a level mapped through
 // two scales. Mute is absolute.
 func (s *session) press(previous, state volumeState) {
-	reading := s.denon.State()
+	reading, _ := s.driver.State().Zone(equipment.MainZone)
 	sent := false
 	if state.Muted != reading.Mute {
-		s.denon.Send(denonMuteCommand(state.Muted))
+		s.driver.SetMute(equipment.MainZone, state.Muted)
 		sent = true
 	}
 	if state.Level != previous.Level {
 		if target, moves := s.nextPosition(reading, state.Level > previous.Level); moves {
-			s.denon.Send(denonVolumeCommand(target))
+			s.driver.SetVolume(equipment.MainZone, target)
 			sent = true
 		}
 	}
@@ -226,8 +232,9 @@ func (s *session) press(previous, state volumeState) {
 
 // nextPosition answers where one press puts the receiver, and whether
 // it moves at all.
-func (s *session) nextPosition(reading denonState, up bool) (int, bool) {
-	ceiling := ceilingHalves(s.scale())
+func (s *session) nextPosition(reading equipment.ZoneState, up bool) (int, bool) {
+	resolution := s.driver.VolumeResolution()
+	ceiling := ceilingSteps(s.scale(), resolution)
 	if ceiling <= 0 || reading.Volume < 0 {
 		return 0, false
 	}
@@ -238,7 +245,7 @@ func (s *session) nextPosition(reading denonState, up bool) (int, bool) {
 	}
 	// The ceiling bounds the way up and never the way down, so a receiver
 	// above it steps down one press at a time.
-	step := pressHalves(s.scale())
+	step := pressSteps(s.scale(), resolution)
 	if !up {
 		target := max(reading.Volume-step, 0)
 		return target, target != reading.Volume
@@ -254,8 +261,8 @@ func (s *session) nextPosition(reading denonState, up bool) (int, bool) {
 // the adopt publishes, so the session takes its return as the adopt
 // line as well. The broker returns the two in its own order, and the
 // session must not wait for the second when the first has come back.
-func (s *session) report(reading denonState) {
-	level, ok := levelForHalves(reading.Volume, ceilingHalves(s.scale()))
+func (s *session) report(reading equipment.ZoneState) {
+	level, ok := levelForSteps(reading.Volume, ceilingSteps(s.scale(), s.driver.VolumeResolution()))
 	if !ok {
 		return
 	}
@@ -281,25 +288,32 @@ func (s *session) report(reading denonState) {
 // observe is the session's half of every line the receiver sends. It
 // releases the waits the one-shots stand on, and it reports a position
 // the operator did not ask for, such as a knob turn.
-func (s *session) observe(event denonEvent) {
+func (s *session) observe(event equipment.Event) {
 	s.mark(event.State)
 	switch event.Field {
-	case denonVolumeField, denonMuteField:
-		s.report(event.State)
+	case equipment.EventVolume, equipment.EventMute:
+		s.report(mainZone(event.State))
 	}
+}
+
+// mainZone reads the zone a session drives out of one state.
+func mainZone(state equipment.State) equipment.ZoneState {
+	zone, _ := state.Zone(equipment.MainZone)
+	return zone
 }
 
 // mark releases the three waits a session stands on: the connection the
 // commands go out over, the power the input selection follows, and the
 // volume reading the adopt needs.
-func (s *session) mark(state denonState) {
+func (s *session) mark(state equipment.State) {
 	if state.Reachable == ConditionTrue {
 		s.reachedOnce.Do(func() { close(s.reached) })
 	}
-	if state.Power == powerOn {
+	main := mainZone(state)
+	if main.Power == equipment.PowerOn {
 		s.notePower()
 	}
-	if state.Reachable == ConditionTrue && state.Volume != unknownHalves {
+	if state.Reachable == ConditionTrue && main.Volume != equipment.Unknown {
 		s.completeOnce.Do(func() { close(s.complete) })
 	}
 }
@@ -358,8 +372,8 @@ func (s *session) adopt(ctx context.Context) {
 // next try may have: a ceiling nobody had declared yet, or a volume the
 // receiver has not reported.
 func (s *session) publishPosition() bool {
-	state := s.denon.State()
-	level, ok := levelForHalves(state.Volume, ceilingHalves(s.scale()))
+	state := mainZone(s.driver.State())
+	level, ok := levelForSteps(state.Volume, ceilingSteps(s.scale(), s.driver.VolumeResolution()))
 	if !ok {
 		return false
 	}
@@ -393,18 +407,18 @@ func (s *session) selectInput(ctx context.Context) {
 	case <-s.reached:
 	}
 	powered := s.armPower()
-	if s.denon.State().Power != powerOn {
-		s.denon.Send(denonPowerOnCommand)
+	if mainZone(s.driver.State()).Power != equipment.PowerOn {
+		s.driver.SetPower(equipment.MainZone, true)
 		select {
 		case <-ctx.Done():
 			return
 		case <-powered:
 		case <-time.After(sessionPowerWait):
-			s.denon.reportCommand(commandTimeout)
+			s.readings.reportCommand(denon.CommandTimeout)
 		}
 	}
 	if ctx.Err() != nil {
 		return
 	}
-	s.denon.Send(denonInputCommand(s.spec.Input))
+	s.driver.SetInput(equipment.MainZone, s.spec.Input)
 }

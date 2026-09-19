@@ -12,6 +12,14 @@ calls for it.
 
 `make test` runs every check CI runs.
 
+## The Denon driver
+
+A protocol lives in its own directory as a driver. The first is
+`denon/`, and its `AGENTS.md` holds the protocol references, the
+command families, and the model notes. The package implements the
+`equipment.Driver` contract in `equipment/`, which the controller
+imports and the driver never does.
+
 ## Errors carry their source's words
 
 An error that wraps a tool, a daemon socket, a bus answer, or a

@@ -213,7 +213,7 @@ func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 	status := api.waitForStatus(t, func(status ReceiverStatus) bool {
 		return connected(status) && status.SoundMode != ""
 	})
-	mustMatch(t, status.Power, powerStandby)
+	mustMatch(t, status.Power, "standby")
 	mustMatch(t, status.Input, "MPLAY")
 	mustMatch(t, status.Volume, "50")
 	mustMatch(t, status.VolumeMax, "69.5")

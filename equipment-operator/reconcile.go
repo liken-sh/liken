@@ -14,6 +14,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // How often the loop reconciles with nothing to prompt it.
@@ -30,7 +33,7 @@ type receiverUnit struct {
 	client     *Client
 	busAddress string
 	now        func() time.Time
-	denon      *denonClient
+	driver     equipment.Driver
 	readings   *metrics
 	cancel     context.CancelFunc
 	dirty      chan struct{}
@@ -48,7 +51,7 @@ type receiverUnit struct {
 // observe is where every line the receiver sends reaches the operator.
 // It wakes the status writer, and it reaches the session that owns the
 // level.
-func (u *receiverUnit) observe(event denonEvent) {
+func (u *receiverUnit) observe(event equipment.Event) {
 	poke(u.dirty)
 	u.mutex.Lock()
 	held := u.session
@@ -85,15 +88,15 @@ func (u *receiverUnit) report(ctx context.Context) {
 
 func (u *receiverUnit) write() {
 	now := u.now()
-	state := u.denon.State()
+	state := u.driver.State()
 	// Metrics are read from the same state and the same moment that
 	// build the status below, and set whether or not the status itself
 	// turns out to have changed: observation_last_success_timestamp_seconds
 	// advances on every settled burst, not only on a burst that changed
 	// what a person reads in status.
-	u.readings.recordObservation(u.name, state, now)
+	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
 
-	status := buildReceiverStatus(state, u.generation.Load(), u.applied.Conditions, now)
+	status := buildReceiverStatus(state, u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}
@@ -130,7 +133,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		u.readings.setClaimed(u.name, false)
 		return
 	}
-	started := startSession(ctx, u.name, *spec, u.denon, u.busAddress, u.volumeRule)
+	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.busAddress, u.volumeRule)
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
@@ -266,12 +269,13 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		dirty:      make(chan struct{}, 1),
 	}
 	unit.setVolume(receiver.Spec.Volume)
-	unit.denon = newDenonClient(receiver.Spec.Denon.Address, unit.observe)
-	unit.denon.readings = c.readings
+	client := denon.NewClient(receiver.Spec.Denon.Address, unit.observe)
+	client.Reporter = c.readings.reportCommand
+	unit.driver = client
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
-	go unit.denon.Run(ctx)
+	go unit.driver.Run(ctx)
 	go unit.report(ctx)
 	// The first write says the operator holds the receiver and has not
 	// reached it yet, before any line arrives.

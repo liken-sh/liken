@@ -1,13 +1,12 @@
-package main
+// The fake receiver the client tests run against. It holds the state a
+// real AVR holds, answers the five queries the way the AVR-X1700H
+// answered them, echoes every set as an event, and can turn its own
+// knob or drop the connection.
 
-// The fake receiver every controller test runs against. It holds the
-// state a real AVR holds, answers the five queries the way the
-// AVR-X1700H answered them, echoes every set as an event, and can turn
-// its own knob or drop the connection.
+package denon
 
 import (
 	"bufio"
-	"github.com/liken-sh/equipment-operator/denon"
 	"net"
 	"strings"
 	"sync"
@@ -17,31 +16,30 @@ import (
 
 // The lines the real receiver volunteered after the queries, which this
 // operator reads none of.
-var denonNoise = []string{"SVOFF", "PSDRC OFF", "PSLFE 00"}
+var noiseLines = []string{"SVOFF", "PSDRC OFF", "PSLFE 00"}
 
-type fakeDenon struct {
+type fakeReceiver struct {
 	listener net.Listener
 	commands chan string
 
-	mutex       sync.Mutex
-	power       string
-	volume      int
-	volumeMax   int
-	mute        bool
-	input       string
-	soundMode   string
-	ignorePower bool
-	conns       []net.Conn
+	mutex     sync.Mutex
+	power     string
+	volume    int
+	volumeMax int
+	mute      bool
+	input     string
+	soundMode string
+	conns     []net.Conn
 }
 
-// startFakeDenon listens on the loopback and answers until the test
+// startFakeReceiver listens on the loopback and answers until the test
 // ends.
-func startFakeDenon(t *testing.T) *fakeDenon {
+func startFakeReceiver(t *testing.T) *fakeReceiver {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	mustSucceed(t, err)
 
-	receiver := &fakeDenon{
+	receiver := &fakeReceiver{
 		listener:  listener,
 		commands:  make(chan string, 64),
 		power:     "PWSTANDBY",
@@ -58,11 +56,11 @@ func startFakeDenon(t *testing.T) *fakeDenon {
 	return receiver
 }
 
-func (f *fakeDenon) address() string {
+func (f *fakeReceiver) address() string {
 	return f.listener.Addr().String()
 }
 
-func (f *fakeDenon) accept() {
+func (f *fakeReceiver) accept() {
 	for {
 		conn, err := f.listener.Accept()
 		if err != nil {
@@ -75,7 +73,7 @@ func (f *fakeDenon) accept() {
 	}
 }
 
-func (f *fakeDenon) serve(conn net.Conn) {
+func (f *fakeReceiver) serve(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\r')
@@ -96,7 +94,7 @@ func (f *fakeDenon) serve(conn net.Conn) {
 
 // answer folds one command into the state and sends every line the
 // receiver would send back, to every client at once.
-func (f *fakeDenon) answer(command string) {
+func (f *fakeReceiver) answer(command string) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
@@ -104,48 +102,46 @@ func (f *fakeDenon) answer(command string) {
 	case command == "PW?":
 		f.send(f.power)
 	case command == "MV?":
-		f.send("MV" + denon.HalfStepDigits(f.volume))
-		f.send("MVMAX " + denon.HalfStepDigits(f.volumeMax))
+		f.send("MV" + HalfStepDigits(f.volume))
+		f.send("MVMAX " + HalfStepDigits(f.volumeMax))
 	case command == "MU?":
 		f.send(f.muteLine())
 	case command == "SI?":
 		f.send("SI" + f.input)
 	case command == "MS?":
 		f.send("MS" + f.soundMode)
-		for _, line := range denonNoise {
+		for _, line := range noiseLines {
 			f.send(line)
 		}
-	case command == "PWON", command == "PWSTANDBY":
+	case command == PowerOnCommand, command == powerStandbyCommand:
 		f.power = command
-		if !f.ignorePower {
-			f.send(f.power)
-		}
-	case command == "MUON", command == "MUOFF":
-		f.mute = command == "MUON"
+		f.send(f.power)
+	case command == MuteOnCommand, command == MuteOffCommand:
+		f.mute = command == MuteOnCommand
 		f.send(f.muteLine())
-	case strings.HasPrefix(command, "MV"):
-		halves, ok := denon.ParseHalfSteps(command[2:])
+	case strings.HasPrefix(command, VolumePrefix):
+		halves, ok := ParseHalfSteps(command[len(VolumePrefix):])
 		if !ok {
 			return
 		}
 		f.volume = halves
-		f.send("MV" + denon.HalfStepDigits(f.volume))
-	case strings.HasPrefix(command, "SI"):
-		f.input = command[2:]
+		f.send("MV" + HalfStepDigits(f.volume))
+	case strings.HasPrefix(command, InputPrefix):
+		f.input = command[len(InputPrefix):]
 		f.send("SI" + f.input)
 	}
 }
 
-func (f *fakeDenon) muteLine() string {
+func (f *fakeReceiver) muteLine() string {
 	if f.mute {
-		return "MUON"
+		return MuteOnCommand
 	}
-	return "MUOFF"
+	return MuteOffCommand
 }
 
 // send writes one event to every open connection. The caller holds the
 // lock.
-func (f *fakeDenon) send(line string) {
+func (f *fakeReceiver) send(line string) {
 	for _, conn := range f.conns {
 		conn.SetWriteDeadline(time.Now().Add(testTimeout))
 		conn.Write([]byte(line + "\r"))
@@ -154,43 +150,24 @@ func (f *fakeDenon) send(line string) {
 
 // turnKnob is a hand on the equipment: the receiver moves its own
 // volume and volunteers the event, with nothing having asked.
-func (f *fakeDenon) turnKnob(halves int) {
+func (f *fakeReceiver) turnKnob(halves int) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.volume = halves
-	f.send("MV" + denon.HalfStepDigits(f.volume))
+	f.send("MV" + HalfStepDigits(f.volume))
 }
 
 // setMute is the same hand on the mute button.
-func (f *fakeDenon) setMute(muted bool) {
+func (f *fakeReceiver) setMute(muted bool) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.mute = muted
 	f.send(f.muteLine())
 }
 
-// ignorePowerOn makes the receiver take PWON without ever answering it,
-// which is the one way a test drives a session's power-on wait to its
-// own timeout.
-func (f *fakeDenon) ignorePowerOn() {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
-	f.ignorePower = true
-}
-
-// driftLimit is the receiver reporting a new MVMAX. A real AVR-X1700H
-// reported 69.5, then 70.5, then 64.5 within one evening, so the figure
-// moves under the room and nothing may be built on it.
-func (f *fakeDenon) driftLimit(halves int) {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
-	f.volumeMax = halves
-	f.send("MVMAX " + denon.HalfStepDigits(f.volumeMax))
-}
-
 // dropConnections closes every open connection, the way a router reboot
 // takes the socket with it.
-func (f *fakeDenon) dropConnections() {
+func (f *fakeReceiver) dropConnections() {
 	f.mutex.Lock()
 	conns := f.conns
 	f.conns = nil
@@ -202,7 +179,7 @@ func (f *fakeDenon) dropConnections() {
 
 // waitForCommand reads the next command the client sent, and fails the
 // test rather than hanging when none arrives.
-func (f *fakeDenon) waitForCommand(t *testing.T) string {
+func (f *fakeReceiver) waitForCommand(t *testing.T) string {
 	t.Helper()
 	select {
 	case command := <-f.commands:
@@ -213,27 +190,10 @@ func (f *fakeDenon) waitForCommand(t *testing.T) string {
 	}
 }
 
-// refuseCommand fails the test if the client sends the named command
-// inside the window.
-func (f *fakeDenon) refuseCommand(t *testing.T, unwanted string, within time.Duration) {
-	t.Helper()
-	deadline := time.After(within)
-	for {
-		select {
-		case command := <-f.commands:
-			if command == unwanted {
-				t.Fatalf("the client sent %q again", unwanted)
-			}
-		case <-deadline:
-			return
-		}
-	}
-}
-
 // waitForCommands reads until it sees the command it wants, and reports
 // what it passed over, so a test names the one command it cares about
 // out of the burst around it.
-func (f *fakeDenon) waitForCommands(t *testing.T, want string) []string {
+func (f *fakeReceiver) waitForCommands(t *testing.T, want string) []string {
 	t.Helper()
 	var seen []string
 	deadline := time.After(testTimeout)

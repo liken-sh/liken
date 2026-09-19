@@ -7,6 +7,8 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -175,7 +177,7 @@ func TestRecordObservationOnAConnectedReceiver(t *testing.T) {
 	m := testMetrics(t)
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 
-	m.recordObservation("theater", connectedState(), now)
+	m.recordObservation("theater", connectedState(), 2, now)
 
 	body := scrape(t, m)
 	requireSeries(t, body, `equipment_receiver_connected{receiver="theater"} 1`)
@@ -193,7 +195,7 @@ func TestRecordObservationOnAConnectedReceiver(t *testing.T) {
 func TestRecordObservationOnAReceiverThatHasNeverAnswered(t *testing.T) {
 	m := testMetrics(t)
 
-	m.recordObservation("theater", newDenonState(), time.Now())
+	m.recordObservation("theater", unreachedState(), 2, time.Now())
 
 	body := scrape(t, m)
 	requireSeries(t, body, `equipment_receiver_connected{receiver="theater"} 0`)
@@ -210,15 +212,15 @@ func TestRecordObservationOnAReceiverThatHasNeverAnswered(t *testing.T) {
 func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
 	m := testMetrics(t)
 	firstRead := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	poweredOn := connectedState()
-	poweredOn.Power = powerOn
-	m.recordObservation("theater", poweredOn, firstRead)
+	poweredOn := setZone(connectedState(), func(zone *equipment.ZoneState) { zone.Power = equipment.PowerOn })
+
+	m.recordObservation("theater", poweredOn, 2, firstRead)
 
 	// denon.go's record only flips Reachable on a dropped connection; it
 	// never clears the rest of the state, so power still reads on here.
 	dropped := poweredOn
 	dropped.Reachable = ConditionFalse
-	m.recordObservation("theater", dropped, firstRead.Add(time.Minute))
+	m.recordObservation("theater", dropped, 2, firstRead.Add(time.Minute))
 
 	body := scrape(t, m)
 	requireSeries(t, body, `equipment_receiver_connected{receiver="theater"} 0`)
@@ -233,11 +235,11 @@ func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
 
 func TestInputInfoMovesToTheNewInputAndDropsTheOld(t *testing.T) {
 	m := testMetrics(t)
-	m.recordObservation("theater", connectedState(), time.Now())
+	m.recordObservation("theater", connectedState(), 2, time.Now())
 
-	moved := connectedState()
-	moved.Input = "GAME"
-	m.recordObservation("theater", moved, time.Now())
+	moved := setZone(connectedState(), func(zone *equipment.ZoneState) { zone.Input = "GAME" })
+
+	m.recordObservation("theater", moved, 2, time.Now())
 
 	body := scrape(t, m)
 	requireSeries(t, body, `equipment_receiver_input_info{input="GAME",receiver="theater"} 1`)
@@ -261,7 +263,7 @@ func TestSetClaimedTracksWhetherASessionStands(t *testing.T) {
 // still happened.
 func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
 	m := testMetrics(t)
-	m.recordObservation("theater", connectedState(), time.Now())
+	m.recordObservation("theater", connectedState(), 2, time.Now())
 	m.setClaimed("theater", true)
 	m.reportCommand(commandOK)
 
@@ -278,7 +280,7 @@ func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
 	requireSeries(t, body, `equipment_commands_total{status="ok"} 1`)
 }
 
-// reportCommand on a nil *metrics is what a denonClient a test builds
+// reportCommand on a nil *metrics is what a denon.Client a test builds
 // with no metrics wiring calls, and it must never panic.
 func TestReportCommandOnANilMetricsIsANoOp(t *testing.T) {
 	var m *metrics
@@ -334,15 +336,15 @@ func TestTheListenerStopsWhenItsContextEnds(t *testing.T) {
 
 // Send drops a command it cannot queue, and a queued command that
 // reaches the socket counts ok. Both paths go through a real
-// denonClient and a real fake receiver, because Send and the write
+// denon.Client and a real fake receiver, because Send and the write
 // loop are what equipment_commands_total actually observes.
 func TestCommandsCountByOutcome(t *testing.T) {
 	m := testMetrics(t)
 	receiver := startFakeDenon(t)
-	client := newDenonClient(receiver.address(), nil)
-	client.readings = m
+	client := denon.NewClient(receiver.address(), nil)
+	client.Reporter = m.reportCommand
 
-	client.Send(denonPowerOnCommand)
+	client.SetPower(equipment.MainZone, true)
 	requireSeries(t, scrape(t, m), `equipment_commands_total{status="failed"} 1`)
 
 	stopped := make(chan struct{})
@@ -368,4 +370,39 @@ func TestCommandsCountByOutcome(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+}
+
+// connectedState is what a receiver reports once it has answered every
+// query: on standby, on the MPLAY input, at half way up.
+func connectedState() equipment.State {
+	return equipment.State{
+		Reachable: ConditionTrue,
+		Zones: map[string]equipment.ZoneState{
+			equipment.MainZone: {
+				Power:     equipment.PowerStandby,
+				Input:     "MPLAY",
+				SoundMode: "MULTI CH IN",
+				Volume:    100,
+				VolumeMax: 139,
+			},
+		},
+	}
+}
+
+// unreachedState is the state before a receiver has said anything.
+func unreachedState() equipment.State {
+	return equipment.State{
+		Reachable: ConditionUnknown,
+		Zones: map[string]equipment.ZoneState{
+			equipment.MainZone: {Volume: equipment.Unknown, VolumeMax: equipment.Unknown},
+		},
+	}
+}
+
+// setZone copies a state with one change to the main zone.
+func setZone(state equipment.State, change func(*equipment.ZoneState)) equipment.State {
+	zone := state.Zones[equipment.MainZone]
+	change(&zone)
+	state.Zones[equipment.MainZone] = zone
+	return state
 }

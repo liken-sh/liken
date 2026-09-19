@@ -5,6 +5,8 @@ package main
 
 import (
 	"bufio"
+	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/equipment-operator/equipment"
 	"net"
 	"strings"
 	"sync"
@@ -24,10 +26,10 @@ const (
 type sessionHolder struct {
 	mutex  sync.Mutex
 	held   *session
-	missed []denonEvent
+	missed []equipment.Event
 }
 
-func (h *sessionHolder) observe(event denonEvent) {
+func (h *sessionHolder) observe(event equipment.Event) {
 	h.mutex.Lock()
 	held := h.held
 	if held == nil {
@@ -60,8 +62,9 @@ func (h *sessionHolder) set(started *session) {
 type sessionHarness struct {
 	equipment *fakeDenon
 	brokers   *fakeBrokerServer
-	denon     *denonClient
+	denon     *denon.Client
 	holder    *sessionHolder
+	readings  *metrics
 
 	rules sync.Mutex
 	rule  ReceiverVolume
@@ -95,16 +98,16 @@ func newSessionHarnessWith(t *testing.T, rule ReceiverVolume) *sessionHarness {
 		brokers:   startFakeBrokerServer(t),
 		holder:    &sessionHolder{},
 	}
-	h.denon = newDenonClient(h.equipment.address(), h.holder.observe)
+	h.denon = denon.NewClient(h.equipment.address(), h.holder.observe)
 	go h.denon.Run(t.Context())
-	h.waitUntil(t, func(state denonState) bool {
-		return state.Power != "" && state.VolumeMax != unknownHalves
+	h.waitUntil(t, func(state equipment.State) bool {
+		return mainZone(state).Power != "" && mainZone(state).VolumeMax != equipment.Unknown
 	})
 	return h
 }
 
 // waitUntil polls the state the operator holds, bounded by testTimeout.
-func (h *sessionHarness) waitUntil(t *testing.T, ready func(denonState) bool) {
+func (h *sessionHarness) waitUntil(t *testing.T, ready func(equipment.State) bool) {
 	t.Helper()
 	deadline := time.Now().Add(testTimeout)
 	for time.Now().Before(deadline) {
@@ -145,16 +148,16 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address(), h.volumeRule)
+	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.brokers.address(), h.volumeRule)
 	h.holder.set(started)
 	return started
 }
 
-// powerOn turns the receiver on before any session stands.
+// equipment.PowerOn turns the receiver on before any session stands.
 func (h *sessionHarness) powerOn(t *testing.T) {
 	t.Helper()
-	h.denon.Send(denonPowerOnCommand)
-	h.waitUntil(t, func(state denonState) bool { return state.Power == powerOn })
+	h.denon.SetPower(equipment.MainZone, true)
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
 }
 
 // refuseCommands fails the test if any named command goes out within
@@ -183,7 +186,7 @@ func TestTheSessionPowersOnThenSelectsTheInput(t *testing.T) {
 
 	h.begin(t, "GAME")
 
-	mustMatch(t, h.equipment.waitForCommand(t), denonPowerOnCommand)
+	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
 }
 
@@ -203,7 +206,7 @@ func handOnTheRemote(t *testing.T, equipment *fakeDenon, line string) {
 	conn, err := net.Dial("tcp", equipment.address())
 	mustSucceed(t, err)
 	t.Cleanup(func() { conn.Close() })
-	_, err = conn.Write([]byte(line + string(denonTerminator)))
+	_, err = conn.Write([]byte(line + string(denon.Terminator)))
 	mustSucceed(t, err)
 }
 
@@ -213,7 +216,7 @@ func TestTheSessionSelectsTheInputOnce(t *testing.T) {
 	h.equipment.waitForCommands(t, "SIGAME")
 
 	handOnTheRemote(t, h.equipment, "SIDVD")
-	h.waitUntil(t, func(state denonState) bool { return state.Input == "DVD" })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 
 	h.refuseCommands(t, quietPeriod, "SIGAME")
 }
@@ -279,7 +282,7 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 	}()
 
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-	startSession(t.Context(), "theater", spec, newDenonClient("127.0.0.1:1", nil), listener.Addr().String(),
+	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, listener.Addr().String(),
 		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} })
 
 	will := connectWill(t, waitForFrame(t, frames))
@@ -371,7 +374,7 @@ func TestThreePressesMoveTheReceiverThreeSteps(t *testing.T) {
 	third := pressFrom(t, h, broker, second.Level, 5, "MV53")
 	mustMatch(t, third, volumeState{Level: 76})
 
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 106 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 106 })
 }
 
 // A press down moves the receiver down by the step a person declared.
@@ -399,18 +402,10 @@ func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
 	// bus scale, so the session has nothing further to say about it.
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 	h.equipment.waitForCommands(t, "MV52")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 104 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 104 })
 
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 	refuseVolumeSets(t, h.equipment, quietPeriod)
-}
-
-// A ceiling above the top of a Denon's own scale is that top, so a
-// person cannot ask for a volume the receiver does not have.
-func TestACeilingAboveTheDenonScaleIsTheScaleTop(t *testing.T) {
-	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 120, Step: 1}, 51)
-
-	mustMatch(t, pressFrom(t, h, broker, 51, 5, "MV51"), volumeState{Level: 52})
 }
 
 // A hand can leave the receiver above the ceiling. The topic then reads
@@ -426,7 +421,7 @@ func TestAReceiverAboveTheCeilingStaysUntilAPressDown(t *testing.T) {
 
 	broker.push(testVolumeTopic, []byte(`{"level":95,"muted":false}`))
 	h.equipment.waitForCommands(t, "MV49")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 98 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 98 })
 }
 
 // The limit a Denon reports wanders while the room is playing, so the
@@ -438,7 +433,7 @@ func TestAWanderingReportedLimitMovesNothing(t *testing.T) {
 	h.equipment.driftLimit(129)
 
 	refuseVolumeSets(t, h.equipment, quietPeriod)
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 100 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 100 })
 	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
 }
 
@@ -525,15 +520,15 @@ func TestTheSessionsOwnWriteBackDoesNotMoveTheEquipment(t *testing.T) {
 
 	broker.push(testVolumeTopic, published.payload)
 
-	mustMatch(t, halvesForLevelOrZero(level), wrong)
-	h.equipment.refuseCommand(t, denonVolumeCommand(wrong), quietPeriod)
-	mustMatch(t, h.denon.State().Volume, knob)
+	mustMatch(t, stepsForLevelOrZero(level), wrong)
+	h.equipment.refuseCommand(t, denon.VolumeCommand(wrong), quietPeriod)
+	mustMatch(t, mainZone(h.denon.State()).Volume, knob)
 }
 
-// halvesForLevelOrZero maps a bus level onto the fake receiver's scale,
+// stepsForLevelOrZero maps a bus level onto the fake receiver's scale,
 // so the case above states the half step the mapping would land on.
-func halvesForLevelOrZero(level int) int {
-	halves, _ := halvesForLevel(level, 139)
+func stepsForLevelOrZero(level int) int {
+	halves, _ := stepsForLevel(level, 139)
 	return halves
 }
 
@@ -557,7 +552,7 @@ func TestASessionAdoptsTheReceiverBeforeItAppliesAnyLevel(t *testing.T) {
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
 	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
 }
 
 // refuseVolumeSets fails the test if the session sets the receiver's
@@ -570,7 +565,7 @@ func refuseVolumeSets(t *testing.T, equipment *fakeDenon, within time.Duration) 
 		select {
 		case command := <-equipment.commands:
 			seen = append(seen, command)
-			if strings.HasPrefix(command, denonVolumeCommandPrefix) && command != "MV?" {
+			if strings.HasPrefix(command, denon.VolumePrefix) && command != "MV?" {
 				t.Fatalf("the session set the volume with %q (seen %v)", command, seen)
 			}
 		case <-deadline:
@@ -605,7 +600,7 @@ func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
 	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
 }
 
 // A press that mutes the room is not a direction: the receiver is muted
@@ -616,8 +611,8 @@ func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
 
 	broker.push(testVolumeTopic, []byte(`{"level":72,"muted":true}`))
 
-	h.equipment.waitForCommands(t, denonMuteOnCommand)
-	h.waitUntil(t, func(state denonState) bool { return state.Mute })
+	h.equipment.waitForCommands(t, denon.MuteOnCommand)
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Mute })
 	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
 }
 
@@ -625,8 +620,11 @@ func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
 // left above the ceiling is not dragged back down by a press up.
 func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
 	press := func(rule ReceiverVolume, volume int, up bool) (int, bool) {
-		held := &session{scale: func() ReceiverVolume { return rule }}
-		return held.nextPosition(denonState{Volume: volume, VolumeMax: 139}, up)
+		held := &session{
+			scale:  func() ReceiverVolume { return rule },
+			driver: denon.NewClient("127.0.0.1:1", nil),
+		}
+		return held.nextPosition(equipment.ZoneState{Volume: volume, VolumeMax: 139}, up)
 	}
 	room := ReceiverVolume{Max: 45, Step: 1}
 
@@ -646,7 +644,7 @@ func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
 		{"down onto the floor", room, 1, false, 0, true},
 		{"down from the floor", room, 0, false, 0, false},
 		{"no ceiling declared", ReceiverVolume{Step: 1}, 80, true, 0, false},
-		{"a volume the receiver has not reported", room, unknownHalves, true, 0, false},
+		{"a volume the receiver has not reported", room, equipment.Unknown, true, 0, false},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -676,5 +674,5 @@ func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
 
 	broker.push(testVolumeTopic, []byte(`{"level":80,"muted":false}`))
 	h.equipment.waitForCommands(t, "MV51")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Volume == 102 })
 }

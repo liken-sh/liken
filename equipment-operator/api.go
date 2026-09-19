@@ -1,5 +1,7 @@
 package main
 
+import "github.com/liken-sh/equipment-operator/equipment"
+
 // The wire types are hand-written, the way liken and the sibling
 // operators write theirs. The Kubernetes API is HTTPS that serves
 // JSON, and importing client-go for a dozen structs brings informers,
@@ -108,13 +110,15 @@ type ReceiverStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
-// ConditionStatus is the three-valued verdict a condition carries.
-type ConditionStatus string
+// ConditionStatus is the three-valued verdict a condition carries. It
+// is the driver contract's own type, so a reachability verdict travels
+// from a driver to the status without a conversion.
+type ConditionStatus = equipment.ConditionStatus
 
 const (
-	ConditionTrue    ConditionStatus = "True"
-	ConditionFalse   ConditionStatus = "False"
-	ConditionUnknown ConditionStatus = "Unknown"
+	ConditionTrue    = equipment.ConditionTrue
+	ConditionFalse   = equipment.ConditionFalse
+	ConditionUnknown = equipment.ConditionUnknown
 )
 
 // Condition mirrors metav1.Condition, the shape Kubernetes uses

@@ -2,7 +2,7 @@ package main
 
 // The level path: the bus payload the room's level travels in, the
 // owner mark that says who applies it, and the arithmetic between the
-// bus scale and the receiver's own.
+// bus scale and a driver's own steps.
 
 import (
 	"encoding/json"
@@ -71,63 +71,53 @@ func ownerMark(receiver string) ([]byte, error) {
 	return json.Marshal(volumeOwner{Owner: "receiver/" + receiver})
 }
 
-// The receiver's scale is counted in half steps, because a Denon moves
-// in halves and an integer count of them never rounds. unknownHalves is
-// a value the receiver has not reported yet.
-const unknownHalves = -1
-
-// parseHalfSteps reads the digits a Denon sends. Two digits are whole
-// steps and three digits are tenths, and the receiver only ever sends a
-// tenth of five.
-func parseHalfSteps(digits string) (int, bool) {
-	value, err := strconv.Atoi(digits)
-	if err != nil || value < 0 {
-		return unknownHalves, false
-	}
-	switch len(digits) {
-	case 2:
-		return value * 2, true
-	case 3:
-		if value%5 != 0 {
-			return unknownHalves, false
-		}
-		return value / 5, true
-	}
-	return unknownHalves, false
-}
-
-// formatHalfSteps writes a count the way a person reads it, which is
-// what the status carries.
-func formatHalfSteps(halves int) string {
-	if halves < 0 {
+// formatSteps writes a driver's step count the way a person reads it,
+// which is what the status carries. The resolution is the driver's
+// number of steps in one display unit, so two half steps read as one.
+func formatSteps(steps, resolution int) string {
+	if steps < 0 || resolution <= 0 {
 		return ""
 	}
-	if halves%2 == 0 {
-		return strconv.Itoa(halves / 2)
-	}
-	return strconv.Itoa(halves/2) + ".5"
+	return strconv.FormatFloat(float64(steps)/float64(resolution), 'f', -1, 64)
 }
 
-// halfStepDigits writes the same count in the digits a set command
-// carries: two for a whole step, three for a half.
-func halfStepDigits(halves int) string {
-	whole := halves / 2
-	digits := strconv.Itoa(whole)
-	if whole < 10 {
-		digits = "0" + digits
+// stepsFromScale reads a figure a person wrote in the driver's own
+// scale as a count of the driver's smallest steps.
+func stepsFromScale(value float64, resolution int) int {
+	if resolution <= 0 {
+		return 0
 	}
-	if halves%2 == 1 {
-		digits += "5"
-	}
-	return digits
+	return int(math.Round(value * float64(resolution)))
 }
 
-// halvesForLevel maps the bus scale onto the receiver's, so 100 is the
+// ceilingSteps is what 100 on the bus means, in the driver's steps. It
+// is the ceiling a person declared and nothing else.
+func ceilingSteps(rule ReceiverVolume, resolution int) int {
+	stated := stepsFromScale(rule.Max, resolution)
+	if stated <= 0 {
+		return 0
+	}
+	return stated
+}
+
+// pressSteps is how far one press moves the driver, in its steps. Where
+// no step is declared, one press moves one whole display unit.
+func pressSteps(rule ReceiverVolume, resolution int) int {
+	if stated := stepsFromScale(rule.Step, resolution); stated > 0 {
+		return stated
+	}
+	if resolution <= 0 {
+		return 1
+	}
+	return resolution
+}
+
+// stepsForLevel maps the bus scale onto the driver's, so 100 is the
 // ceiling the room is allowed. A ceiling that is not known yet cannot
 // be mapped onto.
-func halvesForLevel(level, maxHalves int) (int, bool) {
-	if maxHalves <= 0 {
-		return unknownHalves, false
+func stepsForLevel(level, maxSteps int) (int, bool) {
+	if maxSteps <= 0 {
+		return 0, false
 	}
 	if level < minLevel {
 		level = minLevel
@@ -135,57 +125,18 @@ func halvesForLevel(level, maxHalves int) (int, bool) {
 	if level > maxLevel {
 		level = maxLevel
 	}
-	return int(math.Round(float64(level) * float64(maxHalves) / maxLevel)), true
+	return int(math.Round(float64(level) * float64(maxSteps) / maxLevel)), true
 }
 
-// levelForHalves maps the receiver's scale back onto the bus against
-// the same ceiling, which is what the session publishes after every
-// move.
-func levelForHalves(halves, maxHalves int) (int, bool) {
-	if maxHalves <= 0 || halves < 0 {
+// levelForSteps maps the driver's scale back onto the bus against the
+// same ceiling, which is what the session publishes after every move.
+func levelForSteps(steps, maxSteps int) (int, bool) {
+	if maxSteps <= 0 || steps < 0 {
 		return 0, false
 	}
-	level := int(math.Round(float64(halves) * maxLevel / float64(maxHalves)))
+	level := int(math.Round(float64(steps) * maxLevel / float64(maxSteps)))
 	if level > maxLevel {
 		level = maxLevel
 	}
 	return level, true
-}
-
-// Where no step is declared, one press moves the receiver by one whole
-// unit of its own scale, which is two half steps.
-const defaultStepHalves = 2
-
-// halvesFromScale reads a figure a person wrote in the receiver's own
-// scale as a count of half steps. A figure between two half steps is
-// not one the receiver can take, so it goes to the nearest.
-func halvesFromScale(value float64) int {
-	return int(math.Round(value * 2))
-}
-
-// The top of a Denon's own scale, 98, which no declared ceiling may
-// exceed.
-const denonScaleTop = 196
-
-// ceilingHalves is what 100 on the bus means. It is the ceiling a
-// person declared and nothing else. The receiver's own MVMAX line is
-// not a limit: one AVR reported 69.5, then 70.5, then 64.5 in one
-// evening, so a ceiling read from it would move under the room.
-func ceilingHalves(rule ReceiverVolume) int {
-	stated := halvesFromScale(rule.Max)
-	if stated <= 0 {
-		return 0
-	}
-	if stated > denonScaleTop {
-		return denonScaleTop
-	}
-	return stated
-}
-
-// pressHalves is how far one press moves the receiver.
-func pressHalves(rule ReceiverVolume) int {
-	if stated := halvesFromScale(rule.Step); stated > 0 {
-		return stated
-	}
-	return defaultStepHalves
 }

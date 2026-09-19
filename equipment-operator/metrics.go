@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -225,27 +226,28 @@ func (m *metrics) watchRestarted() {
 }
 
 // recordObservation puts one receiver's freshly read state on the
-// gauges, from the same denonState that builds its status. connected
-// and observation_valid move together here, because the Denon
+// gauges, from the same state that builds its status. connected
+// and observation_valid move together here, because the driver
 // connection is this operator's one source of a receiver's facts: a
 // dropped connection is itself a fresh, valid observation that the
 // receiver is gone, and not a missing reading. now is the moment the
 // state was read, which is what the timestamp gauge reports.
-func (m *metrics) recordObservation(receiver string, state denonState, now time.Time) {
+func (m *metrics) recordObservation(receiver string, state equipment.State, resolution int, now time.Time) {
+	main, _ := state.Zone(equipment.MainZone)
 	connected := state.Reachable == ConditionTrue
 	m.connected.WithLabelValues(receiver).Set(gaugeValue(connected))
 	m.obsValid.WithLabelValues(receiver).Set(gaugeValue(connected))
 	if connected {
 		m.obsLastGood.WithLabelValues(receiver).Set(float64(now.Unix()))
 	}
-	if state.Power != "" {
-		m.power.WithLabelValues(receiver).Set(gaugeValue(state.Power == powerOn))
+	if main.Power != "" {
+		m.power.WithLabelValues(receiver).Set(gaugeValue(main.Power == equipment.PowerOn))
 	}
-	if state.Volume != unknownHalves {
-		m.volume.WithLabelValues(receiver).Set(float64(state.Volume) / 2)
+	if main.Volume != equipment.Unknown && resolution > 0 {
+		m.volume.WithLabelValues(receiver).Set(float64(main.Volume) / float64(resolution))
 	}
-	if state.Input != "" {
-		m.setInput(receiver, state.Input)
+	if main.Input != "" {
+		m.setInput(receiver, main.Input)
 	}
 }
 
