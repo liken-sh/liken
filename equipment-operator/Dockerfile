@@ -10,6 +10,10 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The driver packages are their own directories, and a plain *.go copy
+# leaves them out.
+COPY denon ./denon
+COPY equipment ./equipment
 # The version reaches the binary through -ldflags, so liken_build_info
 # names the release actually running and not dev.
 ARG VERSION=dev
