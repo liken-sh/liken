@@ -426,6 +426,15 @@ that took a hearing-impaired flag for Hindi.
   A `Job` on a fresh claim paid one two-minute timeout on its first
   run, because its first write reached the catalog pod minutes after
   the rest. The confirmation of 2026-09-16 closes it.
+* [A "scan now" trigger for a
+  Library](open-problems/a-scan-now-trigger-for-a-library.md). A Library
+  has no field a person can set to start a full walk, so the `rescan`
+  CLI verb is a stub. The fact vocabulary in `cli/facts.go` can also
+  drift from `factnames.go` without a failure.
+* [Job copies never give space
+  back](open-problems/copies-never-give-space-back.md). A Job's agent
+  stops before the incremental vacuum loop runs, so freed pages stay in
+  the file.
 
 ## Rejected
 
