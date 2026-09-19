@@ -119,11 +119,12 @@ Plan 32 covers a separate part of the system from the enrichment work.
 ## Completed
 
 * [64, A refresh that walks a
-  library](completed/64-a-refresh-that-walks-a-library.md). Built on
-  2026-09-19. `spec.refresh` takes the key `scan` for one full walk, and
-  `kubectl liken library rescan` writes it. The one vocabulary now
-  covers the facts and the walk, and a test holds the CLI's copy of the
-  fact list to the operator's.
+  library](completed/64-a-refresh-that-walks-a-library.md). Built, and
+  drilled on `liken-1` on 2026-09-19, in release
+  2026.09.18-001-dev-004-07544f10. `spec.refresh` takes the key `scan`
+  for one full walk, and `kubectl liken library rescan` writes it. The
+  one vocabulary now covers the facts and the walk, and a test holds the
+  CLI's copy of the fact list to the operator's.
 * [52, Threads](completed/52-threads.md). Built and drilled 2026-09-08
   in releases 2026.09.08-005 and -006. The continue row across series,
   sets, and franchises: an exact-audience thread that a guest night

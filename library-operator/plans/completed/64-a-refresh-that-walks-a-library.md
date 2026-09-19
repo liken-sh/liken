@@ -1,10 +1,11 @@
 # 64, A refresh that walks a library
 
-Built on 2026-09-19. `spec.refresh` takes one more key, `scan`, which
-asks for one full walk of the library. `kubectl liken library rescan`
-writes it, and the operator stands one walk `Job` while the request is
-newer than the last walk. A test reads the CLI's copy of the fact list
-against the operator's, so the two cannot drift.
+Built and drilled on `liken-1` on 2026-09-19, in release
+2026.09.18-001-dev-004-07544f10. `spec.refresh` takes one more key,
+`scan`, which asks for one full walk of the library. `kubectl liken
+library rescan` writes it, and the operator stands one walk `Job` while
+the request is newer than the last walk. A test reads the CLI's copy of
+the fact list against the operator's, so the two cannot drift.
 
 ## The problem
 
@@ -73,7 +74,15 @@ the create-once behavior. `TestTheCLIFactListIsTheOperators` reads
 drift guard the open problem asked for. The CRD is read back and its
 refresh rule compared to `refreshVocabulary`.
 
-The drill runs on `liken-1` after the development build rolls there:
-`kubectl liken library rescan franchises`, then `movies`, and the walk
-`Job` appears and its run reaches `status.runs`. That measurement goes
-here when it runs.
+The drill ran on `liken-1` on 2026-09-19, in release
+2026.09.18-001-dev-004-07544f10. `kubectl liken library rescan
+franchises` wrote `spec.refresh.scan`, and the operator stood
+`franchises-walk-dljfu24crrau` within a second. The `Job` started at
+16:36:29Z and finished at 16:36:43Z, and the scan run reached
+`status.runs` with a start of 16:36:33Z, after the request at
+16:36:28Z. The same verb on `movies` stood `movies-walk-dljfuoquaunf`,
+which started at 16:37:19Z, walked 1,434 titles in four minutes and 27
+seconds, and finished at 16:41:46Z. A second `rescan franchises` on the
+same Library stood a second `Job` under a new name, so setting a later
+time asks again. The API server refused `spec.refresh.bogus` with the
+rule's own message, and the operator logged no error.
