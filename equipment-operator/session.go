@@ -425,11 +425,12 @@ func (s *session) publishPosition() bool {
 
 // togglePower flips the receiver's power on a toggle event. The remote's
 // power button publishes {"action":"toggle"} on the power topic, and
-// the operator answers it the way the receiver's own power button would:
-// off to select the session's input, on to standby. The spec's power
-// field is updated so the next reconcile sees no change to re-assert.
-// Anything else on the topic, a malformed body, an empty payload, or a
-// receiver the operator cannot reach does nothing.
+// the operator answers it the way a power button does: a receiver that
+// is on goes to standby, and one that is not comes on and selects the
+// session's input. The spec's power field is updated to match, so the
+// next reconcile sees no change to re-assert. Anything else on the
+// topic, a malformed body, an empty payload, or a receiver the operator
+// cannot reach does nothing.
 func (s *session) togglePower(payload []byte) {
 	var event struct {
 		Action string `json:"action"`
