@@ -136,9 +136,10 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 
 func shorterBackoff(t *testing.T) {
 	t.Helper()
-	minWas, maxWas := busMinBackoff, busMaxBackoff
-	t.Cleanup(func() { busMinBackoff, busMaxBackoff = minWas, maxWas })
-	busMinBackoff, busMaxBackoff = 5*time.Millisecond, 20*time.Millisecond
+	minWas, maxWas := busMinBackoff.Load(), busMaxBackoff.Load()
+	t.Cleanup(func() { busMinBackoff.Store(minWas); busMaxBackoff.Store(maxWas) })
+	busMinBackoff.Store(int64(5 * time.Millisecond))
+	busMaxBackoff.Store(int64(20 * time.Millisecond))
 }
 
 func waitForConnect(t *testing.T, connected <-chan *Bus) {
@@ -298,7 +299,11 @@ func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
 
 	// The first dial is immediate. Each wait after it is twice the
 	// one before, up to the ceiling the third wait already reaches.
-	floors := []time.Duration{0, busMinBackoff, 2 * busMinBackoff, busMaxBackoff, busMaxBackoff}
+	floors := []time.Duration{0,
+		time.Duration(busMinBackoff.Load()),
+		2 * time.Duration(busMinBackoff.Load()),
+		time.Duration(busMaxBackoff.Load()),
+		time.Duration(busMaxBackoff.Load())}
 	for dial, floor := range floors {
 		select {
 		case waited := <-waits:
@@ -321,9 +326,10 @@ func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
 // Run returns while it waits out a backoff, so a pod that is shutting
 // down does not sit through the whole wait.
 func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
-	minWas, maxWas := busMinBackoff, busMaxBackoff
-	t.Cleanup(func() { busMinBackoff, busMaxBackoff = minWas, maxWas })
-	busMinBackoff, busMaxBackoff = time.Minute, time.Minute
+	minWas, maxWas := busMinBackoff.Load(), busMaxBackoff.Load()
+	t.Cleanup(func() { busMinBackoff.Store(minWas); busMaxBackoff.Store(maxWas) })
+	busMinBackoff.Store(int64(time.Minute))
+	busMaxBackoff.Store(int64(time.Minute))
 
 	dialed := make(chan struct{}, 1)
 	bus := newBus("pipe", "equipment-operator", nil, nil, nil)

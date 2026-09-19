@@ -12,6 +12,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,12 +29,19 @@ const (
 
 // The reconnect backoff bounds. The client waits busMinBackoff after
 // the first failure and doubles the wait up to busMaxBackoff, so a
-// broker that is down does not become a tight reconnect loop. Both are
-// variables so a test drives a reconnect in milliseconds.
+// broker that is down does not become a tight reconnect loop. A test
+// shortens both to drive a reconnect in milliseconds, and the client it
+// built can outlive the test, so the bounds are atomics: a leaked client
+// goroutine reading them never races the next test's write.
 var (
-	busMinBackoff = time.Second
-	busMaxBackoff = 30 * time.Second
+	busMinBackoff atomic.Int64
+	busMaxBackoff atomic.Int64
 )
+
+func init() {
+	busMinBackoff.Store(int64(time.Second))
+	busMaxBackoff.Store(int64(30 * time.Second))
+}
 
 // busHandler receives one inbound message's topic and payload. The Bus
 // calls it on the reader goroutine, so a handler that blocks holds up
@@ -95,14 +103,16 @@ func newBus(address, clientID string, will *busWill, onConnect func(*Bus), handl
 // connection that drops after an hour reconnects at once, while a
 // broker that never answers is retried ever more slowly.
 func (b *Bus) Run(ctx context.Context) {
-	backoff := busMinBackoff
+	floor := time.Duration(busMinBackoff.Load())
+	ceiling := time.Duration(busMaxBackoff.Load())
+	backoff := floor
 	for ctx.Err() == nil {
 		connected := b.runSession(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		if connected {
-			backoff = busMinBackoff
+			backoff = floor
 		}
 		select {
 		case <-ctx.Done():
@@ -111,8 +121,8 @@ func (b *Bus) Run(ctx context.Context) {
 		}
 		if !connected {
 			backoff *= 2
-			if backoff > busMaxBackoff {
-				backoff = busMaxBackoff
+			if backoff > ceiling {
+				backoff = ceiling
 			}
 		}
 	}
