@@ -773,6 +773,7 @@ func denScreenOnTheBus() *Player {
 		VolumeTopic:      "liken/media/players/house/den-tv/volume",
 		VolumeOwnerTopic: "liken/media/players/house/den-tv/volume/owner",
 		CommandsTopic:    "liken/media/players/house/den-tv/commands",
+		PowerTopic:       "liken/media/players/house/den-tv/power",
 		PanelTopic:       "liken/media/players/house/den-tv/panel",
 		Remotes: []PlayerIdleRemote{
 			{
@@ -809,6 +810,7 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 		mediaVolumeTopicVariable:      "liken/media/players/house/den-tv/volume",
 		mediaVolumeOwnerTopicVariable: "liken/media/players/house/den-tv/volume/owner",
 		mediaCommandsTopicVariable:    "liken/media/players/house/den-tv/commands",
+		mediaPowerTopicVariable:       "liken/media/players/house/den-tv/power",
 		mediaPanelTopicVariable:       "liken/media/players/house/den-tv/panel",
 		mediaRemoteEventsTopicsVariable: "liken/media/remotes/house/sofa/events\n" +
 			"liken/media/remotes/house/armchair/events",
@@ -869,6 +871,19 @@ func TestScreenPodWithNoOwnerTopicNamesNoOwnerVariable(t *testing.T) {
 
 	if _, set := environment[mediaVolumeOwnerTopicVariable]; set {
 		t.Errorf("env = %v, want no owner topic", environment)
+	}
+}
+
+// An older media-operator states no power topic, and the browser then
+// forwards the power key to its shade.
+func TestScreenPodWithNoPowerTopicNamesNoPowerVariable(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.PowerTopic = ""
+
+	environment := browserEnvironment(player)
+
+	if _, set := environment[mediaPowerTopicVariable]; set {
+		t.Errorf("env = %v, want no power topic", environment)
 	}
 }
 

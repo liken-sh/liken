@@ -578,6 +578,12 @@ type PlayerIdleBus struct {
 	// back the request block the browser itself wrote onto the Play.
 	// The browser acts on no other action there.
 	CommandsTopic string `json:"commandsTopic"`
+	// The topic a remote power press publishes a toggle on. A screen
+	// wired through an A/V Receiver carries one, because the receiver
+	// owns the power and the remote press must reach it and not the
+	// browser. Empty for a screen on the panel directly, and the
+	// browser then keeps the key as a shade.
+	PowerTopic string `json:"powerTopic,omitempty"`
 	// The retained topic the browser states its panel desire on: off
 	// once its off window passes with no press, and on again at the
 	// next press.

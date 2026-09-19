@@ -84,9 +84,11 @@ const (
 // one contract are wired the same way. They name the broker, the
 // Player's own object name that every focus mark holds, the retained
 // status, the level, the commands topic that carries the play-next ask,
-// the panel topic the client states the panel desire on, and the two
-// newline-joined lists of the unit's controllers. The level variable is
-// absent for a unit with no sinks.
+// the power topic a receiver screen forwards presses on, the panel topic
+// the client states the panel desire on, and the two newline-joined
+// lists of the unit's controllers. The level variable is absent for a
+// unit with no sinks, and the power variable for a screen on the panel
+// directly.
 const (
 	mediaBusAddressVariable  = "MEDIA_BUS_ADDRESS"
 	mediaPlayerNameVariable  = "MEDIA_PLAYER_NAME"
@@ -94,8 +96,13 @@ const (
 	mediaVolumeTopicVariable = "MEDIA_PLAYER_VOLUME_TOPIC"
 	// The owner topic. The playback pod's command sidecar reads it under
 	// the same name, so one variable serves both clients.
-	mediaVolumeOwnerTopicVariable   = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC"
-	mediaCommandsTopicVariable      = "MEDIA_PLAYER_COMMANDS_TOPIC"
+	mediaVolumeOwnerTopicVariable = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC"
+	mediaCommandsTopicVariable    = "MEDIA_PLAYER_COMMANDS_TOPIC"
+	// The power topic. The browser forwards a remote power press to
+	// it when the unit's screen is wired through a receiver; a screen
+	// on the panel directly leaves the variable absent, so the press
+	// stays a shade.
+	mediaPowerTopicVariable         = "MEDIA_PLAYER_POWER_TOPIC"
 	mediaPanelTopicVariable         = "MEDIA_PLAYER_PANEL_TOPIC"
 	mediaRemoteEventsTopicsVariable = "MEDIA_REMOTE_EVENTS_TOPICS"
 	mediaRemoteFocusTopicsVariable  = "MEDIA_REMOTE_FOCUS_TOPICS"
@@ -360,6 +367,12 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 		if bus.VolumeOwnerTopic != "" {
 			environment = append(environment,
 				EnvVar{Name: mediaVolumeOwnerTopicVariable, Value: bus.VolumeOwnerTopic})
+		}
+		// A screen on the panel directly states no power topic, and the
+		// browser then keeps the power key as a shade.
+		if bus.PowerTopic != "" {
+			environment = append(environment,
+				EnvVar{Name: mediaPowerTopicVariable, Value: bus.PowerTopic})
 		}
 		environment = append(environment,
 			EnvVar{Name: mediaCommandsTopicVariable, Value: bus.CommandsTopic},
