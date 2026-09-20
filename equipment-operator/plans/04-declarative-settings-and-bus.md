@@ -126,10 +126,30 @@ it.
    `Settings` model, the id table, the bus move to the unit, the
    one-writer write-back, declarative settings for system, tone,
    audyssey, audio, and channelVolumes, and the non-main zones'
-   declared controls.
-2. The tuner (`TF`, `TM`, `TP`).
-3. The network player and HEOS (`NS`, `NSA`, `NSE`).
-4. Video controls and trigger outputs (`VSASP`, `VSMONI`, `TR`).
+   declared controls. This is the built phase.
+
+## Future families
+
+Four families the protocol names are not parsed, because the house's
+AVR-X1700H answers none of them and there is no hardware to prove a
+parser. They are documented here and not built. Each lands as the same
+shape: a family type on `denon.Settings`, a `denon/settings_<family>.go`
+holding its specs and command builders, the matching CRD block, and
+fake-receiver coverage. A family is a new file and one line in the
+assembly, so the mechanism does not change to add one.
+
+- **The tuner** (`TF`, `TM`, `TP`): the band, the frequency, a preset,
+  and the tuner's transport.
+- **The network player and HEOS** (`NS`, `NSA`, `NSE`): the source, the
+  now-playing state, and transport. Transport is a command, not a
+  setting.
+- **The video controls** (`VSASP`, `VSMONI`): the aspect and the
+  monitor out.
+- **The trigger outputs** (`TR`): the twelve-volt triggers.
+
+Each stays unproven until a model that speaks it answers. A transcript
+from that model is the proof; the fake-receiver test only pins the
+shape. `denon/AGENTS.md` lists the commands the parser ignores.
 
 ## Verification
 
