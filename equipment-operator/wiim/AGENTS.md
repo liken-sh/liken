@@ -91,10 +91,53 @@ Three other interfaces are open on the same LAN:
   changes and volume changes made at the device. There is no
   documented WebSocket.
 
-For discovery, the `PlayQueue:1` service in the UPnP description is the
-definitive marker for a LinkPlay device. The `SERVER` header is not,
-because LinkPlay and many unrelated devices send the same generic
-string.
+## The identity and the address
+
+Each WiiM has a UUID that identifies it. `getStatusEx` returns it as
+`uuid`, 12 bytes of hex. SSDP's UDN and the mDNS TXT `uuid=` field
+spell the same 12 bytes and repeat `FF98F2F7` after them. A driver
+normalizes between the two spellings. `temp_uuid` is a different value
+and is not the identity.
+
+The UUID is the right key for three reasons:
+
+- It is stable across a reboot and a DHCP lease change, and it does
+  not depend on which interface is up.
+- It is one value per device. The same device has four MACs, one each
+  for Wi-Fi, Bluetooth, the access point, and Ethernet.
+- Both discovery paths return it next to the address, so one lookup
+  answers both questions.
+
+The device name is not an identity. `DeviceName` and `setDeviceName`
+make it a human label, and the mDNS instance name comes from it.
+
+The address is never the identity. A driver resolves the address at
+connect time and keeps only the UUID:
+
+- mDNS: browse `_linkplay._tcp.local.`, read each instance's TXT
+  `uuid` and address record, and match the UUID.
+- SSDP: M-SEARCH for `MediaRenderer`, read each response's `USN` and
+  the host in `LOCATION`, and match the UDN.
+- Then read `getStatusEx` on the found address and compare `uuid`
+  before sending any command. The check also guards a declared
+  address, so an address swap never drives the wrong device.
+
+A `PlayQueue:1` service in the UPnP description is the definitive
+marker for a LinkPlay device. The `SERVER` header is not, because
+LinkPlay and many unrelated devices send the same generic string.
+
+mDNS and SSDP are link-local multicast. Discovery from the operator's
+pod works only when the pod shares an L2 segment with the amps. A
+router or a WireGuard tunnel between them drops multicast. In that
+case the network owner pins each amp with a DHCP reservation on its
+Wi-Fi MAC, gives it a DNS name, and the spec declares that name. The
+UUID check still runs on connect, so a stale name fails and does not
+drive the wrong device.
+
+A `spec.wiim` block therefore declares `uuid` as the identity and an
+optional `address` as a hint. A driver reads `uuid` first, tries the
+hint, and falls back to discovery. The API is stateless HTTPS, so
+re-resolving on each poll and reconnect is cheap.
 
 ## The commands
 
@@ -257,6 +300,13 @@ them.
   ignores AirPlay and does not report it.
 - The step size behind `vol++` and `vol--`. WiiM's own list measures
   one percent, and the Arylic document for the same stack says six.
+- Whether the UUID survives a factory reset or a major firmware
+  update. It should, because the device advertises it as its UDN, but
+  no reset has been run here.
+- Whether the cluster network passes multicast to the operator's pod.
+  If it does not, discovery has to run on a node next to the amps, or
+  the network owner has to give each amp a DHCP reservation and a DNS
+  name.
 
 ## The references
 
