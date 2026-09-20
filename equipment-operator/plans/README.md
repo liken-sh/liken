@@ -29,7 +29,8 @@ becomes a new plan or an open problem.
   selected input, and commands by status.
 * [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on the house cluster on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the house's AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
 * [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
-* [05, The operator on the host network](05-the-operator-on-the-host-network.md). The operator stays a Deployment and takes host network, so SSDP and mDNS discovery reach the LAN in process, and 9200 moves to a free host port. Equipment that attaches to a node (CEC, serial, IR) becomes a component on that node. This plan is ordered before the WiiM driver, plan 06.
+* [05, The operator on the host network](05-the-operator-on-the-host-network.md). The operator stays a Deployment and takes host network, so SSDP and mDNS discovery reach the LAN in process, and 9200 moves to a free host port. Equipment that attaches to a node (CEC, serial, IR) becomes a component on that node. This plan is ordered before [plan 06](06-wiim-driver.md).
+* [06, The WiiM driver](06-wiim-driver.md). A stub. The protocol, the models, the discovery rules, and the references are collected in `wiim/AGENTS.md`, and the design is not written.
 
 ## Completed
 
