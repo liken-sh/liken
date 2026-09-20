@@ -1,6 +1,6 @@
 # The Denon driver and the full receiver mirror
 
-Plan 02. Built and drilled on 44stonypoint on 2026-09-19.
+Plan 02. Built and drilled on the house cluster on 2026-09-19.
 
 ## The problem
 
@@ -231,7 +231,7 @@ Failing tests first. The transcript folds into the expected state, the
 session selects the input and the mode in one go, and the status
 carries both zones and the settings.
 
-The drill runs on 44stonypoint, the house cluster, where the receiver
+The drill runs on the house cluster, where the receiver
 is reachable. The cluster's Flux pins this repository at a release tag
 and applies `deploy/`, and its `ImageUpdateAutomation` advances the pin
 when a release is tagged, so a drill is a merge, a tag, and a read:

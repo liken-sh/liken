@@ -304,9 +304,10 @@ them.
   update. It should, because the device advertises it as its UDN, but
   no reset has been run here.
 - Whether the cluster network passes multicast to the operator's pod.
-  If it does not, discovery has to run on a node next to the amps, or
-  the network owner has to give each amp a DHCP reservation and a DNS
-  name.
+  Measured on the house cluster on 2026-09-20: a normal flannel pod sees
+  no LAN multicast, and a hostNetwork pod sees it. Plan 05 gives the
+  operator host network for this reason, so what remains open is only
+  a cluster that spans segments.
 
 ## The references
 

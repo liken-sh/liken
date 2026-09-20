@@ -162,8 +162,8 @@ shape. `denon/AGENTS.md` lists the commands the parser ignores.
 The mechanism is proved on the house's AVR-X1700H, which answers the
 settings the driver already parses. A declared setting reaches the
 receiver, a bus write reaches it and returns to `spec.denon.settings`,
-and a key in both is reported. The drill runs on 44stonypoint the way
-plan 02's did.
+and a key in both is reported. The drill runs on the house cluster the
+way plan 02's did.
 
 The tuner, network/HEOS, video, and trigger families get parsers,
 command builders, and fake-receiver coverage that emulates the
