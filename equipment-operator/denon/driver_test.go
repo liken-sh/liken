@@ -118,7 +118,7 @@ func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
 	// The noise lines arrive behind the sound mode, so poll until the
 	// folded snapshot holds them.
 	got := waitForSettings(t, harness.client, func(s Settings) bool {
-		return s.System.VideoSelect != nil && s.Audio.DRC != nil
+		return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
 	})
 	mustMatch(t, got.System.Power, "standby")
 	mustMatch(t, *got.System.VideoSelect, "off")
