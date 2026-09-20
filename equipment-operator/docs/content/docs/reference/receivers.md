@@ -30,11 +30,11 @@ The receiver accepts the Denon and Marantz control protocol on TCP port 23. Comm
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdenon--address"></span>`address` | string | yes | The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent. |
-| <span id="specdenon--settings"></span>`settings` | [object](#specdenonsettings) | no | The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field. |
+| <span id="specdenon--settings"></span>`settings` | [object](#specdenonsettings) | no | The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field. |
 
 #### spec.denon.settings
 
-The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field.
+The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

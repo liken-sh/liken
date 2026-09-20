@@ -339,7 +339,7 @@ func (d *Client) runSession(parent context.Context) (answered bool) {
 		d.writeLoop(ctx, conn, out)
 		// Stop accepting new commands before the writer is gone, then
 		// drain what was already accepted. The send path holds the mutex
-		// while it enqueues, so taking it here means no send sits between
+		// while it enqueues, so taking it here means no send occurs between
 		// its nil check and its enqueue: a command accepted before this
 		// point is drained, and a send after it sees nil and reports
 		// failure instead of leaving a command in a queue nobody drains.

@@ -14,7 +14,7 @@ calls for it.
 
 ## The Denon driver
 
-A protocol lives in its own directory as a driver. The first is
+A protocol is a driver in its own directory. The first is
 `denon/`, and its `AGENTS.md` holds the protocol references, the
 command families, and the model notes. The package implements the
 `equipment.Driver` contract in `equipment/`, which the controller

@@ -560,7 +560,7 @@ func TestSettingsDoesNotAliasTheLiveState(t *testing.T) {
 
 	// The fake reports SVOFF, PSDRC OFF, and PSLFE 00, so these are
 	// live pointers a shallow copy would share. Wait until they have
-	// folded, since they ride behind the queries the test drains.
+	// folded, since they arrive after the queries the test drains.
 	waitForSettings(t, harness.client, func(s Settings) bool {
 		return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
 	})

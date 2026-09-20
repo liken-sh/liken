@@ -11,7 +11,7 @@ about thirty more queries and volunteers many more events, so the
 cluster cannot see the second zone, the sound mode it reads but never
 sets, or any of the receiver's own settings.
 
-The Denon code also sits in the root package beside the controller,
+The Denon code is also in the root package beside the controller,
 so a second protocol such as a WiiM has nowhere to live. This plan
 makes the protocol a driver with its own directory, makes the parser
 cover every line the house's receiver emits, and makes the resource
@@ -248,5 +248,5 @@ must then move the status.
   trigger outputs, and the speaker presets. The X1700H answers none
   of the first three on our probes, so they stay open problems for a
   model that has them.
-* The Service front, from plan 00, still stands as plan 03.
+* The Service front, from plan 00, is still plan 03.
 * The second driver, a WiiM, and whatever its HTTP API reports.

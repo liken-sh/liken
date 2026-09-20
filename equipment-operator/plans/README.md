@@ -21,8 +21,8 @@ becomes a new plan or an open problem.
 ## The design
 
 * [00, The equipment-operator design](00-design.md). What equipment
-  is, what a `Receiver` holds, how the level rides the media bus, and
-  what the Service front is for.
+  is, what a `Receiver` holds, how the operator owns the room's level
+  on the media bus, and what the Service front is for.
 * [01, Prometheus metrics](completed/01-prometheus-metrics.md). Built and drilled on liken-1 on 2026-09-10. The
   operator serves Prometheus metrics on port 9200 under liken's shared
   contract: the receiver connected and claimed, power, volume, the

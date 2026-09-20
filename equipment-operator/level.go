@@ -60,7 +60,7 @@ type volumeOwner struct {
 	Owner string `json:"owner"`
 }
 
-// ownerTopic is where the mark for one volume topic sits.
+// ownerTopic is the topic a volume topic's owner mark goes on.
 func ownerTopic(volumeTopic string) string {
 	return volumeTopic + "/owner"
 }
