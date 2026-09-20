@@ -1,0 +1,297 @@
+# Working on wiim
+
+This directory holds the WiiM protocol driver, once a plan calls for
+it. No code exists here yet. This file collects what a driver needs to
+know and where that came from.
+
+## The verdict: the LAN alone operates it
+
+A WiiM answers every control this operator needs over the local
+network. It reads state and sets volume, mute, input, and transport
+with unauthenticated HTTP GET requests to the device's own address. It
+sends no request to a cloud service to do any of that, and it needs no
+account, no token, and no internet route. The device does need a local
+network, because that is how a client reaches it.
+
+A live WiiM Amp confirms this. Its firmware answers reads and
+accepts writes over HTTPS with no authentication, and no request
+carries a token.
+
+Two facts come from the design of the protocol, and both help here:
+
+- Every request is a GET, including the ones that set something. The
+  API is stateless, so a driver holds no session per device.
+- There is no authentication. The HTTPS listener presents a
+  self-signed certificate (CN `www.linkplay.com`), so a client disables
+  certificate verification. On a trusted LAN, the certificate adds
+  nothing, and WiiM users have asked the company to open port 80 for
+  exactly this reason.
+
+The one step that is not purely LAN is the first one. A WiiM is
+provisioned with the WiiM Home app, which asks for local network,
+Bluetooth, and location permission. There is no documented headless
+provisioning path. After provisioning, the device runs and answers on
+the LAN with or without an internet route.
+
+What still needs the internet: firmware updates, the music-service
+accounts behind Tidal and Spotify, and voice assistants. A driver
+ignores all three. The `internet` field in `getStatusEx` reports whether
+the device has a route, and it is only a report.
+
+## The models
+
+The amps, which are the equipment this operator cares about:
+
+| Model | Power into 4 ohm | Notes |
+| --- | --- | --- |
+| WiiM Amp | 120 W per channel | HDMI ARC, optical, line-in, USB-A, sub out, Ethernet |
+| WiiM Amp Pro | 120 W per channel | ESS ES9038Q2M, Wi-Fi 6E, no display |
+| WiiM Amp Ultra | 200 W per channel | dual TPA3255, 3.5-inch screen, HDMI ARC with Dolby Digital |
+| WiiM CI MOD A80 | not stated | rack model for the custom-install line |
+
+The streamers and speakers, which are not amps but answer the same API:
+WiiM Mini, WiiM Pro, WiiM Pro Plus, WiiM Ultra, WiiM Sound, WiiM Sound
+Lite. The WiiM Ultra is a streamer and preamp with an HDMI ARC input
+and a phono stage, and it has no power amplifier.
+
+The WiiM Vibelink Amp is a pure analog power amplifier with no network
+port. It is not equipment for this operator and no protocol reaches it.
+
+One wiring fact matters for a liken machine. The HDMI port on a WiiM
+Amp is ARC, so it takes audio from a television and not from a source.
+A liken machine reaches the amp over optical, line-in, or USB audio,
+not over HDMI.
+
+## The transport
+
+The control interface is `httpapi.asp`:
+
+```
+https://<address>/httpapi.asp?command=<name>[:<args>]
+```
+
+Every request uses GET. The device answers `OK`, a bare value, or JSON,
+and answers `unknown command` for a command its firmware does not
+carry. Port 443 is open on current firmware. Port 80 is closed on the
+newer LinkPlay modules, though older modules answered there and served
+a web page. A driver connects to 443 and skips certificate
+verification.
+
+Three other interfaces are open on the same LAN:
+
+- UPnP/SSDP on port 1900, with the device description usually on port
+  49152. The description names AVTransport, RenderingControl, and
+  ConnectionManager, plus LinkPlay's own `PlayQueue` service in the
+  `urn:schemas-wiimu-com:` namespace.
+- mDNS, which advertises `_linkplay._tcp.local.` The Home Assistant
+  integration keys its auto-discovery on this name.
+- GENA event subscriptions. A client subscribes to AVTransport and
+  RenderingControl with a callback URL, and the device sends NOTIFY
+  requests when the state changes. This is the push path for track
+  changes and volume changes made at the device. There is no
+  documented WebSocket.
+
+For discovery, the `PlayQueue:1` service in the UPnP description is the
+definitive marker for a LinkPlay device. The `SERVER` header is not,
+because LinkPlay and many unrelated devices send the same generic
+string.
+
+## The commands
+
+The named reads:
+
+| Command | Answers |
+| --- | --- |
+| `getStatusEx` | device name, firmware, project, build date, `internet`, group, casting flags |
+| `getPlayerStatus` | play state, volume, mute, source, track metadata |
+| `getMetaInfo` | the current track's title, artist, album, and cover |
+| `getStaticIpInfo` | static address, gateway, DNS |
+| `getChannelBalance` | left-right balance from -1.0 to 1.0 |
+| `getbtpairstatus`, `getbthistory` | Bluetooth pairing state and paired devices |
+
+The transport and level writes:
+
+```
+setPlayerCmd:play:<url>      play a URL
+setPlayerCmd:resume          resume
+setPlayerCmd:pause           pause
+setPlayerCmd:onepause        toggle play and pause
+setPlayerCmd:stop            stop
+setPlayerCmd:prev            previous track
+setPlayerCmd:next            next track
+setPlayerCmd:seek:<seconds>  seek
+setPlayerCmd:vol:<0-100>     set volume
+setPlayerCmd:vol++           step volume up
+setPlayerCmd:vol--           step volume down
+setPlayerCmd:mute:1           mute
+setPlayerCmd:mute:0           unmute
+setPlayerCmd:groupVol:<0-100> set the group volume
+```
+
+The input writes name the source:
+
+```
+setPlayerCmd:switchmode:wifi
+setPlayerCmd:switchmode:optical
+setPlayerCmd:switchmode:line-in
+setPlayerCmd:switchmode:coaxial
+setPlayerCmd:switchmode:bluetooth
+setPlayerCmd:switchmode:hdmi       HDMI ARC, on models with an HDMI port
+setPlayerCmd:switchmode:usb        USB audio
+setPlayerCmd:switchmode:udisk      files on a USB drive
+setPlayerCmd:switchmode:phono      on the Ultra
+```
+
+The remaining families:
+
+- Presets: `MCUKeyShortClick:<1-12>` starts a stored preset.
+- Equalizer: `EQGetList`, `EQLoad:<name>`, `EQOn`, `EQOff`. WiiM
+  devices also carry a parametric equalizer over an LV2 API.
+- Timers: sleep timer and alarms, on WiiM devices only.
+- Bluetooth: `startbtdiscovery:<seconds>`, `getbtdiscoveryresult`,
+  `connectbta2dpsynk:<mac>`, `disconnectbta2dpsynk:<mac>`.
+- Device lights and buttons: `LED_SWITCH_SET:<0|1>`,
+  `Button_Enable_SET:<0|1>`.
+- Queues and grouping: the UPnP AVTransport and `PlayQueue` services,
+  not `httpapi.asp`.
+
+## The state and the snapshot
+
+`getStatusEx` carries the device's identity: `ssid` is the device
+name, `firmware` is the Linkplay version, `project` is the model, and
+`internet` is the route flag. `getPlayerStatus` carries the play state,
+the volume as an integer from 0 to 100, the mute flag, and the selected
+source.
+
+Volume is the one number with a decided meaning. The wire counts whole
+steps from 0 to 100, and the display shows the same number, so the
+driver reports `VolumeResolution` 1 and needs no conversion.
+
+The driver would map the API onto `equipment.Driver` with one zone
+named `main`: power, input, mute, and volume from the fields above, no
+sound mode, and the sleep timer where the model has one. The rest of
+`getStatusEx` and `getPlayerStatus` becomes the JSON snapshot the
+controller writes under `status.wiim`. The design already says a WiiM
+makes no Service front, because the protocol has no one-client rule.
+
+## One amp in hand
+
+The studio's WiiM Amp answers on firmware `Linkplay.5.2.828335`
+(build 20260904), project `WiiM_Amp_4layer`, on an AmlogicA113 SoC.
+These are what it reports, and what it accepts.
+
+Open ports are 443 (the API), 49152 (UPnP), 59152 (the port mDNS
+advertises), and 8819 (the port `getStatusEx` calls
+`communication_port`). Ports 80, 1255, 3483, and 8080 are closed. The
+TLS certificate is the LinkPlay self-signed pair, CN
+`www.linkplay.com`, valid to 2028.
+
+The reads it answers:
+
+```
+getStatusEx              device identity and capabilities
+getPlayerStatus          play state, volume, mute, source
+getPlayerStatusEx        the same, plus play mode
+getMetaInfo              title, artist, album, cover, sample rate
+```
+
+The inputs it reports are `wifi`, `bluetooth`, `line-in`, `optical`,
+and `HDMI`, plus `udisk` in the capability list. It has no phono and no
+coaxial input. `getSoundCardModeSupportList` reports one output,
+`Speaker Out`.
+
+`getPlayerStatus` returns `Title`, `Artist`, and `Album` as hex-encoded
+bytes, while `getMetaInfo` returns the same fields as plain JSON. A
+driver reads metadata from `getMetaInfo`.
+
+The writes it accepts, each answering `OK`:
+
+```
+setPlayerCmd:vol:<0-100>
+setPlayerCmd:mute:<0|1>
+setShutdown:<seconds>
+```
+
+`setShutdown` is the sleep timer, not standby. A positive number is
+the seconds until playback pauses, `0` pauses it immediately, and `-1`
+cancels the timer. `getShutdown` reads the remaining seconds. A live
+test with a silent file served from the LAN watched the count reach
+zero and the play state change from `play` to `pause`, while the
+device stayed reachable and `power_mode` stayed `-1`.
+
+No command over the API puts an Amp into standby. WiiM's own power
+guide says a device stands by through the automatic idle timer or the
+voice remote's power button, and the app has no power button. pywiim,
+the mature client, implements no power command.
+
+What it does not answer, on this firmware: `getPowerMode`,
+`getAudioOutputMode`, `getAudioOutputStatus`, `getDeviceInfo`,
+`getFirmwareVersion`, `getMAC`, `getMultiroomStatus`, `getSlaveList`,
+`getTriggeroutStatus`, and every `getEqStatus` spelling. The extended
+references call several of these commands; this model carries none of
+them.
+
+`getStatusEx` also carries a `security` block: `https/2.0`, security
+version `3.0`, and an AES capability. The plain HTTPS API still
+answers without a token, so the block reports a capability and does not
+gate the API today.
+
+## What is not settled
+
+These need another test or another model before a plan can promise
+them.
+
+- Power. The API has no standby command, as the live test above
+  shows. A driver can pause and resume playback, or it can report
+  power as always on and let the automatic idle timer stand the Amp
+  down. A plan has to choose between those two.
+- Whether the local API answers when the WAN is down but the LAN is
+  up. One owner reports that local DLNA playback works in that state
+  on a Pro Plus, and another reports that an Ultra asks for setup only
+  when the whole router is off. Both reports test a different thing,
+  and neither is proof for an Amp.
+- Which commands each model answers. One owner found `reboot` works on
+  a Mini and returns an error on an Amp, so a driver cannot treat the
+  command set as fixed across the line.
+- The model notes above disagree on AirPlay 2 support, so a driver
+  ignores AirPlay and does not report it.
+- The step size behind `vol++` and `vol--`. WiiM's own list measures
+  one percent, and the Arylic document for the same stack says six.
+
+## The references
+
+WiiM's own documents:
+
+- [HTTP API for WiiM Products, version 1.2](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Products.pdf)
+- [HTTP API for WiiM Mini](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Mini.pdf)
+- [How to Manage the Power State of Your WiiM Device](https://faq.wiimhome.com/en/support/solutions/articles/72000624590-how-to-manage-the-power-state-of-your-wiim-device), which states standby is the automatic idle timer or the voice remote
+- [WiiM Home App Permissions](https://faq.wiimhome.com/support/solutions/articles/72000581676-wiim-home-app-permissions), which states the setup needs local network, Bluetooth, and location
+
+Community references that document the protocol beyond WiiM's PDFs:
+
+- [DanBrezeanu/wiim-extended-http-api](https://github.com/DanBrezeanu/wiim-extended-http-api) for the undocumented network, Bluetooth, audio, and equalizer commands
+- [cvdlinden/wiim-httpapi](https://github.com/cvdlinden/wiim-httpapi) and its published [API reference](https://cvdlinden.github.io/wiim-httpapi/) for an OpenAPI description of the whole surface
+- [mjcumming/pywiim](https://github.com/mjcumming/pywiim) for an async client, UPnP eventing, grouping, and [discovery details](https://github.com/mjcumming/pywiim/blob/main/docs/user/DISCOVERY.md)
+- [mjcumming/wiim](https://github.com/mjcumming/wiim) for the Home Assistant integration built on pywiim
+- [shumatech/wiimplay](https://github.com/shumatech/wiimplay), a Go client
+- [carloseberhardt/wiim_api](https://github.com/carloseberhardt/wiim_api), a Rust client
+- [tristanreid/wiim-control](https://github.com/tristanreid/wiim-control), a local control panel that proxies the self-signed certificate
+
+The LinkPlay stack is shared, so the sibling documents often name a
+command WiiM's PDFs omit:
+
+- [Arylic HTTP API](https://developer.arylic.com/httpapi/), the same firmware with a different brand
+- [n4archive/LinkPlayAPI](https://github.com/n4archive/LinkPlayAPI/blob/master/api.md) and [AndersFluur/LinkPlayApi](https://github.com/AndersFluur/LinkPlayApi/blob/master/api.md)
+
+Forum threads that carry the facts above:
+
+- [No way of using the Ultra without Internet?](https://forum.wiimhome.com/threads/no-way-of-using-the-ultra-without-internet.6164/) for the LAN-without-WAN question
+- [WIIM amp without internet](https://forum.wiimhome.com/threads/wiim-amp-without-internet.5253/) for the same
+- [allow API access on http port tcp/80](https://forum.wiimhome.com/threads/allow-api-access-on-http-port-tcp-80.6550/) for the closed port 80 and the self-signed certificate
+- [API - http GET works with browser but no other device](https://forum.wiimhome.com/threads/api-http-get-works-with-browser-but-no-other-device.3317/) for the certificate that blocks a plain client
+- [WiiM HTTP API List](https://forum.wiimhome.com/threads/wiim-http-api-list.9985/) and [Wiim Amp https API - additional commands](https://forum.wiimhome.com/threads/wiim-amp-https-api-additional-commands.3397/) for the command list and the model differences
+- [Is there websocket api documentation for WiiM Pro?](https://forum.wiimhome.com/threads/is-there-websocket-api-documentation-for-wiim-pro.8405/) for UPnP GENA as the event path
+- [API Questions](https://forum.wiimhome.com/threads/api-questions.1809/) and [Recall Presets using the Wiim API](https://forum.wiimhome.com/threads/recall-presets-using-the-wiim-api.2968/) for the `PlayQueue` service and `MCUKeyShortClick`
+- [Power Off command in App](https://forum.wiimhome.com/threads/power-off-command-in-app.1737/) for the missing app power button
+- [WiiM Pro API standby mode](https://forum.wiimhome.com/threads/wiim-pro-api-standby-mode.573/) for the same gap over the API
+- [API for Wiim Amp?](https://forum.wiimhome.com/threads/api-for-wiim-amp.3306/) for the Amp's own command coverage
