@@ -4,6 +4,7 @@
 package denon
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -162,66 +163,112 @@ func TestConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
 }
 
 // A different value in any one declared field fails the whole block, so
-// a partial apply is never taken for confirmed. Each row declares every
-// family and differs in exactly the field it names.
+// a partial apply is never taken for confirmed. The sweep walks the
+// settings structs and changes one field at a time, so a field added to
+// a family without a line in ConfirmedBy fails here instead of being
+// taken for confirmed while the receiver holds another value. It covers
+// every pointer field and the
+// channel volumes, and skips a plain scalar: SystemSettings.Power is
+// reported but the controller owns it, and a declared field is always a
+// pointer.
 func TestConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
-	want := Settings{
-		System: SystemSettings{
-			Eco: strPtr("on"), Dimmer: strPtr("dim"), AutoStandby: strPtr("30m"),
-			SpeakerPreset: intPtr(2), AudioInputMode: strPtr("auto"), VideoSelect: strPtr("off"),
-			BluetoothTransmitter: strPtr("on"), BluetoothOutput: strPtr("speakers"),
-		},
-		Tone: ToneSettings{Control: boolPtr(true), Bass: intPtr(3), Treble: intPtr(-1)},
-		Audyssey: AudysseySettings{
-			Multeq: strPtr("flat"), DynamicEq: boolPtr(true), ReferenceLevelOffset: intPtr(0),
-			DynamicVolume: strPtr("medium"), LoudnessManagement: boolPtr(true),
-		},
-		Audio: AudioSettings{
-			DRC: strPtr("mid"), LFE: intPtr(-5), Effect: intPtr(5), Delay: intPtr(10),
-			AudioDelay: intPtr(20), Subwoofer: boolPtr(true), Restorer: strPtr("low"),
-			GraphicEq: strPtr("on"), HeadphoneEq: strPtr("off"), SpeakerVirtualizer: boolPtr(true),
-			DialogEnhancer: strPtr("low"),
-		},
+	want := Settings{}
+	declareEveryField(t, reflect.ValueOf(&want).Elem())
+	paths := declaredFieldPaths(reflect.ValueOf(want))
+	if len(paths) == 0 {
+		t.Fatal("the sweep found no declared fields")
 	}
-	cases := []struct {
-		name     string
-		observed Settings
-	}{
-		{"eco", Settings{System: SystemSettings{Eco: strPtr("off")}}},
-		{"dimmer", Settings{System: SystemSettings{Dimmer: strPtr("bright")}}},
-		{"auto standby", Settings{System: SystemSettings{AutoStandby: strPtr("60m")}}},
-		{"speaker preset", Settings{System: SystemSettings{SpeakerPreset: intPtr(3)}}},
-		{"audio input mode", Settings{System: SystemSettings{AudioInputMode: strPtr("hdmi")}}},
-		{"video select", Settings{System: SystemSettings{VideoSelect: strPtr("DVD")}}},
-		{"bluetooth transmitter", Settings{System: SystemSettings{BluetoothTransmitter: strPtr("off")}}},
-		{"bluetooth output", Settings{System: SystemSettings{BluetoothOutput: strPtr("bluetooth")}}},
-		{"tone control", Settings{Tone: ToneSettings{Control: boolPtr(false)}}},
-		{"bass", Settings{Tone: ToneSettings{Bass: intPtr(5)}}},
-		{"treble", Settings{Tone: ToneSettings{Treble: intPtr(2)}}},
-		{"multeq", Settings{Audyssey: AudysseySettings{Multeq: strPtr("manual")}}},
-		{"dynamic eq", Settings{Audyssey: AudysseySettings{DynamicEq: boolPtr(false)}}},
-		{"reference level", Settings{Audyssey: AudysseySettings{ReferenceLevelOffset: intPtr(5)}}},
-		{"dynamic volume", Settings{Audyssey: AudysseySettings{DynamicVolume: strPtr("heavy")}}},
-		{"loudness", Settings{Audyssey: AudysseySettings{LoudnessManagement: boolPtr(false)}}},
-		{"dynamic range", Settings{Audio: AudioSettings{DRC: strPtr("low")}}},
-		{"lfe", Settings{Audio: AudioSettings{LFE: intPtr(-8)}}},
-		{"effect", Settings{Audio: AudioSettings{Effect: intPtr(8)}}},
-		{"delay", Settings{Audio: AudioSettings{Delay: intPtr(40)}}},
-		{"audio delay", Settings{Audio: AudioSettings{AudioDelay: intPtr(90)}}},
-		{"subwoofer", Settings{Audio: AudioSettings{Subwoofer: boolPtr(false)}}},
-		{"restorer", Settings{Audio: AudioSettings{Restorer: strPtr("high")}}},
-		{"graphic eq", Settings{Audio: AudioSettings{GraphicEq: strPtr("off")}}},
-		{"headphone eq", Settings{Audio: AudioSettings{HeadphoneEq: strPtr("on")}}},
-		{"speaker virtualizer", Settings{Audio: AudioSettings{SpeakerVirtualizer: boolPtr(false)}}},
-		{"dialog enhancer", Settings{Audio: AudioSettings{DialogEnhancer: strPtr("high")}}},
+	for _, path := range paths {
+		observed := Settings{}
+		declareEveryField(t, reflect.ValueOf(&observed).Elem())
+		changeField(reflect.ValueOf(&observed).Elem(), path)
+		if want.ConfirmedBy(observed) {
+			t.Errorf("a difference in %s was confirmed", fieldPathName(reflect.ValueOf(want), path))
+		}
 	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			if want.ConfirmedBy(one.observed) {
-				t.Error("a field reported at another value was confirmed")
+}
+
+// declaredFieldPaths answers the path to every field ConfirmedBy must
+// compare: every pointer field, and the channel volume map. It recurses
+// through the family structs.
+func declaredFieldPaths(v reflect.Value) [][]int {
+	var paths [][]int
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		switch f.Kind() {
+		case reflect.Ptr, reflect.Map:
+			paths = append(paths, []int{i})
+		case reflect.Struct:
+			for _, inner := range declaredFieldPaths(f) {
+				paths = append(paths, append([]int{i}, inner...))
 			}
-		})
+		}
 	}
+	return paths
+}
+
+// declareEveryField gives every pointer field a value and adds one
+// channel volume, so the sweep has a value to change in each field. A
+// field of a type the sweep cannot fill fails, so a new family type is
+// handled here rather than skipped.
+func declareEveryField(t *testing.T, v reflect.Value) {
+	t.Helper()
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		switch f.Kind() {
+		case reflect.Ptr:
+			elem := reflect.New(f.Type().Elem())
+			switch elem.Elem().Kind() {
+			case reflect.String:
+				elem.Elem().SetString("declared")
+			case reflect.Int:
+				elem.Elem().SetInt(1)
+			case reflect.Bool:
+				elem.Elem().SetBool(true)
+			default:
+				t.Fatalf("no sample for a %s field", elem.Elem().Kind())
+			}
+			f.Set(elem)
+		case reflect.Map:
+			f.Set(reflect.MakeMapWithSize(f.Type(), 1))
+			f.SetMapIndex(reflect.ValueOf("FL"), reflect.ValueOf(0.5))
+		case reflect.Struct:
+			declareEveryField(t, f)
+		}
+	}
+}
+
+// changeField moves one declared field off the value the sweep set.
+func changeField(v reflect.Value, path []int) {
+	for _, i := range path[:len(path)-1] {
+		v = v.Field(i)
+	}
+	f := v.Field(path[len(path)-1])
+	switch f.Kind() {
+	case reflect.Ptr:
+		switch f.Elem().Kind() {
+		case reflect.String:
+			f.Elem().SetString("changed")
+		case reflect.Int:
+			f.Elem().SetInt(2)
+		case reflect.Bool:
+			f.Elem().SetBool(false)
+		}
+	case reflect.Map:
+		f.SetMapIndex(reflect.ValueOf("FL"), reflect.ValueOf(0.25))
+	}
+}
+
+// fieldPathName names the field a path points at, for the failure
+// message.
+func fieldPathName(v reflect.Value, path []int) string {
+	names := make([]string, 0, len(path))
+	t := v.Type()
+	for _, i := range path {
+		names = append(names, t.Field(i).Name)
+		t = t.Field(i).Type
+	}
+	return strings.Join(names, ".")
 }
 
 // A declared channel the receiver has not reported is skipped, and a
