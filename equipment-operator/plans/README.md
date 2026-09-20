@@ -31,6 +31,7 @@ becomes a new plan or an open problem.
 * [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
 * [05, The operator on the host network](05-the-operator-on-the-host-network.md). The operator stays a Deployment and takes host network, so SSDP and mDNS discovery reach the LAN in process, and 9200 moves to a free host port. Equipment that attaches to a node (CEC, serial, IR) becomes a component on that node. This plan is ordered before [plan 06](06-wiim-driver.md).
 * [06, The WiiM driver](06-wiim-driver.md). A stub. The protocol, the models, the discovery rules, and the references are collected in `wiim/AGENTS.md`, and the design is not written.
+* [07, The receiver's HTTP interface and the TV wake](07-receiver-http-and-tv-wake.md). The receiver answers a second interface over HTTP, and it carries HDMI Control and the video controls. The receiver is a CEC responder, so it cannot wake the TV, and the wake needs a node-attached CEC adapter from plan 05. The design is not written.
 
 ## Completed
 

@@ -87,9 +87,11 @@ node, which is the whole of the privilege this plan adds.
 ### Node-attached equipment
 
 CEC over a USB adapter, serial, and IR attach to a node and not to a
-network. This plan does not build them. When they land, they run on
-the nodes that carry the hardware, because that is where the device
-is. The split is attachment and not protocol: network equipment is the
+network. This plan does not build them. The CEC adapter is also the
+only way to wake a TV from the cluster, because the receiver is a CEC
+responder and originates nothing. When the three land, they run on the
+nodes that carry the hardware, because that is where the device is.
+The split is attachment and not protocol: network equipment is the
 Deployment, and wired equipment is a component on its node. The
 `equipment.Driver` contract stays in-process in whichever workload
 runs the driver, so the binary grows a second mode and the contract

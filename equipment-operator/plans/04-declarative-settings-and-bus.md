@@ -158,7 +158,9 @@ assembly, so the mechanism does not change to add one.
   now-playing state, and transport. Transport is a command, not a
   setting.
 - **The video controls** (`VSASP`, `VSMONI`): the aspect and the
-  monitor out.
+  monitor out. The port-23 commands answer nothing on the house's
+  receiver. The same controls are button codes on the HTTP interface
+  plan 07 records.
 - **The trigger outputs** (`TR`): the twelve-volt triggers.
 
 Each stays unproven until a model that speaks it answers. A transcript

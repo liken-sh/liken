@@ -279,36 +279,6 @@ version `3.0`, and an AES capability. The plain HTTPS API still
 answers without a token, so the block reports a capability and does not
 gate the API today.
 
-## What is not settled
-
-These need another test or another model before a plan can promise
-them.
-
-- Power. The API has no standby command, as the live test above
-  shows. A driver can pause and resume playback, or it can report
-  power as always on and let the automatic idle timer stand the Amp
-  down. A plan has to choose between those two.
-- Whether the local API answers when the WAN is down but the LAN is
-  up. One owner reports that local DLNA playback works in that state
-  on a Pro Plus, and another reports that an Ultra asks for setup only
-  when the whole router is off. Both reports test a different thing,
-  and neither is proof for an Amp.
-- Which commands each model answers. One owner found `reboot` works on
-  a Mini and returns an error on an Amp, so a driver cannot treat the
-  command set as fixed across the line.
-- The model notes above disagree on AirPlay 2 support, so a driver
-  ignores AirPlay and does not report it.
-- The step size behind `vol++` and `vol--`. WiiM's own list measures
-  one percent, and the Arylic document for the same stack says six.
-- Whether the UUID survives a factory reset or a major firmware
-  update. It should, because the device advertises it as its UDN, but
-  no reset has been run here.
-- Whether the cluster network passes multicast to the operator's pod.
-  Measured on the house cluster on 2026-09-20: a normal flannel pod sees
-  no LAN multicast, and a hostNetwork pod sees it. Plan 05 gives the
-  operator host network for this reason, so what remains open is only
-  a cluster that spans segments.
-
 ## The references
 
 WiiM's own documents:

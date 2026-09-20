@@ -65,9 +65,8 @@ The parser ignores the tuner (`TF`, `TM`, `TP`), the network player
 (`NS`, `NSA`, `NSE`), the video controls (`VSASP`, `VSMONI`), the
 trigger outputs (`TR`), the speaker presets beyond the number, and the
 `OPINF` capability bitmaps. The house's AVR-X1700H answers none of the
-first four, so there is no way to prove a parser for them here.
+first four over port 23, so there is no way to prove a parser for them
+here.
 
-Those four are future families, not built. Each lands as a new
-`settings_<family>.go` beside the parsed ones, a family type on
-`denon.Settings`, and the matching CRD block, and each stays unproven
-until a model that speaks it answers with a transcript.
+Plan 04 holds the four families as future work. Plan 07 records the
+receiver's second interface, where the video controls answer.
