@@ -1,17 +1,17 @@
 # Working on the library operator
 
 This repository is the media library layer of a
-[`liken`](https://liken.sh/) cluster. It declares libraries as
-Kubernetes resources, keeps a catalog of what they hold, and puts a
-media browser on the screens that
+[`liken`](https://liken.sh/) cluster. It
+declares libraries as Kubernetes resources, keeps a catalog of what they
+hold, and puts a media browser on the screens that
 [`media-operator`](https://github.com/liken-sh/media-operator) plays to.
-Like the rest of the `liken` project, it is written to be read: the
-documents, manifests, and eventual source files are the documentation.
+The documents, the manifests, and the source files are the
+documentation, and the comments teach how the system works.
 
 @docs/themes/brand/voice.md
 
-The voice rules imported above govern all prose in this repository,
-comments included, and they arrive with the brand theme submodule at
+The voice rules in that file govern all prose in this repository,
+comments included. They arrive with the brand theme submodule at
 `docs/themes/brand`.
 
 `plans/00-design.md` is the design, and `plans/README.md` indexes the
@@ -19,28 +19,34 @@ plans that build it. Code exists only where a plan calls for it. The
 plans state contracts and leave the shape of the code to the person or
 agent who builds each one.
 
+## Errors include their source's text
+
 An error that wraps a tool, a daemon socket, a bus answer, or a provider
-includes that source's own stderr, body, or error text word for word, in
-the wrapped error and in whatever status or record the failure writes.
+includes that source's own text word for word: its `stderr`, its
+response body, or its error string. The wrapped error and the status
+field or record that the failure writes both include it, so a person
+reads the cause from the log or the status without opening a shell.
 
 ## Releases and development builds
 
-A pushed tag is a release. It names a version in liken's calendar
-scheme, `2026.09.03-007`, and `release.yaml` builds every image and
-pushes them under that tag and `:latest`.
+A pushed tag is a release. The tag names a version in `liken`'s calendar
+scheme, for example `2026.09.03-007`. `release.yaml` builds every image
+in the repository beside the `ci.yaml` run of the same commit, waits for
+that run to pass, and pushes the images under the version tag and under
+`:latest`.
 
-A push to main is a development build. `release.yaml` builds the
-same images beside the `ci.yaml` run of the same commit, waits for
-that run to pass before it pushes anything, and pushes the images
-under the most recent release tag, from `git describe`, plus a suffix:
-`2026.09.03-007-dev-003-abcdef01` is three commits past that
-release, at commit `abcdef01`. Every image in the repository
-carries the same version, and `:latest` never moves. The suffix
-sorts after its release and before the next one, and the tag shape
-check in `release.yaml` never accepts it.
+A push to `main` is a development build. `release.yaml` builds the
+images the same way and pushes them under a version from `git describe`:
+the most recent release tag, the number of commits since it, and the
+first eight characters of the commit. For example,
+`2026.09.03-007-dev-003-abcdef01` is three commits past
+`2026.09.03-007`, at commit `abcdef01`. A development build never moves
+`:latest`, so a cluster that pulls a release keeps pulling releases.
+The suffix sorts after its release and before the next one, and the tag
+check in `release.yaml` does not accept it as a release version.
 
-To run a development build, pin the manifests to the full sha of
-the commit and the image to the version:
+To run a development build, pin the manifests to the full commit sha
+and the image to the build's version:
 
     resources:
       - https://github.com/liken-sh/library-operator//deploy?ref=<full 40-character sha>
@@ -48,8 +54,8 @@ the commit and the image to the version:
       - name: ghcr.io/liken-sh/library-operator
         newTag: 2026.09.03-007-dev-003-abcdef01
 
-A git fetch by sha needs all forty characters, so the short sha in
-the version is not enough for `ref=`. The CI run's step summary
-prints both lines for that commit. The operator derives its
-companion images from its own pod's image, so nothing else names a
-version.
+Use all forty characters of the commit sha in `ref=`. A `git fetch` by
+sha requires all forty, and the eight characters inside the version are
+not enough. The CI run's step summary prints these lines for the commit.
+The operator derives its companion images from its own pod's image, so
+no other image name needs a version.
