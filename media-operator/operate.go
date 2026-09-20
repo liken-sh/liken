@@ -140,6 +140,11 @@ type operator struct {
 	// that arbitrates it.
 	focus *focusDesk
 
+	// ensure is the desk for each unit's receiver commands topic. The
+	// pass fills it from the Receivers, and the bus reader reads it when
+	// a controller press asks the unit's receiver for the unit's input.
+	ensure *ensureDesk
+
 	// peripherals is the desk for the bluetooth-operator's Peripherals and
 	// for the Peripheral each Remote's claim allocated. The pass fills it
 	// from the API, and both the pass and the bus reader read it when they
@@ -320,6 +325,7 @@ func operate() {
 		playerVerbose:    playerVerbose,
 		reports:          desk,
 		focus:            focusDesk,
+		ensure:           newEnsureDesk(),
 		peripherals:      newPeripheralDesk(),
 		codes:            codesDesk,
 		panels:           panels,
@@ -637,6 +643,13 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	}
 	if namespace, name, ok := parseRemoteFocusCycleTopic(o.topicBase, topic); ok {
 		o.focus.requestCycle(controllerKey(namespace, name))
+		return
+	}
+	// A press on a controller asks the unit's receiver for the unit's
+	// input, in the receiver's own generic vocabulary. A repeat or a
+	// release is dropped inside, so one held control asks once.
+	if namespace, name, ok := parseRemoteEventsTopic(o.topicBase, topic); ok {
+		o.ensureInput(namespace, name, payload)
 		return
 	}
 	// An availability with an empty payload is a cleared retained value and

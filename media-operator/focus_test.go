@@ -21,6 +21,7 @@ func focusOperator(t *testing.T) *operator {
 		topicBase: defaultTopicBase,
 		bus:       newBus("bus.media.svc:1883", "focus-test", nil, nil, nil),
 		focus:     newFocusDesk(make(chan struct{}, 1)),
+		ensure:    newEnsureDesk(),
 		volumes:   newVolumeDesk(),
 	}
 }
@@ -35,6 +36,7 @@ func focusBrokerOperator(t *testing.T) (*operator, *fakeBroker) {
 		topicBase: defaultTopicBase,
 		bus:       bus,
 		focus:     newFocusDesk(make(chan struct{}, 1)),
+		ensure:    newEnsureDesk(),
 		volumes:   newVolumeDesk(),
 	}, brokers[0]
 }

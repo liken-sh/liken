@@ -277,6 +277,7 @@ func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 		"liken/media/plays/+/+/availability",
 		"liken/media/remotes/+/+/focus",
 		"liken/media/remotes/+/+/focus/cycle",
+		"liken/media/remotes/+/+/events",
 		"liken/media/remotes/+/+/availability",
 		"liken/media/remotes/+/+/codes",
 		"liken/media/players/+/+/panel",

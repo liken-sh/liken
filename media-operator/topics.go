@@ -57,6 +57,9 @@ const (
 	// The third retained remotes kind, the compiled key table the
 	// operator writes and the standing pod reads.
 	remoteKeysKind = "keys"
+	// The events kind one controller's presses travel under. It is not
+	// retained, because a press is an event and not a state.
+	remoteEventsKind = "events"
 )
 
 // The last segment of the players topic that carries the panel
@@ -73,7 +76,20 @@ const playerVolumeKind = "volume"
 // retained, because a press is an event and not a state. The pod
 // normalised the event, so every consumer reads one vocabulary.
 func remoteEventsTopic(base, namespace, name string) string {
-	return base + "/remotes/" + namespace + "/" + name + "/events"
+	return base + "/remotes/" + namespace + "/" + name + "/" + remoteEventsKind
+}
+
+// remoteEventsFilter is the operator's subscription that reaches every
+// controller's key events, so one press can ask the equipment for the
+// unit's input.
+func remoteEventsFilter(base string) string {
+	return base + "/remotes/+/+/" + remoteEventsKind
+}
+
+// parseRemoteEventsTopic maps an events topic back to the controller it
+// names.
+func parseRemoteEventsTopic(base, topic string) (namespace, name string, ok bool) {
+	return parseRemoteTopic(base, topic, remoteEventsKind)
 }
 
 // remoteFocusTopic carries the retained focus mark, the bare name of the
@@ -348,6 +364,7 @@ func busFilters(base string) []string {
 		playAvailabilityFilter(base),
 		remoteFocusFilter(base),
 		remoteFocusCycleFilter(base),
+		remoteEventsFilter(base),
 		remoteAvailabilityFilter(base),
 		remoteCodesFilter(base),
 		playerPanelFilter(base),

@@ -40,11 +40,16 @@ type ReceiverList struct {
 	Items    []Receiver `json:"items"`
 }
 
-// The cluster owner states the inputs. The session is this operator's
-// block.
+// The cluster owner states the inputs and the topics. The session is
+// this operator's block.
 type ReceiverSpec struct {
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
+	// CommandsTopic is the receiver's own commands topic, where a
+	// controller press asks for the unit's input. The cluster owner
+	// writes it and this operator only reads it, so the session apply
+	// below never sends it.
+	CommandsTopic string `json:"commandsTopic,omitempty"`
 }
 
 // One input of the equipment, and the machine and monitor id wired into
@@ -188,12 +193,17 @@ type receiverSession struct {
 // session with one flag changed.
 func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerReceiverStatus {
 	receiver, input, matched := o.matchReceiver(player)
+	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if !matched {
+		o.ensure.set(key, "")
 		return nil
 	}
-	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	awake := o.panels.stateFor(key) != panelDesireOff
 	o.applySession(player, receiver, input, standing, awake)
+	// A unit that matches a receiver keeps its commands topic on the
+	// ensure desk, so a press on its controller asks that receiver for
+	// the unit's input.
+	o.ensure.set(key, receiver.Spec.CommandsTopic)
 	return &PlayerReceiverStatus{
 		Name:      receiver.Metadata.Name,
 		Input:     input,
