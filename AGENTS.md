@@ -1,46 +1,46 @@
 # Working on liken
 
-liken aims to be a real, public OS distribution that is also written to
-be read. This goal shapes how you should write everything here.
+`liken` is a public OS distribution. Its repositories are documents as
+much as they are code, so write everything here for a reader.
 
 ## This is a literate project
 
 This repository has very little ordinary program code. It is mostly
 shell scripts, configuration, manifests, and build automation, and these
-files *are* the documentation. Write them in a literate style. Add
-generous comments that give instruction, explanation, and commentary. A
-reader who reads the repository from top to bottom should learn how a
-Linux system boots and how Kubernetes takes control after that.
+files are the documentation. Write them in a literate style, with
+comments that give instruction, explanation, and commentary. A reader who
+reads the repository from top to bottom should learn how a Linux system
+boots and how Kubernetes takes control after that.
 
-The voice rules for everything the project publishes live in the brand
+The voice rules for everything the project publishes are in the brand
 repository and arrive with the theme submodule:
 
 @docs/themes/brand/voice.md
 
-The comment rules there say to teach the domain, not the syntax. In
-this repository, the domain is how a system boots. Do not explain what
+The comment rules there say to teach the domain, not the syntax. In this
+repository, the domain is how a system boots. Do not explain what
 `mkdir -p` does. Explain why the kernel does not mount `/proc` on its
 own, why k3s needs cgroups, and why an initramfs is a cpio archive.
 
-Some explanations are too big for a comment: for example, a design
-decision that spans several files, or a survey of alternatives. Put
-these explanations in a markdown document next to the thing they
-describe, organized by domain.
+Some explanations are too big for a comment, for example a design
+decision that spans several files, or a survey of alternatives. Put those
+explanations in a markdown document next to the thing they describe,
+organized by domain.
 
-## Errors carry their source's words
+## Errors include their source's text
 
-An error that wraps a tool, a daemon socket, a bus answer, or a
-provider carries that source's own text: the stderr, the body, or the
-error string, verbatim. It goes in the wrapped error and in whatever
-status field or record the failure writes, so a person reads the cause
-from the log or the status and never needs a shell to find it.
+An error that wraps a tool, a daemon socket, a bus answer, or a provider
+includes that source's own text word for word: its `stderr`, its
+response body, or its error string. The wrapped error and the status
+field or record that the failure writes both include it, so a person
+reads the cause from the log or the status without opening a shell.
 
 ## Commit messages
 
-A comment says what the system is now. A commit message says what one
-change does and why. Write it in ASD-STE100, like the rest of the prose
-here. Keep it plain and keep it short. The message is a record for a
-person who reads it during review or a bisect, not an essay.
+A comment describes the system as it is now. A commit message describes
+what one change does and why. Write it in ASD-STE100, like the rest of
+the prose here. The message is a record for a person who reads it during
+review or during a bisect, so keep it plain and short.
 
 Use this form:
 
@@ -65,11 +65,11 @@ Follow these rules for the subject line:
 
 * **Write it in the imperative.** It must complete the sentence "This
   commit will ...". Write "Add nodePortCIDRs to the cluster network
-  spec". Do not write "A cluster names the networks its NodePorts
-  answer on".
+  spec". Do not write "A cluster names the networks its NodePorts answer
+  on".
 * **Name the change.** A reader of `git log --oneline` must learn what
   the commit does without opening it. A subject that only a person who
-  read the diff can decode is wrong.
+  read the diff can understand is wrong.
 * **Keep it to 72 characters,** on one line, with no period at the end.
 
 Follow these rules for the body:
@@ -78,12 +78,11 @@ Follow these rules for the body:
   wrong or missing, say what this change does about it, and say what the
   lab measured when a drill ran. Three paragraphs is the target and five
   is the limit. Wrap at 72 columns.
-* **Do not personify a program.** Software has no intentions and makes
-  no discoveries. A program reads, writes, starts, refuses, and fails.
-  It does not find, want, believe, learn, or concede.
-* **Do not be clever.** Cut aphorisms, metaphors, and any sentence that
-  is there because it sounds good. Cut a sentence that survives only as
-  a flourish.
+* **Do not personify a program.** Software has no intentions and makes no
+  discoveries. A program reads, writes, starts, refuses, and fails. It
+  does not find, want, believe, learn, or concede.
+* **Cut aphorisms and metaphors.** Cut any sentence that is there because
+  it sounds good.
 * **Do not narrate the session.** The message describes the change. It
   does not describe the order in which you found things, and it does not
   report how the work felt.
@@ -103,31 +102,31 @@ The commits before 2026-07-25 do not follow these rules. They use
 declarative subject lines that read as riddles, they give programs
 intentions, and their bodies run long. That style is not the model. Do
 not copy a message out of the log, and do not match the tone of the
-commit you are building on. The history stays as it is, because a
-rewrite would break every link and hash that names it.
+commit you are building on. The history stays as it is, because a rewrite
+would break every link and hash that names it.
 
 ## Organization
 
 Organize the repository by domain, not by kind. Name each directory for
 the part of the system it is, for example the kernel, the init, or the
-image. Each directory must contain everything that domain needs:
-scripts, configuration, and documentation together. Do not create one
-shared `scripts/` directory for every domain.
+image. Each directory must contain everything that domain needs: scripts,
+configuration, and documentation together. Do not create one shared
+`scripts/` directory for every domain.
 
 ## The manual
 
-The docs domain is the website: the front page of liken.sh and the
-user manual under /docs/. The manual is written in ASD-STE100, plain
-technical English: short sentences, one instruction per sentence, no
-metaphor. `docs/README.md` explains the domain.
+The docs domain is the website: the front page of liken.sh and the user
+manual under /docs/. The manual is written in ASD-STE100, plain technical
+English: short sentences, one instruction per sentence, no metaphor.
+`docs/README.md` explains the domain.
 
 When you change what an operator sees or does, evaluate whether the
-manual must change with it, and make both changes together. The
-cases to check:
+manual must change with it, and make both changes together. The cases to
+check:
 
 * A `liken` CLI command or flag changes: update
-  `docs/content/docs/reference/cli.md`, and check the guides that
-  run the command.
+  `docs/content/docs/reference/cli.md`, and check the guides that run the
+  command.
 * An operational flow changes (install, adoption, adding machines,
   upgrades, rollback): update the guide in
   `docs/content/docs/guides/`.
@@ -135,41 +134,38 @@ cases to check:
   `docs/content/docs/reference/release-channel.md`.
 * A CRD schema changes: the Machine and Cluster reference pages
   regenerate from the schemas at build time, so the schema's own
-  descriptions are the fix. Write them knowing they become the
-  manual.
+  descriptions are the fix. Write them knowing they become the manual.
 
 A change that only touches internals needs no manual change. The
-repository's comments carry that story.
+repository's comments describe it.
 
 ## Licensing
 
-liken's own code uses the MIT license, but a release also redistributes
+`liken`'s own code uses the MIT license, but a release also redistributes
 other projects' binaries, and several of these use the GPL or LGPL
-license. This never changes liken's own license, because the components
+license. This never changes `liken`'s own license, because the components
 are aggregated, not linked. But it does require the release channel to
-ship third-party notices with the binaries and to offer each
-component's source from the same channel. The licensing domain owns
-both tasks: every release bundles its `LICENSES.md` file as an
-artifact, and the release workflow publishes its source mirror to
-`sources/<component>/<version>/`.
+ship third-party notices with the binaries and to offer each component's
+source from the same channel. The licensing domain owns both tasks: every
+release bundles its `LICENSES.md` file as an artifact, and the release
+workflow publishes its source mirror to `sources/<component>/<version>/`.
 
 When a vendored pin changes, update `licensing/` at the same time: the
 source pins in `licensing/sources.sh` and the notices in
 `licensing/NOTICES.md`. Those files explain the reasoning.
-`licensing/sources.sh --repin` writes the digests that a bump moved,
-and refuses the case it must not guess at: a URL whose filename
-carries the version.
+`licensing/sources.sh --repin` writes the digests that a bump moved, and
+refuses the case it must not guess at: a URL whose filename contains the
+version.
 
 ## Version pins
 
 Every domain that vendors something pins it by version, and by digest
-when its upstream publishes no checksum of its own. `make versions`
-asks every upstream what it has now and prints the answer beside each
-pin.
+when its upstream publishes no checksum of its own. `make versions` asks
+every upstream what it has now and prints the answer beside each pin.
 
-Each pin belongs to a domain, so the knowledge of where its upstream
-lives is a `latest.sh` beside that domain's `fetch.sh`. Run it alone
-and it reports its own pins. Run it with `--bump` and it writes the
-new version, the new digest, and the matching source pin.
-`plans/completed/48-check-and-update-dependency-pins.md` gives the reasons, and each
-script explains what its own upstream calls a release.
+Each pin belongs to a domain, so the `latest.sh` beside that domain's
+`fetch.sh` holds the address of its upstream. Run it alone and it reports
+its own pins. Run it with `--bump` and it writes the new version, the new
+digest, and the matching source pin.
+`plans/completed/48-check-and-update-dependency-pins.md` gives the
+reasons, and each script explains what its own upstream calls a release.
