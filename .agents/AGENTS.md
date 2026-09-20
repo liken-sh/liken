@@ -9,8 +9,8 @@ repositories support the project. Each repository carries its own
 
 This repository carries what the repositories share. A session reaches
 these rules when it starts at the organization root, the directory that
-holds the repositories side by side. On this machine that directory is
-`~/src/github.com/liken-sh`.
+holds the repositories side by side. For example, the checkouts here
+live under `~/src/github.com/liken-sh`.
 
 ## Set up a checkout
 
