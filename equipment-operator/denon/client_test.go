@@ -3,6 +3,7 @@
 package denon
 
 import (
+	"context"
 	"net"
 	"strings"
 	"testing"
@@ -77,6 +78,34 @@ func waitForField(t *testing.T, events <-chan equipment.Event, field string) equ
 func drainQueries(t *testing.T, harness *clientHarness) {
 	t.Helper()
 	harness.receiver.waitForCommands(t, Queries[len(Queries)-1])
+}
+
+// A command sent after the writer has stopped is reported, not left in
+// a queue nobody drains. The writer nils out under the send mutex
+// before it stops, so once Run has returned there is no live queue.
+func TestSendAfterTheWriterStopsReportsFailure(t *testing.T) {
+	receiver := startFakeReceiver(t)
+	client := NewClient(receiver.address(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		client.Run(ctx)
+	}()
+
+	receiver.waitForCommands(t, Queries[len(Queries)-1])
+	cancel()
+	<-stopped
+
+	client.mutex.Lock()
+	live := client.out
+	client.mutex.Unlock()
+	if live != nil {
+		t.Fatal("the writer stopped but the queue is still named")
+	}
+	if err := client.send("PSBAS 53"); err == nil {
+		t.Fatal("a send after the writer stopped did not error")
+	}
 }
 
 // connectedState is the state the fake receiver reports once it has

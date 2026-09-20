@@ -35,64 +35,15 @@ type zoneState struct {
 	seen      bool
 }
 
-// systemState is the unit-wide settings.
-type systemState struct {
-	Power                string `json:"power,omitempty"`
-	Eco                  string `json:"eco,omitempty"`
-	Dimmer               string `json:"dimmer,omitempty"`
-	AutoStandby          string `json:"autoStandby,omitempty"`
-	SpeakerPreset        int    `json:"speakerPreset,omitempty"`
-	AudioInputMode       string `json:"audioInputMode,omitempty"`
-	VideoSelect          string `json:"videoSelect,omitempty"`
-	BluetoothTransmitter string `json:"bluetoothTransmitter,omitempty"`
-	BluetoothOutput      string `json:"bluetoothOutput,omitempty"`
-}
-
-// toneState holds the tone control and the two trims in display units,
-// where the wire's 50 is 0dB.
-type toneState struct {
-	Control bool `json:"control"`
-	Bass    int  `json:"bass"`
-	Treble  int  `json:"treble"`
-}
-
-// audysseyState holds the Audyssey room correction settings.
-type audysseyState struct {
-	Multeq               string `json:"multeq,omitempty"`
-	DynamicEq            bool   `json:"dynamicEq"`
-	ReferenceLevelOffset int    `json:"referenceLevelOffset"`
-	DynamicVolume        string `json:"dynamicVolume,omitempty"`
-	LoudnessManagement   bool   `json:"loudnessManagement"`
-}
-
-// audioState holds the audio processing settings.
-type audioState struct {
-	DRC                string `json:"drc,omitempty"`
-	LFE                int    `json:"lfe"`
-	Effect             int    `json:"effect"`
-	Delay              int    `json:"delay"`
-	AudioDelay         int    `json:"audioDelay"`
-	Subwoofer          bool   `json:"subwoofer"`
-	Restorer           string `json:"restorer,omitempty"`
-	GraphicEq          string `json:"graphicEq,omitempty"`
-	HeadphoneEq        string `json:"headphoneEq,omitempty"`
-	SpeakerVirtualizer bool   `json:"speakerVirtualizer"`
-	DialogEnhancer     string `json:"dialogEnhancer,omitempty"`
-}
-
 // denonState is everything one receiver has said. mainFromZM records
 // that the model reports main-zone power through ZM, so the older PW
 // lines stop standing in for it.
 type denonState struct {
 	Reachable equipment.ConditionStatus
-	System    systemState
+	Settings  Settings
 	Main      zoneState
 	Zone2     zoneState
 	Zone3     zoneState
-	Tone      toneState
-	Audyssey  audysseyState
-	Audio     audioState
-	Channels  map[string]float64
 
 	mainFromZM bool
 }
@@ -104,7 +55,7 @@ func newDenonState() denonState {
 		Main:      zoneState{Volume: unknownHalves, VolumeMax: unknownHalves, Sleep: unknownHalves, Quick: unknownHalves},
 		Zone2:     zoneState{Volume: unknownHalves, VolumeMax: unknownHalves, Sleep: unknownHalves, Quick: unknownHalves},
 		Zone3:     zoneState{Volume: unknownHalves, VolumeMax: unknownHalves, Sleep: unknownHalves, Quick: unknownHalves},
-		Channels:  map[string]float64{},
+		Settings:  Settings{ChannelVolumes: map[string]float64{}},
 	}
 }
 
@@ -122,14 +73,14 @@ const (
 func applyDenonLine(state denonState, line string) (denonState, string, string, bool) {
 	switch {
 	case line == PowerOnCommand:
-		state.System.Power = powerOn
+		state.Settings.System.Power = powerOn
 		if !state.mainFromZM {
 			state.Main.Power = equipment.PowerOn
 			state.Main.seen = true
 		}
 		return state, equipment.MainZone, powerField, true
 	case line == powerStandbyCommand:
-		state.System.Power = powerStandby
+		state.Settings.System.Power = powerStandby
 		if !state.mainFromZM {
 			state.Main.Power = equipment.PowerStandby
 			state.Main.seen = true
@@ -205,44 +156,44 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 
 	switch {
 	case line == "ECOON":
-		state.System.Eco = "on"
+		state.Settings.System.Eco = strPtr("on")
 		return state, "", ecoField, true
 	case line == "ECOOFF":
-		state.System.Eco = "off"
+		state.Settings.System.Eco = strPtr("off")
 		return state, "", ecoField, true
 	case line == "ECOAUTO":
-		state.System.Eco = "auto"
+		state.Settings.System.Eco = strPtr("auto")
 		return state, "", ecoField, true
 	case strings.HasPrefix(line, "DIM "):
 		dimmer, ok := dimmerWord(line[len("DIM "):])
 		if !ok {
 			return state, "", "", false
 		}
-		state.System.Dimmer = dimmer
+		state.Settings.System.Dimmer = strPtr(dimmer)
 		return state, "", dimmerField, true
 	case strings.HasPrefix(line, "STBY"):
 		standby, ok := autoStandbyWord(line[len("STBY"):])
 		if !ok {
 			return state, "", "", false
 		}
-		state.System.AutoStandby = standby
+		state.Settings.System.AutoStandby = strPtr(standby)
 		return state, "", standbyField, true
 	case strings.HasPrefix(line, "SPPR "):
 		preset, err := strconv.Atoi(strings.TrimSpace(line[len("SPPR "):]))
 		if err != nil {
 			return state, "", "", false
 		}
-		state.System.SpeakerPreset = preset
+		state.Settings.System.SpeakerPreset = intPtr(preset)
 		return state, "", speakerPresetField, true
 	case strings.HasPrefix(line, "SD"):
 		mode, ok := inputModeWord(line[2:])
 		if !ok {
 			return state, "", "", false
 		}
-		state.System.AudioInputMode = mode
+		state.Settings.System.AudioInputMode = strPtr(mode)
 		return state, "", inputModeField, true
 	case strings.HasPrefix(line, "SV"):
-		state.System.VideoSelect = videoSelect(line[2:])
+		state.Settings.System.VideoSelect = strPtr(videoSelect(line[2:]))
 		return state, "", videoSelectField, true
 	case strings.HasPrefix(line, "BTTX "):
 		mode, output, ok := bluetoothWord(line[len("BTTX "):])
@@ -250,10 +201,10 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 			return state, "", "", false
 		}
 		if mode != "" {
-			state.System.BluetoothTransmitter = mode
+			state.Settings.System.BluetoothTransmitter = strPtr(mode)
 		}
 		if output != "" {
-			state.System.BluetoothOutput = output
+			state.Settings.System.BluetoothOutput = strPtr(output)
 		}
 		return state, "", bluetoothField, true
 	case strings.HasPrefix(line, "CV"):
@@ -261,7 +212,7 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 		if !ok {
 			return state, "", "", false
 		}
-		state.Channels[channel] = value
+		state.Settings.ChannelVolumes[channel] = value
 		return state, "", channelField, true
 	case strings.HasPrefix(line, "PS"):
 		field, ok := applyParameterLine(&state, line)
@@ -323,117 +274,137 @@ func applyZoneLine(zone zoneState, body string) (zoneState, string, bool) {
 func applyParameterLine(state *denonState, line string) (string, bool) {
 	switch {
 	case strings.HasPrefix(line, "PSMULTEQ:"):
-		state.Audyssey.Multeq = multEqWord(strings.TrimSpace(line[len("PSMULTEQ:"):]))
+		word, ok := multEqWord(strings.TrimSpace(line[len("PSMULTEQ:"):]))
+		if !ok {
+			return "", false
+		}
+		state.Settings.Audyssey.Multeq = strPtr(word)
 		return multeqField, true
 	case strings.HasPrefix(line, "PSDYNEQ "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSDYNEQ "):]))
 		if !ok {
 			return "", false
 		}
-		state.Audyssey.DynamicEq = on
+		state.Settings.Audyssey.DynamicEq = boolPtr(on)
 		return dynamicEqField, true
 	case strings.HasPrefix(line, "PSREFLEV "):
 		offset, err := strconv.Atoi(strings.TrimSpace(line[len("PSREFLEV "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Audyssey.ReferenceLevelOffset = offset
+		state.Settings.Audyssey.ReferenceLevelOffset = intPtr(offset)
 		return referenceLevelField, true
 	case strings.HasPrefix(line, "PSDYNVOL "):
-		state.Audyssey.DynamicVolume = dynamicVolumeWord(strings.TrimSpace(line[len("PSDYNVOL "):]))
+		word, ok := dynamicVolumeWord(strings.TrimSpace(line[len("PSDYNVOL "):]))
+		if !ok {
+			return "", false
+		}
+		state.Settings.Audyssey.DynamicVolume = strPtr(word)
 		return dynamicVolumeField, true
 	case strings.HasPrefix(line, "PSLOM "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSLOM "):]))
 		if !ok {
 			return "", false
 		}
-		state.Audyssey.LoudnessManagement = on
+		state.Settings.Audyssey.LoudnessManagement = boolPtr(on)
 		return loudnessField, true
 	case strings.HasPrefix(line, "PSDRC "):
-		state.Audio.DRC = strings.ToLower(strings.TrimSpace(line[len("PSDRC "):]))
+		word, ok := drcWord(strings.TrimSpace(line[len("PSDRC "):]))
+		if !ok {
+			return "", false
+		}
+		state.Settings.Audio.DRC = strPtr(word)
 		return drcField, true
 	case strings.HasPrefix(line, "PSLFE "):
 		value, err := strconv.Atoi(strings.TrimSpace(line[len("PSLFE "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Audio.LFE = -value
+		state.Settings.Audio.LFE = intPtr(-value)
 		return lfeField, true
 	case strings.HasPrefix(line, "PSEFF "):
 		value, err := strconv.Atoi(strings.TrimSpace(line[len("PSEFF "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Audio.Effect = value
+		state.Settings.Audio.Effect = intPtr(value)
 		return effectField, true
 	case strings.HasPrefix(line, "PSDELAY "):
 		value, err := strconv.Atoi(strings.TrimSpace(line[len("PSDELAY "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Audio.AudioDelay = value
+		state.Settings.Audio.AudioDelay = intPtr(value)
 		return delayField, true
 	case strings.HasPrefix(line, "PSDEL "):
 		value, err := strconv.Atoi(strings.TrimSpace(line[len("PSDEL "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Audio.Delay = value
+		state.Settings.Audio.Delay = intPtr(value)
 		return delayField, true
 	case strings.HasPrefix(line, "PSSWR "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSSWR "):]))
 		if !ok {
 			return "", false
 		}
-		state.Audio.Subwoofer = on
+		state.Settings.Audio.Subwoofer = boolPtr(on)
 		return subwooferField, true
 	case strings.HasPrefix(line, "PSRSTR "):
-		state.Audio.Restorer = restorerWord(strings.TrimSpace(line[len("PSRSTR "):]))
+		word, ok := restorerWord(strings.TrimSpace(line[len("PSRSTR "):]))
+		if !ok {
+			return "", false
+		}
+		state.Settings.Audio.Restorer = strPtr(word)
 		return restorerField, true
 	case strings.HasPrefix(line, "PSGEQ "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSGEQ "):]))
 		if !ok {
 			return "", false
 		}
-		state.Audio.GraphicEq = onOffText(on)
+		state.Settings.Audio.GraphicEq = strPtr(onOffText(on))
 		return graphicEqField, true
 	case strings.HasPrefix(line, "PSHEQ "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSHEQ "):]))
 		if !ok {
 			return "", false
 		}
-		state.Audio.HeadphoneEq = onOffText(on)
+		state.Settings.Audio.HeadphoneEq = strPtr(onOffText(on))
 		return headphoneEqField, true
 	case strings.HasPrefix(line, "PSSPV "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSSPV "):]))
 		if !ok {
 			return "", false
 		}
-		state.Audio.SpeakerVirtualizer = on
+		state.Settings.Audio.SpeakerVirtualizer = boolPtr(on)
 		return virtualizerField, true
 	case strings.HasPrefix(line, "PSDEH "):
-		state.Audio.DialogEnhancer = strings.ToLower(strings.TrimSpace(line[len("PSDEH "):]))
+		word, ok := dialogEnhancerWord(strings.TrimSpace(line[len("PSDEH "):]))
+		if !ok {
+			return "", false
+		}
+		state.Settings.Audio.DialogEnhancer = strPtr(word)
 		return dialogEnhancerField, true
 	case strings.HasPrefix(line, "PSBAS "):
 		value, err := strconv.Atoi(strings.TrimSpace(line[len("PSBAS "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Tone.Bass = value - 50
+		state.Settings.Tone.Bass = intPtr(value - 50)
 		return bassField, true
 	case strings.HasPrefix(line, "PSTRE "):
 		value, err := strconv.Atoi(strings.TrimSpace(line[len("PSTRE "):]))
 		if err != nil {
 			return "", false
 		}
-		state.Tone.Treble = value - 50
+		state.Settings.Tone.Treble = intPtr(value - 50)
 		return trebleField, true
 	case strings.HasPrefix(line, "PSTONE CTRL "):
 		on, ok := onOffWord(strings.TrimSpace(line[len("PSTONE CTRL "):]))
 		if !ok {
 			return "", false
 		}
-		state.Tone.Control = on
+		state.Settings.Tone.Control = boolPtr(on)
 		return toneControlField, true
 	}
 	return "", false
@@ -600,49 +571,90 @@ func bluetoothWord(body string) (string, string, bool) {
 	return "", "", false
 }
 
-// multEqWord reads an Audyssey MultEQ mode.
-func multEqWord(word string) string {
+// multEqWord reads an Audyssey MultEQ mode. A word the receiver does
+// not send is rejected, so the field stays nil rather than hold a value
+// no builder can re-assert.
+func multEqWord(word string) (string, bool) {
 	switch word {
 	case "AUDYSSEY":
-		return "reference"
+		return "reference", true
 	case "BYP.LR":
-		return "l/r bypass"
+		return "l/r bypass", true
 	case "FLAT":
-		return "flat"
+		return "flat", true
 	case "MANUAL":
-		return "manual"
+		return "manual", true
 	case "OFF":
-		return "off"
+		return "off", true
 	}
-	return strings.ToLower(word)
+	return "", false
 }
 
-// dynamicVolumeWord reads a Dynamic Volume setting.
-func dynamicVolumeWord(word string) string {
+// dynamicVolumeWord reads a Dynamic Volume setting. A word the receiver
+// does not send is rejected, so the field stays nil rather than hold a
+// value no builder can re-assert.
+func dynamicVolumeWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
-		return "off"
+		return "off", true
 	case "LIT":
-		return "light"
+		return "light", true
 	case "MED":
-		return "medium"
+		return "medium", true
 	case "HEV":
-		return "heavy"
+		return "heavy", true
 	}
-	return strings.ToLower(word)
+	return "", false
 }
 
-// restorerWord reads an Audio Restorer setting.
-func restorerWord(word string) string {
+// restorerWord reads an Audio Restorer setting. A word the receiver
+// does not send is rejected, so the field stays nil rather than hold a
+// value no builder can re-assert.
+func restorerWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
-		return "off"
+		return "off", true
 	case "LOW":
-		return "low"
+		return "low", true
 	case "MED":
-		return "medium"
+		return "medium", true
 	case "HI":
-		return "high"
+		return "high", true
 	}
-	return strings.ToLower(word)
+	return "", false
+}
+
+// drcWord reads a Dynamic Range Control setting. The receiver sends
+// AUTO as well as the four cut levels, so the word maps it.
+func drcWord(word string) (string, bool) {
+	switch word {
+	case "OFF":
+		return "off", true
+	case "LOW":
+		return "low", true
+	case "MID":
+		return "mid", true
+	case "HI":
+		return "hi", true
+	case "AUTO":
+		return "auto", true
+	}
+	return "", false
+}
+
+// dialogEnhancerWord reads a Dialog Enhancer level. A word the
+// receiver does not send is rejected, so the field stays nil rather
+// than hold a value no builder can re-assert.
+func dialogEnhancerWord(word string) (string, bool) {
+	switch word {
+	case "OFF":
+		return "off", true
+	case "LOW":
+		return "low", true
+	case "MID":
+		return "mid", true
+	case "HIGH":
+		return "high", true
+	}
+	return "", false
 }

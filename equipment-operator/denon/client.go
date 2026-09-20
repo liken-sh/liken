@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -47,7 +48,10 @@ const (
 
 // Client holds one receiver's connection, the state it reports, and
 // the queue of commands waiting to go out. out is the current
-// connection's queue, or nil while disconnected.
+// connection's queue, or nil while disconnected. A send holds the
+// mutex while it enqueues, and the writer nils out under that same
+// mutex before it stops draining, so a command is never left in a
+// queue nobody drains.
 //
 // Reporter counts the outcome of every command this client sends, for
 // equipment_commands_total. The root sets it when it wires up metrics;
@@ -126,32 +130,14 @@ func (d *Client) VolumeResolution() int {
 // ProtocolStatus is the driver's own snapshot for status.denon: the
 // system settings, the tone trims, the Audyssey settings, the audio
 // settings, and the channel volumes. The zones travel on
-// status.zones, which every driver reports.
+// status.zones, which every driver reports. The snapshot is the
+// settings the receiver reported, marshaled as-is.
 func (d *Client) ProtocolStatus() json.RawMessage {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	raw, err := json.Marshal(protocolSnapshot{
-		System:         d.state.System,
-		Tone:           d.state.Tone,
-		Audyssey:       d.state.Audyssey,
-		Audio:          d.state.Audio,
-		ChannelVolumes: d.state.Channels,
-	})
+	raw, err := json.Marshal(d.Settings())
 	if err != nil {
 		return nil
 	}
 	return raw
-}
-
-// protocolSnapshot is the driver's own view of the receiver for the
-// status. The zones are not here, because the controller reports them
-// from equipment.State and a second driver would report its own.
-type protocolSnapshot struct {
-	System         systemState        `json:"system"`
-	Tone           toneState          `json:"tone"`
-	Audyssey       audysseyState      `json:"audyssey"`
-	Audio          audioState         `json:"audio"`
-	ChannelVolumes map[string]float64 `json:"channelVolumes,omitempty"`
 }
 
 // SetPower turns the main zone on or to standby. The zone argument is
@@ -192,22 +178,33 @@ func (d *Client) SetSoundMode(zone, mode string) {
 	d.send(SoundModeCommand(mode))
 }
 
-// send queues one command for the current connection. A disconnected
-// client has no queue, so it drops the command. Commands are one-shot.
-// Replaying one after a reconnect could overwrite a change made at the
-// receiver while the connection was down.
-func (d *Client) send(command string) {
+// send queues one command for the current connection and reports
+// whether it was delivered. A disconnected client has no queue, a full
+// queue drops the command, and a queue whose writer has stopped during
+// teardown is dead, so each reports an error rather than claiming the
+// command is on its way. Commands are one-shot; replaying one after a
+// reconnect could overwrite a change made at the receiver while the
+// connection was down.
+func (d *Client) send(command string) error {
 	d.mutex.Lock()
 	out := d.out
-	d.mutex.Unlock()
 	if out == nil {
+		d.mutex.Unlock()
 		d.reportCommand(CommandFailed)
-		return
+		return fmt.Errorf("no connection to send %q", command)
 	}
+	// The enqueue happens under the mutex, so the writer's shutdown, which
+	// nils out under the same mutex, cannot run between the check above and
+	// this send. A command that returns nil here was accepted before the
+	// writer stopped, and the writer drains everything it accepted.
 	select {
 	case out <- command:
+		d.mutex.Unlock()
+		return nil
 	default:
+		d.mutex.Unlock()
 		d.reportCommand(CommandFailed)
+		return fmt.Errorf("the send queue is full, dropped %q", command)
 	}
 }
 
@@ -262,11 +259,6 @@ func (d *Client) runSession(parent context.Context) (answered bool) {
 	d.mutex.Lock()
 	d.out = out
 	d.mutex.Unlock()
-	defer func() {
-		d.mutex.Lock()
-		d.out = nil
-		d.mutex.Unlock()
-	}()
 
 	var writing sync.WaitGroup
 	writing.Add(1)
@@ -274,6 +266,27 @@ func (d *Client) runSession(parent context.Context) (answered bool) {
 		defer writing.Done()
 		defer cancel()
 		d.writeLoop(ctx, conn, out)
+		// Stop accepting new commands before the writer is gone, then
+		// drain what was already accepted. The send path holds the mutex
+		// while it enqueues, so taking it here means no send sits between
+		// its nil check and its enqueue: a command accepted before this
+		// point is drained, and a send after it sees nil and reports
+		// failure instead of leaving a command in a queue nobody drains.
+		d.mutex.Lock()
+		d.out = nil
+		d.mutex.Unlock()
+		for {
+			select {
+			case command := <-out:
+				if _, err := conn.Write([]byte(command + string(Terminator))); err != nil {
+					d.reportCommand(CommandFailed)
+				} else {
+					d.reportCommand(CommandOK)
+				}
+			default:
+				return
+			}
+		}
 	}()
 
 	for _, query := range Queries {

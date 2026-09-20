@@ -59,27 +59,65 @@ func TestMultEqWordReadsEveryMode(t *testing.T) {
 	}
 	for word, want := range cases {
 		t.Run(word, func(t *testing.T) {
-			mustMatch(t, multEqWord(word), want)
+			got, ok := multEqWord(word)
+			mustMatch(t, ok, true)
+			mustMatch(t, got, want)
 		})
 	}
+	_, ok := multEqWord("MAGIC")
+	mustMatch(t, ok, false)
 }
 
 func TestDynamicVolumeWordReadsEverySetting(t *testing.T) {
 	cases := map[string]string{"OFF": "off", "LIT": "light", "MED": "medium", "HEV": "heavy"}
 	for word, want := range cases {
 		t.Run(word, func(t *testing.T) {
-			mustMatch(t, dynamicVolumeWord(word), want)
+			got, ok := dynamicVolumeWord(word)
+			mustMatch(t, ok, true)
+			mustMatch(t, got, want)
 		})
 	}
+	_, ok := dynamicVolumeWord("BLARING")
+	mustMatch(t, ok, false)
 }
 
 func TestRestorerWordReadsEverySetting(t *testing.T) {
 	cases := map[string]string{"OFF": "off", "LOW": "low", "MED": "medium", "HI": "high"}
 	for word, want := range cases {
 		t.Run(word, func(t *testing.T) {
-			mustMatch(t, restorerWord(word), want)
+			got, ok := restorerWord(word)
+			mustMatch(t, ok, true)
+			mustMatch(t, got, want)
 		})
 	}
+	_, ok := restorerWord("SOFT")
+	mustMatch(t, ok, false)
+}
+
+func TestDrcWordReadsEverySetting(t *testing.T) {
+	cases := map[string]string{"OFF": "off", "LOW": "low", "MID": "mid", "HI": "hi", "AUTO": "auto"}
+	for word, want := range cases {
+		t.Run(word, func(t *testing.T) {
+			got, ok := drcWord(word)
+			mustMatch(t, ok, true)
+			mustMatch(t, got, want)
+		})
+	}
+	_, ok := drcWord("EXTREME")
+	mustMatch(t, ok, false)
+}
+
+func TestDialogEnhancerWordReadsEverySetting(t *testing.T) {
+	cases := map[string]string{"OFF": "off", "LOW": "low", "MID": "mid", "HIGH": "high"}
+	for word, want := range cases {
+		t.Run(word, func(t *testing.T) {
+			got, ok := dialogEnhancerWord(word)
+			mustMatch(t, ok, true)
+			mustMatch(t, got, want)
+		})
+	}
+	_, ok := dialogEnhancerWord("SUPER")
+	mustMatch(t, ok, false)
 }
 
 func TestOnOffWordAndText(t *testing.T) {
@@ -248,7 +286,7 @@ func TestApplyDenonLineReadsEveryMultEqWord(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			state, _, _, known := applyDenonLine(newDenonState(), line)
 			mustMatch(t, known, true)
-			mustMatch(t, state.Audyssey.Multeq, want)
+			mustMatch(t, *state.Settings.Audyssey.Multeq, want)
 		})
 	}
 }
@@ -259,18 +297,18 @@ func TestApplyDenonLineReadsEveryDynamicVolumeWord(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			state, _, _, known := applyDenonLine(newDenonState(), line)
 			mustMatch(t, known, true)
-			mustMatch(t, state.Audyssey.DynamicVolume, want)
+			mustMatch(t, *state.Settings.Audyssey.DynamicVolume, want)
 		})
 	}
 }
 
 func TestApplyDenonLineReadsEveryRestorerWord(t *testing.T) {
-	cases := map[string]string{"PSRSTR MED": "medium", "PSRSTR HI": "high", "PSRSTR MODE1": "mode1"}
+	cases := map[string]string{"PSRSTR MED": "medium", "PSRSTR HI": "high"}
 	for line, want := range cases {
 		t.Run(line, func(t *testing.T) {
 			state, _, _, known := applyDenonLine(newDenonState(), line)
 			mustMatch(t, known, true)
-			mustMatch(t, state.Audio.Restorer, want)
+			mustMatch(t, *state.Settings.Audio.Restorer, want)
 		})
 	}
 }
@@ -280,7 +318,8 @@ func TestApplyDenonLineRejectsParameterSettingsWithNoWord(t *testing.T) {
 		"PSDYNEQ MAYBE", "PSDYNVOL", "PSLOM MAYBE", "PSDRC", "PSLFE XX",
 		"PSEFF XX", "PSDEL XX", "PSDELAY XX", "PSSWR MAYBE", "PSGEQ MAYBE",
 		"PSHEQ MAYBE", "PSSPV MAYBE", "PSDEH", "PSBAS XX", "PSTRE XX",
-		"PSTONE CTRL MAYBE",
+		"PSTONE CTRL MAYBE", "PSMULTEQ:MAGIC", "PSDYNVOL BLARING",
+		"PSRSTR SOFT", "PSDRC EXTREME", "PSDEH SUPER",
 	} {
 		t.Run(line, func(t *testing.T) {
 			_, _, _, known := applyDenonLine(newDenonState(), line)

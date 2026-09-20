@@ -35,10 +35,14 @@ func TestApplyDenonLineFoldsEveryLineTheReceiverSends(t *testing.T) {
 		want  denonState
 	}{
 		{name: "power on", line: "PWON", zone: equipment.MainZone, field: powerField,
-			want: foldedInto(func(s *denonState) { s.System.Power = powerOn; s.Main.Power = equipment.PowerOn; s.Main.seen = true })},
+			want: foldedInto(func(s *denonState) {
+				s.Settings.System.Power = powerOn
+				s.Main.Power = equipment.PowerOn
+				s.Main.seen = true
+			})},
 		{name: "power to standby", line: "PWSTANDBY", zone: equipment.MainZone, field: powerField,
 			want: foldedInto(func(s *denonState) {
-				s.System.Power = powerStandby
+				s.Settings.System.Power = powerStandby
 				s.Main.Power = equipment.PowerStandby
 				s.Main.seen = true
 			})},
@@ -77,63 +81,63 @@ func TestApplyDenonLineFoldsEveryLineTheReceiverSends(t *testing.T) {
 		{name: "the second zone mute", line: "Z2MUOFF", zone: zone2, field: muteField,
 			want: foldedInto(func(s *denonState) { s.Zone2.Mute = false; s.Zone2.seen = true })},
 		{name: "the eco mode", line: "ECOAUTO", zone: "", field: ecoField,
-			want: foldedInto(func(s *denonState) { s.System.Eco = "auto" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.Eco = strPtr("auto") })},
 		{name: "the dimmer", line: "DIM BRI", zone: "", field: dimmerField,
-			want: foldedInto(func(s *denonState) { s.System.Dimmer = "bright" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.Dimmer = strPtr("bright") })},
 		{name: "the auto standby timer", line: "STBY2H", zone: "", field: standbyField,
-			want: foldedInto(func(s *denonState) { s.System.AutoStandby = "2h" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.AutoStandby = strPtr("2h") })},
 		{name: "the speaker preset", line: "SPPR 1", zone: "", field: speakerPresetField,
-			want: foldedInto(func(s *denonState) { s.System.SpeakerPreset = 1 })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.SpeakerPreset = intPtr(1) })},
 		{name: "the audio input mode", line: "SDHDMI", zone: "", field: inputModeField,
-			want: foldedInto(func(s *denonState) { s.System.AudioInputMode = "hdmi" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.AudioInputMode = strPtr("hdmi") })},
 		{name: "the video select", line: "SVOFF", zone: "", field: videoSelectField,
-			want: foldedInto(func(s *denonState) { s.System.VideoSelect = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.VideoSelect = strPtr("off") })},
 		{name: "the bluetooth transmitter off", line: "BTTX OFF", zone: "", field: bluetoothField,
-			want: foldedInto(func(s *denonState) { s.System.BluetoothTransmitter = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.BluetoothTransmitter = strPtr("off") })},
 		{name: "the bluetooth output", line: "BTTX SP", zone: "", field: bluetoothField,
-			want: foldedInto(func(s *denonState) { s.System.BluetoothOutput = "speakers" })},
+			want: foldedInto(func(s *denonState) { s.Settings.System.BluetoothOutput = strPtr("speakers") })},
 		{name: "a channel volume at zero", line: "CVFL 50", zone: "", field: channelField,
-			want: foldedInto(func(s *denonState) { s.Channels["FL"] = 0 })},
+			want: foldedInto(func(s *denonState) { s.Settings.ChannelVolumes["FL"] = 0 })},
 		{name: "a channel volume above zero", line: "CVSW 505", zone: "", field: channelField,
-			want: foldedInto(func(s *denonState) { s.Channels["SW"] = 0.5 })},
+			want: foldedInto(func(s *denonState) { s.Settings.ChannelVolumes["SW"] = 0.5 })},
 		{name: "the Audyssey mode", line: "PSMULTEQ:AUDYSSEY", zone: "", field: multeqField,
-			want: foldedInto(func(s *denonState) { s.Audyssey.Multeq = "reference" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audyssey.Multeq = strPtr("reference") })},
 		{name: "the dynamic EQ", line: "PSDYNEQ ON", zone: "", field: dynamicEqField,
-			want: foldedInto(func(s *denonState) { s.Audyssey.DynamicEq = true })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audyssey.DynamicEq = boolPtr(true) })},
 		{name: "the reference level", line: "PSREFLEV 10", zone: "", field: referenceLevelField,
-			want: foldedInto(func(s *denonState) { s.Audyssey.ReferenceLevelOffset = 10 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audyssey.ReferenceLevelOffset = intPtr(10) })},
 		{name: "the dynamic volume", line: "PSDYNVOL OFF", zone: "", field: dynamicVolumeField,
-			want: foldedInto(func(s *denonState) { s.Audyssey.DynamicVolume = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audyssey.DynamicVolume = strPtr("off") })},
 		{name: "the loudness management", line: "PSLOM ON", zone: "", field: loudnessField,
-			want: foldedInto(func(s *denonState) { s.Audyssey.LoudnessManagement = true })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audyssey.LoudnessManagement = boolPtr(true) })},
 		{name: "the dynamic range", line: "PSDRC OFF", zone: "", field: drcField,
-			want: foldedInto(func(s *denonState) { s.Audio.DRC = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.DRC = strPtr("off") })},
 		{name: "the LFE level", line: "PSLFE 10", zone: "", field: lfeField,
-			want: foldedInto(func(s *denonState) { s.Audio.LFE = -10 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.LFE = intPtr(-10) })},
 		{name: "the effect level", line: "PSEFF 05", zone: "", field: effectField,
-			want: foldedInto(func(s *denonState) { s.Audio.Effect = 5 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.Effect = intPtr(5) })},
 		{name: "the audio delay", line: "PSDELAY 200", zone: "", field: delayField,
-			want: foldedInto(func(s *denonState) { s.Audio.AudioDelay = 200 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.AudioDelay = intPtr(200) })},
 		{name: "the delay", line: "PSDEL 100", zone: "", field: delayField,
-			want: foldedInto(func(s *denonState) { s.Audio.Delay = 100 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.Delay = intPtr(100) })},
 		{name: "the subwoofer", line: "PSSWR ON", zone: "", field: subwooferField,
-			want: foldedInto(func(s *denonState) { s.Audio.Subwoofer = true })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.Subwoofer = boolPtr(true) })},
 		{name: "the restorer", line: "PSRSTR LOW", zone: "", field: restorerField,
-			want: foldedInto(func(s *denonState) { s.Audio.Restorer = "low" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.Restorer = strPtr("low") })},
 		{name: "the graphic equalizer", line: "PSGEQ OFF", zone: "", field: graphicEqField,
-			want: foldedInto(func(s *denonState) { s.Audio.GraphicEq = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.GraphicEq = strPtr("off") })},
 		{name: "the headphone equalizer", line: "PSHEQ OFF", zone: "", field: headphoneEqField,
-			want: foldedInto(func(s *denonState) { s.Audio.HeadphoneEq = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.HeadphoneEq = strPtr("off") })},
 		{name: "the speaker virtualizer", line: "PSSPV ON", zone: "", field: virtualizerField,
-			want: foldedInto(func(s *denonState) { s.Audio.SpeakerVirtualizer = true })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.SpeakerVirtualizer = boolPtr(true) })},
 		{name: "the dialog enhancer", line: "PSDEH OFF", zone: "", field: dialogEnhancerField,
-			want: foldedInto(func(s *denonState) { s.Audio.DialogEnhancer = "off" })},
+			want: foldedInto(func(s *denonState) { s.Settings.Audio.DialogEnhancer = strPtr("off") })},
 		{name: "the bass trim", line: "PSBAS 44", zone: "", field: bassField,
-			want: foldedInto(func(s *denonState) { s.Tone.Bass = -6 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Tone.Bass = intPtr(-6) })},
 		{name: "the treble trim", line: "PSTRE 56", zone: "", field: trebleField,
-			want: foldedInto(func(s *denonState) { s.Tone.Treble = 6 })},
+			want: foldedInto(func(s *denonState) { s.Settings.Tone.Treble = intPtr(6) })},
 		{name: "the tone control", line: "PSTONE CTRL OFF", zone: "", field: toneControlField,
-			want: foldedInto(func(s *denonState) { s.Tone.Control = false })},
+			want: foldedInto(func(s *denonState) { s.Settings.Tone.Control = boolPtr(false) })},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -192,7 +196,7 @@ func TestTheMainZonePowerSurvivesAWholeUnitPowerLine(t *testing.T) {
 	state, _, _, _ = applyDenonLine(state, "PWON")
 
 	mustMatch(t, state.Main.Power, equipment.PowerStandby)
-	mustMatch(t, state.System.Power, powerOn)
+	mustMatch(t, state.Settings.System.Power, powerOn)
 }
 
 func TestTheVolumeCommandCarriesTheHalfSteps(t *testing.T) {

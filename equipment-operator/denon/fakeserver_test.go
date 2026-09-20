@@ -129,7 +129,35 @@ func (f *fakeReceiver) answer(command string) {
 	case strings.HasPrefix(command, InputPrefix):
 		f.input = command[len(InputPrefix):]
 		f.send("SI" + f.input)
+	case isSettingCommand(command):
+		// A set command for a setting is echoed back, which the parser
+		// folds into the state the way a real receiver would.
+		f.send(command)
 	}
+}
+
+// settingEchoPrefixes are the prefixes a set command for a setting
+// carries. The fake echoes them so a test can apply a Settings and read
+// it back.
+var settingEchoPrefixes = []string{
+	"ECO", "DIM ", "STBY", "SPPR ", "SD", "SV", "BTTX ", "PSMULTEQ:", "PSDYNEQ ",
+	"PSREFLEV ", "PSDYNVOL ", "PSLOM ", "PSDRC ", "PSLFE ", "PSEFF ", "PSDELAY ",
+	"PSDEL ", "PSSWR ", "PSRSTR ", "PSGEQ ", "PSHEQ ", "PSSPV ", "PSDEH ",
+	"PSBAS ", "PSTRE ", "PSTONE CTRL ", "CV",
+}
+
+// isSettingCommand answers whether one command sets a setting, which is
+// a set prefix and not a query.
+func isSettingCommand(command string) bool {
+	if strings.HasSuffix(command, "?") {
+		return false
+	}
+	for _, prefix := range settingEchoPrefixes {
+		if strings.HasPrefix(command, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeReceiver) muteLine() string {
