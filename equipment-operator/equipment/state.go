@@ -11,7 +11,6 @@ package equipment
 
 import (
 	"context"
-	"encoding/json"
 )
 
 // ConditionStatus is the three-valued verdict a condition carries. It
@@ -106,22 +105,26 @@ type Driver interface {
 	// one display unit. The Denon reports half steps, so it answers 2.
 	VolumeResolution() int
 
-	// ProtocolStatus is the driver's own snapshot for status.<protocol>.
-	// A driver with nothing extra to report answers nil.
-	ProtocolStatus() json.RawMessage
+	// SetPower turns one zone on or to standby. An unknown zone is an
+	// error.
+	SetPower(zone string, on bool) error
 
-	// SetPower turns one zone on or to standby.
-	SetPower(zone string, on bool)
-
-	// SetInput selects one input on one zone.
-	SetInput(zone, input string)
+	// SetInput selects one input on one zone. An unknown zone is an
+	// error.
+	SetInput(zone, input string) error
 
 	// SetVolume sets one zone's volume, in the driver's smallest steps.
-	SetVolume(zone string, volume int)
+	// An unknown zone is an error.
+	SetVolume(zone string, volume int) error
 
-	// SetMute sets one zone's mute.
-	SetMute(zone string, muted bool)
+	// SetMute sets one zone's mute. An unknown zone is an error.
+	SetMute(zone string, muted bool) error
 
-	// SetSoundMode selects one zone's sound mode.
-	SetSoundMode(zone, mode string)
+	// SetSoundMode selects one zone's sound mode. A protocol that
+	// carries no sound mode on the zone is an error.
+	SetSoundMode(zone, mode string) error
+
+	// SetSleep sets one zone's sleep timer, in minutes, where zero is
+	// off. An unknown zone or an out-of-range value is an error.
+	SetSleep(zone string, minutes int) error
 }

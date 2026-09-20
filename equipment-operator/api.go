@@ -1,8 +1,7 @@
 package main
 
 import (
-	"encoding/json"
-
+	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
@@ -47,17 +46,40 @@ type ReceiverList struct {
 }
 
 // The spec names one protocol block, the inputs that liken machines
-// feed, and the session that currently uses the receiver.
+// feed, the non-main zones, the session that currently uses the
+// receiver, and the bus topics that configure it.
 type ReceiverSpec struct {
 	Denon   *DenonProtocol   `json:"denon,omitempty"`
 	Volume  *ReceiverVolume  `json:"volume,omitempty"`
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
+	// Zones holds the non-main zones' declared controls. The main zone
+	// is spec.power and spec.session, so a zones map may hold only
+	// zone2 and zone3; a main key would give one zone two writers and
+	// is rejected.
+	Zones map[string]ZoneSpec `json:"zones,omitempty"`
+	// SettingsTopic and CommandsTopic are the full MQTT topics the bus
+	// configures this receiver on. A topic that is empty subscribes the
+	// unit to nothing.
+	SettingsTopic string `json:"settingsTopic,omitempty"`
+	CommandsTopic string `json:"commandsTopic,omitempty"`
 	// Power is the power state the operator should drive the receiver
 	// to. It is the operator's own field, applied once per change and
 	// never re-asserted, so a GitOps manifest that omits it leaves the
 	// receiver wherever the operator last put it.
 	Power equipment.Power `json:"power,omitempty"`
+}
+
+// ZoneSpec is one non-main zone's declared controls. Every optional
+// field is a pointer, so a control the owner does not declare differs
+// from one set to zero. Volume is in display units, the way
+// spec.volume.max is.
+type ZoneSpec struct {
+	Power  equipment.Power `json:"power,omitempty"`
+	Input  string          `json:"input,omitempty"`
+	Volume *float64        `json:"volume,omitempty"`
+	Mute   *bool           `json:"mute,omitempty"`
+	Sleep  *int            `json:"sleep,omitempty"`
 }
 
 // How loud the room may get and how far one press moves it, both in the
@@ -68,10 +90,11 @@ type ReceiverVolume struct {
 	Step float64 `json:"step,omitempty"`
 }
 
-// The Denon and Marantz control protocol, and the address it answers
-// on.
+// The Denon and Marantz control protocol, the address it answers on,
+// and the settings the operator drives it to.
 type DenonProtocol struct {
-	Address string `json:"address"`
+	Address  string         `json:"address"`
+	Settings denon.Settings `json:"settings,omitempty"`
 }
 
 // One input of the receiver, and the machine and monitor id that feed
@@ -110,11 +133,11 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 }
 
 // What the receiver last reported, grouped by zone, the protocol's own
-// settings snapshot, the Service that represents the receiver when one
-// exists, and the Reachable condition.
+// typed settings snapshot, the Service that represents the receiver
+// when one exists, and the Reachable condition.
 type ReceiverStatus struct {
 	Zones      map[string]ZoneStatus `json:"zones,omitempty"`
-	Denon      json.RawMessage       `json:"denon,omitempty"`
+	Denon      *denon.Settings       `json:"denon,omitempty"`
 	Service    string                `json:"service,omitempty"`
 	Conditions []Condition           `json:"conditions,omitempty"`
 }

@@ -9,8 +9,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -27,18 +30,23 @@ const backstopInterval = 30 * time.Second
 var statusDebounce = 250 * time.Millisecond
 
 // receiverUnit is one Receiver's running parts: the connection, the
-// status writer, and the session that holds the level.
+// status writer, the settings and zones it drives, and the session that
+// holds the level.
 type receiverUnit struct {
-	name       string
-	address    string
-	client     *Client
-	busAddress string
-	now        func() time.Time
-	driver     equipment.Driver
-	readings   *metrics
-	cancel     context.CancelFunc
-	dirty      chan struct{}
-	generation atomic.Int64
+	name          string
+	address       string
+	settingsTopic string
+	commandsTopic string
+	client        *Client
+	busAddress    string
+	now           func() time.Time
+	driver        equipment.Driver
+	denonClient   *denon.Client
+	readings      *metrics
+	cancel        context.CancelFunc
+	dirty         chan struct{}
+	generation    atomic.Int64
+	bus           *Bus
 	// The ceiling and the step live here and not on the session, so an
 	// edit to them reaches a standing session with no restart.
 	volume atomic.Pointer[ReceiverVolume]
@@ -48,6 +56,14 @@ type receiverUnit struct {
 	// The last power the operator applied, so a reconcile and a toggle
 	// share one memory of what was sent and neither re-asserts it.
 	power atomic.Pointer[equipment.Power]
+	// The last settings the operator applied, so a reconcile applies a
+	// declared change once and a bus write that returns a value to the
+	// spec is not re-sent on the next pass.
+	settings atomic.Pointer[denon.Settings]
+	// The last zone controls the operator applied, keyed by zone, so a
+	// reconcile sends a change once and never re-asserts a value that
+	// stands.
+	zones atomic.Pointer[map[string]ZoneSpec]
 
 	mutex   sync.Mutex
 	session *session
@@ -103,7 +119,8 @@ func (u *receiverUnit) write() {
 	// what a person reads in status.
 	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
 
-	status := buildReceiverStatus(state, u.driver.ProtocolStatus(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
+	settings := u.denonClient.Settings()
+	status := buildReceiverStatus(state, &settings, u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}
@@ -204,8 +221,183 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 	if u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	u.driver.SetPower(equipment.MainZone, power != equipment.PowerStandby && power != equipment.PowerOff)
+	if err := u.driver.SetPower(equipment.MainZone, power != equipment.PowerStandby && power != equipment.PowerOff); err != nil {
+		fmt.Fprintf(os.Stderr, "setting the power of receiver %s: %v\n", u.name, err)
+		return
+	}
 	u.applyPower(power)
+}
+
+// setSettings drives the receiver to the settings a person declared.
+// The operator owns the declared settings, so it applies a change once
+// and never re-asserts a value that stands. A command sent before the
+// connection is open is dropped, so the change waits for a reachable
+// receiver rather than applying a value the equipment never saw. An
+// apply error is logged and not recorded, so the next pass tries
+// again.
+func (u *receiverUnit) setSettings(want denon.Settings) {
+	if reflect.DeepEqual(u.settingsApplied(), want) {
+		return
+	}
+	if u.driver.State().Reachable != equipment.ConditionTrue {
+		return
+	}
+	if err := u.denonClient.ApplySettings(want); err != nil {
+		fmt.Fprintf(os.Stderr, "applying the settings of receiver %s: %v\n", u.name, err)
+		return
+	}
+	u.settings.Store(&want)
+}
+
+// settingsApplied answers the last settings the operator settled on.
+func (u *receiverUnit) settingsApplied() denon.Settings {
+	if held := u.settings.Load(); held != nil {
+		return *held
+	}
+	return denon.Settings{}
+}
+
+// setZones drives the non-main zones to the controls a person declared.
+// The operator owns the declared zone controls, so it applies a change
+// once and never re-asserts a value that stands. A command sent before
+// the connection is open is dropped, so the change waits for a
+// reachable receiver. The main zone is spec.power and spec.session, so
+// a zones map that names main is a misconfiguration and is rejected
+// rather than fought. An apply error is logged and not recorded, so the
+// next pass tries again.
+func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
+	if u.driver.State().Reachable != equipment.ConditionTrue {
+		return
+	}
+	applied := u.zonesApplied()
+	for name, spec := range want {
+		if name == equipment.MainZone {
+			fmt.Fprintf(os.Stderr, "zone %q on receiver %s: the main zone is spec.power and spec.session, not spec.zones\n", name, u.name)
+			continue
+		}
+		if reflect.DeepEqual(applied[name], spec) {
+			continue
+		}
+		if err := u.applyZone(name, spec); err != nil {
+			fmt.Fprintf(os.Stderr, "setting zone %s on receiver %s: %v\n", name, u.name, err)
+			continue
+		}
+		applied[name] = spec
+	}
+	u.zones.Store(&applied)
+}
+
+// zonesApplied answers the last zone controls the operator settled on.
+func (u *receiverUnit) zonesApplied() map[string]ZoneSpec {
+	if held := u.zones.Load(); held != nil {
+		return *held
+	}
+	return map[string]ZoneSpec{}
+}
+
+// applyZone sends the declared controls for one zone. Volume is in
+// display units, so it is turned into the driver's smallest steps
+// before it is sent. An unknown zone is an error the caller logs.
+func (u *receiverUnit) applyZone(name string, spec ZoneSpec) error {
+	if spec.Power != "" {
+		if err := u.driver.SetPower(name, spec.Power != equipment.PowerStandby && spec.Power != equipment.PowerOff); err != nil {
+			return fmt.Errorf("power: %w", err)
+		}
+	}
+	if spec.Input != "" {
+		if err := u.driver.SetInput(name, spec.Input); err != nil {
+			return fmt.Errorf("input: %w", err)
+		}
+	}
+	if spec.Volume != nil {
+		steps := int(math.Round(*spec.Volume * float64(u.driver.VolumeResolution())))
+		if err := u.driver.SetVolume(name, steps); err != nil {
+			return fmt.Errorf("volume: %w", err)
+		}
+	}
+	if spec.Mute != nil {
+		if err := u.driver.SetMute(name, *spec.Mute); err != nil {
+			return fmt.Errorf("mute: %w", err)
+		}
+	}
+	if spec.Sleep != nil {
+		if err := u.driver.SetSleep(name, *spec.Sleep); err != nil {
+			return fmt.Errorf("sleep: %w", err)
+		}
+	}
+	return nil
+}
+
+// startBus opens the unit's own broker connection and subscribes to
+// the settings and commands topics when the spec names them. The unit
+// bus is separate from a session's bus, so settings and commands reach
+// a receiver with no Play and no screen. It holds no retained state, so
+// it names no will.
+func (u *receiverUnit) startBus(ctx context.Context) {
+	if u.settingsTopic == "" && u.commandsTopic == "" {
+		return
+	}
+	u.bus = newBus(u.busAddress, "equipment-operator-"+u.name+"-bus", nil, nil, u.busMessage)
+	if u.settingsTopic != "" {
+		u.bus.Subscribe(u.settingsTopic)
+	}
+	if u.commandsTopic != "" {
+		u.bus.Subscribe(u.commandsTopic)
+	}
+	go u.bus.Run(ctx)
+}
+
+// busMessage routes one message off the unit's own bus. The settings
+// topic and the commands topic each carry their own message shape.
+func (u *receiverUnit) busMessage(topic string, payload []byte) {
+	switch topic {
+	case u.settingsTopic:
+		u.handleSettings(payload)
+	case u.commandsTopic:
+		u.handleCommand(payload)
+	}
+}
+
+// handleSettings reads one settings message and sends the value it
+// names to the receiver. A value that lands is written back to the leaf
+// of spec.denon.settings it came from, so the declared state of the
+// resource stays true. The write is scoped to that one leaf under this
+// operator's own field manager, so a bus-written key is operator-owned
+// and never a key the manifest declared, and the two writers never
+// fight. An error is logged and not recorded: the receiver's own echo
+// is the only thing that moves the observed settings.
+func (u *receiverUnit) handleSettings(payload []byte) {
+	var message struct {
+		Setting string                 `json:"setting"`
+		Value   equipment.SettingValue `json:"value"`
+	}
+	if err := json.Unmarshal(payload, &message); err != nil || message.Setting == "" {
+		return
+	}
+	if err := u.denonClient.Set(message.Setting, message.Value); err != nil {
+		fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
+		return
+	}
+	leaf := settingsPath(message.Setting)
+	if _, err := ApplyReceiverSettings(u.client, u.name, leaf, message.Value); err != nil {
+		fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
+	}
+}
+
+// handleCommand reads one commands message and runs the one-shot it
+// names. No actions exist yet, so every id errors; the error is logged
+// and never fatal, so the bus keeps serving.
+func (u *receiverUnit) handleCommand(payload []byte) {
+	var message struct {
+		Command string                            `json:"command"`
+		Args    map[string]equipment.SettingValue `json:"args"`
+	}
+	if err := json.Unmarshal(payload, &message); err != nil || message.Command == "" {
+		return
+	}
+	if err := u.denonClient.Do(message.Command, message.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
+	}
 }
 
 // powerApplied answers the last power the operator settled on.
@@ -305,13 +497,15 @@ func (c *controller) doPass(ctx context.Context) error {
 	return nil
 }
 
-// reconcile brings one Receiver's unit up to its spec. An address that
-// changed is a different receiver, so the unit is replaced and not
-// redialled.
+// reconcile brings one Receiver's unit up to its spec. An address or a
+// bus topic that changed is a different receiver wiring, so the unit is
+// replaced and not redialled.
 func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
-	if held && unit.address != receiver.Spec.Denon.Address {
+	if held && (unit.address != receiver.Spec.Denon.Address ||
+		unit.settingsTopic != receiver.Spec.SettingsTopic ||
+		unit.commandsTopic != receiver.Spec.CommandsTopic) {
 		unit.stop()
 		delete(c.units, name)
 		held = false
@@ -324,30 +518,37 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.setPower(receiver.Spec.Power)
+	unit.setSettings(receiver.Spec.Denon.Settings)
+	unit.setZones(receiver.Spec.Zones)
 	unit.setSession(ctx, receiver.Spec.Session)
 }
 
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
-		name:       receiver.Metadata.Name,
-		address:    receiver.Spec.Denon.Address,
-		client:     c.client,
-		busAddress: c.busAddress,
-		now:        c.now,
-		readings:   c.readings,
-		cancel:     cancel,
-		dirty:      make(chan struct{}, 1),
+		name:          receiver.Metadata.Name,
+		address:       receiver.Spec.Denon.Address,
+		settingsTopic: receiver.Spec.SettingsTopic,
+		commandsTopic: receiver.Spec.CommandsTopic,
+		client:        c.client,
+		busAddress:    c.busAddress,
+		now:           c.now,
+		readings:      c.readings,
+		cancel:        cancel,
+		dirty:         make(chan struct{}, 1),
 	}
 	unit.setVolume(receiver.Spec.Volume)
+	unit.setInputs(receiver.Spec.Inputs)
 	client := denon.NewClient(receiver.Spec.Denon.Address, unit.observe)
 	client.Reporter = c.readings.reportCommand
 	unit.driver = client
+	unit.denonClient = client
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
 	go unit.driver.Run(ctx)
 	go unit.report(ctx)
+	unit.startBus(ctx)
 	// The first write says the operator holds the receiver and has not
 	// reached it yet, before any line arrives.
 	poke(unit.dirty)

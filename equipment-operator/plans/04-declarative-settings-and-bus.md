@@ -111,25 +111,25 @@ wake path and the declarative path are both live.
 
 ### Zones 2 and 3
 
-Driving the second and third zones needs a placement decision. The
-zones are receiver-common, like power and inputs, so the likely home is
-a common `spec.zones` block with per-zone power, volume, and input,
-sitting beside `spec.power` and `spec.inputs` rather than under
-`spec.denon`. That is recorded here as an open item until a workflow
-needs a second zone.
+The zones are receiver-common, like power and inputs, so they sit in a
+top-level `spec.zones` block beside `spec.power` and `spec.inputs`,
+keyed by the zone's name as the receiver reports it, rather than under
+`spec.denon`. Each entry declares the zone's power, input, volume,
+mute, and sleep, and a change is applied once and never re-asserted.
+The main zone has no entry: `spec.power` and `spec.session` drive it,
+and a `main` key would give one zone two writers, so the CRD rejects
+it.
 
 ## Phases
 
 1. The mechanism, plus the families the driver already parses: the
    `Settings` model, the id table, the bus move to the unit, the
-   one-writer write-back, and declarative settings for system, tone,
-   audyssey, audio, and channelVolumes.
+   one-writer write-back, declarative settings for system, tone,
+   audyssey, audio, and channelVolumes, and the non-main zones'
+   declared controls.
 2. The tuner (`TF`, `TM`, `TP`).
 3. The network player and HEOS (`NS`, `NSA`, `NSE`).
 4. Video controls and trigger outputs (`VSASP`, `VSMONI`, `TR`).
-
-Zone 2 and zone 3 driving lands when the `spec.zones` placement is
-settled, and is not tied to a family phase.
 
 ## Verification
 
@@ -154,11 +154,9 @@ pinned.
 
 ## What this leaves for later
 
-* The placement of `spec.zones` for zones 2 and 3.
 * Whether a declared `spec.power` re-asserts across a wake.
-* Whether `soundMode` moves into Denon settings. The multi-device
-  premise is dropped, so the mode may stay on `spec.inputs` where plan
-  02 put it, because the mode travels with the input and the owner
-  already declares the input. Settled only when a workflow needs to
-  set the mode outside a session.
 * The Service front from plan 00 remains plan 03, not built here.
+
+The `soundMode` question is settled: it stays on `spec.inputs`, where
+plan 02 put it, because the mode travels with the input the session
+already selects.

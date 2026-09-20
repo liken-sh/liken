@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -281,6 +282,70 @@ func ApplyReceiverPower(c *Client, name string, power equipment.Power) (*Receive
 	path := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
 	written := &Receiver{}
 	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// settingsPath maps a bus setting id onto the leaf of
+// spec.denon.settings that holds it. The channel family lives under
+// channelVolumes, and every other id maps by its dotted segments, so
+// tone.bass becomes ["tone","bass"] and channel.FL becomes
+// ["channelVolumes","FL"].
+func settingsPath(id string) []string {
+	if strings.HasPrefix(id, "channel.") {
+		return []string{"channelVolumes", strings.TrimPrefix(id, "channel.")}
+	}
+	return strings.Split(id, ".")
+}
+
+// settingsLeafSpec is the body of an apply that owns one leaf of
+// spec.denon.settings: the identity, and the one nested field this
+// operator manages. It is built as raw JSON because the leaf path is
+// dynamic and no typed struct can name it.
+func settingsLeafSpec(leaf []string, value equipment.SettingValue) (json.RawMessage, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var node any = json.RawMessage(encoded)
+	for index := len(leaf) - 1; index >= 0; index-- {
+		node = map[string]any{leaf[index]: node}
+	}
+	return json.Marshal(map[string]any{"denon": map[string]any{"settings": node}})
+}
+
+// ApplyReceiverSettings writes one leaf of spec.denon.settings on the
+// main resource under this operator's own field manager, the way
+// ApplyReceiverPower owns spec.power. Server-side apply keeps the
+// write to the one leaf the body states, so a bus write to one key
+// never claims the keys around it and never touches a key a GitOps
+// manifest declared. That is the one-writer invariant: a manifest-
+// declared key is Flux's, and a bus-written key is this operator's, and
+// the two never own the same leaf. force settles a conflict in this
+// manager's favour, because nothing else writes a bus-written key.
+func ApplyReceiverSettings(c *Client, name string, leaf []string, value equipment.SettingValue) (*Receiver, error) {
+	spec, err := settingsLeafSpec(leaf, value)
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(struct {
+		APIVersion string          `json:"apiVersion"`
+		Kind       string          `json:"kind"`
+		Metadata   ObjectMeta      `json:"metadata"`
+		Spec       json.RawMessage `json:"spec"`
+	}{
+		APIVersion: equipmentAPIVersion,
+		Kind:       "Receiver",
+		Metadata:   ObjectMeta{Name: name},
+		Spec:       spec,
+	})
+	if err != nil {
+		return nil, err
+	}
+	url := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
+	written := &Receiver{}
+	if err := c.requestJSON(http.MethodPatch, url, applyContentType, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil

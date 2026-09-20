@@ -19,6 +19,9 @@ How to reach the receiver and how its inputs are wired. The cluster owner writes
 | <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine. |
 | <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. The operator sends power and input commands once each time active or awake changes to true. It does not re-assert those commands. A person using the receiver's remote can therefore change them. |
 | <span id="spec--power"></span>`power` | string | no | The power state the operator drives the receiver to. The operator owns this field: it applies it once per change and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it. A toggle from the session's power topic rewrites it. The Denon cannot tell standby from off, so both mean standby. One of: `on`, `off`, `standby`. |
+| <span id="spec--settingstopic"></span>`settingsTopic` | string | no | The topic the operator subscribes to for the life of the Receiver. A message on it is a settings toggle write, {"setting":"tone.bass","value":3}, with the value in display units. An absent topic subscribes to nothing. |
+| <span id="spec--commandstopic"></span>`commandsTopic` | string | no | The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {"command":"quick.3"}, an action that is not a setting. An absent topic subscribes to nothing. |
+| <span id="spec--zones"></span>`zones` | [map\[string\]object](#speczones) | no | The receiver's second and third zones, keyed by the zone's name as the receiver reports it. The main zone has no entry here: spec.power and spec.session drive it. |
 
 ### spec.denon
 
@@ -27,6 +30,74 @@ The receiver accepts the Denon and Marantz control protocol on TCP port 23. Comm
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdenon--address"></span>`address` | string | yes | The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent. |
+| <span id="specdenon--settings"></span>`settings` | [object](#specdenonsettings) | no | The receiver's settings, one family per block, in display units. The operator applies a declared setting once on change and never re-asserts it, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field. |
+
+#### spec.denon.settings
+
+The receiver's settings, one family per block, in display units. The operator applies a declared setting once on change and never re-asserts it, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettings--system"></span>`system` | [object](#specdenonsettingssystem) | no | The unit-wide settings. Power is reported by the driver but not declarable here, because the controller owns it through spec.power. |
+| <span id="specdenonsettings--tone"></span>`tone` | [object](#specdenonsettingstone) | no | The tone control and the two trims, in display units where 0dB is neutral. |
+| <span id="specdenonsettings--audyssey"></span>`audyssey` | [object](#specdenonsettingsaudyssey) | no | The Audyssey room correction settings. |
+| <span id="specdenonsettings--audio"></span>`audio` | [object](#specdenonsettingsaudio) | no | The audio processing settings. |
+| <span id="specdenonsettings--channelvolumes"></span>`channelVolumes` | map[string]number | no | One trim per channel, keyed by the channel's name, in display units where 0dB is neutral. |
+
+#### spec.denon.settings.system
+
+The unit-wide settings. Power is reported by the driver but not declarable here, because the controller owns it through spec.power.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingssystem--eco"></span>`eco` | string | no | The Eco mode the receiver uses: auto, on, or off. |
+| <span id="specdenonsettingssystem--dimmer"></span>`dimmer` | string | no | The display dimmer: off, dim, dark, or bright. |
+| <span id="specdenonsettingssystem--autostandby"></span>`autoStandby` | string | no | The auto standby timer: off, or 15m, 30m, 60m, 2h, 4h, or 8h. |
+| <span id="specdenonsettingssystem--speakerpreset"></span>`speakerPreset` | integer | no | The speaker preset, 1 through 4. |
+| <span id="specdenonsettingssystem--audioinputmode"></span>`audioInputMode` | string | no | The audio input mode: auto, hdmi, digital, or analog. |
+| <span id="specdenonsettingssystem--videoselect"></span>`videoSelect` | string | no | The video source the receiver selects, a name it already knows, or off. |
+| <span id="specdenonsettingssystem--bluetoothtransmitter"></span>`bluetoothTransmitter` | string | no | The Bluetooth transmitter: on or off. |
+| <span id="specdenonsettingssystem--bluetoothoutput"></span>`bluetoothOutput` | string | no | The Bluetooth output: speakers or bluetooth. |
+
+#### spec.denon.settings.tone
+
+The tone control and the two trims, in display units where 0dB is neutral.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingstone--control"></span>`control` | boolean | no | Whether the tone trims apply. False bypasses them. |
+| <span id="specdenonsettingstone--bass"></span>`bass` | integer | no | The bass trim, 12dB on each side of neutral. |
+| <span id="specdenonsettingstone--treble"></span>`treble` | integer | no | The treble trim, 12dB on each side of neutral. |
+
+#### spec.denon.settings.audyssey
+
+The Audyssey room correction settings.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingsaudyssey--multeq"></span>`multeq` | string | no | The MultEQ mode: reference, l/r bypass, flat, manual, or off. |
+| <span id="specdenonsettingsaudyssey--dynamiceq"></span>`dynamicEq` | boolean | no | Whether Dynamic EQ is on. |
+| <span id="specdenonsettingsaudyssey--referenceleveloffset"></span>`referenceLevelOffset` | integer | no | The reference level offset, in dB, one of 0, 5, 10, or 15. One of: `0`, `5`, `10`, `15`. |
+| <span id="specdenonsettingsaudyssey--dynamicvolume"></span>`dynamicVolume` | string | no | The Dynamic Volume mode, such as off, light, medium, or heavy. |
+| <span id="specdenonsettingsaudyssey--loudnessmanagement"></span>`loudnessManagement` | boolean | no | Whether Loudness Management is on. |
+
+#### spec.denon.settings.audio
+
+The audio processing settings.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingsaudio--drc"></span>`drc` | string | no | The Dynamic Range mode: off, auto, low, mid, or hi. |
+| <span id="specdenonsettingsaudio--lfe"></span>`lfe` | integer | no | The LFE level, a cut from 0dB down to 10dB. |
+| <span id="specdenonsettingsaudio--effect"></span>`effect` | integer | no | The effect level. |
+| <span id="specdenonsettingsaudio--delay"></span>`delay` | integer | no | The delay, 0 to 999 milliseconds. |
+| <span id="specdenonsettingsaudio--audiodelay"></span>`audioDelay` | integer | no | The audio delay, 0 to 999 milliseconds. |
+| <span id="specdenonsettingsaudio--subwoofer"></span>`subwoofer` | boolean | no | Whether the subwoofer is on. |
+| <span id="specdenonsettingsaudio--restorer"></span>`restorer` | string | no | The Audio Restorer mode: off, low, medium, or high. |
+| <span id="specdenonsettingsaudio--graphiceq"></span>`graphicEq` | string | no | The Graphic EQ: off or on. |
+| <span id="specdenonsettingsaudio--headphoneeq"></span>`headphoneEq` | string | no | The Headphone EQ: off or on. |
+| <span id="specdenonsettingsaudio--speakervirtualizer"></span>`speakerVirtualizer` | boolean | no | Whether the Speaker Virtualizer is on. |
+| <span id="specdenonsettingsaudio--dialogenhancer"></span>`dialogEnhancer` | string | no | The Dialog Enhancer level: off, low, mid, or high. |
 
 ### spec.volume
 
@@ -60,6 +131,18 @@ The Player that currently uses the receiver. The media operator applies this blo
 | <span id="specsession--powertopic"></span>`powerTopic` | string | no | The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it and flips the receiver's power on a {"action":"toggle"} message, updating spec.power to match. An absent topic subscribes the session to nothing. |
 | <span id="specsession--active"></span>`active` | boolean | no | Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false. |
 | <span id="specsession--awake"></span>`awake` | boolean | no | Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep. |
+
+### spec.zones.*
+
+One zone beyond main, keyed by the zone's name. Every field is optional, so a bare key just claims the zone.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speczones--power"></span>`power` | string | no | The power state the operator drives this zone to. One of: `on`, `off`, `standby`. |
+| <span id="speczones--input"></span>`input` | string | no | The input this zone selects, by its name in spec.inputs. |
+| <span id="speczones--volume"></span>`volume` | number | no | The zone's volume in the receiver's display units. |
+| <span id="speczones--mute"></span>`mute` | boolean | no | Whether this zone is muted. |
+| <span id="speczones--sleep"></span>`sleep` | integer | no | Minutes until this zone sleeps, and zero means no sleep timer. |
 
 ## status
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
@@ -63,11 +64,12 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 
 func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
 	state := testState(equipment.PowerOn, 100, 139)
-	protocol := []byte(`{"system":{"eco":"auto"}}`)
+	eco := "auto"
+	settings := &denon.Settings{System: denon.SystemSettings{Eco: &eco}}
 
-	status := buildReceiverStatus(state, protocol, 2, 1, nil, statusNow)
+	status := buildReceiverStatus(state, settings, 2, 1, nil, statusNow)
 
-	mustMatch(t, string(status.Denon), string(protocol))
+	mustMatch(t, *status.Denon.System.Eco, "auto")
 }
 
 func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
@@ -135,7 +137,8 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 		"zone2":            {Power: "on", Input: "PHONO", Volume: "90"},
 	}
 	movedProtocol := held
-	movedProtocol.Denon = []byte(`{"system":{"eco":"auto"}}`)
+	bass := 3
+	movedProtocol.Denon = &denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
 	unreached := held
 	unreached.Conditions = []Condition{{Type: reachableConditionType, Status: ConditionFalse}}
 	noConditions := held

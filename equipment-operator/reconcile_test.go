@@ -31,24 +31,26 @@ func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
 // fakeAPI is an API server that answers the collection a test sets and
 // records every status the operator applies.
 type fakeAPI struct {
-	client  *Client
-	written chan ReceiverStatus
-	watched chan string
-	powers  chan equipment.Power
+	client   *Client
+	written  chan ReceiverStatus
+	watched  chan string
+	powers   chan equipment.Power
+	settings chan []byte
 
-	mutex     sync.Mutex
-	list      ReceiverList
-	broken    bool
-	statuses  []ReceiverStatus
-	powersSet []equipment.Power
-	refusing  bool
-	events    []string
-	endStream bool
+	mutex       sync.Mutex
+	list        ReceiverList
+	broken      bool
+	statuses    []ReceiverStatus
+	powersSet   []equipment.Power
+	settingsSet [][]byte
+	refusing    bool
+	events      []string
+	endStream   bool
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	api := &fakeAPI{written: make(chan ReceiverStatus, 64), watched: make(chan string, 8), powers: make(chan equipment.Power, 64)}
+	api := &fakeAPI{written: make(chan ReceiverStatus, 64), watched: make(chan string, 8), powers: make(chan equipment.Power, 64), settings: make(chan []byte, 64)}
 	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
 	return api
 }
@@ -140,16 +142,29 @@ func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // recordPower answers the operator's apply on the main resource, which
-// owns spec.power, and records the value it settled on.
+// owns spec.power or one leaf of spec.denon.settings, and records which
+// one the body named. A body whose spec names a denon block is a
+// settings leaf; anything else is a power.
 func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
 	var applied receiverPowerApply
-	_ = json.NewDecoder(r.Body).Decode(&applied)
-	a.mutex.Lock()
-	a.powersSet = append(a.powersSet, applied.Spec.Power)
-	a.mutex.Unlock()
-	select {
-	case a.powers <- applied.Spec.Power:
-	default:
+	_ = json.Unmarshal(body, &applied)
+	if applied.Spec.Denon != nil {
+		a.mutex.Lock()
+		a.settingsSet = append(a.settingsSet, body)
+		a.mutex.Unlock()
+		select {
+		case a.settings <- body:
+		default:
+		}
+	} else {
+		a.mutex.Lock()
+		a.powersSet = append(a.powersSet, applied.Spec.Power)
+		a.mutex.Unlock()
+		select {
+		case a.powers <- applied.Spec.Power:
+		default:
+		}
 	}
 	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Spec: applied.Spec})
 }
@@ -651,4 +666,251 @@ func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 		t.Fatalf("the operator re-applied power %q", power)
 	case <-time.After(quietPeriod):
 	}
+}
+
+// A declarative settings change is applied once the receiver is
+// reachable, and a re-list with the same settings sends nothing further:
+// the operator owns the declared settings and never re-asserts them.
+func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	bass := 3
+	receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	// The first pass starts the driver, which connects asynchronously, so
+	// the change waits for a reachable receiver.
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "PSBAS 53")
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseCommand(t, "PSBAS 53", quietPeriod)
+}
+
+// Declared zone controls reach the right wire lines for each non-main
+// zone, and a re-list with the same zones sends nothing further.
+func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
+	cases := []struct {
+		name   string
+		zone   string
+		power  equipment.Power
+		input  string
+		volume float64
+		mute   bool
+		sleep  int
+		want   []string
+	}{
+		{"zone2", "zone2", equipment.PowerOn, "CD", 40, true, 30, []string{"Z2ON", "Z2CD", "Z2MV40", "Z2MUON", "Z2SLP030"}},
+		{"zone3", "zone3", equipment.PowerStandby, "TV", 30, false, 30, []string{"Z3OFF", "Z3TV", "Z3MV30", "Z3MUOFF", "Z3SLP030"}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api := startFakeAPI(t)
+			fake := startFakeDenon(t)
+			receiver := testReceiver("theater", fake.address())
+			receiver.Spec.Zones = map[string]ZoneSpec{
+				one.zone: {Power: one.power, Input: one.input, Volume: &one.volume, Mute: &one.mute, Sleep: &one.sleep},
+			}
+			api.setReceivers(receiver)
+			operator := startController(t, api)
+
+			mustSucceed(t, operator.pass(t.Context()))
+			api.waitForStatus(t, connected)
+
+			mustSucceed(t, operator.pass(t.Context()))
+			for _, want := range one.want {
+				fake.waitForCommands(t, want)
+			}
+
+			mustSucceed(t, operator.pass(t.Context()))
+			fake.refuseCommand(t, one.want[0], quietPeriod)
+		})
+	}
+}
+
+// A zones map that names the main zone is rejected, so the main zone
+// never has two writers: spec.power and spec.zones.
+func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.Zones = map[string]ZoneSpec{"main": {Power: equipment.PowerOn}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	mustSucceed(t, operator.pass(t.Context()))
+
+	fake.refuseCommand(t, "PWON", quietPeriod)
+}
+
+// The unit's own bus opens and subscribes to the settings and commands
+// topics with no session standing, so settings and commands reach a
+// receiver no Player is using.
+func TestTheReceiverBusSubscribesWithoutASession(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+	receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
+	api.setReceivers(receiver)
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.now = func() time.Time { return statusNow }
+
+	mustSucceed(t, operator.pass(t.Context()))
+
+	broker := brokers.waitForSession(t)
+	seen := map[string]bool{}
+	seen[waitForString(t, broker.subs)] = true
+	seen[waitForString(t, broker.subs)] = true
+	mustMatch(t, seen[receiver.Spec.SettingsTopic], true)
+	mustMatch(t, seen[receiver.Spec.CommandsTopic], true)
+}
+
+// A settings bus message sends the value to the receiver and writes the
+// same leaf back to spec.denon.settings, in a body that carries only
+// that one leaf, so a manifest-declared neighbor is untouched.
+func TestASettingsMessageSendsAndWritesTheLeafBack(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+	api.setReceivers(receiver)
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.now = func() time.Time { return statusNow }
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	broker := brokers.waitForSession(t)
+	waitForString(t, broker.subs)
+
+	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+	fake.waitForCommands(t, "PSBAS 53")
+
+	body := <-api.settings
+	decoded := map[string]any{}
+	mustSucceed(t, json.Unmarshal(body, &decoded))
+	spec := decoded["spec"].(map[string]any)
+	denonBlock := spec["denon"].(map[string]any)
+	settings := denonBlock["settings"].(map[string]any)
+	tone := settings["tone"].(map[string]any)
+	mustMatch(t, tone["bass"].(float64), float64(3))
+	mustMatch(t, len(tone), 1)
+	mustMatch(t, len(settings), 1)
+	mustMatch(t, len(denonBlock), 1)
+	mustMatch(t, len(spec), 1)
+}
+
+// A declared setting the receiver cannot carry is logged and not
+// recorded, so the next pass tries again; a later valid change lands.
+func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	eco := "turbo"
+	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	mustSucceed(t, operator.pass(t.Context()))
+
+	// ApplySettings errors on the word no command can carry, so nothing
+	// is recorded and the value stays pending.
+	bass := 3
+	receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
+	api.setReceivers(receiver)
+	mustSucceed(t, operator.pass(t.Context()))
+
+	fake.waitForCommands(t, "PSBAS 53")
+}
+
+// A zone control the receiver cannot carry is logged and not recorded,
+// so the next pass tries again; a later valid change lands.
+func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	sleep := 200
+	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Sleep: &sleep}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	mustSucceed(t, operator.pass(t.Context()))
+
+	// SetSleep rejects the timer past the receiver's range, so nothing
+	// is recorded and the value stays pending.
+	volume := 40.0
+	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+	api.setReceivers(receiver)
+	mustSucceed(t, operator.pass(t.Context()))
+
+	fake.waitForCommands(t, "Z2MV40")
+}
+
+// A settings message that does not parse, or that names an unknown id,
+// changes nothing: the error is logged and no leaf is written.
+func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+	api.setReceivers(receiver)
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.now = func() time.Time { return statusNow }
+
+	mustSucceed(t, operator.pass(t.Context()))
+	broker := brokers.waitForSession(t)
+	waitForString(t, broker.subs)
+
+	broker.push(receiver.Spec.SettingsTopic, []byte(`not json`))
+	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bogus","value":3}`))
+
+	select {
+	case body := <-api.settings:
+		t.Fatalf("a failing settings message wrote a leaf: %s", body)
+	case <-time.After(quietPeriod):
+	}
+	fake.refuseCommand(t, "PSBAS", quietPeriod)
+}
+
+// A command bus message reaches Do, and the error Do returns for every
+// id is logged and never fatal, so the bus keeps serving later
+// messages.
+func TestACommandMessageErrorIsLoggedAndNotFatal(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+	receiver.Spec.CommandsTopic = "liken/equipment/theater/commands"
+	api.setReceivers(receiver)
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.now = func() time.Time { return statusNow }
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	broker := brokers.waitForSession(t)
+	waitForString(t, broker.subs)
+	waitForString(t, broker.subs)
+
+	// Do errors for every id; the handler logs and the reader moves on,
+	// so the settings message that follows still lands. A payload that
+	// does not parse changes nothing either.
+	broker.push(receiver.Spec.CommandsTopic, []byte(`not json`))
+	broker.push(receiver.Spec.CommandsTopic, []byte(`{"command":"quick.3","args":{}}`))
+	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+	fake.waitForCommands(t, "PSBAS 53")
 }

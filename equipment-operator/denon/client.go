@@ -8,7 +8,6 @@ package denon
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -127,55 +126,126 @@ func (d *Client) VolumeResolution() int {
 	return 2
 }
 
-// ProtocolStatus is the driver's own snapshot for status.denon: the
-// system settings, the tone trims, the Audyssey settings, the audio
-// settings, and the channel volumes. The zones travel on
-// status.zones, which every driver reports. The snapshot is the
-// settings the receiver reported, marshaled as-is.
-func (d *Client) ProtocolStatus() json.RawMessage {
-	raw, err := json.Marshal(d.Settings())
-	if err != nil {
-		return nil
+// SetPower turns one zone on or to standby. The main zone answers PW,
+// and a second or third zone answers its own Z2 or Z3 pair. An unknown
+// zone is an error.
+func (d *Client) SetPower(zone string, on bool) error {
+	switch zone {
+	case equipment.MainZone:
+		if on {
+			return d.send(PowerOnCommand)
+		}
+		return d.send(powerStandbyCommand)
+	case zone2, zone3:
+		if on {
+			return d.send(zonePrefix(zone) + "ON")
+		}
+		return d.send(zonePrefix(zone) + "OFF")
 	}
-	return raw
+	return unknownZone(zone)
 }
 
-// SetPower turns the main zone on or to standby. The zone argument is
-// ignored, because this driver has one zone.
-func (d *Client) SetPower(zone string, on bool) {
-	if on {
-		d.send(PowerOnCommand)
-		return
+// SetInput selects one input on one zone. The main zone carries its
+// input on SI, and a second or third zone on its own Z2 or Z3 prefix.
+// An unknown zone is an error.
+func (d *Client) SetInput(zone, input string) error {
+	switch zone {
+	case equipment.MainZone:
+		return d.send(InputCommand(input))
+	case zone2, zone3:
+		return d.send(zonePrefix(zone) + input)
 	}
-	d.send(powerStandbyCommand)
+	return unknownZone(zone)
 }
 
-// SetInput selects one input on the main zone.
-func (d *Client) SetInput(zone, input string) {
-	d.send(InputCommand(input))
-}
-
-// SetVolume sets the main zone's volume, in half steps. The receiver's
-// own scale ends at denonScaleTop, so a count above it is held to the
-// top rather than sent as a command the receiver would refuse.
-func (d *Client) SetVolume(zone string, halves int) {
+// SetVolume sets one zone's volume, in half steps. The receiver's own
+// scale ends at denonScaleTop, so a count above it is held to the top
+// rather than sent as a command the receiver would refuse. An unknown
+// zone is an error.
+func (d *Client) SetVolume(zone string, halves int) error {
 	if halves > denonScaleTop {
 		halves = denonScaleTop
 	}
 	if halves < 0 {
 		halves = 0
 	}
-	d.send(VolumeCommand(halves))
+	switch zone {
+	case equipment.MainZone:
+		return d.send(VolumeCommand(halves))
+	case zone2, zone3:
+		return d.send(zonePrefix(zone) + "MV" + HalfStepDigits(halves))
+	}
+	return unknownZone(zone)
 }
 
-// SetMute sets the main zone's mute.
-func (d *Client) SetMute(zone string, muted bool) {
-	d.send(MuteCommand(muted))
+// SetMute sets one zone's mute. The main zone answers MU, and a second
+// or third zone answers its own Z2 or Z3 pair. An unknown zone is an
+// error.
+func (d *Client) SetMute(zone string, muted bool) error {
+	switch zone {
+	case equipment.MainZone:
+		return d.send(MuteCommand(muted))
+	case zone2, zone3:
+		command := "MUOFF"
+		if muted {
+			command = "MUON"
+		}
+		return d.send(zonePrefix(zone) + command)
+	}
+	return unknownZone(zone)
 }
 
-// SetSoundMode selects one sound mode on the main zone.
-func (d *Client) SetSoundMode(zone, mode string) {
-	d.send(SoundModeCommand(mode))
+// SetSoundMode selects one sound mode on the main zone. The protocol
+// carries sound mode on the main zone only, so any other zone is an
+// error.
+func (d *Client) SetSoundMode(zone, mode string) error {
+	if zone != equipment.MainZone {
+		return fmt.Errorf("sound mode on zone %s: the protocol carries sound mode on the main zone only", zone)
+	}
+	return d.send(SoundModeCommand(mode))
+}
+
+// SetSleep sets one zone's sleep timer, in minutes, where zero is off.
+// The receiver's timer runs to 120 minutes. An unknown zone or an
+// out-of-range value is an error.
+func (d *Client) SetSleep(zone string, minutes int) error {
+	if minutes < 0 || minutes > 120 {
+		return fmt.Errorf("sleep %d minutes on zone %s", minutes, zone)
+	}
+	var command string
+	switch zone {
+	case equipment.MainZone:
+		command = sleepCommand(minutes)
+	case zone2, zone3:
+		command = zonePrefix(zone) + sleepCommand(minutes)
+	default:
+		return unknownZone(zone)
+	}
+	return d.send(command)
+}
+
+// unknownZone is the error a setter answers when a caller names a zone
+// the receiver does not carry.
+func unknownZone(zone string) error {
+	return fmt.Errorf("unknown zone %q", zone)
+}
+
+// zonePrefix is the wire prefix a second or third zone carries, so the
+// caller can build the Z2 and Z3 command families from it.
+func zonePrefix(zone string) string {
+	if zone == zone3 {
+		return "Z3"
+	}
+	return "Z2"
+}
+
+// sleepCommand is one zone's sleep command, SLP for a timer and SLPOFF
+// for none.
+func sleepCommand(minutes int) string {
+	if minutes == 0 {
+		return "SLPOFF"
+	}
+	return fmt.Sprintf("SLP%03d", minutes)
 }
 
 // send queues one command for the current connection and reports

@@ -74,6 +74,125 @@ spec:
                       minLength: 1
                       maxLength: 253
                       description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
+                    settings:
+                      type: object
+                      description: "The receiver's settings, one family per block, in display units. The operator applies a declared setting once on change and never re-asserts it, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
+                      properties:
+                        system:
+                          type: object
+                          description: "The unit-wide settings. Power is reported by the driver but not declarable here, because the controller owns it through spec.power."
+                          properties:
+                            eco:
+                              type: string
+                              description: "The Eco mode the receiver uses: auto, on, or off."
+                            dimmer:
+                              type: string
+                              description: "The display dimmer: off, dim, dark, or bright."
+                            autoStandby:
+                              type: string
+                              description: "The auto standby timer: off, or 15m, 30m, 60m, 2h, 4h, or 8h."
+                            speakerPreset:
+                              type: integer
+                              minimum: 1
+                              maximum: 4
+                              description: "The speaker preset, 1 through 4."
+                            audioInputMode:
+                              type: string
+                              description: "The audio input mode: auto, hdmi, digital, or analog."
+                            videoSelect:
+                              type: string
+                              description: "The video source the receiver selects, a name it already knows, or off."
+                            bluetoothTransmitter:
+                              type: string
+                              description: "The Bluetooth transmitter: on or off."
+                            bluetoothOutput:
+                              type: string
+                              description: "The Bluetooth output: speakers or bluetooth."
+                        tone:
+                          type: object
+                          description: "The tone control and the two trims, in display units where 0dB is neutral."
+                          properties:
+                            control:
+                              type: boolean
+                              description: "Whether the tone trims apply. False bypasses them."
+                            bass:
+                              type: integer
+                              minimum: -12
+                              maximum: 12
+                              description: "The bass trim, 12dB on each side of neutral."
+                            treble:
+                              type: integer
+                              minimum: -12
+                              maximum: 12
+                              description: "The treble trim, 12dB on each side of neutral."
+                        audyssey:
+                          type: object
+                          description: "The Audyssey room correction settings."
+                          properties:
+                            multeq:
+                              type: string
+                              description: "The MultEQ mode: reference, l/r bypass, flat, manual, or off."
+                            dynamicEq:
+                              type: boolean
+                              description: "Whether Dynamic EQ is on."
+                            referenceLevelOffset:
+                              type: integer
+                              enum: [0, 5, 10, 15]
+                              description: "The reference level offset, in dB, one of 0, 5, 10, or 15."
+                            dynamicVolume:
+                              type: string
+                              description: "The Dynamic Volume mode, such as off, light, medium, or heavy."
+                            loudnessManagement:
+                              type: boolean
+                              description: "Whether Loudness Management is on."
+                        audio:
+                          type: object
+                          description: "The audio processing settings."
+                          properties:
+                            drc:
+                              type: string
+                              description: "The Dynamic Range mode: off, auto, low, mid, or hi."
+                            lfe:
+                              type: integer
+                              minimum: -10
+                              maximum: 0
+                              description: "The LFE level, a cut from 0dB down to 10dB."
+                            effect:
+                              type: integer
+                              description: "The effect level."
+                            delay:
+                              type: integer
+                              minimum: 0
+                              maximum: 999
+                              description: "The delay, 0 to 999 milliseconds."
+                            audioDelay:
+                              type: integer
+                              minimum: 0
+                              maximum: 999
+                              description: "The audio delay, 0 to 999 milliseconds."
+                            subwoofer:
+                              type: boolean
+                              description: "Whether the subwoofer is on."
+                            restorer:
+                              type: string
+                              description: "The Audio Restorer mode: off, low, medium, or high."
+                            graphicEq:
+                              type: string
+                              description: "The Graphic EQ: off or on."
+                            headphoneEq:
+                              type: string
+                              description: "The Headphone EQ: off or on."
+                            speakerVirtualizer:
+                              type: boolean
+                              description: "Whether the Speaker Virtualizer is on."
+                            dialogEnhancer:
+                              type: string
+                              description: "The Dialog Enhancer level: off, low, mid, or high."
+                        channelVolumes:
+                          type: object
+                          description: "One trim per channel, keyed by the channel's name, in display units where 0dB is neutral."
+                          additionalProperties:
+                            type: number
                 volume:
                   type: object
                   description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max."
@@ -164,6 +283,46 @@ spec:
                   type: string
                   enum: ["on", "off", "standby"]
                   description: "The power state the operator drives the receiver to. The operator owns this field: it applies it once per change and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it. A toggle from the session's power topic rewrites it. The Denon cannot tell standby from off, so both mean standby."
+                settingsTopic:
+                  type: string
+                  minLength: 1
+                  maxLength: 1024
+                  description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a settings toggle write, {\"setting\":\"tone.bass\",\"value\":3}, with the value in display units. An absent topic subscribes to nothing."
+                commandsTopic:
+                  type: string
+                  minLength: 1
+                  maxLength: 1024
+                  description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {\"command\":\"quick.3\"}, an action that is not a setting. An absent topic subscribes to nothing."
+                zones:
+                  type: object
+                  description: "The receiver's second and third zones, keyed by the zone's name as the receiver reports it. The main zone has no entry here: spec.power and spec.session drive it."
+                  x-kubernetes-validations:
+                    - rule: "!has(self.main)"
+                      message: "the main zone is driven by spec.power and spec.session, not by zones"
+                  additionalProperties:
+                    type: object
+                    description: "One zone beyond main, keyed by the zone's name. Every field is optional, so a bare key just claims the zone."
+                    properties:
+                      power:
+                        type: string
+                        enum: ["on", "off", "standby"]
+                        description: "The power state the operator drives this zone to."
+                      input:
+                        type: string
+                        minLength: 1
+                        maxLength: 63
+                        description: "The input this zone selects, by its name in spec.inputs."
+                      volume:
+                        type: number
+                        description: "The zone's volume in the receiver's display units."
+                      mute:
+                        type: boolean
+                        description: "Whether this zone is muted."
+                      sleep:
+                        type: integer
+                        minimum: 0
+                        maximum: 120
+                        description: "Minutes until this zone sleeps, and zero means no sleep timer."
             status:
               type: object
               description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."

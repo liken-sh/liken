@@ -5,10 +5,10 @@ package main
 // it.
 
 import (
-	"bytes"
-	"encoding/json"
+	"reflect"
 	"time"
 
+	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
@@ -58,10 +58,10 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 }
 
 // buildReceiverStatus is the whole status one receiver's state makes,
-// in the receiver's own units, plus the protocol's own settings
+// in the receiver's own units, plus the protocol's own typed settings
 // snapshot. status.service stays empty until the operator makes the
 // Service front.
-func buildReceiverStatus(state equipment.State, protocol json.RawMessage, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
+func buildReceiverStatus(state equipment.State, settings *denon.Settings, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
 	zones := make(map[string]ZoneStatus, len(state.Zones))
 	for name, zone := range state.Zones {
 		zones[name] = ZoneStatus{
@@ -76,7 +76,7 @@ func buildReceiverStatus(state equipment.State, protocol json.RawMessage, resolu
 	}
 	return ReceiverStatus{
 		Zones:      zones,
-		Denon:      protocol,
+		Denon:      settings,
 		Conditions: []Condition{reachable(state.Reachable, generation, previous, now)},
 	}
 }
@@ -93,7 +93,7 @@ func sleepMinutes(minutes int) int {
 
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Service != b.Service || !bytes.Equal(a.Denon, b.Denon) ||
+	if a.Service != b.Service || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false
 	}

@@ -245,13 +245,19 @@ func (s *session) press(previous, state volumeState) {
 	reading, _ := s.driver.State().Zone(equipment.MainZone)
 	sent := false
 	if state.Muted != reading.Mute {
-		s.driver.SetMute(equipment.MainZone, state.Muted)
-		sent = true
+		if err := s.driver.SetMute(equipment.MainZone, state.Muted); err != nil {
+			fmt.Fprintf(os.Stderr, "muting %s: %v\n", s.receiver, err)
+		} else {
+			sent = true
+		}
 	}
 	if state.Level != previous.Level {
 		if target, moves := s.nextPosition(reading, state.Level > previous.Level); moves {
-			s.driver.SetVolume(equipment.MainZone, target)
-			sent = true
+			if err := s.driver.SetVolume(equipment.MainZone, target); err != nil {
+				fmt.Fprintf(os.Stderr, "setting the volume of %s: %v\n", s.receiver, err)
+			} else {
+				sent = true
+			}
 		}
 	}
 	// A press the receiver answers is reported when its answer arrives.
@@ -450,7 +456,10 @@ func (s *session) togglePower(payload []byte) {
 	// against the receiver as it stands after any in-flight one-shot
 	// settles, not a snapshot taken a moment earlier.
 	if mainZone(s.driver.State()).Power == equipment.PowerOn {
-		s.driver.SetPower(equipment.MainZone, false)
+		if err := s.driver.SetPower(equipment.MainZone, false); err != nil {
+			fmt.Fprintf(os.Stderr, "setting the power of %s: %v\n", s.receiver, err)
+			return
+		}
 		if s.applyPower != nil {
 			s.applyPower(equipment.PowerStandby)
 		}
@@ -486,7 +495,10 @@ func (s *session) selectInputLocked(ctx context.Context) {
 	}
 	powered := s.armPower()
 	if mainZone(s.driver.State()).Power != equipment.PowerOn {
-		s.driver.SetPower(equipment.MainZone, true)
+		if err := s.driver.SetPower(equipment.MainZone, true); err != nil {
+			fmt.Fprintf(os.Stderr, "setting the power of %s: %v\n", s.receiver, err)
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -498,8 +510,13 @@ func (s *session) selectInputLocked(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	s.driver.SetInput(equipment.MainZone, s.spec.Input)
+	if err := s.driver.SetInput(equipment.MainZone, s.spec.Input); err != nil {
+		fmt.Fprintf(os.Stderr, "selecting the input of %s: %v\n", s.receiver, err)
+		return
+	}
 	if mode := s.inputSoundMode(s.spec.Input); mode != "" {
-		s.driver.SetSoundMode(equipment.MainZone, mode)
+		if err := s.driver.SetSoundMode(equipment.MainZone, mode); err != nil {
+			fmt.Fprintf(os.Stderr, "setting the sound mode of %s: %v\n", s.receiver, err)
+		}
 	}
 }

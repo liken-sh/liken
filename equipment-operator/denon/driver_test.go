@@ -4,11 +4,79 @@
 package denon
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 )
+
+// The setters reject a zone the receiver does not carry, and sound mode
+// on a zone that carries none, so a caller learns before anything
+// reaches the wire.
+func TestSettersRejectAnUnknownZone(t *testing.T) {
+	client := NewClient("192.0.2.1", nil)
+	cases := []struct {
+		name string
+		send func() error
+	}{
+		{"power", func() error { return client.SetPower("zone9", true) }},
+		{"input", func() error { return client.SetInput("zone9", "TV") }},
+		{"volume", func() error { return client.SetVolume("zone9", 50) }},
+		{"mute", func() error { return client.SetMute("zone9", true) }},
+		{"sleep", func() error { return client.SetSleep("zone9", 30) }},
+		{"sound mode on a zone", func() error { return client.SetSoundMode("zone2", "STEREO") }},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if one.send() == nil {
+				t.Fatalf("%s on an unknown zone did not error", one.name)
+			}
+		})
+	}
+}
+
+// The zone-aware setters reach their own wire lines, so a second and
+// third zone each carry its Z2 or Z3 prefix and never the main zone's
+// command.
+func TestTheZoneSettersReachTheirOwnWireLines(t *testing.T) {
+	harness := startHarness(t)
+	drainQueries(t, harness)
+
+	cases := []struct {
+		name string
+		send func() error
+		want string
+	}{
+		{"zone2 power on", func() error { return harness.client.SetPower("zone2", true) }, "Z2ON"},
+		{"zone2 power off", func() error { return harness.client.SetPower("zone2", false) }, "Z2OFF"},
+		{"zone3 power on", func() error { return harness.client.SetPower("zone3", true) }, "Z3ON"},
+		{"zone3 input", func() error { return harness.client.SetInput("zone3", "TV") }, "Z3TV"},
+		{"zone2 volume", func() error { return harness.client.SetVolume("zone2", 101) }, "Z2MV505"},
+		{"zone3 mute on", func() error { return harness.client.SetMute("zone3", true) }, "Z3MUON"},
+		{"zone2 mute off", func() error { return harness.client.SetMute("zone2", false) }, "Z2MUOFF"},
+		{"zone3 sleep", func() error { return harness.client.SetSleep("zone3", 30) }, "Z3SLP030"},
+		{"zone2 sleep off", func() error { return harness.client.SetSleep("zone2", 0) }, "Z2SLPOFF"},
+		{"main sleep", func() error { return harness.client.SetSleep(equipment.MainZone, 60) }, "SLP060"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustSucceed(t, one.send())
+			mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+		})
+	}
+}
+
+// SetSleep bounds the timer to the receiver's own 0 to 120 minute
+// range.
+func TestSetSleepRejectsAnOutOfRangeTimer(t *testing.T) {
+	client := NewClient("192.0.2.1", nil)
+
+	if err := client.SetSleep(equipment.MainZone, 121); err == nil {
+		t.Fatal("a timer above the receiver's range did not error")
+	}
+	if err := client.SetSleep("zone2", -1); err == nil {
+		t.Fatal("a negative timer did not error")
+	}
+}
 
 func TestVolumeResolutionIsTwoStepsPerDisplayUnit(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
@@ -43,25 +111,19 @@ func TestStateCarriesTheMainZoneInHalfSteps(t *testing.T) {
 	mustMatch(t, zone.VolumeMax, 139)
 }
 
-func TestProtocolStatusIsTheDriversOwnSnapshot(t *testing.T) {
+func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
 	harness := startHarness(t)
 	waitForField(t, harness.events, equipment.EventSoundMode)
 
-	raw := harness.client.ProtocolStatus()
-	if len(raw) == 0 {
-		t.Fatal("the protocol snapshot is empty")
-	}
-	var snapshot struct {
-		System struct {
-			Power string `json:"power"`
-		} `json:"system"`
-		Tone struct {
-			Bass int `json:"bass"`
-		} `json:"tone"`
-	}
-	mustSucceed(t, json.Unmarshal(raw, &snapshot))
-	mustMatch(t, snapshot.System.Power, "standby")
-	mustMatch(t, snapshot.Tone.Bass, 0)
+	// The noise lines arrive behind the sound mode, so poll until the
+	// folded snapshot holds them.
+	got := waitForSettings(t, harness.client, func(s Settings) bool {
+		return s.System.VideoSelect != nil && s.Audio.DRC != nil
+	})
+	mustMatch(t, got.System.Power, "standby")
+	mustMatch(t, *got.System.VideoSelect, "off")
+	mustMatch(t, *got.Audio.DRC, "off")
+	mustMatch(t, *got.Audio.LFE, 0)
 }
 
 // Every setter reaches the wire. The zone argument is main for now, and
