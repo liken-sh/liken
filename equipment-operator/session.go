@@ -510,6 +510,13 @@ func (s *session) selectInputLocked(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	s.selectTheInput()
+}
+
+// selectTheInput sends the session's input and the sound mode that
+// travels with it. The power one-shot and the ensure both reach it, so
+// the mode and the input can never drift apart.
+func (s *session) selectTheInput() {
 	if err := s.driver.SetInput(equipment.MainZone, s.spec.Input); err != nil {
 		fmt.Fprintf(os.Stderr, "selecting the input of %s: %v\n", s.receiver, err)
 		return
@@ -519,4 +526,34 @@ func (s *session) selectInputLocked(ctx context.Context) {
 			fmt.Fprintf(os.Stderr, "setting the sound mode of %s: %v\n", s.receiver, err)
 		}
 	}
+}
+
+// ensureInput asks the receiver for the session's input without
+// touching the power. A controller press reaches here, and a room that
+// already shows the player's input is left alone, so the press sends
+// the receiver nothing. A dark room is left dark too: the power key is
+// the one that wakes the equipment.
+func (s *session) ensureInput() {
+	if s.spec.Input == "" {
+		return
+	}
+	go s.ensureInputOnce()
+}
+
+// ensureInputOnce is the ensure under the one-shot lock, serialized
+// against a toggle and a flag flip so the three never drive the
+// receiver at the same moment.
+func (s *session) ensureInputOnce() {
+	s.oneShot.Lock()
+	defer s.oneShot.Unlock()
+	select {
+	case <-s.ctx.Done():
+		return
+	case <-s.reached:
+	}
+	state := mainZone(s.driver.State())
+	if state.Power != equipment.PowerOn || state.Input == s.spec.Input {
+		return
+	}
+	s.selectTheInput()
 }

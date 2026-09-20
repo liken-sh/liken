@@ -416,8 +416,9 @@ func (u *receiverUnit) handleSettings(payload []byte) {
 }
 
 // handleCommand reads one commands message and runs the one-shot it
-// names. No actions exist yet, so every id errors; the error is logged
-// and never fatal, so the bus keeps serving.
+// names. The ensure asks the session for its input; every other id is a
+// driver action, and the error is logged and never fatal, so the bus
+// keeps serving.
 func (u *receiverUnit) handleCommand(payload []byte) {
 	var message struct {
 		Command string                            `json:"command"`
@@ -426,8 +427,30 @@ func (u *receiverUnit) handleCommand(payload []byte) {
 	if err := json.Unmarshal(payload, &message); err != nil || message.Command == "" {
 		return
 	}
+	if message.Command == commandEnsureInput {
+		u.ensureInput()
+		return
+	}
 	if err := u.denonClient.Do(message.Command, message.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
+	}
+}
+
+// commandEnsureInput is the receiver's one generic player action: make
+// sure the session's player is on the input the session names. A
+// program asks for it in player terms, and the receiver resolves the
+// input, so no input name crosses the bus.
+const commandEnsureInput = "input.ensure"
+
+// ensureInput hands one ensure ask to the session that holds the input.
+// A receiver with no session has no player listening, so the ask is
+// dropped.
+func (u *receiverUnit) ensureInput() {
+	u.mutex.Lock()
+	held := u.session
+	u.mutex.Unlock()
+	if held != nil {
+		held.ensureInput()
 	}
 }
 

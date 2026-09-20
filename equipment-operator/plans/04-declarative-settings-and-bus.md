@@ -62,7 +62,15 @@ Two topics per receiver unit, named in `spec.settingsTopic` and
 * settings, a message `{"setting": "tone.bass", "value": 3}`, where the
   id names the family and the field and the value is in display units.
 * commands, a message `{"command": "quick.3"}`, where the command names
-  a one-shot action that is not a setting.
+  a one-shot action that is not a setting. The one generic action so
+  far is `input.ensure`: make sure the session's player is on the input
+  the session names. A program asks in player terms and the receiver
+  resolves the input from the session it holds, so no input name
+  crosses the bus, and a room already on that input is sent nothing.
+  A controller press is the ask: the media operator reads every press
+  on the controller that drives the unit and publishes this command,
+  so picking up the remote restores the room without a timer and
+  without fighting a hand on the receiver.
 
 The bus moves from the media session to the receiver unit. Today each
 session opens its own `Bus` and holds it for the life of the Play, so
