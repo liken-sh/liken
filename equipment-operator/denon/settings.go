@@ -59,6 +59,115 @@ var settingsById = func() map[string]settingSpec {
 	return table
 }()
 
+// sameString is true when the two values hold the same word, or either
+// is nil. A nil on either side is a key the receiver has not reported,
+// so it is skipped rather than judged.
+func sameString(a, b *string) bool { return a == nil || b == nil || *a == *b }
+
+// sameInt is true when the two values hold the same number, or either
+// is nil, the way sameString treats an unreported key.
+func sameInt(a, b *int) bool { return a == nil || b == nil || *a == *b }
+
+// sameBool is true when the two values hold the same switch, or either
+// is nil, the way sameString treats an unreported key.
+func sameBool(a, b *bool) bool { return a == nil || b == nil || *a == *b }
+
+// ConfirmedBy answers whether the receiver has reported every field
+// the settings declare at the declared value. A declared field the
+// receiver has not reported is skipped: there is nothing to confirm it
+// against, and blocking on it would retry forever. A field reported at
+// another value is not confirmed, so the operator sends it again.
+func (w Settings) ConfirmedBy(observed Settings) bool {
+	if !sameString(w.System.Eco, observed.System.Eco) {
+		return false
+	}
+	if !sameString(w.System.Dimmer, observed.System.Dimmer) {
+		return false
+	}
+	if !sameString(w.System.AutoStandby, observed.System.AutoStandby) {
+		return false
+	}
+	if !sameInt(w.System.SpeakerPreset, observed.System.SpeakerPreset) {
+		return false
+	}
+	if !sameString(w.System.AudioInputMode, observed.System.AudioInputMode) {
+		return false
+	}
+	if !sameString(w.System.VideoSelect, observed.System.VideoSelect) {
+		return false
+	}
+	if !sameString(w.System.BluetoothTransmitter, observed.System.BluetoothTransmitter) {
+		return false
+	}
+	if !sameString(w.System.BluetoothOutput, observed.System.BluetoothOutput) {
+		return false
+	}
+	if !sameBool(w.Tone.Control, observed.Tone.Control) {
+		return false
+	}
+	if !sameInt(w.Tone.Bass, observed.Tone.Bass) {
+		return false
+	}
+	if !sameInt(w.Tone.Treble, observed.Tone.Treble) {
+		return false
+	}
+	if !sameString(w.Audyssey.Multeq, observed.Audyssey.Multeq) {
+		return false
+	}
+	if !sameBool(w.Audyssey.DynamicEq, observed.Audyssey.DynamicEq) {
+		return false
+	}
+	if !sameInt(w.Audyssey.ReferenceLevelOffset, observed.Audyssey.ReferenceLevelOffset) {
+		return false
+	}
+	if !sameString(w.Audyssey.DynamicVolume, observed.Audyssey.DynamicVolume) {
+		return false
+	}
+	if !sameBool(w.Audyssey.LoudnessManagement, observed.Audyssey.LoudnessManagement) {
+		return false
+	}
+	if !sameString(w.Audio.DRC, observed.Audio.DRC) {
+		return false
+	}
+	if !sameInt(w.Audio.LFE, observed.Audio.LFE) {
+		return false
+	}
+	if !sameInt(w.Audio.Effect, observed.Audio.Effect) {
+		return false
+	}
+	if !sameInt(w.Audio.Delay, observed.Audio.Delay) {
+		return false
+	}
+	if !sameInt(w.Audio.AudioDelay, observed.Audio.AudioDelay) {
+		return false
+	}
+	if !sameBool(w.Audio.Subwoofer, observed.Audio.Subwoofer) {
+		return false
+	}
+	if !sameString(w.Audio.Restorer, observed.Audio.Restorer) {
+		return false
+	}
+	if !sameString(w.Audio.GraphicEq, observed.Audio.GraphicEq) {
+		return false
+	}
+	if !sameString(w.Audio.HeadphoneEq, observed.Audio.HeadphoneEq) {
+		return false
+	}
+	if !sameBool(w.Audio.SpeakerVirtualizer, observed.Audio.SpeakerVirtualizer) {
+		return false
+	}
+	if !sameString(w.Audio.DialogEnhancer, observed.Audio.DialogEnhancer) {
+		return false
+	}
+	for channel, want := range w.ChannelVolumes {
+		got, held := observed.ChannelVolumes[channel]
+		if held && want != got {
+			return false
+		}
+	}
+	return true
+}
+
 // The small pointer builders the families share. A pointer field is nil
 // when the receiver has not reported the value, which is how the status
 // tells a key the receiver never declared from one set to zero.

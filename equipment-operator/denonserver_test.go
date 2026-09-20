@@ -31,7 +31,13 @@ type fakeDenon struct {
 	input       string
 	soundMode   string
 	ignorePower bool
-	conns       []net.Conn
+	// settingsHold maps one set command to the line the receiver reports
+	// when it takes it. A command the map holds is reported at the mapped
+	// line, which is how a test models a setting or zone control the
+	// receiver accepts without applying; a command it does not hold is
+	// never reported, which models a control the receiver never answers.
+	settingsHold map[string]string
+	conns        []net.Conn
 }
 
 // startFakeDenon listens on the loopback and answers until the test
@@ -133,6 +139,21 @@ func (f *fakeDenon) answer(command string) {
 	case strings.HasPrefix(command, "SI"):
 		f.input = command[2:]
 		f.send("SI" + f.input)
+	case strings.HasPrefix(command, "Z2"), strings.HasPrefix(command, "Z3"):
+		// A non-main zone set command is held or reported by the same map
+		// as a setting, so a test can model a zone that ignores a control.
+		if report, held := f.settingsHold[command]; held {
+			f.send(report)
+		}
+	case isDenonSetting(command):
+		// A set command for a setting is reported only when the test
+		// holds one: a held setting is reported at the line the test
+		// names, which models a receiver that takes the command but does
+		// not apply the change, and a setting no test holds is never
+		// reported, which models a setting the receiver never answers.
+		if report, held := f.settingsHold[command]; held {
+			f.send(report)
+		}
 	}
 }
 
@@ -167,6 +188,42 @@ func (f *fakeDenon) setMute(muted bool) {
 	defer f.mutex.Unlock()
 	f.mute = muted
 	f.send(f.muteLine())
+}
+
+// denonSettingPrefixes are the prefixes a set command for a setting
+// carries. A query always ends in ?, so it never matches.
+var denonSettingPrefixes = []string{
+	"ECO", "DIM ", "STBY", "SPPR ", "SD", "SV", "BTTX ", "PSMULTEQ:", "PSDYNEQ ",
+	"PSREFLEV ", "PSDYNVOL ", "PSLOM ", "PSDRC ", "PSLFE ", "PSEFF ", "PSDELAY ",
+	"PSDEL ", "PSSWR ", "PSRSTR ", "PSGEQ ", "PSHEQ ", "PSSPV ", "PSDEH ",
+	"PSBAS ", "PSTRE ", "PSTONE CTRL ", "CV",
+}
+
+// isDenonSetting answers whether one command sets a setting, which is a
+// set prefix and not a query.
+func isDenonSetting(command string) bool {
+	if strings.HasSuffix(command, "?") {
+		return false
+	}
+	for _, prefix := range denonSettingPrefixes {
+		if strings.HasPrefix(command, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// holdSetting makes the receiver take one set command but report the
+// line the test names instead of the value it set, which models a
+// setting or zone control the receiver ignores. A later call that names
+// the value the command carries is the receiver taking the setting.
+func (f *fakeDenon) holdSetting(command, report string) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	if f.settingsHold == nil {
+		f.settingsHold = map[string]string{}
+	}
+	f.settingsHold[command] = report
 }
 
 // ignorePowerOn makes the receiver take PWON without ever answering it,

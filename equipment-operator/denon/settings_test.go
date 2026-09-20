@@ -126,6 +126,119 @@ func TestTheCommandBuildersWriteTheWireLines(t *testing.T) {
 	}
 }
 
+// A declared field the receiver has not reported is skipped, so the
+// declared settings confirm against an empty report. There is nothing
+// to confirm the field against, and blocking on it would retry forever.
+func TestConfirmedBySkipsAnUnreportedField(t *testing.T) {
+	eco := "on"
+	want := Settings{System: SystemSettings{Eco: &eco}}
+
+	if !want.ConfirmedBy(Settings{}) {
+		t.Error("a declared field the receiver has not reported did not confirm")
+	}
+}
+
+// A declared field reported at another value is not confirmed, so the
+// operator sends it again.
+func TestConfirmedByRejectsADifferentReportedValue(t *testing.T) {
+	eco, observed := "on", "off"
+	want := Settings{System: SystemSettings{Eco: &eco}}
+	got := Settings{System: SystemSettings{Eco: &observed}}
+
+	if want.ConfirmedBy(got) {
+		t.Error("a field reported at another value was confirmed")
+	}
+}
+
+// A declared field reported at the same value is confirmed.
+func TestConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
+	eco := "on"
+	want := Settings{System: SystemSettings{Eco: &eco}}
+	got := Settings{System: SystemSettings{Eco: &eco}}
+
+	if !want.ConfirmedBy(got) {
+		t.Error("a field reported at the same value was not confirmed")
+	}
+}
+
+// A different value in any one declared field fails the whole block, so
+// a partial apply is never taken for confirmed. Each row declares every
+// family and differs in exactly the field it names.
+func TestConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
+	want := Settings{
+		System: SystemSettings{
+			Eco: strPtr("on"), Dimmer: strPtr("dim"), AutoStandby: strPtr("30m"),
+			SpeakerPreset: intPtr(2), AudioInputMode: strPtr("auto"), VideoSelect: strPtr("off"),
+			BluetoothTransmitter: strPtr("on"), BluetoothOutput: strPtr("speakers"),
+		},
+		Tone: ToneSettings{Control: boolPtr(true), Bass: intPtr(3), Treble: intPtr(-1)},
+		Audyssey: AudysseySettings{
+			Multeq: strPtr("flat"), DynamicEq: boolPtr(true), ReferenceLevelOffset: intPtr(0),
+			DynamicVolume: strPtr("medium"), LoudnessManagement: boolPtr(true),
+		},
+		Audio: AudioSettings{
+			DRC: strPtr("mid"), LFE: intPtr(-5), Effect: intPtr(5), Delay: intPtr(10),
+			AudioDelay: intPtr(20), Subwoofer: boolPtr(true), Restorer: strPtr("low"),
+			GraphicEq: strPtr("on"), HeadphoneEq: strPtr("off"), SpeakerVirtualizer: boolPtr(true),
+			DialogEnhancer: strPtr("low"),
+		},
+	}
+	cases := []struct {
+		name     string
+		observed Settings
+	}{
+		{"eco", Settings{System: SystemSettings{Eco: strPtr("off")}}},
+		{"dimmer", Settings{System: SystemSettings{Dimmer: strPtr("bright")}}},
+		{"auto standby", Settings{System: SystemSettings{AutoStandby: strPtr("60m")}}},
+		{"speaker preset", Settings{System: SystemSettings{SpeakerPreset: intPtr(3)}}},
+		{"audio input mode", Settings{System: SystemSettings{AudioInputMode: strPtr("hdmi")}}},
+		{"video select", Settings{System: SystemSettings{VideoSelect: strPtr("DVD")}}},
+		{"bluetooth transmitter", Settings{System: SystemSettings{BluetoothTransmitter: strPtr("off")}}},
+		{"bluetooth output", Settings{System: SystemSettings{BluetoothOutput: strPtr("bluetooth")}}},
+		{"tone control", Settings{Tone: ToneSettings{Control: boolPtr(false)}}},
+		{"bass", Settings{Tone: ToneSettings{Bass: intPtr(5)}}},
+		{"treble", Settings{Tone: ToneSettings{Treble: intPtr(2)}}},
+		{"multeq", Settings{Audyssey: AudysseySettings{Multeq: strPtr("manual")}}},
+		{"dynamic eq", Settings{Audyssey: AudysseySettings{DynamicEq: boolPtr(false)}}},
+		{"reference level", Settings{Audyssey: AudysseySettings{ReferenceLevelOffset: intPtr(5)}}},
+		{"dynamic volume", Settings{Audyssey: AudysseySettings{DynamicVolume: strPtr("heavy")}}},
+		{"loudness", Settings{Audyssey: AudysseySettings{LoudnessManagement: boolPtr(false)}}},
+		{"dynamic range", Settings{Audio: AudioSettings{DRC: strPtr("low")}}},
+		{"lfe", Settings{Audio: AudioSettings{LFE: intPtr(-8)}}},
+		{"effect", Settings{Audio: AudioSettings{Effect: intPtr(8)}}},
+		{"delay", Settings{Audio: AudioSettings{Delay: intPtr(40)}}},
+		{"audio delay", Settings{Audio: AudioSettings{AudioDelay: intPtr(90)}}},
+		{"subwoofer", Settings{Audio: AudioSettings{Subwoofer: boolPtr(false)}}},
+		{"restorer", Settings{Audio: AudioSettings{Restorer: strPtr("high")}}},
+		{"graphic eq", Settings{Audio: AudioSettings{GraphicEq: strPtr("off")}}},
+		{"headphone eq", Settings{Audio: AudioSettings{HeadphoneEq: strPtr("on")}}},
+		{"speaker virtualizer", Settings{Audio: AudioSettings{SpeakerVirtualizer: boolPtr(false)}}},
+		{"dialog enhancer", Settings{Audio: AudioSettings{DialogEnhancer: strPtr("high")}}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if want.ConfirmedBy(one.observed) {
+				t.Error("a field reported at another value was confirmed")
+			}
+		})
+	}
+}
+
+// A declared channel the receiver has not reported is skipped, and a
+// channel reported at the same trim confirms.
+func TestConfirmedByHandlesTheChannelVolumes(t *testing.T) {
+	want := Settings{ChannelVolumes: map[string]float64{"FL": 0.5}}
+	if !want.ConfirmedBy(Settings{}) {
+		t.Error("a declared channel the receiver has not reported did not confirm")
+	}
+	if !want.ConfirmedBy(Settings{ChannelVolumes: map[string]float64{"FL": 0.5}}) {
+		t.Error("a channel reported at the same trim was not confirmed")
+	}
+	if want.ConfirmedBy(Settings{ChannelVolumes: map[string]float64{"FL": 0.0}}) {
+		t.Error("a channel reported at another trim was confirmed")
+	}
+}
+
 func TestApplySettingsSendsEveryDeclaredField(t *testing.T) {
 	harness := startHarness(t)
 	drainQueries(t, harness)

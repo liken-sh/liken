@@ -1,6 +1,8 @@
 package main
 
 import (
+	"math"
+
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
 )
@@ -80,6 +82,38 @@ type ZoneSpec struct {
 	Volume *float64        `json:"volume,omitempty"`
 	Mute   *bool           `json:"mute,omitempty"`
 	Sleep  *int            `json:"sleep,omitempty"`
+}
+
+// ConfirmedBy answers whether the receiver has reported one declared
+// zone control at the declared value. Volume is compared in the
+// driver's smallest steps, so resolution turns the declared display
+// units into a count before it is compared. A control the receiver has
+// not reported is skipped: there is nothing to confirm it against, and
+// blocking on it would retry forever. A control reported at another
+// value is not confirmed, so the operator sends it again.
+func (z ZoneSpec) ConfirmedBy(observed equipment.ZoneState, resolution int) bool {
+	if z.Power != "" && observed.Power != "" {
+		on := z.Power != equipment.PowerStandby && z.Power != equipment.PowerOff
+		if on != (observed.Power == equipment.PowerOn) {
+			return false
+		}
+	}
+	if z.Input != "" && observed.Input != "" && z.Input != observed.Input {
+		return false
+	}
+	if z.Volume != nil && observed.Volume != equipment.Unknown {
+		steps := int(math.Round(*z.Volume * float64(resolution)))
+		if steps != observed.Volume {
+			return false
+		}
+	}
+	if z.Mute != nil && *z.Mute != observed.Mute {
+		return false
+	}
+	if z.Sleep != nil && observed.Sleep != equipment.Unknown && *z.Sleep != observed.Sleep {
+		return false
+	}
+	return true
 }
 
 // How loud the room may get and how far one press moves it, both in the

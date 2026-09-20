@@ -230,17 +230,21 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 // setSettings drives the receiver to the settings a person declared.
 // A declared value is enforced: when the settings block changes, every
 // declared field is re-sent on purpose, so a value declared in the spec
-// is authoritative over a change made at the receiver. A pass with no
-// change to the block sends nothing. A command sent before the
-// connection is open is dropped, so the change waits for a reachable
-// receiver rather than applying a value the equipment never saw. An
-// apply error is logged and not recorded, so the next pass tries
-// again.
+// is authoritative over a change made at the receiver. A block already
+// sent whose reported fields confirm is left alone; a block the
+// receiver has not confirmed is sent again on the next pass and stops
+// the moment the receiver reports it; a block with no reported fields
+// confirms trivially, so it sends once per spec change. A command sent
+// before the connection is open is dropped, so the change waits for a
+// reachable receiver rather than applying a value the equipment never
+// saw. An apply error is logged and not recorded, so the next pass
+// tries again.
 func (u *receiverUnit) setSettings(want denon.Settings) {
-	if reflect.DeepEqual(u.settingsApplied(), want) {
+	if u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	if u.driver.State().Reachable != equipment.ConditionTrue {
+	observed := u.denonClient.Settings()
+	if reflect.DeepEqual(u.settingsApplied(), want) && want.ConfirmedBy(observed) {
 		return
 	}
 	if err := u.denonClient.ApplySettings(want); err != nil {
@@ -262,12 +266,15 @@ func (u *receiverUnit) settingsApplied() denon.Settings {
 // A declared value is enforced: when a zone's block changes, every
 // declared field of that zone is re-sent on purpose, so a value declared
 // in the spec is authoritative over a change made at the receiver. A
-// pass with no change to the block sends nothing. A command sent before
-// the connection is open is dropped, so the change waits for a
-// reachable receiver. The main zone is spec.power and spec.session, so
-// a zones map that names main is a misconfiguration and is rejected
-// rather than fought. An apply error is logged and not recorded, so the
-// next pass tries again.
+// block already sent whose reported controls confirm is left alone; a
+// block the receiver has not confirmed is sent again on the next pass
+// and stops the moment the receiver reports it; a block for a zone the
+// receiver has not reported at all confirms trivially, so it sends once
+// per spec change. A command sent before the connection is open is
+// dropped, so the change waits for a reachable receiver. The main zone
+// is spec.power and spec.session, so a zones map that names main is a
+// misconfiguration and is rejected rather than fought. An apply error
+// is logged and not recorded, so the next pass tries again.
 func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 	if u.driver.State().Reachable != equipment.ConditionTrue {
 		return
@@ -276,12 +283,15 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 	// never shares its backing with the snapshot the last pass stored; a
 	// later setZones cannot reach back into an earlier one.
 	applied := u.zonesApplied()
+	state := u.driver.State()
 	for name, spec := range want {
 		if name == equipment.MainZone {
 			fmt.Fprintf(os.Stderr, "zone %q on receiver %s: the main zone is spec.power and spec.session, not spec.zones\n", name, u.name)
 			continue
 		}
-		if reflect.DeepEqual(applied[name], spec) {
+		observed, reported := state.Zone(name)
+		confirmed := !reported || spec.ConfirmedBy(observed, u.driver.VolumeResolution())
+		if reflect.DeepEqual(applied[name], spec) && confirmed {
 			continue
 		}
 		if err := u.applyZone(name, spec); err != nil {

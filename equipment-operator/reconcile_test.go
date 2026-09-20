@@ -984,6 +984,171 @@ func TestASlowSettingsPatchDoesNotBlockTheReader(t *testing.T) {
 	}
 }
 
+// waitForObservedSettings waits for the driver's reported settings to
+// satisfy check, which is the receiver's echo reaching the state before
+// the next pass reads it.
+func waitForObservedSettings(t *testing.T, operator *controller, name string, check func(denon.Settings) bool) {
+	t.Helper()
+	unit := operator.units[name]
+	deadline := time.After(testTimeout)
+	for {
+		if check(unit.denonClient.Settings()) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the receiver never reported the settings the test expected")
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// waitForObservedZone waits for the driver to report one zone's
+// volume, in the driver's steps.
+func waitForObservedZone(t *testing.T, operator *controller, name, zone string, volume int) {
+	t.Helper()
+	unit := operator.units[name]
+	deadline := time.After(testTimeout)
+	for {
+		if state, reported := unit.driver.State().Zone(zone); reported && state.Volume == volume {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the receiver never reported the zone volume the test expected")
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// A declared setting the receiver accepts but does not apply is sent
+// again on the next pass until the receiver reports the declared value,
+// then the operator stops.
+func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	eco := "on"
+	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	// The first pass starts the driver, which connects asynchronously, so
+	// the change waits for a reachable receiver.
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+
+	// The receiver is in standby, so it takes the eco command but keeps
+	// reporting the standby value.
+	fake.holdSetting("ECOON", "ECOOFF")
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "ECOON")
+	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+		return s.System.Eco != nil && *s.System.Eco == "off"
+	})
+
+	// The receiver still has not reported the declared value, so the
+	// operator sends the command again on the next pass.
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "ECOON")
+
+	// Once the receiver reports the declared value, the operator sends
+	// once more and then stops.
+	fake.holdSetting("ECOON", "ECOON")
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "ECOON")
+	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+		return s.System.Eco != nil && *s.System.Eco == "on"
+	})
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseCommand(t, "ECOON", quietPeriod)
+}
+
+// A declared setting the receiver never reports is sent once and not
+// retried: a block with no reported field confirms trivially, so the
+// operator stops asking.
+func TestASettingTheReceiverNeverReportsSendsOnce(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	eco := "on"
+	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "ECOON")
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseCommand(t, "ECOON", quietPeriod)
+}
+
+// A declared zone control the receiver accepts but does not apply is
+// sent again on the next pass until the zone reports the declared
+// value, then the operator stops.
+func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	volume := 40.0
+	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+
+	// The zone takes the volume command but keeps reporting its old
+	// volume, so the operator re-sends until the zone reports the
+	// declared level. The set command is Z2MV40, and the receiver
+	// reports a volume as Z2 followed by the digits.
+	fake.holdSetting("Z2MV40", "Z230")
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "Z2MV40")
+	waitForObservedZone(t, operator, "theater", "zone2", 60)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "Z2MV40")
+
+	// The zone starts reporting the declared volume, so the operator
+	// sends once more and then stops.
+	fake.holdSetting("Z2MV40", "Z240")
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "Z2MV40")
+	waitForObservedZone(t, operator, "theater", "zone2", 80)
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseCommand(t, "Z2MV40", quietPeriod)
+}
+
+// A declared zone control for a zone the receiver never reports is sent
+// once and not retried: a zone with no reported state confirms
+// trivially, so the operator stops asking.
+func TestAZoneTheReceiverNeverReportsSendsOnce(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	volume := 40.0
+	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "Z2MV40")
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseCommand(t, "Z2MV40", quietPeriod)
+}
+
 // A command bus message reaches Do, and the error Do returns for every
 // id is logged and never fatal, so the bus keeps serving later
 // messages.
