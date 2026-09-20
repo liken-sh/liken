@@ -77,6 +77,13 @@ need detail, use a cluster the project ships: the `dev-cluster/` in
 `liken`, the `lab` fleet of `node-1` through `node-5`, and the test
 clusters named in a repository's own documentation.
 
+## Branch names
+
+Every repository works on `main` except `corrosion`. `corrosion` is a
+shallow fork of superfly/corrosion: its `main` mirrors upstream and takes
+no commits, and its own work is on the `liken` branch. Treat `liken` as
+`corrosion`'s main branch in any process that names one.
+
 ## Releases and development builds
 
 Every repository versions on the same calendar scheme. The `releases`
