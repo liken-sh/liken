@@ -28,6 +28,7 @@ becomes a new plan or an open problem.
   contract: the receiver connected and claimed, power, volume, the
   selected input, and commands by status.
 * [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on 44stonypoint on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the house's AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
+* [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
 
 ## Completed
 
