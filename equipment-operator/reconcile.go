@@ -46,7 +46,6 @@ type receiverUnit struct {
 	cancel        context.CancelFunc
 	dirty         chan struct{}
 	generation    atomic.Int64
-	bus           *Bus
 	// The ceiling and the step live here and not on the session, so an
 	// edit to them reaches a standing session with no restart.
 	volume atomic.Pointer[ReceiverVolume]
@@ -61,8 +60,8 @@ type receiverUnit struct {
 	// spec is not re-sent on the next pass.
 	settings atomic.Pointer[denon.Settings]
 	// The last zone controls the operator applied, keyed by zone, so a
-	// reconcile sends a change once and never re-asserts a value that
-	// stands.
+	// reconcile sends a declared change once and a pass with no change
+	// sends nothing.
 	zones atomic.Pointer[map[string]ZoneSpec]
 
 	mutex   sync.Mutex
@@ -229,8 +228,10 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 }
 
 // setSettings drives the receiver to the settings a person declared.
-// The operator owns the declared settings, so it applies a change once
-// and never re-asserts a value that stands. A command sent before the
+// A declared value is enforced: when the settings block changes, every
+// declared field is re-sent on purpose, so a value declared in the spec
+// is authoritative over a change made at the receiver. A pass with no
+// change to the block sends nothing. A command sent before the
 // connection is open is dropped, so the change waits for a reachable
 // receiver rather than applying a value the equipment never saw. An
 // apply error is logged and not recorded, so the next pass tries
@@ -258,8 +259,10 @@ func (u *receiverUnit) settingsApplied() denon.Settings {
 }
 
 // setZones drives the non-main zones to the controls a person declared.
-// The operator owns the declared zone controls, so it applies a change
-// once and never re-asserts a value that stands. A command sent before
+// A declared value is enforced: when a zone's block changes, every
+// declared field of that zone is re-sent on purpose, so a value declared
+// in the spec is authoritative over a change made at the receiver. A
+// pass with no change to the block sends nothing. A command sent before
 // the connection is open is dropped, so the change waits for a
 // reachable receiver. The main zone is spec.power and spec.session, so
 // a zones map that names main is a misconfiguration and is rejected
@@ -269,6 +272,9 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 	if u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
+	// zonesApplied returns a copy, so this loop writes a fresh map that
+	// never shares its backing with the snapshot the last pass stored; a
+	// later setZones cannot reach back into an earlier one.
 	applied := u.zonesApplied()
 	for name, spec := range want {
 		if name == equipment.MainZone {
@@ -287,10 +293,15 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 	u.zones.Store(&applied)
 }
 
-// zonesApplied answers the last zone controls the operator settled on.
+// zonesApplied answers the last zone controls the operator settled on,
+// as a copy, so a caller can never mutate the stored snapshot.
 func (u *receiverUnit) zonesApplied() map[string]ZoneSpec {
 	if held := u.zones.Load(); held != nil {
-		return *held
+		copy := make(map[string]ZoneSpec, len(*held))
+		for name, spec := range *held {
+			copy[name] = spec
+		}
+		return copy
 	}
 	return map[string]ZoneSpec{}
 }
@@ -337,24 +348,30 @@ func (u *receiverUnit) startBus(ctx context.Context) {
 	if u.settingsTopic == "" && u.commandsTopic == "" {
 		return
 	}
-	u.bus = newBus(u.busAddress, "equipment-operator-"+u.name+"-bus", nil, nil, u.busMessage)
+	// The bus lives and dies with this unit's context, so nothing here
+	// stores it: the goroutine owns the only reference.
+	bus := newBus(u.busAddress, "equipment-operator-"+u.name+"-bus", nil, nil, u.busMessage)
 	if u.settingsTopic != "" {
-		u.bus.Subscribe(u.settingsTopic)
+		bus.Subscribe(u.settingsTopic)
 	}
 	if u.commandsTopic != "" {
-		u.bus.Subscribe(u.commandsTopic)
+		bus.Subscribe(u.commandsTopic)
 	}
-	go u.bus.Run(ctx)
+	go bus.Run(ctx)
 }
 
-// busMessage routes one message off the unit's own bus. The settings
-// topic and the commands topic each carry their own message shape.
+// busMessage routes one message off the unit's own bus. Each handler
+// runs in its own goroutine, so a slow settings patch cannot stall the
+// reader and the messages behind it on the topic. The driver client and
+// the API client are thread-safe, so the handlers may overlap. The
+// settings topic and the commands topic each carry their own message
+// shape.
 func (u *receiverUnit) busMessage(topic string, payload []byte) {
 	switch topic {
 	case u.settingsTopic:
-		u.handleSettings(payload)
+		go u.handleSettings(payload)
 	case u.commandsTopic:
-		u.handleCommand(payload)
+		go u.handleCommand(payload)
 	}
 }
 
@@ -363,9 +380,13 @@ func (u *receiverUnit) busMessage(topic string, payload []byte) {
 // of spec.denon.settings it came from, so the declared state of the
 // resource stays true. The write is scoped to that one leaf under this
 // operator's own field manager, so a bus-written key is operator-owned
-// and never a key the manifest declared, and the two writers never
-// fight. An error is logged and not recorded: the receiver's own echo
-// is the only thing that moves the observed settings.
+// and never a key the manifest declared. A manifest-declared key and a
+// bus-written key on the same leaf is a misconfiguration: the operator's
+// forced write wins each round and Flux reverts the leaf on its next
+// sync. A bus write is recorded into the spec on queue acceptance, so
+// the spec is desired state, not a mirror of the hardware. An error is
+// logged and not recorded: the receiver's own echo is the only thing
+// that moves the observed settings.
 func (u *receiverUnit) handleSettings(payload []byte) {
 	var message struct {
 		Setting string                 `json:"setting"`

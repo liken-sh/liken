@@ -76,7 +76,7 @@ spec:
                       description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
                     settings:
                       type: object
-                      description: "The receiver's settings, one family per block, in display units. The operator applies a declared setting once on change and never re-asserts it, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
+                      description: "The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
                       properties:
                         system:
                           type: object
@@ -295,34 +295,56 @@ spec:
                   description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {\"command\":\"quick.3\"}, an action that is not a setting. An absent topic subscribes to nothing."
                 zones:
                   type: object
-                  description: "The receiver's second and third zones, keyed by the zone's name as the receiver reports it. The main zone has no entry here: spec.power and spec.session drive it."
-                  x-kubernetes-validations:
-                    - rule: "!has(self.main)"
-                      message: "the main zone is driven by spec.power and spec.session, not by zones"
-                  additionalProperties:
-                    type: object
-                    description: "One zone beyond main, keyed by the zone's name. Every field is optional, so a bare key just claims the zone."
-                    properties:
-                      power:
-                        type: string
-                        enum: ["on", "off", "standby"]
-                        description: "The power state the operator drives this zone to."
-                      input:
-                        type: string
-                        minLength: 1
-                        maxLength: 63
-                        description: "The input this zone selects, by its name in spec.inputs."
-                      volume:
-                        type: number
-                        description: "The zone's volume in the receiver's display units."
-                      mute:
-                        type: boolean
-                        description: "Whether this zone is muted."
-                      sleep:
-                        type: integer
-                        minimum: 0
-                        maximum: 120
-                        description: "Minutes until this zone sleeps, and zero means no sleep timer."
+                  description: "The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it."
+                  properties:
+                    zone2:
+                      type: object
+                      description: "The receiver's second zone. Every field is optional, so a bare key just claims the zone."
+                      properties:
+                        power:
+                          type: string
+                          enum: ["on", "off", "standby"]
+                          description: "The power state the operator drives this zone to."
+                        input:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
+                          description: "The input this zone selects, by its name in spec.inputs."
+                        volume:
+                          type: number
+                          description: "The zone's volume in the receiver's display units."
+                        mute:
+                          type: boolean
+                          description: "Whether this zone is muted."
+                        sleep:
+                          type: integer
+                          minimum: 0
+                          maximum: 120
+                          description: "Minutes until this zone sleeps, and zero means no sleep timer."
+                    zone3:
+                      type: object
+                      description: "The receiver's third zone. Every field is optional, so a bare key just claims the zone."
+                      properties:
+                        power:
+                          type: string
+                          enum: ["on", "off", "standby"]
+                          description: "The power state the operator drives this zone to."
+                        input:
+                          type: string
+                          minLength: 1
+                          maxLength: 63
+                          description: "The input this zone selects, by its name in spec.inputs."
+                        volume:
+                          type: number
+                          description: "The zone's volume in the receiver's display units."
+                        mute:
+                          type: boolean
+                          description: "Whether this zone is muted."
+                        sleep:
+                          type: integer
+                          minimum: 0
+                          maximum: 120
+                          description: "Minutes until this zone sleeps, and zero means no sleep timer."
             status:
               type: object
               description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."

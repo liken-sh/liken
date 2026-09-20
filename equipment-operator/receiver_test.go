@@ -138,6 +138,21 @@ func TestCRDSchema(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("the spec zones admit only zone2 and zone3", func(t *testing.T) {
+		zones := spec.Properties["zones"]
+		// The zones are declared as explicit properties, not as a free
+		// map, so no key beyond zone2 and zone3 is a valid input and the
+		// driver can serve every zone the schema admits.
+		if zones.AdditionalProperties != nil {
+			t.Errorf("spec.properties.zones has additionalProperties, want explicit zone2 and zone3 properties")
+		}
+		for _, name := range []string{"zone2", "zone3"} {
+			if _, held := zones.Properties[name]; !held {
+				t.Errorf("spec.properties.zones has no property %s", name)
+			}
+		}
+	})
 }
 
 func TestCRDPrinterColumns(t *testing.T) {
@@ -424,6 +439,22 @@ func TestCRDValidatesExamples(t *testing.T) {
 				"session": map[string]any{"player": "house/theater", "input": "MPLAY"},
 			}),
 			wantErr: true,
+		},
+		{
+			name: "a receiver that declares zone2",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"zones":  map[string]any{"zone2": map[string]any{"volume": 30.0}},
+			}),
+		},
+		{
+			name: "a receiver that declares zone3",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"zones":  map[string]any{"zone3": map[string]any{"power": "on"}},
+			}),
 		},
 	}
 	for _, c := range cases {

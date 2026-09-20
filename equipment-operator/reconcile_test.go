@@ -37,15 +37,16 @@ type fakeAPI struct {
 	powers   chan equipment.Power
 	settings chan []byte
 
-	mutex       sync.Mutex
-	list        ReceiverList
-	broken      bool
-	statuses    []ReceiverStatus
-	powersSet   []equipment.Power
-	settingsSet [][]byte
-	refusing    bool
-	events      []string
-	endStream   bool
+	mutex        sync.Mutex
+	list         ReceiverList
+	broken       bool
+	statuses     []ReceiverStatus
+	powersSet    []equipment.Power
+	settingsSet  [][]byte
+	refusing     bool
+	events       []string
+	endStream    bool
+	settingsGate chan struct{}
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
@@ -152,10 +153,14 @@ func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
 	if applied.Spec.Denon != nil {
 		a.mutex.Lock()
 		a.settingsSet = append(a.settingsSet, body)
+		gate := a.settingsGate
 		a.mutex.Unlock()
 		select {
 		case a.settings <- body:
 		default:
+		}
+		if gate != nil {
+			<-gate
 		}
 	} else {
 		a.mutex.Lock()
@@ -173,6 +178,23 @@ func (a *fakeAPI) setReceivers(items ...Receiver) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.list = ReceiverList{Metadata: ListMeta{ResourceVersion: "1"}, Items: items}
+}
+
+// gateSettings makes every settings write wait until releaseSettings,
+// so a test can hold a handler open at its API patch.
+func (a *fakeAPI) gateSettings() {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.settingsGate = make(chan struct{})
+}
+
+func (a *fakeAPI) releaseSettings() {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	if a.settingsGate != nil {
+		close(a.settingsGate)
+		a.settingsGate = nil
+	}
 }
 
 func (a *fakeAPI) breakTheStatus(refusing bool) {
@@ -750,6 +772,40 @@ func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
 	fake.refuseCommand(t, "PWON", quietPeriod)
 }
 
+// zonesApplied returns a copy and setZones stores a fresh map, so a
+// snapshot read before a later setZones keeps the earlier value; the two
+// never share a backing map.
+func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	receiver := testReceiver("theater", fake.address())
+	volume := 30.0
+	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
+	api.setReceivers(receiver)
+	operator := startController(t, api)
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "Z2MV30")
+
+	unit := operator.units["theater"]
+	snapshot := unit.zonesApplied()
+
+	// A later setZones drives a second zone and must not reach back into
+	// the snapshot read before it.
+	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}, "zone3": {Power: equipment.PowerOn}}
+	api.setReceivers(receiver)
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, "Z3ON")
+
+	if _, held := snapshot["zone3"]; held {
+		t.Errorf("a later setZones mutated an earlier snapshot")
+	}
+	mustMatch(t, len(snapshot), 1)
+	mustMatch(t, *snapshot["zone2"].Volume, volume)
+}
+
 // The unit's own bus opens and subscribes to the settings and commands
 // topics with no session standing, so settings and commands reach a
 // receiver no Player is using.
@@ -884,6 +940,48 @@ func TestASettingsMessageThatFailsChangesNothing(t *testing.T) {
 	case <-time.After(quietPeriod):
 	}
 	fake.refuseCommand(t, "PSBAS", quietPeriod)
+}
+
+// A slow settings patch on one message does not block the reader, so
+// the message behind it on the same topic is still handled. Each
+// handler runs on its own goroutine.
+func TestASlowSettingsPatchDoesNotBlockTheReader(t *testing.T) {
+	api := startFakeAPI(t)
+	fake := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	receiver := testReceiver("theater", fake.address())
+	receiver.Spec.SettingsTopic = "liken/equipment/theater/settings"
+	api.setReceivers(receiver)
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.now = func() time.Time { return statusNow }
+
+	mustSucceed(t, operator.pass(t.Context()))
+	api.waitForStatus(t, connected)
+	broker := brokers.waitForSession(t)
+	waitForString(t, broker.subs)
+
+	// Hold the API write of the first message open, then push a second.
+	// A reader that stalled on the patch would never read the second.
+	api.gateSettings()
+	defer api.releaseSettings()
+
+	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.bass","value":3}`))
+	broker.push(receiver.Spec.SettingsTopic, []byte(`{"setting":"tone.treble","value":1}`))
+
+	// Both handlers run on their own goroutines while the first message's
+	// API write is still blocked, so both settings reach the receiver. The
+	// two run concurrently, so collect until each one has landed.
+	var sawBass, sawTreble bool
+	deadline := time.After(testTimeout)
+	for !sawBass || !sawTreble {
+		select {
+		case command := <-fake.commands:
+			sawBass = sawBass || command == "PSBAS 53"
+			sawTreble = sawTreble || command == "PSTRE 51"
+		case <-deadline:
+			t.Fatalf("a slow settings patch blocked the reader: bass=%v treble=%v", sawBass, sawTreble)
+		}
+	}
 }
 
 // A command bus message reaches Do, and the error Do returns for every

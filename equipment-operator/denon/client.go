@@ -265,8 +265,9 @@ func (d *Client) send(command string) error {
 	}
 	// The enqueue happens under the mutex, so the writer's shutdown, which
 	// nils out under the same mutex, cannot run between the check above and
-	// this send. A command that returns nil here was accepted before the
-	// writer stopped, and the writer drains everything it accepted.
+	// this send. A command that returns nil was accepted while the writer
+	// was still accepting; whether it reaches the wire is best effort,
+	// because the connection can die first and report the command failed.
 	select {
 	case out <- command:
 		d.mutex.Unlock()
@@ -345,6 +346,9 @@ func (d *Client) runSession(parent context.Context) (answered bool) {
 		d.mutex.Lock()
 		d.out = nil
 		d.mutex.Unlock()
+		// This drain never delivers: cancel() closes the connection before
+		// it runs, so every write here fails and reports CommandFailed,
+		// which is correct because the drained commands were never written.
 		for {
 			select {
 			case command := <-out:

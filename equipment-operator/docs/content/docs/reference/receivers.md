@@ -21,7 +21,7 @@ How to reach the receiver and how its inputs are wired. The cluster owner writes
 | <span id="spec--power"></span>`power` | string | no | The power state the operator drives the receiver to. The operator owns this field: it applies it once per change and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it. A toggle from the session's power topic rewrites it. The Denon cannot tell standby from off, so both mean standby. One of: `on`, `off`, `standby`. |
 | <span id="spec--settingstopic"></span>`settingsTopic` | string | no | The topic the operator subscribes to for the life of the Receiver. A message on it is a settings toggle write, {"setting":"tone.bass","value":3}, with the value in display units. An absent topic subscribes to nothing. |
 | <span id="spec--commandstopic"></span>`commandsTopic` | string | no | The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {"command":"quick.3"}, an action that is not a setting. An absent topic subscribes to nothing. |
-| <span id="spec--zones"></span>`zones` | [map\[string\]object](#speczones) | no | The receiver's second and third zones, keyed by the zone's name as the receiver reports it. The main zone has no entry here: spec.power and spec.session drive it. |
+| <span id="spec--zones"></span>`zones` | [object](#speczones) | no | The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. |
 
 ### spec.denon
 
@@ -30,11 +30,11 @@ The receiver accepts the Denon and Marantz control protocol on TCP port 23. Comm
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdenon--address"></span>`address` | string | yes | The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent. |
-| <span id="specdenon--settings"></span>`settings` | [object](#specdenonsettings) | no | The receiver's settings, one family per block, in display units. The operator applies a declared setting once on change and never re-asserts it, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field. |
+| <span id="specdenon--settings"></span>`settings` | [object](#specdenonsettings) | no | The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field. |
 
 #### spec.denon.settings
 
-The receiver's settings, one family per block, in display units. The operator applies a declared setting once on change and never re-asserts it, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field.
+The receiver's settings, one family per block, in display units. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the receiver where it sits. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -132,17 +132,38 @@ The Player that currently uses the receiver. The media operator applies this blo
 | <span id="specsession--active"></span>`active` | boolean | no | Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false. |
 | <span id="specsession--awake"></span>`awake` | boolean | no | Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep. |
 
-### spec.zones.*
+### spec.zones
 
-One zone beyond main, keyed by the zone's name. Every field is optional, so a bare key just claims the zone.
+The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="speczones--power"></span>`power` | string | no | The power state the operator drives this zone to. One of: `on`, `off`, `standby`. |
-| <span id="speczones--input"></span>`input` | string | no | The input this zone selects, by its name in spec.inputs. |
-| <span id="speczones--volume"></span>`volume` | number | no | The zone's volume in the receiver's display units. |
-| <span id="speczones--mute"></span>`mute` | boolean | no | Whether this zone is muted. |
-| <span id="speczones--sleep"></span>`sleep` | integer | no | Minutes until this zone sleeps, and zero means no sleep timer. |
+| <span id="speczones--zone2"></span>`zone2` | [object](#speczoneszone2) | no | The receiver's second zone. Every field is optional, so a bare key just claims the zone. |
+| <span id="speczones--zone3"></span>`zone3` | [object](#speczoneszone3) | no | The receiver's third zone. Every field is optional, so a bare key just claims the zone. |
+
+#### spec.zones.zone2
+
+The receiver's second zone. Every field is optional, so a bare key just claims the zone.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speczoneszone2--power"></span>`power` | string | no | The power state the operator drives this zone to. One of: `on`, `off`, `standby`. |
+| <span id="speczoneszone2--input"></span>`input` | string | no | The input this zone selects, by its name in spec.inputs. |
+| <span id="speczoneszone2--volume"></span>`volume` | number | no | The zone's volume in the receiver's display units. |
+| <span id="speczoneszone2--mute"></span>`mute` | boolean | no | Whether this zone is muted. |
+| <span id="speczoneszone2--sleep"></span>`sleep` | integer | no | Minutes until this zone sleeps, and zero means no sleep timer. |
+
+#### spec.zones.zone3
+
+The receiver's third zone. Every field is optional, so a bare key just claims the zone.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speczoneszone3--power"></span>`power` | string | no | The power state the operator drives this zone to. One of: `on`, `off`, `standby`. |
+| <span id="speczoneszone3--input"></span>`input` | string | no | The input this zone selects, by its name in spec.inputs. |
+| <span id="speczoneszone3--volume"></span>`volume` | number | no | The zone's volume in the receiver's display units. |
+| <span id="speczoneszone3--mute"></span>`mute` | boolean | no | Whether this zone is muted. |
+| <span id="speczoneszone3--sleep"></span>`sleep` | integer | no | Minutes until this zone sleeps, and zero means no sleep timer. |
 
 ## status
 

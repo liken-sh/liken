@@ -75,14 +75,18 @@ connection it already has.
 
 A setting key has exactly one writer.
 
-* A manifest-declared key is pinned. Flux owns it, and the operator
-  applies it on change and never writes it back.
+* A manifest-declared key is enforced. When the settings block changes,
+  the operator re-sends every declared field on purpose, so a value
+  declared in the spec is authoritative over a change made at the
+  receiver. A pass with no change to the block sends nothing. Flux owns
+  the key, and the operator never writes it back.
 * A bus-written key is operator-owned. The operator applies the value
   and writes it back into `spec.denon.settings` at the leaf, with
   server-side apply under its own field manager at leaf granularity, so
   a write to one key does not claim the keys around it.
-* A key that is both declared and bus-written is a misconfiguration,
-  and the operator reports it.
+* A key that is both declared and bus-written is a misconfiguration:
+  the operator's forced write wins each round, and Flux reverts the
+  leaf on its next sync.
 
 The invariant matters because of how Flux applies. Flux applies with
 server-side apply, so a field a manifest declares is a field Flux owns.
@@ -90,7 +94,9 @@ If the operator also wrote that field back, the two field managers
 fight over one key and every reconcile is a conflict. A bus-written key
 is written back so the declared state of the resource stays true, but
 it must be a key Flux never declared, and the write is scoped to that
-leaf so the two never own the same key.
+leaf so the two never own the same key. A bus write is recorded into
+the spec on queue acceptance, so the spec is desired state and not a
+mirror of the hardware.
 
 ### `session.awake`
 
@@ -113,12 +119,12 @@ wake path and the declarative path are both live.
 
 The zones are receiver-common, like power and inputs, so they sit in a
 top-level `spec.zones` block beside `spec.power` and `spec.inputs`,
-keyed by the zone's name as the receiver reports it, rather than under
-`spec.denon`. Each entry declares the zone's power, input, volume,
-mute, and sleep, and a change is applied once and never re-asserted.
-The main zone has no entry: `spec.power` and `spec.session` drive it,
-and a `main` key would give one zone two writers, so the CRD rejects
-it.
+rather than under `spec.denon`. Only `zone2` and `zone3` are valid
+keys, so no other key is a valid input and the driver can serve every
+zone the schema admits. Each entry declares the zone's power, input,
+volume, mute, and sleep. A declared value is enforced when that zone's
+block changes, and a pass with no change sends nothing. The main zone
+has no entry: `spec.power` and `spec.session` drive it.
 
 ## Phases
 
