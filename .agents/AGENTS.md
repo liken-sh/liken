@@ -4,10 +4,10 @@ The `liken` project is one system split across the repositories under
 the `liken-sh` organization on GitHub. The OS is `liken`. The operators
 claim a machine's hardware and serve its interfaces. The CSI drivers
 attach storage, and `brand`, `log`, `corrosion`, and the cluster
-repositories support the project. Each repository carries its own
+repositories support the project. Each repository has its own
 `AGENTS.md` for the work inside it.
 
-This repository carries what the repositories share. A session reaches
+This repository holds what the repositories share. A session reaches
 these rules when it starts at the organization root, the directory that
 holds the repositories side by side. For example, the checkouts here
 live under `~/src/github.com/liken-sh`.
@@ -80,7 +80,7 @@ clusters named in a repository's own documentation.
 ## Releases and development builds
 
 Every repository versions on the same calendar scheme. The `releases`
-skill under `.agents/skills` carries the scheme, the operator release
+skill under `.agents/skills` holds the scheme, the operator release
 and development build flow, and the way the `liken` OS publishes a
 release. Load it before tagging a repository, publishing an image, or
 pinning a development build.
