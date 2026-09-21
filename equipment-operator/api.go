@@ -5,6 +5,7 @@ import (
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/equipment-operator/wiim"
 )
 
 // The wire types are hand-written, the way liken and the sibling
@@ -52,6 +53,7 @@ type ReceiverList struct {
 // receiver, and the bus topics that configure it.
 type ReceiverSpec struct {
 	Denon   *DenonProtocol   `json:"denon,omitempty"`
+	Wiim    *WiimProtocol    `json:"wiim,omitempty"`
 	Volume  *ReceiverVolume  `json:"volume,omitempty"`
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
@@ -131,6 +133,18 @@ type DenonProtocol struct {
 	Settings denon.Settings `json:"settings,omitempty"`
 }
 
+// The WiiM control protocol. The LinkPlay UUID is the device's identity
+// and the only key the operator trusts: a declared address is a hint,
+// and the driver reads the device's own uuid and compares it before it
+// drives anything. The address is optional because a later discovery
+// path resolves the UUID to a current address; with no address and no
+// discovery yet, the driver can reach nothing and reports the receiver
+// unreachable.
+type WiimProtocol struct {
+	UUID    string `json:"uuid"`
+	Address string `json:"address,omitempty"`
+}
+
 // One input of the receiver, and the machine and monitor id that feed
 // it. SoundMode, when present, is the mode the receiver selects with
 // this input, so a Play brings the picture and the mode together.
@@ -172,6 +186,7 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 type ReceiverStatus struct {
 	Zones      map[string]ZoneStatus `json:"zones,omitempty"`
 	Denon      *denon.Settings       `json:"denon,omitempty"`
+	Wiim       *wiim.Status          `json:"wiim,omitempty"`
 	Service    string                `json:"service,omitempty"`
 	Conditions []Condition           `json:"conditions,omitempty"`
 }

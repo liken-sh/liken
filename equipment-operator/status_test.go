@@ -48,7 +48,7 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			status := buildReceiverStatus(one.state, nil, 2, 3, nil, statusNow)
+			status := buildReceiverStatus(one.state, nil, nil, 2, 3, nil, statusNow)
 			main := status.Zones[equipment.MainZone]
 
 			mustMatch(t, main.Power, one.power)
@@ -67,7 +67,7 @@ func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
 	eco := "auto"
 	settings := &denon.Settings{System: denon.SystemSettings{Eco: &eco}}
 
-	status := buildReceiverStatus(state, settings, 2, 1, nil, statusNow)
+	status := buildReceiverStatus(state, settings, nil, 2, 1, nil, statusNow)
 
 	mustMatch(t, *status.Denon.System.Eco, "auto")
 }
@@ -78,7 +78,7 @@ func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
 	zone.Mute = true
 	state.Zones[equipment.MainZone] = zone
 
-	mustMatch(t, buildReceiverStatus(state, nil, 2, 1, nil, statusNow).Zones[equipment.MainZone].Mute, true)
+	mustMatch(t, buildReceiverStatus(state, nil, nil, 2, 1, nil, statusNow).Zones[equipment.MainZone].Mute, true)
 }
 
 func TestReachableNamesEachVerdict(t *testing.T) {

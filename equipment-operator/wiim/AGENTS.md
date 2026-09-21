@@ -141,6 +141,18 @@ re-resolving on each poll and reconnect is cheap.
 
 ## The commands
 
+Three outside documents carry these commands, and they do not have the
+same authority. WiiM's own HTTP API document, version 1.2, names the
+playback, input-switch, equalizer on/off, device-control, alarm,
+preset, and audio-output commands; a command that document names is
+official. `DanBrezeanu/wiim-extended-http-api` carries the balance,
+LED, button, Bluetooth, SPDIF-delay, and static-IP commands, taken by
+intercepting the app's own requests. `cvdlinden/wiim-httpapi`'s
+`openapi.json` carries the widest surface, including the device name,
+the band-level and LV2 equalizer, the volume ceiling, and the
+subwoofer controls, and it is the least authoritative of the three.
+Each family below says which source carries it.
+
 The named reads:
 
 | Command | Answers |
@@ -150,6 +162,10 @@ The named reads:
 | `getMetaInfo` | the current track's title, artist, album, and cover |
 | `getStaticIpInfo` | static address, gateway, DNS |
 | `getChannelBalance` | left-right balance from -1.0 to 1.0 |
+| `EQGetStat` | whether the equalizer is on |
+| `getShutdown` | seconds left on the sleep timer |
+| `getPresetInfo` | the stored presets and their numbers |
+| `getAlarmClock:<0-2>` | one alarm |
 | `getbtpairstatus`, `getbthistory` | Bluetooth pairing state and paired devices |
 
 The transport and level writes:
@@ -168,6 +184,7 @@ setPlayerCmd:vol++           step volume up
 setPlayerCmd:vol--           step volume down
 setPlayerCmd:mute:1           mute
 setPlayerCmd:mute:0           unmute
+setPlayerCmd:loopmode:<n>     0 no loop, 1 single, 2 shuffle, -1 sequence
 setPlayerCmd:groupVol:<0-100> set the group volume
 ```
 
@@ -185,16 +202,36 @@ setPlayerCmd:switchmode:udisk      files on a USB drive
 setPlayerCmd:switchmode:phono      on the Ultra
 ```
 
+WiiM's document names only `wifi`, `line-in`, `optical`, `udisk`, and
+`bluetooth`. The rest come from the community sources and other
+models, so a driver treats them as unproven until a model answers.
+
 The remaining families:
 
-- Presets: `MCUKeyShortClick:<1-12>` starts a stored preset.
-- Equalizer: `EQGetList`, `EQLoad:<name>`, `EQOn`, `EQOff`. WiiM
-  devices also carry a parametric equalizer over an LV2 API.
-- Timers: sleep timer and alarms, on WiiM devices only.
+- Presets: `MCUKeyShortClick:<1-12>` starts a stored preset and
+  `getPresetInfo` lists them. Official.
+- Equalizer: `EQOn`, `EQOff`, `EQGetStat`, `EQGetList`, and
+  `EQLoad:<name>` are official. `EQSet:Bass`, `EQSet:Treble`,
+  `EQSetBand`, `EQSetChannelMode`, `EQSave`, and the LV2 and v2
+  families are in `openapi.json` only, so a driver treats them as
+  unproven until a model answers.
+- Alarms: `setAlarmClock:<n>:<trig>:<op>:<time>[:<day>][:<url>]`,
+  `getAlarmClock:<n>`, `alarmStop`, and `timeSync:<YYYYMMDDHHMMSS>`
+  are official, with three alarms at most.
+- Device control: `reboot` is official. `setShutdown:<seconds>` and
+  `getShutdown` are the sleep timer, not standby.
+- Balance: `getChannelBalance` and `setChannelBalance:<n>` take -1.0
+  to 1.0, from the extended source.
 - Bluetooth: `startbtdiscovery:<seconds>`, `getbtdiscoveryresult`,
-  `connectbta2dpsynk:<mac>`, `disconnectbta2dpsynk:<mac>`.
-- Device lights and buttons: `LED_SWITCH_SET:<0|1>`,
-  `Button_Enable_SET:<0|1>`.
+  `clearbtdiscoveryresult`, `getbthistory`,
+  `connectbta2dpsynk:<mac>`, and `disconnectbta2dpsynk:<mac>`, from
+  the extended source.
+- Device lights and buttons: `LED_SWITCH_SET:<0|1>` and
+  `Button_Enable_SET:<0|1>` from the extended source, with
+  `LED_SWITCH_GET` and `Button_Enable_GET` in `openapi.json`.
+- Audio output: `getNewAudioOutputHardwareMode` and
+  `setAudioOutputHardwareMode:<n>` are official.
+- Device name: `setDeviceName:<name>`, in `openapi.json` only.
 - Queues and grouping: the UPnP AVTransport and `PlayQueue` services,
   not `httpapi.asp`.
 
@@ -268,11 +305,14 @@ voice remote's power button, and the app has no power button. pywiim,
 the mature client, implements no power command.
 
 What it does not answer, on this firmware: `getPowerMode`,
-`getAudioOutputMode`, `getAudioOutputStatus`, `getDeviceInfo`,
-`getFirmwareVersion`, `getMAC`, `getMultiroomStatus`, `getSlaveList`,
-`getTriggeroutStatus`, and every `getEqStatus` spelling. The extended
-references call several of these commands; this model carries none of
-them.
+`getAudioOutputStatus`, `getDeviceInfo`, `getFirmwareVersion`,
+`getMAC`, `getMultiroomStatus`, `getSlaveList`, and
+`getTriggeroutStatus`. Two earlier probes used names no outside
+document carries, so they prove nothing: the equalizer read is
+`EQGetStat` and the output read is `getNewAudioOutputHardwareMode`.
+Neither was tried, so the equalizer and the output mode are untested
+on this model, not absent. `getAudioOutputMode` is not a WiiM
+command.
 
 `getStatusEx` also carries a `security` block: `https/2.0`, security
 version `3.0`, and an AES capability. The plain HTTPS API still
@@ -283,15 +323,15 @@ gate the API today.
 
 WiiM's own documents:
 
-- [HTTP API for WiiM Products, version 1.2](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Products.pdf)
+- [HTTP API for WiiM Products, version 1.2](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Products.pdf), which carries the playback, input-switch, equalizer on/off, device-control, alarm, preset, and audio-output commands
 - [HTTP API for WiiM Mini](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Mini.pdf)
 - [How to Manage the Power State of Your WiiM Device](https://faq.wiimhome.com/en/support/solutions/articles/72000624590-how-to-manage-the-power-state-of-your-wiim-device), which states standby is the automatic idle timer or the voice remote
 - [WiiM Home App Permissions](https://faq.wiimhome.com/support/solutions/articles/72000581676-wiim-home-app-permissions), which states the setup needs local network, Bluetooth, and location
 
 Community references that document the protocol beyond WiiM's PDFs:
 
-- [DanBrezeanu/wiim-extended-http-api](https://github.com/DanBrezeanu/wiim-extended-http-api) for the undocumented network, Bluetooth, audio, and equalizer commands
-- [cvdlinden/wiim-httpapi](https://github.com/cvdlinden/wiim-httpapi) and its published [API reference](https://cvdlinden.github.io/wiim-httpapi/) for an OpenAPI description of the whole surface
+- [DanBrezeanu/wiim-extended-http-api](https://github.com/DanBrezeanu/wiim-extended-http-api) for the balance, LED, button, Bluetooth, SPDIF-delay, and static-IP commands it captured by intercepting the app
+- [cvdlinden/wiim-httpapi](https://github.com/cvdlinden/wiim-httpapi), its [`openapi.json`](https://raw.githubusercontent.com/cvdlinden/wiim-httpapi/main/openapi.json), and its published [API reference](https://cvdlinden.github.io/wiim-httpapi/), for the widest command surface, including the device name, the band-level and LV2 equalizer, the volume ceiling, and the subwoofer controls
 - [mjcumming/pywiim](https://github.com/mjcumming/pywiim) for an async client, UPnP eventing, grouping, and [discovery details](https://github.com/mjcumming/pywiim/blob/main/docs/user/DISCOVERY.md)
 - [mjcumming/wiim](https://github.com/mjcumming/wiim) for the Home Assistant integration built on pywiim
 - [shumatech/wiimplay](https://github.com/shumatech/wiimplay), a Go client

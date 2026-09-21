@@ -15,6 +15,7 @@ How to reach the receiver and how its inputs are wired. The cluster owner writes
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--denon"></span>`denon` | [object](#specdenon) | no | The receiver accepts the Denon and Marantz control protocol on TCP port 23. Commands such as MV50 and receiver events use the same plain-text form. |
+| <span id="spec--wiim"></span>`wiim` | [object](#specwiim) | no | The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything. |
 | <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max. |
 | <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver inputs that liken machines feed. The cluster owner declares this wiring because the operator cannot discover it. A receiver forwards one EDID on every input, so the monitor ID alone cannot distinguish two machines. Each entry therefore names its machine. |
 | <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. The operator sends power and input commands once each time active or awake changes to true. It does not re-assert those commands. A person using the receiver's remote can therefore change them. |
@@ -99,6 +100,15 @@ The audio processing settings.
 | <span id="specdenonsettingsaudio--speakervirtualizer"></span>`speakerVirtualizer` | boolean | no | Whether the Speaker Virtualizer is on. |
 | <span id="specdenonsettingsaudio--dialogenhancer"></span>`dialogEnhancer` | string | no | The Dialog Enhancer level: off, low, mid, or high. |
 
+### spec.wiim
+
+The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiim--uuid"></span>`uuid` | string | yes | The device's LinkPlay UUID: twelve bytes of hex, the value getStatusEx returns as uuid and the first twelve bytes of the UUID mDNS and SSDP advertise. It is the identity, stable across a reboot and a DHCP lease change. The operator reads the device's uuid and compares it before it sends any command, so an address that moved never drives the wrong amp. |
+| <span id="specwiim--address"></span>`address` | string | no | The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable. |
+
 ### spec.volume
 
 The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max.
@@ -173,6 +183,7 @@ What the receiver last reported, in its own units, plus the protocol's own setti
 | --- | --- | --- | --- |
 | <span id="status--zones"></span>`zones` | [map\[string\]object](#statuszones) | no | One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main. |
 | <span id="status--denon"></span>`denon` | object | no | The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it. |
+| <span id="status--wiim"></span>`wiim` | object | no | The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it. |
 | <span id="status--service"></span>`service` | string | no | The Service that represents the receiver on the cluster network after the operator creates it. Empty until then. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. |
 

@@ -51,7 +51,7 @@ spec:
               # holds a Receiver to one of them. A second protocol is
               # one more entry in this list.
               x-kubernetes-validations:
-                - rule: "[has(self.denon)].exists_one(block, block)"
+                - rule: "[has(self.denon), has(self.wiim)].exists_one(block, block)"
                   message: "a Receiver names exactly one protocol block"
                 # A Denon reports a limit beside every volume, and that
                 # number moves under the room, so a Denon needs a
@@ -193,6 +193,21 @@ spec:
                           description: "One trim per channel, keyed by the channel's name, in display units where 0dB is neutral."
                           additionalProperties:
                             type: number
+                wiim:
+                  type: object
+                  required: [uuid]
+                  description: "The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTTPS on port 443. Every request is a GET to /httpapi.asp?command=<name>, and the device's own LinkPlay UUID is the identity the operator checks before it drives anything."
+                  properties:
+                    uuid:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                      description: "The device's LinkPlay UUID: twelve bytes of hex, the value getStatusEx returns as uuid and the first twelve bytes of the UUID mDNS and SSDP advertise. It is the identity, stable across a reboot and a DHCP lease change. The operator reads the device's uuid and compares it before it sends any command, so an address that moved never drives the wrong amp."
+                    address:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable."
                 volume:
                   type: object
                   description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max."
@@ -379,6 +394,10 @@ spec:
                 denon:
                   type: object
                   description: "The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it."
+                  x-kubernetes-preserve-unknown-fields: true
+                wiim:
+                  type: object
+                  description: "The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it."
                   x-kubernetes-preserve-unknown-fields: true
                 service:
                   type: string

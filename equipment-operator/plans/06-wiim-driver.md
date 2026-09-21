@@ -1,57 +1,131 @@
 # The WiiM driver
 
-Plan 06. A stub. The protocol is collected and the design is not
-written.
+Plan 06. Phase 1: the driver and its status. Phases 3 and 4 add
+control.
 
-## Where the spec is
+## The problem
 
-`wiim/AGENTS.md` holds everything gathered so far: the LAN-only
-verdict, the models, the transport, the command families, the identity
-and address rules, the findings from the live Amp in the studio, and
-the references. `wiim/` is the driver's home once this plan calls for
-code, and no code lives there yet.
+A Receiver reaches one piece of A/V equipment over the network. The
+first protocol is the Denon. A WiiM is the same equipment through a
+different protocol: it has power, volume, mute, and inputs, and it
+sits at the far end of the same cable. It belongs in the same resource
+and the same `Receiver` kind. It has no driver, so a cluster with WiiM
+amps cannot see them.
 
-## What is already known
+The WiiM also reports far more than the Denon does. A Denon status
+carries the zones and a settings snapshot. A WiiM reports its own
+identity, network, playback, now-playing, audio output, equalizer,
+timers, Bluetooth, presets, and controls. All of that is observable,
+and phase 1 is to observe it and report it.
 
-The device answers over HTTPS on port 443 with no authentication, so
-the operator reaches it with a GET and no token. Volume is an integer
-from 0 to 100 in whole steps, so `VolumeResolution` is 1. It has one
-zone. It has no standby command, so `SetPower` has no real command
-behind it. Its identity is the LinkPlay UUID, and its address comes
-from plan 05's host network or from a declared hint.
+## The design
 
-A `Receiver` would carry a `spec.wiim` block with the `uuid` and an
-optional `address`. `wiim/AGENTS.md` holds the rest.
+### A second protocol block
 
-## What this plan owes
+`spec` names the protocol by which block it carries. `spec.denon` and
+`spec.wiim` are siblings, and the schema holds a Receiver to exactly
+one of them. The shared fields do not change: `spec.volume`,
+`spec.inputs`, `spec.zones`, the two bus topics, and `spec.power` are
+the same for both protocols.
 
-The sections every other plan carries: the design, what was considered
-and set aside, the phases, and the verification.
+`spec.wiim` carries the identity and the address:
 
-Alongside them, these questions need another test or another model
-before the design can promise an answer.
+* `uuid` is the LinkPlay UUID, twelve bytes of hex. It is the identity
+  and the only key the operator trusts.
+* `address` is a hint, optional. The driver reads the device's own
+  `uuid` from `getStatusEx` and compares it before it sends any
+  command, so an address that moved never drives the wrong amp. A later
+  plan resolves the UUID to a current address by mDNS or SSDP
+  discovery, and the address hint becomes unnecessary.
 
-- **Power.** The API has no standby command, as the live test shows. A
-  driver can pause and resume playback, or it can report power as
-  always on and leave the standby to the device's own idle timer. The
-  plan has to choose between those two.
-- **Whether the local API answers when the WAN is down and the LAN is
-  up.** One owner reports that local DLNA playback works in that state
-  on a Pro Plus, and another reports that an Ultra asks for setup only
-  when the whole router is off. Both reports test a different thing,
-  and neither is proof for an Amp.
-- **Which commands each model answers.** One owner found `reboot`
-  works on a Mini and returns an error on an Amp, so a driver cannot
-  treat the command set as fixed across the line.
-- **AirPlay 2 support.** The model notes disagree, so a driver ignores
-  AirPlay and does not report it.
-- **The step size behind `vol++` and `vol--`.** WiiM's own list
-  measures one percent, and the Arylic document for the same stack
-  says six.
-- **Whether the UUID survives a factory reset or a major firmware
-  update.** It should, because the device advertises it as its UDN,
-  but no reset has been run here.
-- **Whether a cluster that spans network segments still reaches the
-  amps.** The house cluster was measured on 2026-09-20: a normal
-  flannel pod sees no LAN multicast, and a hostNetwork pod sees it.
-  Plan 05 gives the operator host network for this reason.
+The connection and the settings travel together, as they do for the
+Denon. The WiiM's settings surface is a later phase; phase 1 declares
+only the identity.
+
+### The driver
+
+`wiim/` implements `equipment.Driver`, the same contract `denon/`
+implements. The controller imports `equipment/` and neither driver.
+The unit builds the driver its protocol block names, and nothing in the
+shared controller names a protocol type beyond that branch.
+
+The transport is unauthenticated HTTPS GET to
+`https://<address>/httpapi.asp?command=<name>[:<args>]`. Every request
+is a GET, including the setters. The API is stateless, so a driver
+holds no session. The TLS certificate is self-signed, so the client
+skips verification.
+
+The driver polls. Each poll reads the command set, folds the answers
+into its own state, and reports an event. A retrofit to the device's
+UPnP GENA event path is a later phase; polling is enough for a status.
+
+### The status
+
+`status.wiim` is a strongly typed snapshot in the device's own units,
+the way `status.denon` is the Denon's. It is grouped: the device and
+its identity, the network, the playback, the current track, the audio
+output, the equalizer, the timers, Bluetooth, presets, and the
+controls. `wiim/AGENTS.md` records the command behind every field and
+names the source that documents it.
+
+The common `status.zones` block still carries the normalized contract:
+one `main` zone with power, input, mute, and volume.
+
+Power is always `on`. A WiiM has no standby command over the API; its
+only power control is an idle timer at the device, and a driver cannot
+reach it. The alternative, reading pause as standby, was set aside. A
+driver that mapped power onto play and pause would claim a standby the
+device does not have, and it would start or stop playback, which is the
+media session's job and not the receiver's.
+
+The driver reports volume as a whole step from 0 to 100, so
+`VolumeResolution` is 1. The input is the `mode` the player reports,
+mapped to the input names the amp carries.
+
+### What phase 1 leaves out
+
+* Control declared in the spec. Volume, input, mute, and sleep are on
+  the driver's `equipment.Driver` methods already, but no `spec.wiim`
+  settings block and no declarative field beyond neither is built. The
+  driver answers its setters for the phases that follow.
+* The message bus. The settings and commands topics are on the
+  Receiver already; the WiiM handlers are a later phase.
+* Discovery. Host network and the UUID-to-address lookup are plan 05,
+  and phase 1 declares the address hint instead.
+
+## Phases
+
+1. The driver and its status. `spec.wiim` with the identity, the
+   polling driver, `status.wiim`, the CRD, and three amps declared on
+   the house cluster from a development build. This is the built phase.
+2. Stop for review.
+3. Control declared in the spec: a `spec.wiim.settings` block for the
+   slow-moving settings, and the declarative power-off and volume.
+4. Control over the message bus for the realtime integration with the
+   media system.
+
+## Verification
+
+Phase 1 is proved on the house cluster, which has three WiiM amps. The
+operator runs from a development build at a pinned commit, and the
+three amps are declared as Receivers with their UUIDs and addresses.
+Each receiver reports `Reachable: True`, a `status.zones.main` entry,
+and a populated `status.wiim`. The three devices were read directly
+first, so the parser is written against what the firmware answers and
+not against the collected notes alone.
+
+The fake-device tests pin the parse of every command family. A
+transcript from a model that answers differently turns a family
+unproven and marks it in `wiim/AGENTS.md`.
+
+## What this leaves for later
+
+* The settings surface as a control vocabulary: the equalizer, the
+  balance, the output mode, the subwoofer, the device name, the lights,
+  the buttons, and the alarms.
+* The realtime path: UPnP GENA eventing in place of polling, and the
+  media session's use of the bus topics.
+* Discovery, and the host network plan 05 gives it.
+* Which commands each model answers. One owner found `reboot` works on
+  a Mini and fails on an Amp, so the command set is not fixed across
+  the line.

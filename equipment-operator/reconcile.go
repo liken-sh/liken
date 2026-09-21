@@ -21,6 +21,7 @@ import (
 
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/equipment-operator/wiim"
 )
 
 // How often the loop reconciles with nothing to prompt it.
@@ -42,6 +43,7 @@ type receiverUnit struct {
 	now           func() time.Time
 	driver        equipment.Driver
 	denonClient   *denon.Client
+	wiimClient    *wiim.Client
 	readings      *metrics
 	cancel        context.CancelFunc
 	dirty         chan struct{}
@@ -118,8 +120,8 @@ func (u *receiverUnit) write() {
 	// what a person reads in status.
 	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
 
-	settings := u.denonClient.Settings()
-	status := buildReceiverStatus(state, &settings, u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
+	settings := u.denonSettings()
+	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}
@@ -227,6 +229,26 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 	u.applyPower(power)
 }
 
+// denonSettings answers the last settings a Denon reported, and nil for
+// a receiver another protocol drives.
+func (u *receiverUnit) denonSettings() *denon.Settings {
+	if u.denonClient == nil {
+		return nil
+	}
+	settings := u.denonClient.Settings()
+	return &settings
+}
+
+// wiimStatus answers the last snapshot a WiiM reported, and nil for a
+// receiver another protocol drives.
+func (u *receiverUnit) wiimStatus() *wiim.Status {
+	if u.wiimClient == nil {
+		return nil
+	}
+	status := u.wiimClient.Status()
+	return &status
+}
+
 // setSettings drives the receiver to the settings a person declared.
 // A declared value is enforced: when the settings block changes, every
 // declared field is re-sent on purpose, so a value declared in the spec
@@ -240,6 +262,9 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 // saw. An apply error is logged and not recorded, so the next pass
 // tries again.
 func (u *receiverUnit) setSettings(want denon.Settings) {
+	if u.denonClient == nil {
+		return
+	}
 	if u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
@@ -405,6 +430,9 @@ func (u *receiverUnit) handleSettings(payload []byte) {
 	if err := json.Unmarshal(payload, &message); err != nil || message.Setting == "" {
 		return
 	}
+	if u.denonClient == nil {
+		return
+	}
 	if err := u.denonClient.Set(message.Setting, message.Value); err != nil {
 		fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
 		return
@@ -429,6 +457,9 @@ func (u *receiverUnit) handleCommand(payload []byte) {
 	}
 	if message.Command == commandEnsureInput {
 		u.ensureInput()
+		return
+	}
+	if u.denonClient == nil {
 		return
 	}
 	if err := u.denonClient.Do(message.Command, message.Args); err != nil {
@@ -535,7 +566,7 @@ func (c *controller) doPass(ctx context.Context) error {
 	live := map[string]bool{}
 	for index := range list.Items {
 		receiver := &list.Items[index]
-		if receiver.Spec.Denon == nil {
+		if receiver.Spec.Denon == nil && receiver.Spec.Wiim == nil {
 			continue
 		}
 		live[receiver.Metadata.Name] = true
@@ -557,7 +588,7 @@ func (c *controller) doPass(ctx context.Context) error {
 func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
-	if held && (unit.address != receiver.Spec.Denon.Address ||
+	if held && (unit.address != protocolAddress(&receiver.Spec) ||
 		unit.settingsTopic != receiver.Spec.SettingsTopic ||
 		unit.commandsTopic != receiver.Spec.CommandsTopic) {
 		unit.stop()
@@ -572,16 +603,31 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.setPower(receiver.Spec.Power)
-	unit.setSettings(receiver.Spec.Denon.Settings)
+	if receiver.Spec.Denon != nil {
+		unit.setSettings(receiver.Spec.Denon.Settings)
+	}
 	unit.setZones(receiver.Spec.Zones)
 	unit.setSession(ctx, receiver.Spec.Session)
+}
+
+// protocolAddress is the address the receiver's protocol block declares.
+// A change to it is a different receiver wiring, so the unit is
+// replaced and not redialled.
+func protocolAddress(spec *ReceiverSpec) string {
+	if spec.Denon != nil {
+		return spec.Denon.Address
+	}
+	if spec.Wiim != nil {
+		return spec.Wiim.Address
+	}
+	return ""
 }
 
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
 		name:          receiver.Metadata.Name,
-		address:       receiver.Spec.Denon.Address,
+		address:       protocolAddress(&receiver.Spec),
 		settingsTopic: receiver.Spec.SettingsTopic,
 		commandsTopic: receiver.Spec.CommandsTopic,
 		client:        c.client,
@@ -593,10 +639,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	}
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
-	client := denon.NewClient(receiver.Spec.Denon.Address, unit.observe)
-	client.Reporter = c.readings.reportCommand
-	unit.driver = client
-	unit.denonClient = client
+	unit.startDriver(receiver, c.readings.reportCommand)
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
@@ -607,6 +650,25 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	// reached it yet, before any line arrives.
 	poke(unit.dirty)
 	return unit
+}
+
+// startDriver builds the driver the receiver's protocol block names and
+// points the unit at it. A Receiver names exactly one protocol block, so
+// the choice is a branch and not a table.
+func (u *receiverUnit) startDriver(receiver *Receiver, report func(string)) {
+	switch {
+	case receiver.Spec.Denon != nil:
+		client := denon.NewClient(receiver.Spec.Denon.Address, u.observe)
+		client.Reporter = report
+		u.driver = client
+		u.denonClient = client
+	case receiver.Spec.Wiim != nil:
+		client := wiim.NewClient(receiver.Spec.Wiim.Address, u.observe)
+		client.UUID = receiver.Spec.Wiim.UUID
+		client.Reporter = report
+		u.driver = client
+		u.wiimClient = client
+	}
 }
 
 // run reconciles once before any event arrives, then on every wake and
