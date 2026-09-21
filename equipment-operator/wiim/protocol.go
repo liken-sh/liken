@@ -173,47 +173,59 @@ func atof(value string) (float64, bool) {
 	return number, true
 }
 
+// flexString reads a value the device sends either as a JSON string or
+// as a bare number, and holds it as text. The same field is a string on
+// one firmware and a number on another, and a struct that insists on one
+// shape fails the whole answer over a single field.
+type flexString string
+
+// UnmarshalJSON reads the value and strips the quotes a string carries.
+func (f *flexString) UnmarshalJSON(data []byte) error {
+	*f = flexString(strings.Trim(strings.TrimSpace(string(data)), `"`))
+	return nil
+}
+
 // statusEx is the device block getStatusEx answers.
 type statusEx struct {
-	Language             string `json:"language"`
-	DeviceName           string `json:"DeviceName"`
-	GroupName            string `json:"GroupName"`
-	SSID                 string `json:"ssid"`
-	Group                string `json:"group"`
-	Firmware             string `json:"firmware"`
-	Build                string `json:"build"`
-	Project              string `json:"project"`
-	Release              string `json:"Release"`
-	Hardware             string `json:"hardware"`
-	PCBVersion           string `json:"PCB_version"`
-	MCUVer               string `json:"mcu_ver"`
-	HDMIVer              string `json:"hdmi_ver"`
-	UbootVer             string `json:"uboot_verinfo"`
-	UUID                 string `json:"uuid"`
-	MAC                  string `json:"MAC"`
-	BTMAC                string `json:"BTMAC"`
-	APMAC                string `json:"AP_MAC"`
-	ETHMAC               string `json:"ETH_MAC"`
-	TempUUID             string `json:"temp_uuid"`
-	UPnPUUID             string `json:"upnp_uuid"`
-	Internet             string `json:"internet"`
-	Date                 string `json:"date"`
-	Time                 string `json:"time"`
-	Timezone             string `json:"tz"`
-	TimezoneID           string `json:"app_timezone_id"`
-	PrivacyMode          string `json:"privacy_mode"`
-	InitialConfiguration string `json:"InitialConfiguration"`
-	CommunicationPort    string `json:"communication_port"`
-	CastEnable           string `json:"cast_enable"`
-	PresetKey            string `json:"preset_key"`
-	MQTTSupport          string `json:"mqtt_support"`
-	AudioCast            string `json:"audiocast"`
-	MaxVolume            string `json:"max_volume"`
-	VolumeControl        string `json:"volume_control"`
-	EQSupport            string `json:"EQ_support"`
-	EQVersion            string `json:"EQVersion"`
-	Security             string `json:"security"`
-	SecurityVersion      string `json:"security_version"`
+	Language             string     `json:"language"`
+	DeviceName           string     `json:"DeviceName"`
+	GroupName            string     `json:"GroupName"`
+	SSID                 string     `json:"ssid"`
+	Group                string     `json:"group"`
+	Firmware             string     `json:"firmware"`
+	Build                string     `json:"build"`
+	Project              string     `json:"project"`
+	Release              string     `json:"Release"`
+	Hardware             string     `json:"hardware"`
+	PCBVersion           string     `json:"PCB_version"`
+	MCUVer               string     `json:"mcu_ver"`
+	HDMIVer              string     `json:"hdmi_ver"`
+	UbootVer             string     `json:"uboot_verinfo"`
+	UUID                 string     `json:"uuid"`
+	MAC                  string     `json:"MAC"`
+	BTMAC                string     `json:"BTMAC"`
+	APMAC                string     `json:"AP_MAC"`
+	ETHMAC               string     `json:"ETH_MAC"`
+	TempUUID             string     `json:"temp_uuid"`
+	UPnPUUID             string     `json:"upnp_uuid"`
+	Internet             string     `json:"internet"`
+	Date                 string     `json:"date"`
+	Time                 string     `json:"time"`
+	Timezone             string     `json:"tz"`
+	TimezoneID           string     `json:"app_timezone_id"`
+	PrivacyMode          string     `json:"privacy_mode"`
+	InitialConfiguration string     `json:"InitialConfiguration"`
+	CommunicationPort    string     `json:"communication_port"`
+	CastEnable           flexString `json:"cast_enable"`
+	PresetKey            string     `json:"preset_key"`
+	MQTTSupport          string     `json:"mqtt_support"`
+	AudioCast            string     `json:"audiocast"`
+	MaxVolume            string     `json:"max_volume"`
+	VolumeControl        string     `json:"volume_control"`
+	EQSupport            string     `json:"EQ_support"`
+	EQVersion            string     `json:"EQVersion"`
+	Security             string     `json:"security"`
+	SecurityVersion      string     `json:"security_version"`
 	SecurityCapabilities struct {
 		Ver    string `json:"ver"`
 		AESVer string `json:"aes_ver"`

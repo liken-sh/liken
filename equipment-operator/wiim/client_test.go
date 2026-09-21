@@ -34,7 +34,7 @@ func mustSucceed(t *testing.T, err error) {
 // The canned answers the fake amp serves. The values are invented; the
 // field names and the shapes are what the live amps answer.
 const (
-	statusExJSON = `{ "language":"en_us", "DeviceName":"Test Amp", "GroupName":"Test Amp", "ssid":"Test Amp", "group":"0", "firmware":"Linkplay.5.2.1", "build":"release", "project":"WiiM_Amp_4layer", "Release":"20260101", "hardware":"AmlogicA113", "PCB_version":"7", "mcu_ver":"0", "hdmi_ver":"100", "uboot_verinfo":"250928.100906", "uuid":"FF98F2F7AABBCCDDEEFF0011", "MAC":"00:11:22:33:44:55", "BTMAC":"00:11:22:33:44:56", "AP_MAC":"00:11:22:33:44:57", "ETH_MAC":"00:11:22:33:44:58", "temp_uuid":"AABB", "upnp_uuid":"uuid:FF98F2F7-AABB-CCDD-EEFF-0011FF98F2F7", "internet":"1", "date":"2026:09:21", "time":"12:00:00", "tz":"-4.0", "app_timezone_id":"America/New_York", "privacy_mode":"0", "InitialConfiguration":"1", "communication_port":"8819", "cast_enable":"1", "preset_key":"12", "mqtt_support":"1", "audiocast":"1", "max_volume":"100", "volume_control":"0", "EQ_support":"Eq10HP_ver_2.0", "EQVersion":"4.3", "security":"https/2.0", "security_version":"3.0", "security_capabilities":{"ver":"1.0","aes_ver":"1.0"}, "apcli0":"0.0.0.0", "eth0":"192.0.2.10", "essid":"54657374", "WifiChannel":"0", "RSSI":"0", "BSSID":"", "wlanSnr":"0", "wlanNoise":"0", "wlanFreq":"0", "wlanDataRate":"0", "temperature_cpu":"32", "temperature_tmp102":"27", "BleRemoteControl":"1", "BleRemoteConnected":"1", "BleRemoteBatterylevel":"100", "BleRemoteRSSI":"-57", "BleRemoteVersion":"0054", "BleRemote_dev_state":"normal" }`
+	statusExJSON = `{ "language":"en_us", "DeviceName":"Test Amp", "GroupName":"Test Amp", "ssid":"Test Amp", "group":"0", "firmware":"Linkplay.5.2.1", "build":"release", "project":"WiiM_Amp_4layer", "Release":"20260101", "hardware":"AmlogicA113", "PCB_version":"7", "mcu_ver":"0", "hdmi_ver":"100", "uboot_verinfo":"250928.100906", "uuid":"FF98F2F7AABBCCDDEEFF0011", "MAC":"00:11:22:33:44:55", "BTMAC":"00:11:22:33:44:56", "AP_MAC":"00:11:22:33:44:57", "ETH_MAC":"00:11:22:33:44:58", "temp_uuid":"AABB", "upnp_uuid":"uuid:FF98F2F7-AABB-CCDD-EEFF-0011FF98F2F7", "internet":"1", "date":"2026:09:21", "time":"12:00:00", "tz":"-4.0", "app_timezone_id":"America/New_York", "privacy_mode":"0", "InitialConfiguration":"1", "communication_port":"8819", "cast_enable":1, "preset_key":"12", "mqtt_support":"1", "audiocast":"1", "max_volume":"100", "volume_control":"0", "EQ_support":"Eq10HP_ver_2.0", "EQVersion":"4.3", "security":"https/2.0", "security_version":"3.0", "security_capabilities":{"ver":"1.0","aes_ver":"1.0"}, "apcli0":"0.0.0.0", "eth0":"192.0.2.10", "essid":"54657374", "WifiChannel":"0", "RSSI":"0", "BSSID":"", "wlanSnr":"0", "wlanNoise":"0", "wlanFreq":"0", "wlanDataRate":"0", "temperature_cpu":"32", "temperature_tmp102":"27", "BleRemoteControl":"1", "BleRemoteConnected":"1", "BleRemoteBatterylevel":"100", "BleRemoteRSSI":"-57", "BleRemoteVersion":"0054", "BleRemote_dev_state":"normal" }`
 	playerJSON   = `{"type":"0","ch":"0","mode":"43","loop":"4","eq":"0","vendor":"","status":"play","curpos":"1000","offset_pts":"0","totlen":"2000","Title":"486176652061204369676172","Artist":"50696E6B20466C6F7964","Album":"5769736820596F7520576572652048657265","alarmflag":"0","plicount":"0","plicurr":"0","vol":"31","mute":"0"}`
 	metaJSON     = `{ "metaData": { "album":"Wish You Were Here", "title":"Have a Cigar", "subtitle":"unknown", "artist":"Pink Floyd", "albumArtURI":"https://example.invalid/art.jpg", "sampleRate":"44100", "bitDepth":"24", "bitRate":"1525", "trackId":"abc" } }`
 )
@@ -484,6 +484,27 @@ func TestSleepMinutes(t *testing.T) {
 func TestCommandURLFillsThePort(t *testing.T) {
 	mustMatch(t, commandURL("192.0.2.1", "getStatusEx"), "https://192.0.2.1:443/httpapi.asp?command=getStatusEx")
 	mustMatch(t, commandURL("192.0.2.1:8443", "getStatusEx"), "https://192.0.2.1:8443/httpapi.asp?command=getStatusEx")
+}
+
+// A field the device sends as a number on one firmware and a string on
+// another reads either way.
+func TestFlexStringReadsEitherShape(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"number", `1`, "1"},
+		{"string", `"1"`, "1"},
+		{"zero", `0`, "0"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			var value flexString
+			mustSucceed(t, value.UnmarshalJSON([]byte(one.body)))
+			mustMatch(t, string(value), one.want)
+		})
+	}
 }
 
 func TestModeForInput(t *testing.T) {
