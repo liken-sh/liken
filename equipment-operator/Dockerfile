@@ -14,6 +14,7 @@ COPY *.go ./
 # leaves them out.
 COPY denon ./denon
 COPY equipment ./equipment
+COPY wiim ./wiim
 # The version reaches the binary through -ldflags, so liken_build_info
 # names the release actually running and not dev.
 ARG VERSION=dev
