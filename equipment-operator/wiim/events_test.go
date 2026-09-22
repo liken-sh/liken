@@ -22,13 +22,14 @@ import (
 type fakeEvents struct {
 	server *httptest.Server
 
-	mutex        sync.Mutex
-	callbacks    map[string]string
-	sids         map[string]string
-	refuse       bool
-	noSID        bool
-	renewals     int
-	unsubscribed []string
+	mutex               sync.Mutex
+	callbacks           map[string]string
+	sids                map[string]string
+	refuse              bool
+	noSID               bool
+	closeAfterSubscribe bool
+	renewals            int
+	unsubscribed        []string
 }
 
 func startFakeEvents(t *testing.T) *fakeEvents {
@@ -69,7 +70,15 @@ func (f *fakeEvents) handle(w http.ResponseWriter, r *http.Request) {
 		f.mutex.Lock()
 		f.callbacks[r.URL.Path] = callback
 		f.sids[r.URL.Path] = sid
+		closeConn := f.closeAfterSubscribe
 		f.mutex.Unlock()
+		if closeConn {
+			if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+				fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nSID: %s\r\nTIMEOUT: Second-1800\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n", sid)
+				conn.Close()
+				return
+			}
+		}
 		w.Header().Set("SID", sid)
 		w.Header().Set("TIMEOUT", "Second-1800")
 	case "UNSUBSCRIBE":
@@ -443,4 +452,35 @@ func TestAVolumeFieldForAnotherChannelIsIgnored(t *testing.T) {
 func TestAnUnknownTransportStateKeepsItsWord(t *testing.T) {
 	mustMatch(t, playbackStatusFor("TRANSITIONING"), "transitioning")
 	mustMatch(t, playbackStatusFor("NO_MEDIA_PRESENT"), "no_media_present")
+}
+
+// The device claims a keep-alive and then closes the connection after
+// it answers a SUBSCRIBE, so the second subscription cannot reuse that
+// connection. Every subscription opens its own.
+func TestASubscriptionOpensItsOwnConnection(t *testing.T) {
+	events := startFakeEvents(t)
+	events.closeAfterSubscribe = true
+	client := NewClient("127.0.0.1:1", nil)
+	client.upnpBase = events.server.URL
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.startEvents(ctx)
+	defer client.stopEvents()
+
+	client.manageSubscriptions(ctx)
+	mustMatch(t, client.subscribed(renderControlPath), true)
+	mustMatch(t, client.subscribed(avTransportPath), true)
+}
+
+// The device closes the connection after it answers a SUBSCRIBE, so the
+// subscription client must open its own for every request. Go's
+// transport retries a request on a reused connection that failed, which
+// hides the close in a test but not at the device.
+func TestTheSubscriptionClientOpensEachConnection(t *testing.T) {
+	client := NewClient("127.0.0.1:1", nil)
+	transport, ok := client.upnp.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("the subscription client holds %T, not an http.Transport", client.upnp.Transport)
+	}
+	mustMatch(t, transport.DisableKeepAlives, true)
 }

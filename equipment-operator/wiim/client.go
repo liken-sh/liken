@@ -53,6 +53,12 @@ type Client struct {
 	// subscriptions live. It is a fixed port beside the control port.
 	upnpBase string
 
+	// upnp is the client for the subscription requests. The device
+	// closes the connection after it answers a SUBSCRIBE, so every
+	// request opens its own rather than reusing one the device has
+	// already closed.
+	upnp *http.Client
+
 	// Reporter counts the outcome of every command this client sends. A
 	// nil Reporter is a no-op.
 	Reporter func(status string)
@@ -89,6 +95,10 @@ func NewClient(address string, listener func(equipment.Event)) *Client {
 		listener:      listener,
 		upnpBase:      upnpBaseFor(address),
 		subscriptions: map[string]*subscription{},
+		upnp: &http.Client{
+			Timeout:   requestTimeout,
+			Transport: &http.Transport{DisableKeepAlives: true},
+		},
 		http: &http.Client{
 			Timeout: requestTimeout,
 			Transport: &http.Transport{

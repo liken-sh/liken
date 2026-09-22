@@ -88,6 +88,10 @@ func upnpBaseFor(address string) string {
 // bind reports once and leaves the client on the poll, because a
 // cluster with no reachable callback still reads every value.
 func (c *Client) startEvents(ctx context.Context) {
+	if strings.TrimSpace(c.address) == "" {
+		c.reportEventLoss("no address to reach the device on")
+		return
+	}
 	host := localAddress(c.address)
 	if host == "" {
 		c.reportEventLoss("cannot find a local address the device reaches")
@@ -191,7 +195,7 @@ func (c *Client) subscribe(ctx context.Context, server *eventServer, path string
 	req.Header.Set("CALLBACK", "<"+server.url()+">")
 	req.Header.Set("NT", "upnp:event")
 	req.Header.Set("TIMEOUT", "Second-"+fmt.Sprint(subscribeSeconds))
-	resp, err := c.http.Do(req)
+	resp, err := c.upnp.Do(req)
 	if err != nil {
 		c.reportEventLoss("the device refused the subscription for %s: %v", path, err)
 		c.report(CommandFailed)
@@ -229,7 +233,7 @@ func (c *Client) renew(ctx context.Context, server *eventServer, path string) {
 	}
 	req.Header.Set("SID", sub.sid)
 	req.Header.Set("TIMEOUT", "Second-"+fmt.Sprint(subscribeSeconds))
-	resp, err := c.http.Do(req)
+	resp, err := c.upnp.Do(req)
 	if err != nil {
 		c.dropSubscription(path)
 		c.report(CommandFailed)
@@ -263,7 +267,7 @@ func (c *Client) unsubscribe() {
 			continue
 		}
 		req.Header.Set("SID", sub.sid)
-		resp, err := c.http.Do(req)
+		resp, err := c.upnp.Do(req)
 		if err != nil {
 			continue
 		}
