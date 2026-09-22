@@ -295,10 +295,22 @@ func parseSSDP(response []byte) (Device, bool) {
 	headers := httpHeaders(response)
 	uuid := uuidFromUSN(headers["usn"])
 	address := hostFromLocation(headers["location"])
-	if uuid == "" || address == "" {
+	if uuid == "" || address == "" || !isLinkPlayUUID(uuid) {
 		return Device{}, false
 	}
 	return Device{UUID: normalizeUUID(uuid), Address: address}, true
+}
+
+// isLinkPlayUUID answers whether an SSDP uuid belongs to a LinkPlay
+// device. The mDNS browse already names the LinkPlay service, but an
+// SSDP MediaRenderer search matches every renderer on the LAN, so the
+// answer is held to the vendor bytes a LinkPlay uuid repeats after its
+// twelve bytes of identity. Without the check a Denon renderer answers
+// and is taken for a WiiM.
+func isLinkPlayUUID(value string) bool {
+	clean := strings.ToUpper(value)
+	clean = strings.NewReplacer("-", "", ":", "").Replace(clean)
+	return len(clean) >= 32 && strings.HasSuffix(clean, "FF98F2F7")
 }
 
 // httpHeaders reads the header block of an HTTP response into a map

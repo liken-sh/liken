@@ -1,7 +1,9 @@
-# The operator's identity in the cluster, and deliberately little
-# more. It reads every Receiver, writes each one's status, and owns
-# one spec field, power, which it flips when the room's remote toggles
-# the equipment.
+# The operator's identity in the cluster. It reads every Receiver,
+# writes each one's status, owns one spec field (power), and creates
+# and deletes the Receivers discovery makes for amps no person has
+# claimed. It never creates a Receiver for a wired protocol or one a
+# person declared: discovery defers to a claimed identity and prunes
+# only the objects that carry its own marker label.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -17,11 +19,14 @@ rules:
   # The receivers. The watch is the wake signal; every pass re-reads
   # with a list. patch lets this operator own spec.power through
   # server-side apply, whose body states that one field and nothing
-  # else. No create and no delete: a person declares a Receiver, and
-  # this operator only reads one.
+  # else, and it creates and deletes the Receivers discovery owns. It
+  # creates only for an amp no Receiver claims and deletes only an
+  # object carrying its own marker label, so a person's Receiver is
+  # never created over and never deleted. No create on receivers/status:
+  # status travels through patch alone.
   - apiGroups: [equipment.liken.sh]
     resources: [receivers]
-    verbs: [get, list, watch, patch]
+    verbs: [get, list, watch, patch, create, delete]
   # The status half, written with its own patch. The API server's
   # subresource split keeps the status write out of the spec, and the
   # operator's apply body states spec.power alone, so no other declared

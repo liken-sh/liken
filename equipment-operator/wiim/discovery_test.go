@@ -157,6 +157,36 @@ func TestParseSSDPRejectsWithoutIdentityOrAddress(t *testing.T) {
 	}
 }
 
+// An SSDP MediaRenderer that is not a LinkPlay device answers the same
+// search and must not be taken for a WiiM.
+func TestParseSSDPRejectsANonLinkPlayRenderer(t *testing.T) {
+	response := []byte("HTTP/1.1 200 OK\r\n" +
+		"LOCATION: http://192.0.2.20:60006/desc.xml\r\n" +
+		"USN: uuid:508945DC-67F5-1B40-0080-000678F69EB2::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
+	if _, ok := parseSSDP(response); ok {
+		t.Fatal("a non-LinkPlay renderer parsed as a WiiM")
+	}
+}
+
+func TestIsLinkPlayUUID(t *testing.T) {
+	cases := []struct {
+		name string
+		uuid string
+		want bool
+	}{
+		{"dashed", "FF98F2F7-AABB-CCDD-EEFF-0011FF98F2F7", true},
+		{"bare", "FF98F2F7AABBCCDDEEFF0011FF98F2F7", true},
+		{"lowercase", "ff98f2f7-aabb-ccdd-eeff-0011ff98f2f7", true},
+		{"another vendor", "508945DC-67F5-1B40-0080-000678F69EB2", false},
+		{"too short", "FF98F2F7AABBCCDDEEFF0011", false},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, isLinkPlayUUID(one.uuid), one.want)
+		})
+	}
+}
+
 // The merge fills a missing name or address from whichever source
 // carries it, and keeps one device per identity.
 func TestMergeFillsMissingFields(t *testing.T) {
