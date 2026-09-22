@@ -101,7 +101,8 @@ func TestDiscoveryCreatesUnclaimedAndDefersToAPerson(t *testing.T) {
 		{UUID: secondUUID, Address: "192.0.2.2"},
 	}
 	held := newDiscovery(client, func() {})
-	if err := held.reconcile(found); err != nil {
+	held.store(found)
+	if err := held.reconcile(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +120,8 @@ func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
 	)
 
 	held := newDiscovery(client, func() {})
-	if err := held.reconcile([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}}); err != nil {
+	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
+	if err := held.reconcile(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,7 +134,10 @@ func TestDiscoveryPrunesItsOwnWhenTheAmpIsGone(t *testing.T) {
 	api.list = receiversWith(discoveredReceiver(strings.ToLower(secondUUID), secondUUID))
 
 	held := newDiscovery(client, func() {})
-	if err := held.reconcile(nil); err != nil {
+	for range discoveryMisses {
+		held.store(nil)
+	}
+	if err := held.reconcile(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,7 +149,8 @@ func TestDiscoveryKeepsItsOwnWhileTheAmpStands(t *testing.T) {
 	api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
 
 	held := newDiscovery(client, func() {})
-	if err := held.reconcile([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}}); err != nil {
+	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
+	if err := held.reconcile(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,6 +165,23 @@ func TestDiscoveryAddressNormalizesTheIdentity(t *testing.T) {
 	mustMatch(t, held.address(firstUUID), "192.0.2.1")
 	mustMatch(t, held.address("ff98f2f7-8136-ce45-a780-d8a1ff98f2f7"), "192.0.2.1")
 	mustMatch(t, held.address(secondUUID), "")
+}
+
+// One missed search is multicast, not an amp that left: the address
+// and the Receiver both stand through it.
+func TestDiscoveryKeepsAnAmpThroughOneMissedSearch(t *testing.T) {
+	api, client := startDiscoveryAPI(t)
+	api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
+
+	held := newDiscovery(client, func() {})
+	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
+	held.store(nil)
+
+	mustMatch(t, held.address(firstUUID), "192.0.2.1")
+	if err := held.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	mustDeepEqual(t, api.deletedNames(), []string(nil))
 }
 
 func TestDiscoveredNameIsTheLowercasedIdentity(t *testing.T) {

@@ -31,17 +31,31 @@ var (
 )
 
 // discovery holds the amps the operator last found and reconciles the
-// Receivers it owns for them.
+// Receivers it owns for them. An amp a search missed keeps its last
+// address and its Receiver until it has missed discoveryMisses
+// searches, because multicast drops a device for one search and the
+// amp has not moved.
 type discovery struct {
 	client *Client
 	wake   func()
 
 	mutex   sync.Mutex
 	devices map[string]wiim.Device
+	misses  map[string]int
 }
 
+// discoveryMisses is how many searches in a row may miss an amp before
+// the operator forgets it. One missed search is multicast, not an amp
+// that left.
+const discoveryMisses = 3
+
 func newDiscovery(client *Client, wake func()) *discovery {
-	return &discovery{client: client, wake: wake, devices: map[string]wiim.Device{}}
+	return &discovery{
+		client:  client,
+		wake:    wake,
+		devices: map[string]wiim.Device{},
+		misses:  map[string]int{},
+	}
 }
 
 // address answers the address the operator last found for one identity,
@@ -69,22 +83,47 @@ func (d *discovery) run(ctx context.Context) {
 func (d *discovery) once(ctx context.Context) {
 	found := discover(ctx, discoveryWindow)
 	d.store(found)
-	if err := d.reconcile(found); err != nil {
+	if err := d.reconcile(); err != nil {
 		fmt.Fprintf(os.Stderr, "reconciling discovered receivers: %v\n", err)
 	}
 	d.wake()
 }
 
-// store replaces the found set, so an amp that stopped answering drops
-// out of the next address lookup.
+// store folds one search into the devices the operator holds. An amp
+// the search found takes its address and clears its miss count. An amp
+// the search missed keeps the address it had, and is forgotten once it
+// has missed discoveryMisses searches.
 func (d *discovery) store(found []wiim.Device) {
-	devices := make(map[string]wiim.Device, len(found))
-	for _, device := range found {
-		devices[device.UUID] = device
-	}
+	seen := make(map[string]bool, len(found))
 	d.mutex.Lock()
-	d.devices = devices
-	d.mutex.Unlock()
+	defer d.mutex.Unlock()
+	for _, device := range found {
+		seen[device.UUID] = true
+		d.devices[device.UUID] = device
+		d.misses[device.UUID] = 0
+	}
+	for uuid := range d.devices {
+		if seen[uuid] {
+			continue
+		}
+		d.misses[uuid]++
+		if d.misses[uuid] >= discoveryMisses {
+			delete(d.devices, uuid)
+			delete(d.misses, uuid)
+		}
+	}
+}
+
+// held copies the devices the operator holds, which keep an amp through
+// a search that missed it.
+func (d *discovery) held() []wiim.Device {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	devices := make([]wiim.Device, 0, len(d.devices))
+	for _, device := range d.devices {
+		devices = append(devices, device)
+	}
+	return devices
 }
 
 // discoveredName is the object name the operator gives an amp it found:
@@ -97,7 +136,7 @@ func discoveredName(uuid string) string {
 // reconcile creates a Receiver for every discovered amp no Receiver
 // claims, and prunes the Receivers the operator owns whose amp is gone
 // or whose identity a person's Receiver now claims.
-func (d *discovery) reconcile(found []wiim.Device) error {
+func (d *discovery) reconcile() error {
 	list, err := ListReceivers(d.client)
 	if err != nil {
 		return err
@@ -116,9 +155,13 @@ func (d *discovery) reconcile(found []wiim.Device) error {
 		}
 	}
 
-	foundSet := map[string]bool{}
-	for _, device := range found {
-		foundSet[device.UUID] = true
+	// The reconcile follows what the operator holds, not the last search
+	// alone, so an amp one search missed keeps the Receiver the operator
+	// made for it.
+	held := d.held()
+	heldSet := map[string]bool{}
+	for _, device := range held {
+		heldSet[device.UUID] = true
 		if len(claimants[device.UUID]) > 0 {
 			// A Receiver already names this amp, so discovery creates
 			// nothing and defers to what stands.
@@ -130,7 +173,7 @@ func (d *discovery) reconcile(found []wiim.Device) error {
 	}
 
 	for uuid, receiver := range owned {
-		if foundSet[uuid] && !claimedByOther(claimants[uuid], receiver.Metadata.Name) {
+		if heldSet[uuid] && !claimedByOther(claimants[uuid], receiver.Metadata.Name) {
 			continue
 		}
 		if err := DeleteReceiver(d.client, receiver.Metadata.Name); err != nil {
