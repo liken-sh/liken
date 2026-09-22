@@ -31,4 +31,6 @@ comes from the work itself, and not from its runtime.
 The fact has two consumers in two repositories. This operator would
 hold it and the player in
 [`media-operator`](https://github.com/liken-sh/media-operator) would
-act on it, so the plan that answers this one spans both.
+act on it, so the plan that answers this one spans both. [Plan
+65](65-where-the-intro-marks-come-from.md) names where the marks come
+from.

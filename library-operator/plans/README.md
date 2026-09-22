@@ -108,6 +108,12 @@ they share, and plans 28 to 31 build them in order.
   stub. Nothing says where a work's story starts or ends. So a person
   skips an episode's recap and titles by hand, and a percentage of the
   runtime guesses where the credits start.
+* [65, Where the intro marks come
+  from](65-where-the-intro-marks-come-from.md). A stub. Plan 62's
+  missing fact gets its sources: the community databases that publish
+  intro, recap, and credits segments, and the audio fingerprint this
+  operator can compare across a season's episodes when no database
+  holds one.
 * [63, Where the room is in a franchise](63-where-the-room-is-in-a-franchise.md).
   A column of circles marks where the room and each person stand in
   the story, every held member carries a bar, and a press on a split
