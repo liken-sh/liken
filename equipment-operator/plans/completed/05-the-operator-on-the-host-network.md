@@ -1,6 +1,8 @@
 # The operator on the host network
 
-Plan 05.
+Plan 05. Built and drilled on the house cluster on 2026-09-22. The
+Deployment runs on the host network, discovery runs in the process, and
+the metrics listener moved to 9260.
 
 ## The problem
 

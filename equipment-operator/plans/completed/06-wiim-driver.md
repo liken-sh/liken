@@ -1,7 +1,9 @@
 # The WiiM driver
 
-Plan 06. Phase 1: the driver and its status. Phases 3 and 4 add
-control.
+Plan 06. Built and drilled on the house cluster on 2026-09-22. The
+driver, its status, discovery, the spec settings, and the message bus
+are built. The settings families the Amp will not confirm are [an open
+problem](../open-problems/the-wiim-settings-the-amp-will-not-confirm.md).
 
 ## The problem
 
