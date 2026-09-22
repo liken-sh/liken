@@ -358,6 +358,49 @@ func TestAChangedVolumeReachesTheListener(t *testing.T) {
 	}
 }
 
+// A setter takes the level it just sent, so a press moves the room
+// before the next poll and two presses in one poll window each count.
+func TestASetterTakesTheLevelItSent(t *testing.T) {
+	amp := startFakeAmp(t)
+	events := make(chan equipment.Event, 16)
+	client := amp.client(func(event equipment.Event) { events <- event })
+	client.poll(context.Background())
+	drainEvents(events)
+
+	if err := client.SetVolume(equipment.MainZone, 42); err != nil {
+		t.Fatal(err)
+	}
+	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 42)
+	select {
+	case event := <-events:
+		mustMatch(t, event.Field, equipment.EventVolume)
+	case <-time.After(time.Second):
+		t.Fatal("a taken volume reported nothing")
+	}
+
+	if err := client.SetMute(equipment.MainZone, true); err != nil {
+		t.Fatal(err)
+	}
+	mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+}
+
+// A setter the device refuses takes nothing, so the held state never
+// claims a level that did not land.
+func TestARefusedSetterTakesNothing(t *testing.T) {
+	amp := startFakeAmp(t)
+	client := amp.client(nil)
+	client.poll(context.Background())
+	before := client.State().Zones[equipment.MainZone].Volume
+
+	amp.mutex.Lock()
+	amp.setter = "unknown command"
+	amp.mutex.Unlock()
+	if err := client.SetVolume(equipment.MainZone, 42); err == nil {
+		t.Fatal("the device refused the set and the client reported no error")
+	}
+	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, before)
+}
+
 // Run keeps polling until its context ends.
 func TestRunPollsUntilTheContextEnds(t *testing.T) {
 	amp := startFakeAmp(t)

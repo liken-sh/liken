@@ -181,7 +181,42 @@ func (c *Client) publish(next Status) {
 	c.state = next
 	c.reachable = equipment.ConditionTrue
 	c.mutex.Unlock()
+	c.announce(previous, next, wasReachable)
+}
 
+// takeVolume folds the level the device was just told into the held
+// state, and takeMute folds the mute the same way. A poll reaches the
+// device at most once every interval, so without this a press computes
+// against a reading up to one interval old and two presses in that
+// window both move the room from the same place. The next poll carries
+// the device's own report and folds it as usual. A command the device
+// refuses returns before here, so a take never states a level that did
+// not land.
+func (c *Client) takeVolume(volume int) {
+	c.mutex.Lock()
+	previous := c.state
+	wasReachable := c.reachable
+	c.state.Playback.Volume = volume
+	next := c.state
+	c.mutex.Unlock()
+	c.announce(previous, next, wasReachable)
+}
+
+func (c *Client) takeMute(muted bool) {
+	c.mutex.Lock()
+	previous := c.state
+	wasReachable := c.reachable
+	c.state.Playback.Mute = muted
+	next := c.state
+	c.mutex.Unlock()
+	c.announce(previous, next, wasReachable)
+}
+
+// announce reports what a state change moved, from the fields the
+// equipment contract names. A poll and a command that takes the level
+// it just sent both run through here, so a press looks the same to the
+// session as a hand on the device.
+func (c *Client) announce(previous, next Status, wasReachable equipment.ConditionStatus) {
 	state := next.equipmentState(equipment.ConditionTrue)
 	before := previous.equipmentState(equipment.ConditionTrue)
 	beforeZone := before.Zones[equipment.MainZone]
@@ -706,7 +741,11 @@ func (c *Client) SetVolume(zone string, steps int) error {
 	if steps > volumeStepMax {
 		steps = volumeStepMax
 	}
-	return c.send(context.Background(), setVolumePrefix+strconv.Itoa(steps))
+	if err := c.send(context.Background(), setVolumePrefix+strconv.Itoa(steps)); err != nil {
+		return err
+	}
+	c.takeVolume(steps)
+	return nil
 }
 
 // SetMute sets the mute.
@@ -718,7 +757,11 @@ func (c *Client) SetMute(zone string, muted bool) error {
 	if muted {
 		value = "1"
 	}
-	return c.send(context.Background(), setMutePrefix+value)
+	if err := c.send(context.Background(), setMutePrefix+value); err != nil {
+		return err
+	}
+	c.takeMute(muted)
+	return nil
 }
 
 // SetSoundMode answers that the protocol carries no sound mode.
