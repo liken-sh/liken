@@ -660,3 +660,15 @@ func TestRunBacksOffWhenTheDeviceIsDown(t *testing.T) {
 
 	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
 }
+
+// The survey is not complete until one poll has read every family, so
+// the controller knows the device's own facts are in hand before it
+// applies a declared setting.
+func TestASurveyCompletesAfterOnePoll(t *testing.T) {
+	amp := startFakeAmp(t)
+	client := amp.client(nil)
+
+	mustMatch(t, client.Surveyed(), false)
+	client.poll(context.Background())
+	mustMatch(t, client.Surveyed(), true)
+}

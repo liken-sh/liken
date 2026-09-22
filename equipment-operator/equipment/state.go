@@ -106,6 +106,13 @@ type Driver interface {
 	// with Run.
 	State() State
 
+	// Surveyed answers whether the driver has completed its first read
+	// of the device's own facts. The operator applies a declared setting
+	// only after this, because a setting compared against a device that
+	// has not reported yet reads as a difference and sends the whole
+	// block.
+	Surveyed() bool
+
 	// VolumeResolution is the number of the driver's smallest steps in
 	// one display unit. The Denon reports half steps, so it answers 2.
 	VolumeResolution() int

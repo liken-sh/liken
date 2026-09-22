@@ -268,7 +268,11 @@ func (u *receiverUnit) setSettings(want denon.Settings) {
 	if u.denonClient == nil {
 		return
 	}
-	if u.driver.State().Reachable != equipment.ConditionTrue {
+	// A setting is compared against what the receiver reported, and a
+	// receiver the driver has not surveyed yet has reported nothing.
+	// Applying the diff then would send the whole block on every
+	// restart, so the apply waits for the survey.
+	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
 	observed := u.denonClient.Settings()
@@ -296,7 +300,7 @@ func (u *receiverUnit) settingsApplied() denon.Settings {
 // is sent again on the next pass, and a pass with no change sends
 // nothing. The two settings types never meet.
 func (u *receiverUnit) setWiimSettings(want wiim.Settings) {
-	if u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
 	observed := u.wiimClient.Settings()
@@ -333,7 +337,7 @@ func (u *receiverUnit) wiimSettingsApplied() wiim.Settings {
 // misconfiguration and is rejected rather than fought. An apply error
 // is logged and not recorded, so the next pass tries again.
 func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
-	if u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
 	// zonesApplied returns a copy, so this loop writes a fresh map that

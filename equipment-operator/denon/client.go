@@ -28,6 +28,11 @@ var (
 	silenceLimit = 75 * time.Second
 	minBackoff   = time.Second
 	maxBackoff   = 30 * time.Second
+
+	// surveyQuiet is how long the reply stream must stand still after
+	// the connect queries before the survey counts as complete. The
+	// replies arrive in one burst, so a quiet stretch ends it.
+	surveyQuiet = time.Second
 )
 
 // The write queue for one connection. It holds every connect query and
@@ -64,6 +69,10 @@ type Client struct {
 	mutex sync.Mutex
 	state denonState
 	out   chan string
+	// surveyed is set once the connect replies have stopped arriving, so
+	// the controller knows the receiver's own facts are in hand before
+	// it applies a declared setting.
+	surveyed bool
 }
 
 // NewClient builds a client for one address. The listener reports every
@@ -411,6 +420,10 @@ func (d *Client) writeLoop(ctx context.Context, conn net.Conn, out <-chan string
 // read deadline expires or the socket reports an error.
 func (d *Client) readLoop(conn net.Conn) (answered bool) {
 	reader := bufio.NewReader(conn)
+	// The connect queries were just written, and their replies arrive in
+	// one burst. The survey is complete once that burst stops.
+	survey := time.AfterFunc(surveyQuiet, d.recordSurveyed)
+	defer survey.Stop()
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(silenceLimit)); err != nil {
 			return answered
@@ -425,6 +438,7 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 		}
 		if d.fold(line) {
 			answered = true
+			survey.Reset(surveyQuiet)
 		}
 	}
 }
@@ -484,6 +498,21 @@ func (d *Client) record(status equipment.ConditionStatus) {
 
 // notify runs on the reading goroutine. A blocking listener therefore
 // delays processing of every later line on the connection.
+// Surveyed answers whether the connect replies have stopped arriving,
+// which is when the receiver's own facts are in hand.
+func (d *Client) Surveyed() bool {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	return d.surveyed
+}
+
+// recordSurveyed marks the survey complete.
+func (d *Client) recordSurveyed() {
+	d.mutex.Lock()
+	d.surveyed = true
+	d.mutex.Unlock()
+}
+
 func (d *Client) notify(event equipment.Event) {
 	if d.listener != nil {
 		d.listener(event)

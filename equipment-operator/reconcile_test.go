@@ -259,6 +259,33 @@ func startController(t *testing.T, api *fakeAPI) *controller {
 	return operator
 }
 
+// waitForSurvey waits until every unit the operator has reached has
+// surveyed its receiver, which is what gates the settings apply. A unit
+// the operator has not reached is skipped: it has nothing to compare.
+func waitForSurvey(t *testing.T, operator *controller) {
+	t.Helper()
+	deadline := time.After(4 * time.Second)
+	for {
+		waiting := false
+		for _, unit := range operator.units {
+			if unit.driver == nil {
+				continue
+			}
+			if unit.driver.State().Reachable == equipment.ConditionTrue && !unit.driver.Surveyed() {
+				waiting = true
+			}
+		}
+		if !waiting {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("a connected driver never surveyed its receiver")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func connected(status ReceiverStatus) bool {
 	return len(status.Conditions) == 1 && status.Conditions[0].Status == ConditionTrue
 }
@@ -706,6 +733,7 @@ func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 	// the change waits for a reachable receiver.
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "PSBAS 53")
@@ -743,6 +771,7 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 
 			mustSucceed(t, operator.pass(t.Context()))
 			api.waitForStatus(t, connected)
+			waitForSurvey(t, operator)
 
 			mustSucceed(t, operator.pass(t.Context()))
 			for _, want := range one.want {
@@ -786,6 +815,7 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "Z2MV30")
 
@@ -878,6 +908,7 @@ func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 	mustSucceed(t, operator.pass(t.Context()))
 
 	// ApplySettings errors on the word no command can carry, so nothing
@@ -903,6 +934,7 @@ func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 	mustSucceed(t, operator.pass(t.Context()))
 
 	// SetSleep rejects the timer past the receiver's range, so nothing
@@ -1039,6 +1071,7 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	// the change waits for a reachable receiver.
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 
 	// The receiver is in standby, so it takes the eco command but keeps
 	// reporting the standby value.
@@ -1081,6 +1114,7 @@ func TestASettingTheReceiverNeverReportsSendsOnce(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "ECOON")
@@ -1103,6 +1137,7 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 
 	// The zone takes the volume command but keeps reporting its old
 	// volume, so the operator re-sends until the zone reports the
@@ -1141,6 +1176,7 @@ func TestAZoneTheReceiverNeverReportsSendsOnce(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "Z2MV40")

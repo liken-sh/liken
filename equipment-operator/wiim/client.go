@@ -75,6 +75,10 @@ type Client struct {
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
 	misses int
+	// surveyed is set once one poll has read every family, so the
+	// controller knows the device's own facts are in hand before it
+	// applies a declared setting.
+	surveyed bool
 
 	// The event side: the callback listener the device connects back to,
 	// the subscriptions it holds, and whether a loss has been reported.
@@ -133,6 +137,14 @@ func (c *Client) Status() Status {
 // VolumeResolution is the number of the device's steps in one display
 // unit: the wire counts whole steps from 0 to 100, so it is 1.
 func (c *Client) VolumeResolution() int { return 1 }
+
+// Surveyed answers whether one poll has read every family, which is
+// when the device's own facts are in hand.
+func (c *Client) Surveyed() bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.surveyed
+}
 
 // Run polls until ctx ends, backing off after a poll the device did not
 // answer. Reachability flips false on a failed poll and true on the
@@ -199,6 +211,9 @@ func (c *Client) poll(ctx context.Context) bool {
 	// ran, so the evented fields keep the event's value.
 	c.mergeEvents(&next)
 	c.publish(next)
+	c.mutex.Lock()
+	c.surveyed = true
+	c.mutex.Unlock()
 	return true
 }
 
