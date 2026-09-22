@@ -119,6 +119,8 @@ func isSetter(command string) bool {
 	for _, prefix := range []string{
 		setVolumePrefix, setMutePrefix, setInputPrefix, setShutdownPrefix,
 		"setChannelBalance", "setDeviceName", "LED_SWITCH_SET:", "Button_Enable_SET:",
+		"MCUKeyShortClick:", "startbtdiscovery:", "connectbta2dpsynk:", "disconnectbta2dpsynk:",
+		"reboot",
 	} {
 		if strings.HasPrefix(command, prefix) {
 			return true

@@ -443,17 +443,18 @@ func (u *receiverUnit) busMessage(topic string, payload []byte) {
 }
 
 // handleSettings reads one settings message and sends the value it
-// names to the receiver. A value that lands is written back to the leaf
-// of spec.denon.settings it came from, so the declared state of the
-// resource stays true. The write is scoped to that one leaf under this
-// operator's own field manager, so a bus-written key is operator-owned
-// and never a key the manifest declared. A manifest-declared key and a
-// bus-written key on the same leaf is a misconfiguration: the operator's
-// forced write wins each round and Flux reverts the leaf on its next
-// sync. A bus write is recorded into the spec on queue acceptance, so
-// the spec is desired state, not a mirror of the hardware. An error is
-// logged and not recorded: the receiver's own echo is the only thing
-// that moves the observed settings.
+// names to the receiver, whichever protocol the unit drives. A value
+// that lands is written back to the leaf of that protocol's settings it
+// came from, so the declared state of the resource stays true. The
+// write is scoped to that one leaf under this operator's own field
+// manager, so a bus-written key is operator-owned and never a key the
+// manifest declared. A manifest-declared key and a bus-written key on
+// the same leaf is a misconfiguration: the operator's forced write wins
+// each round and Flux reverts the leaf on its next sync. A bus write is
+// recorded into the spec on queue acceptance, so the spec is desired
+// state, not a mirror of the hardware. An error is logged and not
+// recorded: the receiver's own echo is the only thing that moves the
+// observed settings.
 func (u *receiverUnit) handleSettings(payload []byte) {
 	var message struct {
 		Setting string                 `json:"setting"`
@@ -462,16 +463,24 @@ func (u *receiverUnit) handleSettings(payload []byte) {
 	if err := json.Unmarshal(payload, &message); err != nil || message.Setting == "" {
 		return
 	}
-	if u.denonClient == nil {
-		return
-	}
-	if err := u.denonClient.Set(message.Setting, message.Value); err != nil {
-		fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
-		return
-	}
 	leaf := settingsPath(message.Setting)
-	if _, err := ApplyReceiverSettings(u.client, u.name, leaf, message.Value); err != nil {
-		fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
+	switch {
+	case u.denonClient != nil:
+		if err := u.denonClient.Set(message.Setting, message.Value); err != nil {
+			fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
+			return
+		}
+		if _, err := ApplyReceiverSettings(u.client, u.name, leaf, message.Value); err != nil {
+			fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
+		}
+	case u.wiimClient != nil:
+		if err := u.wiimClient.Set(message.Setting, message.Value); err != nil {
+			fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
+			return
+		}
+		if _, err := ApplyReceiverWiimSettings(u.client, u.name, leaf, message.Value); err != nil {
+			fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
+		}
 	}
 }
 
@@ -491,11 +500,15 @@ func (u *receiverUnit) handleCommand(payload []byte) {
 		u.ensureInput()
 		return
 	}
-	if u.denonClient == nil {
-		return
-	}
-	if err := u.denonClient.Do(message.Command, message.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
+	switch {
+	case u.denonClient != nil:
+		if err := u.denonClient.Do(message.Command, message.Args); err != nil {
+			fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
+		}
+	case u.wiimClient != nil:
+		if err := u.wiimClient.Do(message.Command, message.Args); err != nil {
+			fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
+		}
 	}
 }
 

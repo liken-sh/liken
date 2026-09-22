@@ -70,6 +70,13 @@ func (f *fakeWiim) handle(w http.ResponseWriter, r *http.Request) {
 		f.balance, _ = strconv.ParseFloat(strings.TrimPrefix(command, "setChannelBalance:"), 64)
 		f.record(command)
 		fmt.Fprint(w, "OK")
+	case strings.HasPrefix(command, "MCUKeyShortClick:"),
+		strings.HasPrefix(command, "startbtdiscovery:"),
+		strings.HasPrefix(command, "connectbta2dpsynk:"),
+		strings.HasPrefix(command, "disconnectbta2dpsynk:"),
+		command == "reboot":
+		f.record(command)
+		fmt.Fprint(w, "OK")
 	default:
 		fmt.Fprint(w, "unknown command")
 	}

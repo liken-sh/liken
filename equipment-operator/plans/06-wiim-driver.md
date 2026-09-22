@@ -108,10 +108,14 @@ mapped to the input names the amp carries.
    operator creates a Receiver for a discovered amp no Receiver
    claims. This is the built phase.
 3. Stop for review.
-4. Control declared in the spec: a `spec.wiim.settings` block for the
-   slow-moving settings, and the declarative power-off and volume.
-5. Control over the message bus for the realtime integration with the
-   media system.
+4. Control declared in the spec. The `device` and `audio` settings
+   families are built; the equalizer, the output mode, and the
+   subwoofer wait for a model whose reads confirm them. Power stays
+   always on, so `spec.power` stays meaningless for a WiiM.
+5. Control over the message bus. The settings and commands topics now
+   drive the same families and the one-shot commands, and a settings
+   write is returned to `spec.wiim.settings` at the leaf, so the
+   resource stays true.
 
 ### Discovered Receivers
 
