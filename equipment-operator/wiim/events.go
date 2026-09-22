@@ -89,7 +89,9 @@ func upnpBaseFor(address string) string {
 // cluster with no reachable callback still reads every value.
 func (c *Client) startEvents(ctx context.Context) {
 	if strings.TrimSpace(c.address) == "" {
-		c.reportEventLoss("no address to reach the device on")
+		// The unit is wired before discovery has an address for the amp,
+		// and it is rebuilt once one arrives. There is nothing to
+		// subscribe to yet, and the poll is the only path meanwhile.
 		return
 	}
 	host := localAddress(c.address)
