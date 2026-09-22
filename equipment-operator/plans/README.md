@@ -30,6 +30,7 @@ becomes a new plan or an open problem.
 * [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on the house cluster on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the house's AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
 * [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
 * [07, The receiver's HTTP interface and the TV wake](07-receiver-http-and-tv-wake.md). The receiver answers a second interface over HTTP, and it carries HDMI Control and the video controls. The receiver is a CEC responder, so it cannot wake the TV, and the wake needs a node-attached CEC adapter from plan 05. The design is not written.
+* [08, The WiiM's event path](08-the-wiim-event-path.md). A WiiM is a UPnP MediaRenderer that pushes volume, mute, and transport changes over GENA, so the driver subscribes instead of polling every ten seconds. The poll stays for the settings families push does not reach, as a slower read, and as the fallback where a subscription cannot be established. The design is written and not built.
 
 ## Open problems
 

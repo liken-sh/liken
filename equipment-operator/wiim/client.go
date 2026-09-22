@@ -27,6 +27,12 @@ var (
 	pollInterval   = 10 * time.Second
 	minBackoff     = time.Second
 	maxBackoff     = 30 * time.Second
+
+	// pollFailures is how many polls in a row must fail before the
+	// client calls the device unreachable. A burst of commands can make
+	// the device miss one request and answer the next, and a poll is a
+	// single sample, so one miss is not the device going away.
+	pollFailures = 3
 )
 
 // maxSleepMinutes bounds the sleep timer the driver accepts.
@@ -43,6 +49,10 @@ type Client struct {
 	address  string
 	listener func(equipment.Event)
 
+	// upnpBase is the device's UPnP MediaRenderer, where the event
+	// subscriptions live. It is a fixed port beside the control port.
+	upnpBase string
+
 	// Reporter counts the outcome of every command this client sends. A
 	// nil Reporter is a no-op.
 	Reporter func(status string)
@@ -56,6 +66,18 @@ type Client struct {
 	mutex     sync.Mutex
 	state     Status
 	reachable equipment.ConditionStatus
+	// misses counts the polls in a row the device did not answer, cleared
+	// by the next poll it does.
+	misses int
+
+	// The event side: the callback listener the device connects back to,
+	// the subscriptions it holds, and whether a loss has been reported.
+	events             *eventServer
+	eventsMutex        sync.Mutex
+	eventsLost         bool
+	eventsRetry        time.Time
+	subscriptions      map[string]*subscription
+	subscriptionsMutex sync.Mutex
 }
 
 // NewClient builds a client for one address. The listener reports the
@@ -63,8 +85,10 @@ type Client struct {
 // client to the device's identity.
 func NewClient(address string, listener func(equipment.Event)) *Client {
 	return &Client{
-		address:  address,
-		listener: listener,
+		address:       address,
+		listener:      listener,
+		upnpBase:      upnpBaseFor(address),
+		subscriptions: map[string]*subscription{},
 		http: &http.Client{
 			Timeout: requestTimeout,
 			Transport: &http.Transport{
@@ -100,8 +124,11 @@ func (c *Client) VolumeResolution() int { return 1 }
 // answer. Reachability flips false on a failed poll and true on the
 // next answered one.
 func (c *Client) Run(ctx context.Context) {
+	c.startEvents(ctx)
+	defer c.stopEvents()
 	backoff := minBackoff
 	for ctx.Err() == nil {
+		c.manageSubscriptions(ctx)
 		answered := c.poll(ctx)
 		wait := pollInterval
 		if answered {
@@ -133,14 +160,15 @@ func (c *Client) poll(ctx context.Context) bool {
 
 	if err := c.readStatusEx(ctx, &next); err != nil {
 		c.report(CommandFailed)
-		c.record(equipment.ConditionFalse)
+		c.miss()
 		return false
 	}
 	if !c.identityMatches(next.Device.UUID) {
 		c.report(CommandFailed)
-		c.record(equipment.ConditionFalse)
+		c.miss()
 		return false
 	}
+	c.answered()
 	c.report(CommandOK)
 
 	c.readStaticIP(ctx, &next)
@@ -153,8 +181,33 @@ func (c *Client) poll(ctx context.Context) bool {
 	c.readPresets(ctx, &next)
 	c.readControls(ctx, &next)
 
+	// A poll's reads were taken before any event that arrived while it
+	// ran, so the evented fields keep the event's value.
+	c.mergeEvents(&next)
 	c.publish(next)
 	return true
+}
+
+// miss counts a poll the device did not answer. Enough polls in a row
+// that fail call the device unreachable; fewer than that leave the last
+// answer standing, so a request the device drops under load does not
+// read as the device leaving.
+func (c *Client) miss() {
+	c.mutex.Lock()
+	c.misses++
+	misses := c.misses
+	c.mutex.Unlock()
+	if misses >= pollFailures {
+		c.record(equipment.ConditionFalse)
+	}
+}
+
+// answered clears the run of failed polls after one the device
+// answered.
+func (c *Client) answered() {
+	c.mutex.Lock()
+	c.misses = 0
+	c.mutex.Unlock()
 }
 
 // identityMatches answers whether the device's reported uuid is the one

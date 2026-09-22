@@ -89,7 +89,53 @@ Three other interfaces are open on the same LAN:
   RenderingControl with a callback URL, and the device sends NOTIFY
   requests when the state changes. This is the push path for track
   changes and volume changes made at the device. There is no
-  documented WebSocket.
+  documented WebSocket. The section below records what a live Amp
+  answers on it.
+
+## The event path
+
+The driver subscribes to the device's GENA events, so a change made
+at the device reaches the state in under a second. The poll stays, at
+ten seconds, for the settings and the identity that push does not
+reach, and it carries the evented fields when a subscription is not
+live.
+
+The MediaRenderer description is on port 49152. It names the event
+URLs `/upnp/event/rendercontrol1` for RenderingControl and
+`/upnp/event/rendertransport1` for AVTransport. A live Amp answers
+these, and the driver uses them:
+
+- `SUBSCRIBE` carries `CALLBACK`, `NT: upnp:event`, and
+  `TIMEOUT: Second:1800`. The device answers `200` with a `SID` and a
+  `TIMEOUT` header such as `Second-1801`. The driver renews before the
+  grant ends, and sends `UNSUBSCRIBE` with the `SID` when it stops.
+- The device pushes a `NOTIFY` with sequence `0` right after the
+  subscribe. That body carries the full state of the service. Every
+  later `NOTIFY` carries only the fields that moved, so the driver
+  merges a delta and replaces on sequence `0`.
+- RenderingControl carries `Volume` and `Mute` on the `Master`
+  channel, each as a `val` attribute in the device's whole steps.
+- AVTransport carries `TransportState`. Its track metadata is
+  double-escaped DIDL-Lite, and it has no sample rate, bit depth, or
+  bit rate. The driver takes the transport state from the event and
+  the track from the poll's getMetaInfo, which carries those fields.
+- The `callback` host is the local address the device is reached on,
+  found by dialing the device, so the address is discovered and never
+  declared.
+- The device refuses a subscription it will not carry, and the driver
+  then retries once a minute and keeps the poll as the only path. A
+  subscription is not a device command that changes state, so a
+  refused one is reported through the command counter the same way a
+  failed read is.
+
+The poll does not overwrite the evented fields while a subscription is
+live. A poll's reads are taken before any event that arrives while it
+runs, so writing them would move a value back to where it stood before
+the change the device already pushed.
+
+The port 8819 the `getStatusEx` block calls `communication_port` is
+open on a live Amp, and no document names a protocol for it. The
+driver does not use it.
 
 ## The identity and the address
 

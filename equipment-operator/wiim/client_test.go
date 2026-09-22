@@ -252,8 +252,10 @@ func TestIdentityMismatchReportsUnreachable(t *testing.T) {
 	client := amp.client(nil)
 	client.UUID = "FF98F2F70000000000000000"
 
-	if client.poll(context.Background()) {
-		t.Fatal("a mismatched uuid answered as the expected device")
+	for range pollFailures {
+		if client.poll(context.Background()) {
+			t.Fatal("a mismatched uuid answered as the expected device")
+		}
 	}
 	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
 	for _, command := range amp.sent() {
@@ -283,10 +285,63 @@ func TestAFailedPollReportsUnreachable(t *testing.T) {
 	amp.mutex.Unlock()
 	client := amp.client(nil)
 
-	if client.poll(context.Background()) {
-		t.Fatal("a failing device answered as reachable")
+	for range pollFailures {
+		if client.poll(context.Background()) {
+			t.Fatal("a failing device answered as reachable")
+		}
 	}
 	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+}
+
+// One poll the device misses leaves the last answer standing, and the
+// polls after it call the device unreachable.
+func TestOneMissedPollLeavesTheDeviceReachable(t *testing.T) {
+	amp := startFakeAmp(t)
+	client := amp.client(nil)
+	client.poll(context.Background())
+	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+
+	amp.mutex.Lock()
+	amp.failing = http.StatusInternalServerError
+	amp.mutex.Unlock()
+	client.poll(context.Background())
+	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+
+	for i := 1; i < pollFailures; i++ {
+		client.poll(context.Background())
+	}
+	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+}
+
+// A poll the device answers clears the run of misses, so a device that
+// stumbles once does not go unreachable on a later run counted from the
+// stumble.
+func TestAnAnsweredPollClearsTheMisses(t *testing.T) {
+	amp := startFakeAmp(t)
+	client := amp.client(nil)
+
+	amp.mutex.Lock()
+	amp.failing = http.StatusInternalServerError
+	amp.mutex.Unlock()
+	for i := 0; i < pollFailures-1; i++ {
+		client.poll(context.Background())
+	}
+
+	amp.mutex.Lock()
+	amp.failing = 0
+	amp.mutex.Unlock()
+	if !client.poll(context.Background()) {
+		t.Fatal("the device answered and the poll reported failure")
+	}
+	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+
+	amp.mutex.Lock()
+	amp.failing = http.StatusInternalServerError
+	amp.mutex.Unlock()
+	for i := 0; i < pollFailures-1; i++ {
+		client.poll(context.Background())
+	}
+	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
 }
 
 // A source with no track answers "Failed", and the track is cleared.
