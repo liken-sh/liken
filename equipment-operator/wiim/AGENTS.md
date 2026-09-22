@@ -109,6 +109,12 @@ these, and the driver uses them:
   `TIMEOUT: Second:1800`. The device answers `200` with a `SID` and a
   `TIMEOUT` header such as `Second-1801`. The driver renews before the
   grant ends, and sends `UNSUBSCRIBE` with the `SID` when it stops.
+- The device closes the connection after it answers a `SUBSCRIBE`,
+  while its answer names `Connection: keep-alive`. A second
+  subscription on that connection fails with EOF, so the subscription
+  client opens a connection for each request. Go's HTTP transport
+  retries a request on a reused connection that failed, so the failure
+  does not always surface on the first attempt.
 - The device pushes a `NOTIFY` with sequence `0` right after the
   subscribe. That body carries the full state of the service. Every
   later `NOTIFY` carries only the fields that moved, so the driver

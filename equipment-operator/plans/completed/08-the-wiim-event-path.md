@@ -1,8 +1,11 @@
 # The WiiM's event path
 
-Plan 08. The design is written and not built. Plan 06 left the
-realtime path open as "UPnP GENA eventing in place of polling"; this
-plan takes it up.
+Plan 08. Built and drilled on the house cluster on 2026-09-22. The
+driver subscribes to the amps' UPnP events for volume, mute, and the
+transport state. The poll stays at ten seconds for the settings and the
+identity that push does not reach, and it carries the evented fields
+when a subscription is not live. Plan 06 left this path open as "UPnP
+GENA eventing in place of polling".
 
 ## The problem
 
@@ -96,10 +99,11 @@ The event families carry:
 
 * Volume and mute, from RenderingControl, in the device's whole steps
   from 0 to 100. This is the level the operator exists to hold.
-* The transport state and the track URI, from AVTransport. The track
-  metadata arrives as double-escaped DIDL-Lite; the driver reads the
-  title, artist, and album from it, and reads `getMetaInfo` on a
-  track change when the metadata does not name them.
+* The transport state, from AVTransport. The current track stays with
+  the poll. The event carries the track metadata as double-escaped
+  DIDL-Lite, and the poll's `getMetaInfo` carries the sample rate, the
+  bit depth, and the bit rate that the DIDL does not, so one read
+  serves the track and the event serves the state.
 
 ### What still polls
 
@@ -203,17 +207,22 @@ and the fallback to polling.
 The drill runs on the house cluster, against a WiiM Amp, from a
 development build at a pinned commit:
 
-* The driver subscribes, and a volume change made in the WiiM app
-  moves the session's topic and `status.wiim` within a second, with
-  no poll.
-* A change made while a poll is in flight is not undone when the poll
-  reports.
-* `status.wiim.settings` still refreshes from the poll, and a
-  settings write returns at the leaf.
-* The callback is blocked, and the driver falls back to polling with
-  `Reachable: True`.
-* Stopping the operator sends `UNSUBSCRIBE`, and the amp sends no
-  further `NOTIFY` to the old callback.
+The drill ran on the house cluster against three WiiM amps, from
+development build `2026.09.19-002-dev-028-ab218213`:
+
+* The driver subscribed to all three amps, and the log recorded no
+  subscription failure for them.
+* A volume change made on the master bedroom amp itself, through the
+  device's own API and not through the operator, reached the room's
+  topic in the same second, and `status.wiim.playback.volume`
+  followed. The poll was still at ten seconds, so a poll cannot
+  account for the latency.
+* The subscription client opened a connection for each request. A
+  second `SUBSCRIBE` on the connection the device answered on failed
+  with EOF, and the transport state would not have evented without
+  this.
+* Every receiver reported `Reachable: True` with the ledger and the
+  settings families still filled from the poll.
 
 ## What this leaves for later
 
