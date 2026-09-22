@@ -14,11 +14,6 @@ import (
 // vocabulary and the shape written under status.wiim. A block the
 // device did not answer stays empty.
 type Status struct {
-	// Address is the address the operator reached the device on. The
-	// network block reports the interface the device says it holds; this
-	// is the address discovery resolved, which is the one a person needs
-	// when the address moves.
-	Address    string      `json:"address,omitempty"`
 	Device     DeviceInfo  `json:"device"`
 	Network    Network     `json:"network"`
 	Playback   Playback    `json:"playback"`

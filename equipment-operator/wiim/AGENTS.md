@@ -299,11 +299,11 @@ Volume is the one number with a decided meaning. The wire counts whole
 steps from 0 to 100, and the display shows the same number, so the
 driver reports `VolumeResolution` 1 and needs no conversion.
 
-The status carries `address`, the one the operator reached the device
-on. It is the address discovery resolved, and it is not the network
-block's `address`, which is the interface the device says it holds. A
-person reads the resolved one to see where an amp moved to, because no
-`spec` field declares it.
+The driver reports `Address`, the address discovery resolved, and the
+controller writes it at `status.address` beside the protocol snapshots.
+It is not the network block's `address`, which is the interface the
+device says it holds. A person reads the resolved one to see where an
+amp moved to, because no `spec` field declares it.
 
 The driver would map the API onto `equipment.Driver` with one zone
 named `main`: power, input, mute, and volume from the fields above, no

@@ -28,7 +28,7 @@ spec:
           jsonPath: .status.driver
         - name: Address
           type: string
-          jsonPath: .status.wiim.address
+          jsonPath: .status.address
         - name: Power
           type: string
           jsonPath: .status.zones.main.power
@@ -398,6 +398,9 @@ spec:
               type: object
               description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."
               properties:
+                address:
+                  type: string
+                  description: "The address the operator reached the receiver on: a WiiM's is the address discovery found, and a Denon's is the declared address resolved. Empty until the operator builds the driver."
                 driver:
                   type: string
                   description: "The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver."
@@ -434,7 +437,7 @@ spec:
                   x-kubernetes-preserve-unknown-fields: true
                 wiim:
                   type: object
-                  description: "The WiiM protocol's own observable status, in the device's units: the address the operator reached it on, identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it."
+                  description: "The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it."
                   x-kubernetes-preserve-unknown-fields: true
                 service:
                   type: string

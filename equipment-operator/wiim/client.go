@@ -123,16 +123,15 @@ func (c *Client) State() equipment.State {
 }
 
 // Status returns the device's own typed snapshot, which the controller
-// writes under status.wiim. It carries the address the operator reached
-// the device on, which is the resolved one and not the interface the
-// device reports for itself.
+// writes under status.wiim.
 func (c *Client) Status() Status {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	status := c.state
-	status.Address = c.address
-	return status
+	return c.state
 }
+
+// Address answers the address discovery found for the amp.
+func (c *Client) Address() string { return c.address }
 
 // VolumeResolution is the number of the device's steps in one display
 // unit: the wire counts whole steps from 0 to 100, so it is 1.

@@ -209,10 +209,11 @@ What the receiver last reported, in its own units, plus the protocol's own setti
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="status--address"></span>`address` | string | no | The address the operator reached the receiver on: a WiiM's is the address discovery found, and a Denon's is the declared address resolved. Empty until the operator builds the driver. |
 | <span id="status--driver"></span>`driver` | string | no | The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver. |
 | <span id="status--zones"></span>`zones` | [map\[string\]object](#statuszones) | no | One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main. |
 | <span id="status--denon"></span>`denon` | object | no | The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it. |
-| <span id="status--wiim"></span>`wiim` | object | no | The WiiM protocol's own observable status, in the device's units: the address the operator reached it on, identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it. |
+| <span id="status--wiim"></span>`wiim` | object | no | The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it. |
 | <span id="status--service"></span>`service` | string | no | The Service that represents the receiver on the cluster network after the operator creates it. Empty until then. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. |
 

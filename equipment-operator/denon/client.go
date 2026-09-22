@@ -69,6 +69,10 @@ type Client struct {
 	mutex sync.Mutex
 	state denonState
 	out   chan string
+	// peer is the address the receiver answered from, or the declared
+	// address resolved to one, which the status reports as the address
+	// the operator reached it on.
+	peer string
 	// surveyed is set once the connect replies have stopped arriving, so
 	// the controller knows the receiver's own facts are in hand before
 	// it applies a declared setting.
@@ -323,11 +327,20 @@ func (d *Client) Run(ctx context.Context) {
 // the reconnect backoff.
 func (d *Client) runSession(parent context.Context) (answered bool) {
 	dialer := &net.Dialer{Timeout: dialTimeout}
+	// The declared address may be a name, and the status reports an
+	// address, so it is resolved beside the dial. A failure leaves the
+	// name as the fallback.
+	if ip := resolveHost(d.address); ip != "" {
+		d.recordAddress(ip)
+	}
 	conn, err := dialer.DialContext(parent, "tcp", d.address)
 	if err != nil {
 		return false
 	}
 	defer conn.Close()
+	if remote, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		d.recordAddress(remote.IP.String())
+	}
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -511,6 +524,53 @@ func (d *Client) recordSurveyed() {
 	d.mutex.Lock()
 	d.surveyed = true
 	d.mutex.Unlock()
+}
+
+// Address answers the address the receiver is reached on: the peer a
+// connection answered from, or the declared address resolved to one.
+// The status reports it so a receiver declared by name still shows an
+// address.
+func (d *Client) Address() string {
+	d.mutex.Lock()
+	peer := d.peer
+	d.mutex.Unlock()
+	if peer != "" {
+		return peer
+	}
+	return hostOf(d.address)
+}
+
+// recordAddress stores the address the receiver is reached on.
+func (d *Client) recordAddress(ip string) {
+	d.mutex.Lock()
+	d.peer = ip
+	d.mutex.Unlock()
+}
+
+// resolveHost answers the IP the address names, and an empty string
+// when it names none.
+func resolveHost(address string) string {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	if net.ParseIP(host) != nil {
+		return host
+	}
+	ips, err := net.LookupHost(host)
+	if err != nil || len(ips) == 0 {
+		return ""
+	}
+	return ips[0]
+}
+
+// hostOf strips the port from an address.
+func hostOf(address string) string {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return address
+	}
+	return host
 }
 
 func (d *Client) notify(event equipment.Event) {

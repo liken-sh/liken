@@ -124,7 +124,7 @@ func (u *receiverUnit) write() {
 	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
 
 	settings := u.denonSettings()
-	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
+	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.Address(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}

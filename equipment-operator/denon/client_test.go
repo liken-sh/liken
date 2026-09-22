@@ -302,3 +302,14 @@ func TestASurveyCompletesAfterTheConnectReplies(t *testing.T) {
 		}
 	}
 }
+
+// The address is the peer the receiver answered from, so a receiver
+// declared by name still reports an address.
+func TestTheAddressIsThePeer(t *testing.T) {
+	harness := startHarness(t)
+	drainQueries(t, harness)
+
+	host, _, err := net.SplitHostPort(harness.receiver.address())
+	mustSucceed(t, err)
+	mustMatch(t, harness.client.Address(), host)
+}

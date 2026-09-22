@@ -63,7 +63,7 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 // the Denon settings or the WiiM status, whichever the receiver's
 // protocol block names. status.service stays empty until the operator
 // makes the Service front.
-func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimStatus *wiim.Status, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
+func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimStatus *wiim.Status, address string, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
 	zones := make(map[string]ZoneStatus, len(state.Zones))
 	for name, zone := range state.Zones {
 		zones[name] = ZoneStatus{
@@ -77,6 +77,7 @@ func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimSt
 		}
 	}
 	return ReceiverStatus{
+		Address:    address,
 		Zones:      zones,
 		Driver:     protocolName(settings, wiimStatus),
 		Denon:      settings,

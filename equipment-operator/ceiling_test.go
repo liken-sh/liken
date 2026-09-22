@@ -20,6 +20,7 @@ type fixedDriver struct {
 func (d *fixedDriver) Run(context.Context)               {}
 func (d *fixedDriver) State() equipment.State            { return d.state }
 func (d *fixedDriver) Surveyed() bool                    { return true }
+func (d *fixedDriver) Address() string                   { return "" }
 func (d *fixedDriver) VolumeResolution() int             { return 1 }
 func (d *fixedDriver) SetPower(string, bool) error       { return nil }
 func (d *fixedDriver) SetInput(string, string) error     { return nil }

@@ -186,6 +186,10 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 // typed settings snapshot, the Service that represents the receiver
 // when one exists, and the Reachable condition.
 type ReceiverStatus struct {
+	// Address is the address the operator reached the receiver on. A
+	// receiver declared by name reports its resolved address, and a WiiM
+	// reports the address discovery found.
+	Address    string                `json:"address,omitempty"`
 	Zones      map[string]ZoneStatus `json:"zones,omitempty"`
 	Driver     string                `json:"driver,omitempty"`
 	Denon      *denon.Settings       `json:"denon,omitempty"`

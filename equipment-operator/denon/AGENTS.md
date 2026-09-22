@@ -29,7 +29,10 @@ operator sends, and the lines it reads back, come from these sources.
 every `MV` response, so the parser reads it and nothing acts on it.
 
 The driver implements `equipment.Driver` and reports volume in half
-steps, two per display unit.
+steps, two per display unit. It reports the address it reached the
+receiver on, which is the peer a connection answered from, or the
+declared address resolved to one when no connection stands. The
+controller writes it at `status.address`.
 
 ## The state and the snapshot
 

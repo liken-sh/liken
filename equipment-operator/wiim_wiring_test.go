@@ -72,12 +72,12 @@ func TestWiimStatusTravelsIntoTheStatus(t *testing.T) {
 		Reachable: equipment.ConditionTrue,
 		Zones:     map[string]equipment.ZoneState{equipment.MainZone: {Power: equipment.PowerOn}},
 	}
-	withWiim := buildReceiverStatus(state, nil, unit.wiimStatus(), 1, 1, nil, statusNow)
+	withWiim := buildReceiverStatus(state, nil, unit.wiimStatus(), "", 1, 1, nil, statusNow)
 	if withWiim.Wiim == nil {
 		t.Fatal("the WiiM snapshot did not reach the status")
 	}
 	mustMatch(t, withWiim.Driver, "wiim")
-	without := buildReceiverStatus(state, nil, nil, 1, 1, nil, statusNow)
+	without := buildReceiverStatus(state, nil, nil, "", 1, 1, nil, statusNow)
 	if sameStatus(withWiim, without) {
 		t.Fatal("a status with a WiiM snapshot matched one without")
 	}

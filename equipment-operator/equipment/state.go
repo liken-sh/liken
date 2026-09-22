@@ -106,6 +106,12 @@ type Driver interface {
 	// with Run.
 	State() State
 
+	// Address answers the address the driver reached the device on. A
+	// receiver declared by name reports its resolved address, and a
+	// discovered one reports what was found. The status carries it, so a
+	// reader sees where the operator reached the device.
+	Address() string
+
 	// Surveyed answers whether the driver has completed its first read
 	// of the device's own facts. The operator applies a declared setting
 	// only after this, because a setting compared against a device that
