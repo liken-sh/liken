@@ -48,7 +48,12 @@ type ZoneState struct {
 	Mute      bool
 	Volume    int
 	VolumeMax int
-	Sleep     int // minutes until standby, -1 unknown, 0 off
+	// VolumeMaxStable says whether VolumeMax is a ceiling a session may
+	// map the bus level against. A Denon reports a limit that moves with
+	// the volume, so it is false and the ceiling must be declared. A WiiM
+	// reports its own fixed 0 to 100 top, so it is true.
+	VolumeMaxStable bool
+	Sleep           int // minutes until standby, -1 unknown, 0 off
 }
 
 // Unknown is the value a driver reports for a number it has not read.

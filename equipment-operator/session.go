@@ -272,7 +272,7 @@ func (s *session) press(previous, state volumeState) {
 // it moves at all.
 func (s *session) nextPosition(reading equipment.ZoneState, up bool) (int, bool) {
 	resolution := s.driver.VolumeResolution()
-	ceiling := ceilingSteps(s.scale(), resolution)
+	ceiling := s.ceiling()
 	if ceiling <= 0 || reading.Volume < 0 {
 		return 0, false
 	}
@@ -300,7 +300,7 @@ func (s *session) nextPosition(reading equipment.ZoneState, up bool) (int, bool)
 // line as well. The broker returns the two in its own order, and the
 // session must not wait for the second when the first has come back.
 func (s *session) report(reading equipment.ZoneState) {
-	level, ok := levelForSteps(reading.Volume, ceilingSteps(s.scale(), s.driver.VolumeResolution()))
+	level, ok := levelForSteps(reading.Volume, s.ceiling())
 	if !ok {
 		return
 	}
@@ -338,6 +338,22 @@ func (s *session) observe(event equipment.Event) {
 func mainZone(state equipment.State) equipment.ZoneState {
 	zone, _ := state.Zone(equipment.MainZone)
 	return zone
+}
+
+// ceiling answers the loudest the bus level maps to, in the driver's
+// smallest steps. A declared spec.volume.max wins. A protocol whose
+// reported limit is a real ceiling, such as a WiiM at 100, provides one
+// when none is declared; a Denon's reported limit moves with the volume,
+// so its driver marks it unstable and the ceiling stays declared.
+func (s *session) ceiling() int {
+	if declared := ceilingSteps(s.scale(), s.driver.VolumeResolution()); declared > 0 {
+		return declared
+	}
+	zone := mainZone(s.driver.State())
+	if zone.VolumeMaxStable && zone.VolumeMax > 0 {
+		return zone.VolumeMax
+	}
+	return 0
 }
 
 // mark releases the three waits a session stands on: the connection the
@@ -411,7 +427,7 @@ func (s *session) adopt(ctx context.Context) {
 // receiver has not reported.
 func (s *session) publishPosition() bool {
 	state := mainZone(s.driver.State())
-	level, ok := levelForSteps(state.Volume, ceilingSteps(s.scale(), s.driver.VolumeResolution()))
+	level, ok := levelForSteps(state.Volume, s.ceiling())
 	if !ok {
 		return false
 	}

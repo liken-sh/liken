@@ -527,11 +527,12 @@ type controller struct {
 	wake       chan struct{}
 	now        func() time.Time
 	readings   *metrics
+	discovery  *discovery
 	units      map[string]*receiverUnit
 }
 
 func newController(client *Client, busAddress string, readings *metrics) *controller {
-	return &controller{
+	c := &controller{
 		client:     client,
 		busAddress: busAddress,
 		wake:       make(chan struct{}, 1),
@@ -539,6 +540,10 @@ func newController(client *Client, busAddress string, readings *metrics) *contro
 		readings:   readings,
 		units:      map[string]*receiverUnit{},
 	}
+	// Discovery wakes the same loop a watch event does, so a Receiver it
+	// creates or an address it finds reaches a reconcile pass at once.
+	c.discovery = newDiscovery(client, func() { poke(c.wake) })
+	return c
 }
 
 // pass derives every unit from the collection as it stands now. It
@@ -588,7 +593,7 @@ func (c *controller) doPass(ctx context.Context) error {
 func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
-	if held && (unit.address != protocolAddress(&receiver.Spec) ||
+	if held && (unit.address != c.resolvedAddress(&receiver.Spec) ||
 		unit.settingsTopic != receiver.Spec.SettingsTopic ||
 		unit.commandsTopic != receiver.Spec.CommandsTopic) {
 		unit.stop()
@@ -623,11 +628,16 @@ func protocolAddress(spec *ReceiverSpec) string {
 	return ""
 }
 
+// resolvedAddress is the address a Receiver's protocol block declares,
+// or the one discovery found for its identity when it declares none. A
+// discovered address that moves is a different wiring too, so the unit
+// is replaced and redialled.
+
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
 		name:          receiver.Metadata.Name,
-		address:       protocolAddress(&receiver.Spec),
+		address:       c.resolvedAddress(&receiver.Spec),
 		settingsTopic: receiver.Spec.SettingsTopic,
 		commandsTopic: receiver.Spec.CommandsTopic,
 		client:        c.client,
@@ -639,7 +649,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	}
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
-	unit.startDriver(receiver, c.readings.reportCommand)
+	unit.startDriver(receiver, unit.address, c.readings.reportCommand)
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
@@ -655,15 +665,15 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 // startDriver builds the driver the receiver's protocol block names and
 // points the unit at it. A Receiver names exactly one protocol block, so
 // the choice is a branch and not a table.
-func (u *receiverUnit) startDriver(receiver *Receiver, report func(string)) {
+func (u *receiverUnit) startDriver(receiver *Receiver, address string, report func(string)) {
 	switch {
 	case receiver.Spec.Denon != nil:
-		client := denon.NewClient(receiver.Spec.Denon.Address, u.observe)
+		client := denon.NewClient(address, u.observe)
 		client.Reporter = report
 		u.driver = client
 		u.denonClient = client
 	case receiver.Spec.Wiim != nil:
-		client := wiim.NewClient(receiver.Spec.Wiim.Address, u.observe)
+		client := wiim.NewClient(address, u.observe)
 		client.UUID = receiver.Spec.Wiim.UUID
 		client.Reporter = report
 		u.driver = client
@@ -674,6 +684,7 @@ func (u *receiverUnit) startDriver(receiver *Receiver, report func(string)) {
 // run reconciles once before any event arrives, then on every wake and
 // every backstop tick, until ctx ends.
 func (c *controller) run(ctx context.Context) {
+	go c.discovery.run(ctx)
 	ticker := time.NewTicker(backstopInterval)
 	defer ticker.Stop()
 	for {

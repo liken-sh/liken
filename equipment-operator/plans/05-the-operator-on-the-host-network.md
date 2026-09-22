@@ -74,7 +74,7 @@ namespace, where it collides with the other host-network pods on that
 node. Port 9200 is the port every liken process shares, and
 `liken-machine-operator` already holds 9200 as a host port on every
 node. `bluetooth-operator` took 9250 for the same reason. This
-operator leaves 9200 and takes a free port from that series, and the
+operator leaves 9200 and takes 9260 from that series, and the
 Prometheus scrape moves with it.
 
 ### The namespace and the grant
@@ -96,6 +96,14 @@ Deployment, and wired equipment is a component on its node. The
 `equipment.Driver` contract stays in-process in whichever workload
 runs the driver, so the binary grows a second mode and the contract
 does not change.
+
+## Phases
+
+1. The Deployment gains `hostNetwork` and `ClusterFirstWithHostNet`,
+   the metrics listener moves to 9260, and discovery runs in the
+   process. The search is `wiim.Discover` in `wiim/discovery.go`, and
+   the loop that consumes it and reconciles the Receivers the operator
+   owns is `discovery.go`. This is the built phase.
 
 ## What was considered and set aside
 

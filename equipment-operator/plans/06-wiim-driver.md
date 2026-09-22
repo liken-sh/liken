@@ -97,12 +97,46 @@ mapped to the input names the amp carries.
 
 1. The driver and its status. `spec.wiim` with the identity, the
    polling driver, `status.wiim`, the CRD, and three amps declared on
-   the house cluster from a development build. This is the built phase.
-2. Stop for review.
-3. Control declared in the spec: a `spec.wiim.settings` block for the
+   the house cluster from a development build.
+2. The driver as a full Receiver. The inputs bind a Player to the amp
+   the way a Denon's do, so the media operator holds the session and
+   the player's level drives the WiiM. A session uses the amp's own
+   reported ceiling when `spec.volume.max` is not declared, because a
+   WiiM's top is fixed where a Denon's limit wanders. Network
+   discovery finds an amp and resolves its identity to an address, so
+   `spec.wiim.address` is a hint rather than a requirement, and the
+   operator creates a Receiver for a discovered amp no Receiver
+   claims. This is the built phase.
+3. Stop for review.
+4. Control declared in the spec: a `spec.wiim.settings` block for the
    slow-moving settings, and the declarative power-off and volume.
-4. Control over the message bus for the realtime integration with the
+5. Control over the message bus for the realtime integration with the
    media system.
+
+### Discovered Receivers
+
+The operator finds the amps itself, so a cluster owner does not have to
+write an address by hand. A run browses mDNS and sends an SSDP search,
+merges the answers by UUID, and repeats for a window, because each path
+misses a device. The address that comes back resolves the identity to a
+current one for every Receiver, and no `spec.wiim.address` is needed.
+
+A discovered amp no Receiver claims gets a Receiver of its own, named
+by its lowercased UUID and marked with the `equipment.liken.sh/discovered`
+label. The marker is what lets the operator prune only its own objects.
+A person's Receiver that names the same UUID always wins: the operator
+creates nothing beside it and deletes its own copy, so the person's
+room-named object stands. An amp that stops answering takes the
+operator's copy with it.
+
+### The input binding
+
+The inputs are the Receiver's common field, and the media operator
+matches a unit's machine and monitor id to an input with no knowledge
+of the protocol. A WiiM's input names are its own (`optical`, `line-in`,
+`hdmi`, `bluetooth`, `wifi`, `usb`, `udisk`), and the driver maps each
+onto the device's `switchmode` value. A session then selects the input
+and owns the level, which is how the player's volume drives the amp.
 
 ## Verification
 

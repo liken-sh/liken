@@ -14,7 +14,7 @@ import (
 // vocabulary and the shape written under status.wiim. A block the
 // device did not answer stays empty.
 type Status struct {
-	Device     Device      `json:"device"`
+	Device     DeviceInfo  `json:"device"`
 	Network    Network     `json:"network"`
 	Playback   Playback    `json:"playback"`
 	NowPlaying *NowPlaying `json:"nowPlaying,omitempty"`
@@ -26,10 +26,11 @@ type Status struct {
 	Controls   Controls    `json:"controls"`
 }
 
-// Device is the identity and the hardware: what the device is, which
-// firmware it runs, and how it is addressed. The UUID is the identity
-// the operator trusts.
-type Device struct {
+// DeviceInfo is the identity and the hardware: what the device is,
+// which firmware it runs, and how it is addressed. The UUID is the
+// identity the operator trusts. It is not the discovery Device, which
+// the network search returns; this is the snapshot a poll reads.
+type DeviceInfo struct {
 	Name              string       `json:"name,omitempty"`
 	Group             string       `json:"group,omitempty"`
 	Model             string       `json:"model,omitempty"`
@@ -312,12 +313,13 @@ func newStatus() Status {
 // state to report but on.
 func (s Status) zone() equipment.ZoneState {
 	return equipment.ZoneState{
-		Power:     equipment.PowerOn,
-		Input:     s.Playback.Source,
-		Mute:      s.Playback.Mute,
-		Volume:    s.Playback.Volume,
-		VolumeMax: s.Audio.MaxVolume,
-		Sleep:     sleepMinutes(s.Timers.SleepSeconds),
+		Power:           equipment.PowerOn,
+		Input:           s.Playback.Source,
+		Mute:            s.Playback.Mute,
+		Volume:          s.Playback.Volume,
+		VolumeMax:       s.Audio.MaxVolume,
+		VolumeMaxStable: true,
+		Sleep:           sleepMinutes(s.Timers.SleepSeconds),
 	}
 }
 

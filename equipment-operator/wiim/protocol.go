@@ -127,6 +127,12 @@ func modeForInput(input string) (string, bool) {
 	return "", false
 }
 
+// NormalizeUUID holds the twelve bytes of the LinkPlay UUID as upper
+// hex, so every spelling of one identity compares equal. mDNS and SSDP
+// spell a sixteen-byte UUID whose first twelve bytes are the identity,
+// and a person may write it with dashes or colons.
+func NormalizeUUID(value string) string { return normalizeUUID(value) }
+
 // normalizeUUID holds the twelve bytes of the LinkPlay UUID as upper
 // hex. getStatusEx spells it bare; mDNS and SSDP spell a sixteen-byte
 // UUID whose first twelve bytes are the same value, so the first

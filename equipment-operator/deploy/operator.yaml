@@ -2,8 +2,10 @@
 # in the shape of the media operator and not the hardware operators'
 # DaemonSets.
 #
-# A receiver answers over the network, so the pod holds no hardware
-# and runs on any node.
+# A receiver answers over the network, so the pod holds no hardware and
+# runs on any node. It does share the node's network namespace, because
+# finding a device is link-local multicast: a pod on the overlay gets
+# no answer to an mDNS or SSDP search, and discovery would find nothing.
 #
 # There is no volume for state. The operator re-derives everything
 # from the API server on every pass.
@@ -28,6 +30,12 @@ spec:
         app: equipment-operator
     spec:
       serviceAccountName: equipment-operator
+      # The operator shares the node's network namespace so its mDNS and
+      # SSDP searches reach the LAN. A policy that keeps the cluster's
+      # own DNS is what still resolves the broker and a declared
+      # equipment name from this namespace.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: operator
           image: ghcr.io/liken-sh/equipment-operator:latest
@@ -41,15 +49,17 @@ spec:
             # manifest states it.
             - name: EQUIPMENT_BUS_ADDRESS
               value: bus.liken-system.svc:1883
-            # liken/plans/65-prometheus-metrics.md gives every process
-            # port 9200. The deploy/monitoring component is what a
-            # cluster owner adds to scrape it; the base runs the same
-            # either way.
+            # Host network moves the listener into the node's namespace,
+            # where port 9200 is already liken-machine-operator's. This
+            # operator takes 9260, the next free port in the series that
+            # bluetooth-operator also took one from. The deploy/monitoring
+            # component is what a cluster owner adds to scrape it; the
+            # base runs the same either way.
             - name: EQUIPMENT_METRICS_ADDRESS
-              value: :9200
+              value: :9260
           ports:
             - name: metrics
-              containerPort: 9200
+              containerPort: 9260
           securityContext:
             capabilities:
               drop: ["ALL"]

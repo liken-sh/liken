@@ -21,9 +21,10 @@ const equipmentAPIVersion = "equipment.liken.sh/v1alpha1"
 // ObjectMeta carries what this operator reads or writes: name for the
 // URL, and resourceVersion for the conditional write.
 type ObjectMeta struct {
-	Name            string `json:"name,omitempty"`
-	ResourceVersion string `json:"resourceVersion,omitempty"`
-	Generation      int64  `json:"generation,omitempty"`
+	Name            string            `json:"name,omitempty"`
+	ResourceVersion string            `json:"resourceVersion,omitempty"`
+	Generation      int64             `json:"generation,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
 }
 
 // A list's own resourceVersion is the revision of the whole
@@ -185,6 +186,7 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 // when one exists, and the Reachable condition.
 type ReceiverStatus struct {
 	Zones      map[string]ZoneStatus `json:"zones,omitempty"`
+	Driver     string                `json:"driver,omitempty"`
 	Denon      *denon.Settings       `json:"denon,omitempty"`
 	Wiim       *wiim.Status          `json:"wiim,omitempty"`
 	Service    string                `json:"service,omitempty"`

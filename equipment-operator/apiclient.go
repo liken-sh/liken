@@ -287,6 +287,69 @@ func ApplyReceiverPower(c *Client, name string, power equipment.Power) (*Receive
 	return written, nil
 }
 
+// discoveredLabel marks a Receiver the discovery loop created for an
+// amp it found, and holds the protocol it was found by. The label is
+// what lets the operator prune its own objects and never a person's:
+// only an object carrying it is one the operator made.
+const discoveredLabel = "equipment.liken.sh/discovered"
+
+// discoveredReceiverApply is the partial object discovery applies: the
+// identity, the marker label, and the protocol block. It carries no
+// inputs, no session, and no settings, so every field a person later
+// writes stays theirs.
+type discoveredReceiverApply struct {
+	APIVersion string       `json:"apiVersion"`
+	Kind       string       `json:"kind"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       ReceiverSpec `json:"spec"`
+}
+
+// ApplyDiscoveredReceiver creates, or keeps, the Receiver the discovery
+// loop owns for one amp. It applies under this operator's own field
+// manager, so a person's later writes to the inputs, the session, or
+// the settings are untouched, and the identity block it does state is
+// the one field it owns.
+func ApplyDiscoveredReceiver(c *Client, name, uuid string) (*Receiver, error) {
+	body, err := json.Marshal(&discoveredReceiverApply{
+		APIVersion: equipmentAPIVersion,
+		Kind:       "Receiver",
+		Metadata: ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{discoveredLabel: "wiim"},
+		},
+		Spec: ReceiverSpec{Wiim: &WiimProtocol{UUID: uuid}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	path := receiverPath(name) + "?fieldManager=" + fieldManager + "&force=true"
+	written := &Receiver{}
+	if err := c.requestJSON(http.MethodPatch, path, applyContentType, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// DeleteReceiver removes one Receiver. A Receiver the operator did not
+// create is never named here: discovery deletes only the objects that
+// carry its own marker label. A name that is already gone is not an
+// error, so a prune that races a deletion settles the same way.
+func DeleteReceiver(c *Client, name string) error {
+	resp, err := c.send(context.Background(), http.MethodDelete, receiverPath(name), "", nil)
+	if err != nil {
+		return err
+	}
+	defer drain(resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("deleting receiver %s: %s: %s", name, resp.Status, message)
+	}
+	return nil
+}
+
 // settingsPath maps a bus setting id onto the leaf of
 // spec.denon.settings that holds it. The channel family lives under
 // channelVolumes, and every other id maps by its dotted segments, so

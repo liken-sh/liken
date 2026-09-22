@@ -78,10 +78,23 @@ func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimSt
 	}
 	return ReceiverStatus{
 		Zones:      zones,
+		Driver:     protocolName(settings, wiimStatus),
 		Denon:      settings,
 		Wiim:       wiimStatus,
 		Conditions: []Condition{reachable(state.Reachable, generation, previous, now)},
 	}
+}
+
+// protocolName is the driver the receiver's protocol block selected,
+// written the way the listing shows it.
+func protocolName(settings *denon.Settings, wiimStatus *wiim.Status) string {
+	switch {
+	case wiimStatus != nil:
+		return "wiim"
+	case settings != nil:
+		return "denon"
+	}
+	return ""
 }
 
 // sleepMinutes writes one zone's sleep timer the way the status carries
@@ -96,7 +109,7 @@ func sleepMinutes(minutes int) int {
 
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Service != b.Service || !reflect.DeepEqual(a.Denon, b.Denon) ||
+	if a.Service != b.Service || a.Driver != b.Driver || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
 		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false

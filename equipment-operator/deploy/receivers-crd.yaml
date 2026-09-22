@@ -23,6 +23,9 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
+        - name: Driver
+          type: string
+          jsonPath: .status.driver
         - name: Power
           type: string
           jsonPath: .status.zones.main.power
@@ -364,6 +367,9 @@ spec:
               type: object
               description: "What the receiver last reported, in its own units, plus the protocol's own settings. Only the operator writes it."
               properties:
+                driver:
+                  type: string
+                  description: "The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver."
                 zones:
                   type: object
                   description: "One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main."

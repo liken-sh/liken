@@ -70,6 +70,7 @@ func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
 	status := buildReceiverStatus(state, settings, nil, 2, 1, nil, statusNow)
 
 	mustMatch(t, *status.Denon.System.Eco, "auto")
+	mustMatch(t, status.Driver, "denon")
 }
 
 func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
