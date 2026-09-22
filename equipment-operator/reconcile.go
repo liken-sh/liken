@@ -61,6 +61,9 @@ type receiverUnit struct {
 	// declared change once and a bus write that returns a value to the
 	// spec is not re-sent on the next pass.
 	settings atomic.Pointer[denon.Settings]
+	// The same memory for a WiiM, which has its own settings type and no
+	// shared field with the Denon's.
+	wiimSettings atomic.Pointer[wiim.Settings]
 	// The last zone controls the operator applied, keyed by zone, so a
 	// reconcile sends a declared change once and a pass with no change
 	// sends nothing.
@@ -285,6 +288,35 @@ func (u *receiverUnit) settingsApplied() denon.Settings {
 		return *held
 	}
 	return denon.Settings{}
+}
+
+// setWiimSettings drives the device to the settings a person declared.
+// It is the Denon path's shape in WiiM's own terms: a declared value is
+// enforced when the block changes, a block the device has not confirmed
+// is sent again on the next pass, and a pass with no change sends
+// nothing. The two settings types never meet.
+func (u *receiverUnit) setWiimSettings(want wiim.Settings) {
+	if u.driver.State().Reachable != equipment.ConditionTrue {
+		return
+	}
+	observed := u.wiimClient.Settings()
+	if reflect.DeepEqual(u.wiimSettingsApplied(), want) && want.ConfirmedBy(observed) {
+		return
+	}
+	if err := u.wiimClient.ApplySettings(want); err != nil {
+		fmt.Fprintf(os.Stderr, "applying the settings of receiver %s: %v\n", u.name, err)
+		return
+	}
+	u.wiimSettings.Store(&want)
+}
+
+// wiimSettingsApplied answers the last WiiM settings the operator
+// settled on.
+func (u *receiverUnit) wiimSettingsApplied() wiim.Settings {
+	if held := u.wiimSettings.Load(); held != nil {
+		return *held
+	}
+	return wiim.Settings{}
 }
 
 // setZones drives the non-main zones to the controls a person declared.
@@ -610,6 +642,9 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	unit.setPower(receiver.Spec.Power)
 	if receiver.Spec.Denon != nil {
 		unit.setSettings(receiver.Spec.Denon.Settings)
+	}
+	if receiver.Spec.Wiim != nil {
+		unit.setWiimSettings(receiver.Spec.Wiim.Settings)
 	}
 	unit.setZones(receiver.Spec.Zones)
 	unit.setSession(ctx, receiver.Spec.Session)

@@ -116,7 +116,10 @@ func (f *fakeAmp) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func isSetter(command string) bool {
-	for _, prefix := range []string{setVolumePrefix, setMutePrefix, setInputPrefix, setShutdownPrefix} {
+	for _, prefix := range []string{
+		setVolumePrefix, setMutePrefix, setInputPrefix, setShutdownPrefix,
+		"setChannelBalance", "setDeviceName", "LED_SWITCH_SET:", "Button_Enable_SET:",
+	} {
 		if strings.HasPrefix(command, prefix) {
 			return true
 		}

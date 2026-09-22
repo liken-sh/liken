@@ -108,6 +108,34 @@ The receiver answers the WiiM/LinkPlay control protocol over unauthenticated HTT
 | --- | --- | --- | --- |
 | <span id="specwiim--uuid"></span>`uuid` | string | yes | The device's LinkPlay UUID: twelve bytes of hex, the value getStatusEx returns as uuid and the first twelve bytes of the UUID mDNS and SSDP advertise. It is the identity, stable across a reboot and a DHCP lease change. The operator reads the device's uuid and compares it before it sends any command, so an address that moved never drives the wrong amp. |
 | <span id="specwiim--address"></span>`address` | string | no | The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable. |
+| <span id="specwiim--settings"></span>`settings` | [object](#specwiimsettings) | no | The device's own settings, one family per block. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the device unchanged. An empty block sends nothing. |
+
+#### spec.wiim.settings
+
+The device's own settings, one family per block. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the device unchanged. An empty block sends nothing.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiimsettings--audio"></span>`audio` | [object](#specwiimsettingsaudio) | no | The level controls the device parses. |
+| <span id="specwiimsettings--device"></span>`device` | [object](#specwiimsettingsdevice) | no | The device's own name and its front-panel controls. |
+
+#### spec.wiim.settings.audio
+
+The level controls the device parses.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiimsettingsaudio--balance"></span>`balance` | number | no | The left-right balance, -1.0 fully left to 1.0 fully right. |
+
+#### spec.wiim.settings.device
+
+The device's own name and its front-panel controls.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwiimsettingsdevice--name"></span>`name` | string | no | The device's human label, set over the API. It is not the identity: the LinkPlay uuid is. |
+| <span id="specwiimsettingsdevice--led"></span>`led` | boolean | no | Whether the status light is on. |
+| <span id="specwiimsettingsdevice--buttons"></span>`buttons` | boolean | no | Whether the touch controls are enabled. |
 
 ### spec.volume
 

@@ -211,6 +211,34 @@ spec:
                       minLength: 1
                       maxLength: 253
                       description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable."
+                    settings:
+                      type: object
+                      description: "The device's own settings, one family per block. A declared value is enforced when the block changes: the operator re-sends every declared field on purpose, and a pass with no change sends nothing, so an omitted key leaves the device unchanged. An empty block sends nothing."
+                      properties:
+                        audio:
+                          type: object
+                          description: "The level controls the device parses."
+                          properties:
+                            balance:
+                              type: number
+                              minimum: -1
+                              maximum: 1
+                              description: "The left-right balance, -1.0 fully left to 1.0 fully right."
+                        device:
+                          type: object
+                          description: "The device's own name and its front-panel controls."
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 63
+                              description: "The device's human label, set over the API. It is not the identity: the LinkPlay uuid is."
+                            led:
+                              type: boolean
+                              description: "Whether the status light is on."
+                            buttons:
+                              type: boolean
+                              description: "Whether the touch controls are enabled."
                 volume:
                   type: object
                   description: "The loudest level a press may set and the distance one press moves, both in the receiver's own scale. A Denon requires max."

@@ -142,8 +142,9 @@ type DenonProtocol struct {
 // discovery yet, the driver can reach nothing and reports the receiver
 // unreachable.
 type WiimProtocol struct {
-	UUID    string `json:"uuid"`
-	Address string `json:"address,omitempty"`
+	UUID     string        `json:"uuid"`
+	Address  string        `json:"address,omitempty"`
+	Settings wiim.Settings `json:"settings,omitempty"`
 }
 
 // One input of the receiver, and the machine and monitor id that feed
