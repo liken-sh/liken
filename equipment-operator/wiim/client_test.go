@@ -161,6 +161,7 @@ func TestPollFoldsEveryFamily(t *testing.T) {
 	}
 	status := client.Status()
 
+	mustMatch(t, status.Address, amp.server.Listener.Addr().String())
 	mustMatch(t, status.Device.Name, "Test Amp")
 	mustMatch(t, status.Device.Model, "WiiM_Amp_4layer")
 	mustMatch(t, status.Device.UUID, "FF98F2F7AABBCCDDEEFF0011")
