@@ -250,6 +250,20 @@ cut or the extended one. IntroDB reads no length. A file that holds two
 episodes is asked about neither, because each provider places an
 episode's spans in that episode's own file.
 
+The community adds marks for a new episode or film in the days after
+it comes out, so the fact asks again about a new work sooner than
+about an old one. The release date the catalog holds for the movie or
+the episode sets the wait after a find or a miss:
+
+| Released | Asked again after |
+|---|---|
+| in the last 7 days | 1 day |
+| 8 to 90 days ago | 7 days |
+| more than 90 days ago, or no date | 30 days |
+
+A file that holds two episodes takes the later of their dates. An
+error waits one day, whatever the date.
+
 A provider that answers `429` waits for the reset its headers name and
 asks again. When a provider has spent its allowance for the day, the
 reset is hours away, and the fact asks that provider nothing more in
@@ -295,8 +309,9 @@ inside it. The fact takes no `spec.refresh`.
 ### When a fact asks again
 
 A miss lasts for thirty days and an error for one day, then the fact
-asks again. An attempt made before a title's release date lasts only
-until that date. To ask one fact again for every title now, set its
+asks again. The `marks` fact asks about a new work sooner, as the
+section above describes. An attempt made before a title's release date
+lasts only until that date. To ask one fact again for every title now, set its
 time in `spec.refresh`:
 
     spec:

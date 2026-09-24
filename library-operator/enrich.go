@@ -104,7 +104,9 @@ const (
 // provider that is down or a volume that will not read is asked again the
 // next day, and a fault that stands costs one try a day.
 // An attempt an item's release date has outlived stands for neither
-// window. beforeReleaseClause carries that rule.
+// window. beforeReleaseClause carries that rule. The marks fact shortens
+// the dated window for a work released in the last ninety days, and
+// marksgap.go carries that rule.
 const (
 	defaultRetryInterval = 30 * 24 * time.Hour
 	errorRetryInterval   = 24 * time.Hour
@@ -120,7 +122,8 @@ const (
 // A fact whose items carry a release date binds today as a fifth, in the
 // form the released column holds, because an attempt made before an item
 // was released stands only until that date. A fact whose items carry
-// none names no fifth parameter, so it binds none.
+// none names no fifth parameter, so it binds none. The marks fact binds two
+// more, the cutoffs of its shorter windows, which marksgap.go names.
 func gapParams(fact, library string, now, refresh time.Time) []any {
 	params := []any{library,
 		now.Add(-defaultRetryInterval).Unix(),
@@ -129,7 +132,11 @@ func gapParams(fact, library string, now, refresh time.Time) []any {
 	if releaseDates(fact) == "" {
 		return params
 	}
-	return append(params, now.UTC().Format(time.DateOnly))
+	params = append(params, now.UTC().Format(time.DateOnly))
+	if fact == factMarks {
+		params = append(params, marksGapParams(now)...)
+	}
+	return params
 }
 
 // The refresh time in Unix seconds, and zero where the Library names none or
@@ -199,6 +206,9 @@ func releaseDates(fact string) string {
 	if _, art := artTypes[fact]; art {
 		return artReleaseDates(fact)
 	}
+	if fact == factMarks {
+		return marksReleaseDates()
+	}
 	if fact == factIdentity || fact == factCredits || fact == factTrailer ||
 		slices.Contains(nfoFacts, fact) {
 		return titleReleaseDates("id")
@@ -232,7 +242,8 @@ func gapClause(fact, column, missing string) string {
 //
 // Every query binds the fact's refresh time as ?4. A query whose items
 // carry a release date binds today's date as ?5, and no other query
-// names a fifth parameter.
+// names a fifth parameter. The marks query alone names a sixth and a
+// seventh, the cutoffs of its shorter windows.
 //
 // A probe gap is a present video or audio file whose probed column is not
 // its modified column: no probe has read the file, or the file changed after

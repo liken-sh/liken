@@ -197,23 +197,6 @@ func replacedMarks(held []markEntry, entry string, entries []markEntry) []markEn
 	return slices.Insert(kept, at, fresh...)
 }
 
-// The marks gap reads no table of its own. Every present main video of an
-// identified movie or of an episode of an identified series, with a length
-// the probe measured, is asked again once its last attempt has passed that
-// attempt's own window, because the databases gain spans over time. The
-// length is required, because TheIntroDB chooses the release version by it.
-func marksGapQuery() string {
-	return `SELECT path FROM files ` +
-		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
-		`AND role = '` + fileRolePrimary + `' AND duration_ms > 0 ` +
-		`AND path IN (SELECT path FROM file_items WHERE library = ?1 AND item IN (` +
-		`SELECT id FROM movies WHERE library = ?1 AND id NOT LIKE '` + scopeMovie + `:path:%' ` +
-		`UNION ALL SELECT e.id FROM episodes AS e JOIN series AS s ` +
-		`ON s.library = e.library AND s.id = e.series ` +
-		`WHERE e.library = ?1 AND s.id NOT LIKE '` + scopeSeries + `:path:%')) ` +
-		`AND ` + attemptClause(factMarks, "path")
-}
-
 // What one file of the gap names, read out of the local copy of the catalog.
 // The file's links name the movie or the episodes it holds, and the aliases
 // of the movie or of the episode's series carry the provider ids. A file the
