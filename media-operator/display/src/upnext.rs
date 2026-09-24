@@ -19,10 +19,10 @@ const CARD_TOP: f32 = 380.0;
 pub const ART_H: f32 = 248.0;
 const PAD_X: f32 = 22.0;
 const PAD_Y: f32 = 16.0;
-const CARD_R: f32 = 14.0;
+pub(crate) const CARD_R: f32 = 14.0;
 /// The unfocused card's fill, dark enough to read the three lines over a
 /// bright frame. The focused card takes the chooser panel.
-const CARD_ALPHA: f32 = theme::opacity(0x54);
+pub(crate) const CARD_ALPHA: f32 = theme::opacity(0x54);
 /// The drop from each line of the card to the next, at the type size each
 /// line draws in.
 const REASON_PITCH: f32 = 40.0;
@@ -31,10 +31,10 @@ const DETAIL_H: f32 = 42.0;
 const CARD_H: f32 = ART_H + PAD_Y + REASON_PITCH + TITLE_PITCH + DETAIL_H + PAD_Y;
 
 /// The chip's row, above the right end of the bar and above the time label.
-const CHIP_Y: f32 = 806.0;
-const CHIP_H: f32 = 34.0;
-const CHIP_PAD_X: f32 = 22.0;
-const CHIP_PAD_Y: f32 = 6.0;
+pub(crate) const CHIP_Y: f32 = 806.0;
+pub(crate) const CHIP_H: f32 = 34.0;
+pub(crate) const CHIP_PAD_X: f32 = 22.0;
+pub(crate) const CHIP_PAD_Y: f32 = 6.0;
 
 /// The two amounts of a work that may remain when the card rises: a share
 /// of its length, and a number of seconds. The rule takes whichever leaves
@@ -47,6 +47,13 @@ const CHIP_PAD_Y: f32 = 6.0;
 /// rule marks the end of the story.
 const RISE_PERCENT: f64 = 3.0;
 const RISE_SECONDS: f64 = 180.0;
+
+/// The second at which the time rule raises the card: the length less the
+/// smaller of the two amounts. The marks cap a rise after a scene at this
+/// point, so a card never rises later than the time rule puts it.
+pub(crate) fn time_rise(duration: f64) -> f64 {
+    duration - (duration * RISE_PERCENT / 100.0).min(RISE_SECONDS)
+}
 
 /// The card draws at this fraction of its alpha while it waits for the next
 /// work to start.
@@ -164,9 +171,14 @@ impl UpNext {
     /// property and the display runs no timer to watch for the crossing. The
     /// rise holds after it happens, so a seek back does not take the card down.
     ///
+    /// `credits` is where the item's marks place the rise: the start of the
+    /// credits in its second half, or the point after a scene that follows
+    /// them. `Marks::credits` states the rule. The time that remains decides
+    /// only for an item with no such mark.
+    ///
     /// It answers whether the card rose, because that is the one push of this
     /// property that draws anything.
-    pub fn on_percent(&mut self, value: Option<f64>, film: &Film) -> bool {
+    pub fn on_percent(&mut self, value: Option<f64>, film: &Film, credits: Option<f64>) -> bool {
         let Some(value) = value else {
             return false;
         };
@@ -178,8 +190,14 @@ impl UpNext {
         let Some(duration) = film.duration.filter(|duration| *duration > 0.0) else {
             return false;
         };
-        let remaining = duration * (100.0 - value) / 100.0;
-        if remaining > (duration * RISE_PERCENT / 100.0).min(RISE_SECONDS) {
+        let reached = match credits {
+            Some(start) => duration * value / 100.0 >= start,
+            None => {
+                let remaining = duration * (100.0 - value) / 100.0;
+                remaining <= (duration * RISE_PERCENT / 100.0).min(RISE_SECONDS)
+            }
+        };
+        if !reached {
             return false;
         }
         self.risen = true;
@@ -466,7 +484,7 @@ mod tests {
     fn risen() -> UpNext {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
-        assert!(upnext.on_percent(Some(98.0), &film(100.0)));
+        assert!(upnext.on_percent(Some(98.0), &film(100.0), None));
         upnext
     }
 
@@ -603,9 +621,9 @@ mod tests {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
 
-        assert!(!upnext.on_percent(Some(97.0), &long));
+        assert!(!upnext.on_percent(Some(97.0), &long, None));
         assert!(!upnext.showing_card());
-        assert!(upnext.on_percent(Some(98.75), &long));
+        assert!(upnext.on_percent(Some(98.75), &long, None));
         assert!(upnext.showing_card());
     }
 
@@ -615,8 +633,8 @@ mod tests {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
 
-        assert!(!upnext.on_percent(Some(96.0), &short));
-        assert!(upnext.on_percent(Some(97.0), &short));
+        assert!(!upnext.on_percent(Some(96.0), &short, None));
+        assert!(upnext.on_percent(Some(97.0), &short, None));
     }
 
     /// A work with no length, and a push that carries no number, raise
@@ -625,9 +643,9 @@ mod tests {
     fn a_work_with_no_length_never_raises_the_card() {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
-        assert!(!upnext.on_percent(Some(99.0), &Film::default()));
-        assert!(!upnext.on_percent(Some(99.0), &film(0.0)));
-        assert!(!upnext.on_percent(None, &film(100.0)));
+        assert!(!upnext.on_percent(Some(99.0), &Film::default(), None));
+        assert!(!upnext.on_percent(Some(99.0), &film(0.0), None));
+        assert!(!upnext.on_percent(None, &film(100.0), None));
         assert!(!upnext.showing_card());
     }
 
@@ -637,16 +655,48 @@ mod tests {
     fn the_rise_holds_and_arms_one_hide_window() {
         let mut upnext = risen();
         assert_eq!(upnext.take_hide(), Hide::Arm);
-        assert!(!upnext.on_percent(Some(20.0), &film(100.0)));
+        assert!(!upnext.on_percent(Some(20.0), &film(100.0), None));
         assert!(upnext.showing_card());
         assert_eq!(upnext.take_hide(), Hide::Keep);
+    }
+
+    /// Credits in the second half move the rise to their start, whether that
+    /// is earlier or later than the time that remains would put it.
+    #[test]
+    fn credits_raise_the_card_at_their_start() {
+        let cases = [
+            ("credits before the three minutes", 5400.0, 89.9, 90.0),
+            ("credits inside the last three minutes", 5950.0, 99.0, 99.2),
+        ];
+        let long = film(6000.0);
+        for (name, credits, before, at) in cases {
+            let mut upnext = UpNext::default();
+            upnext.receive(OFFER);
+            assert!(
+                !upnext.on_percent(Some(before), &long, Some(credits)),
+                "{name}"
+            );
+            assert!(upnext.on_percent(Some(at), &long, Some(credits)), "{name}");
+            assert!(upnext.showing_card(), "{name}");
+        }
+    }
+
+    /// A rise the credits raised holds after a seek back, as every rise does.
+    #[test]
+    fn a_rise_at_the_credits_holds_after_a_seek_back() {
+        let long = film(6000.0);
+        let mut upnext = UpNext::default();
+        upnext.receive(OFFER);
+        assert!(upnext.on_percent(Some(90.0), &long, Some(5400.0)));
+        assert!(!upnext.on_percent(Some(10.0), &long, Some(5400.0)));
+        assert!(upnext.showing_card());
     }
 
     /// An offer with no block raises nothing, whatever the position.
     #[test]
     fn a_position_with_no_offer_raises_nothing() {
         let mut upnext = UpNext::default();
-        assert!(!upnext.on_percent(Some(99.0), &film(100.0)));
+        assert!(!upnext.on_percent(Some(99.0), &film(100.0), None));
     }
 
     #[test]
@@ -764,7 +814,7 @@ mod tests {
         upnext.receive(OFFER);
         assert!(!upnext.draws_outside(false));
 
-        assert!(upnext.on_percent(Some(98.0), &film(100.0)));
+        assert!(upnext.on_percent(Some(98.0), &film(100.0), None));
         while upnext.fade().running() {
             upnext.fade_mut().step();
         }

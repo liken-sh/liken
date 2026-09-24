@@ -10,6 +10,7 @@ use crate::images;
 use crate::ipc::Command;
 use crate::presentation::Presentation;
 use crate::scrubber::{self, Axis, Scrubber};
+use crate::skip::Skip;
 use crate::strip::Strip;
 use crate::upnext::UpNext;
 
@@ -43,18 +44,22 @@ impl Action {
 /// chapter, on one bar. up and down walk the stops present for the current file
 /// and skip the rest, so the list is flat and dynamic.
 /// The up-next offer is the stop above the scrubber, so up from the fine axis
-/// lands on it and down returns.
+/// lands on it and down returns. The skip control is between the two while
+/// the playhead is inside an intro or a recap, because it is the one a person
+/// reaches for then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
     Next,
+    Skip,
     Fine,
     Chapter,
     Images,
     Strip,
 }
 
-const STOPS: [Stop; 5] = [
+const STOPS: [Stop; 6] = [
     Stop::Next,
+    Stop::Skip,
     Stop::Fine,
     Stop::Chapter,
     Stop::Images,
@@ -83,6 +88,7 @@ pub struct Parts<'a> {
     /// The monotonic second the seek ramp reads.
     pub now: f64,
     pub upnext: &'a mut UpNext,
+    pub skip: &'a mut Skip,
 }
 
 /// Whether the display stands summoned, where the focus is, and how far the
@@ -165,6 +171,7 @@ impl Focus {
         let film = parts.film;
         match stop {
             Stop::Next => parts.upnext.available(),
+            Stop::Skip => parts.skip.available(),
             Stop::Fine => !parts.presentation.is_image() && scrubber::fine_available(film),
             Stop::Chapter => !parts.presentation.is_image() && scrubber::chapter_available(film),
             Stop::Images => images::available(parts.presentation),
@@ -172,11 +179,19 @@ impl Focus {
         }
     }
 
-    /// Show the display and arm the idle window.
+    /// Show the display and arm the idle window. A summon from a press lands
+    /// on the skip control when it shows, so the select after the press
+    /// skips.
     pub fn summon(&mut self, parts: &Parts<'_>) {
+        self.raise(parts, &[Stop::Next]);
+    }
+
+    /// Show the display, landing the focus on the first present stop that is
+    /// not in `passed`.
+    fn raise(&mut self, parts: &Parts<'_>, passed: &[Stop]) {
         if !self.summoned {
             self.summoned = true;
-            self.reset_focus(parts);
+            self.focused = Self::first_present(parts, passed);
         }
         // A summon while paused arms nothing, so the display stands for as
         // long as the film does.
@@ -195,12 +210,30 @@ impl Focus {
         self.clock.hide();
     }
 
-    /// A summon lands on the first stop below the offer, so the main button
-    /// stays play-pause, and a select on the offer takes an up press first.
-    fn reset_focus(&mut self, parts: &Parts<'_>) {
-        self.focused = Self::present(parts)
+    /// A summon lands below the offer, so the main button stays play-pause,
+    /// and a select on the offer takes an up press first. The offer ends the
+    /// run, and a press that lands on it by surprise would end a film the
+    /// viewer meant to pause.
+    ///
+    /// The skip control is different. It shows on the bare video before the
+    /// press, the focus that lands on it draws the panel around it, and a seek
+    /// back undoes a skip. So a press lands on it, and the viewer reads what
+    /// select does before pressing it.
+    fn first_present(parts: &Parts<'_>, passed: &[Stop]) -> Option<Stop> {
+        Self::present(parts)
             .into_iter()
-            .find(|stop| *stop != Stop::Next);
+            .find(|stop| !passed.contains(stop))
+    }
+
+    /// A stop can leave while the focus is on it: the skip control
+    /// leaves when the playhead leaves its span or a select skips it. The
+    /// frame loop and the select call this then, and a focus on a stop that
+    /// is gone moves to the first stop below the offer.
+    pub fn refocus(&mut self, parts: &Parts<'_>) {
+        let present = Self::present(parts);
+        if self.focused.is_some_and(|stop| !present.contains(&stop)) {
+            self.focused = Self::first_present(parts, &[Stop::Next, Stop::Skip]);
+        }
     }
 
     /// The frame loop observes pause and reports it here. A pause summons the
@@ -208,7 +241,9 @@ impl Focus {
     ///
     /// mpv reports the pause state once at registration. The first report only
     /// records it, so a film that loads paused starts with the display hidden.
-    /// A later pause, during playback, summons the display.
+    /// A later pause, during playback, summons the display. It lands below
+    /// the skip control as well as the offer, so the select that resumes the
+    /// film resumes it.
     pub fn on_pause(&mut self, paused: bool, parts: &mut Parts<'_>) {
         self.paused = paused;
         if self.first_pause {
@@ -216,7 +251,7 @@ impl Focus {
             return;
         }
         if paused {
-            self.summon(parts);
+            self.raise(parts, &[Stop::Next, Stop::Skip]);
             self.clock.ask(Hide::Cancel);
         } else if self.summoned {
             self.dismiss(parts);
@@ -251,9 +286,9 @@ impl Focus {
     /// and select opens a chooser that captures.
     fn route(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
         match self.focused {
-            // The offer is one thing to take, so it answers select and nothing
-            // else.
-            Some(Stop::Next) | None => Vec::new(),
+            // The offer and the skip control are each one thing to take, so
+            // they answer select and nothing else.
+            Some(Stop::Next | Stop::Skip) | None => Vec::new(),
             Some(Stop::Fine) => {
                 match action {
                     Action::Left => parts.scrubber.seek(-1.0, parts.now, parts.film),
@@ -293,6 +328,13 @@ impl Focus {
                 }
                 parts.upnext.expand();
                 return Vec::new();
+            }
+            // A select on the skip control seeks past the span, and the
+            // control leaves with it, so the focus moves to the bar.
+            if self.focused == Some(Stop::Skip) && parts.skip.available() {
+                let commands = parts.skip.take();
+                self.refocus(parts);
+                return commands;
             }
             if self.focused == Some(Stop::Strip) {
                 return self.route(Action::Select, parts);
@@ -381,6 +423,7 @@ fn next() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::marks::{Jump, Kind, Span};
     use serde_json::json;
 
     /// One film, one presentation, and the two modules a press reaches.
@@ -392,6 +435,7 @@ mod tests {
         focus: Focus,
         now: f64,
         upnext: UpNext,
+        skip: Skip,
     }
 
     impl Display {
@@ -422,7 +466,13 @@ mod tests {
                 focus: Focus::new(),
                 now: 100.0,
                 upnext: UpNext::default(),
+                skip: Skip::default(),
             }
+        }
+
+        /// The playhead inside the intro, which offers the skip control.
+        fn intro(&mut self) {
+            self.skip.on_position(Some(INTRO));
         }
 
         /// The block the sidecar sends for the work that follows this one.
@@ -446,7 +496,14 @@ mod tests {
                 strip: &mut self.strip,
                 now: self.now,
                 upnext: &mut self.upnext,
+                skip: &mut self.skip,
             }
+        }
+
+        fn refocus(&mut self) {
+            let mut focus = self.focus;
+            focus.refocus(&self.parts());
+            self.focus = focus;
         }
 
         fn press(&mut self, action: Action) -> Vec<Command> {
@@ -473,6 +530,20 @@ mod tests {
     const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
         "title":"E05 \u00b7 The Long Tide",
         "detail":"Harbor Lights \u00b7 S02 \u00b7 45 min"}"#;
+
+    /// The intro the skip control offers, in the film's own seconds.
+    const INTRO: Jump = Jump {
+        span: Span {
+            kind: Kind::Intro,
+            start: 1100.0,
+            end: 1250.0,
+        },
+        to: 1250.0,
+    };
+
+    fn skip_to_the_end() -> Vec<Command> {
+        vec![vec![json!("seek"), json!(1250.0), json!("absolute+exact")]]
+    }
 
     fn ask() -> Vec<Command> {
         vec![vec![json!("script-message"), json!("liken-next")]]
@@ -863,7 +934,7 @@ mod tests {
     fn a_select_on_the_risen_card_asks_for_the_next_work() {
         let mut display = Display::new("{}");
         display.offer();
-        assert!(display.upnext.on_percent(Some(98.0), &display.film));
+        assert!(display.upnext.on_percent(Some(98.0), &display.film, None));
         display.summon();
         display.press(Action::Up);
 
@@ -923,6 +994,103 @@ mod tests {
             display.press(Action::Back),
             vec![vec![json!("script-message"), json!("liken-exit")]]
         );
+    }
+
+    /// The skip control is a stop between the offer and the bar while the
+    /// playhead is inside the span.
+    #[test]
+    fn the_skip_control_is_a_stop_while_the_playhead_is_inside_the_span() {
+        let mut display = Display::new("{}");
+        display.offer();
+        display.intro();
+        assert_eq!(
+            Focus::present(&display.parts()),
+            vec![
+                Stop::Next,
+                Stop::Skip,
+                Stop::Fine,
+                Stop::Chapter,
+                Stop::Strip
+            ]
+        );
+    }
+
+    /// The press that wakes the display lands on the skip control, so the
+    /// select after it skips: two presses from the bare video.
+    #[test]
+    fn a_wake_lands_on_the_skip_control_and_a_select_skips() {
+        for action in [Action::Up, Action::Down, Action::Left, Action::Right] {
+            let mut display = Display::new("{}");
+            display.intro();
+            assert!(display.press(action).is_empty(), "{action:?}");
+            assert_eq!(display.focus.focused_stop(), Some(Stop::Skip), "{action:?}");
+            assert_eq!(
+                display.press(Action::Select),
+                skip_to_the_end(),
+                "{action:?}"
+            );
+            assert!(!display.skip.available(), "{action:?}");
+            assert_eq!(display.focus.focused_stop(), Some(Stop::Fine), "{action:?}");
+        }
+    }
+
+    /// A select at the bare video plays or pauses, as it does everywhere else,
+    /// so the control never changes what the button does before it shows
+    /// focus.
+    #[test]
+    fn a_select_at_the_bare_video_pauses_during_the_intro() {
+        let mut display = Display::new("{}");
+        display.intro();
+        assert_eq!(display.press(Action::Select), pause_toggle());
+    }
+
+    /// A pause lands below the skip control, so the select that resumes the
+    /// film resumes it.
+    #[test]
+    fn a_pause_lands_below_the_skip_control() {
+        let mut display = Display::new("{}");
+        display.intro();
+        display.pause(false);
+        display.pause(true);
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+        assert_eq!(display.press(Action::Select), pause_toggle());
+    }
+
+    /// up from the bar reaches the skip control, and left and right on it do
+    /// nothing.
+    #[test]
+    fn up_reaches_the_skip_control_and_it_answers_select_alone() {
+        let mut display = Display::new("{}");
+        display.pause(false);
+        display.pause(true);
+        display.intro();
+        display.press(Action::Up);
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
+        for action in [Action::Left, Action::Right] {
+            assert!(display.press(action).is_empty(), "{action:?}");
+            assert!(!display.scrubber.scanning(), "{action:?}");
+        }
+        assert_eq!(display.press(Action::Select), skip_to_the_end());
+    }
+
+    /// When the playhead leaves the span, the focus on the control moves to
+    /// the first stop below the offer, and a select there plays or pauses.
+    #[test]
+    fn the_focus_leaves_the_control_with_the_span() {
+        let mut display = Display::new("{}");
+        display.intro();
+        display.summon();
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
+
+        display.skip.on_position(None);
+        display.refocus();
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+        assert_eq!(display.press(Action::Select), pause_toggle());
+
+        // A focus on a stop that is still there stays where it is.
+        display.press(Action::Down);
+        display.refocus();
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Chapter));
     }
 
     /// A focus built either way holds the same state, so one built through

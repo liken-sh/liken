@@ -534,6 +534,32 @@ type Presentation struct {
 	// logo is. The display shows a tile from its sprite sheets on the scrub
 	// cursor.
 	Trickplay string `json:"trickplay,omitempty"`
+
+	// The spans in the file where the intro, the recap, the credits, the
+	// scene after the credits, and the preview are. A community database
+	// can return several candidate spans for one kind, from different
+	// submissions or release versions, and the library forwards every one.
+	// The operator passes them to the display unread, and the display
+	// merges the candidates and acts on the result, so one rule reads them.
+	Marks []PlayMark `json:"marks,omitempty"`
+}
+
+// PlayMark is one candidate span of one kind. Start and End are pointers
+// because an absent value differs from zero: an absent start is the start
+// of the file, and an absent end is the end of the file, which the display
+// reads from the duration mpv reports.
+type PlayMark struct {
+	// Kind is `intro`, `recap`, `credits`, `post-credits`, or `preview`.
+	// `post-credits` is the scene after the credits. The display
+	// ignores a kind it does not know, so a library can send a new kind
+	// before the display acts on it.
+	Kind  string   `json:"kind"`
+	Start *float64 `json:"start,omitempty"`
+	End   *float64 `json:"end,omitempty"`
+
+	// Source names the database the span came from, such as `theintrodb`.
+	// The display does not read it.
+	Source string `json:"source,omitempty"`
 }
 
 // The status the operator alone writes: the phase, the activity

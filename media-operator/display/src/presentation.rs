@@ -5,6 +5,7 @@
 use serde_json::{Map, Value};
 
 use crate::film::Film;
+use crate::marks::Marks;
 
 /// What kind of item the block declares, which the scrubber, the strip, and
 /// the header each ask about on every rebuild.
@@ -18,15 +19,17 @@ pub enum Kind {
     Music,
 }
 
-/// The current item's declared fields, and the two readings that do not
-/// change between two blocks: what kind of item it is, and the season line a
-/// series draws. Both are resolved when the block arrives, because the layer
-/// is rebuilt many times for one item and the block is read once.
+/// The current item's declared fields, and the three readings that do not
+/// change between two blocks: what kind of item it is, the season line a
+/// series draws, and the marks. Each is resolved when the block arrives,
+/// because the display reads them many times for one item and the block is
+/// read once.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Presentation {
     block: Map<String, Value>,
     kind: Kind,
     second: Option<String>,
+    marks: Marks,
 }
 
 impl Presentation {
@@ -47,6 +50,14 @@ impl Presentation {
             _ => Kind::Other,
         };
         self.second = crate::header::second_line(self);
+        self.marks = Marks::parse(self.field("marks"));
+    }
+
+    /// The spans the library found for the intro, the recap, the credits, and
+    /// the preview. An item with none plays with no skip control, and its card
+    /// rises by the time that remains.
+    pub fn marks(&self) -> &Marks {
+        &self.marks
     }
 
     /// The title resolves in three tiers: the block's own title, then mpv's
@@ -294,5 +305,26 @@ mod tests {
         presentation.receive(r#"{"title":"Another"}"#);
         assert_eq!(presentation.title(&film()).as_deref(), Some("Another"));
         assert_eq!(presentation.year(), None);
+    }
+
+    /// The marks read off the block once, and the next item's block, which
+    /// may carry none, replaces them.
+    #[test]
+    fn the_marks_read_off_the_block_and_a_new_item_replaces_them() {
+        let mut presentation =
+            block(r#"{"title":"A Film","marks":[{"kind":"intro","start":5.0,"end":65.0}]}"#);
+        assert_eq!(
+            presentation.marks().skippable(Some(10.0), None),
+            Some(crate::marks::Jump {
+                span: crate::marks::Span {
+                    kind: crate::marks::Kind::Intro,
+                    start: 5.0,
+                    end: 65.0
+                },
+                to: 65.0
+            })
+        );
+        presentation.receive(r#"{"title":"Another"}"#);
+        assert_eq!(presentation.marks(), &Marks::default());
     }
 }

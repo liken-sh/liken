@@ -22,6 +22,7 @@ use crate::focus::{Focus, Parts, Stop};
 use crate::ipc::{self, Command, Ipc};
 use crate::presentation::Presentation;
 use crate::scrubber::Scrubber;
+use crate::skip::Skip;
 use crate::strip::Strip;
 use crate::upnext::{self, UpNext};
 use crate::volume::Volume;
@@ -110,6 +111,7 @@ pub struct Display {
     scrubber: Scrubber,
     strip: Strip,
     upnext: UpNext,
+    skip: Skip,
     volume: Volume,
     art: Art,
     /// The hide windows the display, the card, and the row wait out, each on
@@ -165,6 +167,7 @@ impl Display {
             scrubber: Scrubber::default(),
             strip: Strip::default(),
             upnext: UpNext::default(),
+            skip: Skip::default(),
             volume: Volume::default(),
             art: Art::default(),
             idle: Idle::default(),
@@ -203,6 +206,7 @@ impl Display {
             Message::Tick => {
                 self.focus.fade_mut().step();
                 self.upnext.fade_mut().step();
+                self.skip.fade_mut().step();
                 self.volume.fade_mut().step();
                 self.redraw();
             }
@@ -283,6 +287,7 @@ impl Display {
             strip: &mut self.strip,
             now,
             upnext: &mut self.upnext,
+            skip: &mut self.skip,
         }
     }
 
@@ -306,6 +311,9 @@ impl Display {
             // follows decodes the new item's logo.
             crate::canvas::forget_measurements();
             self.art.on_item(&self.presentation, &self.canvas);
+            // The new item's marks may place the playhead inside a span, or
+            // outside the one the last item offered.
+            self.follow_marks();
         } else if word == ipc::NEXT {
             self.upnext.receive(words.get(1).map_or("", String::as_str));
         } else if word == ipc::VOLUME_CHANGED {
@@ -325,17 +333,20 @@ impl Display {
     /// alone moves nothing a person can see and redraws nothing.
     ///
     /// The offer reads the position as well, and raises its card at the rise,
-    /// which is the one thing a position does with the display down.
+    /// and the skip control comes and goes with the intro and the recap.
+    /// Those are the two things a position does with the display down.
     fn on_property(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
         self.film.apply(name, value);
         if !draws(name) {
             return self.own_clock(name, value);
         }
         if name == "time-pos" {
-            let rose = self.upnext.on_percent(self.percent(), &self.film);
+            let credits = self.presentation.marks().credits(self.film.duration);
+            let rose = self.upnext.on_percent(self.percent(), &self.film, credits);
             if rose {
                 self.redraw();
             }
+            self.follow_marks();
             // With the display down nothing under it follows the position, so
             // the signature is not worth the work.
             if self.focus.fade().value() > 0.0 {
@@ -379,6 +390,23 @@ impl Display {
             self.redraw_above();
         }
         Task::none()
+    }
+
+    /// Offer the skip control while the playhead is inside an intro or a
+    /// recap, and take it down when the playhead leaves. A focus on the
+    /// control that has gone moves to the bar.
+    fn follow_marks(&mut self) {
+        let inside = self
+            .presentation
+            .marks()
+            .skippable(self.film.position, self.film.duration);
+        if !self.skip.on_position(inside) {
+            return;
+        }
+        let mut focus = self.focus;
+        focus.refocus(&self.parts());
+        self.focus = focus;
+        self.redraw();
     }
 
     /// How far into the work the playhead stands, as the hundredths mpv
@@ -523,6 +551,11 @@ impl Display {
                 brush.text(line);
             }
         }
+        // The skip control draws after the bottom cluster, so it reads over
+        // the scrim, and before the thumbnail, so a scan near the start of
+        // the film shows its frame over the control.
+        self.skip
+            .draw(brush, self.focus.focused_stop() == Some(Stop::Skip));
         // The thumbnail stands over the bar, centred on the playhead it
         // previews.
         if let Some(tile) = self.art.tile()
@@ -567,6 +600,9 @@ impl Display {
         // outside the OSD block on a fade of its own.
         self.upnext
             .draw_outside(brush, self.focus.visible(), &self.bridge(&canvas));
+        // The skip control stays over the bare video for the whole span, on a
+        // fade of its own, for the same reason.
+        self.skip.draw_outside(brush, self.focus.visible());
         // The volume row draws outside the OSD block, because it comes and
         // goes on a clock of its own and a level change must show the level
         // and nothing else. It draws last, so it reads over a chooser's dim as
@@ -625,10 +661,13 @@ impl Display {
         Subscription::batch(running)
     }
 
-    /// Whether any of the three fades is moving: the display's own, the
-    /// up-next card's, and the volume row's.
+    /// Whether any of the four fades is moving: the display's own, the
+    /// up-next card's, the skip control's, and the volume row's.
     fn fading(&self) -> bool {
-        self.focus.fade().running() || self.upnext.fade().running() || self.volume.fade().running()
+        self.focus.fade().running()
+            || self.upnext.fade().running()
+            || self.skip.fade().running()
+            || self.volume.fade().running()
     }
 }
 
@@ -799,8 +838,9 @@ impl canvas::Program<Message> for Layer<'_> {
 
         // A frame with nothing in it is what the display draws between
         // summons: the film below shows through every pixel of the window.
-        // The up-next card and the volume row come and go on clocks of their
-        // own, so the layer above draws for them with the display down. The
+        // The up-next card, the skip control, and the volume row come and go
+        // on clocks of their own, so the layer above draws for them with the
+        // display down. The
         // cover is the one picture that holds the frame with the OSD down, so
         // the layer under the OSD draws for it as well.
         let fade = self.display.focus.fade().value();
@@ -811,6 +851,10 @@ impl canvas::Program<Message> for Layer<'_> {
                     || self
                         .display
                         .upnext
+                        .draws_outside(self.display.focus.visible())
+                    || self
+                        .display
+                        .skip
                         .draws_outside(self.display.focus.visible())
                     || self.display.volume.showing()
             }
@@ -1402,6 +1446,109 @@ mod tests {
 
         let _ = display.update(property("playlist-pos", json!(1)));
         assert!(!display.upnext.available());
+    }
+
+    /// An item whose marks place its intro around the playhead the fixture
+    /// film stands at, and its credits in its second half.
+    const MARKED: &str = r#"{"title":"A Film","marks":[
+        {"kind":"intro","end":1250.0,"source":"theintrodb"},
+        {"kind":"intro","start":1100.0,"end":1250.0},
+        {"kind":"credits","start":5400.0,"end":5900.0}]}"#;
+
+    /// The skip control comes with the intro and leaves with it, on its own
+    /// fade, with the display down.
+    #[tokio::test]
+    async fn the_skip_control_follows_the_intro_with_the_display_down() {
+        let (mut display, _) = display();
+        let _ = display.update(present(MARKED));
+        settle(&mut display);
+        assert!(display.skip.available());
+        assert!(display.skip.draws_outside(false));
+        assert!(!display.focus.visible());
+
+        let _ = display.update(property("time-pos", json!(1300.0)));
+        settle(&mut display);
+        assert!(!display.skip.available());
+        assert!(!display.skip.draws_outside(false));
+    }
+
+    /// An item with no marks offers no skip control anywhere in the film.
+    #[tokio::test]
+    async fn an_item_with_no_marks_offers_no_skip_control() {
+        let (mut display, _) = display();
+        let _ = display.update(present(r#"{"title":"A Film"}"#));
+        for at in [0.0, 1200.0, 5950.0] {
+            let _ = display.update(property("time-pos", json!(at)));
+            assert!(!display.skip.available(), "{at}");
+        }
+    }
+
+    /// The press that wakes the display lands on the control, and the select
+    /// after it seeks to the end of the intro. The focus moves to the bar when
+    /// the playhead leaves the span.
+    #[tokio::test]
+    async fn a_wake_and_a_select_skip_the_intro() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(present(MARKED));
+        let _ = display.update(message("down"));
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
+
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"seek\",1250.0,\"absolute+exact\"],\"request_id\":0}"]
+        );
+        let _ = display.update(property("time-pos", json!(1250.0)));
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+    }
+
+    /// Credits in the second half raise the card at their start, earlier than
+    /// the time that remains would.
+    #[tokio::test]
+    async fn the_credits_raise_the_card_at_their_start() {
+        let (mut display, _) = display();
+        let _ = display.update(present(MARKED));
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("time-pos", json!(5399.0)));
+        assert_eq!(display.card.armed, None);
+
+        let _ = display.update(property("time-pos", json!(5400.0)));
+        assert!(display.card.armed.is_some());
+        assert!(display.upnext.showing_card());
+    }
+
+    /// In the credits before a scene, the skip control shows and the card
+    /// waits. A wake lands on the control, up reaches the offer's chip, and a
+    /// select on the control seeks to the scene in the gap between the two
+    /// credits spans. The card rises at the credits after the scene.
+    #[tokio::test]
+    async fn the_card_waits_for_the_scene_and_the_control_leads_to_it() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(present(
+            r#"{"marks":[{"kind":"credits","start":5300.0,"end":5600.0},
+                {"kind":"credits","start":5700.0}]}"#,
+        ));
+        let _ = display.update(block("next", OFFER));
+        let _ = display.update(property("time-pos", json!(5400.0)));
+        assert!(!display.upnext.showing_card());
+        assert!(display.skip.available());
+
+        let _ = display.update(message("down"));
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
+        let _ = display.update(message("up"));
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
+        let _ = display.update(message("down"));
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"seek\",5600.0,\"absolute+exact\"],\"request_id\":0}"]
+        );
+
+        let _ = display.update(property("time-pos", json!(5699.0)));
+        assert!(!display.upnext.showing_card());
+        let _ = display.update(property("time-pos", json!(5700.0)));
+        assert!(display.upnext.showing_card());
+        assert!(!display.skip.available());
     }
 
     /// The level shows the row and nothing else on the display.

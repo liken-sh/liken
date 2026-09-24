@@ -222,6 +222,63 @@ spec:
                               The X.trickplay directory URI, claim://, nfs:// or
                               https://, resolved the way the media URI is. The
                               display shows a tile from it on the scrub cursor.
+                          marks:
+                            type: array
+                            x-kubernetes-list-type: atomic
+                            description: >-
+                              The spans in the file where the intro, the
+                              recap, the credits, the scene after the
+                              credits, and the preview are. A database can
+                              give several candidate spans for one kind, and
+                              the list carries every one. The display merges
+                              the candidates that overlap into one span, from
+                              the median start and the median end. It offers
+                              a skip control while the playhead is inside an
+                              intro or a recap. The credits count when they
+                              start in the second half of the item. A scene
+                              after them is a post-credits span, or the gap
+                              between two credits spans. Inside the credits
+                              before a scene, the display offers a skip to the
+                              scene. The up-next card rises at the start of
+                              the credits, or, when a scene follows them, at
+                              the later of the start of the last credits span
+                              and the end of the last scene. A card after a
+                              scene never rises later than it would with no
+                              marks, when three percent of the item or three
+                              minutes remain, whichever is less. An item with
+                              no marks plays with no skip control, and its
+                              card rises by the time that remains.
+                            items:
+                              type: object
+                              required: [kind]
+                              properties:
+                                kind:
+                                  type: string
+                                  description: >-
+                                    What the span holds: intro, recap,
+                                    credits, post-credits, or preview.
+                                    post-credits is the scene after the
+                                    credits. The display ignores a kind it
+                                    does not know.
+                                start:
+                                  type: number
+                                  minimum: 0
+                                  description: >-
+                                    Where the span starts, in seconds from
+                                    the start of the file. Omit it for a span
+                                    that starts with the file.
+                                end:
+                                  type: number
+                                  minimum: 0
+                                  description: >-
+                                    Where the span ends, in seconds from the
+                                    start of the file. Omit it for a span
+                                    that ends with the file.
+                                source:
+                                  type: string
+                                  description: >-
+                                    The database the span came from, such as
+                                    theintrodb. The display does not read it.
                 start:
                   type: string
                   description: >-
@@ -235,8 +292,13 @@ spec:
                   type: object
                   description: >-
                     The work that follows this run. The display offers
-                    it on the scrubber as a chip, and as a card in the
-                    last ten percent of the run. A select on the offer
+                    it on the scrubber as a chip, and as a card near the
+                    end of the run. When the item's marks place credits
+                    in its second half, the card rises at the start of the
+                    credits, or after the scene that follows them, as the
+                    marks field describes. Otherwise it rises when three
+                    percent of the item or three minutes remain, whichever
+                    is less. A select on the offer
                     publishes the request below on the Player's commands
                     topic, where the program that wrote the Play reads
                     it back and creates the next Play. A Play with no

@@ -351,6 +351,32 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 	}
 }
 
+// The marks reach the display as the library wrote them: every candidate
+// in order, an absent start or end still absent, and a kind the display
+// does not know still present, because the display interprets the marks
+// and the operator only carries them.
+func TestBuildPodBakesTheMarksAsWritten(t *testing.T) {
+	end, start, later := 107.0, 7.007, 3316.0
+	play := testPlay()
+	play.Spec.Items = []PlayItem{{
+		URI: "nfs://nas.example/export/shows/ep.mkv",
+		Presentation: &Presentation{Marks: []PlayMark{
+			{Kind: "intro", End: &end, Source: "theintrodb"},
+			{Kind: "intro", Start: &start, End: &end},
+			{Kind: "credits", Start: &start, End: &later},
+			{Kind: "cold-open"},
+		}},
+	}}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	got := envValue(initContainer(t, pod, commandContainer), presentationsVariable)
+	want := `[{"marks":[{"kind":"intro","end":107,"source":"theintrodb"},{"kind":"intro","start":7.007,"end":107},{"kind":"credits","start":7.007,"end":3316},{"kind":"cold-open"}]}]`
+	if got != want {
+		t.Errorf("%s = %s, want %s", presentationsVariable, got, want)
+	}
+}
+
 // The command sidecar names every controller the unit owns: their events
 // topics and their focus topics, aligned.
 func TestBuildPodGivesTheCommandSidecarEveryRemote(t *testing.T) {
