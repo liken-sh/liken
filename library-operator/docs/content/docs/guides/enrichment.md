@@ -59,10 +59,24 @@ The providers, and the facts each one serves:
   `movie_trailers` collection, and it needs no account. Declare it
   with an empty block, `archive: {}`. It holds trailers for many older
   films, and the operator asks it no faster than four times a second.
+* `theintrodb`, TheIntroDB: marks only, the intro, recap, credits, and
+  preview spans of movies and episodes. It finds a work by its TMDb id,
+  and a key is optional. Declare it with an empty block,
+  `theintrodb: {}`, or name a `Secret` under `secretRef` to use a key.
+  Without a key it answers 500 asks a day for your address. With one it
+  answers 1000 a day for your account, and it adds your own pending
+  submissions to each answer.
+* `introdb`, IntroDB: marks only, the intro, recap, credits, and
+  post-credits spans of movies and episodes. It finds a work by its IMDb
+  id and needs no account. Declare it with an empty block,
+  `introdb: {}`.
 
-The operator reads the `Secret` once per pass to check the provider
-answers. A `secretKeyRef` passes the key to an enricher container, so
-no long-running pod stores it.
+The operator checks that each provider answers with one call: when it
+starts, when you edit the provider or its `Secret`, and then once an
+hour. A provider that gives no usable answer is checked every five
+minutes until it does. A refused key waits the hour, so edit its
+`Secret` to have it checked at once. A `secretKeyRef` passes the key to
+an enricher container, so no long-running pod stores it.
 
     $ kubectl -n media get metadataproviders
     NAME    PROVIDER   READY   REASON      AGE
@@ -98,8 +112,9 @@ walk has finished and a fact still has an open gap. The `Job` runs its
 facts in order, each in a container of its own: `probe` reads each
 video's streams, `arrival` records when a file was first seen,
 `identity` names each title, `nfo` fills the sidecar, `art` downloads
-the images, `trailer` records where each title's trailers are, and
-`contributors` fills the people.
+the images, `trailer` records where each title's trailers are, `marks`
+records where each video's intro and credits are, and `contributors`
+fills the people.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=enrich
     kubectl -n media logs job/movies-enrich -c nfo
@@ -192,6 +207,56 @@ household's `audioLanguages` from the media operator's
 `MediaPreferences`, and `en` when neither names any.
 
 A trailer file beside the title still plays as before.
+
+### Intro and credits marks
+
+The `marks` fact records where a video file's intro, recap, credits,
+and preview are. It asks every source that serves it about each main
+video of an identified movie, and of each episode of an identified
+series, once the `probe` fact has measured the file's length. It writes
+what it finds to `.liken/marks.yaml` in the folder that holds the file,
+the folder whose `.liken/probe.yaml` records the same file:
+
+    marks:
+      - path: Game of Thrones - S01E02.mkv
+        kind: intro
+        end: 107000
+        source: theintrodb
+      - path: Game of Thrones - S01E02.mkv
+        kind: intro
+        start: 7007
+        end: 106482
+        source: theintrodb
+      - path: Game of Thrones - S01E02.mkv
+        kind: credits
+        start: 3253000
+        end: 3316000
+        source: theintrodb
+
+Each entry is one span: the file, the kind, the start and the end in
+milliseconds from the start of the file, and the provider that answered.
+An absent `start` is the start of the file, and an absent `end` is the
+end of the file. A provider can answer several candidates for one kind,
+from several submissions or several releases of the work, and the fact
+records every one exactly as the provider answered it. It chooses none.
+The catalog's `marks` table holds one row per span, and the media
+browser sends every span to the `Play`, where the player in
+`media-operator` reads them and offers the skip.
+
+TheIntroDB reads the file's length from the ask, and it answers the
+spans of the release whose length is closest, such as the theatrical
+cut or the extended one. IntroDB reads no length. A file that holds two
+episodes is asked about neither, because each provider places an
+episode's spans in that episode's own file.
+
+A provider that answers `429` waits for the reset its headers name and
+asks again. When a provider has spent its allowance for the day, the
+reset is hours away, and the fact asks that provider nothing more in
+this run. The files it did not reach stay in the gap for a later run.
+
+Neither Jellyfin nor Kodi reads these marks. Jellyfin keeps its media
+segments in its own database, and Kodi's `.edl` sidecar is a different
+format, so the fact writes no file other than its ledger.
 
 ### Trailer files
 

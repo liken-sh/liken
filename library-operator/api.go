@@ -721,6 +721,23 @@ type PlayPresentation struct {
 	Date         string `json:"date,omitempty"`
 	Art          string `json:"art,omitempty"`
 	Trickplay    string `json:"trickplay,omitempty"`
+	// Marks are the spans of the item's file that the catalog's marks fact
+	// holds: every candidate of every provider, in ledger order. The display
+	// merges the candidates and acts on the result, so the operator carries
+	// them unread.
+	Marks []PlayMark `json:"marks,omitempty"`
+}
+
+// PlayMark is one candidate span of one kind, in media-operator's own field
+// names. Start and End are seconds from the start of the file. They are
+// pointers because an absent value is not zero: an absent start is the start
+// of the file, and an absent end is the end of the file. Source names the
+// provider block the span came from.
+type PlayMark struct {
+	Kind   string   `json:"kind"`
+	Start  *float64 `json:"start,omitempty"`
+	End    *float64 `json:"end,omitempty"`
+	Source string   `json:"source,omitempty"`
 }
 
 // The condition types this operator publishes. Bound reports the

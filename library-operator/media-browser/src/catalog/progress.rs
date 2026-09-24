@@ -15,9 +15,11 @@ pub const WATCHED_SECONDS: i64 = 300;
 
 /// Whether a play reached the end of its work. A work with no duration is
 /// never finished, because nothing says how long it is.
-/// `library-operator`'s `watched.go` states the same rule. The up-next
-/// card in `media-operator`'s `display/upnext.lua` rises on a rule of its
-/// own, later in the work than this one.
+/// `library-operator`'s `watched.go` states the same rule for the marks
+/// it writes to Jellyfin, and there the file's credits marks move the
+/// line to the start of the credits, merged and placed the way the
+/// up-next card in `media-operator`'s display places them. This rule
+/// reads no mark.
 pub fn finished(position: i64, duration: i64) -> bool {
     duration > 0 && position >= duration - (duration * WATCHED_PERCENT / 100).min(WATCHED_SECONDS)
 }

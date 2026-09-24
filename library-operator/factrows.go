@@ -90,6 +90,11 @@ func (e *enricher) writeOwnedRows(ctx context.Context, fact string, result *walk
 		return e.writeCreditRows(ctx, result)
 	case fact == factTrailer:
 		return e.writeTrailerRows(ctx, result)
+	case fact == factMarks:
+		// The marks of every video in the folder, as one set per file, so a
+		// file whose provider dropped a span drops the row.
+		_, err := e.catalog.UpsertMarks(ctx, result.files, result.marks)
+		return err
 	case nfoFactSet[fact]:
 		return e.writeBodyRows(ctx, result)
 	case art:

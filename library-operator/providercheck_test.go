@@ -104,6 +104,8 @@ func TestTheCheckOfEachProviderBlock(t *testing.T) {
 		{block: providerBlockFanart, path: fanartCheckPath, secret: true},
 		{block: providerBlockTVmaze, path: tvmazeCheckPath},
 		{block: providerBlockArchive, path: archiveSearchPath},
+		{block: providerBlockTheIntroDB, path: theintrodbCheckPath, secret: true},
+		{block: providerBlockIntroDB, path: introdbCheckPath},
 	}
 	answers := []struct {
 		name   string
@@ -151,6 +153,28 @@ func TestTheCheckOfEachProviderBlock(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A TheIntroDB account that names no Secret is an account, because the key is
+// optional, and its check reaches the provider with none.
+func TestATheIntroDBAccountWithNoSecretIsReady(t *testing.T) {
+	cluster := newFakeCluster()
+	provider := providerOfBlock(providerBlockTheIntroDB, providerBlockTheIntroDB)
+	provider.Spec.TheIntroDB.SecretRef = nil
+	cluster.providers[providerBlockTheIntroDB] = provider
+	operator := providerOperator(t, cluster,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+	written := cluster.heldProvider(providerBlockTheIntroDB)
+	ready := conditionNamed(written.Status.Conditions, conditionReady)
+	if ready.Status != ConditionTrue || ready.Reason != reasonReachable {
+		t.Errorf("Ready = %s/%s, want True/Reachable", ready.Status, ready.Reason)
+	}
+	if !slices.Equal(written.Status.Facts, []string{factMarks}) {
+		t.Errorf("status.facts = %v, want the marks fact alone", written.Status.Facts)
 	}
 }
 

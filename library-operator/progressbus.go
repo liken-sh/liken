@@ -72,6 +72,10 @@ type playAudience struct {
 	// that has none.
 	Season  int `json:"season,omitempty"`
 	Episode int `json:"episode,omitempty"`
+	// Every credits mark of the Play's first item, in seconds, from the
+	// Play's presentation. The jellyfin role reads it for the watched
+	// rule, and a work whose file has no mark has none.
+	Credits []creditsSpan `json:"credits,omitempty"`
 }
 
 // One play that ran outside this cluster, published by the jellyfin role and

@@ -99,7 +99,13 @@ type likenLedger struct {
 	// The trailerfile fact's own record: the one file it pulled beside the
 	// title, and nothing where it has pulled none.
 	TrailerFile *trailerFileEntry `yaml:"trailerfile,omitempty"`
-	Attempts    []likenAttempt    `yaml:"attempts,omitempty"`
+	// The marks fact's own list, in the file that is its ledger: one entry per
+	// span a provider answered for a file in this folder, keyed by the file's
+	// entry path, in the order the providers answered. Only the marks fact
+	// writes it. The walk reads it for the marks table, so a rebuilt catalog
+	// never asks a provider again.
+	Marks    []markEntry    `yaml:"marks,omitempty"`
+	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 
 // The provider blocks that answered one fact: one name for a single value,

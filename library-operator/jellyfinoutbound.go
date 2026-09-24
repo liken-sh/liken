@@ -31,8 +31,11 @@ type jellyfinPlay struct {
 	aliases  map[string]string
 	season   int
 	episode  int
-	written  int
-	wrote    bool
+	// The credits marks of the work's file, in seconds, which move the line
+	// the watched rule draws.
+	credits []creditsSpan
+	written int
+	wrote   bool
 	// Whether a status or a final has carried a position for this Play. A
 	// Play whose audience arrived and whose position has not writes
 	// nothing, because a write of the start would move a person's resume
@@ -104,6 +107,7 @@ func (o *jellyfinOutbound) audience(name string, payload []byte) {
 	held := o.entry(name)
 	held.people, held.aliases = audience.People, audience.Aliases
 	held.season, held.episode = audience.Season, audience.Episode
+	held.credits = audience.Credits
 }
 
 // final folds the last status of a Play and writes at once, because the
@@ -178,7 +182,7 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string) {
 	}
 	data := jellyfinUserData{
 		PlaybackPositionTicks: jellyfinTicks(held.position),
-		Played:                watched(held.position, held.duration),
+		Played:                watched(held.position, held.duration, held.credits),
 		LastPlayedDate:        o.now().UTC().Format(time.RFC3339),
 	}
 	for _, person := range held.people {

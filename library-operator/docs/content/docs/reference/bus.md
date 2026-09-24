@@ -267,12 +267,14 @@ audience.
 | `people` | list of strings | The `Person` names on the `Play`'s owner references, or absent for a `Play` nobody claimed. |
 | `aliases` | map of strings | The work's ids by provider, from the `Play`'s alias annotations. |
 | `season`, `episode` | integers | The numbers of an episode, absent for a work that has none. |
+| `credits` | list of objects | Every `credits` mark of the `Play`'s first item, from its presentation: `start` and `end` in seconds, each absent where the mark runs from the start or to the end of the file. Absent where the item has none. The jellyfin role reads it for the watched rule. |
 
     {
       "player": "den-tv",
       "library": "movies",
       "people": ["ada", "grace"],
-      "aliases": {"tmdb": "1000001", "imdb": "tt0000001"}
+      "aliases": {"tmdb": "1000001", "imdb": "tt0000001"},
+      "credits": [{"start": 6204.5, "end": 6600}, {"start": 6210}]
     }
 
 ## The final status

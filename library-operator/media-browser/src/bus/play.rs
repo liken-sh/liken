@@ -6,7 +6,7 @@
 use serde_json::{Map, Value};
 
 use super::next;
-use crate::catalog::{Identity, PlayItem, Presentation};
+use crate::catalog::{Identity, Mark, PlayItem, Presentation};
 use crate::screens::upnext::Next;
 
 /// The request as bytes. `library` is the catalog's library column,
@@ -121,6 +121,29 @@ fn presentation(presentation: &Presentation) -> Value {
             object.insert(name.into(), Value::from(number));
         }
     }
+    if !presentation.marks.is_empty() {
+        object.insert(
+            "marks".into(),
+            Value::Array(presentation.marks.iter().map(mark).collect()),
+        );
+    }
+    Value::Object(object)
+}
+
+// One span, in media-operator's own field names: the two ends in seconds
+// from the start of the file, and each end left out where the file's own
+// start or end is the end of the span.
+fn mark(mark: &Mark) -> Value {
+    let mut object = Map::new();
+    object.insert("kind".into(), Value::from(mark.kind.as_str()));
+    for (name, end) in [("start", mark.start), ("end", mark.end)] {
+        if let Some(milliseconds) = end {
+            object.insert(name.into(), Value::from(milliseconds as f64 / 1000.0));
+        }
+    }
+    if !mark.source.is_empty() {
+        object.insert("source".into(), Value::from(mark.source.as_str()));
+    }
     Value::Object(object)
 }
 
@@ -227,6 +250,42 @@ mod tests {
                 "episodeTitle": "The Second",
                 "date": "2004-09-22",
             })
+        );
+    }
+
+    /// Every candidate span travels in the order the catalog holds them,
+    /// in seconds, with an open end left out rather than sent as zero.
+    #[test]
+    fn a_request_carries_every_mark_of_the_file_in_seconds() {
+        let mut item = movie();
+        item.presentation.marks = vec![
+            Mark {
+                kind: "intro".into(),
+                start: None,
+                end: Some(107_000),
+                source: "theintrodb".into(),
+            },
+            Mark {
+                kind: "intro".into(),
+                start: Some(7_007),
+                end: Some(106_482),
+                source: "theintrodb".into(),
+            },
+            Mark {
+                kind: "credits".into(),
+                start: Some(3_253_000),
+                end: None,
+                source: String::new(),
+            },
+        ];
+
+        assert_eq!(
+            decoded("default/films", &[item])["items"][0]["presentation"]["marks"],
+            serde_json::json!([
+                {"kind": "intro", "end": 107.0, "source": "theintrodb"},
+                {"kind": "intro", "start": 7.007, "end": 106.482, "source": "theintrodb"},
+                {"kind": "credits", "start": 3253.0},
+            ])
         );
     }
 

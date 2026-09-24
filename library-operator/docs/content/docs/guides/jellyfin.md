@@ -86,6 +86,17 @@ of the work, and at or under five minutes. The rule takes whichever of
 the two leaves less time. So a short episode is watched near its end,
 and a long film is watched with up to five minutes left.
 
+Where the file's [marks](/docs/guides/enrichment/#intro-and-credits-marks)
+place the credits in the second half of the work, the work counts as
+watched from the start of those credits instead, whatever time is left.
+The role reads the credits marks the way the player's up-next card
+does. Candidates that overlap become one span, from the median start and
+the median end of the group, so one submission that is off moves the
+line little. Spans that do not overlap stay apart, and the line is the
+start of the earliest span that starts in the second half. A credits
+span in the first half is an opening title sequence and moves nothing.
+Where no span starts in the second half, the rule above applies.
+
 Every write to Jellyfin includes a played mark. The role reads the mark
 off the position it writes, with that same rule. So a replay from the
 start clears the mark, because the new position does not pass the rule.

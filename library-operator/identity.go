@@ -62,7 +62,10 @@ type walkResult struct {
 	credits []creditRow
 	// The trailers of each title, off the trailer ledger the fact wrote, the way
 	// the credits come off theirs.
-	trailers           []trailerRow
+	trailers []trailerRow
+	// The marks of each video file, off the marks ledger of the folder that
+	// holds the file, the way the streams come off the probe ledger.
+	marks              []markRow
 	contributors       []contributorRow
 	contributorAliases []contributorAliasRow
 	// The genres of each movie and series, in the sidecar's order, derived
@@ -120,6 +123,7 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.attempts = append(buffer.attempts, folder.attempts...)
 	buffer.credits = append(buffer.credits, folder.credits...)
 	buffer.trailers = append(buffer.trailers, folder.trailers...)
+	buffer.marks = append(buffer.marks, folder.marks...)
 	buffer.contributors = append(buffer.contributors, folder.contributors...)
 	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
 	buffer.genres = append(buffer.genres, folder.genres...)

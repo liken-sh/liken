@@ -96,6 +96,112 @@ fn a_movie_with_two_encodings_plays_one_of_them() {
     );
 }
 
+// One span of one file, as the walk writes it off the marks ledger. An
+// absent end is a null in the table.
+fn insert_mark(
+    path: &Path,
+    file: &str,
+    ordinal: i64,
+    kind: &str,
+    start: Option<i64>,
+    end: Option<i64>,
+) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source) \
+             VALUES ('default/films', ?, ?, ?, ?, ?, 'theintrodb')",
+            (file, ordinal, kind, start, end),
+        )
+        .unwrap();
+}
+
+// A movie's item carries every span of its main file in the ledger's
+// order, and no span of another file.
+#[test]
+fn a_movie_carries_the_marks_of_its_main_file() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:603",
+        "The Matrix",
+        "matrix",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Matrix/The Matrix.mkv",
+        "movie:tmdb:603",
+    );
+    insert_mark(
+        &path,
+        "The Matrix/The Matrix.mkv",
+        1,
+        "credits",
+        Some(7_800_000),
+        None,
+    );
+    insert_mark(
+        &path,
+        "The Matrix/The Matrix.mkv",
+        0,
+        "intro",
+        None,
+        Some(23_000),
+    );
+    insert_mark(&path, "Elsewhere/other.mkv", 0, "intro", None, Some(1));
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let items = source.play("default/films", &movie_chosen());
+    assert_eq!(
+        items[0].presentation.marks,
+        vec![
+            Mark {
+                kind: "intro".into(),
+                start: None,
+                end: Some(23_000),
+                source: "theintrodb".into(),
+            },
+            Mark {
+                kind: "credits".into(),
+                start: Some(7_800_000),
+                end: None,
+                source: "theintrodb".into(),
+            },
+        ]
+    );
+}
+
+// An episode's item carries the spans of its own file.
+#[test]
+fn an_episode_carries_the_marks_of_its_file() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source) \
+             VALUES ('default/shows', 'Lost/S01E2.mkv', 0, 'recap', 0, 45000, 'introdb')",
+            (),
+        )
+        .unwrap();
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(2));
+    assert_eq!(
+        items[0].presentation.marks,
+        vec![Mark {
+            kind: "recap".into(),
+            start: Some(0),
+            end: Some(45_000),
+            source: "introdb".into(),
+        }]
+    );
+}
+
 // The season around the chosen episode stays in the catalog, and the play
 // list holds the one work the person chose.
 // the play list holds the one work the person chose.

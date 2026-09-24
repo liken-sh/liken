@@ -48,6 +48,7 @@ var factRuns = map[string]factRun{
 
 	factTrailer:     func(ctx context.Context, e *enricher) error { return e.trailerFact(ctx) },
 	factTrailerFile: func(ctx context.Context, e *enricher) error { return e.trailerFileFact(ctx) },
+	factMarks:       func(ctx context.Context, e *enricher) error { return e.marksFact(ctx) },
 
 	factContributorIDs:       contributorFactRun(factContributorIDs),
 	factContributorBiography: contributorFactRun(factContributorBiography),

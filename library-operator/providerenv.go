@@ -131,7 +131,9 @@ func providerEndpointEnv(library *Library, providers providerSet) []EnvVar {
 // the blocks, which is the Library's own spec.sources order, and the rules
 // for who answers read that order. A block this line has no answerer for, a
 // keyed block whose token did not reach the container, and an endpoint block
-// whose address did not reach it, are all skipped with no error.
+// whose address did not reach it, are all skipped with no error. A block
+// whose key is optional is built with the token where one reached the
+// container and with none where none did.
 // Each line brings a table of its own, because the nfo facts, the art, and
 // the trailers are three interfaces.
 func answerersOf[A any](blocks []string, value func(string) string,
@@ -144,10 +146,11 @@ func answerersOf[A any](blocks []string, value func(string) string,
 		}
 		block := blockOf(name)
 		token := ""
-		if block.key {
-			if token = value(providerTokenVariable(name)); token == "" {
-				continue
-			}
+		if block.key || block.keyOptional {
+			token = value(providerTokenVariable(name))
+		}
+		if block.key && token == "" {
+			continue
 		}
 		base := block.base
 		if block.endpoint {

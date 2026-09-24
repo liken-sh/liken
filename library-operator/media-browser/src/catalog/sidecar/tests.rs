@@ -24,7 +24,7 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Answer, Change, Counts, Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails,
+    Answer, Change, Counts, Credit, FileFacts, Fold, InSeries, LibraryEntry, Mark, MovieDetails,
     PlayItem, Presentation, Query, Selection, SeriesDetails, Slot, Sort, Source,
 };
 

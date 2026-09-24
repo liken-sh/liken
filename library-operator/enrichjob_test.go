@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 )
@@ -597,6 +598,74 @@ func TestTheTrailerContainerStandsWhereASourceServesTheFact(t *testing.T) {
 				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, factTrailer)
 			}
 		})
+	}
+}
+
+// The marks container stands where a Ready source serves the marks fact. A
+// TheIntroDB account with a key carries the key to it, and one with none
+// carries none.
+func TestTheMarksContainerStandsWhereASourceServesTheFact(t *testing.T) {
+	anonymous := providerOfBlock("intros", providerBlockTheIntroDB)
+	anonymous.Spec.TheIntroDB.SecretRef = nil
+	cases := []struct {
+		name     string
+		provider *MetadataProvider
+		want     bool
+		wantKey  bool
+	}{
+		{name: "a provider that serves no marks", provider: readyProvider("tmdb", "house")},
+		{name: "TheIntroDB with a key", provider: providerOfBlock("intros", providerBlockTheIntroDB),
+			want: true, wantKey: true},
+		{name: "TheIntroDB with no key", provider: anonymous, want: true},
+		{name: "IntroDB", provider: providerOfBlock("intros", providerBlockIntroDB), want: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			job := testEnrichJob(studioMovies(), "", test.provider)
+
+			var marks *Container
+			names := []string{}
+			for at, container := range job.Spec.Template.Spec.InitContainers {
+				names = append(names, container.Name)
+				if container.Name == marksContainerName {
+					marks = &job.Spec.Template.Spec.InitContainers[at]
+				}
+			}
+			if marks == nil {
+				if test.want {
+					t.Fatalf("initContainers = %v, want a marks container", names)
+				}
+				return
+			}
+			if !test.want {
+				t.Fatalf("initContainers = %v, want no marks container", names)
+			}
+			if got := containerEnvironment(*marks)[libraryFactsVariable]; got != factMarks {
+				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, factMarks)
+			}
+			_, keyed := containerEnvironment(*marks)[providerTokenVariable(providerBlockTheIntroDB)]
+			if keyed != test.wantKey {
+				t.Errorf("the container carries a key: %v, want %v", keyed, test.wantKey)
+			}
+		})
+	}
+}
+
+// The marks container runs after the probe, whose lengths it reads, and in
+// the place its group holds among the facts: after the trailers and before
+// the people.
+func TestTheMarksContainerRunsAfterTheTrailersAndBeforeThePeople(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"),
+		providerOfBlock("intros", providerBlockTheIntroDB))
+
+	names := []string{}
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		names = append(names, container.Name)
+	}
+	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity, nfoContainerName,
+		artContainerName, trailerContainerName, marksContainerName, contributorsContainerName}
+	if !slices.Equal(names, want) {
+		t.Errorf("initContainers = %v, want %v", names, want)
 	}
 }
 

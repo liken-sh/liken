@@ -28,6 +28,7 @@ var refreshFactVocabulary = []string{
 	"season-banner",
 	"episode-thumb",
 	"trailer",
+	"marks",
 	"contributor.ids",
 	"contributor.biography",
 	"contributor.headshot",

@@ -310,6 +310,50 @@ func TestAPlayWithNobodyOnItCarriesThePlayerAlone(t *testing.T) {
 	}
 }
 
+// The audience carries every credits mark of the first item with both of its
+// edges as the Play states them, and nothing for a mark of another kind or a
+// later item.
+func TestTheAudienceCarriesTheCreditsOfTheFirstItem(t *testing.T) {
+	seconds := func(value float64) *float64 { return &value }
+	cases := []struct {
+		name  string
+		items []PlayItem
+		want  string
+	}{
+		{name: "an item with no presentation", items: []PlayItem{{URI: "claim://movies/a.mkv"}}, want: "null"},
+		{
+			name: "every credits mark",
+			items: []PlayItem{{URI: "claim://movies/a.mkv", Presentation: &PlayPresentation{Marks: []PlayMark{
+				{Kind: markKindIntro, End: seconds(107)},
+				{Kind: markKindCredits, Start: seconds(3253), End: seconds(3316)},
+				{Kind: markKindCredits, End: seconds(3316)},
+				{Kind: markKindCredits, Start: seconds(3249.5)},
+			}}}},
+			want: `[{"start":3253,"end":3316},{"end":3316},{"start":3249.5}]`,
+		},
+		{
+			name: "a later item's marks",
+			items: []PlayItem{{URI: "claim://movies/a.mkv"}, {URI: "claim://movies/b.mkv",
+				Presentation: &PlayPresentation{Marks: []PlayMark{{Kind: markKindCredits, Start: seconds(60)}}}}},
+			want: "null",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			play := testPlay("den-tv-some-film")
+			play.Spec.Items = test.items
+
+			got, err := json.Marshal(playAudienceOf(&play).Credits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != test.want {
+				t.Errorf("credits = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
 // A Play is a person's to write, so a number annotation that holds
 // anything else reads as none.
 func TestANumberAnnotationThatIsNoNumberReadsAsNone(t *testing.T) {

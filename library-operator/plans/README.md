@@ -104,16 +104,11 @@ they share, and plans 28 to 31 build them in order.
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
-* [62, Intro and credits marks](62-intro-and-credits-marks.md). A
-  stub. Nothing says where a work's story starts or ends. So a person
-  skips an episode's recap and titles by hand, and a percentage of the
-  runtime guesses where the credits start.
-* [65, Where the intro marks come
-  from](65-where-the-intro-marks-come-from.md). A stub. Plan 62's
-  missing fact gets its sources: the community databases that publish
-  intro, recap, and credits segments, and the audio fingerprint this
-  operator can compare across a season's episodes when no database
-  holds one.
+* [62, Intro and credits marks](62-intro-and-credits-marks.md). Built
+  on 2026-09-24 and not yet drilled. The `marks` fact reads intro,
+  recap, credits, and post-credits spans from TheIntroDB and IntroDB
+  and stores every candidate. The player offers a skip, and the up-next
+  card and the watched rule use the credits start.
 * [63, Where the room is in a franchise](63-where-the-room-is-in-a-franchise.md).
   A column of circles marks where the room and each person stand in
   the story, every held member carries a bar, and a press on a split

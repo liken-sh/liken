@@ -26,6 +26,10 @@ func providerOfBlock(name, block string) *MetadataProvider {
 		provider.Spec.PeerTube = &ProviderPeerTube{Endpoint: "https://tube.example"}
 	case providerBlockArchive:
 		provider.Spec.Archive = &ProviderArchive{}
+	case providerBlockTheIntroDB:
+		provider.Spec.TheIntroDB = &ProviderTheIntroDB{SecretRef: &reference}
+	case providerBlockIntroDB:
+		provider.Spec.IntroDB = &ProviderIntroDB{}
 	}
 	provider.Status.Conditions = []Condition{
 		{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
@@ -47,6 +51,8 @@ func TestTheBlockAndTheSecretOfOneSpec(t *testing.T) {
 		{name: "TVmaze, which takes no account", block: providerBlockTVmaze},
 		{name: "a PeerTube instance, which takes no account", block: providerBlockPeerTube},
 		{name: "the Internet Archive, which takes no account", block: providerBlockArchive},
+		{name: "an account with TheIntroDB", block: providerBlockTheIntroDB, wantSecret: "one-key"},
+		{name: "IntroDB, which takes no account", block: providerBlockIntroDB},
 		{name: "a spec that names no block"},
 	}
 	for _, one := range cases {

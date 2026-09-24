@@ -80,6 +80,9 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		{librarySweepStreamSQL(), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteStreams(ctx, library, streamKeys(keys))
 		}},
+		{librarySweepMarkSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteMarks(ctx, library, spanKeys(keys))
+		}},
 		{librarySweepSQL("files", "path"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteFiles(ctx, library, keys)
 		}},

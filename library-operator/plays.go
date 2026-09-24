@@ -127,7 +127,26 @@ func playAudienceOf(play *Play) playAudience {
 	}
 	audience.Season = numberAnnotation(play.Metadata.Annotations, seasonAnnotation)
 	audience.Episode = numberAnnotation(play.Metadata.Annotations, episodeAnnotation)
+	audience.Credits = creditsSpans(play)
 	return audience
+}
+
+// creditsSpans reads every credits mark of the Play's first item. The first
+// item is the work the aliases and the numbers name, so its marks are the
+// ones the watched rule reads. Every candidate travels, with both edges as
+// the Play states them, because the rule merges them the way the display
+// does.
+func creditsSpans(play *Play) []creditsSpan {
+	if len(play.Spec.Items) == 0 || play.Spec.Items[0].Presentation == nil {
+		return nil
+	}
+	var spans []creditsSpan
+	for _, mark := range play.Spec.Items[0].Presentation.Marks {
+		if mark.Kind == markKindCredits {
+			spans = append(spans, creditsSpan{Start: mark.Start, End: mark.End})
+		}
+	}
+	return spans
 }
 
 // numberAnnotation reads one number off an annotation, and 0 where the

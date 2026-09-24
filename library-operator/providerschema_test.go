@@ -83,7 +83,8 @@ func TestTheFactsEnumIsTheOperatorsVocabulary(t *testing.T) {
 
 // The CRD names one block per row of the operator's table and no other, and a
 // block whose provider takes a key requires the Secret that holds it, so a
-// spec the API server admits is a spec this operator serves.
+// spec the API server admits is a spec this operator serves. A block whose
+// key is optional names a Secret it does not require.
 func TestTheCRDHoldsOneBlockPerProvider(t *testing.T) {
 	schema := providerSchema(t)
 	blocks := schemaField(t, schema, "schema", "openAPIV3Schema", "properties",
@@ -108,14 +109,21 @@ func TestTheCRDHoldsOneBlockPerProvider(t *testing.T) {
 				t.Fatalf("the spec holds no %s block", block)
 			}
 			required := requiredNames(schemaField(t, blocks, block, "required"))
-			wantsSecret := providerOfBlock("one", block).secretRef() != nil
-			if wantsSecret != slices.Contains(required, "secretRef") {
-				t.Errorf("%s requires %v, and the operator reads a Secret: %v",
-					block, required, wantsSecret)
+			if blockOf(block).key != slices.Contains(required, "secretRef") {
+				t.Errorf("%s requires %v, and the table states a key: %v",
+					block, required, blockOf(block).key)
 			}
-			if wantsSecret != blockOf(block).key {
+			wantsSecret := providerOfBlock("one", block).secretRef() != nil
+			takesSecret := blockOf(block).key || blockOf(block).keyOptional
+			if wantsSecret != takesSecret {
 				t.Errorf("%s reads a Secret: %v, and the table states %v",
-					block, wantsSecret, blockOf(block).key)
+					block, wantsSecret, takesSecret)
+			}
+			properties, _ := schemaField(t, blocks, block, "properties").(map[string]any)
+			_, named := properties["secretRef"]
+			if named != takesSecret {
+				t.Errorf("%s names a secretRef: %v, and the table states %v",
+					block, named, takesSecret)
 			}
 		})
 	}

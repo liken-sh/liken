@@ -45,8 +45,13 @@ pub mod progress;
 // request carries so the progress store keys on the work.
 pub mod identity;
 
+// The mark module: one span of a file, such as its intro or its credits,
+// which a play request carries to the display.
+pub mod mark;
+
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
+pub use mark::Mark;
 pub use progress::{Played, Progress, Resume};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 
@@ -695,6 +700,9 @@ pub struct Presentation {
     pub art: String,
     /// The trickplay path, relative to the library root.
     pub trickplay: String,
+    /// Every span the catalog holds for the main file, in the order the
+    /// marks ledger holds them.
+    pub marks: Vec<Mark>,
 }
 
 #[cfg(test)]

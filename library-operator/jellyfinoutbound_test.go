@@ -126,6 +126,33 @@ func TestARunningPlayPastTheWatchedLineIsWrittenWatched(t *testing.T) {
 	}
 }
 
+// A credits mark in the second half of the work moves the watched line to
+// the start of the credits, so a long film is written as watched with more
+// than five minutes left.
+func TestACreditsMarkMovesTheLineAPlayIsWrittenWatchedAt(t *testing.T) {
+	fake := jellyfinFixture()
+	out, _ := standJellyfinOutbound(t, fake)
+	payload, err := json.Marshal(playAudience{Player: "living-room", People: []string{"chris"},
+		Aliases: map[string]string{"tmdb": "603"}, Credits: []creditsSpan{credit(7680, 8160)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.audience("play-1", payload)
+
+	out.status("play-1", []byte(`{"item":0,"position":"2:07:59","duration":"2:16:00"}`))
+	out.tick(t.Context())
+	out.status("play-1", []byte(`{"item":0,"position":"2:08:00","duration":"2:16:00"}`))
+	out.tick(t.Context())
+
+	if len(fake.writes) != 2 {
+		t.Fatalf("writes = %+v, want one for each position", fake.writes)
+	}
+	if fake.writes[0].data.Played || !fake.writes[1].data.Played {
+		t.Errorf("played = %v then %v, want false then true at the start of the credits",
+			fake.writes[0].data.Played, fake.writes[1].data.Played)
+	}
+}
+
 // A replay from the start clears the mark. The position alone says
 // whether a person watched the work, and a replay puts it back at the
 // start.

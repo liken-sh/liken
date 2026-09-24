@@ -20,8 +20,15 @@ import (
 	"time"
 )
 
-// The cooldown a 429 with no Retry-After header takes.
+// The cooldown a 429 takes when no header names one.
 const providerCooldown = 10 * time.Second
+
+// The longest cooldown a container waits out. A provider that counts a daily
+// allowance names a reset hours away once the day is spent, and a container
+// that slept that long would hold its Job for the whole wait. A longer
+// cooldown fails the request at once with the provider's own answer, and the
+// fact asks again on a later run.
+const providerLongestCooldown = time.Minute
 
 // How many times one request goes out, so a provider that answers 429 without
 // end fails the attempt instead of holding the container.
@@ -118,7 +125,7 @@ func (r *providerRequests) roundTrip(request *http.Request,
 	if takeErr != nil {
 		return 0, 0, takeErr
 	}
-	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), nil
+	return response.StatusCode, cooldownOf(response.Header), nil
 }
 
 // roundTripBytes reads the answer into memory, up to the caller's own bound.
@@ -205,15 +212,22 @@ func answeredWith(err error, status int) bool {
 	return errors.As(err, &answer) && answer.status == status
 }
 
-// The whole retry rule: a 429 waits the header's own cooldown, or ten seconds
-// where it names none, and the request goes out again.
+// Whether a 429 is worth a wait and another request: the attempts are not
+// spent, and the cooldown is one a container can wait out.
+func waitable(status int, cooldown time.Duration, attempt int) bool {
+	return status == http.StatusTooManyRequests && attempt < providerAttempts &&
+		cooldown <= providerLongestCooldown
+}
+
+// The whole retry rule: a 429 waits the cooldown its headers name, or ten
+// seconds where they name none, and the request goes out again.
 func (r *providerRequests) get(ctx context.Context, path string, query url.Values, into any) error {
 	for attempt := 1; ; attempt++ {
 		status, cooldown, body, err := r.send(ctx, path, query)
 		if err != nil {
 			return err
 		}
-		if status == http.StatusTooManyRequests && attempt < providerAttempts {
+		if waitable(status, cooldown, attempt) {
 			if err := r.wait(ctx, cooldown); err != nil {
 				return err
 			}
@@ -261,7 +275,7 @@ func (r *providerRequests) fetchFile(ctx context.Context, address string) ([]byt
 		if err != nil {
 			return nil, err
 		}
-		if status == http.StatusTooManyRequests && attempt < providerAttempts {
+		if waitable(status, cooldown, attempt) {
 			if err := r.wait(ctx, cooldown); err != nil {
 				return nil, err
 			}
@@ -312,7 +326,7 @@ func (r *providerRequests) fetchInto(ctx context.Context, address string, into i
 		if err != nil {
 			return written, err
 		}
-		if status == http.StatusTooManyRequests && attempt < providerAttempts {
+		if waitable(status, cooldown, attempt) {
 			if err := r.wait(timed, cooldown); err != nil {
 				return 0, err
 			}
@@ -357,6 +371,25 @@ func (r *providerRequests) sendInto(ctx context.Context, address string, into io
 		return nil
 	})
 	return written, status, cooldown, err
+}
+
+// The cooldown one answer's headers name. Retry-After is the standard
+// header, and a provider that sends it means it. TheIntroDB names its two
+// windows in headers of its own instead: X-RateLimit-* for its window of
+// seconds, and X-UsageLimit-* for its daily allowance. Each window names the
+// requests it has left and the seconds until it resets, and the window with
+// none left is the one that refused. The daily window is read first, because
+// its reset is the later one when both are spent.
+func cooldownOf(header http.Header) time.Duration {
+	if value := header.Get("Retry-After"); value != "" {
+		return retryAfter(value)
+	}
+	for _, window := range []string{"X-UsageLimit", "X-RateLimit"} {
+		if strings.TrimSpace(header.Get(window+"-Remaining")) == "0" {
+			return retryAfter(header.Get(window + "-Reset"))
+		}
+	}
+	return providerCooldown
 }
 
 // An unreadable or absent header takes the fixed cooldown.

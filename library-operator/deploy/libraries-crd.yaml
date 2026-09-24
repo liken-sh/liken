@@ -349,7 +349,7 @@ spec:
                     minLength: 1
                 refresh:
                   type: object
-                  maxProperties: 26
+                  maxProperties: 27
                   additionalProperties:
                     type: string
                     format: date-time
@@ -370,9 +370,9 @@ spec:
                         'credits', 'poster', 'backdrop', 'logo',
                         'clearart', 'banner', 'landscape', 'discart',
                         'season-poster', 'season-banner',
-                        'episode-thumb', 'trailer', 'contributor.ids',
-                        'contributor.biography', 'contributor.headshot',
-                        'scan'])
+                        'episode-thumb', 'trailer', 'marks',
+                        'contributor.ids', 'contributor.biography',
+                        'contributor.headshot', 'scan'])
                       message: >-
                         every key of spec.refresh must name a fact the
                         operator runs, or scan for a full walk

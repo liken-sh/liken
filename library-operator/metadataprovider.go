@@ -44,7 +44,10 @@ type MetadataProviderSpec struct {
 	TVmaze   *ProviderTVmaze   `json:"tvmaze,omitempty"`
 	PeerTube *ProviderPeerTube `json:"peertube,omitempty"`
 	Archive  *ProviderArchive  `json:"archive,omitempty"`
-	Facts    []string          `json:"facts,omitempty"`
+	// The two community databases of intro, recap, and credits spans.
+	TheIntroDB *ProviderTheIntroDB `json:"theintrodb,omitempty"`
+	IntroDB    *ProviderIntroDB    `json:"introdb,omitempty"`
+	Facts      []string            `json:"facts,omitempty"`
 }
 
 // The TMDb block names the Secret alone. The endpoint is TMDb's own, and the
@@ -79,6 +82,17 @@ type ProviderPeerTube struct {
 // with no account. The block alone says that the operator may ask it.
 type ProviderArchive struct{}
 
+// The TheIntroDB block names a Secret or none. TheIntroDB answers with no
+// account, and a key adds the account's own pending submissions and a larger
+// daily allowance.
+type ProviderTheIntroDB struct {
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
+}
+
+// The IntroDB block is empty, because IntroDB serves its reads with no
+// account. The block alone says that the operator may ask it.
+type ProviderIntroDB struct{}
+
 // One key in one Secret of the provider's own namespace.
 type SecretKeyRef struct {
 	Name string `json:"name"`
@@ -99,7 +113,7 @@ func (r SecretKeyRef) secretKey() string {
 
 // What the operator reports on a provider: the block this account names,
 // which the PROVIDER column shows because no printer column can read which
-// block a spec holds; the Ready condition its one check per pass produced;
+// block a spec holds; the Ready condition its last check produced;
 // the facts the provider serves right now; and when the provider last refused
 // the key.
 type MetadataProviderStatus struct {

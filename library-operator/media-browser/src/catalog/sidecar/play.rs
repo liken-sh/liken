@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 
 use super::{collect, item};
-use crate::catalog::{PlayItem, Presentation, art};
+use crate::catalog::{Mark, PlayItem, Presentation, art};
 
 // The join from an item to one of its video files. A title with a
 // second encoding holds more than one file in a role, so MIN(path) picks
@@ -23,6 +23,38 @@ fn video(role: &'static str) -> String {
     )
 }
 
+// Every span the marks table holds for one file, in ordinal order, which
+// is the order of the ledger. A null end reads as no end.
+fn marks(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Mark>> {
+    collect(
+        connection,
+        "SELECT kind, start_ms, end_ms, source FROM marks \
+         WHERE library = ? AND path = ? ORDER BY ordinal",
+        &[&library, &path],
+        |row| {
+            Ok(Mark {
+                kind: row.get(0)?,
+                start: row.get(1)?,
+                end: row.get(2)?,
+                source: row.get(3)?,
+            })
+        },
+    )
+}
+
+// A play list with the marks of each item's main file, so the display can
+// skip an intro and place the credits.
+fn marked(
+    connection: &Connection,
+    library: &str,
+    mut items: Vec<PlayItem>,
+) -> rusqlite::Result<Vec<PlayItem>> {
+    for item in &mut items {
+        item.presentation.marks = marks(connection, library, &item.path)?;
+    }
+    Ok(items)
+}
+
 /// One movie's play list: the one item it resolves to, or nothing when
 /// the movie holds no main file.
 pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Result<Vec<PlayItem>> {
@@ -33,7 +65,7 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
          WHERE item.library = ? AND item.id = ? GROUP BY item.id",
         video("primary")
     );
-    collect(connection, &sql, &[&library, &id], |row| {
+    let items = collect(connection, &sql, &[&library, &id], |row| {
         let released: String = row.get(1)?;
         Ok(PlayItem {
             path: row.get(3)?,
@@ -48,7 +80,8 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
                 ..Presentation::default()
             },
         })
-    })
+    })?;
+    marked(connection, library, items)
 }
 
 /// One title's trailer: the trailer file's path, the title's own
@@ -114,7 +147,7 @@ pub fn episodes(
          GROUP BY item.id",
         video("primary")
     );
-    collect(
+    let items = collect(
         connection,
         &sql,
         &[&library, &series, &season, &chosen],
@@ -142,7 +175,8 @@ pub fn episodes(
                 presentation,
             })
         },
-    )
+    )?;
+    marked(connection, library, items)
 }
 
 // An episode carries the release the catalog holds: a full ISO date

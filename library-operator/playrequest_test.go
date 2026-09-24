@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -111,8 +112,30 @@ func TestAPlayCarriesThePresentationTheBrowserResolved(t *testing.T) {
 
 	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
 	want := PlayPresentation{Type: "video", Hint: "movie", Title: "Some Film", Year: 1999}
-	if presentation == nil || *presentation != want {
+	if presentation == nil || !reflect.DeepEqual(*presentation, want) {
 		t.Errorf("presentation = %+v, want %+v", presentation, want)
+	}
+}
+
+// The marks travel through the request unread, every candidate in the order
+// the browser sent them, and an open end stays absent rather than zero.
+func TestTheMarksTravelThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	marks := `[{"kind":"intro","end":107},` +
+		`{"kind":"intro","start":7.007,"end":106.482,"source":"theintrodb"},` +
+		`{"kind":"credits","start":3253,"source":"theintrodb"}]`
+	payload := `{"library":"` + testLibraryKey + `","items":[{"path":"` + testFilmPath + `",` +
+		`"presentation":{"type":"video","marks":` + marks + `}}]}`
+	publishPlay(operator, []byte(payload))
+
+	operator.pass()
+
+	written, err := json.Marshal(cluster.heldPlays()[0].Spec.Items[0].Presentation.Marks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != marks {
+		t.Errorf("marks = %s, want %s", written, marks)
 	}
 }
 

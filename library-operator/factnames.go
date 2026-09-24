@@ -37,6 +37,12 @@ const (
 	// nothing.
 	factTrailer = "trailer"
 
+	// The marks group holds one fact: where a video file's intro, recap,
+	// credits, and preview are, as community databases record them. It is a
+	// file fact, keyed on the file's path, because two releases of one work
+	// place the same span at different times.
+	factMarks = "marks"
+
 	// The trailerfile fact pulls one of those links into a file beside the
 	// title. Its Job runs beside the enricher, so it is out of factVocabulary,
 	// out of spec.refresh, and served by no provider.
@@ -75,6 +81,7 @@ var factVocabulary = []string{
 	factSeasonBanner,
 	factEpisodeThumb,
 	factTrailer,
+	factMarks,
 	factContributorIDs,
 	factContributorBiography,
 	factContributorHeadshot,

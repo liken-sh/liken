@@ -433,11 +433,14 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	return removed, nil
 }
 
-// Removes the streams of each file the sweep found, then the files
-// themselves, and returns the count of file rows removed. The streams go
-// first so a failure never leaves a stream without its file.
+// Removes the streams and the marks of each file the sweep found, then the
+// files themselves, and returns the count of file rows removed. The streams
+// and the marks go first so a failure never leaves either without its file.
 func deleteFilesWithStreams(ctx context.Context, catalog *Catalog, library string, paths []string) (int, error) {
 	if _, err := catalog.DeleteStreamsOfFiles(ctx, library, paths); err != nil {
+		return 0, err
+	}
+	if _, err := catalog.DeleteMarksOfFiles(ctx, library, paths); err != nil {
 		return 0, err
 	}
 	return catalog.DeleteFiles(ctx, library, paths)

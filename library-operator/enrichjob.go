@@ -134,6 +134,14 @@ func enrichPodTemplate(library *Library, providers providerSet, languages []stri
 		facts = append(facts, factsContainer(library, trailerContainerName, []string{factTrailer},
 			path, scannerImage))
 	}
+	// The marks container stands where a Ready source serves the marks fact. It
+	// runs after the probe, because TheIntroDB chooses the release version by
+	// the length the probe measured. It is an init container for the same
+	// reason the art container is.
+	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factMarks) != nil {
+		facts = append(facts, factsContainer(library, marksContainerName, []string{factMarks},
+			path, scannerImage))
+	}
 	// The contributors container, which fills the people the credits fact named.
 	// It runs after the art container, and it is an init container for the same
 	// reason the art container is: the enrich container must run last. Plan 57

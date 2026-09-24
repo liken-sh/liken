@@ -12,18 +12,21 @@ in the namespace of the libraries that name it, because a pod mounts
 a `Secret` only from its own namespace. A `Library` names providers by
 name in `spec.sources`, in the order they are asked, and for each
 fact the first provider in that list that serves it is the one
-asked.
+asked. The `trailer` and `marks` facts take the union of their
+providers, so they ask every provider in the list that serves them.
 
 A `MetadataProvider` names exactly one provider block: `tmdb`,
-`omdb`, `fanart`, `tvmaze`, `peertube`, or `archive`. TMDb, OMDb, and
-Fanart.tv take a key from a `Secret`; TVmaze and the Internet Archive
-take none, so their blocks are empty. PeerTube takes no key either,
+`omdb`, `fanart`, `tvmaze`, `peertube`, `archive`, `theintrodb`, or
+`introdb`. TMDb, OMDb, and Fanart.tv take a key from a `Secret`;
+TVmaze, the Internet Archive, and IntroDB take none, so their blocks
+are empty. TheIntroDB takes a key where its block names a `Secret`
+and asks with none where it names none. PeerTube takes no key either,
 but it is software that many people run, so its block names the
 address of one instance. The `PROVIDER` column shows the block.
 
 The operator paces every provider: one request at a time per block,
 with a fixed gap between requests that fits each provider's stated
-limits, and a quarter second for the Internet Archive.
+limits, and a quarter second for the Internet Archive and IntroDB.
 
 `spec.facts` is optional. A provider that names none serves every
 fact the operator can request, and `status.facts`, shown
@@ -69,8 +72,8 @@ empty while the provider is not `Ready`.
       sources: [tmdb, omdb, tvmaze]
       # the rest as before
 
-The operator checks each provider once per pass with one call to the
-provider, and reports the answer in the
+The operator checks each provider with one call to the provider, and
+reports the answer in the
 `Ready` condition: `Reachable`, `NoSecret`, `Refused`, `Unreachable`, or
 `Unavailable`. `Unreachable` is a check that got no answer at all and
 carries the error as its message. `Unavailable` is a check the provider
@@ -79,6 +82,15 @@ message names that status code. The key
 reaches an enricher container through a `secretKeyRef` that the
 kubelet resolves. It never passes through a status, a log, or the
 catalog.
+
+The check calls a provider when the operator starts, when the
+provider's `metadata.generation` changes, and when its `Secret` changes.
+Otherwise it calls a provider whose last answer was `Reachable` or
+`Refused` once an hour, and one whose last answer was `Unreachable` or
+`Unavailable` every five minutes. A refused key does not repair itself,
+so an edit of the `Secret` is what calls again at once. An account with
+a daily allowance, such as OMDb's thousand calls, spends at most
+twenty-four of them a day on the check.
 
 One account with one metadata provider, named by the Libraries of its namespace in spec.sources.
 
@@ -94,6 +106,8 @@ The provider this account is with, and the facts it may serve. A spec that names
 | <span id="spec--tvmaze"></span>`tvmaze` | object | no | The account is with TVmaze, which serves series alone and needs no account. The block is empty, and its presence says that the operator may ask TVmaze. |
 | <span id="spec--peertube"></span>`peertube` | [object](#specpeertube) | no | The account is with one PeerTube instance, which provides only the trailer fact and needs no account. Many people run PeerTube, so this block identifies the instance by its address. |
 | <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second. |
+| <span id="spec--theintrodb"></span>`theintrodb` | [object](#spectheintrodb) | no | The account is with TheIntroDB, a community database of the intro, recap, credits, and preview spans of movies and episodes. It provides only the marks fact, and it finds a work by its TMDb id. A key is optional. Without one, TheIntroDB answers 500 asks a day for each address and serves accepted submissions alone. With one, it answers 1000 asks a day for the account and adds the account's own pending submissions. The operator checks it at /health, which spends none of the daily allowance and cannot test the key. |
+| <span id="spec--introdb"></span>`introdb` | object | no | The account is with IntroDB, a community database of the intro, recap, credits, and post-credits spans of movies and episodes. It provides only the marks fact, finds a work by its IMDb id, and needs no account. The block is empty, and its presence says that the operator may ask IntroDB. |
 | <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
@@ -153,7 +167,24 @@ The account is with one PeerTube instance, which provides only the trailer fact 
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specpeertube--endpoint"></span>`endpoint` | string | yes | The address of the instance, such as https://tube.example. The operator checks it at /api/v1/config once per pass, and the trailer fact searches its videos by title. Pattern: `^https://`. |
+| <span id="specpeertube--endpoint"></span>`endpoint` | string | yes | The address of the instance, such as https://tube.example. The operator checks it at /api/v1/config, and the trailer fact searches its videos by title. Pattern: `^https://`. |
+
+### spec.theintrodb
+
+The account is with TheIntroDB, a community database of the intro, recap, credits, and preview spans of movies and episodes. It provides only the marks fact, and it finds a work by its TMDb id. A key is optional. Without one, TheIntroDB answers 500 asks a day for each address and serves accepted submissions alone. With one, it answers 1000 asks a day for the account and adds the account's own pending submissions. The operator checks it at /health, which spends none of the daily allowance and cannot test the key.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectheintrodb--secretref"></span>`secretRef` | [object](#spectheintrodbsecretref) | no | The Secret in this namespace that holds the TheIntroDB API key, and the key inside it. Omit it to ask with no key. |
+
+#### spec.theintrodb.secretRef
+
+The Secret in this namespace that holds the TheIntroDB API key, and the key inside it. Omit it to ask with no key.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectheintrodbsecretref--name"></span>`name` | string | yes | The Secret's name, in this provider's own namespace. |
+| <span id="spectheintrodbsecretref--key"></span>`key` | string | no | The key inside that Secret. When omitted, token. Default: `token`. |
 
 ## status
 

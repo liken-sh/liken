@@ -277,6 +277,8 @@ var gapQueries = map[string]string{
 	factTrailer: trailerGapQuery(),
 	// A title with a trailer this fact can fetch and no trailer file of its own.
 	factTrailerFile: trailerFileGapQuery(),
+	// A main video of an identified work, asked again once its window passes.
+	factMarks: marksGapQuery(),
 
 	factContributorIDs:       contributorIDsGapSQL(),
 	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),

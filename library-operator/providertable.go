@@ -24,6 +24,10 @@ const (
 	// The archive block is the Internet Archive's movie_trailers collection, at
 	// one fixed address and with no account.
 	providerBlockArchive = "archive"
+	// The two community databases of the marks fact. TheIntroDB takes a key
+	// where the account names one, and IntroDB takes none.
+	providerBlockTheIntroDB = "theintrodb"
+	providerBlockIntroDB    = "introdb"
 )
 
 // What one account of a block holds, as the spec states it: the Secret that
@@ -51,6 +55,10 @@ type providerBlock struct {
 	// Whether the block takes a Secret, and whether its spec names an address.
 	key      bool
 	endpoint bool
+	// Whether the block takes a Secret where its spec names one and asks with no
+	// key where it names none. A block with an optional key is not a keyed
+	// block, because an account with no Secret is still an account.
+	keyOptional bool
 	// The account this spec names for the block, or nothing where the spec names
 	// another block.
 	account func(*MetadataProviderSpec) *providerAccount
@@ -60,9 +68,10 @@ type providerBlock struct {
 // facts run. A provider block with no row here serves nothing.
 // The paces follow what each provider publishes. TMDb states about 40 to 50
 // requests a second; OMDb a daily count and no rate; TVmaze 20 calls every
-// 10 seconds; a PeerTube instance 50 every 10 seconds by default; Fanart.tv
-// and the Internet Archive no number for these calls. Each pace sits at or
-// under its provider's number, and the 429 cooldown covers a stricter day.
+// 10 seconds; a PeerTube instance 50 every 10 seconds by default; TheIntroDB
+// 30 asks every 10 seconds; Fanart.tv, the Internet Archive, and IntroDB no
+// number for these calls. Each pace sits at or under its provider's number,
+// and the 429 cooldown covers a stricter day.
 var providerBlocks = []providerBlock{
 	{
 		name: providerBlockTMDb,
@@ -191,6 +200,38 @@ var providerBlocks = []providerBlock{
 		base:  archiveAPIBase,
 		account: func(spec *MetadataProviderSpec) *providerAccount {
 			if spec.Archive == nil {
+				return nil
+			}
+			return &providerAccount{}
+		},
+	},
+	// TheIntroDB holds the spans of movies and episodes alone, so it serves the
+	// marks fact and nothing else. Its pace is 30 asks every 10 seconds, with
+	// room for the check.
+	{
+		name:        providerBlockTheIntroDB,
+		facts:       []string{factMarks},
+		pace:        350 * time.Millisecond,
+		reach:       providerReach{path: theintrodbCheckPath},
+		base:        theintrodbAPIBase,
+		keyOptional: true,
+		account: func(spec *MetadataProviderSpec) *providerAccount {
+			if spec.TheIntroDB == nil {
+				return nil
+			}
+			return &providerAccount{secret: spec.TheIntroDB.SecretRef}
+		},
+	},
+	// IntroDB holds the spans of movies and episodes alone, keyed on IMDb ids,
+	// so it serves the marks fact and nothing else.
+	{
+		name:  providerBlockIntroDB,
+		facts: []string{factMarks},
+		pace:  250 * time.Millisecond,
+		reach: providerReach{path: introdbCheckPath},
+		base:  introdbAPIBase,
+		account: func(spec *MetadataProviderSpec) *providerAccount {
+			if spec.IntroDB == nil {
 				return nil
 			}
 			return &providerAccount{}

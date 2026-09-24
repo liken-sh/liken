@@ -269,6 +269,37 @@ CREATE TABLE streams (
     PRIMARY KEY (library, path, ordinal)
 );
 
+-- One row per candidate span of one video file: where a community database
+-- records the file's intro, recap, credits, preview, or post-credits scene.
+-- The key is the library, the file's path, and the span's ordinal among the
+-- file's spans, so (library, path) names the files row the span belongs to.
+-- The walk writes every row from the marks ledger in .liken/marks.yaml, and a
+-- file's marks leave with the file.
+--
+-- A provider can answer several candidates of one kind, from several
+-- submissions or several release versions, and the table holds every one in
+-- the order the ledger holds them. No row is chosen over another here. The
+-- player reads them all and decides.
+--
+-- start_ms and end_ms are milliseconds from the start of the file. A null
+-- start_ms is the start of the file, and a null end_ms is the end of the
+-- file, as the provider answered. Both columns take a null, because an open
+-- end is not zero. source is the provider block that answered, such as
+-- theintrodb.
+--
+-- Every read of a file's marks leads with the library and the path, which
+-- the primary key covers, so the table carries no index of its own.
+CREATE TABLE marks (
+    library TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT '',
+    start_ms INTEGER,
+    end_ms INTEGER,
+    source TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, path, ordinal)
+);
+
 -- The many-to-many link between a file and the items it holds, within
 -- one library: a multi-episode file names more than one item, and an
 -- item with a second encoding holds more than one file. All three
