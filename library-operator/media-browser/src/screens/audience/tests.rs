@@ -197,9 +197,11 @@ fn a_tile_carries_the_display_name_of_its_person() {
         display_name: "First".into(),
     }];
     let picker = Picker::open(1, &[]);
+    let unit = identity::Unit::default();
     let layer = Layer {
         people: &people,
         picker: &picker,
+        unit: &unit,
     };
 
     assert_eq!(layer.caption(0), "First");

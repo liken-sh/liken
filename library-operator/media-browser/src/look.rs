@@ -56,6 +56,13 @@ pub fn shade() -> Color {
     Color::from_rgba(0.0, 0.0, 0.0, 0.94)
 }
 
+/// The fill the person picker draws over the whole screen. It is darker
+/// than the text panel's shade, because the picker is a modal question
+/// and the screen behind it must not compete with it.
+pub fn picker_shade() -> Color {
+    Color::from_rgba(0.0, 0.0, 0.0, 0.96)
+}
+
 /// The opacity art draws at where a screen drew it but the person did not
 /// choose it, such as the siblings in a set strip. The dim is the image's
 /// own opacity and not a veil over it, because a veil is a fill and a fill
@@ -218,6 +225,15 @@ mod tests {
         assert_eq!(shade().b, 0.0);
         assert!(shade().a > CLEAR.a);
         assert_eq!(CLEAR.a, 0.0);
+    }
+
+    #[test]
+    fn the_picker_covers_the_screen_in_a_darker_black_than_the_text_panel() {
+        assert_eq!(
+            (picker_shade().r, picker_shade().g, picker_shade().b),
+            (0.0, 0.0, 0.0)
+        );
+        assert!(picker_shade().a > shade().a);
     }
 
     #[test]

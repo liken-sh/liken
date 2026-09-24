@@ -14,6 +14,9 @@ use crate::audience::Person;
 use crate::look;
 use crate::views::{area, extent, mark, text};
 
+// The unit's name and parts at the bottom left of the picker.
+pub mod identity;
+
 /// The word on the link while no person is chosen. The link then answers
 /// that nobody is watching.
 pub const NOBODY: &str = "Nobody";
@@ -253,12 +256,14 @@ impl Picker {
 }
 
 /// The picker as one layer over the stack: the shade that dims what is
-/// under it, the heading, and the row of tiles.
+/// under it, the heading, the row of tiles, and the unit's identity block.
 pub struct Layer<'a> {
     /// The people the picker offers, in the order the list came.
     pub people: &'a [Person],
     /// What is chosen and where focus stands.
     pub picker: &'a Picker,
+    /// The unit the last status named, which the identity block draws.
+    pub unit: &'a identity::Unit,
 }
 
 impl Layer<'_> {
@@ -285,7 +290,8 @@ impl canvas::Program<Infallible, Theme, Renderer> for Layer<'_> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        frame.fill_rectangle(bounds.position(), extent(bounds), look::shade());
+        frame.fill_rectangle(bounds.position(), extent(bounds), look::picker_shade());
+        identity::draw(&mut frame, self.unit, bounds);
         text::centered(
             &mut frame,
             QUESTION,

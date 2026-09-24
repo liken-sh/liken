@@ -124,6 +124,9 @@ pub struct Browser<S: Source, A: Art> {
     // The picker over the stack while the browser has no answer to who is
     // watching, and nothing once it has one.
     picker: Option<screens::audience::Picker>,
+    // The unit's name and parts from the last status. The picker draws
+    // them as its identity block, and nothing else reads them.
+    unit: screens::audience::identity::Unit,
     // The volume row's state, which the level moments the bus delivers fold
     // into.
     level: volume::Level,
@@ -186,6 +189,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             loading: None,
             lights: None,
             picker: None,
+            unit: screens::audience::identity::Unit::default(),
             level: volume::Level::default(),
             time: clock::now(),
             on_strip: false,
@@ -290,6 +294,15 @@ impl<S: Source, A: Art> Browser<S, A> {
             self.audience.known().len(),
             &chosen,
         ));
+    }
+
+    // The picker as a layer over the stack, while the picker is up.
+    fn picker_layer(&self) -> Option<screens::audience::Layer<'_>> {
+        self.picker.as_ref().map(|picker| screens::audience::Layer {
+            people: self.audience.known(),
+            picker,
+            unit: &self.unit,
+        })
     }
 
     // Raise the picker where the browser has no answer to who is watching.
@@ -495,6 +508,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 }
                 self.activity = status.activity;
                 self.refresh.cover(status.activity == Activity::Playing);
+                self.unit = screens::audience::identity::Unit::of(&status);
             }
             // A level brings up the volume row, which draws over every
             // screen.
@@ -502,8 +516,9 @@ impl<S: Source, A: Art> Browser<S, A> {
             // The mark stands between the equipment that owns the room's
             // level and this client's row.
             Moment::Owner(mark) => self.level.own(&mark),
-            // The browser draws no identity block, so focus changes nothing
-            // here.
+            // The picker's identity block reads focus from the status and
+            // draws no beat when focus moves, so a focus moment changes
+            // nothing here.
             Moment::Focus { .. } => {}
             // A person took the offer the display drew. The bytes are the
             // request this browser wrote onto that Play.
@@ -1032,15 +1047,12 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
                 .height(Length::Fill)
                 .into(),
         );
-        if let Some(picker) = &self.picker {
+        if let Some(picker) = self.picker_layer() {
             layers.push(
-                canvas(screens::audience::Layer {
-                    people: self.audience.known(),
-                    picker,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
+                canvas(picker)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into(),
             );
         }
         if let Some(row) = self.level.row(self.clock) {

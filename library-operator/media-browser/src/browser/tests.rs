@@ -9,6 +9,7 @@ mod audience;
 mod banner;
 mod clock;
 mod home;
+mod identity;
 mod keys;
 mod loading;
 mod moments;
