@@ -1,7 +1,7 @@
 package main
 
 // providercheck.go holds the one call the operator makes against each
-// MetadataProvider per pass, the Ready condition it writes from the answer,
+// MetadataProvider, the Ready condition it writes from the answer,
 // and the resolution of a Library's ordered sources to the provider that
 // serves a fact.
 
@@ -17,8 +17,8 @@ import (
 
 // The one call each provider answers for the check: the path, and how the key
 // travels on it. A provider that takes no key authorizes nothing. The call is
-// the cheapest read each provider serves, so a pass costs one request per
-// account.
+// the cheapest read each provider serves, and providercadence.go says how
+// seldom it goes out.
 type providerReach struct {
 	path      string
 	authorize func(*http.Request, string)
@@ -114,11 +114,11 @@ func (o *operator) checkProviders(ctx context.Context, providers []MetadataProvi
 	return set
 }
 
-// An empty verdict leaves the last condition standing. Two answers still
-// produce one: a status that is neither 200 nor 401, and a Secret the API
-// server would not serve.
+// An empty verdict leaves the last condition standing. A pass that does not
+// call the provider returns one, and so does a Secret the API server would
+// not serve.
 func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider, now time.Time) error {
-	verdict, err := o.reachProvider(ctx, provider)
+	verdict, err := o.reachProvider(ctx, provider, now)
 	if verdict.reason == "" {
 		return err
 	}
@@ -170,7 +170,11 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 // status is Unavailable. A provider that is down says nothing about the
 // account, and the check still writes a verdict, because every Job of a
 // Library that names this provider waits for one.
-func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider) (providerVerdict, error) {
+//
+// The Secret is read on every pass, because the API server answers it at no
+// cost to the provider and its resourceVersion says whether the key changed.
+// The provider itself is called only when providerCallDue says so.
+func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider, now time.Time) (providerVerdict, error) {
 	block := provider.block()
 	if block == "" {
 		return providerVerdict{reason: reasonNoSecret,
@@ -178,49 +182,60 @@ func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider
 	}
 	// A provider that takes no key skips the Secret, because TVmaze serves its
 	// free tier to anyone.
-	key, verdict, err := o.providerKey(ctx, provider)
+	key, secretVersion, verdict, err := o.providerKey(ctx, provider)
 	if verdict.reason != "" || err != nil {
 		return verdict, err
 	}
+	if !o.providerCallDue(provider, secretVersion, now) {
+		return providerVerdict{}, nil
+	}
+	verdict = o.callProvider(ctx, provider, key)
+	o.noteProviderCall(provider, secretVersion, now, verdict.reason)
+	return verdict, nil
+}
 
+// The one call to the provider and the verdict its answer earns.
+func (o *operator) callProvider(ctx context.Context, provider *MetadataProvider, key string) providerVerdict {
+	block := provider.block()
 	status, err := o.askProvider(ctx, provider, key)
 	if err != nil {
-		return providerVerdict{reason: reasonUnreachable, message: err.Error()}, nil
+		return providerVerdict{reason: reasonUnreachable, message: err.Error()}
 	}
 	switch status {
 	case http.StatusOK:
 		return providerVerdict{reason: reasonReachable,
-			message: "the provider answered the check call"}, nil
+			message: "the provider answered the check call"}
 	case http.StatusUnauthorized:
 		return providerVerdict{reason: reasonRefused,
-			message: "the provider refused the key of " + block}, nil
+			message: "the provider refused the key of " + block}
 	}
 	return providerVerdict{reason: reasonUnavailable,
-		message: fmt.Sprintf("the provider answered %d", status)}, nil
+		message: fmt.Sprintf("the provider answered %d", status)}
 }
 
-// The key of one provider, out of the Secret its block names. An empty key
-// and an empty verdict together are a provider that needs none.
-func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) (string, providerVerdict, error) {
+// The key of one provider, out of the Secret its block names, and the
+// Secret's resourceVersion, which changes with every edit of the key. An
+// empty key and an empty verdict together are a provider that needs none.
+func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) (string, string, providerVerdict, error) {
 	reference := provider.secretRef()
 	if reference == nil {
-		return "", providerVerdict{}, nil
+		return "", "", providerVerdict{}, nil
 	}
 	secret, err := GetSecret(ctx, o.client, provider.Metadata.Namespace, reference.Name)
 	if errors.Is(err, ErrNotFound) {
-		return "", providerVerdict{reason: reasonNoSecret,
+		return "", "", providerVerdict{reason: reasonNoSecret,
 			message: fmt.Sprintf("the Secret %s does not exist in namespace %s",
 				reference.Name, provider.Metadata.Namespace)}, nil
 	}
 	if err != nil {
-		return "", providerVerdict{}, err
+		return "", "", providerVerdict{}, err
 	}
 	key := string(secret.Data[reference.secretKey()])
 	if key == "" {
-		return "", providerVerdict{reason: reasonNoSecret,
+		return "", "", providerVerdict{reason: reasonNoSecret,
 			message: fmt.Sprintf("the Secret %s holds no %s", reference.Name, reference.secretKey())}, nil
 	}
-	return key, providerVerdict{}, nil
+	return key, secret.Metadata.ResourceVersion, providerVerdict{}, nil
 }
 
 // The request carries a timeout of its own, so a provider that stops

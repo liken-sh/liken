@@ -80,6 +80,9 @@ type operator struct {
 	// at a server of its own and no test reaches the internet.
 	providerBases  map[string]string
 	providerClient *http.Client
+	// The last call to each provider's check, which says whether the next pass
+	// calls it again. providercadence.go holds the rule.
+	providerCalls map[string]providerCall
 
 	// The namespace this operator runs in, which is what the
 	// webhook address it reports on every Library names, and the address
@@ -182,6 +185,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
+		providerCalls:  map[string]providerCall{},
 	}
 	// The operator names no will. Its one publish is the empty
 	// retained payload that drops a departed library's topics, and a
@@ -445,7 +449,8 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing catalog member pods: %v\n", err)
 		return
 	}
-	// The providers of every namespace, read and checked once per pass. A
+	// The providers of every namespace, read once per pass and called only when
+	// providercadence.go says their verdict can have changed. A
 	// cluster that has not applied the CRD serves no such collection, and its
 	// libraries are still scanned and still reported.
 	providers, err := ListMetadataProviders(ctx, o.client)
