@@ -78,9 +78,9 @@ reports the answer in the
 `Unavailable`. `Unreachable` is a check that got no answer at all and
 carries the error as its message. `Unavailable` is a check the provider
 answered with a status that says nothing about the account, and its
-message names that status code. The key
-reaches an enricher container through a `secretKeyRef` that the
-kubelet resolves. It never passes through a status, a log, or the
+message names that status code. The key reaches each phase container
+of a `Library`'s `Job` through a `secretKeyRef` that the kubelet
+resolves. It never passes through a status, a log, or the
 catalog.
 
 The check calls a provider when the operator starts, when the

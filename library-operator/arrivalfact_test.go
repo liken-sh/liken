@@ -284,7 +284,7 @@ func TestTheArrivalFactWorksOverTheFolderItsJobNames(t *testing.T) {
 	seedArrivalGap(t, catalog, root, "One (2001)", "One (2001).mkv")
 	seedArrivalGap(t, catalog, root, "Two (2002)", "Two (2002).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "Two (2002)"
+	work.scopes = []string{"Two (2002)"}
 
 	if err := work.arrivalFact(t.Context()); err != nil {
 		t.Fatal(err)

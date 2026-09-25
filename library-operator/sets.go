@@ -253,3 +253,20 @@ func setIDsUnderSQL() string {
 	return `SELECT set_id FROM movies WHERE library = ? AND ` + pathScopeClause("path") +
 		` AND set_id <> '' LIMIT ?`
 }
+
+// Every set of one library: the sets its movies name, and the set rows it
+// holds, so a set whose last member left derives as gone.
+const librarySetIDsSQL = `SELECT set_id FROM movies WHERE library = ?1 AND set_id != '' ` +
+	`UNION SELECT id FROM sets WHERE library = ?1`
+
+// deriveLibrarySets derives every set of one library again from the movie
+// rows the catalog holds. A library Job runs it after its last phase,
+// because the identity, nfo, and art phases each write a column a set reads,
+// and a set derives from all of its members.
+func deriveLibrarySets(ctx context.Context, catalog *Catalog, library string) error {
+	ids, err := catalog.queryStrings(ctx, librarySetIDsSQL, []any{library})
+	if err != nil {
+		return err
+	}
+	return reconcileSets(ctx, catalog, library, ids)
+}

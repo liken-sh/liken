@@ -29,10 +29,13 @@ const (
 	volumeDirectoryPerm fs.FileMode = 0o755
 )
 
-// One Job's writes to the volume, named by the Job so two Jobs never share a
-// temporary.
+// One container's writes to the volume, named by the Job and the container
+// so two writers never share a temporary.
 type volumeWriter struct {
 	job string
+	// The phases volume, where the .nfo locks are, and empty where the
+	// writer is alone, as in a test.
+	locks string
 }
 
 // A test or a local run may hold no Job name. The temporary still needs a

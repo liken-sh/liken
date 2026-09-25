@@ -162,7 +162,7 @@ func TestEachWorkerKeepsItsOwnNewestRuns(t *testing.T) {
 	oldest := time.Unix(1_700_000_000, 0).UTC()
 	seedTallies(t, catalog, "house/movies", "enrich-1", factProbe, oldest.Add(time.Hour))
 	seedTallies(t, catalog, "house/movies", "enrich-2", factProbe, oldest.Add(2*time.Hour))
-	trickplay := newTallies(catalog, "house/movies", workerTrickplay, "trickplay-1",
+	trickplay := newTallies(catalog, "house/movies", workerScan, "walk-1",
 		factTrickplay, oldest)
 	trickplay.add(tallyAttempts, 1, "fact", factTrickplay, "result", attemptFound)
 	if err := trickplay.flush(t.Context()); err != nil {
@@ -178,8 +178,8 @@ func TestEachWorkerKeepsItsOwnNewestRuns(t *testing.T) {
 	for _, one := range held {
 		workers[one.Worker] = true
 	}
-	if !workers[workerTrickplay] {
-		t.Errorf("the report carries %v, want the trickplay run the enricher's runs did not push out", workers)
+	if !workers[workerScan] {
+		t.Errorf("the report carries %v, want the scan run the enricher's runs did not push out", workers)
 	}
 }
 

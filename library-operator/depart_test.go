@@ -37,11 +37,9 @@ func houseJob(name, worker string, status JobStatus) Job {
 	}
 }
 
-// the walk the CronJob created, which the CronJob owns.
+// a walk Job of the movies Library.
 func walkJob(status JobStatus) Job {
-	job := houseJob("movies-scan-29380000", workerScan, status)
-	job.Metadata.OwnerReferences = []OwnerReference{{Kind: "CronJob", Name: "movies-scan"}}
-	return job
+	return houseJob("movies-walk-29380000", jobModeWalk, status)
 }
 
 // the report in which the namespace's reporter echoes one cleanup Job
@@ -177,19 +175,18 @@ func TestDepartBlocksOnANamespaceWithTwoCatalogs(t *testing.T) {
 	}
 }
 
-// the schedule goes first, so no walk starts behind the sweep.
-func TestDepartStopsTheScheduleFirst(t *testing.T) {
+// the CronJob of an earlier release goes first, so no walk starts behind
+// the sweep.
+func TestDepartDeletesTheScheduleOfAnEarlierReleaseFirst(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	cluster.cronJobs["house/movies-scan"] = &CronJob{
-		Metadata: ObjectMeta{Name: "movies-scan", Namespace: "house"},
-	}
+	cluster.holdCronJob("house", "movies-scan")
 
 	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldCronJob("house", "movies-scan") != nil {
+	if cluster.heldCronJob("house", "movies-scan") {
 		t.Error("the scan schedule stands during a departure")
 	}
 }
@@ -225,7 +222,9 @@ func TestDepartWaitsForARunningEnricher(t *testing.T) {
 		jobs []Job
 		runs []libraryRun
 	}{
-		{name: "an enricher Job the controller has not ended",
+		{name: "a Job that fills gaps the controller has not ended",
+			jobs: []Job{houseJob("movies-gaps-1", jobModeGaps, JobStatus{Active: 1})}},
+		{name: "an enricher Job of an earlier release the controller has not ended",
 			jobs: []Job{{Metadata: ObjectMeta{Name: "movies-enrich-1", Namespace: "house",
 				Labels: workerLabels("movies", workerEnrich)}}}},
 		{name: "an enrich run the reporter has not seen finish",
@@ -465,9 +464,7 @@ func TestDepartReportsAFailureItCannotReadPast(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			library := departingMovies(cluster)
-			cluster.cronJobs["house/movies-scan"] = &CronJob{
-				Metadata: ObjectMeta{Name: "movies-scan", Namespace: "house"},
-			}
+			cluster.holdCronJob("house", "movies-scan")
 			cluster.broken[one.path] = http.StatusInternalServerError
 
 			err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil)

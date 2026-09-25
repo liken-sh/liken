@@ -167,7 +167,7 @@ library, Jellyfin deletes the whole `.trickplay` directory beside every
 video on each refresh, whoever made the directory. It deletes the rows
 it holds for them too. So on a volume this operator tiles, Jellyfin's
 extraction stays on, and the two race for each new title. The trickplay
-`Job` claims the node's GPU so that it wins. A directory Jellyfin made
+phase of the `Library`'s `Job` claims the node's GPU so that it wins. A directory Jellyfin made
 first holds the same sheets, so the fact leaves it alone.
 
 Jellyfin imports a tile directory it did not make when the folder name

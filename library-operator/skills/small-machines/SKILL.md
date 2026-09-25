@@ -65,14 +65,32 @@ happens once:
 
 ## The worker pods
 
-A scan `Job` requests `32Mi` with a `64Mi` limit, and its own catalog
-agent the same. The enrich `Job`'s art container is limited to `256Mi`.
-The trickplay `Job`, when enabled, requests half a CPU with a `512Mi`
-limit, because it runs `ffmpeg` where every other container reads rows
-and files. It runs beside the enrich `Job` with a catalog agent of its
-own. Every pod that runs an agent has a sixty-second termination grace
-period, twice the default, because a busy agent flushes its database as
-it stops.
+A `Library` runs one `Job` at a time, and every container of that `Job`
+is a regular container that runs at the same time as the others, beside
+one catalog agent. Kubernetes schedules the pod on the sum of their
+requests:
+
+| Container | Memory request | Memory limit | CPU request |
+|---|---|---|---|
+| the catalog agent | `64Mi` | `512Mi` | `10m` |
+| `scan`, in a walk | `32Mi` | `64Mi` | `10m` |
+| `probe` | `32Mi` | `256Mi` | `10m` |
+| `art` | `32Mi` | `256Mi` | `10m` |
+| `trickplay`, when enabled | `32Mi` | `512Mi` | `500m` |
+| `trailer-files`, when enabled | `32Mi` | `256Mi` | `10m` |
+| every other phase, and `close` | `32Mi` | `64Mi` | `10m` |
+
+A walk of a `Library` whose sources serve every phase runs twelve
+containers beside the agent, so the pod requests about `448Mi`. A `Job`
+that fills gaps runs only the phases with work, and requests less. The
+probe and trickplay limits are wide because `ffmpeg` and `ffprobe` hold
+a decoded stream, and the art limit because the art container holds an
+image while it writes it. Every pod that runs an agent has a
+sixty-second termination grace period, twice the default, because a
+busy agent flushes its database as it stops.
+
+The peak memory of a whole `Job` on a one-gigabyte machine is not
+measured yet.
 
 ## What to turn down
 
@@ -95,8 +113,7 @@ it stops.
             - ".recycle"
 
 * **Refresh one fact at a time.** Each name in `spec.refresh` reopens
-  every title for that fact, and the enricher fills it before the
-  next.
+  every title for that fact, and a `Job` fills it before the next.
 
 The agent's `512Mi` limit and the `emptyDir` cache's `640Mi` cap are
 constants of the operator's build, not fields. The art claim's size

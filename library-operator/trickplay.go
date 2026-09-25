@@ -79,7 +79,6 @@ func (c *Catalog) trickplayGaps(ctx context.Context, library string,
 // the run carries on to the next file. The files run one at a time, so one
 // ffmpeg holds the container's memory line.
 func (e *enricher) trickplayFact(ctx context.Context) error {
-	e.sweepOldTallies(ctx, time.Now().UTC())
 	if err := e.sweepTrickplayMaps(ctx); err != nil {
 		return err
 	}
@@ -94,6 +93,11 @@ func (e *enricher) trickplayFact(ctx context.Context) error {
 		}
 		if !e.inScope(gap.path) {
 			continue
+		}
+		// Past the phase's time limit the run starts no other file, and the
+		// rest stays as the gap of the next Job.
+		if !e.mayStartTitle() {
+			break
 		}
 		if e.trickplayOne(ctx, gap) {
 			written++

@@ -176,37 +176,9 @@ func (r *reporter) follow(ctx context.Context) {
 	}
 }
 
-// Follows one table's update stream and marks a change on every
-// event, opening the stream again after a backoff for as long as the
-// context runs. The stream's events name no library, so the mark says
-// only that something moved.
+// Follows one table's update stream for the life of the context.
 func (r *reporter) followTable(ctx context.Context, table string, changed chan<- struct{}) {
-	backoff := reportMinBackoff
-	for ctx.Err() == nil {
-		opened := false
-		err := r.catalog.followUpdates(ctx, table,
-			func() { opened = true },
-			func() { markChanged(changed) })
-		if err != nil && ctx.Err() == nil {
-			r.logf("the update stream of %s ended: %v", table, err)
-		}
-		// The events between one stream and the next are gone, so
-		// a stream that ended marks a change and the republish reads what
-		// the catalog holds now.
-		markChanged(changed)
-		if opened {
-			backoff = reportMinBackoff
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(backoff):
-		}
-		if !opened {
-			backoff = min(backoff*2, reportMaxBackoff)
-		}
-	}
+	followTableChanges(ctx, r.catalog, table, changed, r.logf)
 }
 
 // Republishes every library the reporter knows on each marked

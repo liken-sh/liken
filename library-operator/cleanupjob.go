@@ -72,8 +72,11 @@ func cleanupSidecar(library *Library, image string) Container {
 // template hash here, the one departure from every other object this
 // operator stands: the Job exists for one teardown, and a rebuild would
 // restart the sweep it is running. A Job that failed is deleted on a
-// backoff and created again, because the claim admits one holder at a
-// time and the failed Job's pod is that holder until it goes.
+// backoff and created again, because its name is fixed and a new Job
+// takes the name only after the failed one is gone. The pass starts no
+// other Job of a deleting Library, and the departure waits for every
+// Job of it to finish first, so the cleanup's agent is the only one on
+// the Library's catalog claim.
 func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs []Job) (*Job, error) {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	live := cleanupJobOf(jobs, namespace, name)

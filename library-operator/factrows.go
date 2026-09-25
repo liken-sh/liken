@@ -127,7 +127,10 @@ func filesOfType(files []fileRow, kind string) []fileRow {
 // The probe owns the stream columns of every video and the duration of the
 // items whose .nfo file states no runtime of its own.
 func (e *enricher) writeProbeRows(ctx context.Context, result *walkResult) error {
-	if _, err := e.catalog.UpdateFileStreams(ctx, filesOfType(result.files, fileTypeVideo)); err != nil {
+	// The probe reads audio files as well as video files, so both take the
+	// probed column that closes the gap.
+	probed := append(filesOfType(result.files, fileTypeVideo), filesOfType(result.files, fileTypeAudio)...)
+	if _, err := e.catalog.UpdateFileStreams(ctx, probed); err != nil {
 		return err
 	}
 	var movies, episodes []itemUpdate

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // One site that answers the files a case names and one body for every
@@ -238,7 +239,26 @@ func TestTheTrailerFileFactSkipsATitleOutsideTheJobsScope(t *testing.T) {
 	root := t.TempDir()
 	seedTrailerFileRun(t, catalog, root)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "Another Title (2020)"
+	work.scopes = []string{"Another Title (2020)"}
+	line := trailerFetchLineOf(t, "video bytes", []int{1080}, nil)
+
+	if err := work.trailerFileGap(t.Context(), line); err != nil {
+		t.Fatal(err)
+	}
+
+	if held := trailersFolderHolds(t, root); len(held) != 0 {
+		t.Errorf("the folder holds %v, want nothing", held)
+	}
+}
+
+// Past the phase's time limit the fact starts no other title, and the title
+// stays in the gap of the next Job.
+func TestTheTrailerFileFactStartsNoTitlePastItsTimeLimit(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrailerFileRun(t, catalog, root)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work.stopStarting = time.Now().Add(-time.Second)
 	line := trailerFetchLineOf(t, "video bytes", []int{1080}, nil)
 
 	if err := work.trailerFileGap(t.Context(), line); err != nil {

@@ -230,7 +230,7 @@ func TestSweepTalliesTakesOnlyTheWorkersOldRows(t *testing.T) {
 	for _, one := range []*tallies{
 		newTallies(catalog, "house/movies", workerEnrich, "enrich-old", factProbe, old),
 		newTallies(catalog, "house/movies", workerEnrich, "enrich-now", factProbe, now),
-		newTallies(catalog, "house/movies", workerTrickplay, "trickplay-old", factTrickplay, old),
+		newTallies(catalog, "house/movies", workerScan, "walk-old", factTrickplay, old),
 		newTallies(catalog, "house/series", workerEnrich, "enrich-old", factProbe, old),
 	} {
 		one.add(tallyAttempts, 1, "fact", factProbe, "result", attemptFound)
@@ -257,7 +257,7 @@ func TestSweepTalliesTakesOnlyTheWorkersOldRows(t *testing.T) {
 		}
 		jobs = append(jobs, job)
 	}
-	want := []string{"enrich-now", "trickplay-old", "enrich-old"}
+	want := []string{"enrich-now", "walk-old", "enrich-old"}
 	if len(jobs) != len(want) {
 		t.Fatalf("the table holds %v, want %v", jobs, want)
 	}

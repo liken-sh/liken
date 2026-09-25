@@ -26,13 +26,12 @@ func boundVolume() binding {
 }
 
 // scanning is the whole path working: the storage bound, the
-// namespace's catalog pod up, the schedule standing, and the reporter
-// on the bus. Every case below changes one thing about it.
+// namespace's catalog pod up, and the reporter on the bus. Every case
+// below changes one thing about it.
 func scanning() libraryObservation {
 	return libraryObservation{
 		bound:             boundVolume(),
 		choice:            standingCatalog(),
-		cronJob:           testScanCronJob(studioMovies()),
 		online:            true,
 		operatorNamespace: testOperatorNamespace,
 	}
@@ -139,17 +138,17 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	starting.Status.ContainerStatuses[0].Ready = false
 	startingPod.choice = catalogChoice{catalog: testNamespaceCatalog(), pod: starting}
 
-	noSchedule := scanning()
-	noSchedule.cronJob = nil
+	_, unparsed := parseScanSchedule("every hour")
 
 	offline := scanning()
 	offline.online = false
 
 	cases := []struct {
-		name    string
-		seen    libraryObservation
-		reason  string
-		message string
+		name     string
+		seen     libraryObservation
+		schedule string
+		reason   string
+		message  string
 	}{
 		{
 			name: "no volume", seen: unbound,
@@ -179,8 +178,8 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 			message: "the catalog pod runs and not every container is ready",
 		},
 		{
-			name: "no schedule yet", seen: noSchedule,
-			reason: reasonScanPending, message: "the scan schedule does not stand yet",
+			name: "a schedule that does not parse", seen: scanning(), schedule: "every hour",
+			reason: reasonScheduleInvalid, message: unparsed.Error(),
 		},
 		{
 			name: "a reporter that left the bus", seen: offline,
@@ -193,7 +192,9 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			status := deriveLibraryStatus(studioMovies(), one.seen, testNow)
+			library := studioMovies()
+			library.Spec.Scan.Schedule = one.schedule
+			status := deriveLibraryStatus(library, one.seen, testNow)
 
 			ready := conditionOf(t, status, conditionReady)
 			if ready.Status != ConditionFalse {
@@ -214,7 +215,7 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 func TestThePhaseSaysWhatTheLibraryIsDoing(t *testing.T) {
 	walking := &libraryReport{Titles: 412, Walking: true,
 		Runs: []libraryRun{{Worker: workerScan, Job: "movies-scan-7", Started: testNow}}}
-	walkJobs := []Job{runningJob("movies-scan-7", "house", workerLabels("movies", workerScan))}
+	walkJobs := []Job{runningJob("movies-scan-7", "house", workerLabels("movies", jobModeWalk))}
 	between := &libraryReport{Titles: 412}
 
 	cases := []struct {
@@ -287,7 +288,7 @@ func TestReadyConditionRefusesAPodTheKubeletHasNotSpokenFor(t *testing.T) {
 		},
 	}
 
-	condition := readyCondition(seen, 1)
+	condition := readyCondition(seen, defaultScanSchedule, 1)
 
 	if condition.Status != ConditionFalse || condition.Reason != reasonCatalogPending {
 		t.Errorf("Ready = %+v, want False with CatalogPending", condition)

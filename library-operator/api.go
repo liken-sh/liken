@@ -14,8 +14,8 @@ import (
 )
 
 // The group this operator serves, and the core group it writes
-// into: a Library becomes an ordinary CronJob and its Jobs ordinary
-// pods, so any tool that reads them reads what a Library became.
+// into: a Library becomes ordinary Jobs and their ordinary pods, so
+// any tool that reads them reads what a Library became.
 const (
 	libraryAPIVersion = "library.liken.sh/v1alpha1"
 	podAPIVersion     = "v1"
@@ -209,8 +209,8 @@ type LibraryTrailers struct {
 type LibraryTrickplay struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	// The render node the trickplay Job claims for the decode. Unset, the Job
-	// carries no claim and decodes in software.
+	// The render node a library Job claims for the trickplay decode. Unset,
+	// the Job carries no claim and decodes in software.
 	Render *TrickplayDevice `json:"render,omitempty"`
 }
 
@@ -221,8 +221,9 @@ type TrickplayDevice struct {
 	Selector string `json:"selector,omitempty"`
 }
 
-// The schedule the Library's full walk runs on, as the cron
-// expression a CronJob takes.
+// The schedule the Library's full walk runs on, as a cron expression
+// in the form a CronJob takes. The operator reads it with the CronJob
+// controller's own parser and starts the walk itself.
 type LibraryScan struct {
 	Schedule string `json:"schedule,omitempty"`
 }
@@ -231,7 +232,7 @@ type LibraryScan struct {
 // needs as a backstop and a library with none can live on.
 const defaultScanSchedule = "0 * * * *"
 
-// The schedule the CronJob takes: the Library's own, or the
+// The schedule the walks follow: the Library's own, or the
 // default when it names none. The CRD defaults the field, so a Library
 // from the API server always carries one, and this answers for the ones
 // built in this program.
@@ -285,7 +286,7 @@ func (s LibrarySpec) artClaim() string {
 
 // screenClaim is the claim that holds the files a screen reads: the art
 // claim of a franchises library, and the storage claim of every other
-// kind. The screen pod, the play request, and the enrich Job all ask it,
+// kind. The screen pod, the play request, and the library Job all ask it,
 // so no one of them decides the question on its own.
 func (s LibrarySpec) screenClaim() string {
 	if claim := s.artClaim(); claim != "" {
@@ -765,14 +766,14 @@ const (
 	reasonNoCatalog    = "NoCatalog"
 	reasonManyCatalogs = "ManyCatalogs"
 	reasonNoReport     = "NoReport"
-	// The namespace's catalog pod is not up, the schedule does
-	// not stand yet, and the namespace's reporter has left the bus.
-	reasonCatalogPending = "CatalogPending"
-	reasonScanPending    = "ScanPending"
-	reasonOffline        = "Offline"
+	// The namespace's catalog pod is not up, spec.scan.schedule does
+	// not parse, and the namespace's reporter has left the bus.
+	reasonCatalogPending  = "CatalogPending"
+	reasonScheduleInvalid = "ScheduleInvalid"
+	reasonOffline         = "Offline"
 
 	// The Departing condition's reasons, in the order depart.go
-	// reaches them: a scan Job of this library is still running, the
+	// reaches them: a walk Job of this library is still running, the
 	// cleanup Job is deleting the rows, the Job finished and the
 	// reporter has not echoed it yet, and the cleanup cannot run at
 	// all. Blocked covers a cleanup Job that failed and a namespace
@@ -781,8 +782,9 @@ const (
 	reasonSweeping     = "Sweeping"
 	reasonAwaitingEcho = "AwaitingEcho"
 	reasonBlocked      = "Blocked"
-	// An enricher Job of this library is still running. It writes onto the
-	// volume and into the catalog the sweep is emptying.
+	// A Job of this library that fills gaps, or a Job an earlier release
+	// created, is still running. It writes onto the volume and into the
+	// catalog the sweep is emptying.
 	reasonEnrichRunning = "EnrichRunning"
 )
 

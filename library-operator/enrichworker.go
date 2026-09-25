@@ -1,8 +1,8 @@
 package main
 
-// enrichworker.go is what the probe and identity containers share: the
-// environment they read, the gap query they work from, and where each of them
-// records what it did.
+// enrichworker.go is what every phase container of a library Job shares: the
+// environment it reads, the gap query it works from, and where it records
+// what it did.
 
 import (
 	"context"
@@ -19,14 +19,28 @@ import (
 // One enricher container: the Library it serves, the volume it writes, and
 // the catalog it reads its gap out of.
 type enricher struct {
-	library  string
-	kind     string
-	root     string
-	scanPath string
-	job      string
-	catalog  *Catalog
-	writer   *volumeWriter
-	log      io.Writer
+	library string
+	kind    string
+	root    string
+	// The folders this Job walks, in the form the webhook named them, and
+	// none where the Job covers the whole library.
+	scanPaths []string
+	job       string
+	// The container's own name, which is its phase.
+	container string
+	catalog   *Catalog
+	writer    *volumeWriter
+	log       io.Writer
+	// The phases volume, and the phases this container waits for. The
+	// board is nil where no phases volume is mounted, as in a test, and the
+	// container then runs its facts once.
+	board *phaseBoard
+	needs []string
+	// The write the local copy must hold before the first gap read.
+	sync syncTarget
+	// When this container stops starting titles, and the zero time where
+	// its phase has no time limit.
+	stopStarting time.Time
 	// The worker whose run this container belongs to, and the counts it
 	// raises under that run.
 	worker  string
@@ -37,9 +51,9 @@ type enricher struct {
 	// The refresh time of every fact the Library named, which the gap
 	// query of that fact binds.
 	refresh refreshTimes
-	// The folder this Job was narrowed to, relative to the library root, and
-	// empty where the Job covers the whole library.
-	scope string
+	// The folders this Job was narrowed to, relative to the library root,
+	// and none where the Job covers the whole library.
+	scopes []string
 	// How long a container waits for its own copy to hold the walk
 	// that the catalog pods hold.
 	syncTimeout time.Duration
@@ -87,42 +101,74 @@ func newEnricher(log io.Writer) (*enricher, error) {
 		library:     libraryKey(namespace, name),
 		kind:        os.Getenv(libraryKindVariable),
 		root:        mountRoot,
-		scanPath:    os.Getenv(scanPathVariable),
+		scanPaths:   scanPathsOf(os.Getenv(scanPathsVariable), os.Getenv(scanPathVariable)),
 		job:         job,
+		container:   container,
 		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
-		writer:      newVolumeWriter(job),
+		writer:      newVolumeWriter(writerName(job, container)),
 		log:         log,
+		needs:       phaseNeeds(os.Getenv(libraryPhaseNeedsVariable)),
+		sync:        syncTargetOf(os.Getenv(syncActorVariable), os.Getenv(syncVersionVariable)),
 		ignore:      parseIgnore(os.Getenv(libraryIgnoreVariable)),
 		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable)),
 		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
 		worker:      worker,
 	}
+	if work.board = boardOf(os.Getenv(libraryPhasesVariable)); work.board != nil {
+		work.writer.locks = work.board.dir
+	}
 	work.tallies = newTallies(work.catalog, work.library, worker, job, container, time.Now().UTC())
-	work.scope = work.narrowedScope()
+	work.scopes = work.narrowedScopes()
 	return work, nil
+}
+
+// The name a container's temporaries carry. The containers of one Job write
+// beside the same titles at the same time, so the name holds the container
+// as well as the Job.
+func writerName(job, container string) string {
+	if job == "" || container == "" {
+		return job
+	}
+	return job + "-" + container
 }
 
 // A Job that names a folder the volume does not hold covers the whole library
 // and not nothing, because a folder that moved still has gaps somewhere.
-func (e *enricher) narrowedScope() string {
-	if e.scanPath == "" {
-		return ""
+func (e *enricher) narrowedScopes() []string {
+	var scopes []string
+	for _, scanPath := range e.scanPaths {
+		absolute := resolveVolumePath(e.root, scanPath)
+		if absolute == "" {
+			e.logf("could not map %s onto the volume, working over the whole library", scanPath)
+			return nil
+		}
+		relative := relativePath(e.root, absolute)
+		if relative == "." {
+			return nil
+		}
+		scopes = append(scopes, relative)
 	}
-	absolute := resolveVolumePath(e.root, e.scanPath)
-	if absolute == "" {
-		e.logf("could not map %s onto the volume, working over the whole library", e.scanPath)
-		return ""
-	}
-	return relativePath(e.root, absolute)
+	return scopes
 }
 
 // How a narrowed Job tells a path it owns from one it does not: the path is
-// the scope or has the scope as its directory prefix.
+// one of the scopes or has one of them as its directory prefix.
 func (e *enricher) inScope(relative string) bool {
-	if e.scope == "" || e.scope == "." {
+	if len(e.scopes) == 0 {
 		return true
 	}
-	return relative == e.scope || strings.HasPrefix(relative, e.scope+string(filepath.Separator))
+	for _, scope := range e.scopes {
+		if relative == scope || strings.HasPrefix(relative, scope+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// When a container may start one more title. A phase with a time limit
+// finishes the title it has and starts no other once the limit has passed.
+func (e *enricher) mayStartTitle() bool {
+	return e.stopStarting.IsZero() || time.Now().Before(e.stopStarting)
 }
 
 // Reads one fact's work list out of the local copy of the catalog, with
@@ -134,19 +180,6 @@ func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]stri
 		return nil, fmt.Errorf("reading the %s gap of %s: %w", fact, e.library, err)
 	}
 	return keys, nil
-}
-
-// The probe container writes the started mark for the whole Job. It is the
-// first container to run, and the operator reads a run in flight off a start
-// with no finish beside it. Only the last container would leave the Job
-// looking idle until the end.
-func (e *enricher) markRunStarted(ctx context.Context) error {
-	run := libraryRun{Worker: workerEnrich, Job: e.job, Started: time.Now().UTC()}
-	if _, _, err := e.catalog.UpsertRun(ctx, e.library, run); err != nil {
-		return fmt.Errorf("writing the run of %s: %w", e.library, err)
-	}
-	e.sweepOldTallies(ctx, run.Started)
-	return nil
 }
 
 // sweepOldTallies deletes this worker's old tally rows where the Job marks

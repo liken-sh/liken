@@ -131,6 +131,52 @@ func TestStandClaimWritesNoVolumeOnAnotherClass(t *testing.T) {
 	}
 }
 
+// A Library's catalog claim asks for ReadWriteOncePod, so the scheduler
+// admits one pod of the claim in the cluster at a time. A per-node class
+// keeps that mode on the claim and on the volume the claim binds to, and
+// every other class receives ReadWriteOnce, because Kubernetes applies
+// ReadWriteOncePod only to CSI volumes.
+func TestStandClaimKeepsOnePodOnALibrarysCatalogClaim(t *testing.T) {
+	cases := []struct {
+		name   string
+		class  string
+		volume bool
+		want   string
+	}{
+		{name: "a per-node class", class: "per-node", volume: true, want: accessModeReadWriteOncePod},
+		{name: "a class of another provisioner", class: "local-path", want: accessModeReadWriteOnce},
+		{name: "no class at all", want: accessModeReadWriteOnce},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			seedStorageClass(cluster, "per-node", perNodeProvisioner)
+			seedStorageClass(cluster, "local-path", "rancher.io/local-path")
+			catalog := housekeepingCatalog()
+			catalog.Spec.Libraries.StorageClassName = one.class
+
+			if err := testOperator(t, cluster).standCatalogClaim(t.Context(), studioMovies(), catalog); err != nil {
+				t.Fatal(err)
+			}
+
+			claim := cluster.heldClaim("movies-catalog")
+			if claim == nil {
+				t.Fatal("the pass provisioned no claim")
+			}
+			if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != one.want {
+				t.Errorf("claim accessModes = %v, want %s", claim.Spec.AccessModes, one.want)
+			}
+			volume := cluster.heldVolume("house-movies-catalog")
+			if (volume != nil) != one.volume {
+				t.Fatalf("volume = %+v, want a volume only on a per-node class", volume)
+			}
+			if volume != nil && (len(volume.Spec.AccessModes) != 1 || volume.Spec.AccessModes[0] != one.want) {
+				t.Errorf("volume accessModes = %v, want %s", volume.Spec.AccessModes, one.want)
+			}
+		})
+	}
+}
+
 // A claim whose name was used before finds the old volume still there,
 // Released, with the uid of the claim the binder gave it in its
 // claimRef. The pass replaces that volume, so the fresh claim binds to
@@ -438,13 +484,6 @@ func TestEveryClaimTheOperatorWritesGoesThroughStandClaim(t *testing.T) {
 			volume: "house-movies-catalog",
 			stand: func(o *operator, catalog *NamespaceCatalog) error {
 				return o.standCatalogClaim(t.Context(), studioMovies(), catalog)
-			},
-		},
-		{
-			name:   "the enrichment claim of a Library",
-			volume: "house-movies-enrich-catalog",
-			stand: func(o *operator, catalog *NamespaceCatalog) error {
-				return o.standEnrichClaim(t.Context(), studioMovies(), catalog)
 			},
 		},
 		{

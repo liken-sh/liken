@@ -3,9 +3,9 @@ package main
 // The batch objects this operator writes and the requests it
 // makes for them, hand-written in the same form as the core objects in
 // objects.go and reached through the same client. Every worker of a
-// namespace is a Job: a scan runs on a schedule from a CronJob, a
-// folder scan runs once from a Job the webhook creates, and a departure
-// runs once from a Job of its own.
+// namespace is a Job: a Library's walks and the phases that fill its
+// gaps run in the Job the operator creates for it, and a departure runs
+// once from a Job of its own.
 //
 // the Jellyfin backfill is a worker too, and it belongs to a Catalog rather
 // than to a Library.
@@ -20,12 +20,12 @@ import (
 	"time"
 )
 
-// The group the Job and the CronJob belong to.
+// The group Jobs and CronJobs belong to.
 const batchAPIVersion = "batch/v1"
 
 // The label Kubernetes stamps on every pod a Job creates, whose
-// value is the Job's own name; the scanner reads it through the
-// downward API and writes it into the runs row.
+// value is the Job's own name; every container of a library Job reads
+// it through the downward API and writes it into the runs row.
 const jobNameLabel = "batch.kubernetes.io/job-name"
 
 // The field path the downward API reads that label from.
@@ -126,43 +126,17 @@ func (j *Job) holds(conditionType string) bool {
 	return false
 }
 
-// The pod one Job or CronJob creates, as the metadata and spec
+// The pod one Job creates, as the metadata and spec
 // the controller stamps onto it.
 type PodTemplateSpec struct {
 	Metadata ObjectMeta `json:"metadata"`
 	Spec     PodSpec    `json:"spec"`
 }
 
-// The schedule one Library's full walk runs on. The operator
-// writes it and reads nothing back but the resourceVersion, because the
-// Jobs it creates are read through the Job list.
-type CronJob struct {
-	APIVersion string      `json:"apiVersion,omitempty"`
-	Kind       string      `json:"kind,omitempty"`
-	Metadata   ObjectMeta  `json:"metadata"`
-	Spec       CronJobSpec `json:"spec"`
-}
-
-// ConcurrencyPolicy is Forbid, so a walk that runs past its next
-// turn skips that turn rather than starting a second walk on a claim
-// that admits one writer.
-type CronJobSpec struct {
-	Schedule                   string          `json:"schedule"`
-	ConcurrencyPolicy          string          `json:"concurrencyPolicy,omitempty"`
-	SuccessfulJobsHistoryLimit *int32          `json:"successfulJobsHistoryLimit,omitempty"`
-	FailedJobsHistoryLimit     *int32          `json:"failedJobsHistoryLimit,omitempty"`
-	JobTemplate                JobTemplateSpec `json:"jobTemplate"`
-}
-
-// The Job one turn of the schedule creates.
-type JobTemplateSpec struct {
-	Metadata ObjectMeta `json:"metadata"`
-	Spec     JobSpec    `json:"spec"`
-}
-
 // The batch collections: the Jobs of every namespace read with one
-// request, and the Jobs and CronJobs of one namespace written per
-// namespace.
+// request, and the Jobs of one namespace written per namespace. The
+// CronJobs path is there for the delete of the CronJob an earlier
+// release stood for each Library.
 const (
 	jobsAllPath = "/apis/" + batchAPIVersion + "/jobs"
 	batchPrefix = "/apis/" + batchAPIVersion + "/namespaces/"
@@ -225,20 +199,15 @@ const succeededJobGrace = 5 * time.Minute
 
 // retireSucceededJobs deletes every worker Job that exited zero longer than
 // the grace ago. The pass acts on the list it already read, so a Job it
-// deletes still decides this pass and is gone from the next one. A Job of a
-// webhook chain stays for its TTL, whatever its stage: the chain reads its
-// stages out of the Job list, and a rescan deleted while its enrich Job
-// stands would be created again every pass. A delete that fails is reported
-// and the pass carries on, because the next pass reads the Job again.
+// deletes still decides this pass and is gone from the next one. A delete
+// that fails is reported and the pass carries on, because the next pass
+// reads the Job again.
 func (o *operator) retireSucceededJobs(ctx context.Context, jobs []Job, now time.Time) {
 	cutoff := now.Add(-succeededJobGrace)
 	for index := range jobs {
 		job := &jobs[index]
 		if !job.succeeded() || job.Status.CompletionTime.IsZero() ||
 			!job.Status.CompletionTime.Before(cutoff) {
-			continue
-		}
-		if job.Metadata.Annotations[chainAnnotation] != "" {
 			continue
 		}
 		if err := DeleteJob(ctx, o.client, job.Metadata.Namespace, job.Metadata.Name); err != nil {
@@ -248,23 +217,9 @@ func (o *operator) retireSucceededJobs(ctx context.Context, jobs []Job, now time
 	}
 }
 
-// A standing Job that failed is deleted, so the scheduler that names it stands
-// the work again on the next pass. Nothing else frees the name before the
-// Job's own TTL. Any other Job, running, succeeded, or already being deleted,
-// is left as it is.
-func (o *operator) retireFailedJob(ctx context.Context, job *Job, key string, now time.Time) error {
-	if !job.failed() || job.Metadata.DeletionTimestamp != "" {
-		return nil
-	}
-	if !o.mayRestandFailed(key, now) {
-		return nil
-	}
-	return DeleteJob(ctx, o.client, job.Metadata.Namespace, job.Metadata.Name)
-}
-
-// The delete that stands the work again waits on the same backoff curve a
+// The Job that follows a failed one waits on the same backoff curve a
 // cleanup Job uses, so a cause nobody has repaired costs one Job per delay.
-// Without the curve it would cost one Job per pass. The first delete is
+// Without the curve it would cost one Job per pass. The first Job is
 // immediate, and the wait after it grows to the cap, which is the shape
 // mayStandCleanup has.
 func (o *operator) mayRestandFailed(key string, now time.Time) bool {
@@ -278,46 +233,9 @@ func (o *operator) mayRestandFailed(key string, now time.Time) bool {
 	return true
 }
 
-func GetCronJob(ctx context.Context, c *Client, namespace, name string) (*CronJob, error) {
-	cronJob := &CronJob{}
-	path := cronJobsPath(namespace) + "/" + name
-	if err := c.RequestJSON(ctx, http.MethodGet, path, nil, cronJob); err != nil {
-		return nil, err
-	}
-	return cronJob, nil
-}
-
-func CreateCronJob(ctx context.Context, c *Client, cronJob *CronJob) (*CronJob, error) {
-	body, err := json.Marshal(cronJob)
-	if err != nil {
-		return nil, err
-	}
-	created := &CronJob{}
-	path := cronJobsPath(cronJob.Metadata.Namespace)
-	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
-		return nil, err
-	}
-	return created, nil
-}
-
-// UpdateCronJob writes the whole CronJob back. The resourceVersion in
-// the body makes the write conditional, so a CronJob that changed
-// underneath answers ErrConflict and the next pass reads it again.
-func UpdateCronJob(ctx context.Context, c *Client, cronJob *CronJob) (*CronJob, error) {
-	body, err := json.Marshal(cronJob)
-	if err != nil {
-		return nil, err
-	}
-	written := &CronJob{}
-	path := cronJobsPath(cronJob.Metadata.Namespace) + "/" + cronJob.Metadata.Name
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
-}
-
-// DeleteCronJob removes one Library's schedule. An already-absent
-// CronJob is success, the rule DeleteJob follows.
+// DeleteCronJob removes the CronJob an earlier release ran a Library's
+// walk from. An already-absent CronJob is success, the rule DeleteJob
+// follows.
 func DeleteCronJob(ctx context.Context, c *Client, namespace, name string) error {
 	path := cronJobsPath(namespace) + "/" + name + backgroundDeletion
 	err := c.RequestJSON(ctx, http.MethodDelete, path, nil, nil)

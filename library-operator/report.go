@@ -46,8 +46,9 @@ type libraryReport struct {
 	// for its own entry here before it exits.
 	Runs []libraryRun `json:"runs,omitempty"`
 	// One count per fact of the rows that fact has left to fill,
-	// from gapQueries. The operator creates the enricher Job when any
-	// count is above zero, so a fact with no key here never runs.
+	// from gapQueries. The operator creates a Job that fills gaps with
+	// the phases whose counts are above zero, so a fact with no key
+	// here never runs in one.
 	Gaps map[string]int `json:"gaps,omitempty"`
 	// The oldest attempt this library holds for each fact. The operator
 	// reads it against the Library's spec.refresh: a refresh later than

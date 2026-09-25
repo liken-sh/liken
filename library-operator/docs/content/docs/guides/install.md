@@ -22,8 +22,8 @@ You need:
   namespace where the `Library` will be. The operator never creates
   this claim. See [The media claim](#the-media-claim) below.
 * A `StorageClass` for the catalogs. The operator provisions those
-  claims itself, one per catalog pod, one per scan `Job`, and one per
-  screen. See [The catalog claims](#the-catalog-claims).
+  claims itself: one for the catalog pods, one per `Library`, and two
+  per screen. See [The catalog claims](#the-catalog-claims).
 * `kubectl` with cluster-admin access. The base creates a
   `ClusterRole` and three `CustomResourceDefinitions`.
 
@@ -39,11 +39,12 @@ A `Library` names an existing claim in `spec.storage.claim`. Any
 volume the cluster can mount works: an NFS export, a Longhorn volume,
 a local disk on a single-node cluster.
 
-Three kinds of pod mount the claim, and they can land on different
-nodes. Every scan `Job` mounts it read-only. The enrich `Job` mounts it
-read-write, because it writes the `.nfo` and art files beside the
-media. So the claim has to allow more than one node at once, which on
-most clusters means `ReadWriteMany`:
+Two kinds of pod mount the claim, and they can land on different
+nodes. A screen mounts it read-only. The `Library`'s `Job` mounts it
+read-write, because its phases write the `.nfo` and art files beside
+the media, and its scan container mounts it read-only. So the claim
+has to allow more than one node at once, which on most clusters means
+`ReadWriteMany`:
 
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -66,16 +67,19 @@ downloads. [Franchises](/docs/guides/franchises/) covers it.
 ### The catalog claims
 
 The catalog is SQLite, and one agent writes each copy. So the operator
-provisions every catalog claim as `ReadWriteOnce`, and the namespace's
-`Catalog` names the class of each kind of claim:
+provisions a catalog claim as `ReadWriteOnce`, and as `ReadWriteMany`
+on a per-node class, where every node holds a copy of its own. A
+`Library`'s claim on a per-node class is `ReadWriteOncePod`, so
+Kubernetes admits one pod of it in the cluster at a time. The
+namespace's `Catalog` names the class of each kind of claim:
 
 * `spec.storage.storageClassName` for the catalog pod's claim, the
   catalog of record every other agent syncs from.
 * `spec.progress.storageClassName` for the progress store's claim,
   the record of who watched what. It defaults to the catalog's class,
   and `spec.progress.size` gives the store a size of its own.
-* `spec.libraries.storageClassName` for the scan and enrichment claims
-  of every `Library`. It defaults to the catalog's class.
+* `spec.libraries.storageClassName` for the catalog claim of every
+  `Library`, `<library>-catalog`. It defaults to the catalog's class.
 * `spec.screens.storageClassName` for both claims of every screen.
 
 A class left empty binds to the cluster's default class.
@@ -83,8 +87,8 @@ A class left empty binds to the cluster's default class.
 Keep the catalog of record and the progress store on classes that
 survive a lost node, such as block storage from a SAN. A SQLite file on
 NFS can corrupt when its
-node is lost, so do not use an NFS class. A `Library`'s claims are
-working copies that a `Job` rebuilds from the catalog of record, and a
+node is lost, so do not use an NFS class. A `Library`'s claim is a
+working copy that a `Job` rebuilds from the catalog of record, and a
 screen pod is pinned to the machine that holds its display. A
 node-local class such as `local-path` fits both.
 
@@ -118,8 +122,9 @@ namespace. On this operator's own resources, its grants are read and
 status writes. On `media-operator`'s `Player` and `MediaPreferences`
 they are read, on `Play` create and patch, and on `people.liken.sh`'s
 `Person` patch, for one finalizer. On the claims, pods, `Jobs`,
-`CronJobs`, `Services`, and the one `ConfigMap` per screen namespace
-it owns, they are create and delete. That `ConfigMap` holds the
+`Services`, and the one `ConfigMap` per screen namespace it owns,
+they are create and delete. On `CronJobs` the grant is delete alone,
+for the one an earlier release stood for each `Library`. That `ConfigMap` holds the
 `Person` list every screen reads.
 
 This site serves the same files as raw YAML, so a clone is never

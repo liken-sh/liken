@@ -19,14 +19,18 @@ func itemTable(kind string) string {
 	return "movies"
 }
 
-// The probe's columns of a file: the streams ffprobe read.
+// The probe's columns of a file: the streams ffprobe read, and the probed
+// column, the modified stamp of the file the record describes. The probe gap
+// compares probed with modified, so this write closes the gap at once, and
+// no walk has to read the ledger first.
 func (c *Catalog) UpdateFileStreams(ctx context.Context, rows []fileRow) (int, error) {
 	statements := make([]statement, 0, len(rows))
 	for _, row := range rows {
 		statements = append(statements, statement{
-			sql: `UPDATE files SET video_codec = ?, audio_codec = ?, width = ?, height = ?, duration_ms = ? ` +
-				`WHERE library = ? AND path = ?`,
-			params: []any{row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.DurationMs, row.Library, row.Path},
+			sql: `UPDATE files SET video_codec = ?, audio_codec = ?, width = ?, height = ?, duration_ms = ?, ` +
+				`probed = ? WHERE library = ? AND path = ?`,
+			params: []any{row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.DurationMs,
+				row.Probed, row.Library, row.Path},
 		})
 	}
 	return c.apply(ctx, statements)

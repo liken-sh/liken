@@ -217,25 +217,24 @@ func TestTheImagesFailWhenThePodCannotBeRead(t *testing.T) {
 	}
 }
 
-// The two facts that open a media file run on the ffmpeg image, and every other
-// container of the enricher runs on the operator's own.
+// The phases that open a media file run on the ffmpeg image, and every other
+// container of the Job runs on the operator's own.
 func TestTheFileFactsRunOnTheFFmpegImage(t *testing.T) {
-	enricher := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
-	tiles := testTrickplayJob(studioMovies(), "")
+	library := studioMovies()
+	library.Spec.Trickplay.Enabled = true
+	job := testEnrichJob(library, "", readyProvider("tmdb", "house", factIdentity))
 
 	stamped := map[string]string{}
-	spec := enricher.Spec.Template.Spec
-	for _, container := range append(spec.InitContainers, spec.Containers...) {
+	for _, container := range job.Spec.Template.Spec.Containers {
 		stamped[container.Name] = container.Image
 	}
-	stamped[trickplayContainerName] = tiles.Spec.Template.Spec.Containers[0].Image
 
 	for _, name := range []string{factProbe, trickplayContainerName} {
 		if stamped[name] != testFFmpegImage {
 			t.Errorf("%s runs on %q, want the ffmpeg image %q", name, stamped[name], testFFmpegImage)
 		}
 	}
-	for _, name := range []string{arrivalContainerName, factIdentity, enrichMode} {
+	for _, name := range []string{scannerContainer, arrivalContainerName, factIdentity, closeMode} {
 		if stamped[name] != testScannerImage {
 			t.Errorf("%s runs on %q, want the operator's own image %q",
 				name, stamped[name], testScannerImage)

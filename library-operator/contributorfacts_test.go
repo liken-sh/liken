@@ -357,12 +357,7 @@ func TestTheContributorsContainerStandsWhereASourceServesAPeopleFact(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", test.facts...))
 
-			var people *Container
-			for at, container := range job.Spec.Template.Spec.InitContainers {
-				if container.Name == contributorsContainerName {
-					people = &job.Spec.Template.Spec.InitContainers[at]
-				}
-			}
+			people := jobContainer(job, contributorsContainerName)
 			if test.want == "" {
 				if people != nil {
 					t.Fatal("the pod holds a contributors container, want none")
@@ -370,8 +365,7 @@ func TestTheContributorsContainerStandsWhereASourceServesAPeopleFact(t *testing.
 				return
 			}
 			if people == nil {
-				t.Fatalf("the pod holds no contributors container, initContainers = %+v",
-					job.Spec.Template.Spec.InitContainers)
+				t.Fatalf("the pod holds no contributors container, containers = %v", jobContainerNames(job))
 			}
 			if got := containerEnvironment(*people)[libraryFactsVariable]; got != test.want {
 				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, test.want)
@@ -510,7 +504,7 @@ func TestAContributorOutsideTheScopeIsLeftAlone(t *testing.T) {
 	})
 	writeFile(t, filepath.Join(root, ".contributors/pe/person-31", contributorFileName), "name: Tom Hanks\n")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "The Signal (2014)"
+	work.scopes = []string{"The Signal (2014)"}
 	client, fake := newPersonTMDb(t, map[string]string{
 		tmdbKey("/3/person/31", "", ""): personAnswer("", "", "An actor.", ""),
 	})

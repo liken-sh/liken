@@ -29,6 +29,14 @@ beside the base, which holds a `PodMonitor` for each of the three.
 | media-browser | `library_browser_art_cache_bytes` | gauge | the RSS problem as a graph |
 | catalog | upstream `corro_*` | upstream | sync and change health |
 
+The `worker` label names the runs row a run wrote. `scan` is a full
+walk and `rescan` a walk of the folders webhooks named, each timed from
+the walk's start to its end. `enrich` is the whole of a `Library`'s
+`Job`, from the start its close container writes to the hand-off, so it
+covers the walk and every phase. `cleanup` is the sweep of a deleted
+`Library`. The counters read the tallies every phase container writes,
+and they carry no worker.
+
 ```yaml
 resources:
   - https://github.com/liken-sh/library-operator//deploy?ref=<ref>

@@ -749,7 +749,7 @@ func TestTheTrailerFactSkipsATitleOutsideTheJobsScope(t *testing.T) {
 	folder := "The Signal (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "Another Film (2001)"
+	work.scopes = []string{"Another Film (2001)"}
 
 	if err := work.trailerGap(t.Context(), trailerLineOf(scriptedTrailers{
 		block: providerBlockTMDb, entries: []trailerEntry{trailerEntryOf(providerBlockTMDb, "high", 90)},

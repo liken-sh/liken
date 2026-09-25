@@ -1,202 +1,261 @@
 package main
 
-// enrichjob.go builds the enricher Job of one Library and stands the claim
-// its catalog agent runs on. The order of the facts is the order of the
-// containers in the pod, so a person reads it with kubectl get pod, and the
-// operator holds no order of its own.
+// enrichjob.go builds the one Job a Library runs. The Job runs the walk in
+// walk mode, and every phase the Library's sources serve, as regular
+// containers that start together, beside one Corrosion agent on the
+// Library's one catalog claim. The agent is the only init container, because
+// Kubernetes runs a native sidecar as an init container. A close container
+// writes the run's start, waits for every phase's mark, and hands off.
+//
+// The pod names every phase and the facts each runs, so a person reads the
+// Job's work with kubectl get pod, and the operator holds no order of its
+// own.
 
 import (
-	"context"
 	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
-// The fixed part of every enricher Job's name, and the claim its catalog
-// agent runs on. A standing Job and a chain Job each add their own suffix,
-// and the claim keeps the fixed name, so one Library has one claim.
-func enrichJobName(library string) string {
-	return library + "-enrich"
+// The two modes of a library Job. A walk runs the scan container and every
+// phase the sources serve. A gap Job runs no scan and only the phases whose
+// gaps the last report counted. The mode is the Job's worker label, so a
+// person lists the walks of a Library with one selector.
+const (
+	jobModeWalk = "walk"
+	jobModeGaps = "gaps"
+)
+
+// The annotation a Job carries with the time the operator created it, in
+// RFC 3339. The scheduler reads the newest walk and the newest failure off
+// it, because a report can reach the operator after the Job it describes
+// has finished.
+const jobCreatedAnnotation = "library.liken.sh/created"
+
+// The annotation a walk of folders carries with the folders, as the JSON
+// list SCAN_PATHS holds. A walk with none is a full walk, and the scheduler
+// reads the last full walk's start off it.
+const jobPathsAnnotation = "library.liken.sh/paths"
+
+// What one library Job covers: its mode, the folders a walk rescans and none
+// for a full walk, the phases it runs in the table's order, and the write
+// its copy of the catalog must hold before the phases read a gap.
+type libraryJob struct {
+	mode   string
+	paths  []string
+	phases []servedPhase
+	sync   syncTarget
 }
 
-func enrichCatalogClaimName(library string) string {
-	return enrichJobName(library) + "-catalog"
+// The images a library Job runs: the operator's own, the one with ffmpeg for
+// the phases that open a media file, and the catalog agent's.
+type jobImages struct {
+	operator  string
+	ffmpeg    string
+	corrosion string
 }
 
-// The volume the enricher's agent runs on. It is separate from the scan
-// Jobs' claim, so a folder enrich never waits on the claim a scan holds,
-// and it keeps the agent's actor id and rows between runs, so a run
-// syncs a delta. It binds to the libraries' class, as the scan claim
-// does, because it is a working copy and not the catalog of record.
-func buildEnrichClaim(library *Library, catalog *NamespaceCatalog) *PersistentVolumeClaim {
-	return &PersistentVolumeClaim{
-		APIVersion: claimAPIVersion,
-		Kind:       "PersistentVolumeClaim",
-		Metadata: ObjectMeta{
-			Name:            enrichCatalogClaimName(library.Metadata.Name),
-			Namespace:       library.Metadata.Namespace,
-			Labels:          libraryLabels(library.Metadata.Name),
-			OwnerReferences: []OwnerReference{libraryOwner(library)},
-		},
-		Spec: PersistentVolumeClaimSpec{
-			AccessModes: []string{accessModeReadWriteOnce},
-			Resources: VolumeResourceRequirements{
-				Requests: map[string]string{"storage": catalogStorageSize(catalog)},
-			},
-			StorageClassName: libraryStorageClass(catalog),
-		},
-	}
+// The Job's name: the Library, the mode, and the creation time in base 36,
+// so a person reads which kind of run it is and no two Jobs share a name.
+func libraryJobName(library, mode string, created time.Time) string {
+	return library + "-" + mode + "-" + strconv.FormatInt(created.UnixNano(), 36)
 }
 
-// The claim is provisioned once and never rewritten, the rule standClaim
-// holds, because a claim's spec is immutable once it binds.
-func (o *operator) standEnrichClaim(ctx context.Context, library *Library, catalog *NamespaceCatalog) error {
-	return o.standClaim(ctx, buildEnrichClaim(library, catalog))
-}
-
-// The enricher Job. The name is the caller's, because a Library runs the
-// standing enricher under the walk's name and a webhook's folder runs under
-// the chain's. Sources that reach no Ready provider of the identity fact omit
-// the identity container, which is how a Library with no Ready provider still
-// runs the probe.
-func buildEnrichJob(library *Library, providers providerSet, languages []string, name, path string,
-	scannerImage, ffmpegImage, corrosionImage string) *Job {
+// The library Job, owned by the Library so the garbage collector takes it
+// with the Library.
+func buildLibraryJob(library *Library, providers providerSet, languages []string,
+	plan libraryJob, images jobImages, created time.Time) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
+	labels := workerLabels(library.Metadata.Name, plan.mode)
+	annotations := map[string]string{jobCreatedAnnotation: created.UTC().Format(time.RFC3339Nano)}
+	if len(plan.paths) > 0 {
+		annotations[jobPathsAnnotation] = scanPathsValue(plan.paths)
+	}
 	return &Job{
 		APIVersion: batchAPIVersion,
 		Kind:       "Job",
 		Metadata: ObjectMeta{
-			Name:            name,
+			Name:            libraryJobName(library.Metadata.Name, plan.mode, created),
 			Namespace:       library.Metadata.Namespace,
-			Labels:          workerLabels(library.Metadata.Name, workerEnrich),
+			Labels:          labels,
+			Annotations:     annotations,
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
 		Spec: JobSpec{
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
-			Template: enrichPodTemplate(library, providers, languages, path,
-				scannerImage, ffmpegImage, corrosionImage),
+			Template:                libraryPodTemplate(library, providers, languages, plan, images),
 		},
 	}
 }
 
-// The pod the enricher Job runs. The facts that must run in order
-// are init containers, and the enrich container is the one regular
-// container: it writes the runs row last and waits to be confirmed.
-func enrichPodTemplate(library *Library, providers providerSet, languages []string, path string,
-	scannerImage, ffmpegImage, corrosionImage string) PodTemplateSpec {
+// The names of the containers the close container waits for: the scan in
+// walk mode, and every phase.
+func (plan libraryJob) included() []string {
+	var names []string
+	if plan.mode == jobModeWalk {
+		names = append(names, scanPhase)
+	}
+	for _, phase := range plan.phases {
+		names = append(names, phase.name)
+	}
+	return names
+}
+
+// The pod the library Job runs.
+func libraryPodTemplate(library *Library, providers providerSet, languages []string,
+	plan libraryJob, images jobImages) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
-	// An enricher holds no Kubernetes credential. It reads its work through the
-	// agent beside it and takes the provider key through a secretKeyRef, so
+	// No container holds a Kubernetes credential. Each reads its work through
+	// the agent beside it and takes a provider key through a secretKeyRef, so
 	// nothing in this pod reads the API server.
 	noToken := false
 
-	// The agent starts first, and the facts run in order behind it, because
-	// the kubelet starts an init container only when the one before it is up.
-	// The facts here edit the same .nfo file, so they must never run at
-	// once.
-	facts := []Container{
-		probeContainer(library, path, ffmpegImage),
-		// The arrival container runs on every Library, because the fact asks no
-		// provider. It runs after the probe, because the probe container writes the
-		// run's started mark.
-		factsContainer(library, arrivalContainerName, []string{factArrival}, path, scannerImage),
+	included := plan.included()
+	var containers []Container
+	if plan.mode == jobModeWalk {
+		containers = append(containers, walkContainer(library, plan.paths, images.operator))
 	}
-	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity) != nil {
-		facts = append(facts, factsContainer(library, factIdentity, []string{factIdentity}, path,
-			scannerImage))
+	for _, phase := range plan.phases {
+		containers = append(containers, phaseContainer(library, providers, languages, plan, phase,
+			phaseNeedsOf(phase.name, included), images))
 	}
-	// The nfo container: one phase that runs every fact of the nfo group in
-	// order, each fact reading the .nfo and writing its own element group. It
-	// names the facts the Library's own sources serve. It runs before the art
-	// container because a plot costs one call and an image costs a download, so
-	// the cheap facts land first.
-	if served := servedNFOFacts(library, providers); len(served) > 0 {
-		facts = append(facts, factsContainer(library, nfoContainerName, served, path,
-			scannerImage))
-	}
-	// The art container. It runs where a Ready provider of the Library's sources
-	// serves one of the art facts, and it takes a memory line of its own because
-	// it holds an image while it writes it. It is an init container because the
-	// enrich container must run last, and a regular container beside it would
-	// let the run end before the art is written. Plan 57 makes it a regular
-	// container once a second fan-out container exists.
-	if served := servedArtFacts(library, providers); len(served) > 0 {
-		images := factsContainer(library, artContainerName, served, path,
-			scannerImage)
-		images.Resources.Limits = map[string]string{"memory": artMemoryLimit}
-		facts = append(facts, images)
-	}
-	// The trailer container stands where a Ready source serves the trailer fact.
-	// It runs after the art container, because a trailer is a list of addresses
-	// and costs no download. It is an init container for the same reason the art
-	// container is.
-	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factTrailer) != nil {
-		facts = append(facts, factsContainer(library, trailerContainerName, []string{factTrailer},
-			path, scannerImage))
-	}
-	// The marks container stands where a Ready source serves the marks fact. It
-	// runs after the probe, because TheIntroDB chooses the release version by
-	// the length the probe measured. It is an init container for the same
-	// reason the art container is.
-	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factMarks) != nil {
-		facts = append(facts, factsContainer(library, marksContainerName, []string{factMarks},
-			path, scannerImage))
-	}
-	// The contributors container, which fills the people the credits fact named.
-	// It runs after the art container, and it is an init container for the same
-	// reason the art container is: the enrich container must run last. Plan 57
-	// makes both of them regular containers that run at once.
-	if providers.servingContributors(library.Metadata.Namespace, library.Spec.Sources) != nil {
-		facts = append(facts, factsContainer(library, contributorsContainerName, contributorFactNames,
-			path, scannerImage))
-	}
-	// The same environment carries the source order, so a container asks its
-	// providers in the order spec.sources names them.
-	// The languages travel in the same environment, so every container ranks by
-	// one list.
-	keys := providerEnv(library, providers, languages)
-	// Every container of this Job records its counts under the enricher's own
-	// worker, because the Job's runs row is the enricher's.
-	worker := EnvVar{Name: libraryWorkerVariable, Value: workerEnrich}
-	for index := range facts {
-		facts[index].Env = append(facts[index].Env, keys...)
-		facts[index].Env = append(facts[index].Env, worker)
-	}
-	sequence := append([]Container{catalogSidecar(corrosionImage)}, facts...)
-	closing := enrichContainer(library, enrichMode, enrichMode, path, scannerImage)
-	closing.Env = append(closing.Env, worker)
+	closing := enrichContainer(library, closeMode, closeMode, plan.paths, images.operator)
+	withPhaseEnv(&closing, plan, included)
+	containers = append(containers, closing)
 
+	spec := PodSpec{
+		RestartPolicy:                 "Never",
+		TerminationGracePeriodSeconds: &grace,
+		AutomountServiceAccountToken:  &noToken,
+		InitContainers:                []Container{catalogSidecar(images.corrosion)},
+		Containers:                    containers,
+		Volumes:                       libraryJobVolumes(library),
+	}
+	// The pod holds the render claim only where the Library names a render
+	// block and the Job runs trickplay. With none it decodes in software.
+	if library.Spec.Trickplay.Render != nil && slices.Contains(included, trickplayContainerName) {
+		spec.ResourceClaims = []PodResourceClaim{{
+			Name:                      renderRequestName,
+			ResourceClaimTemplateName: trickplayTemplateName(library.Metadata.Name),
+		}}
+		for index := range spec.Containers {
+			if spec.Containers[index].Name == trickplayContainerName {
+				spec.Containers[index].Resources.Claims = []ResourceClaim{{Name: renderRequestName}}
+			}
+		}
+	}
 	return PodTemplateSpec{
-		Metadata: ObjectMeta{
-			Labels: withMemberLabel(workerLabels(library.Metadata.Name, workerEnrich)),
-		},
-		Spec: PodSpec{
-			RestartPolicy:                 "Never",
-			TerminationGracePeriodSeconds: &grace,
-			AutomountServiceAccountToken:  &noToken,
-			InitContainers:                sequence,
-			Containers:                    []Container{closing},
-			Volumes: []Volume{
-				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-					ClaimName: enrichCatalogClaimName(library.Metadata.Name),
-				}},
-				// The enricher mounts the volume read-write, where every scan Job mounts
-				// it read-only, because the facts it fills in are files beside the media.
-				// The volume is the claim a screen reads, so an enricher of a franchises
-				// library writes beside the art and never into the checkout.
-				{Name: libraryVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-					ClaimName: library.Spec.screenClaim(),
-				}},
-			},
-		},
+		Metadata: ObjectMeta{Labels: withMemberLabel(workerLabels(library.Metadata.Name, plan.mode))},
+		Spec:     spec,
 	}
 }
 
-// One phase's container. Its name is the phase and its command is the role,
-// and it learns everything else from the environment, because it holds no
-// credential to look a Library up with. The kind's own image is the scanner's
-// alone: a scanner a person supplies is not an enricher.
-func enrichContainer(library *Library, name, role, path, image string) Container {
+// The volumes of the pod. The storage claim is mounted read-write at the
+// volume, and the scan container mounts it read-only, so a scanner a person
+// supplies never writes the media. The phases write beside the media, into
+// the claim a screen reads: the storage claim, or a franchises library's art
+// claim, which the scan also writes the downloaded art into.
+func libraryJobVolumes(library *Library) []Volume {
+	volumes := []Volume{
+		// The agent's state is the Library's own durable claim. It keeps the
+		// agent's actor id and its rows between runs, so a run syncs a delta
+		// rather than the whole namespace.
+		{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
+			ClaimName: scannerCatalogClaimName(library.Metadata.Name),
+		}},
+		{Name: libraryVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
+			ClaimName: library.Spec.Storage.Claim,
+		}},
+		// The marks and the .nfo locks. An emptyDir is local to the node, so
+		// flock reaches every container, and a retried pod starts clean.
+		{Name: phasesVolumeName, EmptyDir: &EmptyDirVolumeSource{}},
+	}
+	if claim := library.Spec.artClaim(); claim != "" {
+		volumes = append(volumes, Volume{
+			Name:                  artVolumeName,
+			PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: claim},
+		})
+	}
+	return volumes
+}
+
+// The volume the phases write into at the library mount: the art claim of a
+// franchises library, which holds the files its screen reads, and the
+// storage claim of every other kind.
+func phaseVolumeOf(library *Library) string {
+	if library.Spec.artClaim() != "" {
+		return artVolumeName
+	}
+	return libraryVolumeName
+}
+
+// The scan container of a walk: the scanner, with the phases volume where it
+// writes its mark.
+func walkContainer(library *Library, paths []string, image string) Container {
+	scan := scannerSidecar(library, paths, image)
+	scan.Env = append(scan.Env, EnvVar{Name: libraryPhasesVariable, Value: phasesMountPath})
+	scan.VolumeMounts = append(scan.VolumeMounts, VolumeMount{Name: phasesVolumeName, MountPath: phasesMountPath})
+	return scan
+}
+
+// One phase's container. The phases that open a media file run on the ffmpeg
+// image, and each takes the memory line its work needs.
+func phaseContainer(library *Library, providers providerSet, languages []string, plan libraryJob,
+	phase servedPhase, needs []string, images jobImages) Container {
+	image := images.operator
+	if phase.name == factProbe || phase.name == trickplayContainerName || phase.name == trailerFileContainerName {
+		image = images.ffmpeg
+	}
+	container := factsContainer(library, phase.name, phase.served, plan.paths, image)
+	switch phase.name {
+	case factProbe:
+		container.Resources.Limits = map[string]string{"memory": probeMemoryLimit}
+	case artContainerName:
+		// The art container holds an image while it writes it.
+		container.Resources.Limits = map[string]string{"memory": artMemoryLimit}
+	case trickplayContainerName:
+		// Trickplay decodes a video, where every other container reads rows.
+		container.Resources.Requests["cpu"] = trickplayCPURequest
+		container.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
+	case trailerFileContainerName:
+		container.Resources.Limits = map[string]string{"memory": trailersMemoryLimit}
+	}
+	// The source order, the keys, and the languages travel in one
+	// environment, so a container asks its providers in the order
+	// spec.sources names them and ranks by one list.
+	container.Env = append(container.Env, providerEnv(library, providers, languages)...)
+	container.Env = append(container.Env, EnvVar{Name: libraryPhaseNeedsVariable, Value: strings.Join(needs, ",")})
+	withPhaseEnv(&container, plan, nil)
+	return container
+}
+
+// What every container but the scan shares: the worker its counts go under,
+// the phases volume, and the write its copy must hold. The close container
+// also names every phase it waits for.
+func withPhaseEnv(container *Container, plan libraryJob, waits []string) {
+	container.Env = append(container.Env,
+		// Every container of the Job counts under one worker, because the
+		// Job writes one runs row, under that worker.
+		EnvVar{Name: libraryWorkerVariable, Value: workerEnrich},
+		EnvVar{Name: libraryPhasesVariable, Value: phasesMountPath},
+		EnvVar{Name: syncActorVariable, Value: plan.sync.actor},
+		EnvVar{Name: syncVersionVariable, Value: strconv.FormatInt(plan.sync.version, 10)},
+	)
+	if waits != nil {
+		container.Env = append(container.Env, EnvVar{Name: libraryPhaseNeedsVariable, Value: strings.Join(waits, ",")})
+	}
+	container.VolumeMounts = append(container.VolumeMounts,
+		VolumeMount{Name: phasesVolumeName, MountPath: phasesMountPath})
+}
+
+// One container of the operator's image. Its name is the phase and its
+// command is the role, and it learns everything else from the environment,
+// because it holds no credential to look a Library up with. The kind's own
+// image is the scanner's alone: a scanner a person supplies runs no phase.
+func enrichContainer(library *Library, name, role string, paths []string, image string) Container {
 	return Container{
 		Name:    name,
 		Image:   image,
@@ -210,7 +269,7 @@ func enrichContainer(library *Library, name, role, path, image string) Container
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
 			{Name: libraryRefreshVariable, Value: refreshValue(library)},
-			{Name: scanPathVariable, Value: path},
+			{Name: scanPathsVariable, Value: scanPathsValue(paths)},
 			{Name: handoffTimeoutVariable, Value: defaultHandoffTimeout.String()},
 			{Name: syncTimeoutVariable, Value: defaultSyncTimeout.String()},
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
@@ -218,7 +277,7 @@ func enrichContainer(library *Library, name, role, path, image string) Container
 			}},
 		},
 		VolumeMounts: []VolumeMount{
-			{Name: libraryVolumeName, MountPath: libraryMountPath},
+			{Name: phaseVolumeOf(library), MountPath: libraryMountPath},
 		},
 		Resources: ResourceRequirements{
 			Requests: map[string]string{"cpu": scannerCPURequest, "memory": scannerMemoryRequest},
@@ -229,11 +288,10 @@ func enrichContainer(library *Library, name, role, path, image string) Container
 }
 
 // A container that runs facts. Its name is the phase, and LIBRARY_FACTS names
-// the facts it runs in order, so the pod reads as the sequence and one
-// container fills more than one gap.
-func factsContainer(library *Library, name string, facts []string,
-	path, image string) Container {
-	container := enrichContainer(library, name, factsMode, path, image)
+// the facts it runs in order, so the pod reads as the work and one container
+// fills more than one gap.
+func factsContainer(library *Library, name string, facts []string, paths []string, image string) Container {
+	container := enrichContainer(library, name, factsMode, paths, image)
 	container.Env = append(container.Env,
 		EnvVar{Name: libraryFactsVariable, Value: strings.Join(facts, ",")})
 	return container
@@ -262,12 +320,3 @@ func refreshValue(library *Library) string {
 // reads one file, whatever the file's size, which is more than the scanner's
 // limit allows.
 const probeMemoryLimit = "256Mi"
-
-// The probe container: the one fact of the enrich Job that runs a child
-// process, with a memory line of its own for it. It runs on the ffmpeg image,
-// because the operator's own image carries no ffprobe.
-func probeContainer(library *Library, path, ffmpegImage string) Container {
-	probe := factsContainer(library, factProbe, []string{factProbe}, path, ffmpegImage)
-	probe.Resources.Limits = map[string]string{"memory": probeMemoryLimit}
-	return probe
-}

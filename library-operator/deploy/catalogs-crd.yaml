@@ -135,12 +135,12 @@ spec:
                 libraries:
                   type: object
                   default: {}
-                  description: "The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path."
+                  description: "The claim each Library's Jobs run on, one Job at a time, named after the Library with the suffix -catalog. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. On a per-node class the claim is ReadWriteOncePod, so Kubernetes admits one pod of it in the cluster at a time."
                   properties:
                     storageClassName:
                       type: string
                       minLength: 1
-                      description: "The StorageClass a Library's scan and enrichment claims bind to. Omitted, they take storage.storageClassName, and when that is also omitted the cluster's default binds them. There is no size here: every agent holds the whole catalog, so both claims take storage.size."
+                      description: "The StorageClass a Library's catalog claim binds to. Omitted, it takes storage.storageClassName, and when that is also omitted the cluster's default binds it. There is no size here: every agent holds the whole catalog, so the claim takes storage.size."
                 screens:
                   type: object
                   default: {}

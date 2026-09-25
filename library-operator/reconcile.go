@@ -1,17 +1,12 @@
 package main
 
-// One pass over one Library: resolve the storage it names, create
-// the schedule its full walk runs on, create a Job for every webhook
-// path it holds, and write what all of it says into its status.
-//
-// The pass also creates the Job of the first full walk, for a Library
-// that no scan has run against yet, so a new Library has rows before
-// its CronJob's first turn.
+// One pass over one Library: resolve the storage it names, stand its
+// catalog claim, start its Job when one is due and no other Job of it is
+// unfinished, and write what all of it says into its status.
 //
 // The order is the order of the conditions. A Library that names a
-// claim nothing has bound has no volume to mount, so it gets no
-// schedule, and the Bound condition alone says why. Only a bound
-// Library reaches the CronJob.
+// claim nothing has bound has no volume to mount, so it gets no Job, and
+// the Bound condition alone says why.
 
 import (
 	"context"
@@ -40,9 +35,9 @@ type binding struct {
 // events arrived in.
 //
 // The catalog is a precondition beside the storage. A Library gets a
-// schedule only when its storage is bound and its namespace holds
-// exactly one Catalog. Every scan Job's catalog agent joins the
-// cluster that Catalog creates and uses a volume that it sizes.
+// Job only when its storage is bound and its namespace holds exactly
+// one Catalog. Every Job's catalog agent joins the cluster that Catalog
+// creates and uses a volume that it sizes.
 func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice,
 	jobs []Job, providers providerSet, now time.Time) error {
 	if err := o.holdLibrary(ctx, library); err != nil {
@@ -59,55 +54,34 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 	o.metrics.observeLibraryReport(library, report)
 
 	// A Library with no volume, or in a namespace with no single
-	// Catalog, gets no schedule. There would be nothing to mount, or no
+	// Catalog, gets no Job. There would be nothing to mount, or no
 	// cluster to join, and the Ready condition says which.
-	var cronJob *CronJob
 	if libraryStands(bound, choice) {
+		if err := o.retireLegacyWorkers(ctx, library); err != nil {
+			return err
+		}
 		if err := o.standCatalogClaim(ctx, library, choice.catalog); err != nil {
 			return err
 		}
-		cronJob, err = o.standScanCronJob(ctx, library)
-		if err != nil {
-			return err
-		}
-		o.holdFirstWalk(library, report, jobs)
-		// The render template must exist before either scheduler creates a
-		// pod. A pod that names a missing template never starts.
+		// The render template must exist before the pass creates a pod
+		// that names it. A pod that names a missing template never starts.
 		if err := o.standTrickplayTemplate(ctx, library); err != nil {
 			return err
 		}
 		// No Job of this Library is built while any source it names has no
 		// verdict yet. A Job built while a check is outstanding would receive
-		// a partial source list, and the enricher would close a refresh entry
+		// a partial source list, and a phase would close a refresh entry
 		// with that list.
 		if providers.everySourceChecked(namespace, library.Spec.Sources) {
-			if err := o.serveRequestedWalk(ctx, library, report, jobs); err != nil {
-				return err
-			}
-			if err := o.serveHeldPaths(ctx, library, jobs, now); err != nil {
-				return err
-			}
-			if err := o.enrich(ctx, library, choice.catalog, report, jobs, providers, now); err != nil {
-				return err
-			}
-			// The trickplay Job runs beside the enricher and waits for none of
-			// its work.
-			if err := o.trickplay(ctx, library, choice.catalog, report, jobs, now); err != nil {
-				return err
-			}
-			// The trailers Job runs beside both of them for the same reason.
-			if err := o.trailers(ctx, library, choice.catalog, report, jobs, providers, now); err != nil {
+			if err := o.runLibrary(ctx, library, report, jobs, providers, now); err != nil {
 				return err
 			}
 		}
-	} else if err := o.stopScanCronJob(ctx, library); err != nil {
-		return err
 	}
 
 	return writeLibraryStatus(ctx, o.client, library, deriveLibraryStatus(library, libraryObservation{
 		bound:             bound,
 		choice:            choice,
-		cronJob:           cronJob,
 		report:            report,
 		jobs:              jobs,
 		sources:           checkSources(library, providers),
@@ -115,30 +89,6 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,
 	}, now))
-}
-
-// holdFirstWalk gives a new Library its first full walk. A Library the
-// reporter carries no scan run for, and that has no unfinished scan Job,
-// holds the empty path, which is the full walk, so serveHeldPaths
-// creates the Job on this same pass. Without this the library would
-// hold no rows until the CronJob's first turn, up to an hour later.
-//
-// The rule fires once. The Job the pass created is unfinished until
-// the controller marks it Complete or Failed, which covers the pod it
-// has not created yet and the backoff between its pods. By then the
-// walk's started runs row has reached the report, and the report
-// carries a scan run for the rest of the Library's life.
-func (o *operator) holdFirstWalk(library *Library, report *libraryReport, jobs []Job) {
-	namespace, name := library.Metadata.Namespace, library.Metadata.Name
-	if report != nil {
-		if _, ran := runOf(report.Runs, workerScan); ran {
-			return
-		}
-	}
-	if scanUnfinished(jobs, namespace, name) {
-		return
-	}
-	o.paths.hold(namespace, name, "")
 }
 
 // HoldLibrary puts the finalizer on a Library that does not carry
@@ -174,7 +124,7 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 	return nil
 }
 
-// LibraryStands reports the one condition a Library's scans need: its
+// LibraryStands reports the one condition a Library's Jobs need: its
 // storage is bound, and its namespace holds exactly one Catalog. The pass
 // reads it to create the objects, and the status derivation reads it to
 // report the webhook address, so the two cannot answer differently.

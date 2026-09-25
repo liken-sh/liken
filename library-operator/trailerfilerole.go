@@ -13,7 +13,7 @@ import (
 )
 
 // The name of the container that runs this fact.
-const trailerFileContainerName = "trailers"
+const trailerFileContainerName = "trailer-files"
 
 // What this fact counts: one row per attempt, by site and outcome, and the
 // bytes every pull took.
@@ -45,7 +45,6 @@ func (e *enricher) trailerFileFact(ctx context.Context) error {
 		return fmt.Errorf("no site this fact can fetch from reached this container, and the %s fact cannot pull without one; %s is %q",
 			factTrailerFile, librarySourcesVariable, sources)
 	}
-	e.sweepOldTallies(ctx, time.Now().UTC())
 	return e.trailerFileGap(ctx, e.trailerFiles)
 }
 
@@ -79,7 +78,9 @@ func (e *enricher) trailerFileGapTitle(ctx context.Context, line *trailerFetchLi
 		run.fail(err)
 		return
 	}
-	if !held || !e.inScope(item.path) {
+	// Past the phase's time limit the run starts no other title, and the
+	// rest stays as the gap of the next Job.
+	if !held || !e.inScope(item.path) || !e.mayStartTitle() {
 		return
 	}
 	rows, err := e.catalog.trailersOf(ctx, e.library, id)

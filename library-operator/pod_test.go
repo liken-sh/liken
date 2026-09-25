@@ -42,15 +42,14 @@ func studioMovies() *Library {
 	}
 }
 
-// TestScanPod is the pod a scan Job would run, as a Pod, so the tests
+// TestScanPod is the pod a walk Job would run, as a Pod, so the tests
 // below read one object the way the kubelet would.
 func testScanPod(library *Library) *Pod {
 	return scanPodOf(library, "")
 }
 
 func scanPodOf(library *Library, path string) *Pod {
-	template := scanPodTemplate(library, path,
-		testScannerImage, testCorrosionImage)
+	template := testEnrichJob(library, path).Spec.Template
 	return &Pod{Metadata: template.Metadata, Spec: template.Spec}
 }
 
@@ -64,7 +63,7 @@ func TestScanPodCarriesItsLibrarysMarks(t *testing.T) {
 	want := map[string]string{
 		scannerLabelKey: workerLabelValue,
 		libraryLabelKey: "movies",
-		workerLabelKey:  workerScan,
+		workerLabelKey:  jobModeWalk,
 		memberLabelKey:  memberLabelValue,
 	}
 	for key, value := range want {
@@ -99,7 +98,9 @@ func TestScanPodRunsToCompletionAndStopsSlowly(t *testing.T) {
 }
 
 // The scanner runs this same image in its scan role, mounts the claim
-// read-only, and learns its Library from the environment alone.
+// read-only beside the phases volume, and learns its Library from the
+// environment alone. The volume itself is read-write, because the phases
+// beside the scan write into it.
 func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	pod := testScanPod(studioMovies())
 
@@ -113,8 +114,8 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	if strings.Join(scanner.Command, " ") != "/library-operator scan" {
 		t.Errorf("command = %v, want the scan role", scanner.Command)
 	}
-	if len(scanner.VolumeMounts) != 1 {
-		t.Fatalf("volumeMounts = %v, want one", scanner.VolumeMounts)
+	if len(scanner.VolumeMounts) != 2 || scanner.VolumeMounts[1].Name != phasesVolumeName {
+		t.Fatalf("volumeMounts = %v, want the library and the phases volume", scanner.VolumeMounts)
 	}
 	mount := scanner.VolumeMounts[0]
 	if mount.MountPath != libraryMountPath || !mount.ReadOnly {
@@ -125,8 +126,8 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	if source.PersistentVolumeClaim == nil {
 		t.Fatalf("volume %s = %+v, want the Library's claim", mount.Name, source)
 	}
-	if source.PersistentVolumeClaim.ClaimName != "movies" || !source.PersistentVolumeClaim.ReadOnly {
-		t.Errorf("claim = %+v, want movies read-only", source.PersistentVolumeClaim)
+	if source.PersistentVolumeClaim.ClaimName != "movies" {
+		t.Errorf("claim = %+v, want movies", source.PersistentVolumeClaim)
 	}
 }
 
@@ -195,7 +196,9 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		libraryIgnoreVariable:    "null",
 		libraryArtVariable:       "",
 		scanPathVariable:         "",
+		scanPathsVariable:        "",
 		jobNameVariable:          "",
+		libraryPhasesVariable:    phasesMountPath,
 	}
 	got := containerEnvironment(pod.Spec.Containers[0])
 	for name, value := range want {
@@ -327,8 +330,8 @@ func TestCatalogContainerIsANativeSidecar(t *testing.T) {
 	if catalog.RestartPolicy != "Always" {
 		t.Errorf("restartPolicy = %q, want Always", catalog.RestartPolicy)
 	}
-	if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != scannerContainer {
-		t.Errorf("containers = %v, want the scanner alone", pod.Spec.Containers)
+	if len(pod.Spec.Containers) == 0 || pod.Spec.Containers[0].Name != scannerContainer {
+		t.Errorf("containers = %v, want the scanner first", pod.Spec.Containers)
 	}
 }
 
@@ -583,7 +586,7 @@ func studioFranchises() *Library {
 	}
 }
 
-// A franchises scan Job mounts its storage claim read-only, because the
+// A franchises scan mounts its storage claim read-only, because the
 // checkout is the truth it walks, and its art claim writable beside it,
 // because the scan downloads the art each franchise.yaml links to.
 func TestTheFranchisesScanPodMountsTheCheckoutAndTheArtClaim(t *testing.T) {
@@ -594,17 +597,16 @@ func TestTheFranchisesScanPodMountsTheCheckoutAndTheArtClaim(t *testing.T) {
 		volumes[volume.Name] = volume
 	}
 	claim := volumes[libraryVolumeName].PersistentVolumeClaim
-	if claim == nil || claim.ClaimName != "franchises" || !claim.ReadOnly {
-		t.Errorf("the library volume is %+v, want the checkout claim, read-only",
-			volumes[libraryVolumeName])
+	if claim == nil || claim.ClaimName != "franchises" {
+		t.Errorf("the library volume is %+v, want the checkout claim", volumes[libraryVolumeName])
 	}
 	art := volumes[artVolumeName].PersistentVolumeClaim
 	if art == nil || art.ClaimName != "franchise-art" || art.ReadOnly {
 		t.Errorf("the art volume is %+v, want the art claim, writable", volumes[artVolumeName])
 	}
 	mounts := pod.Spec.Containers[0].VolumeMounts
-	if len(mounts) != 2 {
-		t.Fatalf("volumeMounts = %+v, want the checkout and the art claim", mounts)
+	if len(mounts) != 3 {
+		t.Fatalf("volumeMounts = %+v, want the checkout, the art claim, and the phases", mounts)
 	}
 	if mounts[0].MountPath != libraryMountPath || !mounts[0].ReadOnly {
 		t.Errorf("mount = %+v, want %s read-only", mounts[0], libraryMountPath)
@@ -614,7 +616,7 @@ func TestTheFranchisesScanPodMountsTheCheckoutAndTheArtClaim(t *testing.T) {
 	}
 }
 
-// A movies or series scan Job mounts its claim read-only and no art claim,
+// A movies or series scan mounts its claim read-only and no art claim,
 // because it reads a volume and downloads nothing into one.
 func TestTheMoviesScanPodMountsItsClaimAlone(t *testing.T) {
 	pod := testScanPod(studioMovies())
@@ -626,8 +628,8 @@ func TestTheMoviesScanPodMountsItsClaimAlone(t *testing.T) {
 		}
 	}
 	mounts := pod.Spec.Containers[0].VolumeMounts
-	if len(mounts) != 1 || !mounts[0].ReadOnly {
-		t.Errorf("volumeMounts = %+v, want the claim read-only and no other", mounts)
+	if len(mounts) != 2 || !mounts[0].ReadOnly || mounts[1].Name != phasesVolumeName {
+		t.Errorf("volumeMounts = %+v, want the claim read-only and the phases volume", mounts)
 	}
 }
 

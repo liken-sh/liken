@@ -1,12 +1,13 @@
 package main
 
-// what these tests read: the enricher Job one Library becomes, the
-// order of the containers in its pod, the key the identity container
-// receives, and the claim its catalog agent runs on.
+// What these tests read: the one Job a Library becomes, the containers in its
+// pod, the facts and the needs each phase names, the keys the phases
+// receive, and the volumes they mount.
 
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,207 +22,308 @@ func readyProvider(name, namespace string, facts ...string) *MetadataProvider {
 	return provider
 }
 
-// the enricher Job of one Library, built the way a pass builds it. Every
-// provider named here is a source of the Library, in the order given.
+// The images a test Job runs.
+var testJobImages = jobImages{operator: testScannerImage, ffmpeg: testFFmpegImage, corrosion: testCorrosionImage}
+
+// The walk Job of one Library, built the way a pass builds it, with every
+// phase its sources serve. Every provider named here is a source of the
+// Library, in the order given. A path makes it a walk of that folder.
 func testEnrichJob(library *Library, path string, providers ...*MetadataProvider) *Job {
 	set := providerSet{}
 	for _, provider := range providers {
 		set[libraryKey(provider.Metadata.Namespace, provider.Metadata.Name)] = provider
 		library.Spec.Sources = append(library.Spec.Sources, provider.Metadata.Name)
 	}
-	return buildEnrichJob(library, set, nil, enrichJobName(library.Metadata.Name), path,
-		testScannerImage, testFFmpegImage, testCorrosionImage)
+	plan := libraryJob{mode: jobModeWalk, phases: servedPhases(library, set)}
+	if path != "" {
+		plan.paths = []string{path}
+	}
+	return buildLibraryJob(library, set, nil, plan, testJobImages, testNow)
 }
 
-// the pod holds the catalog agent, then the two facts that edit the
-// .nfo file in order, then the container that writes the runs row.
-func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
-
-	spec := job.Spec.Template.Spec
+// The names of the regular containers of a Job, in the pod's order.
+func jobContainerNames(job *Job) []string {
 	names := []string{}
-	for _, container := range spec.InitContainers {
+	for _, container := range job.Spec.Template.Spec.Containers {
 		names = append(names, container.Name)
 	}
-	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity}
-	if len(names) != len(want) {
-		t.Fatalf("initContainers = %v, want %v", names, want)
-	}
-	for index, name := range want {
-		if names[index] != name {
-			t.Errorf("initContainer %d = %q, want %q", index, names[index], name)
+	return names
+}
+
+// The phase containers of a Job: every regular container but the scan and
+// the close container.
+func phaseContainers(job *Job) []Container {
+	return slices.DeleteFunc(slices.Clone(job.Spec.Template.Spec.Containers), func(container Container) bool {
+		return container.Name == scannerContainer || container.Name == closeMode
+	})
+}
+
+// One container of a Job by name, and nil where the pod holds none.
+func jobContainer(job *Job, name string) *Container {
+	for at, container := range job.Spec.Template.Spec.Containers {
+		if container.Name == name {
+			return &job.Spec.Template.Spec.Containers[at]
 		}
 	}
-	if len(spec.Containers) != 1 || spec.Containers[0].Name != enrichMode {
-		t.Fatalf("containers = %+v, want the one enrich container", spec.Containers)
+	return nil
+}
+
+// The agent is the one init container. The walk, every phase the sources
+// serve, and the close container are regular containers, so all of them
+// start together.
+func TestAWalkJobRunsEveryPhaseBesideTheWalk(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"),
+		providerOfBlock("intros", providerBlockTheIntroDB))
+
+	spec := job.Spec.Template.Spec
+	if len(spec.InitContainers) != 1 || spec.InitContainers[0].Name != catalogContainer {
+		t.Fatalf("initContainers = %+v, want the catalog agent alone", spec.InitContainers)
+	}
+	want := []string{scannerContainer, factProbe, arrivalContainerName, factIdentity, nfoContainerName,
+		artContainerName, trailerContainerName, marksContainerName, contributorsContainerName, closeMode}
+	if got := jobContainerNames(job); !slices.Equal(got, want) {
+		t.Errorf("containers = %v, want %v", got, want)
 	}
 }
 
-// each init container after the agent runs the facts role and names the one
-// fact it fills, and the enrich container runs its own role.
-func TestEnrichJobNamesTheFactsOfEachContainer(t *testing.T) {
+// A Job that fills gaps runs no walk, and only the phases it names.
+func TestAGapJobRunsNoWalk(t *testing.T) {
+	library := studioMovies()
+	plan := libraryJob{mode: jobModeGaps, phases: servedPhases(library, providerSet{})[:1]}
+
+	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testNow)
+
+	if got := jobContainerNames(job); !slices.Equal(got, []string{factProbe, closeMode}) {
+		t.Errorf("containers = %v, want the probe and the close container", got)
+	}
+	if job.Metadata.Labels[workerLabelKey] != jobModeGaps || !strings.HasPrefix(job.Metadata.Name, "movies-gaps-") {
+		t.Errorf("metadata = %+v, want the gaps mode in the label and the name", job.Metadata)
+	}
+	if got := containerEnvironment(*jobContainer(job, factProbe))[libraryPhaseNeedsVariable]; got != "" {
+		t.Errorf("the probe waits for %q, want nothing in a Job with no walk", got)
+	}
+}
+
+// Each phase runs the facts role and names its facts, and the close
+// container runs its own role.
+func TestEachPhaseNamesItsFacts(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
-	spec := job.Spec.Template.Spec
-	for _, container := range spec.InitContainers[1:] {
+	for _, container := range phaseContainers(job) {
 		if len(container.Command) != 2 || container.Command[1] != factsMode {
 			t.Errorf("%s runs %v, want the binary in the facts role", container.Name, container.Command)
 		}
-		if got := containerEnvironment(container)[libraryFactsVariable]; got != container.Name {
-			t.Errorf("%s reads %s = %q, want its own fact", container.Name, libraryFactsVariable, got)
+	}
+	for name, want := range map[string]string{factProbe: factProbe, arrivalContainerName: factArrival,
+		factIdentity: factIdentity} {
+		if got := containerEnvironment(*jobContainer(job, name))[libraryFactsVariable]; got != want {
+			t.Errorf("%s reads %s = %q, want %q", name, libraryFactsVariable, got, want)
 		}
 	}
-	enrich := spec.Containers[0]
-	if len(enrich.Command) != 2 || enrich.Command[1] != enrichMode {
-		t.Errorf("%s runs %v, want the binary in the enrich role", enrich.Name, enrich.Command)
+	closing := jobContainer(job, closeMode)
+	if closing == nil || closing.Command[1] != closeMode {
+		t.Fatalf("close = %+v, want the binary in the close role", closing)
 	}
-	if got := containerEnvironment(enrich)[libraryFactsVariable]; got != "" {
-		t.Errorf("%s reads %s = %q, want none", enrich.Name, libraryFactsVariable, got)
+	if got := containerEnvironment(*closing)[libraryFactsVariable]; got != "" {
+		t.Errorf("close reads %s = %q, want none", libraryFactsVariable, got)
 	}
 }
 
-// the enricher writes the volume, where a scanner reads it, and its
-// agent runs on a claim of the Library's own.
-func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
+// Each phase waits for the phases whose rows open its gap, through the whole
+// table, and the close container waits for every container.
+func TestEachContainerWaitsForThePhasesBeforeIt(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"),
+		providerOfBlock("intros", providerBlockTheIntroDB))
+
+	cases := map[string]string{
+		factProbe:                 "scan",
+		factIdentity:              "scan",
+		nfoContainerName:          "scan,identity",
+		marksContainerName:        "scan,probe,identity",
+		contributorsContainerName: "scan,identity,nfo",
+		closeMode:                 "scan,probe,arrival,identity,nfo,art,trailer,marks,contributors",
+	}
+	for name, want := range cases {
+		if got := containerEnvironment(*jobContainer(job, name))[libraryPhaseNeedsVariable]; got != want {
+			t.Errorf("%s waits for %q, want %q", name, got, want)
+		}
+	}
+}
+
+// A phase whose direct need is absent from the Job waits for what that need
+// waited for.
+func TestAPhaseInheritsTheNeedsOfAnAbsentPhase(t *testing.T) {
+	if got := phaseNeedsOf(nfoContainerName, []string{scanPhase, nfoContainerName}); !slices.Equal(got, []string{scanPhase}) {
+		t.Errorf("needs = %v, want the walk the absent identity phase waited for", got)
+	}
+}
+
+// The scan mounts the storage read-only, so a scanner a person supplies never
+// writes the media. The phases mount it read-write, because they write beside
+// the media. Every container but the agent mounts the phases volume, and the
+// agent runs on the Library's one catalog claim.
+func TestTheJobMountsTheVolumes(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
-	spec := job.Spec.Template.Spec
-	for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
-		if len(container.VolumeMounts) != 1 {
-			t.Fatalf("%s mounts %+v, want the library volume alone", container.Name, container.VolumeMounts)
+	for _, container := range job.Spec.Template.Spec.Containers {
+		mounts := map[string]VolumeMount{}
+		for _, mount := range container.VolumeMounts {
+			mounts[mount.Name] = mount
 		}
-		mount := container.VolumeMounts[0]
-		if mount.Name != libraryVolumeName || mount.MountPath != libraryMountPath || mount.ReadOnly {
-			t.Errorf("%s mounts %+v, want the library volume read-write", container.Name, mount)
+		library, phases := mounts[libraryVolumeName], mounts[phasesVolumeName]
+		if library.MountPath != libraryMountPath || library.ReadOnly != (container.Name == scannerContainer) {
+			t.Errorf("%s mounts the library as %+v", container.Name, library)
+		}
+		if phases.MountPath != phasesMountPath {
+			t.Errorf("%s mounts the phases volume as %+v", container.Name, phases)
 		}
 	}
-	claims := map[string]string{}
-	for _, volume := range spec.Volumes {
-		claims[volume.Name] = volume.PersistentVolumeClaim.ClaimName
-	}
-	if claims[libraryVolumeName] != "movies" {
-		t.Errorf("library volume = %q, want the Library's claim", claims[libraryVolumeName])
-	}
-	if claims[catalogVolumeName] != "movies-enrich-catalog" {
-		t.Errorf("catalog volume = %q, want the enricher's own claim", claims[catalogVolumeName])
-	}
-}
-
-// A franchises library's enricher mounts the art claim, because the art is
-// the file set an enricher writes for this kind and the storage claim holds
-// the checkout.
-func TestEnrichJobMountsTheArtClaimOfAFranchisesLibrary(t *testing.T) {
-	job := testEnrichJob(studioFranchises(), "", readyProvider("tmdb", "house", factIdentity))
-
-	claims := map[string]string{}
+	volumes := map[string]Volume{}
 	for _, volume := range job.Spec.Template.Spec.Volumes {
-		claims[volume.Name] = volume.PersistentVolumeClaim.ClaimName
+		volumes[volume.Name] = volume
 	}
-
-	if claims[libraryVolumeName] != "franchise-art" {
-		t.Errorf("library volume = %q, want the art claim", claims[libraryVolumeName])
+	if claim := volumes[catalogVolumeName].PersistentVolumeClaim; claim == nil || claim.ClaimName != "movies-catalog" {
+		t.Errorf("catalog volume = %+v, want the Library's one catalog claim", volumes[catalogVolumeName])
 	}
-}
-
-// the key reaches the identity container through a secretKeyRef, so no
-// container reads the API server.
-func TestEnrichJobPassesTheKeyThroughASecretKeyRef(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
-
-	identity := job.Spec.Template.Spec.InitContainers[3]
-	var reference *SecretKeySelector
-	for _, variable := range identity.Env {
-		if variable.Name == tmdbTokenVariable && variable.ValueFrom != nil {
-			reference = variable.ValueFrom.SecretKeyRef
-		}
+	if claim := volumes[libraryVolumeName].PersistentVolumeClaim; claim == nil || claim.ClaimName != "movies" || claim.ReadOnly {
+		t.Errorf("library volume = %+v, want the Library's claim, read-write at the volume", volumes[libraryVolumeName])
 	}
-	if reference == nil {
-		t.Fatalf("%s reads no Secret, env = %+v", tmdbTokenVariable, identity.Env)
-	}
-	if reference.Name != "tmdb-key" || reference.Key != "token" {
-		t.Errorf("secretKeyRef = %+v, want the provider's own Secret and key", reference)
+	if volumes[phasesVolumeName].EmptyDir == nil {
+		t.Errorf("phases volume = %+v, want an emptyDir", volumes[phasesVolumeName])
 	}
 }
 
-// Every facts container carries every key the Library's sources reach, so a
-// container that asks a second provider needs no wiring of its own. The
-// catalog agent carries none, because it asks no provider.
-func TestEnrichJobCarriesEveryProviderKeyIntoEveryFactsContainer(t *testing.T) {
+// A franchises library's phases write into the art claim, because the art is
+// the file set a phase writes for this kind and the storage claim holds the
+// checkout. The scan mounts both.
+func TestTheJobOfAFranchisesLibraryWritesIntoTheArtClaim(t *testing.T) {
+	job := testEnrichJob(studioFranchises(), "")
+
+	probe := jobContainer(job, factProbe)
+	if probe.VolumeMounts[0].Name != artVolumeName || probe.VolumeMounts[0].MountPath != libraryMountPath {
+		t.Errorf("probe mounts %+v, want the art claim at the library mount", probe.VolumeMounts)
+	}
+	scan := jobContainer(job, scannerContainer)
+	names := []string{}
+	for _, mount := range scan.VolumeMounts {
+		names = append(names, mount.Name)
+	}
+	if !slices.Equal(names, []string{libraryVolumeName, artVolumeName, phasesVolumeName}) {
+		t.Errorf("scan mounts %v, want the storage, the art, and the phases", names)
+	}
+}
+
+// The key reaches every phase through a secretKeyRef, so no container reads
+// the API server, and the agent carries none.
+func TestEveryPhaseCarriesEveryProviderKey(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "",
 		readyProvider("tmdb", "house", factIdentity),
 		providerOfBlock("omdb", providerBlockOMDb))
 
-	spec := job.Spec.Template.Spec
-	for _, container := range spec.InitContainers[1:] {
+	for _, container := range phaseContainers(job) {
 		keys := map[string]*SecretKeySelector{}
 		for _, variable := range container.Env {
 			if variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil {
 				keys[variable.Name] = variable.ValueFrom.SecretKeyRef
 			}
 		}
-		if len(keys) != 2 || keys[tmdbTokenVariable] == nil {
-			t.Errorf("%s reads %v, want the key of each account", container.Name, keys)
+		if reference := keys[tmdbTokenVariable]; reference == nil || reference.Name != "tmdb-key" || reference.Key != "token" {
+			t.Errorf("%s reads %+v for TMDb, want the account's own Secret and key", container.Name, reference)
 		}
-		if reference := keys[providerTokenVariable(providerBlockOMDb)]; reference == nil ||
-			reference.Name != "omdb-key" {
+		if reference := keys[providerTokenVariable(providerBlockOMDb)]; reference == nil || reference.Name != "omdb-key" {
 			t.Errorf("%s reads %+v for OMDb, want the account's own Secret", container.Name, reference)
 		}
 	}
-	for _, variable := range spec.InitContainers[0].Env {
+	for _, variable := range job.Spec.Template.Spec.InitContainers[0].Env {
 		if variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil {
 			t.Errorf("the catalog agent reads %s, want no provider key", variable.Name)
 		}
 	}
 }
 
-// A Library whose sources name no ready provider that serves identity
-// still runs the probe and the arrival fact, the two that ask no
-// provider.
-func TestEnrichJobWithoutAProviderRunsTheProviderFreeFactsAlone(t *testing.T) {
+// A Library whose sources name no ready provider still runs the probe and
+// the arrival fact, the two that ask no provider.
+func TestAJobWithoutAProviderRunsTheProviderFreePhasesAlone(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "")
 
-	spec := job.Spec.Template.Spec
-	if len(spec.InitContainers) != 3 || spec.InitContainers[1].Name != factProbe ||
-		spec.InitContainers[2].Name != arrivalContainerName {
-		t.Fatalf("initContainers = %+v, want the agent, the probe, and the arrival fact", spec.InitContainers)
+	want := []string{scannerContainer, factProbe, arrivalContainerName, closeMode}
+	if got := jobContainerNames(job); !slices.Equal(got, want) {
+		t.Errorf("containers = %v, want %v", got, want)
 	}
 }
 
-// every container learns its Library, its broker, and the Job it runs
-// from its environment, and a Job for one folder names that folder.
-func TestEnrichJobCarriesTheJobEnvironment(t *testing.T) {
-	cases := []struct{ name, path string }{
+// Every container learns its Library, its folders, and the Job it runs from
+// its environment. The scan reads one folder from SCAN_PATH as well, so a
+// scanner image built before the list rescans it.
+func TestTheJobCarriesItsEnvironment(t *testing.T) {
+	cases := []struct {
+		name, path, list string
+	}{
 		{name: "the whole library"},
-		{name: "one folder", path: "/library/movies/Arrival (2016)"},
+		{name: "one folder", path: "/library/movies/Arrival (2016)", list: `["/library/movies/Arrival (2016)"]`},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			job := testEnrichJob(studioMovies(), one.path, readyProvider("tmdb", "house", factIdentity))
 
-			spec := job.Spec.Template.Spec
-			for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
+			for _, container := range job.Spec.Template.Spec.Containers {
 				got := containerEnvironment(container)
 				if got[libraryNameVariable] != "movies" || got[libraryKindVariable] != libraryKindMovies {
 					t.Errorf("%s reads %v, want the Library it serves", container.Name, got)
 				}
-				if _, held := got[busAddressVariable]; held {
-					t.Errorf("%s reads %s, and no enricher container uses the bus", container.Name, busAddressVariable)
+				if got[scanPathsVariable] != one.list {
+					t.Errorf("%s reads %s = %q, want %q", container.Name, scanPathsVariable, got[scanPathsVariable], one.list)
 				}
-				if got[handoffTimeoutVariable] != defaultHandoffTimeout.String() {
-					t.Errorf("%s reads %s = %q", container.Name, handoffTimeoutVariable, got[handoffTimeoutVariable])
-				}
-				if got[syncTimeoutVariable] != defaultSyncTimeout.String() {
-					t.Errorf("%s reads %s = %q", container.Name, syncTimeoutVariable, got[syncTimeoutVariable])
-				}
-				if got[scanPathVariable] != one.path {
-					t.Errorf("%s reads %s = %q, want %q", container.Name,
-						scanPathVariable, got[scanPathVariable], one.path)
+				if got[libraryPhasesVariable] != phasesMountPath {
+					t.Errorf("%s reads %s = %q", container.Name, libraryPhasesVariable, got[libraryPhasesVariable])
 				}
 				if !readsTheJobName(container) {
 					t.Errorf("%s reads no %s", container.Name, jobNameVariable)
 				}
 			}
+			if got := containerEnvironment(*jobContainer(job, scannerContainer))[scanPathVariable]; got != one.path {
+				t.Errorf("scan reads %s = %q, want %q", scanPathVariable, got, one.path)
+			}
 		})
+	}
+}
+
+// A walk of several folders names none in SCAN_PATH, which a scanner image
+// built before the list reads as a full walk, and the Job records them.
+func TestAWalkOfSeveralFoldersNamesNoneInTheOnePath(t *testing.T) {
+	library := studioMovies()
+	plan := libraryJob{mode: jobModeWalk, paths: []string{"/a", "/b"}}
+
+	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testNow)
+
+	if got := containerEnvironment(*jobContainer(job, scannerContainer))[scanPathVariable]; got != "" {
+		t.Errorf("scan reads %s = %q, want none", scanPathVariable, got)
+	}
+	if got := job.Metadata.Annotations[jobPathsAnnotation]; got != `["/a","/b"]` {
+		t.Errorf("paths = %q, want both folders", got)
+	}
+}
+
+// Every container but the scan counts under the enrich worker, reads the
+// write its copy must hold, and names itself.
+func TestEveryPhaseNamesItsWorkerAndItsSyncTarget(t *testing.T) {
+	library := studioMovies()
+	plan := libraryJob{mode: jobModeWalk, phases: servedPhases(library, providerSet{}),
+		sync: syncTarget{actor: sqliteAgentActor, version: 40}}
+
+	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testNow)
+
+	for _, container := range job.Spec.Template.Spec.Containers {
+		got := containerEnvironment(container)
+		if container.Name == scannerContainer {
+			continue
+		}
+		if got[libraryWorkerVariable] != workerEnrich || got[libraryContainerVariable] != container.Name {
+			t.Errorf("%s reads %v, want the enrich worker and its own name", container.Name, got)
+		}
+		if got[syncActorVariable] != sqliteAgentActor || got[syncVersionVariable] != "40" {
+			t.Errorf("%s reads %v, want the sync target", container.Name, got)
+		}
 	}
 }
 
@@ -237,16 +339,19 @@ func readsTheJobName(container Container) bool {
 	return false
 }
 
-// the Job belongs to its Library, runs to completion, and stays for an
-// hour after it finishes.
-func TestEnrichJobBelongsToItsLibrary(t *testing.T) {
+// The Job belongs to its Library, runs to completion, stays for an hour after
+// it finishes, and records when the operator created it.
+func TestTheJobBelongsToItsLibrary(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "")
 
-	if job.Metadata.Name != "movies-enrich" || job.Metadata.Namespace != "house" {
-		t.Errorf("metadata = %+v, want the Library's own enricher", job.Metadata)
+	if !strings.HasPrefix(job.Metadata.Name, "movies-walk-") || job.Metadata.Namespace != "house" {
+		t.Errorf("metadata = %+v, want the Library's walk", job.Metadata)
 	}
-	if job.Metadata.Labels[workerLabelKey] != workerEnrich {
-		t.Errorf("labels = %v, want the enrich worker label", job.Metadata.Labels)
+	if job.Metadata.Labels[workerLabelKey] != jobModeWalk {
+		t.Errorf("labels = %v, want the walk label", job.Metadata.Labels)
+	}
+	if got := jobCreated(job); !got.Equal(testNow) {
+		t.Errorf("created = %v, want %v", got, testNow)
 	}
 	if len(job.Metadata.OwnerReferences) != 1 || job.Metadata.OwnerReferences[0].Name != "movies" {
 		t.Errorf("ownerReferences = %+v, want the Library", job.Metadata.OwnerReferences)
@@ -257,223 +362,197 @@ func TestEnrichJobBelongsToItsLibrary(t *testing.T) {
 	if job.Spec.TTLSecondsAfterFinished == nil || *job.Spec.TTLSecondsAfterFinished != scanJobTTL {
 		t.Errorf("ttlSecondsAfterFinished = %+v, want %d", job.Spec.TTLSecondsAfterFinished, scanJobTTL)
 	}
-	if job.Spec.Template.Spec.Containers[0].SecurityContext == nil {
-		t.Error("the enrich container carries no security context")
+	if spec := job.Spec.Template.Spec; spec.RestartPolicy != "Never" || spec.AutomountServiceAccountToken == nil ||
+		*spec.AutomountServiceAccountToken {
+		t.Errorf("pod = %+v, want no restart and no token", spec)
 	}
 }
 
-// the enricher's claim is sized by the namespace's Catalog and classed
-// by its durable storage, and it is created once.
-func TestStandEnrichClaimCreatesItOnce(t *testing.T) {
-	cluster := newFakeCluster()
-	library := boundHouse(cluster)
-	catalog := testNamespaceCatalog()
-	catalog.Spec.Storage.Size = "2Gi"
-	catalog.Spec.Storage.StorageClassName = "local-path"
-	operator := testOperator(t, cluster)
-
-	for range 2 {
-		if err := operator.standEnrichClaim(t.Context(), library, catalog); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	claim := cluster.heldClaim("movies-enrich-catalog")
-	if claim == nil {
-		t.Fatal("the pass stood no claim for the enricher")
-	}
-	if claim.Spec.Resources.Requests["storage"] != "2Gi" || claim.Spec.StorageClassName != "local-path" {
-		t.Errorf("claim spec = %+v, want the Catalog's size and class", claim.Spec)
-	}
-	if !slicesContainsOwner(claim.Metadata.OwnerReferences, "movies") {
-		t.Errorf("ownerReferences = %+v, want the Library", claim.Metadata.OwnerReferences)
-	}
-	if got := cluster.countRequests("POST", "persistentvolumeclaims"); got != 1 {
-		t.Errorf("the pass created the claim %d times, want once", got)
-	}
-}
-
-// The enricher's claim takes spec.libraries.storageClassName when the
-// Catalog names one, and keeps the catalog's size.
-func TestEnrichClaimTakesTheLibrariesClass(t *testing.T) {
-	catalog := testNamespaceCatalog()
-	catalog.Spec.Storage.Size = "2Gi"
-	catalog.Spec.Storage.StorageClassName = "synology-iscsi"
-	catalog.Spec.Libraries.StorageClassName = "local-path"
-
-	claim := buildEnrichClaim(studioMovies(), catalog)
-
-	if claim.Spec.StorageClassName != "local-path" {
-		t.Errorf("storageClassName = %q, want spec.libraries's class", claim.Spec.StorageClassName)
-	}
-	if got := claim.Spec.Resources.Requests["storage"]; got != "2Gi" {
-		t.Errorf("storage = %q, want the catalog's size", got)
-	}
-}
-
-func slicesContainsOwner(owners []OwnerReference, name string) bool {
-	for _, owner := range owners {
-		if owner.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// The art container runs where a provider of the Library's sources serves an
-// art fact, and never where none does.
-func TestTheArtContainerRunsWhereAProviderServesArt(t *testing.T) {
+// Each phase runs where a Ready source serves one of its facts, and names the
+// facts the sources serve in the order the group runs them.
+func TestAPhaseRunsWhereASourceServesItsFacts(t *testing.T) {
+	anonymous := providerOfBlock("intros", providerBlockTheIntroDB)
+	anonymous.Spec.TheIntroDB.SecretRef = nil
 	cases := []struct {
-		name  string
-		facts []string
-		want  bool
+		name     string
+		provider *MetadataProvider
+		phase    string
+		want     string
 	}{
-		{name: "a provider that serves every fact", facts: nil, want: true},
-		{name: "a provider narrowed to one art fact", facts: []string{factPoster}, want: true},
-		{name: "a provider narrowed to the identity", facts: []string{factIdentity}, want: false},
+		{name: "nfo from a provider of identity alone", provider: readyProvider("tmdb", "house", factIdentity),
+			phase: nfoContainerName},
+		{name: "nfo from a provider of the overview", provider: readyProvider("tmdb", "house", factIdentity, factOverview),
+			phase: nfoContainerName, want: factOverview},
+		{name: "nfo from a provider of every fact", provider: readyProvider("tmdb", "house"),
+			phase: nfoContainerName, want: "overview,certification,rating.tmdb,credits"},
+		{name: "art from a provider of one art fact", provider: readyProvider("tmdb", "house", factPoster),
+			phase: artContainerName, want: factPoster},
+		{name: "art from a provider of every fact", provider: readyProvider("tmdb", "house"),
+			phase: artContainerName, want: "poster,backdrop,logo,season-poster,episode-thumb"},
+		{name: "art from a provider of identity alone", provider: readyProvider("tmdb", "house", factIdentity),
+			phase: artContainerName},
+		{name: "trailers from a provider of every fact", provider: readyProvider("tmdb", "house"),
+			phase: trailerContainerName, want: factTrailer},
+		{name: "trailers from a video instance", provider: providerOfBlock("tube", providerBlockPeerTube),
+			phase: trailerContainerName, want: factTrailer},
+		{name: "marks from TheIntroDB with no key", provider: anonymous, phase: marksContainerName, want: factMarks},
+		{name: "marks from IntroDB", provider: providerOfBlock("intros", providerBlockIntroDB),
+			phase: marksContainerName, want: factMarks},
+		{name: "marks from a provider of none", provider: readyProvider("tmdb", "house"), phase: marksContainerName},
 	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", test.facts...))
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			job := testEnrichJob(studioMovies(), "", one.provider)
 
-			held := false
-			for _, container := range job.Spec.Template.Spec.InitContainers {
-				if container.Name == artContainerName {
-					held = true
-				}
+			container := jobContainer(job, one.phase)
+			if (container != nil) != (one.want != "") {
+				t.Fatalf("containers = %v, want %s only where it is served", jobContainerNames(job), one.phase)
 			}
-			if held != test.want {
-				t.Errorf("the pod holds the art container: %t, want %t", held, test.want)
-			}
-		})
-	}
-}
-
-// The art container names every art fact, takes the provider key, holds a
-// memory line of its own above the scanner's, and mounts the volume the way
-// the facts before it do.
-func TestTheArtContainerNamesItsFactsAndItsMemory(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
-
-	var art Container
-	for _, container := range job.Spec.Template.Spec.InitContainers {
-		if container.Name == artContainerName {
-			art = container
-		}
-	}
-	if art.Name == "" {
-		t.Fatal("the pod holds no art container")
-	}
-	facts := ""
-	key := false
-	for _, variable := range art.Env {
-		if variable.Name == libraryFactsVariable {
-			facts = variable.Value
-		}
-		if variable.Name == tmdbTokenVariable {
-			key = variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil
-		}
-	}
-	want := "poster,backdrop,logo,season-poster,episode-thumb"
-	if facts != want {
-		t.Errorf("%s = %q, want %q", libraryFactsVariable, facts, want)
-	}
-	if !key {
-		t.Error("the art container reads no provider key")
-	}
-	if art.Resources.Limits["memory"] != artMemoryLimit || artMemoryLimit == scannerMemoryLimit {
-		t.Errorf("memory limit = %q, want %q, above the scanner's %q",
-			art.Resources.Limits["memory"], artMemoryLimit, scannerMemoryLimit)
-	}
-	if len(art.VolumeMounts) != 1 || art.VolumeMounts[0].Name != libraryVolumeName ||
-		art.VolumeMounts[0].ReadOnly {
-		t.Errorf("mounts = %+v, want the library volume read-write", art.VolumeMounts)
-	}
-}
-
-// The enrich container is still the last container of the Job, because it
-// Writes the runs row and waits to be confirmed.
-func TestTheEnrichContainerStillRunsLast(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
-
-	spec := job.Spec.Template.Spec
-	last := spec.InitContainers[len(spec.InitContainers)-1]
-	if last.Name != contributorsContainerName {
-		t.Errorf("the last init container is %q, want the contributors container", last.Name)
-	}
-	if len(spec.Containers) != 1 || spec.Containers[0].Name != enrichMode {
-		t.Fatalf("containers = %+v, want the one enrich container", spec.Containers)
-	}
-}
-
-// the nfo container stands only where the Library's sources serve one of its
-// facts, and it names the facts they serve in the order the group runs them.
-func TestTheNFOContainerStandsWhereASourceServesItsFacts(t *testing.T) {
-	cases := []struct {
-		name  string
-		facts []string
-		want  string
-	}{
-		{name: "a provider that serves identity alone", facts: []string{factIdentity}},
-		{name: "a provider narrowed to the overview", facts: []string{factIdentity, factOverview}, want: factOverview},
-		{
-			name:  "a provider that serves every nfo fact",
-			facts: nil,
-			want:  "overview,certification,rating.tmdb,credits",
-		},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", test.facts...))
-
-			var nfo *Container
-			for at, container := range job.Spec.Template.Spec.InitContainers {
-				if container.Name == nfoContainerName {
-					nfo = &job.Spec.Template.Spec.InitContainers[at]
-				}
-			}
-			if test.want == "" {
-				if nfo != nil {
-					t.Fatal("the pod holds an nfo container, want none")
-				}
+			if container == nil {
 				return
 			}
-			if nfo == nil {
-				t.Fatalf("the pod holds no nfo container, initContainers = %+v",
-					job.Spec.Template.Spec.InitContainers)
-			}
-			if got := containerEnvironment(*nfo)[libraryFactsVariable]; got != test.want {
-				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, test.want)
+			if got := containerEnvironment(*container)[libraryFactsVariable]; got != one.want {
+				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, one.want)
 			}
 		})
 	}
 }
 
-// the nfo container runs after the identity container, because a title takes
-// its id before a fact asks about it, and before the art container.
-func TestTheNFOContainerRunsAfterIdentityAndBeforeArt(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
+// The address of a PeerTube instance reaches the container that asks it.
+func TestTheTrailerContainerReadsThePeerTubeAddress(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", providerOfBlock("tube", providerBlockPeerTube))
 
-	names := []string{}
-	for _, container := range job.Spec.Template.Spec.InitContainers {
-		names = append(names, container.Name)
+	got := containerEnvironment(*jobContainer(job, trailerContainerName))[providerEndpointVariable(providerBlockPeerTube)]
+	if got != "https://tube.example" {
+		t.Errorf("%s = %q, want the instance the source names", providerEndpointVariable(providerBlockPeerTube), got)
 	}
-	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity, nfoContainerName,
-		artContainerName, trailerContainerName, contributorsContainerName}
-	if len(names) != len(want) {
-		t.Fatalf("initContainers = %v, want %v", names, want)
-	}
-	for at, name := range want {
-		if names[at] != name {
-			t.Errorf("initContainer %d = %q, want %q", at, names[at], name)
+}
+
+// The languages the pass resolved reach every phase, because the score of a
+// trailer reads them and no container holds a credential to read the Library
+// or the household itself.
+func TestEveryPhaseCarriesTheLanguages(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Languages = []string{"en-US"}
+	library.Spec.Sources = []string{"tmdb"}
+	tmdb := readyProvider("tmdb", "house", factIdentity)
+	set := providerSet{libraryKey(tmdb.Metadata.Namespace, tmdb.Metadata.Name): tmdb}
+	plan := libraryJob{mode: jobModeWalk, phases: servedPhases(library, set)}
+
+	job := buildLibraryJob(library, set, []string{"en-US", "ko"}, plan, testJobImages, testNow)
+
+	for _, container := range phaseContainers(job) {
+		if got := containerEnvironment(container)[libraryLanguagesVariable]; got != "en-US,ko" {
+			t.Errorf("%s reads %s = %q, want the union", container.Name, libraryLanguagesVariable, got)
 		}
 	}
 }
 
-// The refresh times travel as one JSON value into every container of
-// the Job, so a fact of any name reaches the container whole, and a
-// Library that names none writes an empty value.
-func TestEnrichJobCarriesTheRefreshTimes(t *testing.T) {
+// The phases that open a media file run on the ffmpeg image and take the
+// memory their work needs, above the scanner's limit.
+func TestThePhasesThatOpenAFileTakeTheirOwnImageAndMemory(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Trickplay.Enabled = true
+	library.Spec.Trailers.Enabled = true
+	job := testEnrichJob(library, "", readyProvider("tmdb", "house"), providerOfBlock("tube", providerBlockPeerTube))
+
+	cases := []struct {
+		phase, image, memory string
+	}{
+		{phase: factProbe, image: testFFmpegImage, memory: probeMemoryLimit},
+		{phase: artContainerName, image: testScannerImage, memory: artMemoryLimit},
+		{phase: trickplayContainerName, image: testFFmpegImage, memory: trickplayMemoryLimit},
+		{phase: trailerFileContainerName, image: testFFmpegImage, memory: trailersMemoryLimit},
+	}
+	for _, one := range cases {
+		container := jobContainer(job, one.phase)
+		if container == nil {
+			t.Fatalf("containers = %v, want %s", jobContainerNames(job), one.phase)
+		}
+		if container.Image != one.image || container.Resources.Limits["memory"] != one.memory ||
+			one.memory == scannerMemoryLimit {
+			t.Errorf("%s runs %s with %v, want %s with %s", one.phase, container.Image,
+				container.Resources.Limits, one.image, one.memory)
+		}
+	}
+	if got := jobContainer(job, trickplayContainerName).Resources.Requests["cpu"]; got != trickplayCPURequest {
+		t.Errorf("trickplay requests %s of CPU, want %s", got, trickplayCPURequest)
+	}
+}
+
+// The pod holds the render claim only where the Library names a render block
+// and the Job runs trickplay, and only the trickplay container takes it.
+func TestTheRenderClaimGoesToTheTrickplayPhase(t *testing.T) {
+	cases := []struct {
+		name      string
+		trickplay bool
+		render    bool
+		want      bool
+	}{
+		{name: "trickplay with a render block", trickplay: true, render: true, want: true},
+		{name: "trickplay in software", trickplay: true},
+		{name: "a render block with no trickplay", render: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			library := studioMovies()
+			library.Spec.Trickplay.Enabled = one.trickplay
+			if one.render {
+				library.Spec.Trickplay.Render = &TrickplayDevice{Class: "display-render"}
+			}
+
+			job := testEnrichJob(library, "")
+
+			claims := job.Spec.Template.Spec.ResourceClaims
+			if (len(claims) == 1) != one.want {
+				t.Fatalf("resourceClaims = %+v, want one: %v", claims, one.want)
+			}
+			if !one.want {
+				return
+			}
+			if claims[0].ResourceClaimTemplateName != "movies-trickplay" {
+				t.Errorf("template = %q, want the Library's own", claims[0].ResourceClaimTemplateName)
+			}
+			for _, container := range job.Spec.Template.Spec.Containers {
+				if held := len(container.Resources.Claims) == 1; held != (container.Name == trickplayContainerName) {
+					t.Errorf("%s holds the claim: %v", container.Name, held)
+				}
+			}
+		})
+	}
+}
+
+// The trailer files run where the Library turns them on and a Ready source
+// names a site to fetch from.
+func TestTheTrailerFilesRunWhereASiteServesThem(t *testing.T) {
+	cases := []struct {
+		name     string
+		enabled  bool
+		provider *MetadataProvider
+		want     bool
+	}{
+		{name: "on, with a video instance", enabled: true, provider: providerOfBlock("tube", providerBlockPeerTube), want: true},
+		{name: "off", provider: providerOfBlock("tube", providerBlockPeerTube)},
+		{name: "on, with no site", enabled: true, provider: readyProvider("tmdb", "house", factIdentity)},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			library := studioMovies()
+			library.Spec.Trailers.Enabled = one.enabled
+
+			job := testEnrichJob(library, "", one.provider)
+
+			if held := jobContainer(job, trailerFileContainerName) != nil; held != one.want {
+				t.Errorf("containers = %v, want the trailer files: %v", jobContainerNames(job), one.want)
+			}
+		})
+	}
+}
+
+// The refresh times travel as one JSON value into every container of the
+// Job, so a fact of any name reaches the container whole, and a Library
+// that names none writes an empty value.
+func TestTheJobCarriesTheRefreshTimes(t *testing.T) {
 	library := studioMovies()
 	library.Spec.Refresh = map[string]time.Time{
 		factCredits: time.Date(2026, 9, 3, 21, 0, 0, 0, time.UTC),
@@ -481,19 +560,15 @@ func TestEnrichJobCarriesTheRefreshTimes(t *testing.T) {
 
 	job := testEnrichJob(library, "", readyProvider("tmdb", "house", factIdentity))
 
-	spec := job.Spec.Template.Spec
-	for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
+	for _, container := range phaseContainers(job) {
 		got := containerEnvironment(container)[libraryRefreshVariable]
 		if got != `{"credits":"2026-09-03T21:00:00Z"}` {
-			t.Errorf("%s reads %s = %q, want the JSON-encoded map",
-				container.Name, libraryRefreshVariable, got)
+			t.Errorf("%s reads %s = %q, want the JSON-encoded map", container.Name, libraryRefreshVariable, got)
 		}
 	}
 	empty := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
-	got := containerEnvironment(empty.Spec.Template.Spec.Containers[0])
-	if got[libraryRefreshVariable] != "" {
-		t.Errorf("%s = %q, want no value for a Library that names no refresh",
-			libraryRefreshVariable, got[libraryRefreshVariable])
+	if got := containerEnvironment(*jobContainer(empty, factProbe))[libraryRefreshVariable]; got != "" {
+		t.Errorf("%s = %q, want no value for a Library that names no refresh", libraryRefreshVariable, got)
 	}
 }
 
@@ -532,209 +607,8 @@ func TestTheContainerReadsTheRefreshTimesItIsGiven(t *testing.T) {
 	}
 }
 
-// ffprobe holds about 60 MB on its own while it reads a file, so the probe
-// container cannot run under the scanner's limit.
-func TestTheProbeContainerTakesAMemoryLineAboveTheScanners(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
-
-	var probe Container
-	for _, container := range job.Spec.Template.Spec.InitContainers {
-		if container.Name == factProbe {
-			probe = container
-		}
-	}
-	if probe.Name == "" {
-		t.Fatal("no probe container")
-	}
-	if probe.Resources.Limits["memory"] != probeMemoryLimit || probeMemoryLimit == scannerMemoryLimit {
-		t.Errorf("memory limit = %q, want %q, above the scanner's %q",
-			probe.Resources.Limits["memory"], probeMemoryLimit, scannerMemoryLimit)
-	}
-}
-
-// The trailer container stands where a Ready source serves the fact,
-// whichever block that source names. It runs between the art container and
-// the people.
-func TestTheTrailerContainerStandsWhereASourceServesTheFact(t *testing.T) {
-	cases := []struct {
-		name     string
-		provider *MetadataProvider
-		want     bool
-	}{
-		{
-			name:     "a provider that serves every fact",
-			provider: readyProvider("tmdb", "house"), want: true,
-		},
-		{
-			name:     "a provider narrowed to the identity",
-			provider: readyProvider("tmdb", "house", factIdentity),
-		},
-		{
-			name:     "an instance that holds videos alone",
-			provider: providerOfBlock("tube", providerBlockPeerTube), want: true,
-		},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			job := testEnrichJob(studioMovies(), "", test.provider)
-
-			var trailer *Container
-			for at, container := range job.Spec.Template.Spec.InitContainers {
-				if container.Name == trailerContainerName {
-					trailer = &job.Spec.Template.Spec.InitContainers[at]
-				}
-			}
-			if !test.want {
-				if trailer != nil {
-					t.Fatal("the pod holds a trailer container, want none")
-				}
-				return
-			}
-			if trailer == nil {
-				t.Fatalf("the pod holds no trailer container, initContainers = %+v",
-					job.Spec.Template.Spec.InitContainers)
-			}
-			if got := containerEnvironment(*trailer)[libraryFactsVariable]; got != factTrailer {
-				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, factTrailer)
-			}
-		})
-	}
-}
-
-// The marks container stands where a Ready source serves the marks fact. A
-// TheIntroDB account with a key carries the key to it, and one with none
-// carries none.
-func TestTheMarksContainerStandsWhereASourceServesTheFact(t *testing.T) {
-	anonymous := providerOfBlock("intros", providerBlockTheIntroDB)
-	anonymous.Spec.TheIntroDB.SecretRef = nil
-	cases := []struct {
-		name     string
-		provider *MetadataProvider
-		want     bool
-		wantKey  bool
-	}{
-		{name: "a provider that serves no marks", provider: readyProvider("tmdb", "house")},
-		{name: "TheIntroDB with a key", provider: providerOfBlock("intros", providerBlockTheIntroDB),
-			want: true, wantKey: true},
-		{name: "TheIntroDB with no key", provider: anonymous, want: true},
-		{name: "IntroDB", provider: providerOfBlock("intros", providerBlockIntroDB), want: true},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			job := testEnrichJob(studioMovies(), "", test.provider)
-
-			var marks *Container
-			names := []string{}
-			for at, container := range job.Spec.Template.Spec.InitContainers {
-				names = append(names, container.Name)
-				if container.Name == marksContainerName {
-					marks = &job.Spec.Template.Spec.InitContainers[at]
-				}
-			}
-			if marks == nil {
-				if test.want {
-					t.Fatalf("initContainers = %v, want a marks container", names)
-				}
-				return
-			}
-			if !test.want {
-				t.Fatalf("initContainers = %v, want no marks container", names)
-			}
-			if got := containerEnvironment(*marks)[libraryFactsVariable]; got != factMarks {
-				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, factMarks)
-			}
-			_, keyed := containerEnvironment(*marks)[providerTokenVariable(providerBlockTheIntroDB)]
-			if keyed != test.wantKey {
-				t.Errorf("the container carries a key: %v, want %v", keyed, test.wantKey)
-			}
-		})
-	}
-}
-
-// The marks container runs after the probe, whose lengths it reads, and in
-// the place its group holds among the facts: after the trailers and before
-// the people.
-func TestTheMarksContainerRunsAfterTheTrailersAndBeforeThePeople(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"),
-		providerOfBlock("intros", providerBlockTheIntroDB))
-
-	names := []string{}
-	for _, container := range job.Spec.Template.Spec.InitContainers {
-		names = append(names, container.Name)
-	}
-	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity, nfoContainerName,
-		artContainerName, trailerContainerName, marksContainerName, contributorsContainerName}
-	if !slices.Equal(names, want) {
-		t.Errorf("initContainers = %v, want %v", names, want)
-	}
-}
-
-// The address of a PeerTube instance reaches the container that asks it.
-func TestTheTrailerContainerReadsThePeerTubeAddress(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "", providerOfBlock("tube", providerBlockPeerTube))
-
-	for _, container := range job.Spec.Template.Spec.InitContainers {
-		if container.Name != trailerContainerName {
-			continue
-		}
-		if got := containerEnvironment(container)[providerEndpointVariable(providerBlockPeerTube)]; got != "https://tube.example" {
-			t.Errorf("%s = %q, want the instance the source names", providerEndpointVariable(providerBlockPeerTube), got)
-		}
-		return
-	}
-	t.Fatal("the pod holds no trailer container")
-}
-
-// The languages the pass resolved reach every container that asks a
-// provider, because the score of a trailer reads them and no container holds
-// a credential to read the Library or the household itself.
-func TestEveryFactsContainerCarriesTheLanguages(t *testing.T) {
-	library := studioMovies()
-	library.Spec.Languages = []string{"en-US"}
-	library.Spec.Sources = []string{"tmdb"}
-	tmdb := readyProvider("tmdb", "house", factIdentity)
-	set := providerSet{libraryKey(tmdb.Metadata.Namespace, tmdb.Metadata.Name): tmdb}
-
-	job := buildEnrichJob(library, set, []string{"en-US", "ko"},
-		enrichJobName(library.Metadata.Name), "",
-		testScannerImage, testFFmpegImage, testCorrosionImage)
-
-	for _, container := range job.Spec.Template.Spec.InitContainers[1:] {
-		if got := containerEnvironment(container)[libraryLanguagesVariable]; got != "en-US,ko" {
-			t.Errorf("%s reads %s = %q, want the union", container.Name, libraryLanguagesVariable, got)
-		}
-	}
-}
-
-// Every container of the enricher Job counts under the enricher's own worker,
-// because the Job's runs row is the enricher's.
-func TestEveryEnricherContainerNamesTheEnrichWorker(t *testing.T) {
-	spec := testEnrichJob(studioMovies(), "").Spec.Template.Spec
-
-	containers := append(append([]Container{}, spec.InitContainers[1:]...), spec.Containers...)
-	for _, container := range containers {
-		if got := containerEnvironment(container)[libraryWorkerVariable]; got != workerEnrich {
-			t.Errorf("%s of %s = %q, want %q", libraryWorkerVariable, container.Name, got, workerEnrich)
-		}
-	}
-}
-
-// Every container names itself, because one Job runs its facts as a sequence
-// of containers and each counts from zero under its own name.
-func TestEveryEnricherContainerNamesItself(t *testing.T) {
-	spec := testEnrichJob(studioMovies(), "").Spec.Template.Spec
-
-	containers := append(append([]Container{}, spec.InitContainers[1:]...), spec.Containers...)
-	for _, container := range containers {
-		if got := containerEnvironment(container)[libraryContainerVariable]; got != container.Name {
-			t.Errorf("%s of %s = %q, want %q",
-				libraryContainerVariable, container.Name, got, container.Name)
-		}
-	}
-}
-
 // The walk is not a fact and no container runs it, so it does not travel to
-// the enricher pod's LIBRARY_REFRESH.
+// the phases' LIBRARY_REFRESH.
 func TestRefreshValueSendsTheFactsAlone(t *testing.T) {
 	library := studioMovies()
 	library.Spec.Refresh = map[string]time.Time{

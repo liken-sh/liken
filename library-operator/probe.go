@@ -43,9 +43,6 @@ func (e *enricher) probeFact(ctx context.Context) error {
 // work and there is nothing to do without it. A file that will not open
 // records an error attempt, and the run carries on to the next file.
 func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
-	if err := e.markRunStarted(ctx); err != nil {
-		return err
-	}
 	paths, err := e.gaps(ctx, factProbe, time.Now().UTC())
 	if err != nil {
 		return err
@@ -306,7 +303,15 @@ func commandStderr(err error) string {
 // same way, because there is nothing in it to keep. Otherwise the edit never
 // rewrites the document it read. It replaces one element and keeps every other
 // byte.
+//
+// The read and the write are one step under the file's lock, because the
+// probe, identity, and nfo containers edit one .nfo file at the same time.
 func (w *volumeWriter) editNFO(path, rootElement, title string, element xmlElement, replacement []byte) error {
+	release, err := lockNFO(w.locks, path)
+	if err != nil {
+		return err
+	}
+	defer release()
 	document, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

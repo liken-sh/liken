@@ -16,10 +16,11 @@ tree, and it gives every field of the report.
 
 The report, as the operator writes it into the status: the counts, the
 rows the last sweep removed, the two times, the gaps and the oldest
-attempts per fact, and the last run of each worker. A scan `Job`
-writes its `runs` row as its last catalog write and exits only when
-this report names that `Job`, so a report is also the proof that the
-catalog pod holds every row the `Job` wrote.
+attempts per fact, and the last run of each worker. The close container
+of a `Library`'s `Job` writes the `enrich` run as the `Job`'s last
+catalog write and exits only when a catalog pod confirms it, so a run
+in this report with a finish is also the proof that a catalog pod holds
+every row the `Job` wrote.
 
     {
       "titles": 412,
@@ -31,7 +32,7 @@ catalog pod holds every row the `Job` wrote.
       "walking": false,
       "removedLastSweep": 3,
       "runs": [
-        {"worker": "scan", "job": "movies-scan-29310740",
+        {"worker": "scan", "job": "movies-walk-dlcg1z2yyzgw",
          "started": "2026-08-29T21:03:02Z", "finished": "2026-08-29T21:04:11Z",
          "unidentified": 9, "removed": 3}
       ],
@@ -42,7 +43,7 @@ catalog pod holds every row the `Job` wrote.
       "fights": 0
     }
 
-`walking` is true while a scan `Job` runs, and the operator's phase
+`walking` is true while a walk runs, and the operator's phase
 follows it. `oldestAttempts` is what the operator reads `spec.refresh`
 against: a refresh later than the oldest attempt is a fact with work
 left, whatever `gaps` says.

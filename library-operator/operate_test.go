@@ -163,8 +163,8 @@ func TestRunReconcilesOnceAndStops(t *testing.T) {
 	if !strings.Contains(line, "1 libraries") || !strings.Contains(line, testBusAddress) {
 		t.Errorf("report = %q, want the count and the broker", line)
 	}
-	if cluster.heldCronJob("house", "movies-scan") == nil {
-		t.Error("the pass created no scan schedule")
+	if !cluster.heldWalk("house", "movies") {
+		t.Error("the pass started no walk")
 	}
 }
 
@@ -287,11 +287,11 @@ func TestPassCarriesOnPastOneBrokenLibrary(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.heldCronJob("house", "movies-scan") == nil {
+	if !cluster.heldWalk("house", "movies") {
 		t.Error("the movies library was not reconciled")
 	}
-	if cluster.heldCronJob("house", "series-scan") != nil {
-		t.Error("a schedule was created for a library whose claim could not be read")
+	if cluster.heldWalk("house", "series") {
+		t.Error("a walk started for a library whose claim could not be read")
 	}
 }
 
@@ -405,8 +405,8 @@ func TestPassCarriesOnWithNoPlayersToRead(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.heldCronJob("house", "movies-scan") == nil {
-		t.Error("the pass stood no scan schedule")
+	if !cluster.heldWalk("house", "movies") {
+		t.Error("the pass started no walk")
 	}
 	if cluster.heldLibrary("movies").Status.Conditions == nil {
 		t.Error("the pass wrote no status for the library")
@@ -556,10 +556,10 @@ func TestPassDepartsADeletingLibraryAndReconcilesTheRest(t *testing.T) {
 	if cluster.heldJob("house", "movies-cleanup") == nil {
 		t.Error("the pass stood no cleanup job for the departing library")
 	}
-	if cluster.heldCronJob("house", "movies-scan") != nil {
-		t.Error("the pass stood a schedule for a library on its way out")
+	if cluster.heldWalk("house", "movies") {
+		t.Error("the pass started a walk of a library on its way out")
 	}
-	if cluster.heldCronJob("house", "shows-scan") == nil {
+	if !cluster.heldWalk("house", "shows") {
 		t.Error("the surviving library was not reconciled")
 	}
 	if phase := cluster.heldLibrary("movies").Status.Phase; phase != phaseDeparting {
@@ -649,28 +649,23 @@ func failedStatus(at time.Time) JobStatus {
 }
 
 // a worker Job that exited zero goes once the grace is over. A Job inside the
-// grace, a Job that failed, and a Job of a webhook chain stay where a person
-// and the chain can read them.
+// grace and a Job that failed stay where a person can read them.
 func TestPassRetiresTheJobsThatSucceeded(t *testing.T) {
 	now := time.Now().UTC()
 	cases := []struct {
 		name   string
 		status JobStatus
-		marks  map[string]string
 		want   bool
 	}{
 		{name: "succeeded before the grace", status: succeededStatus(now.Add(-10 * time.Minute))},
 		{name: "succeeded inside the grace", status: succeededStatus(now.Add(-time.Minute)), want: true},
 		{name: "failed before the grace", status: failedStatus(now.Add(-10 * time.Minute)), want: true},
-		{name: "a chain's stage before the grace", status: succeededStatus(now.Add(-10 * time.Minute)),
-			marks: chainMarks("c1", "/library/movies/Arrival (2016)", chainStageRescan), want: true},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			boundHouse(cluster)
 			job := houseJob("movies-scan-29380000", workerScan, one.status)
-			job.Metadata.Annotations = one.marks
 			cluster.holdJob(&job)
 			operator := testOperator(t, cluster)
 			// The report carries a scan run, so the pass starts no
@@ -702,7 +697,7 @@ func TestPassCarriesOnPastAJobItCannotRetire(t *testing.T) {
 
 	operator.pass()
 
-	if cluster.heldCronJob("house", "movies-scan") == nil {
+	if cluster.heldLibrary("movies").Status.Conditions == nil {
 		t.Error("the pass stopped at the delete the API server refused")
 	}
 }

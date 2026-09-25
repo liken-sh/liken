@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,8 +49,8 @@ func TestAnEnricherReadsItsWholeWiringOutOfTheEnvironment(t *testing.T) {
 	if work.root != filepath.Join(libraryMountPath, "media") {
 		t.Errorf("root = %q, want the root under the mount", work.root)
 	}
-	if work.scope != "" {
-		t.Errorf("scope = %q, want the whole library", work.scope)
+	if len(work.scopes) != 0 {
+		t.Errorf("scopes = %q, want the whole library", work.scopes)
 	}
 	if work.syncTimeout != 90*time.Second {
 		t.Errorf("syncTimeout = %s, want the wait the environment names", work.syncTimeout)
@@ -80,54 +81,64 @@ func TestAnEnricherWithNoEnvironmentTakesTheDefaults(t *testing.T) {
 	}
 }
 
-func TestANarrowedJobWorksOverItsOwnFolderAlone(t *testing.T) {
+func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "Action", "The Thing (1982)", "thing.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Action", "Alien (1979)", "alien.mkv"), "video")
+	thing := filepath.Join("Action", "The Thing (1982)")
+	alien := filepath.Join("Action", "Alien (1979)")
 
 	cases := []struct {
-		name      string
-		scanPath  string
-		wantScope string
-		inScope   string
-		outScope  string
+		name       string
+		scanPaths  []string
+		wantScopes []string
+		inScope    string
+		outScope   string
 	}{
 		{
-			name:      "a relative folder under the root",
-			scanPath:  "Action/The Thing (1982)",
-			wantScope: filepath.Join("Action", "The Thing (1982)"),
-			inScope:   filepath.Join("Action", "The Thing (1982)", "thing.mkv"),
-			outScope:  filepath.Join("Action", "Alien (1979)", "alien.mkv"),
+			name:       "a relative folder under the root",
+			scanPaths:  []string{"Action/The Thing (1982)"},
+			wantScopes: []string{thing},
+			inScope:    filepath.Join(thing, "thing.mkv"),
+			outScope:   filepath.Join(alien, "alien.mkv"),
 		},
 		{
-			name:      "the media server's own absolute path",
-			scanPath:  "/data/media/Action/The Thing (1982)",
-			wantScope: filepath.Join("Action", "The Thing (1982)"),
-			inScope:   filepath.Join("Action", "The Thing (1982)", "thing.mkv"),
-			outScope:  "Other/other.mkv",
+			name:       "the media server's own absolute path",
+			scanPaths:  []string{"/data/media/Action/The Thing (1982)"},
+			wantScopes: []string{thing},
+			inScope:    filepath.Join(thing, "thing.mkv"),
+			outScope:   "Other/other.mkv",
+		},
+		{
+			name:       "two folders",
+			scanPaths:  []string{"Action/The Thing (1982)", "Action/Alien (1979)"},
+			wantScopes: []string{thing, alien},
+			inScope:    filepath.Join(alien, "alien.mkv"),
+			outScope:   "Other/other.mkv",
 		},
 		{
 			name:      "a folder the volume does not hold",
-			scanPath:  "Action/Not There",
-			wantScope: "",
+			scanPaths: []string{"Action/The Thing (1982)", "Action/Not There"},
 			inScope:   "anything at all",
-			outScope:  "",
 		},
 		{
-			name:      "no folder at all",
-			scanPath:  "",
-			wantScope: "",
+			name:      "the root itself",
+			scanPaths: []string{"/"},
 			inScope:   "anything at all",
-			outScope:  "",
+		},
+		{
+			name:    "no folder at all",
+			inScope: "anything at all",
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			work, _ := testEnricher(t, libraryKindMovies, root, nil)
-			work.scanPath = test.scanPath
-			work.scope = work.narrowedScope()
+			work.scanPaths = test.scanPaths
+			work.scopes = work.narrowedScopes()
 
-			if work.scope != test.wantScope {
-				t.Fatalf("scope = %q, want %q", work.scope, test.wantScope)
+			if !slices.Equal(work.scopes, test.wantScopes) {
+				t.Fatalf("scopes = %q, want %q", work.scopes, test.wantScopes)
 			}
 			if !work.inScope(test.inScope) {
 				t.Errorf("%q reads as out of scope", test.inScope)
@@ -186,20 +197,17 @@ func TestAnEnricherThatCannotReachItsSidecarFails(t *testing.T) {
 	if _, err := work.gaps(t.Context(), factProbe, ledgerTime); err == nil {
 		t.Error("the gap read reported no error, want one")
 	}
-	if err := work.markRunStarted(t.Context()); err == nil {
-		t.Error("the run mark reported no error, want one")
-	}
 }
 
-// Every container of the enricher Job counts under the enricher's own worker.
+// A container counts under the worker its environment names.
 func TestAnEnricherReadsItsWorkerOutOfTheEnvironment(t *testing.T) {
 	cases := []struct {
 		name  string
 		named string
 		want  string
 	}{
-		{name: "a container of the enricher Job", named: workerEnrich, want: workerEnrich},
-		{name: "a container of the trickplay Job", named: workerTrickplay, want: workerTrickplay},
+		{name: "a phase of a library Job", named: workerEnrich, want: workerEnrich},
+		{name: "a container of another worker", named: workerScan, want: workerScan},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -234,51 +242,5 @@ func TestAnEnricherWithNoWorkerFails(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), libraryWorkerVariable) {
 		t.Errorf("newEnricher = %v, want an error naming %s", err, libraryWorkerVariable)
-	}
-}
-
-// seedOldTallies writes one row this worker left more than the retention ago,
-// so a test can prove the Job that follows deletes it.
-func seedOldTallies(t *testing.T, catalog *Catalog, library, worker string) {
-	t.Helper()
-	old := newTallies(catalog, library, worker, "a-run-that-ended", factProbe,
-		time.Now().UTC().Add(-tallyRetention-time.Hour))
-	old.add(tallyAttempts, 1, "fact", factProbe, "result", attemptFound)
-	if err := old.flush(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// A Job deletes its own worker's old rows where it marks its run's start, so
-// the table holds the retention and no more.
-func TestMarkRunStartedSweepsTheOldTallies(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
-	seedOldTallies(t, catalog, work.library, workerEnrich)
-
-	if err := work.markRunStarted(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	if held := talliesHeld(t, agent, work.library); len(held) != 0 {
-		t.Errorf("the table holds %v, want the old run's rows gone", held)
-	}
-}
-
-// A sweep the catalog refuses is logged and never ends the run, because a
-// count is not the work.
-func TestASweepTheCatalogRefusesNeverEndsTheRun(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work, log := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
-	seedOldTallies(t, catalog, work.library, workerEnrich)
-	agent.transactionsLeft = 2
-
-	err := work.markRunStarted(t.Context())
-
-	if err != nil {
-		t.Fatalf("markRunStarted = %v, want no error", err)
-	}
-	if !strings.Contains(log.String(), "could not sweep the tallies") {
-		t.Errorf("log = %q, want the refused sweep", log.String())
 	}
 }

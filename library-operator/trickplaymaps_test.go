@@ -119,22 +119,3 @@ func TestADirectoryThatLandedSinceTheWalkLosesItsMap(t *testing.T) {
 		t.Errorf("log = %q, want the line that names the map it removed", log)
 	}
 }
-
-// The trickplay Job deletes its own worker's old counts where it starts,
-// because it writes no run row of its own and the fact is its whole run.
-func TestTheTrickplayFactSweepsTheOldTallies(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	root := t.TempDir()
-	seedTiledVideo(t, catalog, root)
-	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.worker = workerTrickplay
-	seedOldTallies(t, catalog, work.library, workerTrickplay)
-
-	if err := work.trickplayFact(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	if held := talliesHeld(t, agent, work.library); len(held) != 0 {
-		t.Errorf("the table holds %v, want the old run's rows gone", held)
-	}
-}

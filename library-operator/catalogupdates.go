@@ -3,7 +3,8 @@ package main
 // The per-table update stream of the agent's loopback API. An event
 // says that a row of the table changed, and nothing more. That is
 // enough for the reporter, which reads the table's counts again on
-// any change and needs no values from the stream.
+// any change, and for a phase of a library Job, which reads its gap
+// again. Neither needs values from the stream.
 
 import (
 	"bufio"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // The update endpoint, one path per replicated table.
@@ -64,4 +66,45 @@ func (c *Catalog) followUpdates(ctx context.Context, table string, onOpen func()
 		}
 	}
 	return scanner.Err()
+}
+
+// Follows one table's update stream and marks a change on every
+// event, opening the stream again after a backoff for as long as the
+// context runs. The stream's events name no library, so the mark says
+// only that something moved.
+func followTableChanges(ctx context.Context, catalog *Catalog, table string, changed chan<- struct{},
+	logf func(format string, args ...any)) {
+	backoff := reportMinBackoff
+	for ctx.Err() == nil {
+		opened := false
+		err := catalog.followUpdates(ctx, table,
+			func() { opened = true },
+			func() { markChanged(changed) })
+		if err != nil && ctx.Err() == nil {
+			logf("the update stream of %s ended: %v", table, err)
+		}
+		// The events between one stream and the next are gone, so
+		// a stream that ended marks a change and the reader reads what
+		// the catalog holds now.
+		markChanged(changed)
+		if opened {
+			backoff = reportMinBackoff
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if !opened {
+			backoff = min(backoff*2, reportMaxBackoff)
+		}
+	}
+}
+
+// The same agent through a client with no timeout, because a stream stays
+// open for the life of the container and a client timeout would cut it. The
+// transport is the catalog's own, so a test's server answers both.
+func (c *Catalog) streaming() *Catalog {
+	return &Catalog{base: c.base, http: &http.Client{Transport: c.http.Transport}}
 }

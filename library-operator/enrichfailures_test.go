@@ -86,14 +86,6 @@ func TestAFolderThatWillNotTakeALedgerLogsTheFailure(t *testing.T) {
 	}
 }
 
-func TestTheEnrichJobTakesItsOwnStartWhereItCannotReadTheRuns(t *testing.T) {
-	run := enrichJob(t, writeOnlyCatalog(t))
-
-	if got := run.startedAt(t.Context()); got.IsZero() {
-		t.Error("the container read no start at all, want its own")
-	}
-}
-
 func TestAWriteThatCannotRenameLeavesNoTemporary(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "movie.nfo")

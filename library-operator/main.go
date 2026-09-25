@@ -33,8 +33,8 @@ func main() {
 		case factsMode:
 			runFacts()
 			return
-		case enrichMode:
-			runEnrich()
+		case closeMode:
+			runClose()
 			return
 		case progressMode:
 			runProgress()

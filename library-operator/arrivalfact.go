@@ -1,8 +1,8 @@
 package main
 
 // arrivalfact.go is the arrival fact: the enricher concern that writes the
-// arrival ledger. It is a fact and not part of the walk because the scan Job
-// mounts the volume read-only and the enrich Jobs mount it read-write. It
+// arrival ledger. It is a fact and not part of the walk because the scan
+// container mounts the volume read-only and the phases mount it read-write. It
 // asks no provider, because the file's own change time is the answer. It
 // never rewrites an entry that exists, because the ledger is what makes the
 // first sighting durable against every later sweep of the volume.

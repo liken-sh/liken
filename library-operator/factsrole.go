@@ -1,6 +1,6 @@
 package main
 
-// The facts container of the enricher Job. LIBRARY_FACTS names the facts it
+// The facts container of a library Job. LIBRARY_FACTS names the facts it
 // runs, in order, and the container waits once for its synced copy of the
 // catalog before the first of them. The pod names the facts, so the operator
 // holds no order of its own, and a container is one phase of the run.
@@ -84,9 +84,14 @@ func namedFacts(list string) []string {
 // a fact this image cannot run fails before it writes to the volume. Then the
 // container waits once for its own copy of the catalog to hold what the
 // standing pod reports, because a gap query against a copy that has not
-// synced names a fraction of the work. One wait covers every fact in the
-// container, because no fact reads a write that another fact in the same
-// container made.
+// synced names a fraction of the work.
+//
+// In a library Job the container is one phase. It holds its running lock,
+// runs the phase loop, and writes its mark. A phase that fails writes a
+// failed mark and returns no error, so the container exits zero and the Job
+// still succeeds when its close container writes the runs row. The failed
+// phase's gaps stay open for the next Job. A container with no phases volume
+// runs its facts once.
 func (e *enricher) runFacts(ctx context.Context, facts []string) error {
 	if len(facts) == 0 {
 		return fmt.Errorf("%s names no fact", libraryFactsVariable)
@@ -100,6 +105,25 @@ func (e *enricher) runFacts(ctx context.Context, facts []string) error {
 	// when the facts end, because no scrape reaches a container that has
 	// exited.
 	defer e.tallies.recording(ctx)()
+	if e.board == nil {
+		return e.runSynced(ctx, facts, e.pass)
+	}
+	if err := e.board.start(e.container); err != nil {
+		return err
+	}
+	worked := e.runSynced(ctx, facts, e.phaseLoop)
+	if ctx.Err() != nil {
+		return worked
+	}
+	if worked != nil {
+		e.logf("the %s phase failed: %v", e.container, worked)
+	}
+	return e.board.finish(e.container, worked)
+}
+
+// The wait for the synced copy, and then the work.
+func (e *enricher) runSynced(ctx context.Context, facts []string,
+	work func(context.Context, []string) error) error {
 	// The wait is silent otherwise, and it can run for minutes on a fresh
 	// claim, so its two ends are logged.
 	e.logf("waiting for the catalog to sync onto this claim")
@@ -108,10 +132,5 @@ func (e *enricher) runFacts(ctx context.Context, facts []string) error {
 		return err
 	}
 	e.logf("the catalog synced in %s", time.Since(started).Round(time.Second))
-	for _, name := range facts {
-		if err := factRuns[name](ctx, e); err != nil {
-			return fmt.Errorf("the %s fact failed: %w", name, err)
-		}
-	}
-	return nil
+	return work(ctx, facts)
 }

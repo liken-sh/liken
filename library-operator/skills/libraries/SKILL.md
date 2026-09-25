@@ -74,9 +74,10 @@ walk could not name, and they are still browsable under their folder
 names.
 
 `Status` is the phase. `Pending` means the storage, the catalog pod, or
-the schedule is not ready yet. `Scanning` and `Enriching` name the
-`Job` that runs. `Idle` is the state between them. `Failed` means the
-last scan `Job` failed and wrote no rows. `Offline` means the
+the schedule is not ready yet. `Scanning` means a walk runs, and
+`Enriching` means the phases of a `Job` run after its walk or in a
+`Job` that fills gaps. `Idle` is the state between `Jobs`. `Failed`
+means the last walk failed and wrote no rows. `Offline` means the
 namespace's reporter has left the bus. `Departing` means a deleted
 `Library` is still removing its rows from the catalog.
 
@@ -84,19 +85,23 @@ Four conditions report why the phase is what it is:
 
 * `Bound` reports the storage. The reasons for `False` are
   `ClaimNotFound`, `ClaimUnbound`, and `VolumeNotFound`.
-* `Ready` reports the scanning path: the catalog pod runs, the
-  `CronJob` exists, and the reporter has reported this library. The
-  reasons for `False`, in the order they are checked, are `NotBound`,
-  `NoCatalog`, `ManyCatalogs`, `CatalogPending`, `ScanPending`,
-  `Offline`, and `NoReport`.
+* `Ready` reports the scanning path: the catalog pod runs,
+  `spec.scan.schedule` parses, and the reporter has reported this
+  library. The reasons for `False`, in the order they are checked, are
+  `NotBound`, `NoCatalog`, `ManyCatalogs`, `CatalogPending`,
+  `ScheduleInvalid`, `Offline`, and `NoReport`.
 * `Sources` reports `spec.sources`. It is absent on a library that
   names none.
 * `Departing` reports the teardown of a deleted library, for as long
   as its finalizer keeps the object from being removed.
 
-`status.runs` holds the last run of each worker: `scan`, `rescan`,
-`enrich`, and `cleanup`, with its `Job`, its times, and its failure if
-it had one. `status.webhook` is the address that rescans one folder;
+`status.runs` holds the last run of each worker, with its `Job`, its
+times, and its failure if it had one. `scan` is a full walk, `rescan`
+is a walk of the folders webhooks named, `enrich` is the phases of a
+`Job` and its hand-off, and `cleanup` is the sweep of a deleted
+`Library`. A phase that failed names its failure in the `enrich` run,
+and the `Job` still succeeds, so the next `Job` tries that phase's
+titles again. `status.webhook` is the address that rescans one folder;
 [Webhooks](https://library.liken.sh/docs/guides/webhooks/) gives it to Radarr, Sonarr, and
 Jellyfin.
 

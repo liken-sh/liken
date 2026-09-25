@@ -513,7 +513,7 @@ func TestANarrowedJobFillsItsOwnFolderAlone(t *testing.T) {
 	seedNFOGap(t, catalog, root, "Winter Harbour (2011)", "movie:tmdb:4242")
 	seedNFOGap(t, catalog, root, "Summer Harbour (2012)", "movie:tmdb:4243")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "Winter Harbour (2011)"
+	work.scopes = []string{"Winter Harbour (2011)"}
 	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers()}
 
 	if err := work.nfoGap(t.Context(), factOverview, lineOf(fake)); err != nil {

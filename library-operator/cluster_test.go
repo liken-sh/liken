@@ -46,11 +46,12 @@ type fakeCluster struct {
 	slices     map[string]*EndpointSlice
 	services   map[string]*Service
 	configMaps map[string]*ConfigMap
-	// The Jobs and CronJobs the operator creates, keyed by namespace and
-	// name, because a worker of one namespace and a worker of another
-	// may take the same name.
+	// The Jobs the operator creates, keyed by namespace and name, because
+	// a worker of one namespace and a worker of another may take the same
+	// name. The CronJobs are the names of those an earlier release stood,
+	// which the operator deletes.
 	jobs     map[string]*Job
-	cronJobs map[string]*CronJob
+	cronJobs map[string]bool
 	// The ResourceClaimTemplates the operator keeps for the Libraries that name
 	// a render node, by namespace and name.
 	claimTemplates map[string]*ResourceClaimTemplate
@@ -108,7 +109,7 @@ func newFakeCluster() *fakeCluster {
 		services:       map[string]*Service{},
 		configMaps:     map[string]*ConfigMap{},
 		jobs:           map[string]*Job{},
-		cronJobs:       map[string]*CronJob{},
+		cronJobs:       map[string]bool{},
 		claimTemplates: map[string]*ResourceClaimTemplate{},
 		people:         map[string]*Person{},
 		nodes:          map[string]*Node{},
@@ -430,35 +431,14 @@ func (f *fakeCluster) serveJob(w http.ResponseWriter, r *http.Request, key strin
 	}
 }
 
-// ServeCronJob answers a CronJob the same way, with the update the
-// operator sends when a schedule or an image changes.
+// ServeCronJob answers the one request the operator makes of a CronJob:
+// the delete of one an earlier release stood.
 func (f *fakeCluster) serveCronJob(w http.ResponseWriter, r *http.Request, key string) {
-	switch r.Method {
-	case http.MethodPost:
-		if f.refuseCreate {
-			w.WriteHeader(http.StatusConflict)
-			return
-		}
-		f.writeCronJob(w, r, "1")
-	case http.MethodPut:
-		f.writeCronJob(w, r, "2")
-	case http.MethodDelete:
-		if _, held := f.cronJobs[key]; !held {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		delete(f.cronJobs, key)
-	default:
-		answer(w, f.cronJobs[key])
+	if r.Method != http.MethodDelete || !f.cronJobs[key] {
+		w.WriteHeader(http.StatusNotFound)
+		return
 	}
-}
-
-func (f *fakeCluster) writeCronJob(w http.ResponseWriter, r *http.Request, resourceVersion string) {
-	var written CronJob
-	_ = json.NewDecoder(r.Body).Decode(&written)
-	written.Metadata.ResourceVersion = resourceVersion
-	f.cronJobs[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
-	_ = json.NewEncoder(w).Encode(written)
+	delete(f.cronJobs, key)
 }
 
 // ServeClaimTemplate answers a ResourceClaimTemplate the way the API server
@@ -509,10 +489,31 @@ func (f *fakeCluster) heldJob(namespace, name string) *Job {
 	return f.jobs[namespace+"/"+name]
 }
 
-func (f *fakeCluster) heldCronJob(namespace, name string) *CronJob {
+func (f *fakeCluster) heldCronJob(namespace, name string) bool {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.cronJobs[namespace+"/"+name]
+}
+
+// Whether the cluster holds a walk Job of one Library, which is what a pass
+// that reconciled a new Library creates.
+func (f *fakeCluster) heldWalk(namespace, library string) bool {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	for _, job := range f.jobs {
+		if job.Metadata.Namespace == namespace && job.Metadata.Labels[libraryLabelKey] == library &&
+			job.Metadata.Labels[workerLabelKey] == jobModeWalk {
+			return true
+		}
+	}
+	return false
+}
+
+// HoldCronJob puts a CronJob an earlier release stood into the cluster.
+func (f *fakeCluster) holdCronJob(namespace, name string) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.cronJobs[namespace+"/"+name] = true
 }
 
 // HoldJob puts a Job into the cluster as the Job controller would have

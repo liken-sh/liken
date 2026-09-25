@@ -106,8 +106,8 @@ func TestTheProbeNFOIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
 	}
 }
 
-func TestTheProbeRecordsItsAttemptAndTheRunItStarted(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
+func TestTheProbeRecordsItsAttempt(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
@@ -125,9 +125,6 @@ func TestTheProbeRecordsItsAttemptAndTheRunItStarted(t *testing.T) {
 	}
 	if ledger.Attempts[0].Path != "The Thing (1982).mkv" {
 		t.Errorf("the attempt names %q, want the file", ledger.Attempts[0].Path)
-	}
-	if got := agent.rowCount(t, "runs"); got != 1 {
-		t.Errorf("runs = %d, want the started mark the probe container writes", got)
 	}
 }
 
@@ -202,8 +199,8 @@ func TestTheProbeWorksOverTheFolderItsJobNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scanPath = "The Thing (1982)"
-	work.scope = work.narrowedScope()
+	work.scanPaths = []string{"The Thing (1982)"}
+	work.scopes = work.narrowedScopes()
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 		t.Fatal(err)

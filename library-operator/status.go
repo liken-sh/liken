@@ -18,14 +18,13 @@ import (
 // Everything one pass observed about one Library, gathered so
 // the derivation stays one function of its arguments: what the API
 // server says about the storage, which Catalog the namespace resolved
-// to and how its pod is doing, whether the schedule stands, what the
+// to and how its pod is doing, what the
 // namespace's reporter last said about this library, whether that
 // reporter is on the bus, and the namespace the operator's own Service
 // is in.
 type libraryObservation struct {
 	bound             binding
 	choice            catalogChoice
-	cronJob           *CronJob
 	report            *libraryReport
 	online            bool
 	operatorNamespace string
@@ -42,9 +41,8 @@ type libraryObservation struct {
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
-// pass's observation and nothing else. A nil cronJob is a library whose
-// schedule does not stand, and a nil report is one the reporter has
-// said nothing about yet.
+// pass's observation and nothing else. A nil report is one the reporter
+// has said nothing about yet.
 func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Time) LibraryStatus {
 	status := LibraryStatus{
 		Volume:         seen.bound.volume,
@@ -90,7 +88,7 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 	// every status look unchanged.
 	conditions := slices.Clone(library.Status.Conditions)
 	generation := library.Metadata.Generation
-	ready := readyCondition(seen, generation)
+	ready := readyCondition(seen, library.Spec.scanSchedule(), generation)
 	conditions = SetCondition(conditions, boundCondition(seen.bound, generation), now)
 	conditions = SetCondition(conditions, ready, now)
 	// A Library that names no source carries no Sources condition at all,
@@ -192,16 +190,17 @@ func boundCondition(bound binding, generation int64) Condition {
 // ReadyCondition reports whether this library is being scanned.
 // Ready is the whole path working: the storage is bound, the namespace
 // holds one Catalog whose pod runs with every container ready, the
-// schedule stands, the reporter is on the bus, and it has reported this
-// library. Each reason names the step that has not happened, so the
-// condition says where to look.
-func readyCondition(seen libraryObservation, generation int64) Condition {
+// walk's schedule parses, the reporter is on the bus, and it has
+// reported this library. Each reason names the step that has not
+// happened, so the condition says where to look.
+func readyCondition(seen libraryObservation, schedule string, generation int64) Condition {
 	condition := Condition{
 		Type:               conditionReady,
 		Status:             ConditionFalse,
 		ObservedGeneration: generation,
 	}
 	_, blocker := catalogPodBlocker(seen.choice.pod)
+	_, unparsed := parseScanSchedule(schedule)
 	switch {
 	case seen.bound.volume == nil:
 		condition.Reason = reasonNotBound
@@ -215,9 +214,11 @@ func readyCondition(seen libraryObservation, generation int64) Condition {
 	case blocker != "":
 		condition.Reason = reasonCatalogPending
 		condition.Message = blocker
-	case seen.cronJob == nil:
-		condition.Reason = reasonScanPending
-		condition.Message = "the scan schedule does not stand yet"
+	case unparsed != nil:
+		// The operator starts every walk from this schedule, so a schedule
+		// it cannot read is a Library that never walks.
+		condition.Reason = reasonScheduleInvalid
+		condition.Message = unparsed.Error()
 	case !seen.online:
 		condition.Reason = reasonOffline
 		condition.Message = "the namespace's reporter is not on the bus"

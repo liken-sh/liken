@@ -116,7 +116,7 @@ docker run --detach --name "$container" \
 
 # The Job exits on its own, and every way out of this script removes
 # what is left of its container. Only the trap calls cleanup, and
-# shellcheck does not count a trap as a call.
+# ShellCheck does not count a trap as a call.
 # shellcheck disable=SC2329
 cleanup() {
   docker rm --force "$container" >/dev/null 2>&1 || true

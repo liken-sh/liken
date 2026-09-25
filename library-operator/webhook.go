@@ -103,9 +103,9 @@ func topString(top map[string]json.RawMessage, key string) string {
 }
 
 // resolveWebhookPath maps a payload path onto the library root. The
-// scanner and the enrichers resolve a SCAN_PATH through the one function
-// below, so a folder the webhook named reads the same in every Job of
-// its chain.
+// scanner and the phases resolve each folder of SCAN_PATHS through the one
+// function below, so a folder the webhook named reads the same in every
+// container of the Job.
 func (s *scanner) resolveWebhookPath(payloadPath string) string {
 	return resolveVolumePath(s.root, payloadPath)
 }

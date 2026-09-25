@@ -36,8 +36,8 @@ cluster's members use to find one another:
 
 Every member holds the whole namespace's catalog, because the cluster
 gossips every row to every peer. `spec.storage.size` sets the size of
-new catalog claims for the durable replicas, worker `Jobs`, and
-screens. `spec.storage.claimName` names an existing claim for the
+new catalog claims for the durable replicas, each `Library`'s `Jobs`,
+and screens. `spec.storage.claimName` names an existing claim for the
 durable replicas in place of the one the operator provisions.
 [Catalog](/docs/reference/catalogs/) describes every field.
 
@@ -97,11 +97,43 @@ for the agent to open its database.
 The operator writes a headless `Service` named `catalog` in the
 namespace, on UDP port 8787, and writes its `EndpointSlice` itself.
 The slice holds every pod in the namespace that has the member
-label: the catalog replica pods, every running scan, enrich, and cleanup `Job`,
-and every screen. A starting agent is published before it is ready,
+label: the catalog replica pods, the running `Job` of each `Library`,
+a running cleanup `Job`, and every screen. A starting agent is published before it is ready,
 because it is a gossip peer as soon as it starts. Every agent
 bootstraps to `catalog:8787` and keeps re-resolving it for as long as
 it runs.
+
+## A Library's claim
+
+Each `Library` has one catalog claim, `<library>-catalog`, and every
+`Job` of the `Library` runs its agent on it: the walks, the `Jobs` that
+fill gaps, and the cleanup of a deleted `Library`. The claim keeps the
+agent's actor id and its rows between runs, so each `Job` syncs only
+what changed since the last one.
+
+Two agents must never open one database. `ReadWriteOnce` limits a
+volume to one node, and every pod on that node can still mount it, so
+the operator starts a `Job` of a `Library` only when no other `Job` of
+that `Library` is unfinished. On a per-node class the claim is also
+`ReadWriteOncePod`, which limits it to one pod in the whole cluster.
+The next `Job` can run on another node and use that node's copy. On
+every other class the operator writes `ReadWriteOnce`, and its rule of
+one `Job` at a time is the only guard.
+
+A claim's access mode cannot change after it is created, and the
+operator creates each claim once. So a `<library>-catalog` claim made
+by an earlier release keeps its mode. To move it to `ReadWriteOncePod`
+on a per-node class, delete the claim after the `Library`'s last `Job`
+completed and while no other `Job` of it runs. The next pass creates
+the claim again, and the next `Job` syncs the catalog onto it. A `Job`
+that completed has handed its rows to a catalog pod, so no row is
+lost.
+
+Earlier releases gave each `Library` three more claims:
+`<library>-enrich-catalog`, `<library>-trickplay-catalog`, and
+`<library>-trailers-catalog`. The operator deletes them, and the
+`CronJob` named `<library>-scan`, the first time it reconciles the
+`Library`.
 
 ## How a `Job` confirms its rows landed
 
@@ -109,6 +141,9 @@ Every worker `Job` writes a `runs` row when it starts. It updates that
 row when it finishes. The finished write returns the writing agent's id
 and the database version of that write. The `Job` then records that
 agent id and database version in the row, and waits for confirmation.
+In a `Library`'s `Job`, the `close` container makes this write after
+every phase has ended, so it covers every row the walk and the phases
+wrote through the one agent.
 
 Every catalog pod runs a `confirmer` beside its agent. The `confirmer`
 follows each finished run. It reads `crsql_db_versions` and
@@ -125,7 +160,13 @@ earlier versions arrived. While it waits, the `Job` rewrites its
 `runs` row every ten seconds with a later finish time. Each rewrite is a
 new broadcast to current peers. A `Job` that waits more than two minutes
 fails, and Kubernetes retries it. `HANDOFF_TIMEOUT` sets that limit. The
-rows remain safe on the `Job`'s own claim.
+rows remain safe on the `Library`'s claim.
+
+Before a phase reads its first gap, it waits until the local copy holds
+the newest run a catalog pod confirmed for the `Library`, the one the
+reporter last published. A gap read against a copy that has not synced
+would miss titles, or ask a provider again about a title whose attempt
+has not arrived. `SYNC_TIMEOUT` bounds the wait at ten minutes.
 
 ## How a screen syncs
 

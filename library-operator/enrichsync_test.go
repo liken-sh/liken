@@ -23,154 +23,133 @@ func shorterSyncInterval(t *testing.T) {
 }
 
 // SyncingEnricher builds one fact container with the bound on its
-// wait the operator gives it.
+// wait the operator gives it, and a target another agent wrote.
 func syncingEnricher(t *testing.T, catalog *Catalog) *enricher {
 	t.Helper()
 	shorterSyncInterval(t)
 
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
 	work.syncTimeout = scanTestTimeout
+	work.sync = syncTarget{actor: otherAgent, version: 1}
 	return work
 }
 
-// Writes the finished scan run a synced copy has to hold, naming the
-// write the walking agent made.
-func walkLanded(t *testing.T, catalog *Catalog, library string, at time.Time) {
-	t.Helper()
-	run := libraryRun{Worker: workerScan, Job: "movies-scan-1", Started: at.Add(-time.Minute), Finished: at}
-	actor, version, err := catalog.UpsertRun(t.Context(), library, run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	run.Actor, run.Version = actor, version
-	if _, _, err := catalog.UpsertRun(t.Context(), library, run); err != nil {
-		t.Fatal(err)
-	}
-}
+// Another agent's run, which a copy has to receive before it holds it: the
+// target a Job carries, from the run the last Job of the Library confirmed.
+const otherAgent = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 
-// A walk that changes no count still has to reach the copy before the
-// container reads its gap, and the runs row is what says it has.
-func TestAContainerWaitsUntilItsCopyHoldsTheWalk(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
+// A copy waits until the target's agent reaches its version, and a sync
+// from that agent is what ends the wait.
+func TestAContainerWaitsUntilItsCopyHoldsTheTarget(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
+	work.sync = syncTarget{actor: otherAgent, version: 40}
+	agent.holdVersion(t, otherAgent, 12)
 	done := make(chan error, 1)
 	go func() { done <- work.awaitCatalogSync(t.Context()) }()
 
 	select {
 	case err := <-done:
-		t.Fatalf("the wait ended on a copy that had not seen the walk: %v", err)
+		t.Fatalf("the wait ended on a copy that had not reached the target: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	walkLanded(t, catalog, work.library, time.Date(2026, 9, 3, 23, 0, 0, 0, time.UTC))
+	agent.holdVersion(t, otherAgent, 40)
 
 	if err := <-done; err != nil {
-		t.Fatalf("the wait failed after the walk's row landed: %v", err)
+		t.Fatalf("the wait failed after the copy reached the target: %v", err)
 	}
 }
 
-// What the wait reads off the runs table: the row it needs, the
-// rows it stands on, and the row from before the confirmation existed,
-// which carries no version and is taken as it is.
-func TestWhichScanRunEndsTheWait(t *testing.T) {
+// What the wait reads: no target, a target the copy holds, a version it
+// does not hold, and a hole in the target's own agent.
+func TestWhichCopyHoldsTheTarget(t *testing.T) {
 	cases := []struct {
-		name string
-		run  libraryRun
-		want bool
+		name   string
+		target syncTarget
+		held   int64
+		gap    bool
+		want   bool
 	}{
-		{
-			name: "no scan run at all",
-			run:  libraryRun{Worker: workerRescan, Job: "movies-rescan-1", Finished: time.Unix(20, 0)},
-		},
-		{
-			name: "a walk that has not finished",
-			run:  libraryRun{Worker: workerScan, Job: "movies-scan-1", Started: time.Unix(10, 0)},
-		},
-		{
-			// A walk written before the confirmation existed names no
-			// version, and there is nothing about it to prove.
-			name: "a finished walk written before this build",
-			run:  libraryRun{Worker: workerScan, Job: "movies-scan-1", Finished: time.Unix(20, 0)},
-			want: true,
-		},
-		{
-			name: "a walk whose version this copy does not hold",
-			run: libraryRun{Worker: workerScan, Job: "movies-scan-1", Finished: time.Unix(20, 0),
-				Actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", Version: 99},
-		},
+		{name: "a Library with no confirmed run", want: true},
+		{name: "a copy that holds the version", target: syncTarget{actor: otherAgent, version: 40},
+			held: 41, want: true},
+		{name: "a copy behind the version", target: syncTarget{actor: otherAgent, version: 40}, held: 39},
+		{name: "a hole that reaches back over the version", target: syncTarget{actor: otherAgent, version: 40},
+			held: 41, gap: true},
 	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			catalog, _ := newSQLiteCatalog(t)
-			if _, _, err := catalog.UpsertRun(t.Context(), "house/movies", testCase.run); err != nil {
-				t.Fatal(err)
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			catalog, agent := newSQLiteCatalog(t)
+			agent.holdVersion(t, otherAgent, one.held)
+			if one.gap {
+				agent.recordGap(t, otherAgent, 1, 30)
 			}
 
-			synced, err := catalogSynced(t.Context(), catalog, "house/movies")
+			synced, err := catalogSynced(t.Context(), catalog, one.target)
 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if synced != testCase.want {
-				t.Errorf("catalogSynced = %v, want %v", synced, testCase.want)
+			if synced != one.want {
+				t.Errorf("catalogSynced = %v, want %v", synced, one.want)
 			}
 		})
 	}
 }
 
-// A walk written before the confirmation existed names no version, so
-// it is synced on its own, gaps or not.
-func TestAWalkFromBeforeThisBuildIsSyncedWithGapsPresent(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	if _, _, err := catalog.UpsertRun(t.Context(), work.library, libraryRun{
-		Worker: workerScan, Job: "movies-scan-1", Finished: time.Unix(20, 0),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 110)
-
-	if err := work.awaitCatalogSync(t.Context()); err != nil {
-		t.Fatalf("the wait held on a run from before this build: %v", err)
-	}
-}
-
 // Ranges left by agents that died with versions unsent never fill, and
-// they say nothing about the walk.
+// they say nothing about the target.
 func TestAnotherWritersHoleDoesNotBlockTheWait(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
-	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
-	agent.recordGap(t, "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 136)
+	work.sync = syncTarget{actor: otherAgent, version: 40}
+	agent.holdVersion(t, otherAgent, 40)
+	agent.recordGap(t, "5a6b7c8d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", 1, 136)
 
 	if err := work.awaitCatalogSync(t.Context()); err != nil {
 		t.Fatalf("the wait held on another writer's missing range: %v", err)
 	}
 }
 
-// A gap of the walk's own writer that reaches back over the version the
-// run names leaves the walk unheld.
-func TestAHoleInTheWalksOwnWriterBlocksTheWait(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
-	agent.recordGap(t, sqliteAgentActor, 1, 1000)
-	work.syncTimeout = 100 * time.Millisecond
-
-	if err := work.awaitCatalogSync(t.Context()); err == nil {
-		t.Error("the wait ended on a copy missing the walk writer's versions")
+// The target is the newest finished run that names a version, whatever its
+// worker, and no target where no run names one.
+func TestTheSyncTargetIsTheNewestConfirmedRun(t *testing.T) {
+	cases := []struct {
+		name string
+		runs []libraryRun
+		want syncTarget
+	}{
+		{name: "no runs"},
+		{name: "runs with no version", runs: []libraryRun{
+			{Worker: workerScan, Finished: time.Unix(20, 0)},
+		}},
+		{name: "the newest of two", want: syncTarget{actor: otherAgent, version: 90}, runs: []libraryRun{
+			{Worker: workerScan, Finished: time.Unix(20, 0), Actor: sqliteAgentActor, Version: 12},
+			{Worker: workerEnrich, Finished: time.Unix(40, 0), Actor: otherAgent, Version: 90},
+		}},
+		{name: "a run in flight", want: syncTarget{actor: sqliteAgentActor, version: 12}, runs: []libraryRun{
+			{Worker: workerScan, Finished: time.Unix(20, 0), Actor: sqliteAgentActor, Version: 12},
+			{Worker: workerEnrich, Started: time.Unix(40, 0), Actor: otherAgent, Version: 90},
+		}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if got := syncTargetFor(one.runs); got != one.want {
+				t.Errorf("syncTargetFor = %+v, want %+v", got, one.want)
+			}
+		})
 	}
 }
 
-func TestAContainerWhoseCopyAlreadyHoldsTheWalkReadsItsGapAtOnce(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	work := syncingEnricher(t, catalog)
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
-	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
-
-	if err := work.awaitCatalogSync(t.Context()); err != nil {
-		t.Fatalf("the wait failed on a copy that already held the walk: %v", err)
+// The target reaches a container through two variables, and a version no
+// reader can parse is zero.
+func TestTheSyncTargetComesOffTheEnvironment(t *testing.T) {
+	if got := syncTargetOf(otherAgent, "40"); got != (syncTarget{actor: otherAgent, version: 40}) {
+		t.Errorf("syncTargetOf = %+v, want the agent and version 40", got)
+	}
+	if got := syncTargetOf(otherAgent, "soon"); got != (syncTarget{actor: otherAgent}) {
+		t.Errorf("syncTargetOf = %+v, want version zero", got)
 	}
 }
 
@@ -196,6 +175,7 @@ func TestAStoppedContainerEndsItsWait(t *testing.T) {
 func TestAFactContainerFailsWhereTheCopyNeverSyncs(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
+	work.sync = syncTarget{actor: otherAgent, version: 40}
 	work.syncTimeout = 100 * time.Millisecond
 
 	if err := work.runFacts(t.Context(), likenFacts); err == nil {
@@ -212,11 +192,11 @@ func answering(t *testing.T, probe mediaProbe) {
 }
 
 func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
+	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
 	folder := "The Thing (1982)"
 	seedProbeGap(t, catalog, work.root, folder, "The Thing (1982).mkv")
-	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
+	agent.holdVersion(t, otherAgent, 1)
 	answering(t, answeringProbe(ffprobeOfOneFile))
 
 	if err := work.runFacts(t.Context(), []string{factProbe}); err != nil {
@@ -240,12 +220,12 @@ func answeringTMDb(t *testing.T, client *tmdbClient) {
 }
 
 func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
+	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
 	folder := "The Thing (1982)"
 	writeFile(t, filepath.Join(work.root, folder, "thing.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
-	walkLanded(t, catalog, work.library, time.Unix(1_700_000_000, 0).UTC())
+	agent.holdVersion(t, otherAgent, 1)
 	client, _ := newFakeTMDb(t, map[string]string{
 		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
 			tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,

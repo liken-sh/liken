@@ -77,7 +77,7 @@ starts, when you edit the provider or its `Secret`, and then once an
 hour. A provider that gives no usable answer is checked every five
 minutes until it does. A refused key waits the hour, so edit its
 `Secret` to have it checked at once. A `secretKeyRef` passes the key to
-an enricher container, so no long-running pod stores it.
+a phase container of the `Library`'s `Job`, so no long-running pod stores it.
 
     $ kubectl -n media get metadataproviders
     NAME    PROVIDER   READY   REASON      AGE
@@ -106,39 +106,69 @@ first provider that holds an image. The `Sources` condition on the
 `Library` reports whether every name resolves and every fact the
 library needs has a provider.
 
-## 3. What the enricher does
+## 3. What the phases do
 
-The operator creates an enrich `Job` named `<library>-enrich` when a
-walk has finished and a fact still has an open gap. The `Job` runs its
-facts in order, each in a container of its own: `probe` reads each
-video's streams, `arrival` records when a file was first seen,
-`identity` names each title, `nfo` fills the `.nfo` file, `art` downloads
-the images, `trailer` records where each title's trailers are, `marks`
-records where each video's intro and credits are, and `contributors`
-fills the people.
+Enrichment runs as phases of the `Library`'s `Job`, one container for
+each phase. The operator runs one `Job` of a `Library` at a time. A walk
+`Job` runs the walk and every phase the `Library`'s sources serve. A
+`Job` that fills gaps runs no walk and only the phases whose gaps the
+last report counted. The [scanning guide](https://library.liken.sh/docs/guides/scanning/#when-a-scan-runs)
+says when each one starts.
 
-    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=enrich
-    kubectl -n media logs job/movies-enrich -c nfo
+The phases are `probe`, which reads each video's streams, `arrival`,
+which records when a file was first seen, `identity`, which names each
+title, `nfo`, which fills the `.nfo` file, `art`, which downloads the
+images, `trailer`, which records where each title's trailers are,
+`marks`, which records where each video's intro and credits are,
+`contributors`, which fills the people, and, where the `Library` turns
+them on, `trickplay` and `trailer-files`. A phase runs only where a
+Ready source of the `Library` serves one of its facts. `probe` and
+`arrival` ask no provider, so they always run.
 
-### The trickplay Job
+All the phases start together, and each one reads its gap again
+whenever the rows it reads change. So a phase works on a title as soon
+as the phases before it have written that title's rows: `nfo`, `art`,
+and `trailer` wait for the id `identity` writes, `marks` for the id and
+the length `probe` measures, `contributors` for the people the credits
+fact writes, `trickplay` for the length, and `trailer-files` for the
+addresses `trailer` records. The art of the first title lands while
+`identity` still works on the rest.
 
-The scrub-bar thumbnails are a `Job` of their own, named
-`<library>-trickplay`, because one title's decode runs for minutes and
-the other facts must not wait behind it. It runs beside the enrich
-`Job` when `spec.trickplay.enabled` is set and a video has no tile
-directory. A webhook's folder gets one beside its enrich stage.
+A phase ends when every phase it waits for has ended and one pass after
+that found no work. Then it writes a mark on the `Job`'s `phases`
+volume, and the `close` container waits for every mark before it writes
+the `Job`'s run. Three phases edit the `.nfo` file of a title: `probe`
+writes `<fileinfo>`, `identity` writes `<uniqueid>`, and `nfo` writes
+its element groups. Each edit takes a lock on the `phases` volume for
+that file, so no two of them overwrite each other.
 
-The `Job` decodes on the node's GPU when `spec.trickplay.render` names
+A phase that fails writes a failed mark, and the phases that wait for
+it finish what they have and end. The `Job` still succeeds, the
+`enrich` run in `status.runs` names the failure, and the failed phase's
+titles stay in its gap for the next `Job`.
+
+    kubectl -n media get jobs -l library.liken.sh/library=movies
+    kubectl -n media logs job/<job> -c nfo
+
+### Trickplay
+
+The scrub-bar thumbnails are the `trickplay` phase, which runs where
+`spec.trickplay.enabled` is set. One title's decode runs for minutes,
+so the phase starts no new title fifteen minutes into a run. It
+finishes the title it has, and the rest stays in its gap. While that gap
+is open, the operator starts a `Job` that fills gaps each time the
+`Library` has no other `Job` running, so a backlog clears fifteen
+minutes at a time and a webhook's folder never waits behind all of it.
+
+The phase decodes on the node's GPU when `spec.trickplay.render` names
 a DeviceClass. The operator keeps a `ResourceClaimTemplate` for the
-`Library`, and the `Job`'s pod claims one device from it. `ffmpeg`
-decodes through VA-API, and it falls back to software for a codec the
-GPU refuses. With no render block the `Job` decodes in software. With
-a render block on a cluster where no node offers such a device, the
-pod stays `Pending`, and its events say so.
+`Library`, and a `Job` that runs the phase claims one device from it.
+`ffmpeg` decodes through VA-API, and it falls back to software for a
+codec the GPU refuses. With no render block the phase decodes in
+software. With a render block on a cluster where no node offers such a
+device, the pod stays `Pending`, and its events say so.
 
-    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
-
-The tile directory is the one Jellyfin reads and writes. So the `Job`
+The tile directory is the one Jellyfin reads and writes. So the phase
 accepts a directory Jellyfin made first and leaves it alone.
 
 ### Identification
@@ -155,7 +185,7 @@ in `.liken/identity.yaml`, and the title counts in `status.waiting`
 until a person names the right `uniqueid` in the `.nfo`. A title no
 provider can name counts in `status.unresolved`.
 
-After identifying a title through TMDb, the enricher requests its IMDb
+After identifying a title through TMDb, the identity phase requests its IMDb
 and TVDB ids and writes any returned ids into the `.nfo` file. OMDb uses
 the IMDb id to look up the title. Fanart.tv uses the TMDb id for a
 movie and the TVDB id for a series. These ids identify the title;
@@ -313,9 +343,10 @@ the attempt records the error.
 **A trailer is tens of megabytes per title, so a library of any size
 adds gigabytes to the volume the first time this fact runs.**
 
-The operator creates a `<library>-trailers-<walk>` `Job` beside the
-enricher, on a catalog claim of its own, and two titles pull at once
-inside it. The fact takes no `spec.refresh`.
+The `trailer-files` phase of the `Library`'s `Job` runs the fact, and
+two titles pull at once inside it. Like `trickplay`, the phase starts
+no new title fifteen minutes into a run, and the next `Job` goes on
+with the rest. The fact takes no `spec.refresh`.
 
 ### When a fact asks again
 
@@ -330,8 +361,9 @@ time in `spec.refresh`:
         overview: "2026-09-06T00:00:00Z"
 
 Every attempt of that fact before the time no longer counts. A refresh
-starts an enricher on the next pass without a walk behind it, and a
-refresh set while an enricher runs starts another one after it. The fact
+starts a `Job` that fills gaps, without a walk, as soon as the
+`Library` has no other `Job` running, and a refresh set while a `Job`
+runs starts another one after it. The fact
 rewrites its own files and rows in place, and nothing is deleted.
 
 `kubectl liken library reenrich movies` writes that field for you and
@@ -357,5 +389,9 @@ the file to Jellyfin.
     kubectl -n media get library movies -o jsonpath='{.status.waiting} {.status.unresolved} {.status.fights}'
     kubectl -n media get library movies -o jsonpath='{.status.conditions[?(@.type=="Sources")]}'
 
-`status.gaps` counts, per fact, the rows still to fill. The operator
-creates the next enrich `Job` while any count is above zero.
+`status.gaps` counts, per fact, the rows still to fill. Between walks,
+the operator starts a `Job` that fills gaps with the phases whose counts
+are above zero, once a refresh time or a source provider that turned
+`Ready` has given them work since the last `Job` started. `trickplay` and
+`trailer-files` run in such a `Job` while their counts are above zero,
+because each run stops at its time limit.

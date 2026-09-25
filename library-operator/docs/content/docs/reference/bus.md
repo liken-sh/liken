@@ -74,10 +74,11 @@ The reporter publishes one report per `Library`, retained, and
 rebuilds it whenever the catalog's runs table changes and while any
 replicated table keeps changing. The operator folds each report into
 that `Library`'s status, so the fields are the ones
-[the `Library` status](/docs/reference/libraries/#status) carries. A
-scan `Job` writes its `runs` row as its last catalog write and exits
-only when this report names that `Job`, so a report is also the proof
-that the catalog pod holds every row the `Job` wrote.
+[the `Library` status](/docs/reference/libraries/#status) carries. The
+close container of a `Library`'s `Job` writes the `enrich` run as the
+`Job`'s last catalog write and exits only when a catalog pod confirms
+it, so a run in this report with a finish is also the proof that a
+catalog pod holds every row the `Job` wrote.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -87,7 +88,7 @@ that the catalog pod holds every row the `Job` wrote.
 | `lastChange` | RFC 3339 time | When the counts last moved. A report that counts the same rows as the one before carries the same time. A reporter that has just started takes `lastWalk`. |
 | `items` | integer | The item rows the catalog holds for this library after the last walk pruned. |
 | `files` | integer | The file rows the catalog holds for this library after the last walk pruned. |
-| `walking` | boolean | True while a scan `Job` runs, which is a scan run whose start is later than its finish. |
+| `walking` | boolean | True while a walk runs, which is a scan run whose start is later than its finish. |
 | `removedLastSweep` | integer | How many rows the last full sweep removed. |
 | `runs` | list | One entry per worker that has run against this library, sorted by worker. Absent until a worker has run. |
 | `gaps` | map of integers | One count per fact of the rows that fact has left to fill. Absent when no fact has a gap. |
@@ -111,9 +112,9 @@ is empty for a run that finished its work.
       "walking": false,
       "removedLastSweep": 3,
       "runs": [
-        {"worker": "enrich", "job": "movies-enrich-29310751",
-         "started": "2026-08-29T21:05:00Z", "finished": "2026-08-29T21:09:42Z"},
-        {"worker": "scan", "job": "movies-scan-29310740",
+        {"worker": "enrich", "job": "movies-walk-dlcg1z2yyzgw",
+         "started": "2026-08-29T21:03:01Z", "finished": "2026-08-29T21:09:42Z"},
+        {"worker": "scan", "job": "movies-walk-dlcg1z2yyzgw",
          "started": "2026-08-29T21:03:02Z", "finished": "2026-08-29T21:04:11Z",
          "unidentified": 9, "removed": 3}
       ],

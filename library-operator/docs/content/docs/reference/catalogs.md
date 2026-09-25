@@ -49,7 +49,7 @@ Where the catalog is stored and how large each agent's copy is.
 | --- | --- | --- | --- |
 | <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | The catalog of record every other agent copies, held on one claim that every durable copy mounts. The size is also the size of every working copy, and the class is the default class for the progress and libraries claims. |
 | <span id="spec--progress"></span>`progress` | [object](#specprogress) | no | The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size. |
-| <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. |
+| <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claim each Library's Jobs run on, one Job at a time, named after the Library with the suffix -catalog. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. On a per-node class the claim is ReadWriteOncePod, so Kubernetes admits one pod of it in the cluster at a time. |
 | <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
 | <span id="spec--jellyfin"></span>`jellyfin` | [object](#specjellyfin) | no | The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator run a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, the operator runs neither and deletes the previous pair. |
 
@@ -76,11 +76,11 @@ The claim the progress store runs on: who watched what, and how far. Each field 
 
 ### spec.libraries
 
-The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path.
+The claim each Library's Jobs run on, one Job at a time, named after the Library with the suffix -catalog. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. On a per-node class the claim is ReadWriteOncePod, so Kubernetes admits one pod of it in the cluster at a time.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="speclibraries--storageclassname"></span>`storageClassName` | string | no | The StorageClass a Library's scan and enrichment claims bind to. Omitted, they take storage.storageClassName, and when that is also omitted the cluster's default binds them. There is no size here: every agent holds the whole catalog, so both claims take storage.size. |
+| <span id="speclibraries--storageclassname"></span>`storageClassName` | string | no | The StorageClass a Library's catalog claim binds to. Omitted, it takes storage.storageClassName, and when that is also omitted the cluster's default binds it. There is no size here: every agent holds the whole catalog, so the claim takes storage.size. |
 
 ### spec.screens
 

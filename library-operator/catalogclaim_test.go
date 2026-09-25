@@ -19,17 +19,17 @@ func testCatalogWithSize(size, class string) *NamespaceCatalog {
 	}
 }
 
-// The catalog claim is ReadWriteOnce, sized from the Catalog, named for
-// the Library, and owned by the Library so it survives a pod roll and
-// is collected with the Library.
+// The catalog claim asks for ReadWriteOncePod, is sized from the Catalog,
+// is named for the Library, and is owned by the Library, so it survives a
+// pod roll and is collected with the Library.
 func TestBuildCatalogClaimIsOwnedByItsLibraryAndSizedByTheCatalog(t *testing.T) {
 	claim := buildCatalogClaim(studioMovies(), testCatalogWithSize("2Gi", "fast"))
 
 	if claim.Metadata.Name != "movies-catalog" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Library's catalog claim", claim.Metadata)
 	}
-	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
-		t.Errorf("accessModes = %v, want ReadWriteOnce", claim.Spec.AccessModes)
+	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOncePod {
+		t.Errorf("accessModes = %v, want ReadWriteOncePod", claim.Spec.AccessModes)
 	}
 	if claim.Spec.Resources.Requests["storage"] != "2Gi" {
 		t.Errorf("storage = %q, want the Catalog's size", claim.Spec.Resources.Requests["storage"])
@@ -139,7 +139,7 @@ func TestStandCatalogClaimReportsAFailedRead(t *testing.T) {
 }
 
 // The claim is created in the Library's own namespace, in the core
-// group, and the body carries the ReadWriteOnce access mode.
+// group, and the body carries the access mode the claim was built with.
 func TestCreatePersistentVolumeClaimPostsIntoTheNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "movies-catalog", Namespace: "house"},
@@ -151,8 +151,8 @@ func TestCreatePersistentVolumeClaimPostsIntoTheNamespace(t *testing.T) {
 	}
 
 	expectRequest(t, recorded, http.MethodPost, "/api/v1/namespaces/house/persistentvolumeclaims")
-	if !strings.Contains(recorded.body, `"ReadWriteOnce"`) {
-		t.Errorf("body = %s, want the ReadWriteOnce claim", recorded.body)
+	if !strings.Contains(recorded.body, `"ReadWriteOncePod"`) {
+		t.Errorf("body = %s, want the ReadWriteOncePod claim", recorded.body)
 	}
 	if created.Metadata.Name != "movies-catalog" {
 		t.Errorf("name = %q, want the claim the server wrote back", created.Metadata.Name)

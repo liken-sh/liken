@@ -331,7 +331,7 @@ func TestTheTrickplayFactWorksOnlyItsOwnScope(t *testing.T) {
 	seedTrickplayGap(t, catalog, root, 100*time.Second)
 	standInFFmpeg(t, 1)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "Another Folder"
+	work.scopes = []string{"Another Folder"}
 
 	if err := work.trickplayFact(t.Context()); err != nil {
 		t.Fatal(err)
@@ -367,40 +367,21 @@ func TestAStrayStagingDirectoryDoesNotBecomeTiles(t *testing.T) {
 	}
 }
 
-// The enricher Job holds no trickplay container. The fact runs in a Job of its
-// own, so an enricher never waits behind a decode.
-func TestTheEnricherHoldsNoTrickplayContainer(t *testing.T) {
-	library := studioMovies()
-	library.Spec.Trickplay.Enabled = true
+// Past the phase's time limit the fact starts no other file, and the file
+// stays in the gap of the next Job.
+func TestTheTrickplayFactStartsNoFilePastItsTimeLimit(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedTrickplayGap(t, catalog, root, 100*time.Second)
+	standInFFmpeg(t, 1)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work.stopStarting = time.Now().Add(-time.Second)
 
-	job := testEnrichJob(library, "", readyProvider("tmdb", "house"))
-
-	for _, container := range job.Spec.Template.Spec.InitContainers {
-		if container.Name == trickplayContainerName {
-			t.Errorf("the enricher holds %s, want the fact in a Job of its own", container.Name)
-		}
+	if err := work.trickplayFact(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-}
 
-// The enricher's own gap counts leave the trickplay gap out, on or off, because
-// an enricher that counted it would run for ever with nothing to do.
-func TestTheEnricherDoesNotCountTheTrickplayGap(t *testing.T) {
-	cases := []struct {
-		name    string
-		enabled bool
-	}{
-		{name: "a library that turns it on", enabled: true},
-		{name: "a library that leaves it off"},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			library, providers := libraryWithProvider()
-			library.Spec.Trickplay.Enabled = test.enabled
-			report := &libraryReport{Gaps: map[string]int{factTrickplay: 3}}
-
-			if gapOpen(library, report, providers) {
-				t.Error("the trickplay gap opened an enricher Job, want the trickplay Job to answer it")
-			}
-		})
+	if fileExistsInTest(t, filepath.Join(trickplayTilesUnder(root), "0.jpg")) {
+		t.Error("the fact started a file past its time limit")
 	}
 }

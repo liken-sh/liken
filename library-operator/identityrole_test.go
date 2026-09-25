@@ -276,8 +276,8 @@ func TestTheIdentityFactWorksOverTheFolderItsJobNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scanPath = "The Thing (1982)"
-	work.scope = work.narrowedScope()
+	work.scanPaths = []string{"The Thing (1982)"}
+	work.scopes = work.narrowedScopes()
 	client, fake := newFakeTMDb(t, nil)
 
 	if err := work.identityGap(t.Context(), client); err != nil {

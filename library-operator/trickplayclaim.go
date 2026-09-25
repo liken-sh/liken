@@ -69,10 +69,10 @@ type CELDeviceSelector struct {
 	Expression string `json:"expression"`
 }
 
-// The template of one Library, named from the Job that holds it, so a person
-// reading either object finds the other.
+// The template of one Library, named from the Library and the phase that
+// holds its claim, so a person reading the template finds the container.
 func trickplayTemplateName(library string) string {
-	return trickplayJobName(library)
+	return library + "-" + trickplayContainerName
 }
 
 // The template one Library's render block becomes: one request named render,

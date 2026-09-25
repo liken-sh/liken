@@ -8,8 +8,9 @@ This skill is the guide at https://library.liken.sh/docs/guides/webhooks/, emitt
 # Connect Radarr, Sonarr, and Jellyfin
 
 A full walk runs on the `Library`'s schedule, once an hour by
-default. A webhook rescans one folder the moment an import lands, so
-a new title is on the wall in seconds.
+default. A webhook rescans one folder as soon as the `Library` has no
+other `Job` running, so a new title reaches the wall without waiting
+for the next walk.
 
 ## The address
 
@@ -33,10 +34,20 @@ found names the folder to rescan. A body with none of them, or no
 body at all, schedules a full walk. Every POST answers `204 No
 Content`.
 
-A rescan is a chain of three `Jobs`: a scan of the folder, an enrich,
-and a rescan that reads what the enrich wrote. Past 64 distinct
-folders held for one `Library`, the whole set collapses to a full
-walk.
+The operator holds the folder and starts one walk `Job` for it on its
+next pass. That `Job` walks the folder and runs every phase the
+`Library`'s sources serve over it, so the title gets its id, its `.nfo`
+file, its art, and its tiles in the same `Job`, as each phase before
+them finishes the title.
+
+A `Library` runs one `Job` at a time. A webhook that arrives while a
+`Job` runs waits for it, and every folder the webhooks named in the
+meantime goes into the next `Job`. So five imports during one run start
+one `Job`, not five. Trickplay and the trailer files each stop starting
+new titles fifteen minutes into a run, so a `Job` that works through a
+backlog of them ends within about fifteen minutes and one title, and the
+folders that waited go next. Past 64 distinct folders held for one
+`Library`, the whole set collapses to a full walk.
 
 ## Radarr
 
@@ -71,7 +82,7 @@ lists the Jellyfin switches.
 
     curl -X POST http://library-operator.liken-system.svc/webhook/media/movies
 
-A body naming a folder narrows the rescan to that folder:
+A body naming a folder narrows the walk to that folder:
 
     curl -X POST http://library-operator.liken-system.svc/webhook/media/movies \
       -H 'Content-Type: application/json' \

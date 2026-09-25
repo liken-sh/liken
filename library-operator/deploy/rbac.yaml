@@ -2,8 +2,8 @@
 # nothing more. It reads libraries and catalogs, writes their statuses,
 # reads the storage behind each library, provisions the catalog claims,
 # stands the durable copies of each namespace's two stores with the
-# Services and EndpointSlices beside them, and creates the CronJob each
-# library becomes and the Jobs a webhook and a departure ask for. It
+# Services and EndpointSlices beside them, and creates the Jobs each
+# library runs and the Job a departure asks for. It
 # deletes an object to replace a stale one, to end a run, to recover a
 # screen the scheduler cannot place, to take down a copy the Catalog no
 # longer asks for, or to free a copy stranded on a node that stays
@@ -11,9 +11,11 @@
 # stranded copy loses the claim under it only on a class that binds the
 # claim to the node.
 # Every other teardown is the garbage collector's, through the
-# ownerReferences the pods, the claims, the CronJob, and the catalog
+# ownerReferences the pods, the claims, the Jobs, and the catalog
 # objects carry. It deletes no
-# object a person created. Every grant is cluster-wide, because a
+# object a person created. It deletes the CronJob and the claims an
+# earlier release stood for each library, by the names that release gave
+# them. Every grant is cluster-wide, because a
 # Library can be in any namespace.
 #
 # The operator also holds a finalizer on every Library, so a delete
@@ -127,24 +129,25 @@ rules:
     verbs: [get, list, watch, patch]
   # The media claim each Library names, read by name to learn whether it
   # is bound and which volume it is bound to. The claims the operator
-  # provisions: two per Library, one for its scan Jobs and one for its
-  # enricher, one for each of a Catalog's two stores, which every copy
-  # of that store mounts, and two per screen. Each is owned by the
-  # object it belongs to, so the garbage collector removes it with that
-  # owner. There is no update, because a claim's spec is immutable once
-  # it binds.
+  # provisions: one per Library, which its Jobs mount one at a time,
+  # one for each of a Catalog's two stores, which every copy of that
+  # store mounts, and two per screen. Each is owned by the object it
+  # belongs to, so the garbage collector removes it with that owner.
+  # There is no update, because a claim's spec is immutable once it
+  # binds.
   #
-  # The delete covers two cases, each guarded by the labels and the name
-  # the operator itself wrote: the two claims of a screen the scheduler
-  # has refused for longer than the grace, and the claim of a store
-  # whose copy is stranded on a node that has stayed NotReady past the
-  # grace. Neither delete fires on a per-node class, where the claim
-  # pins no pod to a node.
+  # The delete covers three cases, each guarded by the labels or the
+  # names the operator itself wrote: the two claims of a screen the
+  # scheduler has refused for longer than the grace, the claim of a
+  # store whose copy is stranded on a node that has stayed NotReady past
+  # the grace, and the enrich, trickplay, and trailers claims an earlier
+  # release stood for each Library. The first two never fire on a
+  # per-node class, where the claim pins no pod to a node.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, create, delete]
   # The ResourceClaimTemplate each Library that names a render node keeps, one
-  # per Library, owned by it. The trickplay Job's pod names the template and the
+  # per Library, owned by it. A library Job that runs trickplay names the template and the
   # kubelet mints the claim from it. The delete covers two cases: a Library that
   # no longer names a render node, and a render block that changed, because a
   # template's spec is immutable.
@@ -194,23 +197,24 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
-  # The workers. One CronJob per Library runs its full walk on a
-  # schedule, a Job runs one folder scan for a webhook, and a Job runs
-  # the sweep of a departing Library. The list and watch are
-  # cluster-scoped for the reason the pods are, and every pass re-reads
-  # with the list. The delete verb covers four deletes: the schedule of
-  # a Library that no longer stands one, a cleanup Job that failed and
-  # is stood again on a backoff, the retirement of a cleanup Job
-  # when its library is released, and a Jellyfin backfill Job that
-  # failed or that a Catalog no longer asks for. A CronJob is also updated, because a
-  # changed schedule or a new image rewrites it in place. A Job is
-  # never updated: it runs once as it was created.
+  # The workers. A Library runs one Job at a time: a walk on its
+  # schedule, for a request, or for a webhook's folders, and a Job that
+  # fills gaps between walks. A Job runs the sweep of a departing
+  # Library. The list and watch are cluster-scoped for the reason the
+  # pods are, and every pass re-reads with the list. The delete verb
+  # covers four deletes: a worker Job that succeeded more than the grace
+  # ago, a cleanup Job that failed and is stood again on a backoff, the
+  # retirement of a cleanup Job when its library is released, and a
+  # Jellyfin backfill Job that failed or that a Catalog no longer asks
+  # for. A Job is never updated: it runs once as it was created.
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [get, list, watch, create, delete]
+  # The CronJob an earlier release ran each Library's walk from, which
+  # the operator deletes by name. The operator creates none.
   - apiGroups: [batch]
     resources: [cronjobs]
-    verbs: [get, list, watch, create, update, delete]
+    verbs: [delete]
   # The headless catalog Service of each namespace that holds a
   # Catalog, read by name. The grant is cluster-wide because a Catalog
   # can be in any namespace, and the operator is one Deployment for the

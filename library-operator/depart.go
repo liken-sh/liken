@@ -76,37 +76,23 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 		return departure{reason: reasonBlocked, message: choice.message}, nil
 	}
 
-	// The schedule goes first, so no new walk starts behind the sweep.
-	if err := o.stopScanCronJob(ctx, library); err != nil {
+	// The objects an earlier release stood go first, so its CronJob starts
+	// no walk behind the sweep. The pass starts no Job of a deleting
+	// Library.
+	if err := o.retireLegacyWorkers(ctx, library); err != nil {
 		return departure{}, err
 	}
 
-	// A scan that is still running rewrites the rows the sweep deletes,
-	// and it holds the claim the cleanup Job needs. The
-	// guard reads the Job and not its pods, because a scan Job between
-	// the pods of its backoff has no pod running, and its next pod writes
-	// the rows the sweep deleted.
-	if scanUnfinished(jobs, namespace, name) {
-		return departure{
-			reason:  reasonScanRunning,
-			message: "a scan job of this library is still running",
-		}, nil
-	}
-
-	// An enricher that is still running writes onto the volume, and it writes
-	// its own runs row into the catalog the sweep is emptying, so a sweep beside
-	// it leaves rows behind. The Job list and the reporter's runs are both read,
-	// because a Job between the pods of its backoff has no pod running.
-	//
-	// An open run row whose Job the pass did not list is a run that died, and it
-	// holds no departure back.
+	// A Job that is still running rewrites the rows the sweep deletes, and
+	// it holds the claim the cleanup Job needs. The guard reads the Job and
+	// not its pods, because a Job between the pods of its backoff has no pod
+	// running, and its next pod writes the rows the sweep deleted. The
+	// reporter's runs are read as well, because a Job the controller has not
+	// started has written no run. An open run row whose Job the pass did not
+	// list is a run that died, and it holds no departure back.
 	report := o.reports.latestFor(namespace, name)
-	if enrichUnfinished(jobs, namespace, name) ||
-		(report != nil && enrichInFlight(report.Runs, jobs, namespace, name)) {
-		return departure{
-			reason:  reasonEnrichRunning,
-			message: "an enricher job of this library is still running",
-		}, nil
+	if running := departureBlocker(jobs, report, namespace, name); running.reason != "" {
+		return running, nil
 	}
 
 	blocker, err := o.standDepartureClaim(ctx, library, choice)
@@ -162,8 +148,8 @@ func (o *operator) standDepartureClaim(ctx context.Context, library *Library, ch
 // releaseLibrary lets a swept Library go: it retires the cleanup Job,
 // drops the library's retained messages from the bus, and takes the
 // finalizer off last, so the act that releases the object is the final
-// one. The garbage collector then takes the catalog claim and the
-// CronJob with the Library.
+// one. The garbage collector then takes the catalog claim with the
+// Library.
 func (o *operator) releaseLibrary(ctx context.Context, library *Library) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 
@@ -215,4 +201,25 @@ func departingStatus(library *Library, stage departure, now time.Time) LibrarySt
 		Message:            stage.message,
 	}, now)
 	return status
+}
+
+// The Job of this Library that holds the departure back: a walk, or a Job
+// that fills gaps, or a Job an earlier release created. A walk writes the
+// rows the sweep deletes. Every other Job writes onto the volume and its own
+// runs row into the catalog the sweep is emptying.
+func departureBlocker(jobs []Job, report *libraryReport, namespace, library string) departure {
+	for _, job := range jobsOfLibrary(jobs, namespace, library) {
+		worker := job.Metadata.Labels[workerLabelKey]
+		if job.finished() || worker == workerCleanup {
+			continue
+		}
+		if worker == jobModeWalk || worker == workerScan {
+			return departure{reason: reasonScanRunning, message: "a walk job of this library is still running"}
+		}
+		return departure{reason: reasonEnrichRunning, message: "a job of this library is still running"}
+	}
+	if report != nil && enrichInFlight(report.Runs, jobs, namespace, library) {
+		return departure{reason: reasonEnrichRunning, message: "a job of this library is still running"}
+	}
+	return departure{}
 }

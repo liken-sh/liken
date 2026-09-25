@@ -61,7 +61,8 @@ type operator struct {
 	scannerImage   string
 	corrosionImage string
 	browserImage   string
-	// The image the probe container and the trickplay Job run on.
+	// The image the phases that open a media file run on: the probe,
+	// trickplay, and the trailer files.
 	ffmpegImage string
 	// The household wall-clock zone the pass read last, which every screen
 	// pod it stands carries as TZ. Empty where the cluster states none.
@@ -134,10 +135,13 @@ type operator struct {
 	// names no server.
 	backfillStands map[string]cleanupStand
 
-	// The restand backoff of each Library worker whose standing Job failed,
-	// keyed by the Library and the worker, so the curve survives the Job
-	// renaming that a new walk brings.
+	// The backoff of each Library whose newest Job failed, keyed by the
+	// Library, so the curve survives the new name each Job takes.
 	failedStands map[string]cleanupStand
+
+	// The Libraries whose objects from an earlier release this process has
+	// deleted, keyed the way the report desk keys a Library.
+	legacyRetired map[string]bool
 
 	// Which of the classes this pass has read are served by the per-node
 	// driver, by class name. The pass clears it when it starts, so an
@@ -182,6 +186,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 		cleanupStands:  map[string]cleanupStand{},
 		backfillStands: map[string]cleanupStand{},
 		failedStands:   map[string]cleanupStand{},
+		legacyRetired:  map[string]bool{},
 		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
@@ -531,6 +536,11 @@ func (o *operator) pass() {
 	for key := range o.cleanupStands {
 		if !live[key] {
 			delete(o.cleanupStands, key)
+		}
+	}
+	for key := range o.legacyRetired {
+		if !live[key] {
+			delete(o.legacyRetired, key)
 		}
 	}
 	// A restand key names a Library and a worker, so the Library it names is

@@ -63,10 +63,17 @@ const claimBound = "Bound"
 // mode on a per-node class, because every node that mounts the volume
 // holds a copy of its own, and ReadWriteOnce would refuse the second
 // node.
+//
+// ReadWriteOncePod is the mode of a Library's catalog claim on a per-node
+// class. ReadWriteOnce limits a volume to one node, and every pod on that
+// node can mount it. ReadWriteOncePod limits the claim to one pod in the
+// cluster, so a second Job of the Library stays Pending and never starts
+// a second agent on the same database.
 const (
-	claimAPIVersion         = "v1"
-	accessModeReadWriteOnce = "ReadWriteOnce"
-	accessModeReadWriteMany = "ReadWriteMany"
+	claimAPIVersion            = "v1"
+	accessModeReadWriteOnce    = "ReadWriteOnce"
+	accessModeReadWriteMany    = "ReadWriteMany"
+	accessModeReadWriteOncePod = "ReadWriteOncePod"
 )
 
 // A PersistentVolume is read for what serves the storage behind a
@@ -322,8 +329,8 @@ type PodSpec struct {
 	Volumes        []Volume    `json:"volumes,omitempty"`
 	// The claims the pod holds, under the names its containers ask for
 	// them by. A screen pod names the display claim media-operator stood for
-	// its Player, and a trickplay Job's pod names the template the
-	// operator keeps for its Library's render node.
+	// its Player, and a library Job that runs trickplay names the
+	// template the operator keeps for its Library's render node.
 	ResourceClaims []PodResourceClaim `json:"resourceClaims,omitempty"`
 	// The scheduling rules the pod carries. The durable copies of a store
 	// are the only pods this operator gives any.

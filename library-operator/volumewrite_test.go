@@ -198,7 +198,8 @@ func TestAnEditRefusesADocumentItCannotRead(t *testing.T) {
 }
 
 // The calls that would let an enricher lose a file on the volume, which only
-// the write door may make.
+// the write door may make. phasemarks.go makes them on the phases volume, an
+// emptyDir of the Job's own that holds no media, so the rule leaves it out.
 var forbiddenVolumeCalls = []string{"os.Remove(", "os.RemoveAll(", "os.Truncate(", "os.Rename("}
 
 func TestOnlyTheWritePackageRemovesRenamesOrTruncates(t *testing.T) {
@@ -218,7 +219,8 @@ func forbiddenCallsInPackage(t *testing.T) []string {
 	var found []string
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || name == "volumewrite.go" {
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") ||
+			name == "volumewrite.go" || name == "phasemarks.go" {
 			continue
 		}
 		source, err := os.ReadFile(name)

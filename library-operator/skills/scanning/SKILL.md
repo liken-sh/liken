@@ -112,43 +112,69 @@ no element for: one YAML file per fact, named for the fact. `identity.yaml`
 holds the provider ids, or the candidates left for a person to choose
 from. `arrival.yaml` holds when each video file was first seen. Every
 other `<fact>.yaml` holds what that fact wrote, which provider answered,
-and its attempts. One file per writer lets several enrichers run at once
-on a network mount with no locks. The scan reads these files and never
-writes them.
+and its attempts. One file per writer lets the phases of a `Job` run at
+once on a network mount with no locks. The scan reads these files and
+never writes them.
 
 ### `.contributors/`
 
 At the library root, one directory per credited person, sharded by
 the first two characters of the person's slug. Each holds
 `contributor.yaml` with the name and the provider ids, and, once the
-enricher fills them, `biography.txt` and `headshot.jpg`. The walk
+contributors phase fills them, `biography.txt` and `headshot.jpg`. The walk
 reads this directory after the titles. It is the one dot-named
 directory the walk enters.
 
 ## When a scan runs
 
-Every scan is a `Job`. The full walk runs from a `CronJob` named
-`<library>-scan` on `spec.scan.schedule`, once an hour by default.
-A walk that runs past its next turn skips that turn, because the
-catalog claim admits one writer. A [webhook](https://library.liken.sh/docs/guides/webhooks/)
-runs a one-off `Job` that rescans one folder.
+Every scan runs in a `Job` the operator creates for the `Library`, and
+only one `Job` of a `Library` runs at a time. The operator starts a
+walk `Job` when one of these asks for it and no other `Job` of the
+`Library` is unfinished:
 
-    kubectl -n media get cronjob movies-scan
-    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=scan
-    kubectl -n media create job movies-scan-now --from=cronjob/movies-scan
+* `spec.scan.schedule`, a cron expression in the form a `CronJob`
+  takes, once an hour by default. It is in UTC unless it starts with a
+  `CRON_TZ=` prefix. A walk is due when a time in the
+  schedule has passed since the last full walk started. A `Library`
+  that has never been walked is due at once.
+* A request in `spec.refresh.scan`. `kubectl liken library rescan
+  movies` writes the current time there. A walk that starts at or
+  after the time answers the request, so asking again is a matter of
+  setting a later time. It is the same map the
+  [enrichment guide](https://library.liken.sh/docs/guides/enrichment/) uses for facts.
+* A [webhook](https://library.liken.sh/docs/guides/webhooks/). The walk reads only the folders
+  the webhooks named, and a webhook that named no folder asks for a
+  full walk.
 
-A person can ask for a walk without waiting for the schedule.
-`kubectl liken library rescan movies` writes the walk's time into
-`spec.refresh.scan`, and the operator stands one `Job` for it, the same
-walk the `CronJob` runs. A walk that starts at or after the time answers
-the request, so asking again is a matter of setting a later time. It is
-the same map the [enrichment guide](https://library.liken.sh/docs/guides/enrichment/) uses for
-facts, and the key for a full walk is `scan`.
+A walk that is due while another `Job` of the `Library` runs waits for
+that `Job` to finish, and the folders webhooks name in the meantime
+wait with it. The next `Job` walks all of them.
 
-A scan `Job` writes a `runs` row when it starts and updates it when it
-finishes. Then it waits until a catalog pod confirms that run, and
-exits. So a `Job` that completed is a `Job` whose rows reached a
-durable copy of the catalog.
+    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=walk
+
+A walk `Job` is named `<library>-walk-<suffix>`. It runs the `scan`
+container beside every phase the `Library`'s sources serve: the probe,
+the arrival fact, identity, the `.nfo` facts, the art, the trailers,
+the marks, the people, trickplay, and the trailer files. All of them
+start together, and each phase works on a title as soon as the walk and
+the phases before it have written that title's rows. The
+[enrichment guide](https://library.liken.sh/docs/guides/enrichment/#3-what-the-phases-do)
+describes the phases. The `scan` container runs a person's own image
+when the kind's settings block names one, and it always mounts the
+library volume read-only.
+
+The walk writes a `runs` row under the `scan` worker when it starts,
+and again when it finishes. A walk of folders writes its row under the
+`rescan` worker, so the full walk's counts stay beside it. The `Job`'s
+`close` container writes the `enrich` row after the last phase and
+waits until a catalog pod confirms it. So a `Job` that completed is a
+`Job` whose rows reached a durable copy of the catalog.
+
+Every `Job` of a `Library` runs its catalog agent on the `Library`'s one
+catalog claim, `<library>-catalog`. The operator's rule of one `Job` at
+a time is what keeps two agents off one database. On a per-node class
+the claim is also `ReadWriteOncePod`, so the scheduler keeps a second
+pod of the claim `Pending` while the first one runs.
 
 ## Mark and sweep
 
@@ -174,14 +200,16 @@ a player.
 ## Deleting a Library
 
 A `Library` has a finalizer, and deleting it starts a departure that
-removes its rows from the namespace's catalog. The operator deletes
-the `CronJob`, then waits for any scan or enrich `Job` to finish. Then
-it runs a cleanup `Job` named `<library>-cleanup`, which deletes the
+removes its rows from the namespace's catalog. The operator starts no
+new `Job` for a deleting `Library`, and it waits for any `Job` of the
+`Library` to finish. Then it runs a cleanup `Job` named
+`<library>-cleanup` on the `Library`'s catalog claim, which deletes the
 rows in batches through its own catalog agent. The finalizer clears
 once the cleanup `Job` succeeded and a catalog pod confirmed its run.
 
 While this runs, the phase is `Departing`, and the `Departing`
-condition names the step: `ScanRunning`, `EnrichRunning`, `Sweeping`,
+condition names the step: `ScanRunning` while a walk `Job` runs,
+`EnrichRunning` while another `Job` of the `Library` runs, `Sweeping`,
 `AwaitingEcho`, or `Blocked` when the cleanup `Job` keeps failing or
 the namespace holds two `Catalogs`. There is no timeout. The operator
 reports the blocker for as long as the object is deleting.
@@ -194,7 +222,7 @@ the rows over gossip and then sweeps them.
 ## Reading progress
 
     kubectl -n media get library movies -o jsonpath='{.status.phase} titles={.status.titles} unidentified={.status.unidentified} waiting={.status.waiting} gaps={.status.gaps}{"\n"}'
-    kubectl -n media logs -l library.liken.sh/library=movies,library.liken.sh/worker=scan -c scanner --tail=100
+    kubectl -n media logs -l library.liken.sh/library=movies,library.liken.sh/worker=walk -c scan --tail=100
 
 A finished walk logs its counts:
 
@@ -202,6 +230,6 @@ A finished walk logs its counts:
 
 `status.unidentified` counts the folders cataloged by name.
 `status.waiting` counts the titles a provider returned candidates for,
-and a scan does not retry those until a person names the right
-`uniqueid` in the `.nfo`. `status.gaps` counts, per fact, the rows the
-enricher still has to fill.
+and the identity phase does not retry those until a person names the
+right `uniqueid` in the `.nfo`. `status.gaps` counts, per fact, the
+rows the phases still have to fill.

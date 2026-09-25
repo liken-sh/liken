@@ -197,7 +197,8 @@ func TestReconcileWaitsForACatalog(t *testing.T) {
 }
 
 // A bound Library in a namespace with a Catalog provisions its durable
-// catalog claim before it stands the schedule.
+// catalog claim before it starts its first walk. With no class named, the
+// claim is ReadWriteOnce, because ReadWriteOncePod needs a CSI volume.
 func TestReconcileProvisionsTheCatalogClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
@@ -213,8 +214,8 @@ func TestReconcileProvisionsTheCatalogClaim(t *testing.T) {
 	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
 		t.Errorf("accessModes = %v, want ReadWriteOnce", claim.Spec.AccessModes)
 	}
-	if cluster.heldCronJob("house", "movies-scan") == nil {
-		t.Error("the reconcile stood no scan schedule")
+	if !cluster.heldWalk("house", "movies") {
+		t.Error("the reconcile started no walk")
 	}
 }
 
@@ -227,7 +228,7 @@ func TestReconcileFailsWhenTheClusterCannotBeRead(t *testing.T) {
 	}{
 		{name: "the claim", path: "/api/v1/namespaces/house/persistentvolumeclaims/movies"},
 		{name: "the volume", path: "/api/v1/persistentvolumes/pv-movies"},
-		{name: "the schedule", path: "/apis/batch/v1/namespaces/house/cronjobs/movies-scan"},
+		{name: "the schedule of an earlier release", path: "/apis/batch/v1/namespaces/house/cronjobs/movies-scan"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -297,84 +298,34 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 	}
 }
 
-// A release that changes an image, and a person who changes the root,
-// the schedule, or the scanner image, each change the hash, which is
-// what rolls the schedule the Jobs are built from.
-func TestTemplateHashFollowsTheSchedule(t *testing.T) {
-	base, err := templateHash(testScanCronJob(studioMovies()).Spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	newRoot := studioMovies()
-	newRoot.Spec.Storage.Root = "/kids-movies"
-	ownScanner := studioMovies()
-	ownScanner.Spec.Movies.Image = "registry.example/my-scanner:1"
-	newSchedule := studioMovies()
-	newSchedule.Spec.Scan.Schedule = "*/15 * * * *"
-	cases := []struct {
-		name    string
-		cronJob *CronJob
-	}{
-		{"the scanner image", buildScanCronJob(studioMovies(), testScannerImage+"-next",
-			testCorrosionImage)},
-		{"the catalog image", buildScanCronJob(studioMovies(), testScannerImage,
-			testCorrosionImage+"-next")},
-		{"the root", testScanCronJob(newRoot)},
-		{"a scanner of one's own", testScanCronJob(ownScanner)},
-		{"the schedule", testScanCronJob(newSchedule)},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			hash, err := templateHash(one.cronJob.Spec)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if hash == base {
-				t.Errorf("%s changed and the hash stayed %q", one.name, hash)
-			}
-		})
-	}
-}
-
-// A Library that loses a precondition loses its schedule. The pass is
-// level-triggered, so the schedule that stood for a Library whose
-// Catalog went away is deleted on the next pass, rather than left to
-// keep walking a volume the Library no longer reports.
-func TestReconcileStopsTheScheduleWhenThePreconditionGoes(t *testing.T) {
+// The pass deletes what an earlier release stood for the Library: the
+// CronJob of its walk and the claims of its enrich, trickplay, and trailers
+// Jobs. It asks once for each Library, because an absent object is success.
+func TestReconcileDeletesTheObjectsOfAnEarlierRelease(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
+	cluster.holdCronJob("house", "movies-scan")
+	for _, name := range legacyClaimNames("movies") {
+		cluster.claims[name] = &PersistentVolumeClaim{Metadata: ObjectMeta{Name: name, Namespace: "house"}}
+	}
 	operator := testOperator(t, cluster)
 
-	if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
-		t.Fatal(err)
-	}
-	if cluster.heldCronJob("house", "movies-scan") == nil {
-		t.Fatal("the first pass stood no schedule")
-	}
-
-	if err := operator.reconcile(t.Context(), library, singleCatalog(nil), nil, nil, testNow); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	if cluster.heldCronJob("house", "movies-scan") != nil {
-		t.Error("the schedule stands for a Library with no Catalog")
+	if cluster.heldCronJob("house", "movies-scan") {
+		t.Error("the CronJob of an earlier release stands")
 	}
-	// The conditions still report the precondition, not the delete.
-	if ready := conditionOf(t, cluster.heldLibrary("movies").Status, conditionReady); ready.Reason != reasonNoCatalog {
-		t.Errorf("Ready = %+v, want NoCatalog", ready)
+	for _, name := range legacyClaimNames("movies") {
+		if cluster.heldClaim(name) != nil {
+			t.Errorf("the claim %s stands", name)
+		}
 	}
-}
-
-// A Library that never stood a schedule asks for the delete anyway,
-// because the pass reads the whole state every time. An absent CronJob
-// is success, so the pass reports no error.
-func TestReconcileWithNoScheduleToStopReportsNoError(t *testing.T) {
-	cluster := newFakeCluster()
-	library := boundHouse(cluster)
-
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, singleCatalog(nil), nil, nil, testNow); err != nil {
-		t.Fatalf("a pass with no schedule to stop failed: %v", err)
+	if got := cluster.countRequests(http.MethodDelete, "cronjobs"); got != 1 {
+		t.Errorf("CronJob deletes = %d, want one", got)
 	}
 }
 
@@ -523,7 +474,7 @@ func TestReconcileBindsTheStorageClaimOfAFranchisesLibrary(t *testing.T) {
 	if status.Volume == nil || status.Volume.Name != "pv-franchises" {
 		t.Errorf("volume = %+v, want the one behind the claim", status.Volume)
 	}
-	if cluster.heldCronJob("house", scanCronJobName("franchises")) == nil {
-		t.Error("the pass stood no schedule for a franchises library")
+	if !cluster.heldWalk("house", "franchises") {
+		t.Error("the pass started no walk of a franchises library")
 	}
 }

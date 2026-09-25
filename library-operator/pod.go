@@ -1,11 +1,11 @@
 package main
 
-// The containers every pod this operator builds is made of, and
-// the pod template a scan Job runs. A worker pod holds two containers:
-// the worker itself, and a Corrosion agent of its own as a native
-// sidecar. They share the pod because they share a loopback address and
-// a lifetime: no agent answers on the network, so a worker that writes
-// the catalog carries the agent that holds it.
+// The containers every pod this operator builds is made of, and the pod
+// template the cleanup Job runs. A worker pod holds the worker's containers
+// and a Corrosion agent of its own as a native sidecar. They share the pod
+// because they share a loopback address and a lifetime: no agent answers on
+// the network, so a worker that writes the catalog carries the agent that
+// holds it.
 
 // The containers, and the pod-local names of the two volumes they
 // mount. The container names reach a person through kubectl logs, so
@@ -14,7 +14,7 @@ package main
 import "encoding/json"
 
 const (
-	scannerContainer  = "scanner"
+	scannerContainer  = "scan"
 	catalogContainer  = "catalog"
 	cleanupContainer  = "cleanup"
 	reporterContainer = "reporter"
@@ -105,43 +105,9 @@ const (
 	catalogMemoryLimit   = "512Mi"
 )
 
-// The pod a scan Job runs: the scanner beside a Corrosion agent
-// on the Library's own catalog claim, with the library volume mounted
-// read-only. It is a function of the Library, the scan path, and the
-// operator's own settings alone, so two passes build the same template,
-// which is what makes the template hash mean anything.
-func scanPodTemplate(library *Library, scanPath, scannerImage, corrosionImage string) PodTemplateSpec {
-	template := workerPodTemplate(library, workerScan,
-		scannerSidecar(library, scanPath, scannerImage), corrosionImage)
-	// The library volume is the scanner's alone; the cleanup worker
-	// reads no media, so it mounts none.
-	//
-	// Every kind mounts its storage claim read-only, because every scanner
-	// reads the storage and writes nothing to it.
-	template.Spec.Volumes = append(template.Spec.Volumes, Volume{
-		Name: libraryVolumeName,
-		PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-			ClaimName: library.Spec.Storage.Claim,
-			ReadOnly:  true,
-		},
-	})
-	// A franchises library mounts its art claim writable beside the
-	// read-only storage, because the scan downloads the art that each
-	// franchise.yaml links to.
-	if claim := library.Spec.artClaim(); claim != "" {
-		template.Spec.Volumes = append(template.Spec.Volumes, Volume{
-			Name: artVolumeName,
-			PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-				ClaimName: claim,
-			},
-		})
-	}
-	return template
-}
-
-// The pod shape both workers share: one worker container, the
+// The pod shape of a worker with one container: the container, the
 // catalog agent beside it on the Library's catalog claim, and no
-// Kubernetes credential.
+// Kubernetes credential. The cleanup Job runs it.
 func workerPodTemplate(library *Library, worker string, container Container, corrosionImage string) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
 	// A worker holds no Kubernetes credential: it writes the catalog
@@ -167,9 +133,8 @@ func workerPodTemplate(library *Library, worker string, container Container, cor
 				// The agent's state is the Library's own durable claim.
 				// It keeps the agent's actor id and its rows between
 				// runs, so a run syncs a delta rather than the whole
-				// namespace. On a class that is not per-node its
-				// ReadWriteOnce is what serializes one library's
-				// workers.
+				// namespace. The operator starts this pod only when no
+				// other Job of the Library is unfinished.
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
 					ClaimName: scannerCatalogClaimName(library.Metadata.Name),
 				}},
@@ -202,11 +167,14 @@ func libraryOwner(library *Library) OwnerReference {
 // claim is mounted read-only, so a scanner cannot write to the media
 // volume whatever it does.
 //
-// An empty scan path is a full walk, and a path names the one
-// folder to rescan; the Job's own name arrives through the downward
-// API, because the scanner writes it into the runs row a catalog pod
-// confirms.
-func scannerSidecar(library *Library, scanPath, image string) Container {
+// No folder is a full walk, and a list names the folders to rescan. The
+// Job's own name arrives through the downward API, because the scanner
+// writes it into the runs row.
+func scannerSidecar(library *Library, paths []string, image string) Container {
+	single := ""
+	if len(paths) == 1 {
+		single = paths[0]
+	}
 	if settings := library.Spec.settings(); settings != nil && settings.Image != "" {
 		image = settings.Image
 	}
@@ -222,7 +190,8 @@ func scannerSidecar(library *Library, scanPath, image string) Container {
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
 			{Name: libraryArtVariable, Value: artPathOf(library)},
-			{Name: scanPathVariable, Value: scanPath},
+			{Name: scanPathVariable, Value: single},
+			{Name: scanPathsVariable, Value: scanPathsValue(paths)},
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
 				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
 			}},
@@ -243,8 +212,9 @@ func scannerSidecar(library *Library, scanPath, image string) Container {
 //
 // The agent is a native sidecar: an initContainer with
 // restartPolicy Always. The kubelet starts it and waits for its
-// startupProbe before it starts the scanner, so the scanner's first walk
-// never races a catalog API that is not listening.
+// startupProbe before it starts the Job's other containers, so no
+// container's first read or write races a catalog API that is not
+// listening.
 //
 // The probes run a query inside the container, not an httpGet or
 // a TCP dial from the kubelet. The agent's API binds loopback alone (see

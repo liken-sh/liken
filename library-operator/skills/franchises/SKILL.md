@@ -53,7 +53,7 @@ way, and it keeps the checkout current:
       volumeName: franchises-repo
       resources: {requests: {storage: 1Gi}}
 
-Every scan `Job` and every screen mounts the storage claim read-only,
+The walk of every `Job` and every screen mount the storage claim read-only,
 which is what the driver requires of a `ReadOnlyMany` volume.
 [Read-only volumes](https://git.liken.sh/docs/guides/read-only/) in
 the driver's manual covers `offline: allowStale` and private
@@ -62,8 +62,8 @@ repositories.
 ## 2. The art claim and the Library
 
 The checkout is read-only, so the art a scan downloads needs a claim
-of its own. Every scan `Job` of the library writes it, and every
-screen that shows the library mounts it read-only. So the claim has to
+of its own. Every `Job` of the library writes it, and every screen
+that shows the library mounts it read-only. So the claim has to
 allow those mounts at once:
 
     apiVersion: v1

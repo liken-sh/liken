@@ -109,8 +109,8 @@ func TestNewScannerReadsTheJobItRuns(t *testing.T) {
 	if scan.job != "movies-scan-29128191" {
 		t.Errorf("job = %q, want the Job the environment names", scan.job)
 	}
-	if scan.scanPath != "/movies/The Thing (1982)" {
-		t.Errorf("scanPath = %q, want the folder the environment names", scan.scanPath)
+	if len(scan.scanPaths) != 1 || scan.scanPaths[0] != "/movies/The Thing (1982)" {
+		t.Errorf("scanPaths = %q, want the folder the environment names", scan.scanPaths)
 	}
 	if scan.handoffTimeout != 90*time.Second {
 		t.Errorf("handoffTimeout = %s, want the wait the environment names", scan.handoffTimeout)
@@ -417,7 +417,7 @@ func scanJob(t *testing.T, root, kind, scanPath string) (*scanner, *catalogRecor
 		catalog:        recording,
 		log:            io.Discard,
 		job:            "scan-1",
-		scanPath:       scanPath,
+		scanPaths:      scanPathsOf("", scanPath),
 		handoffTimeout: scanTestTimeout,
 	}, recorder, catalog
 }

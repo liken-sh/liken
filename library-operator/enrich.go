@@ -1,7 +1,7 @@
 package main
 
-// enrich.go is the seam between the enricher Job's containers and the
-// operator that creates the Job. Plan 29 builds both sides on the names
+// enrich.go is the seam between the phase containers of a library Job and
+// the operator that creates the Job. Plan 29 builds both sides on the names
 // here: the roles the binary runs, the facts those roles fill, the
 // results an attempt can record, and the queries that say how much work
 // each fact has left. The reporter counts a gap with the same query a
@@ -14,14 +14,10 @@ import (
 	"time"
 )
 
-// The roles the enricher Job runs. Every fact container runs facts,
-// which runs the facts its container names, in order, in one process. The
-// one regular container runs enrich, which writes the runs row last and
-// waits for a catalog pod to confirm it.
-const (
-	factsMode  = "facts"
-	enrichMode = "enrich"
-)
+// The role every phase container of a library Job runs but the scan and the
+// close container. It runs the facts its container names, in order, in one
+// process.
+const factsMode = "facts"
 
 // The variable a facts container reads its work from: the facts it runs, by
 // name, separated by commas, in the order it runs them. The container's own
@@ -65,9 +61,10 @@ func parseRefresh(raw string) refreshTimes {
 	return read
 }
 
-// The worker name the enricher Job's runs row carries. One row per
-// Library, whatever the Job's scope, so the operator reads one entry to
-// know whether an enrich run is in flight.
+// The worker name the close container of a library Job writes its runs row
+// under, and the worker every phase counts its tallies under. One row per
+// Library, whatever the Job's mode, so the operator reads one entry to know
+// whether a Job is in flight after its walk.
 const workerEnrich = "enrich"
 
 // The environment an identity container reads its TMDb key from. The
@@ -262,9 +259,9 @@ func gapClause(fact, column, missing string) string {
 // its modified column: no probe has read the file, or the file changed after
 // one did. An identity gap is an item whose id is its folder key, so no
 // provider named it. Both exclude an item with an attempt inside that
-// attempt's own window. A probe closes its own gap through the probed column
-// the next scan reads off the ledger. A probe whose record landed nowhere
-// the scanner reads is tried again after the window.
+// attempt's own window. A probe closes its own gap through the probed column,
+// which it writes with the streams it read. A probe whose record landed
+// nowhere the scanner reads is tried again after the window.
 var gapQueries = map[string]string{
 	// A video with a length and no tiles beside it.
 	factTrickplay: trickplayGapSQL(),

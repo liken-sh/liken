@@ -749,19 +749,15 @@ func TestASourceNoCheckHasReachedHoldsEveryJob(t *testing.T) {
 			operator := testOperator(t, cluster)
 			operator.reports.fold("house", "movies", libraryReport{
 				Gaps: map[string]int{factProbe: 4, factTrickplay: 4},
-				Runs: walkedRuns(testNow)})
+				Runs: scanRunReport().Runs})
 
 			if err := operator.reconcile(t.Context(), library, standingCatalog(),
 				nil, providers, testNow); err != nil {
 				t.Fatal(err)
 			}
 
-			enricher := cluster.heldJob("house", standingEnrichJobName("movies", testNow)) != nil
-			tiles := cluster.heldJob("house",
-				standingTrickplayJobName("movies", walkedRuns(testNow))) != nil
-			if enricher != test.want || tiles != test.want {
-				t.Errorf("the pass stood the enricher: %v and the trickplay Job: %v, want %v",
-					enricher, tiles, test.want)
+			if stood := len(cluster.heldJobs()) == 1; stood != test.want {
+				t.Errorf("the pass started a Job: %v, want %v", stood, test.want)
 			}
 		})
 	}
@@ -779,7 +775,7 @@ func TestProviderCheckOnAProviderThatIsDown(t *testing.T) {
 	operator := providerOperator(t, cluster,
 		tokenServer(t, http.StatusInternalServerError, "the-key"))
 	operator.reports.fold("house", "movies", libraryReport{
-		Gaps: map[string]int{factProbe: 4}, Runs: walkedRuns(testNow)})
+		Gaps: map[string]int{factProbe: 4}, Runs: scanRunReport().Runs})
 
 	providers := operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 
@@ -796,7 +792,7 @@ func TestProviderCheckOnAProviderThatIsDown(t *testing.T) {
 		nil, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
-	if cluster.heldJob("house", standingEnrichJobName("movies", testNow)) == nil {
-		t.Errorf("the pass stood no enricher, jobs = %v", cluster.heldJobs())
+	if jobs := cluster.heldJobs(); len(jobs) != 1 || jobs[0].Metadata.Labels[workerLabelKey] != jobModeGaps {
+		t.Errorf("the pass started no Job that fills the gaps, jobs = %v", jobs)
 	}
 }

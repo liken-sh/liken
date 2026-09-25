@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // The provisioner of a per-node StorageClass. The operator reads the
@@ -50,9 +51,10 @@ func volumeClaimLabels(namespace, claim string) map[string]string {
 // buildPerNodeVolume builds the volume a per-node claim binds to. It
 // names the driver, the handle, the claim's class and size, and a
 // claimRef that reserves the volume for that one claim. The access mode
-// is ReadWriteMany, because every node that mounts the volume holds a
-// copy of its own. The reclaim policy is Retain, so the volume stays when
-// the claim goes, and the sweep in this file is what removes it.
+// is the claim's own, from perNodeAccessMode, because the binder gives a
+// claim only a volume whose modes include the claim's mode. The reclaim
+// policy is Retain, so the volume stays when the claim goes, and the
+// sweep in this file is what removes it.
 func buildPerNodeVolume(claim *PersistentVolumeClaim) *PersistentVolume {
 	namespace, name := claim.Metadata.Namespace, claim.Metadata.Name
 	volume := perNodeVolumeName(namespace, name)
@@ -65,7 +67,7 @@ func buildPerNodeVolume(claim *PersistentVolumeClaim) *PersistentVolume {
 		},
 		Spec: PersistentVolumeSpec{
 			StorageClassName:              claim.Spec.StorageClassName,
-			AccessModes:                   []string{accessModeReadWriteMany},
+			AccessModes:                   []string{perNodeAccessMode(claim)},
 			Capacity:                      map[string]string{"storage": claim.Spec.Resources.Requests["storage"]},
 			PersistentVolumeReclaimPolicy: reclaimRetain,
 			ClaimRef:                      &ClaimReference{Namespace: namespace, Name: name},
@@ -74,13 +76,27 @@ func buildPerNodeVolume(claim *PersistentVolumeClaim) *PersistentVolume {
 	}
 }
 
+// The mode a claim takes on a per-node class. A claim built as
+// ReadWriteOncePod keeps it, because the driver publishes that mode as it
+// publishes ReadWriteMany, and the scheduler then admits one pod of the
+// claim in the cluster. Every other claim is ReadWriteMany, because every
+// node that mounts the volume holds a copy of its own.
+func perNodeAccessMode(claim *PersistentVolumeClaim) string {
+	if slices.Contains(claim.Spec.AccessModes, accessModeReadWriteOncePod) {
+		return accessModeReadWriteOncePod
+	}
+	return accessModeReadWriteMany
+}
+
 // standClaim creates a claim when there is none and leaves an existing
 // one alone, because a claim's spec is immutable once it binds. A claim
 // on a per-node class gets its volume first, and then names that volume
-// in spec.volumeName with ReadWriteMany, so it binds at once and waits on
-// no provisioner. A claim on any other class is written as it was built.
-// A conflict on the claim create means another writer got there first,
-// which is success.
+// in spec.volumeName with the mode perNodeAccessMode gives it, so it
+// binds at once and waits on no provisioner. A claim on any other class
+// is written as it was built, except that ReadWriteOncePod becomes
+// ReadWriteOnce, because Kubernetes applies ReadWriteOncePod only to CSI
+// volumes and a class such as local-path is not one. A conflict on the
+// claim create means another writer got there first, which is success.
 func (o *operator) standClaim(ctx context.Context, claim *PersistentVolumeClaim) error {
 	namespace, name := claim.Metadata.Namespace, claim.Metadata.Name
 
@@ -100,8 +116,10 @@ func (o *operator) standClaim(ctx context.Context, claim *PersistentVolumeClaim)
 		if err := o.standPerNodeVolume(ctx, claim); err != nil {
 			return err
 		}
-		claim.Spec.AccessModes = []string{accessModeReadWriteMany}
+		claim.Spec.AccessModes = []string{perNodeAccessMode(claim)}
 		claim.Spec.VolumeName = perNodeVolumeName(namespace, name)
+	} else if slices.Contains(claim.Spec.AccessModes, accessModeReadWriteOncePod) {
+		claim.Spec.AccessModes = []string{accessModeReadWriteOnce}
 	}
 
 	_, err = CreatePersistentVolumeClaim(ctx, o.client, claim)

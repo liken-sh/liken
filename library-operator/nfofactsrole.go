@@ -223,8 +223,23 @@ func creditsOrNFO(merged factAnswer, document []byte) factAnswer {
 // The write is the group edit and the ledger entry together. The hash the
 // ledger keeps is read back off the document the edit left, so the next run
 // compares like with like.
+//
+// The probe and identity containers edit the same .nfo file while this fact
+// asks its providers. So the edit takes the file's lock, reads the file
+// again, and changes this fact's group in what it reads, and an element
+// another container wrote in the meantime stays.
 func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem, group elementGroup,
 	document []byte, merged factAnswer, names providerNames) string {
+	release, err := lockNFO(e.writer.locks, nfoPath)
+	if err != nil {
+		e.logf("could not write the %s of %s: %v", fact, item.path, err)
+		e.recordNFO(folder, fact, nil, attemptError, names)
+		return attemptError
+	}
+	defer release()
+	if fresh, err := os.ReadFile(nfoPath); err == nil && hasRootElement(fresh) {
+		document = fresh
+	}
 	edited := document
 	if groupNeedsWrite(fact, document, merged) {
 		written, err := editElementGroup(document, group, nfoElements(fact, merged))

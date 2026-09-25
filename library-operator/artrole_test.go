@@ -275,7 +275,7 @@ func TestAnArtFactOutsideTheScopeIsLeftAlone(t *testing.T) {
 	writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
 	seedArtMovie(t, catalog, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scope = "Another Film (2001)"
+	work.scopes = []string{"Another Film (2001)"}
 	client, _ := newArtTMDb(t, map[string]string{
 		tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
 		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,

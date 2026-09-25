@@ -1,17 +1,19 @@
 package main
 
-// The scanner is the container of one scan Job. It walks one
-// library's volume once, beside a Corrosion agent of its own on the
-// Library's claim, and it holds no Kubernetes credentials. It writes the
+// The scanner is the scan container of a library Job in walk mode. It
+// walks one library's volume once, beside a Corrosion agent of its own on
+// the Library's claim, and it holds no Kubernetes credentials. It writes the
 // catalog only through that agent's transaction API, on the pod's
-// loopback. It publishes no report: it writes a runs row first and last,
-// and waits for the namespace's reporter to publish that row back before
-// it exits, because an agent drops unsent broadcasts on SIGTERM.
+// loopback. It publishes no report: it writes a runs row first and last.
+// In a library Job it then writes its mark on the phases volume, and the
+// Job's close container hands the rows off. Run alone, with no phases
+// volume, it waits for a catalog pod to confirm its row before it exits,
+// because an agent drops unsent broadcasts on SIGTERM.
 //
-// A Job walks the whole root, or the one folder SCAN_PATH names,
-// which is the path a webhook reported. It does not use inotify, which
-// fires only for writes made through the same kernel and never for
-// another client's writes to a network volume.
+// A Job walks the whole root, or the folders SCAN_PATHS names, which are
+// the paths webhooks reported. It does not use inotify, which fires only
+// for writes made through the same kernel and never for another client's
+// writes to a network volume.
 
 import (
 	"context"
@@ -53,9 +55,42 @@ const (
 	libraryArtVariable = "LIBRARY_ART"
 )
 
-// The one folder a scan Job rescans, in the form the webhook
-// handler maps onto the volume. An empty value is a full walk.
-const scanPathVariable = "SCAN_PATH"
+// The folders a Job rescans, in the form the webhook handler maps onto the
+// volume. SCAN_PATHS is a JSON list of every folder. SCAN_PATH names the one
+// folder of a Job that walks one, so a scanner image built before the list
+// existed still rescans it, and it is empty for a Job of several folders,
+// which such an image reads as a full walk. Both empty is a full walk.
+const (
+	scanPathVariable  = "SCAN_PATH"
+	scanPathsVariable = "SCAN_PATHS"
+)
+
+// The folders a container rescans, read from the list where the environment
+// holds one and from the one path where it does not. A list this image
+// cannot read is no folder, which is the full walk, because a walk of the
+// whole library is never less than the folders asked for.
+func scanPathsOf(list, single string) []string {
+	if list != "" {
+		var paths []string
+		if err := json.Unmarshal([]byte(list), &paths); err == nil {
+			return paths
+		}
+		return nil
+	}
+	if single != "" {
+		return []string{single}
+	}
+	return nil
+}
+
+// The value SCAN_PATHS carries for a list of folders, and empty for none.
+func scanPathsValue(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	value, _ := json.Marshal(paths)
+	return string(value)
+}
 
 // ignoreSet is the folder names the walk skips, and the test for one. A
 // folder whose name is in the set, and everything under it, is left out
@@ -117,11 +152,13 @@ type scanner struct {
 	// for every other kind.
 	art     string
 	catalog *Catalog
-	// The Job this container runs, the folder it rescans, and how
+	// The Job this container runs, the folders it rescans, and how
 	// long it waits for a catalog pod to confirm its run.
 	job            string
-	scanPath       string
+	scanPaths      []string
 	handoffTimeout time.Duration
+	// The phases volume of a library Job, and nil for a scanner run alone.
+	board *phaseBoard
 	// log is where the scanner writes a walk that could not finish a catalog
 	// step, so a swallowed error shows in the pod log instead of a gap in
 	// the report. A scanner built without one writes nowhere.
@@ -149,11 +186,30 @@ func runScan() {
 	defer stop()
 
 	scan := newScanner(time.Now().UTC(), os.Stdout)
-	if err := scan.runJob(stopped); err != nil {
+	if err := scan.runPhase(stopped); err != nil {
 		scan.logf("the scan job failed: %v", err)
 		stop()
 		os.Exit(1)
 	}
+}
+
+// The scan phase of a library Job: the walk between the running lock and
+// the mark. A walk that failed writes a failed mark and exits zero, so the
+// Job's other phases and its close container still run, and the scan row
+// carries the failure to the Library's status. A scanner with no phases
+// volume runs the walk alone and exits with its outcome.
+func (s *scanner) runPhase(ctx context.Context) error {
+	if s.board == nil {
+		return s.runJob(ctx)
+	}
+	if err := s.board.start(scanPhase); err != nil {
+		return err
+	}
+	walked := s.runJob(ctx)
+	if ctx.Err() != nil {
+		return walked
+	}
+	return s.board.finish(scanPhase, walked)
 }
 
 // NewScanner reads the container's environment and builds the
@@ -190,17 +246,20 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 		log:            log,
 		report:         libraryReport{LastWalk: started, LastChange: started},
 		job:            os.Getenv(jobNameVariable),
-		scanPath:       os.Getenv(scanPathVariable),
+		scanPaths:      scanPathsOf(os.Getenv(scanPathsVariable), os.Getenv(scanPathVariable)),
 		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
+		board:          boardOf(os.Getenv(libraryPhasesVariable)),
 	}
 }
 
-// The whole of a scan Job: write the run with no finish, walk,
-// write the run again with what the walk left, and hand off to the
-// standing catalog pods.
+// The whole of a walk: write the run with no finish, walk, and write the
+// run again with what the walk left. A scanner run alone then hands off to
+// the standing catalog pods.
 //
 // The first write says a walk is running. The hand-off is what proves a
-// standing pod holds every row this Job wrote.
+// standing pod holds every row this Job wrote. In a library Job the close
+// container makes the hand-off after every phase, and its write covers the
+// walk's rows, because every container of the Job writes through one agent.
 func (s *scanner) runJob(ctx context.Context) error {
 	run := libraryRun{Worker: s.worker(), Job: s.job, Started: time.Now().UTC()}
 	if _, _, err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
@@ -225,43 +284,59 @@ func (s *scanner) runJob(ctx context.Context) error {
 	run.Removed = s.report.RemovedLastSweep
 	s.mutex.Unlock()
 
+	if s.board != nil {
+		if _, _, err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
+			return fmt.Errorf("writing the finished run of %s: %w", s.library, err)
+		}
+		return walked
+	}
 	if err := handOff(ctx, s.catalog, s.library, run, s.log, s.handoffTimeout); err != nil {
 		return err
 	}
 	return walked
 }
 
-// The worker whose runs row this Job writes. A Job that names a folder
+// The worker whose runs row this Job writes. A Job that names folders
 // is the rescan worker, so its row stands beside the full walk's row and
 // never over it, and the reporter reads the walk's own numbers off the
 // scan row alone.
 //
 // A folder scan that falls back to the whole root keeps the
-// rescan worker, because the Job it runs is the one the webhook asked
+// rescan worker, because the Job it runs is the one the webhooks asked
 // for.
 func (s *scanner) worker() string {
-	if s.scanPath == "" {
+	if len(s.scanPaths) == 0 {
 		return workerScan
 	}
 	return workerRescan
 }
 
-// The one walk this Job runs: the whole root, or the single folder
-// SCAN_PATH names, which falls back to the whole root when the path names
-// no folder on the volume.
+// The one walk this Job runs: the whole root, or each folder SCAN_PATHS
+// names. A path that names no folder on the volume makes it a walk of the
+// whole root, which covers every folder the webhooks named.
 func (s *scanner) walkOnce(ctx context.Context) error {
 	if s.kind == libraryKindFranchises {
 		return s.franchiseScan(ctx)
 	}
-	if s.scanPath == "" {
+	if len(s.scanPaths) == 0 {
 		return s.fullWalk(ctx)
 	}
-	absolute := s.resolveWebhookPath(s.scanPath)
-	if absolute == "" {
-		s.logf("could not map %s onto the volume, walking the whole root", s.scanPath)
-		return s.fullWalk(ctx)
+	folders := make([]string, 0, len(s.scanPaths))
+	for _, scanPath := range s.scanPaths {
+		absolute := s.resolveWebhookPath(scanPath)
+		if absolute == "" {
+			s.logf("could not map %s onto the volume, walking the whole root", scanPath)
+			return s.fullWalk(ctx)
+		}
+		folders = append(folders, absolute)
 	}
-	return s.rescan(ctx, absolute)
+	var failed error
+	for _, absolute := range folders {
+		if err := s.rescan(ctx, absolute); err != nil && failed == nil {
+			failed = err
+		}
+	}
+	return failed
 }
 
 // walkFolders streams this library's title folders, read by the pool in

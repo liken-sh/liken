@@ -1,21 +1,23 @@
 package main
 
-// The catalog volumes. There is one per Library, which its worker Jobs
-// mount in turn, and one for the durable copies of the namespace's
-// catalog, which every copy mounts. All are sized from the namespace
-// Catalog, because every agent holds the whole namespace's catalog. Each
-// is built ReadWriteOnce, and standClaim writes it ReadWriteMany on a
-// per-node class.
+// The catalog volumes. There is one per Library, which its Jobs mount one
+// at a time, and one for the durable copies of the namespace's catalog,
+// which every copy mounts. All are sized from the namespace Catalog,
+// because every agent holds the whole namespace's catalog. A Library's
+// claim is built ReadWriteOncePod and the store's claim ReadWriteOnce.
+// standClaim writes the mode each class accepts.
 
 import (
 	"context"
 )
 
 // scannerCatalogClaimName is the durable catalog volume one Library's
-// worker Jobs mount. It is derived from the Library name, so every pass
-// names the same claim and the operator keeps no record of it. On a class
-// that is not per-node the claim is ReadWriteOnce, and that is what
-// serializes one library's Jobs.
+// Jobs mount. It is derived from the Library name, so every pass names
+// the same claim and the operator keeps no record of it. The operator
+// starts a Job of a Library only when no other Job of that Library is
+// unfinished, and that gate is what keeps one agent on the database.
+// ReadWriteOncePod on a per-node class is the guard for a fault in the
+// gate.
 //
 // The claim must hold a database whose schema matches this release.
 // Corrosion refuses to change the primary key of a database it already
@@ -29,9 +31,10 @@ func scannerCatalogClaimName(library string) string {
 	return library + "-catalog"
 }
 
-// buildCatalogClaim writes the catalog claim one Library's workers take.
-// It asks for ReadWriteOnce, and standClaim writes ReadWriteMany in its
-// place on a per-node class. It is sized from the namespace Catalog,
+// buildCatalogClaim writes the catalog claim one Library's Jobs take. It
+// asks for ReadWriteOncePod. standClaim keeps that mode on a per-node
+// class and writes ReadWriteOnce on every other class. It is sized from
+// the namespace Catalog,
 // because each agent holds the whole namespace's catalog. It is owned by
 // the Library, so it survives a pod roll and is collected with the
 // Library. It binds to the libraries' class, because it is a working copy
@@ -48,7 +51,7 @@ func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentV
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
 		Spec: PersistentVolumeClaimSpec{
-			AccessModes: []string{accessModeReadWriteOnce},
+			AccessModes: []string{accessModeReadWriteOncePod},
 			Resources: VolumeResourceRequirements{
 				Requests: map[string]string{"storage": catalogStorageSize(catalog)},
 			},
