@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   renew:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # A renewal takes about a minute, so 15 stops a hung run with
     # wide margin for a slow DNS-01 challenge.
     timeout-minutes: 15
