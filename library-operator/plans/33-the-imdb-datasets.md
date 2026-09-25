@@ -54,12 +54,21 @@ This plan reads four of the files: `title.ratings`, `title.episode`,
 
 **A dataset fact reads a file once per run, not once per title.** An
 enricher container has its full gap list before it asks a provider
-for anything. The `imdb` fact container reads its gap list, then
-reads each file it needs from start to end through a gzip reader. It
+for anything. `rating.imdb` and `credits` are facts of the nfo group,
+so the nfo container runs them. It reads the gap list of each dataset
+fact, then reads each file it needs from start to end through a gzip
+reader. It
 keeps a row only when the row's id is in its list, and it discards
 every other row as it reads. Memory holds the list and the matching
 rows, not the file. One read of a file serves every title in the run,
-whether the run has one gap or ten thousand.
+whether the run has one gap or ten thousand. A fact with no gaps in the
+run sends no request for its files.
+
+The nfo container starts the dataset reads when it starts, and it runs
+its other facts while the reads work. So the 32 seconds of a credits
+read do not delay the plot, the certification, or the other ratings.
+The container keeps its memory limit of 64Mi. Memory holds the gap
+list, the matching rows, and one gzip buffer.
 
 These times were measured from a cloud host on 2026-09-25 with
 `curl` and `gunzip`. A home link downloads more slowly. The time to
@@ -116,9 +125,12 @@ whether a rating is old enough to read again.
   fact. A `Library` that puts `imdb` before `omdb` takes the rating
   from the datasets. OMDb continues to serve the Rotten Tomatoes and
   Metacritic ratings, the certification, and the plot, and its
-  thousand calls now go to those facts. A `Library` that wants IMDb's
-  rating and TMDb's fuller credits puts `imdb` first and narrows it
-  with `spec.facts: [rating.imdb]`, or puts `tmdb` before `imdb`.
+  thousand calls now go to those facts.
+- **The datasets are a fallback for credits.** `title.principals` has
+  about nine people for each title, and TMDb gives the full cast. So a
+  `Library` puts `tmdb` before `imdb`, and the datasets answer
+  `credits` only for a title that TMDb does not have. The manual's
+  examples use that order.
 - **The block does not serve the contributor facts.**
   `contributor.ids` keys on the TMDb id, and `name.basics` has no TMDb
   id, no biography, and no image. TMDb continues to serve all three.
@@ -142,30 +154,32 @@ whether a rating is old enough to read again.
   After that it calls once an hour, or every five minutes after an
   `Unreachable` or `Unavailable` answer. That is at most four `HEAD`
   requests an hour. A `HEAD` request transfers no file.
-- **`status.datasets` lists one entry for each file the check read,**
-  with the headers IMDb returned:
+- **`status.imdb.datasets` lists one entry for each file the check
+  read,** with the headers IMDb returned. The block's status is under
+  `status.imdb`, as its settings are under `spec.imdb`:
 
   ```yaml
   status:
     provider: imdb
     facts: [rating.imdb, credits]
-    datasets:
-    - name: title.ratings
-      lastModified: "2026-09-25T00:40:02Z"
-      etag: '"e03c00cbebf3c4fda2d847d0f6d16b7e-2"'
-      size: 8657835
-    - name: title.episode
-      lastModified: "2026-09-25T00:39:26Z"
-      etag: '"03737bcd3a8c870a1243090aeb70a9d5-7"'
-      size: 54779154
-    - name: title.principals
-      lastModified: "2026-09-25T00:40:24Z"
-      etag: '"c7e7651414623759eea719c945546b9a-94"'
-      size: 783966700
-    - name: name.basics
-      lastModified: "2026-09-24T12:43:08Z"
-      etag: '"83cec581eaa50d30776a32f09d435bc6-37"'
-      size: 310309697
+    imdb:
+      datasets:
+      - name: title.ratings
+        lastModified: "2026-09-25T00:40:02Z"
+        etag: '"e03c00cbebf3c4fda2d847d0f6d16b7e-2"'
+        size: 8657835
+      - name: title.episode
+        lastModified: "2026-09-25T00:39:26Z"
+        etag: '"03737bcd3a8c870a1243090aeb70a9d5-7"'
+        size: 54779154
+      - name: title.principals
+        lastModified: "2026-09-25T00:40:24Z"
+        etag: '"c7e7651414623759eea719c945546b9a-94"'
+        size: 783966700
+      - name: name.basics
+        lastModified: "2026-09-24T12:43:08Z"
+        etag: '"83cec581eaa50d30776a32f09d435bc6-37"'
+        size: 310309697
     conditions:
     - type: Ready
       status: "True"
@@ -187,24 +201,29 @@ whether a rating is old enough to read again.
 
 - **One claim per `imdb` provider, `<provider>-datasets`.** The claim
   is in the provider's namespace, and the `MetadataProvider` owns it,
-  so a deleted provider takes its cache with it. It uses the class of
-  `spec.libraries` on the namespace's `Catalog`, which is the class of
-  the libraries' working copies. Its size is a fixed 3Gi. The four
+  so a deleted provider takes its cache with it. Its size is a fixed
+  3Gi. The four
   files take 1.2 GB, and the replacement of one file needs room for a
   second copy of it, at most 784 MB for `title.principals`. The rest
   leaves room for the files to grow. The claim follows the create-once
   rule of plan 43.
-- **On a per-node class, every node holds its own cache.** The claim
-  is `ReadWriteMany` on a volume from plan 44. Any number of `Job`s on
-  any node mount it, and each node's directory fills the first time a
-  run on that node needs a file. On any other class the claim is
-  `ReadWriteOnce`, and a `Job` that mounts it runs on the node that
-  holds it. Two `Job`s on two nodes then run one after the other. The
-  manual says that a namespace with more than one library should use
-  a per-node class for this reason.
-- **The enricher `Job` mounts the claim** read-write in the `imdb`
-  fact container alone, and only when the `Library`'s sources name a
-  `Ready` `imdb` provider as the answerer of a fact that has gaps.
+- **The claim is on a per-node class, whatever class the libraries
+  use.** The claim is `ReadWriteMany` on a volume from plan 44. Any
+  number of `Job`s on any node mount it, and each node's directory
+  fills the first time a run on that node needs a file. The operator
+  uses the class whose provisioner is `per-node.liken.sh`, the test
+  that `classIsPerNode` makes today. It does not match a class by name.
+- **With no per-node class, there is no cache.** A claim on any other
+  class is `ReadWriteOnce`. A `Job` that mounts it must run on the node
+  that has the volume, and each `Library` also mounts its own catalog
+  claim. When those two claims are on different nodes, the `Job` never
+  starts. So on a cluster with no per-node class, the operator makes no
+  claim. The nfo container reads each file from IMDb directly into the
+  gzip reader, and the check writes a `Cached` condition with status
+  `False` and the reason `NoPerNodeClass`. `Ready` does not change.
+- **The enricher `Job` mounts the claim** read-write in the nfo
+  container alone, and only when the `Library`'s sources name a `Ready`
+  `imdb` provider as the answerer of a fact that has gaps.
 - **The layout is one directory per file.** `title.ratings/` holds the
   gzipped file exactly as IMDb served it, named by a hash of its ETag,
   and a record `current.json` that gives the ETag, the `Last-Modified`
@@ -261,12 +280,16 @@ whether a rating is old enough to read again.
   that episode.
 - **The rating is written as OMDb writes it today,** as the `imdb`
   rating in the `.nfo`, with the vote count and a maximum of ten.
-- **The container writes a `.nfo` only when the rating changed.** It
-  compares the rating and the vote count with the values the `.nfo`
-  already holds. When both are the same, the container records the
-  attempt and does not write the `.nfo`. This keeps a refresh from
-  rewriting every `.nfo` in a library and starting a rescan of every
-  folder.
+- **The container writes a `.nfo` only when the rating changed.**
+  IMDb gives `averageRating` with one decimal, which is the value the
+  media browser shows. The container compares that value with the
+  rating the `.nfo` already has. When the two are the same, the
+  container records the attempt and does not write the `.nfo`. When
+  they differ, it writes the new rating with the current vote count.
+  A change in the vote count alone does not write the `.nfo`, because
+  the vote count of almost every title changes each month. This keeps
+  a refresh from rewriting every `.nfo` in a library and starting a
+  rescan of every folder.
 - **The attempt records the version of the file it read.** The
   attempt of `rating.imdb` gains the `Last-Modified` time of the
   `title.ratings` copy that answered it. An attempt that another
@@ -288,17 +311,14 @@ whether a rating is old enough to read again.
   `job` column where IMDb gives one. `archive_footage` and
   `archive_sound` are not credits.
 - **A person is one `.contributors/` entry, whichever provider named
-  them.** The credits fact already joins an entry by any id scheme it
-  holds, and `imdb` is already a scheme a slug takes its suffix from.
-  A credit from the datasets names the person by `nconst` alone. When
-  an entry already holds that IMDb id, because TMDb's person record
-  gave it, the credit links to that entry. When no entry holds it, the
-  fact creates an entry with the IMDb id and the name from
-  `name.basics`, and TMDb's `contributor.ids` fact cannot fill it,
-  because that fact keys on the TMDb id. The builder decides whether
-  the TMDb block also looks up such an entry by its IMDb id, through
-  TMDb's find endpoint, so a person that IMDb named gets a biography
-  and a headshot.
+  them.** A credit from the datasets names the person by `nconst`
+  alone. [Plan 65](65-one-entry-for-each-person.md) finds the entry by
+  that IMDb id first, and it asks TMDb's find endpoint for the TMDb id
+  of a person that no entry holds. `contributor.ids` fills an entry that
+  has only an IMDb id the same way, so a person that IMDb named gets a
+  biography and a headshot. When two entries turn out to be one person,
+  plan 65 merges them. This plan's credits depend on plan 65, and the
+  rating does not.
 - **Credits are not refreshed on a timer.** A title's principal
   credits change rarely after its release, and a credits run costs 32
   seconds of reading. `spec.refresh` with the key `credits` opens them
@@ -310,11 +330,30 @@ whether a rating is old enough to read again.
   `rating.imdb` gap includes a title when the `imdb` block is the
   answerer for the fact, the title's attempt is more than 30 days old,
   and the attempt's file time is older than the `lastModified` of
-  `title.ratings` in the provider's status. An attempt with no file
-  time, such as one that OMDb answered, counts as older. So a library
-  that moves from OMDb to the datasets moves each title's rating over
-  within 30 days, and no title is rewritten more often than once in 30
-  days.
+  `title.ratings` in `status.imdb.datasets`. IMDb publishes the file
+  daily, so the second test fails only when IMDb has stopped
+  publishing. Then no run reads the same file again for nothing. An
+  attempt with no file time, such as one that OMDb answered, counts as
+  older. So a library that moves from OMDb to the datasets moves each
+  title's rating over within 30 days, and no title is read more often
+  than once in 30 days.
+- **The operator passes the file time to the enricher's gap query.**
+  The gap query runs as SQL in two places: in the enricher `Job`,
+  against its local copy of the catalog (`enricher.gaps`,
+  `enrichworker.go:130`), and in the reporter in the catalog pod, which
+  counts the gaps (`gapCounts`, `attempts.go:279`). Neither of them
+  reads the `MetadataProvider`. The operator writes the `lastModified`
+  of `title.ratings` into the `Job`'s environment, next to the provider
+  settings that `providerEnv` writes today. With no time, as before the
+  first check, the query uses the 30 days alone.
+- **The reporter counts with the 30 days alone.** The reporter reads no
+  `Library` and no `MetadataProvider`, and it counts every gap with no
+  refresh time today. So when IMDb stops publishing, the report counts
+  a gap that the `Job` does not find, and every report would start a
+  `Job` that ends with nothing to do. To prevent that, the operator does
+  not start a gap-mode `Job` for `rating.imdb` alone while the
+  provider's `Stale` condition is `True`. A walk still starts its `Job`,
+  so a new title still gets its rating from the newest file.
 - **The period is a constant,** not a field. A field can be added when
   a person needs a different period. `spec.refresh` with the key
   `rating.imdb` still opens every rating at once, as it does for every
@@ -338,6 +377,9 @@ built and drilled.
   `storage` field, and a `ReadOnlyMany` volume that a per-node class
   cannot share between nodes. The design above downloads only when a
   run has gaps, and it stores 1.2 GB.
+- **A cache claim on the libraries' class.** On a class that is not
+  per-node, the claim is `ReadWriteOnce`. A `Job` that mounts it and
+  its own catalog claim on a different node never starts.
 - **A cache on each `Library`'s own enricher claim.** That claim is
   sized for the catalog, and every library in the namespace would
   download its own copy of each file. One claim per provider downloads
@@ -375,7 +417,7 @@ IMDb credit, and the manual's guide to enrichment states it.
 To be run on `liken-1` when the plan is built.
 
 - Apply an `imdb` provider. Read its status: `Ready`, the four
-  `status.datasets` entries, and `UPDATED` within the last day.
+  `status.imdb.datasets` entries, and `UPDATED` within the last day.
 - Put `imdb` first in a movie library's sources and run the enricher.
   Record the download time, the read time of each file, and the
   ratings and credits written. Run a webhook enrich for one folder

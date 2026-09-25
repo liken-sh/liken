@@ -10,7 +10,7 @@ start (`prune.go`, `walkStart`).
 The phase fan-out is not built. The enricher still runs probe,
 arrival, identity, nfo, art, contributors, and trickplay as init
 containers in a row, with no `phases` volume and no marks.
-[Plan 57](../57-the-phases-fan-out.md) carries that half.
+[Plan 57](../57-one-job-for-each-library.md) carries that half.
 
 Shaped on 2026-09-03 after plan 30's first walk with credits. Before
 this plan a fact wrote files and nothing else, and the next walk read

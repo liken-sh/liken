@@ -92,21 +92,27 @@ they share, and plans 28 to 31 build them in order.
 * [33, The IMDb datasets](33-the-imdb-datasets.md). An `imdb` block
   that serves `rating.imdb` for movies, series, and episodes, and
   `credits` for movies and series. A run reads each dataset file once
-  and keeps the rows in its gap list. A claim per provider caches the
-  files, and the status reports when IMDb last published each one.
-  OMDb serves `rating.imdb` until then.
+  and keeps the rows in its gap list. A claim on a per-node class
+  caches the files, and `status.imdb` reports when IMDb last published
+  each one. The credits depend on plan 65. OMDb serves `rating.imdb`
+  until then.
 * [34, Every fact writes its rows](completed/34-every-fact-writes-its-rows.md).
   Built on 2026-09-03. Each fact writes its own catalog rows as it
   writes its files, only the columns it owns, with the art list in its
   own `arts` column and a prune that spares a row newer than the
   walk's start.
-* [57, Running the enricher phases in parallel](57-the-phases-fan-out.md). A stub from plan
-  34: the phases that share no file run at once, behind a mark per
-  finished phase on a shared `emptyDir`.
+* [57, One Job for each Library](57-one-job-for-each-library.md). The walk,
+  every enricher fact, trickplay, and the trailer files run as regular
+  containers of one `Job`, on one catalog claim, one `Job` at a time.
+  Each phase works on a title as soon as the phases before it finish
+  that title. A webhook starts one `Job` in place of a chain.
 * [60, A fact that fetches subtitles](60-the-subtitle-fact.md). For later. The
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
+* [65, One entry for each person](65-one-entry-for-each-person.md). A
+  credit finds its `.contributors/` entry by id before it looks by
+  name, and the enricher merges two entries that share an id.
 
 Plan 32 covers a separate part of the system from the enrichment work.
 
