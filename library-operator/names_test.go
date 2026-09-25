@@ -1,7 +1,7 @@
 package main
 
 // These tests fix the *arr name parses and the file
-// attribute reads, so a re-walk of a sidecar-less volume reads the same
+// attribute reads, so a re-walk of a volume with no .nfo files reads the same
 // titles, years, and resolutions every time.
 
 import (
@@ -341,7 +341,7 @@ func TestDiscoverArtOnAMissingFolder(t *testing.T) {
 	}
 }
 
-func TestListVideoFilesSkipsSidecars(t *testing.T) {
+func TestListVideoFilesSkipsEveryFileThatIsNotAVideo(t *testing.T) {
 	dir := filepath.Join("testdata", "movies", "Action", "The Matrix (1999)")
 	files, err := listVideoFiles(dir)
 	if err != nil {
@@ -427,17 +427,17 @@ func TestANameStatesAProviderIdInJellyfinsForm(t *testing.T) {
 	}
 }
 
-func TestASidecarsIdsWinOverANames(t *testing.T) {
+func TestAnNFOsIdsWinOverANames(t *testing.T) {
 	merged := mergeProviderIDs(map[string]string{"tmdb": "1"}, map[string]string{"tmdb": "2", "imdb": "tt3"})
 
 	if merged["tmdb"] != "1" {
-		t.Errorf("tmdb = %q, want the sidecar's", merged["tmdb"])
+		t.Errorf("tmdb = %q, want the .nfo file's", merged["tmdb"])
 	}
 	if merged["imdb"] != "tt3" {
-		t.Errorf("imdb = %q, want the name's, which the sidecar left out", merged["imdb"])
+		t.Errorf("imdb = %q, want the name's, which the .nfo file left out", merged["imdb"])
 	}
 	if got := mergeProviderIDs(map[string]string{"tmdb": "1"}, nil); got["tmdb"] != "1" {
-		t.Errorf("a name with no ids changed the sidecar's to %v", got)
+		t.Errorf("a name with no ids changed the .nfo file's to %v", got)
 	}
 }
 

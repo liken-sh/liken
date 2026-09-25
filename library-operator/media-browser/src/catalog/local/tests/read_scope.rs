@@ -52,7 +52,7 @@ fn one_page_reuses_the_aliases_from_a_persons_wall_for_the_about_slot() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     incomplete_person(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     source.begin_page_read();
     source.wall(&person_wall());
@@ -67,7 +67,7 @@ fn a_successful_empty_alias_read_is_held_until_the_next_page() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     incomplete_person(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     source.begin_page_read();
     assert!(!person(&mut source).headshot);
@@ -85,7 +85,7 @@ fn standalone_person_reads_resolve_aliases_each_time() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     incomplete_person(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     assert!(!person(&mut source).headshot);
     add_other_entry(&path, "tmdb", "31");
@@ -101,7 +101,7 @@ fn a_complete_person_does_not_resolve_aliases() {
         .unwrap()
         .execute_batch("DROP TABLE contributor_aliases")
         .unwrap();
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let person = person(&mut source);
     assert!(person.biography);
@@ -139,8 +139,8 @@ fn a_reader_without_streams_starts_a_fresh_scope_for_each_page() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     person_with_four_works(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
-    let mut reader = source.reader().expect("the sidecar answers a reader");
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let mut reader = source.reader().expect("the local catalog answers a reader");
     let today = Date {
         year: 2026,
         month: 9,
@@ -164,7 +164,7 @@ fn a_failed_alias_read_does_not_cache_an_empty_answer() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     incomplete_person(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     source.begin_page_read();
 
     Connection::open(&path)
@@ -208,7 +208,7 @@ fn one_page_reuses_library_kinds_between_people_and_genres() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     person_with_four_works(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     source.begin_page_read();
     source.wall(&person_wall());
@@ -223,7 +223,7 @@ fn one_page_reuses_library_kinds_between_people_and_genres() {
 fn a_reader_releases_an_empty_library_kind_answer_after_the_page() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let mut reader = source.reader().unwrap();
 
     reader.begin_page_read();
@@ -242,7 +242,7 @@ fn a_failed_library_kind_read_does_not_cache_an_empty_answer() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     let connection = Connection::open(&path).unwrap();
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     source.begin_page_read();
 
     connection

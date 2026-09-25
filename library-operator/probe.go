@@ -78,10 +78,10 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 	e.recordAttempt(folder, factProbe, entry, result, time.Now().UTC())
 }
 
-// The record is the truth, so it is written first and the sidecar follows
-// from it. An audio file gets a record and no sidecar, because no player
-// reads an .nfo beside a music file.
-// A video whose role is not the feature also gets a record and no sidecar.
+// The ledger record is the source of truth, so the probe writes it first
+// and then writes the .nfo file from it. An audio file gets a record and no
+// .nfo file, because no player reads an .nfo file beside a music file.
+// A video whose role is not the feature also gets a record and no .nfo file.
 func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
 	output, err := probe(ctx, absolute)
 	if err != nil {
@@ -106,8 +106,8 @@ func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute s
 	if err != nil {
 		return err
 	}
-	// A sidecar beside a trailer, an extra, a sample, or a theme is a movie to
-	// Jellyfin and to this scanner, so the record is the whole answer for a
+	// Jellyfin and this scanner read an .nfo file beside a trailer, an extra,
+	// a sample, or a theme as a movie. So the record is the whole answer for a
 	// video that is not the feature. The walk reads the streams off the
 	// ledger either way.
 	if fileTypeOf(absolute) != fileTypeVideo || fileRoleAt(e.kind, absolute) != fileRolePrimary {
@@ -116,33 +116,33 @@ func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute s
 	return e.writeStreamDetails(absolute, record)
 }
 
-// The answer is one surgical edit of the sidecar, so every other element the
-// sidecar holds stays as it was. A file with no sidecar gets a minimal one,
-// and the later facts edit that same file.
+// The answer is one edit of one element in the .nfo file, so every other
+// element in the file stays as it was. A video with no .nfo file gets a
+// minimal one, and the later facts edit that same file.
 func (e *enricher) writeStreamDetails(absolute string, record probedFile) error {
 	element, err := xml.MarshalIndent(record.fileInfo(), "  ", "  ")
 	if err != nil {
 		return err
 	}
-	sidecar, rootElement, title := probeSidecar(e.kind, absolute)
-	return e.writer.editNFO(sidecar, rootElement, title, xmlElement{name: "fileinfo"}, element)
+	nfoPath, rootElement, title := probeNFO(e.kind, absolute)
+	return e.writer.editNFO(nfoPath, rootElement, title, xmlElement{name: "fileinfo"}, element)
 }
 
-// The sidecar names and the root elements the scanner reads a title's, a
-// series', and an episode's facts from.
+// The .nfo file names and the root elements that the scanner reads a
+// title's, a series', and an episode's facts from.
 const (
-	movieSidecarName  = "movie.nfo"
-	seriesSidecarName = "tvshow.nfo"
-	nfoRootMovie      = "movie"
-	nfoRootSeries     = "tvshow"
-	nfoRootEpisode    = "episodedetails"
+	movieNFOName   = "movie.nfo"
+	seriesNFOName  = "tvshow.nfo"
+	nfoRootMovie   = "movie"
+	nfoRootSeries  = "tvshow"
+	nfoRootEpisode = "episodedetails"
 )
 
-// Which sidecar carries a file's stream details: the title's own for the
+// Which .nfo file contains a file's stream details: the title's own for the
 // first video of a movie folder, and the file's own for every other video.
 // That is where the scanner reads each of them from, so a trailer's details
 // never land in movie.nfo.
-func probeSidecar(kind, absolute string) (string, string, string) {
+func probeNFO(kind, absolute string) (string, string, string) {
 	dir, name := filepath.Dir(absolute), filepath.Base(absolute)
 	rootElement := nfoRootEpisode
 	if kind == libraryKindMovies {
@@ -150,14 +150,14 @@ func probeSidecar(kind, absolute string) (string, string, string) {
 		if videos, err := listVideoFiles(dir); err == nil && len(videos) > 0 && videos[0] == name &&
 			extrasFolderName(filepath.Base(dir)) == "" {
 			title, _ := parseReleaseName(filepath.Base(dir))
-			return filepath.Join(dir, movieSidecarName), nfoRootMovie, title
+			return filepath.Join(dir, movieNFOName), nfoRootMovie, title
 		}
 	}
 	title, _ := parseReleaseName(name)
-	return sidecarBeside(absolute), rootElement, title
+	return nfoBeside(absolute), rootElement, title
 }
 
-func sidecarBeside(absolute string) string {
+func nfoBeside(absolute string) string {
 	return strings.TrimSuffix(absolute, filepath.Ext(absolute)) + metadataExtension
 }
 
@@ -266,7 +266,7 @@ const (
 )
 
 // A duration ffprobe states as a decimal reads as whole seconds, which is
-// what the sidecar carries.
+// what the .nfo file contains.
 func probeSeconds(duration float64) int {
 	return int(duration + 0.5)
 }
@@ -300,12 +300,12 @@ func commandStderr(err error) string {
 	return ""
 }
 
-// An absent sidecar becomes a minimal one and not an error, because the
-// sidecar-less title is the case this fact exists for. A sidecar with no
-// root element, an empty file or a declaration alone, is treated the same
-// way, because there is nothing in it to keep. Otherwise the edit never
-// rewrites the document it read. It replaces one element and keeps every
-// other byte.
+// Where no .nfo file exists, the edit writes a minimal one and returns no
+// error, because this fact exists for the title with no .nfo file. An .nfo file
+// with no root element, an empty file or a declaration alone, is treated the
+// same way, because there is nothing in it to keep. Otherwise the edit never
+// rewrites the document it read. It replaces one element and keeps every other
+// byte.
 func (w *volumeWriter) editNFO(path, rootElement, title string, element xmlElement, replacement []byte) error {
 	document, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {

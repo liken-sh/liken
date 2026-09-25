@@ -2,7 +2,7 @@ package main
 
 // What these tests read: the credits fact writing the cast of a title,
 // which is the provider's list where a provider named one and the
-// sidecar's own actors where none did.
+// .nfo file's own actors where none did.
 
 import (
 	"os"
@@ -13,11 +13,11 @@ import (
 	"testing"
 )
 
-// A sidecar with the actors Jellyfin wrote, which is the shape of every title
-// of a library it filled before this operator existed.
-func writeJellyfinActors(t *testing.T, sidecar string) {
+// An .nfo file with the actors Jellyfin wrote, which is the shape of every
+// title of a library it filled before this operator existed.
+func writeJellyfinActors(t *testing.T, nfoPath string) {
 	t.Helper()
-	writeFile(t, sidecar, `<?xml version="1.0" encoding="utf-8"?>
+	writeFile(t, nfoPath, `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <title>Winter Harbour</title>
   <year>2011</year>
@@ -40,16 +40,16 @@ func writeJellyfinActors(t *testing.T, sidecar string) {
 `)
 }
 
-// The provider's cast replaces the sidecar's actors: the provider's
+// The provider's cast replaces the .nfo file's actors: the provider's
 // order is the billing, the provider's roles are the roles, a person
-// only the sidecar names is dropped, and every person of the new cast
+// only the .nfo file names is dropped, and every person of the new cast
 // gets an entry in .contributors/.
-func TestTheProvidersCastReplacesTheActorsTheSidecarHolds(t *testing.T) {
+func TestTheProvidersCastReplacesTheActorsTheNFOHolds(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	writeJellyfinActors(t, sidecar)
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	writeJellyfinActors(t, nfoPath)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: map[string]factAnswer{
 		factCredits: {Cast: []creditedActor{
@@ -77,25 +77,26 @@ func TestTheProvidersCastReplacesTheActorsTheSidecarHolds(t *testing.T) {
 	}
 	if entry := readFileString(t, filepath.Join(root, ".contributors/no/nora-vance", contributorFileName)); entry !=
 		"name: Nora Vance\nids: {tmdb: 31}\n" {
-		t.Errorf("contributor.yaml = %q, want the ids the provider gave for the person the sidecar holds", entry)
+		t.Errorf("contributor.yaml = %q, want the ids the provider gave for the person the .nfo file holds", entry)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".contributors/iv/ivo-brandt")); !os.IsNotExist(err) {
 		t.Errorf("the store holds an entry for a person the provider's cast does not name")
 	}
-	if held := readFileString(t, sidecar); !strings.Contains(held, "<name>Ada Ferris</name>") ||
+	if held := readFileString(t, nfoPath); !strings.Contains(held, "<name>Ada Ferris</name>") ||
 		strings.Contains(held, "<name>Ivo Brandt</name>") {
-		t.Errorf("the sidecar is not the provider's cast:\n%s", held)
+		t.Errorf("the .nfo file is not the provider's cast:\n%s", held)
 	}
 }
 
 // The actor group is another writer's until this fact writes it, so the first
-// run over a sidecar Jellyfin filled takes the group over and is no fight.
+// run over an .nfo file that Jellyfin filled rewrites the group and is no
+// fight.
 func TestTheFirstCreditsWriteOverAnotherWritersActorsIsNoFight(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	writeJellyfinActors(t, sidecar)
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	writeJellyfinActors(t, nfoPath)
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers()}
 
@@ -125,7 +126,7 @@ func TestTheCreditsFactRewritesTheActorsOnlyWhenTheCastDiffers(t *testing.T) {
 		changed bool
 	}{
 		{
-			name: "a provider that names the people the sidecar holds",
+			name: "a provider that names the people the .nfo file holds",
 			cast: []creditedActor{
 				{Name: "Nora Vance", Role: "Captain", IDs: providerIDs{"tmdb": "31"}},
 				{Name: "Ivo Brandt", Role: "The Mate"},
@@ -133,7 +134,7 @@ func TestTheCreditsFactRewritesTheActorsOnlyWhenTheCastDiffers(t *testing.T) {
 			},
 		},
 		{
-			name: "a provider that names the part and the picture the sidecar left empty",
+			name: "a provider that names the part and the picture the .nfo file left empty",
 			cast: []creditedActor{
 				{Name: "Nora Vance", Role: "Captain"},
 				{Name: "Ivo Brandt", Role: "The Mate"},
@@ -157,9 +158,9 @@ func TestTheCreditsFactRewritesTheActorsOnlyWhenTheCastDiffers(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			folder := "Winter Harbour (2011)"
-			sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-			writeJellyfinActors(t, sidecar)
-			before := readFileString(t, sidecar)
+			nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+			writeJellyfinActors(t, nfoPath)
+			before := readFileString(t, nfoPath)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts,
 				answers: map[string]factAnswer{factCredits: {Cast: test.cast}}}
@@ -168,9 +169,9 @@ func TestTheCreditsFactRewritesTheActorsOnlyWhenTheCastDiffers(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if changed := readFileString(t, sidecar) != before; changed != test.changed {
-				t.Errorf("the sidecar changed = %v, want %v:\n%s", changed, test.changed,
-					readFileString(t, sidecar))
+			if changed := readFileString(t, nfoPath) != before; changed != test.changed {
+				t.Errorf("the .nfo file changed = %v, want %v:\n%s", changed, test.changed,
+					readFileString(t, nfoPath))
 			}
 			ledger, err := readLikenLedger(filepath.Join(root, folder), factCredits)
 			if err != nil {
@@ -190,7 +191,7 @@ func TestACreditsAnswerWithNoCastWritesAnEmptyLedger(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	empty := &fakeAnswerer{name: "tmdb", facts: nfoFacts,
 		answers: map[string]factAnswer{factCredits: {}}}
@@ -209,22 +210,22 @@ func TestACreditsAnswerWithNoCastWritesAnEmptyLedger(t *testing.T) {
 	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
 		t.Fatalf("attempts = %+v, want the one that wrote the empty file", ledger.Attempts)
 	}
-	if held := readFileString(t, sidecar); strings.Contains(held, "<actor>") {
+	if held := readFileString(t, nfoPath); strings.Contains(held, "<actor>") {
 		t.Errorf("the fact wrote an actor no provider named:\n%s", held)
 	}
 }
 
-// The actors the sidecar holds, in billing order, with the people it
+// The actors the .nfo file holds, in billing order, with the people it
 // names nothing left out. They are the cast where no provider named
 // one.
-func TestTheSidecarsActorsReadInBillingOrder(t *testing.T) {
+func TestTheNFOsActorsReadInBillingOrder(t *testing.T) {
 	cases := []struct {
 		name     string
 		document string
 		want     []creditedActor
 	}{
 		{
-			name:     "a sidecar with no actors",
+			name:     "an .nfo file with no actors",
 			document: "<movie><title>One</title></movie>",
 		},
 		{
@@ -261,7 +262,7 @@ func TestTheSidecarsActorsReadInBillingOrder(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if got := sidecarCast([]byte(test.document)); !reflect.DeepEqual(got, test.want) {
+			if got := nfoCast([]byte(test.document)); !reflect.DeepEqual(got, test.want) {
 				t.Errorf("cast = %+v, want %+v", got, test.want)
 			}
 		})
@@ -269,15 +270,15 @@ func TestTheSidecarsActorsReadInBillingOrder(t *testing.T) {
 }
 
 // Jellyfin writes a producer as an actor element whose role is
-// "Producer", so a person who acted and produced stands twice in the
-// sidecar. The provider's cast names them once, in the part they acted,
+// "Producer", so a person who acted and produced appears twice in the
+// .nfo file. The provider's cast names them once, in the part they acted,
 // and that is the cast the fact writes.
-func TestAProducerTheSidecarHoldsAsAnActorIsWrittenOnce(t *testing.T) {
+func TestAProducerTheNFOHoldsAsAnActorIsWrittenOnce(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	writeFile(t, sidecar, `<?xml version="1.0" encoding="utf-8"?>
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	writeFile(t, nfoPath, `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <title>Winter Harbour</title>
   <uniqueid type="tmdb" default="true">4242</uniqueid>
@@ -311,21 +312,21 @@ func TestAProducerTheSidecarHoldsAsAnActorIsWrittenOnce(t *testing.T) {
 	if !slices.Equal(ledger.Credits, want) {
 		t.Fatalf("credits = %+v, want %+v", ledger.Credits, want)
 	}
-	if held := readFileString(t, sidecar); strings.Count(held, "<name>Nora Vance</name>") != 1 {
-		t.Errorf("the sidecar names the person twice:\n%s", held)
+	if held := readFileString(t, nfoPath); strings.Count(held, "<name>Nora Vance</name>") != 1 {
+		t.Errorf("the .nfo file names the person twice:\n%s", held)
 	}
 }
 
-// A provider that named no person at all leaves the sidecar's own
-// actors where they are, in the order the sidecar reads them, and
+// A provider that named no person at all leaves the .nfo file's own
+// actors where they are, in their order in the .nfo file, and
 // credits.yaml names them.
-func TestACreditsAnswerWithNoPeopleLeavesTheSidecarsOwn(t *testing.T) {
+func TestACreditsAnswerWithNoPeopleLeavesTheNFOsOwn(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	writeJellyfinActors(t, sidecar)
-	before := readFileString(t, sidecar)
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	writeJellyfinActors(t, nfoPath)
+	before := readFileString(t, nfoPath)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	empty := &fakeAnswerer{name: "tmdb", facts: nfoFacts,
 		answers: map[string]factAnswer{factCredits: {}}}
@@ -349,7 +350,7 @@ func TestACreditsAnswerWithNoPeopleLeavesTheSidecarsOwn(t *testing.T) {
 	if !slices.Equal(ledger.Credits, want) {
 		t.Fatalf("credits = %+v, want %+v", ledger.Credits, want)
 	}
-	if held := readFileString(t, sidecar); held != before {
-		t.Errorf("the sidecar reads\n%s\nwant the actors it already held", held)
+	if held := readFileString(t, nfoPath); held != before {
+		t.Errorf("the .nfo file reads\n%s\nwant the actors it already held", held)
 	}
 }

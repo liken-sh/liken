@@ -80,7 +80,7 @@ func TestAnNFOFactWritesOnlyTheColumnsItOwns(t *testing.T) {
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
 	seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	// The catalog's title differs from the sidecar's, so a whole-row write
+	// The catalog's title differs from the .nfo file's, so a whole-row write
 	// would show as a changed title.
 	if _, err := catalog.updateItems(t.Context(), "movies", []string{"title"},
 		[]itemUpdate{{Library: contributorLibrary, Id: "movie:tmdb:4242", Values: []any{"Seeded Title"}}}); err != nil {
@@ -125,9 +125,9 @@ func TestAnArtFactWritesTheImagesRowAndTheItemsArt(t *testing.T) {
 	root := t.TempDir()
 	folder := "The Signal (2014)"
 	writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
-	// The identity fact has written the id into the sidecar by the time art
+	// The identity fact has written the id into the .nfo file by the time art
 	// runs, and that id is what keys the title's row.
-	writeFile(t, filepath.Join(root, folder, movieSidecarName),
+	writeFile(t, filepath.Join(root, folder, movieNFOName),
 		"<movie><title>The Signal</title><uniqueid type=\"tmdb\" default=\"true\">603</uniqueid></movie>\n")
 	seedArtMovie(t, catalog, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
@@ -213,7 +213,7 @@ func TestAContributorFactWritesTheColumnsItOwns(t *testing.T) {
 }
 
 // The nfo fact's own row write carries the ratings block into the body,
-// so a score reaches the catalog with the sidecar the fact just wrote.
+// so a score reaches the catalog with the .nfo file the fact just wrote.
 func TestARatingFactWritesTheScoreIntoTheBody(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()

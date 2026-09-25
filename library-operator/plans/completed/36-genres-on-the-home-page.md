@@ -37,7 +37,7 @@ way `reread` does today. The browser owns a reader: a thread over a
 second `Source` of its own that answers one read at a time and wakes
 the loop when the page is in hand. `Source::reader` yields that second
 source, and a source that has no thread to give answers nothing, in
-which case the browser reads in place. The sidecar answers a second
+which case the browser reads in place. `LocalCatalog` answers a second
 read-only connection to the same file. The test fixture and the sample
 answer nothing, so every test reads in place and stays deterministic,
 and one test proves the thread with a fixture that answers a clone.
@@ -83,7 +83,7 @@ Three changes, one release.
 1. **The genre page and where "see all" goes.** `Head` on the wall, the
    `Genre` head from its answer, and the one function that opens the
    screen for a query. The person page's works stay on their own screen.
-2. **The genres strip.** `Source::genres` on the sidecar, the sample,
+2. **The genres strip.** `Source::genres` on `LocalCatalog`, the sample,
    and the test fixture, and the `Genres` row that ends the home page.
 3. **The read off the frame thread.** The split of `Home` into read and
    apply, `Source::reader`, the browser's reader thread, and the stale

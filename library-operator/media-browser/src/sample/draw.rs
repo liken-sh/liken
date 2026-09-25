@@ -13,7 +13,7 @@ use crate::catalog::{GenreEntry, GenreSort, Order, Query, Slot, TILE_CANDIDATES,
 // trail with it.
 const GENRES: [&str; 5] = ["Drama", "Mystery", "Western", "Comedy", "Thriller"];
 
-/// The genres of one invented movie in the sidecar's order: the lead by
+/// The genres of one invented movie in the local catalog's order: the lead by
 /// the number, and a second where it differs from the lead.
 pub fn movie_genres(number: i64) -> Vec<String> {
     let lead = GENRES[(number % 5) as usize];
@@ -38,7 +38,7 @@ fn serial_arrival(number: i64) -> i64 {
 
 /// The genre query as the sample answers it: every movie and serial
 /// that carries the genre, in the order the sort names, then by library
-/// and id, which is the sidecar's own order.
+/// and id, which is the local catalog's own order.
 // `Leads` keeps the rank-first order. The three plain sorts drop the
 // rank and read the way the library wall's do.
 pub fn titles(name: &str, order: Order, sort: GenreSort) -> Vec<Slot> {
@@ -77,7 +77,7 @@ pub fn titles(name: &str, order: Order, sort: GenreSort) -> Vec<Slot> {
 
 /// Every invented genre as the genres strip draws it, in name order: the
 /// count of the titles that carry it, and the posters of its candidates,
-/// which the genre read already orders the way the sidecar orders them.
+/// which the genre read already orders the way the local catalog orders them.
 pub fn genres() -> Vec<GenreEntry> {
     let mut names = GENRES;
     names.sort_unstable();

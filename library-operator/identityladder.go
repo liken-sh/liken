@@ -64,8 +64,8 @@ type identityMatch struct {
 }
 
 // The ladder itself, rung by rung. A name with no year climbs on the title
-// alone, because such a folder is exactly the sidecar-less case the ladder
-// exists for. One survivor is written with its reason. Several survivors go
+// alone, because the ladder exists for such a folder, which has no .nfo
+// file. One survivor is written with its reason. Several survivors go
 // to the episode rung, then to the runtime rung when the probe measured one,
 // and anything else is a candidate list.
 func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identitySearch) (identityAnswer, error) {

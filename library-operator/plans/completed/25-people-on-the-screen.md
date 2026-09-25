@@ -18,7 +18,7 @@ tables.
 
 Every movie and every series carries its cast with roles, its
 directors, and its writers in the body the scanner reads from the
-sidecar. Plan 22 draws them as text under the buttons. A name is a
+`.nfo` file. Plan 22 draws them as text under the buttons. A name is a
 dead end: select does nothing on it, and nothing on the screen answers
 "what else is this person in." Plan 14 is about a different kind of
 person, the one holding the remote, and this plan does not touch that.

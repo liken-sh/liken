@@ -57,7 +57,7 @@ func seedProbeGap(t *testing.T, catalog *Catalog, root, folder, file string) {
 	}
 }
 
-func TestTheProbeWritesStreamDetailsIntoAMinimalSidecar(t *testing.T) {
+func TestTheProbeWritesStreamDetailsIntoAMinimalNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
@@ -67,12 +67,12 @@ func TestTheProbeWritesStreamDetailsIntoAMinimalSidecar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(root, "The Thing (1982)", movieSidecarName))
+	body := readFileString(t, filepath.Join(root, "The Thing (1982)", movieNFOName))
 	for _, want := range []string{"<title>The Thing</title>", "<codec>h264</codec>", "<width>1920</width>",
 		"<durationinseconds>8673</durationinseconds>", "<aspect>1.78</aspect>",
 		"<codec>ac3</codec>", "<channels>6</channels>", "<subtitle>"} {
-		if !strings.Contains(sidecar, want) {
-			t.Errorf("the sidecar holds no %s:\n%s", want, sidecar)
+		if !strings.Contains(body, want) {
+			t.Errorf("the .nfo file holds no %s:\n%s", want, body)
 		}
 	}
 	if !strings.Contains(log.String(), "probed 1 of the 1 files") {
@@ -80,7 +80,7 @@ func TestTheProbeWritesStreamDetailsIntoAMinimalSidecar(t *testing.T) {
 	}
 }
 
-func TestTheProbeSidecarIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
+func TestTheProbeNFOIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
@@ -90,7 +90,7 @@ func TestTheProbeSidecarIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(root, "The Thing (1982)", movieSidecarName))
+	data, err := os.ReadFile(filepath.Join(root, "The Thing (1982)", movieNFOName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,19 +131,19 @@ func TestTheProbeRecordsItsAttemptAndTheRunItStarted(t *testing.T) {
 	}
 }
 
-func TestTheProbeKeepsEveryOtherByteOfASidecarThatIsAlreadyThere(t *testing.T) {
+func TestTheProbeKeepsEveryOtherByteOfAnNFOThatIsAlreadyThere(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
-	sidecar := filepath.Join(root, "The Thing (1982)", movieSidecarName)
-	writeFile(t, sidecar, nfoWithUnknownElements)
+	nfoPath := filepath.Join(root, "The Thing (1982)", movieNFOName)
+	writeFile(t, nfoPath, nfoWithUnknownElements)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 		t.Fatal(err)
 	}
 
-	edited := readFileString(t, sidecar)
+	edited := readFileString(t, nfoPath)
 	for _, want := range []string{"<lockdata>false</lockdata>", "<criticrating>84</criticrating>",
 		`<uniqueid type="imdb">tt0084787</uniqueid>`, "<poster>/volume/poster.jpg</poster>"} {
 		if !strings.Contains(edited, want) {
@@ -209,10 +209,10 @@ func TestTheProbeWorksOverTheFolderItsJobNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "The Thing (1982)", movieSidecarName)); err != nil {
-		t.Errorf("the folder the Job named holds no sidecar: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "The Thing (1982)", movieNFOName)); err != nil {
+		t.Errorf("the folder the Job named holds no .nfo file: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "Alien (1979)", movieSidecarName)); err == nil {
+	if _, err := os.Stat(filepath.Join(root, "Alien (1979)", movieNFOName)); err == nil {
 		t.Error("the probe wrote outside the folder its Job named")
 	}
 }
@@ -226,7 +226,7 @@ func TestTheProbeFailsWhereItCannotReadItsGap(t *testing.T) {
 	}
 }
 
-func TestTheSidecarAFileWritesIntoIsTheOneTheScannerReads(t *testing.T) {
+func TestTheNFOAFileWritesIntoIsTheOneTheScannerReads(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "The Thing (1982)", "The Thing 1.mkv"), "video")
 	writeFile(t, filepath.Join(root, "The Thing (1982)", "The Thing 2.mkv"), "video")
@@ -234,51 +234,51 @@ func TestTheSidecarAFileWritesIntoIsTheOneTheScannerReads(t *testing.T) {
 	writeFile(t, filepath.Join(root, "Twin Peaks", "Season 01", "s01e01.mkv"), "video")
 
 	cases := []struct {
-		name        string
-		kind        string
-		file        string
-		wantSidecar string
-		wantRoot    string
-		wantTitle   string
+		name      string
+		kind      string
+		file      string
+		wantNFO   string
+		wantRoot  string
+		wantTitle string
 	}{
 		{
-			name:        "the first video of a movie folder in name order",
-			kind:        libraryKindMovies,
-			file:        "The Thing (1982)/The Thing 1.mkv",
-			wantSidecar: "The Thing (1982)/movie.nfo",
-			wantRoot:    nfoRootMovie,
-			wantTitle:   "The Thing",
+			name:      "the first video of a movie folder in name order",
+			kind:      libraryKindMovies,
+			file:      "The Thing (1982)/The Thing 1.mkv",
+			wantNFO:   "The Thing (1982)/movie.nfo",
+			wantRoot:  nfoRootMovie,
+			wantTitle: "The Thing",
 		},
 		{
-			name:        "a second encoding beside it",
-			kind:        libraryKindMovies,
-			file:        "The Thing (1982)/The Thing 2.mkv",
-			wantSidecar: "The Thing (1982)/The Thing 2.nfo",
-			wantRoot:    nfoRootMovie,
-			wantTitle:   "The Thing 2",
+			name:      "a second encoding beside it",
+			kind:      libraryKindMovies,
+			file:      "The Thing (1982)/The Thing 2.mkv",
+			wantNFO:   "The Thing (1982)/The Thing 2.nfo",
+			wantRoot:  nfoRootMovie,
+			wantTitle: "The Thing 2",
 		},
 		{
-			name:        "a trailer in an extras folder",
-			kind:        libraryKindMovies,
-			file:        "The Thing (1982)/trailers/teaser.mkv",
-			wantSidecar: "The Thing (1982)/trailers/teaser.nfo",
-			wantRoot:    nfoRootMovie,
-			wantTitle:   "teaser",
+			name:      "a trailer in an extras folder",
+			kind:      libraryKindMovies,
+			file:      "The Thing (1982)/trailers/teaser.mkv",
+			wantNFO:   "The Thing (1982)/trailers/teaser.nfo",
+			wantRoot:  nfoRootMovie,
+			wantTitle: "teaser",
 		},
 		{
-			name:        "an episode",
-			kind:        libraryKindSeries,
-			file:        "Twin Peaks/Season 01/s01e01.mkv",
-			wantSidecar: "Twin Peaks/Season 01/s01e01.nfo",
-			wantRoot:    nfoRootEpisode,
-			wantTitle:   "s01e01",
+			name:      "an episode",
+			kind:      libraryKindSeries,
+			file:      "Twin Peaks/Season 01/s01e01.mkv",
+			wantNFO:   "Twin Peaks/Season 01/s01e01.nfo",
+			wantRoot:  nfoRootEpisode,
+			wantTitle: "s01e01",
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			sidecar, rootElement, title := probeSidecar(test.kind, filepath.Join(root, test.file))
-			if sidecar != filepath.Join(root, test.wantSidecar) {
-				t.Errorf("sidecar = %q, want %q", sidecar, test.wantSidecar)
+			nfoPath, rootElement, title := probeNFO(test.kind, filepath.Join(root, test.file))
+			if nfoPath != filepath.Join(root, test.wantNFO) {
+				t.Errorf(".nfo file = %q, want %q", nfoPath, test.wantNFO)
 			}
 			if rootElement != test.wantRoot || title != test.wantTitle {
 				t.Errorf("root, title = %q, %q, want %q, %q", rootElement, title, test.wantRoot, test.wantTitle)
@@ -349,7 +349,7 @@ func TestTheStreamDetailsAreWrittenFromTheRecord(t *testing.T) {
 				Width: 3840, Height: 2160, HDRType: "hlg"}}},
 		},
 		{
-			name: "a cover and a data stream, which the sidecar does not carry",
+			name: "a cover and a data stream, which the .nfo file does not record",
 			record: probedFile{Streams: []probedStream{
 				{Kind: fileTypeImage, Codec: "mjpeg", Width: 600, Height: 600},
 				{Kind: probedKindData, Codec: "bin_data"},
@@ -425,7 +425,7 @@ func TestASecondProbeOfAFileLeavesOneRecordInTheLedger(t *testing.T) {
 	}
 }
 
-func TestAnAudioFileIsRecordedAndGetsNoSidecar(t *testing.T) {
+func TestAnAudioFileIsRecordedAndGetsNoNFO(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "A Perfect Circle", "01 The Track.mp3"), "audio")
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
@@ -444,7 +444,7 @@ func TestAnAudioFileIsRecordedAndGetsNoSidecar(t *testing.T) {
 		t.Errorf("attempt = %+v, want one that found the streams", ledger.Attempts[0])
 	}
 	if _, err := os.Stat(filepath.Join(root, "A Perfect Circle", "01 The Track.nfo")); err == nil {
-		t.Error("the probe wrote a sidecar beside a music file")
+		t.Error("the probe wrote an .nfo file beside a music file")
 	}
 }
 
@@ -464,12 +464,12 @@ func TestAFileTheProbeCannotStatIsAnError(t *testing.T) {
 	}
 }
 
-func TestASidecarThatIsNotXMLFailsTheEdit(t *testing.T) {
+func TestAnNFOThatIsNotXMLFailsTheEdit(t *testing.T) {
 	dir := t.TempDir()
-	sidecar := filepath.Join(dir, movieSidecarName)
-	writeFile(t, sidecar, "this is not xml <<<")
+	nfoPath := filepath.Join(dir, movieNFOName)
+	writeFile(t, nfoPath, "this is not xml <<<")
 
-	err := newVolumeWriter("movies-enrich").editNFO(sidecar, nfoRootMovie, "X",
+	err := newVolumeWriter("movies-enrich").editNFO(nfoPath, nfoRootMovie, "X",
 		xmlElement{name: "fileinfo"}, []byte("<fileinfo/>"))
 
 	if err == nil {
@@ -477,13 +477,13 @@ func TestASidecarThatIsNotXMLFailsTheEdit(t *testing.T) {
 	}
 }
 
-func TestASidecarTheEnricherCannotReadFailsTheEdit(t *testing.T) {
+func TestAnNFOTheEnricherCannotReadFailsTheEdit(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, movieSidecarName), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, movieNFOName), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	err := newVolumeWriter("movies-enrich").editNFO(filepath.Join(dir, movieSidecarName), nfoRootMovie, "X",
+	err := newVolumeWriter("movies-enrich").editNFO(filepath.Join(dir, movieNFOName), nfoRootMovie, "X",
 		xmlElement{name: "fileinfo"}, []byte("<fileinfo/>"))
 
 	if err == nil {
@@ -529,20 +529,20 @@ func TestACommandThatFailsIsAnError(t *testing.T) {
 	}
 }
 
-// A sidecar with no root element holds nothing to keep, so the minimal
-// document takes its place and the fact's edit lands in it.
-func TestASidecarWithNoRootElementIsWrittenAsIfItWereAbsent(t *testing.T) {
+// An .nfo file with no root element contains nothing to keep, so the edit
+// writes the minimal document in its place and puts the fact's element in it.
+func TestAnNFOWithNoRootElementIsWrittenAsIfItWereAbsent(t *testing.T) {
 	cases := []struct {
-		name    string
-		sidecar string
+		name string
+		body string
 	}{
-		{name: "an empty file", sidecar: ""},
-		{name: "an XML declaration alone", sidecar: "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"},
+		{name: "an empty file", body: ""},
+		{name: "an XML declaration alone", body: "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "s01e01.nfo")
-			writeFile(t, path, test.sidecar)
+			writeFile(t, path, test.body)
 
 			err := newVolumeWriter("series-enrich").editNFO(path, nfoRootEpisode, "s01e01",
 				xmlElement{name: "fileinfo"}, []byte("<fileinfo/>"))
@@ -559,14 +559,15 @@ func TestASidecarWithNoRootElementIsWrittenAsIfItWereAbsent(t *testing.T) {
 	}
 }
 
-// A sidecar whose root the parser stops on is an error, and the bytes stay as
-// they were, because the volume may hold facts no reader here models.
-func TestASidecarWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
+// An .nfo file whose root the parser cannot read fails the edit, and the
+// bytes stay as they were, because the volume may hold facts no reader here
+// models.
+func TestAnNFOWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s01e01.nfo")
 	// The document ends inside the root, which even a lenient reader cannot
 	// read past.
-	sidecar := "<episodedetails><title>Breakage"
-	writeFile(t, path, sidecar)
+	body := "<episodedetails><title>Breakage"
+	writeFile(t, path, body)
 
 	err := newVolumeWriter("series-enrich").editNFO(path, nfoRootEpisode, "s01e01",
 		xmlElement{name: "fileinfo"}, []byte("<fileinfo/>"))
@@ -574,31 +575,31 @@ func TestASidecarWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
 	if err == nil {
 		t.Error("the edit reported no error, want one")
 	}
-	if got := readFileString(t, path); got != sidecar {
-		t.Errorf("the sidecar reads %q, want the bytes it held", got)
+	if got := readFileString(t, path); got != body {
+		t.Errorf("the .nfo file reads %q, want the bytes it held", got)
 	}
 }
 
 // The probe reads every video the gap holds and records its streams, and it
-// writes a sidecar beside the feature alone, because a sidecar beside a
-// trailer is a second movie to Jellyfin and to the walk.
-func TestTheProbeWritesNoSidecarBesideAVideoThatIsNotTheFeature(t *testing.T) {
+// writes an .nfo file beside the feature only, because Jellyfin and the walk
+// read an .nfo file beside a trailer as a second movie.
+func TestTheProbeWritesNoNFOBesideAVideoThatIsNotTheFeature(t *testing.T) {
 	cases := []struct {
-		name        string
-		file        string
-		wantSidecar string
+		name    string
+		file    string
+		wantNFO string
 	}{
 		{
 			name: "the feature", file: "The Thing (1982).mkv",
-			wantSidecar: movieSidecarName,
+			wantNFO: movieNFOName,
 		},
 		{
 			name: "a pulled trailer", file: filepath.Join(trailersFolderName, "Official Trailer.mp4"),
-			wantSidecar: "",
+			wantNFO: "",
 		},
 		{
 			name: "an extra", file: filepath.Join("Extras", "Making Of.mkv"),
-			wantSidecar: "",
+			wantNFO: "",
 		},
 	}
 	for _, test := range cases {
@@ -633,16 +634,16 @@ func TestTheProbeWritesNoSidecarBesideAVideoThatIsNotTheFeature(t *testing.T) {
 			}
 
 			beside := strings.TrimSuffix(test.file, filepath.Ext(test.file)) + metadataExtension
-			for _, sidecar := range []string{movieSidecarName, beside} {
-				_, err := os.Stat(filepath.Join(folder, sidecar))
-				if sidecar == test.wantSidecar {
+			for _, nfo := range []string{movieNFOName, beside} {
+				_, err := os.Stat(filepath.Join(folder, nfo))
+				if nfo == test.wantNFO {
 					if err != nil {
-						t.Errorf("the probe wrote no %s: %v", sidecar, err)
+						t.Errorf("the probe wrote no %s: %v", nfo, err)
 					}
 					continue
 				}
 				if err == nil {
-					t.Errorf("the probe wrote %s beside a video that is not the feature", sidecar)
+					t.Errorf("the probe wrote %s beside a video that is not the feature", nfo)
 				}
 			}
 		})

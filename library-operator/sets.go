@@ -1,7 +1,7 @@
 package main
 
-// sets.go derives the sets item table. A set is the collection a movie
-// sidecar names, a film and its sequels, and nothing on the volume holds it,
+// sets.go derives the sets item table. A set is the collection a movie's
+// .nfo file names, a film and its sequels, and nothing on the volume holds it,
 // so every set row is derived from the movies that name it. A full walk
 // derives each set from all of its members as they arrive. A rescan reads
 // one folder and cannot see a set's other members, so it derives the set
@@ -201,7 +201,7 @@ func reconcileSets(ctx context.Context, catalog *Catalog, library string, ids []
 
 // earliestSetMember reads the member a set derives its row from, in the
 // order the fold uses. The set's name comes off that movie's body, where the
-// sidecar's set name lands.
+// set name from the .nfo file lands.
 func (c *Catalog) earliestSetMember(ctx context.Context, library, set string) (setMember, bool, error) {
 	member := setMember{set: set, library: library}
 	found := false

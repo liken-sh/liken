@@ -297,9 +297,9 @@ func TestABareSeriesFolderIdentifiesByItsEpisodeNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(root, folder, seriesSidecarName))
-	if !strings.Contains(sidecar, `<uniqueid type="tmdb" default="true">1920</uniqueid>`) {
-		t.Errorf("the sidecar holds no id:\n%s", sidecar)
+	nfo := readFileString(t, filepath.Join(root, folder, seriesNFOName))
+	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1920</uniqueid>`) {
+		t.Errorf("the .nfo file holds no id:\n%s", nfo)
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 	if err != nil {

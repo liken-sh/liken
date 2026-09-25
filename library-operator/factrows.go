@@ -125,7 +125,7 @@ func filesOfType(files []fileRow, kind string) []fileRow {
 }
 
 // The probe owns the stream columns of every video and the duration of the
-// items whose sidecar states no runtime of its own.
+// items whose .nfo file states no runtime of its own.
 func (e *enricher) writeProbeRows(ctx context.Context, result *walkResult) error {
 	if _, err := e.catalog.UpdateFileStreams(ctx, filesOfType(result.files, fileTypeVideo)); err != nil {
 		return err
@@ -170,7 +170,7 @@ func (e *enricher) writeArrivalRows(ctx context.Context, result *walkResult) err
 }
 
 // The nfo phase owns the body and the nfo_facts of the title itself. The
-// phase edits no episode sidecar, so the episode rows stay as they are.
+// phase edits no episode .nfo file, so the episode rows stay as they are.
 func (e *enricher) writeBodyRows(ctx context.Context, result *walkResult) error {
 	var rows []itemUpdate
 	for _, row := range result.movies {

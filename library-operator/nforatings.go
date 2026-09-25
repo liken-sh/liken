@@ -1,8 +1,8 @@
 package main
 
-// nforatings.go is the ratings block of a sidecar: the element as Kodi and
+// nforatings.go is the ratings block of an .nfo file: the element as Kodi and
 // Jellyfin write it, the names and scales of the four sites the rating facts
-// serve, and the read that carries the scores into an item's body.
+// serve, and the read that copies the scores into an item's body.
 
 import (
 	"strconv"
@@ -13,7 +13,7 @@ import (
 // scored the title, the top of that site's scale, whether a reader takes this
 // one first, the score, and how many people voted. The score is read as text
 // and parsed per rating, because a number field fails the decode of the whole
-// sidecar on one bad score, and a title would lose its plot and its cast to
+// .nfo file on one bad score, and a title would lose its plot and its cast to
 // one site's empty value.
 type nfoRating struct {
 	Name    string  `xml:"name,attr"`
@@ -73,7 +73,7 @@ func ratingNamed(ratings []nfoRating, name string) *nfoRating {
 }
 
 // The block as the body holds it: one entry per site that scored,
-// keyed by the sidecar's own rating name, valued on that site's own scale. A
+// keyed by the .nfo file's own rating name, valued on that site's own scale. A
 // rating that states no score is left out, and a block with no score at all
 // leaves the item with no ratings key.
 func bodyRatings(ratings []nfoRating) map[string]float64 {

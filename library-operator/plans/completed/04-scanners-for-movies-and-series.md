@@ -13,7 +13,7 @@ The volume already has what a catalog needs. A movie is a folder, `Title
 Jellyfin. A series is a folder with `tvshow.nfo`, season folders, and an
 `.nfo` per episode. The scanner reads that into the catalog and detects
 when it changes. On the lab's volume, about a fifth of the movie folders
-had no sidecar, so the scanner also reports what it could not identify.
+had no `.nfo` file, so the scanner also reports what it could not identify.
 
 ## The scanner contract
 
@@ -122,19 +122,20 @@ agent releases it, are the `Catalog` object's concern.
 ## Movies
 
 A movies library is one folder per title, at the root or under grouping
-folders. A grouping folder holds no `movie.nfo` and no video, so the walk
-descends into it and keeps descending until it reaches title folders. This
-finds a title a volume nests under a genre and then a studio, and a
-grouping folder is never a title itself. For a folder with
-no sidecar, the scanner reads the title and year from the folder name,
-in the `Title (Year)` and `Title [Year]` forms the `*arr` tools and
-Jellyfin write. A folder with `movie.nfo` takes its identity, plot, cast, set,
-genres, and provider ids from it. The scanner records the folder's
-art on the item, and the path of a file's `.trickplay` directory on the
-file, so the media browser and the display draw them from the volume and
-the scanner copies nothing. A folder with neither a sidecar nor a confident parse is
-counted as unidentified and cataloged by its folder name, so it is
-browsable and the count is accurate.
+folders. A grouping folder holds no `movie.nfo` and no video, so the
+walk descends into it and keeps descending until it reaches title
+folders. This finds a title a volume nests under a genre and then a
+studio, and a grouping folder is never a title itself. For a folder with
+no `.nfo` file, the scanner reads the title and year from the folder
+name, in the `Title (Year)` and `Title [Year]` forms the `*arr` tools
+and Jellyfin write. A folder with `movie.nfo` takes its identity, plot,
+cast, set, genres, and provider ids from it. The scanner records the
+folder's art on the item, and the path of a file's `.trickplay`
+directory on the file, so the media browser and the display draw them
+from the volume and the scanner copies nothing. A folder with neither an
+`.nfo` file nor a confident parse is counted as unidentified and
+cataloged by its folder name, so it is browsable and the count is
+accurate.
 
 ## Series
 
@@ -164,16 +165,16 @@ file and not another work.
 
 An alias maps one of an item's ids to the item. Every provider id in a
 folder's `.nfo`, and the folder's own name, become aliases of the item,
-so several names resolve to one work and a lost sidecar still resolves
-the folder.
+so several names resolve to one work, and the folder's own name still
+resolves the folder after its `.nfo` file is lost.
 
 An item's id is derived from the provider id in the `.nfo`, scoped by
 kind: `movie:tmdb:603`, `series:tvdb:81189`, and
 `episode:tvdb:81189:s02e05` for an episode. The scanner reads the id off
 the volume and mints nothing. A folder with no provider id takes an id
-derived from its folder name, so two sidecar-less folders that name the
-same title fold to one item. This is the weak case: a move of a
-sidecar-less folder breaks its id. The scanner sets the sort key,
+derived from its folder name, so two folders with no `.nfo` file that name
+the same title fold to one item. This is the weak case: a move of a
+folder with no `.nfo` file breaks its id. The scanner sets the sort key,
 so "The Matrix" sorts under M in every media browser, and a display
 slug, so a URL and a screen read `the-matrix-1999` and not the id.
 
@@ -182,7 +183,7 @@ slug, so a URL and a screen read `the-matrix-1999` and not the id.
 `local/` gains a script that runs a scanner against a directory of movies
 on the workstation, into the local three-agent cluster, so a parser
 change shows in a catalog without a cluster. The lab workstation has a
-folder of movies with real sidecars for this.
+folder of movies with real `.nfo` files for this.
 
 ## What was set aside
 
@@ -191,15 +192,15 @@ catalog stores paths. The display already reads art from the volume for
 a `Play`.
 
 Generating thumbnails. Jellyfin's `.trickplay` tiles are its own layout.
-The project will write WebVTT thumbnail sidecars of its own, and that is
+The project will write WebVTT thumbnail files of its own, and that is
 the enrichment plan's job.
 
 Writing a cleaner id back to the volume. The provider-scoped id is
-stable for a title with a sidecar, but a sidecar-less folder's id rests
-on its path, and a move breaks it. Writing a minted id back to the
-volume as a durable fact would fix that. The project trusts the public
-databases' ids for now and deferred writing its own until
-[plan 29](29-identification.md).
+stable for a title with an `.nfo` file, but the id of a folder with no
+`.nfo` file depends on its path, and a move breaks it. Writing a minted
+id back to the volume as a durable fact would fix that. The project
+trusts the public databases' ids for now and deferred writing its own
+until [plan 29](29-identification.md).
 
 ## Proof
 

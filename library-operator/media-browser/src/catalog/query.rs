@@ -28,7 +28,7 @@ pub enum Fold {
 }
 
 /// The column a read orders by: the release date or the arrival. It is
-/// a closed pair and not a column name, because the sidecar formats it
+/// a closed pair and not a column name, because the local catalog formats it
 /// into SQL, and the genre read and the recency read share it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
@@ -300,7 +300,7 @@ pub struct Slot {
     pub art: String,
     pub duration: i64,
     pub rating: String,
-    /// The tagline the sidecar wrote, empty where the read carried none.
+    /// The tagline the .nfo file held, empty where the read carried none.
     /// A film's card leads with it.
     pub tagline: String,
     pub parts: String,

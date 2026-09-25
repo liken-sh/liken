@@ -67,7 +67,7 @@ Leads, Newest, Oldest, Title. The recency walls are newest first by
 definition and draw bars with no button. A person's page, a set, a
 franchise, and a search draw no rail.
 
-The sidecar formats the order into the reads it makes today, on the
+`LocalCatalog` formats the order into the reads it makes today, on the
 `(library, sort_key)` and `(library, released)` indexes.
 
 ### The seasons rail

@@ -1,7 +1,7 @@
 package main
 
-// The nfo facts this wave fills, the list a sidecar answers, and the gap
-// query each fact works from. The full fact vocabulary lives in factnames.go.
+// The nfo facts this wave fills, the list an .nfo file answers, and the gap
+// query each fact works from. The full fact vocabulary is in factnames.go.
 // These names are the ones the nfo container runs today.
 
 import "strings"
@@ -44,14 +44,14 @@ func nfoFactList(facts []string) string {
 	return nfoFactSeparator + strings.Join(facts, nfoFactSeparator) + nfoFactSeparator
 }
 
-// Which nfo facts a sidecar already answers, read from the elements the
-// sidecar holds. The scanner writes the answer into the nfo_facts column. The
-// lead element of each group is the test: a sidecar that holds the plot holds
-// the group the overview fact wrote.
+// Which nfo facts an .nfo file already answers, read from the elements the .nfo
+// file holds. The scanner writes the answer into the nfo_facts column. The lead
+// element of each group is the test: an .nfo file that holds the plot holds the
+// group the overview fact wrote.
 //
 // The credits fact is not in this map. The people are the point of the fact,
-// and a sidecar's actors say nothing about credits.yaml or the .contributors/
-// entries, so the credits gap reads the credits table instead.
+// and an .nfo file's actors say nothing about credits.yaml or the
+// .contributors/ entries, so the credits gap reads the credits table instead.
 func nfoFactsAnswered(plot, certification string, ratings []nfoRating) string {
 	held := map[string]bool{
 		factOverview:      strings.TrimSpace(plot) != "",
@@ -83,7 +83,7 @@ func nfoGapQuery(fact string) string {
 
 // The credits gap, which is the one nfo gap that does not read nfo_facts: a
 // title with a provider id whose credits.yaml is not there yet, which the
-// catalog holds as no row in the credits table, whatever actors the sidecar
+// catalog holds as no row in the credits table, whatever actors the .nfo file
 // holds. The attempt window is every other query's own.
 func creditsGapQuery() string {
 	return `SELECT id FROM (` +

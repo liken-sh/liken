@@ -21,7 +21,7 @@ fn a_movie_plays_its_primary_video_file() {
         "movie:tmdb:603",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.play("default/films", &movie_chosen()),
         vec![PlayItem {
@@ -68,7 +68,7 @@ fn a_movie_plays_neither_its_art_nor_its_extras() {
         "extra",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.play("default/films", &movie_chosen()).is_empty());
 }
 
@@ -86,7 +86,7 @@ fn a_movie_with_two_encodings_plays_one_of_them() {
     insert_main_file(&path, "default/films", "The Matrix/b.mkv", "movie:tmdb:603");
     insert_main_file(&path, "default/films", "The Matrix/a.mkv", "movie:tmdb:603");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/films", &movie_chosen());
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].path, "The Matrix/a.mkv");
@@ -153,7 +153,7 @@ fn a_movie_carries_the_marks_of_its_main_file() {
     );
     insert_mark(&path, "Elsewhere/other.mkv", 0, "intro", None, Some(1));
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/films", &movie_chosen());
     assert_eq!(
         items[0].presentation.marks,
@@ -189,7 +189,7 @@ fn an_episode_carries_the_marks_of_its_file() {
         )
         .unwrap();
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(2));
     assert_eq!(
         items[0].presentation.marks,
@@ -218,7 +218,7 @@ fn an_episode_plays_itself_alone() {
         "episode:tvdb:next",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(2));
     let paths: Vec<&str> = items.iter().map(|item| item.path.as_str()).collect();
     assert_eq!(paths, ["Lost/S01E2.mkv"]);
@@ -232,7 +232,7 @@ fn every_item_carries_the_slug_its_row_holds() {
     let path = fixture(&dir);
     a_season(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(2));
     let slugs: Vec<&str> = items.iter().map(|item| item.slug.as_str()).collect();
     assert_eq!(slugs, ["s01e02"]);
@@ -244,7 +244,7 @@ fn an_episodes_presentation_names_its_series_and_its_numbers() {
     let path = fixture(&dir);
     a_season(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(3));
     assert_eq!(
         items[0].presentation,
@@ -271,7 +271,7 @@ fn an_episode_the_catalog_dates_carries_the_date_and_not_the_year() {
     insert_released_episode(&path, "default/shows", "e2", SERIES, 1, 2, "2004");
     insert_main_file(&path, "default/shows", "Lost/S01E2.mkv", "e2");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let dated = source.play("default/shows", &episode_chosen(1));
     assert_eq!(dated[0].presentation.date, "2004-09-22");
     assert_eq!(dated[0].presentation.year, 0);
@@ -294,7 +294,7 @@ fn an_episode_with_no_still_presents_the_art_of_its_series() {
     );
     clear_episode_art(&path, "default/shows", "episode:tvdb:1");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let cleared = source.play("default/shows", &episode_chosen(1));
     assert_eq!(cleared[0].presentation.art, "Lost/fanart.jpg");
     let held = source.play("default/shows", &episode_chosen(2));
@@ -308,7 +308,7 @@ fn an_episode_under_no_series_row_names_no_series() {
     insert_episode(&path, "default/shows", "e1", SERIES, 1, 1);
     insert_main_file(&path, "default/shows", "Lost/S01E1.mkv", "e1");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(1));
     assert_eq!(items[0].presentation.series, "");
     assert_eq!(items[0].presentation.year, 0);
@@ -323,7 +323,7 @@ fn an_episode_with_no_file_of_its_own_plays_nothing() {
     insert_episode(&path, "default/shows", "e2", SERIES, 1, 2);
     insert_main_file(&path, "default/shows", "Lost/S01E2.mkv", "e2");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.play("default/shows", &episode_chosen(1)).is_empty());
 }
 
@@ -346,7 +346,7 @@ fn a_choice_in_another_library_plays_nothing() {
         "movie:tmdb:603",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.play("default/other", &movie_chosen()).is_empty());
     assert!(source.play("default/other", &episode_chosen(1)).is_empty());
 }
@@ -366,7 +366,7 @@ fn a_trailer_plays_the_trailer_file_and_carries_no_trickplay() {
         "trailer",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.play("default/films", &Selection::Trailer { id: "one".into() }),
         vec![PlayItem {
@@ -399,7 +399,7 @@ fn a_series_trailer_plays_the_trailer_file_under_the_series_row() {
         "trailer",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.play(
             "default/shows",
@@ -429,7 +429,7 @@ fn a_series_with_no_trailer_file_plays_nothing() {
     let path = fixture(&dir);
     insert_series_page(&path, "default/shows", "series:tvdb:1", "2004", "{}");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(
         source
             .play(
@@ -449,7 +449,7 @@ fn a_movie_with_no_trailer_file_plays_nothing() {
     insert_page(&path, "default/films", "one", "1994", "", BODY);
     insert_main_file(&path, "default/films", "Film one/Film one.mkv", "one");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(
         source
             .play("default/films", &Selection::Trailer { id: "one".into() })

@@ -1,8 +1,8 @@
 package main
 
-// What these tests read: the credits fact writing the directors and the
-// writers of a title beside its cast, from the sidecar and from every provider
-// that names them.
+// What these tests read: the credits fact writing the directors and the writers
+// of a title beside its cast, from the .nfo file and from every provider that
+// names them.
 
 import (
 	"os"
@@ -11,15 +11,15 @@ import (
 	"testing"
 )
 
-// The crew the provider names replaces the crew the sidecar holds: the
+// The crew the provider names replaces the crew the .nfo file holds: the
 // provider's directors are the directors, the provider's writers are
-// the writers, and a person only the sidecar names is dropped.
-func TestTheProvidersCrewReplacesTheCrewTheSidecarHolds(t *testing.T) {
+// the writers, and a person only the .nfo file names is dropped.
+func TestTheProvidersCrewReplacesTheCrewTheNFOHolds(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	writeJellyfinCrew(t, sidecar)
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	writeJellyfinCrew(t, nfoPath)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: map[string]factAnswer{
 		factCredits: {
@@ -61,14 +61,14 @@ func TestTheProvidersCrewReplacesTheCrewTheSidecarHolds(t *testing.T) {
 }
 
 // The group edit writes the actors, the directors, and the writers where the
-// first of them stood, and leaves every other byte of the sidecar: the plot,
+// first of them was, and leaves every other byte of the .nfo file: the plot,
 // the credits element Kodi reads, and the URL after the root element.
-func TestTheCreditsGroupLeavesEveryOtherByteOfTheSidecar(t *testing.T) {
+func TestTheCreditsGroupLeavesEveryOtherByteOfTheNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	writeJellyfinCrew(t, sidecar)
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	writeJellyfinCrew(t, nfoPath)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: map[string]factAnswer{
 		factCredits: {
@@ -97,22 +97,22 @@ func TestTheCreditsGroupLeavesEveryOtherByteOfTheSidecar(t *testing.T) {
 </movie>
 <url function="GetDetails" cache="4242.xml">https://api.example.test/series?apikey=k&amp;id=4242</url>
 `
-	if held := readFileString(t, sidecar); held != want {
-		t.Errorf("the sidecar reads\n%s\nwant\n%s", held, want)
+	if held := readFileString(t, nfoPath); held != want {
+		t.Errorf("the .nfo file reads\n%s\nwant\n%s", held, want)
 	}
 }
 
-// The crew the sidecar holds, in its own order, with the writer Kodi's
+// The crew the .nfo file holds, in its own order, with the writer Kodi's
 // credits element names among the writers and a name in both elements
 // read once. They are the crew where no provider named one.
-func TestTheSidecarsCrewReadsInItsOwnOrder(t *testing.T) {
+func TestTheNFOsCrewReadsInItsOwnOrder(t *testing.T) {
 	cases := []struct {
 		name      string
 		document  string
 		directors []string
 		writers   []string
 	}{
-		{name: "a sidecar with no crew", document: "<movie><title>One</title></movie>"},
+		{name: "an .nfo file with no crew", document: "<movie><title>One</title></movie>"},
 		{
 			name: "the crew another writer left",
 			document: "<movie><director>Iris Kell</director><director>Mira Solberg</director>" +
@@ -126,7 +126,7 @@ func TestTheSidecarsCrewReadsInItsOwnOrder(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			directors, writers := sidecarCrew([]byte(test.document))
+			directors, writers := nfoCrew([]byte(test.document))
 
 			if got := peopleNames(directors); !slices.Equal(got, test.directors) {
 				t.Errorf("directors = %v, want %v", got, test.directors)
@@ -148,7 +148,7 @@ func TestTheCreditsFactRewritesTheCrewOnlyWhenItDiffers(t *testing.T) {
 		changed bool
 	}{
 		{
-			name: "a provider that names the crew the sidecar holds",
+			name: "a provider that names the crew the .nfo file holds",
 			answer: factAnswer{
 				Cast:      []creditedActor{{Name: "Nora Vance", Role: "Captain"}},
 				Directors: []creditedPerson{{Name: "Iris Kell"}},
@@ -179,9 +179,9 @@ func TestTheCreditsFactRewritesTheCrewOnlyWhenItDiffers(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			folder := "Winter Harbour (2011)"
-			sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-			writeJellyfinCrew(t, sidecar)
-			before := readFileString(t, sidecar)
+			nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+			writeJellyfinCrew(t, nfoPath)
+			before := readFileString(t, nfoPath)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts,
 				answers: map[string]factAnswer{factCredits: test.answer}}
@@ -190,9 +190,9 @@ func TestTheCreditsFactRewritesTheCrewOnlyWhenItDiffers(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if changed := readFileString(t, sidecar) != before; changed != test.changed {
-				t.Errorf("the sidecar changed = %v, want %v:\n%s", changed, test.changed,
-					readFileString(t, sidecar))
+			if changed := readFileString(t, nfoPath) != before; changed != test.changed {
+				t.Errorf("the .nfo file changed = %v, want %v:\n%s", changed, test.changed,
+					readFileString(t, nfoPath))
 			}
 		})
 	}

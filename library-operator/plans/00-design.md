@@ -18,7 +18,7 @@ and its idle-client contract. `media-operator` does not depend on it.
 
 A `Play` names its media as URIs, and a person supplies them with
 `kubectl`. The files on a library's volume have folders, `.nfo`
-sidecars, artwork, and thumbnails beside them, written by the tools that
+files, artwork, and thumbnails beside them, written by the tools that
 manage the volume, and nothing in the cluster reads any of it. A person
 in a room has no way to see what is there and pick something. A catalog
 of the volume and a media browser on the screen make a media system out
@@ -35,7 +35,7 @@ and the next reads them.
    structure, and the paths of the metadata and art beside them. The
    catalog is derived. Losing it costs a rescan.
 3. **Enrich.** Fetch what the volume does not hold, from named metadata
-   providers, into the same sidecar files the indexer reads.
+   providers, into the same metadata files the indexer reads.
 4. **Organize.** Rename and move files to the library's naming
    convention.
 5. **Serve.** Replicate the catalog to every reader with no query
@@ -53,7 +53,7 @@ libraries, and a library may appear on every screen in its namespace.
 
 A kind is a plugin in the scanner and a screen design in the media
 browser. In the scanner it defines how to walk a root and how to read
-the sidecars that kind's ecosystem writes. Each kind runs as its own
+the metadata files that kind's ecosystem writes. Each kind runs as its own
 scanner image, so a photo scanner never contains an `.nfo` parser. A new
 kind is a new image and a new typed settings block in the `Library`
 schema. In the media browser each kind gets screens designed for it,
@@ -62,7 +62,7 @@ album each look like what they are. The kinds are movies, series,
 music, photos, audiobooks, books, and games.
 
 Each kind uses the format its ecosystem uses. Movies and series use the
-`.nfo`, artwork, and thumbnail sidecars that Jellyfin, Kodi, and the
+`.nfo` files, artwork, and thumbnails that Jellyfin, Kodi, and the
 `*arr` tools read and write. Music uses the tags in the files. Photos
 use EXIF and XMP. The operator writes no format of its own on the
 volume, so every file it reads or writes stays useful to other programs.
@@ -166,7 +166,7 @@ volume. The enricher never writes the catalog, and it never removes or
 overwrites a file it did not write. [Plan 27](completed/27-enrichment.md) holds
 the contracts, and plans 28 to 31 build them.
 
-One program writes sidecars into a folder. A library that another tool
+One program writes metadata files into a folder. A library that another tool
 enriches, such as Jellyfin, has no enricher of its own until that tool's
 writer is turned off.
 

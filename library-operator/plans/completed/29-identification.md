@@ -2,7 +2,7 @@
 
 Plan 29. The first enrichment build from [plan 27](27-enrichment.md).
 It answers one question for a fresh piece of media: what is it? A
-title with a sidecar answers from the sidecar. A title with none gets
+title with an `.nfo` file gets its answer from that file. A title with none gets
 its answer from a provider search over the clues the volume holds, or
 a list of candidates for a person to choose from. The plan also brings
 the machinery every later concern runs on: the enricher `Job`, the
@@ -10,8 +10,8 @@ write package, `MetadataProvider`, and the gap loop.
 
 ## The problem
 
-About a fifth of the lab's movies have no sidecar. Their id in the
-catalog rests on the folder's path, so a move of the folder loses the
+About a fifth of the lab's movies have no `.nfo` file. Their id in the
+catalog depends on the folder's path, so a move of the folder loses the
 item, and no enricher can ask a provider about a title it cannot name.
 Every other concern in plan 27 waits on an id. Identification is also
 the one step with a person in the loop, because a search can be wrong,
@@ -23,11 +23,11 @@ downstream.
 The scanner already reads the clues that cost nothing. `names.go`
 cuts a title and a year out of a *arr release name, and reads the
 season and episode markers off a file. `nfo.go` reads every
-`uniqueid` a sidecar carries. Jellyfin also reads an id out of a name,
+`uniqueid` an `.nfo` file contains. Jellyfin also reads an id out of a name,
 as in `Jellyfin Documentary (2030) [imdbid-tt00000000].mkv`, and the
 scanner learns that form in this plan. In order from free to costly:
 
-1. An id in the sidecar or in the name. No search.
+1. An id in the `.nfo` file or in the name. No search.
 2. The `Library`'s kind and the path: movie or series, and the season
    and episode. These narrow the search before any call.
 3. The title and the year from the name. Enough for a search.
@@ -220,7 +220,7 @@ scan after that identifies the title.
 
 On `liken-1`, against the lab's movies library on the NAS. The
 `probe` concern fills `<streamdetails>` for every file that has none.
-The `identity` concern runs over the sidecar-less fifth and the drill
+The `identity` concern runs over the fifth with no `.nfo` file, and the drill
 records how many it wrote, how many it left as candidates, and how
 many it wrote wrong, by hand check. That number decides whether the
 ladder ships as the default. A confirmed candidate reaches the catalog
@@ -236,8 +236,8 @@ Built by two Opus agents on one seam and rolled to `liken-1` as
 **The plan's premise was stale.** The catalog on the testbed holds 6
 movies and 1 series with a path id, not a fifth of the library, and 24
 movie files and 36 episode files with no `<streamdetails>`. Jellyfin had
-written sidecars for the rest since plan 27 measured. So the first
-probe run touches sixty sidecars, and identity has seven titles to try.
+written `.nfo` files for the rest since plan 27 measured. So the first
+probe run touches sixty `.nfo` files, and identity has seven titles to try.
 
 **The enricher read an empty copy.** The Corrosion sidecar's
 `startupProbe` answers `SELECT 1` long before a fresh claim holds the
@@ -276,9 +276,9 @@ travels as a query parameter and a v4 token as a bearer header, and the
 code now reads the form from the key's shape. The image had no CA
 bundle, so every TLS call failed, and the provider check read that as
 `NoSecret`; it now says `Unreachable`, which names a check that got no
-HTTP answer at all. And the per-file sidecars the probe writes were
+HTTP answer at all. And the per-file `.nfo` files the probe writes were
 never read back, because the movie walk read `movie.nfo` alone. Release
--013 taught the series walk the same lessons: a sidecar under either
+-013 taught the series walk the same lessons: an `.nfo` file under either
 root element, `.liken/` lifted from every folder the walk reads files
 from, a `.nfo` with no root element treated as absent, and a country
 qualifier such as `(US)` on a series folder, which becomes a rung that
@@ -289,7 +289,7 @@ by title and year, 1 became a list of 4 candidates, and 3 found nothing.
 A hand check found every outcome right: the 3 with nothing were a folder
 with a part number after its year, a special that belongs in a series
 library, and a title the provider does not hold. Then 10 movies had
-their sidecars stripped, with copies kept aside, and every one came
+their `.nfo` files stripped, with copies kept aside, and every one came
 back with its original id by title and year. The one series stripped
 carried a country qualifier and came back only with the -013 rung,
 with its original id, by title and country. Two more series stripped

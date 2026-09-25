@@ -1,14 +1,14 @@
 // The seam between the catalog and the views. The views draw rows, and a
-// `Source` yields them, so one set of views draws the sidecar's file, a
+// `Source` yields them, so one set of views draws the agent's file, a
 // test fixture, and the sample data the same way.
 
 use std::collections::HashMap;
 
 use crate::harness::Waker;
 
-// The sidecar module implements this seam over plan 06's delivery: a
-// read-only open of the sidecar's file, and its update stream.
-pub mod sidecar;
+// The local module implements this seam over plan 06's delivery: a
+// read-only open of the agent's file, and its update stream.
+pub mod local;
 
 // The query module: the closed set of queries a wall is fed by, and the
 // slots a source answers one with.
@@ -160,10 +160,10 @@ pub struct Title {
     /// The item's running time in seconds, zero where the catalog holds
     /// none.
     pub duration: i64,
-    /// The content rating from the body, empty where the sidecar named
+    /// The content rating from the body, empty where the .nfo file named
     /// none.
     pub rating: String,
-    /// The tagline from the body, empty where the sidecar wrote none. A
+    /// The tagline from the body, empty where the .nfo file held none. A
     /// film's card leads with it.
     pub tagline: String,
 }
@@ -173,7 +173,7 @@ pub struct Title {
 pub struct Credit {
     /// The person's name.
     pub name: String,
-    /// The part they played, empty where the sidecar named none.
+    /// The part they played, empty where the .nfo file named none.
     pub role: String,
 }
 
@@ -187,23 +187,23 @@ pub struct MovieDetails {
     pub released: String,
     /// The running time in seconds, zero where the catalog holds none.
     pub duration: i64,
-    /// The content rating, empty where the sidecar named none.
+    /// The content rating, empty where the .nfo file named none.
     pub rating: String,
-    /// The genres, in the order the sidecar named them.
+    /// The genres, in the order the .nfo file named them.
     pub genres: Vec<String>,
-    /// The one-line tagline, empty where the sidecar named none.
+    /// The one-line tagline, empty where the .nfo file named none.
     pub tagline: String,
     /// The plot. The page cuts it to four lines.
     pub plot: String,
-    /// The directors, in the order the sidecar named them.
+    /// The directors, in the order the .nfo file named them.
     pub directors: Vec<String>,
-    /// The writers, in the order the sidecar named them.
+    /// The writers, in the order the .nfo file named them.
     pub writers: Vec<String>,
-    /// The cast, in the order the sidecar named them.
+    /// The cast, in the order the .nfo file named them.
     pub cast: Vec<Credit>,
-    /// The studios, in the order the sidecar names them.
+    /// The studios, in the order the .nfo file names them.
     pub studios: Vec<String>,
-    /// Each site's score of the movie, keyed by the sidecar's own name for
+    /// Each site's score of the movie, keyed by the .nfo file's own name for
     /// the site, on that site's own scale.
     pub ratings: Vec<(String, f64)>,
     /// The id of the set the movie belongs to, empty where it belongs to
@@ -247,21 +247,21 @@ pub struct SeriesDetails {
     pub released: String,
     /// The running time in seconds, zero where the catalog holds none.
     pub duration: i64,
-    /// The content rating, empty where the sidecar named none.
+    /// The content rating, empty where the .nfo file named none.
     pub rating: String,
-    /// The genres, in the order the sidecar named them.
+    /// The genres, in the order the .nfo file named them.
     pub genres: Vec<String>,
-    /// The one-line tagline, empty where the sidecar named none.
+    /// The one-line tagline, empty where the .nfo file named none.
     pub tagline: String,
     /// The plot. The page cuts it to two lines.
     pub plot: String,
-    /// The creators, in the order the sidecar named them.
+    /// The creators, in the order the .nfo file named them.
     pub creators: Vec<String>,
-    /// The cast, in the order the sidecar named them.
+    /// The cast, in the order the .nfo file named them.
     pub cast: Vec<Credit>,
-    /// The studios, in the order the sidecar names them.
+    /// The studios, in the order the .nfo file names them.
     pub studios: Vec<String>,
-    /// Each site's score of the series, keyed by the sidecar's own name for
+    /// Each site's score of the series, keyed by the .nfo file's own name for
     /// the site, on that site's own scale.
     pub ratings: Vec<(String, f64)>,
     /// The path of the backdrop file, relative to the library root, or
@@ -292,7 +292,7 @@ pub struct Episode {
     pub released: String,
     /// The running time in seconds, zero where the catalog holds none.
     pub duration: i64,
-    /// The plot, empty where the sidecar named none.
+    /// The plot, empty where the .nfo file named none.
     pub plot: String,
     /// The path the still draws, relative to the library root: the
     /// episode's own still, and the art of its series where the catalog

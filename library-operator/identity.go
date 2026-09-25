@@ -12,8 +12,8 @@ import (
 
 // aliasRowsForItem builds every alias an item carries. It starts with
 // aliasesFor, which reads the providers in the canonical order and the folder
-// key, then adds an alias for every other provider id the sidecar named. The
-// extra providers are added in sorted order, so a re-walk of the same sidecar
+// key, then adds an alias for every other provider id the .nfo file named. The
+// extra providers are added in sorted order, so a re-walk of the same .nfo file
 // writes the same rows.
 func aliasRowsForItem(library, kind string, providerIDs map[string]string, folderKey, canonicalID string) []aliasRow {
 	rows := aliasesFor(library, kind, providerIDs, folderKey, canonicalID)
@@ -68,8 +68,8 @@ type walkResult struct {
 	marks              []markRow
 	contributors       []contributorRow
 	contributorAliases []contributorAliasRow
-	// The genres of each movie and series, in the sidecar's order, derived
-	// from the sidecar the way the attempts are derived from the ledgers.
+	// The genres of each movie and series, in the .nfo file's order, derived
+	// from the .nfo file the way the attempts are derived from the ledgers.
 	genres []genreRow
 	// The three tables one franchise directory writes. The members and
 	// the runs key on the franchise and the position, so they travel with
@@ -83,7 +83,7 @@ type walkResult struct {
 	// full walk names a sample of them in its log without holding every
 	// one. It carries one path per unidentified folder.
 	unidentifiedNames []string
-	// A walk that could not read a directory, a sidecar, or a file read
+	// A walk that could not read a directory, an .nfo file, or a file read
 	// only part of the volume, whatever the depth of the failure. The
 	// prune-abort guard then skips the prune for this pass and keeps the
 	// rows the walk did not reach.

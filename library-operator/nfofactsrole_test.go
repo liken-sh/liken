@@ -40,11 +40,12 @@ func lineOf(answerers ...answerer) *answerLine {
 	return &answerLine{answerers: answerers, spent: map[string]bool{}}
 }
 
-// one title with a provider id and a sidecar, which is the shape of an nfo gap.
+// one title with a provider id and an .nfo file, which is the shape of an nfo
+// gap.
 func seedNFOGap(t *testing.T, catalog *Catalog, root, folder, id string) string {
 	t.Helper()
-	sidecar := filepath.Join(root, folder, movieSidecarName)
-	writeFile(t, sidecar, `<?xml version="1.0" encoding="utf-8"?>
+	nfoPath := filepath.Join(root, folder, movieNFOName)
+	writeFile(t, nfoPath, `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <title>Winter Harbour</title>
   <year>2011</year>
@@ -58,7 +59,7 @@ func seedNFOGap(t *testing.T, catalog *Catalog, root, folder, id string) string 
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)
 	}
-	return sidecar
+	return nfoPath
 }
 
 func harbourAnswers() map[string]factAnswer {
@@ -83,7 +84,7 @@ func TestAnNFOFactWritesItsGroupAndSaysWhoAnswered(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			folder := "Winter Harbour (2011)"
-			sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+			nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers()}
 
@@ -91,7 +92,7 @@ func TestAnNFOFactWritesItsGroupAndSaysWhoAnswered(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			hash, err := groupHash([]byte(readFileString(t, sidecar)), nfoGroup(fact))
+			hash, err := groupHash([]byte(readFileString(t, nfoPath)), nfoGroup(fact))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,7 +101,7 @@ func TestAnNFOFactWritesItsGroupAndSaysWhoAnswered(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(ledger.Items) != 1 || ledger.Items[0].Wrote != hash {
-				t.Fatalf("items = %+v, want one with the hash of the group in the sidecar", ledger.Items)
+				t.Fatalf("items = %+v, want one with the hash of the group in the .nfo file", ledger.Items)
 			}
 			if got := ledger.Items[0].Provider; len(got) != 1 || got[0] != "tmdb" {
 				t.Errorf("provider = %v, want the block that answered", got)
@@ -251,20 +252,20 @@ func TestEachSitesRatingMergesOnItsOwn(t *testing.T) {
 }
 
 // A group another writer changed since this fact wrote it stops the fact for
-// that title, and the sidecar keeps what that writer left.
+// that title, and the .nfo file keeps what that writer left.
 func TestAFactLeavesAGroupAnotherWriterHolds(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers()}
 	if err := work.nfoGap(t.Context(), factOverview, lineOf(fake)); err != nil {
 		t.Fatal(err)
 	}
-	byHand := strings.Replace(readFileString(t, sidecar),
+	byHand := strings.Replace(readFileString(t, nfoPath),
 		"<plot>A keeper watches the ice.</plot>", "<plot>A plot a person wrote.</plot>", 1)
-	writeFile(t, sidecar, byHand)
+	writeFile(t, nfoPath, byHand)
 
 	// The title's rows now say the overview is answered, so the gap no longer
 	// lists it; the fact reaches the title again the way a rerun over it does.
@@ -276,7 +277,7 @@ func TestAFactLeavesAGroupAnotherWriterHolds(t *testing.T) {
 		t.Fatalf("the rerun answered %q, want a fight", got)
 	}
 
-	if held := readFileString(t, sidecar); !strings.Contains(held, "A plot a person wrote.") {
+	if held := readFileString(t, nfoPath); !strings.Contains(held, "A plot a person wrote.") {
 		t.Errorf("the fact wrote over another writer's plot:\n%s", held)
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, folder), factOverview)
@@ -388,15 +389,15 @@ func TestAnNFOContainerWithNoProviderKeyFails(t *testing.T) {
 	}
 }
 
-// A sidecar this container cannot read, and a provider that refuses, both
+// An .nfo file this container cannot read, and a provider that refuses, both
 // record an error attempt, and the next run tries again.
 func TestAFactRecordsAnErrorAndCarriesOn(t *testing.T) {
 	cases := []struct {
-		name    string
-		sidecar string
-		fail    error
+		name string
+		nfo  string
+		fail error
 	}{
-		{name: "a sidecar that is not XML", sidecar: "this is not xml <<<"},
+		{name: "an .nfo file that is not XML", nfo: "this is not xml <<<"},
 		{name: "a provider that refuses", fail: errRefused},
 	}
 	for _, test := range cases {
@@ -404,9 +405,9 @@ func TestAFactRecordsAnErrorAndCarriesOn(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			folder := "Winter Harbour (2011)"
-			sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-			if test.sidecar != "" {
-				writeFile(t, sidecar, test.sidecar)
+			nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+			if test.nfo != "" {
+				writeFile(t, nfoPath, test.nfo)
 			}
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers(), err: test.fail}
@@ -422,8 +423,8 @@ func TestAFactRecordsAnErrorAndCarriesOn(t *testing.T) {
 			if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptError {
 				t.Fatalf("attempts = %+v, want one error", ledger.Attempts)
 			}
-			if held := readFileString(t, sidecar); strings.Contains(held, "A keeper watches the ice.") {
-				t.Errorf("the fact wrote a plot into a sidecar it could not read:\n%s", held)
+			if held := readFileString(t, nfoPath); strings.Contains(held, "A keeper watches the ice.") {
+				t.Errorf("the fact wrote a plot into an .nfo file it could not read:\n%s", held)
 			}
 		})
 	}
@@ -524,17 +525,17 @@ func TestANarrowedJobFillsItsOwnFolderAlone(t *testing.T) {
 	}
 }
 
-// A sidecar the container cannot open at all records an error attempt, and the
-// next run tries again.
-func TestASidecarTheContainerCannotOpenRecordsAnError(t *testing.T) {
+// An .nfo file the container cannot open at all records an error attempt, and
+// the next run tries again.
+func TestAnNFOTheContainerCannotOpenRecordsAnError(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	if err := os.Remove(sidecar); err != nil {
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	if err := os.Remove(nfoPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(sidecar, 0o755); err != nil {
+	if err := os.Mkdir(nfoPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
@@ -568,7 +569,7 @@ func TestALedgerTheContainerCannotReadRecordsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if held := readFileString(t, filepath.Join(root, folder, movieSidecarName)); strings.Contains(held, "A keeper") {
+	if held := readFileString(t, filepath.Join(root, folder, movieNFOName)); strings.Contains(held, "A keeper") {
 		t.Errorf("the fact wrote without the fight check:\n%s", held)
 	}
 }
@@ -620,13 +621,13 @@ func TestTheNFOFactBuildsItsProvidersOnce(t *testing.T) {
 }
 
 // A volume the container cannot write records an error attempt and leaves the
-// sidecar as it was.
+// .nfo file as it was.
 func TestAVolumeTheContainerCannotWriteRecordsAnError(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
-	sidecar := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
-	before := readFileString(t, sidecar)
+	nfoPath := seedNFOGap(t, catalog, root, folder, "movie:tmdb:4242")
+	before := readFileString(t, nfoPath)
 	if err := os.Chmod(filepath.Join(root, folder), 0o555); err != nil {
 		t.Fatal(err)
 	}
@@ -638,8 +639,8 @@ func TestAVolumeTheContainerCannotWriteRecordsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if held := readFileString(t, sidecar); held != before {
-		t.Errorf("the sidecar changed:\n%s", held)
+	if held := readFileString(t, nfoPath); held != before {
+		t.Errorf("the .nfo file changed:\n%s", held)
 	}
 	if !strings.Contains(log.String(), "could not write the overview") {
 		t.Errorf("log = %q, want the line that names the write it could not make", log.String())
@@ -694,12 +695,12 @@ func TestEveryNFOFactRunsTheSameLoop(t *testing.T) {
 	}
 }
 
-// A sidecar Jellyfin filled with a crew: the director and the writer elements
-// it writes, Kodi's credits element beside them, and the URL it leaves after
-// the root element.
-func writeJellyfinCrew(t *testing.T, sidecar string) {
+// An .nfo file Jellyfin filled with a crew: the director and the writer
+// elements it writes, Kodi's credits element beside them, and the URL it writes
+// after the root element.
+func writeJellyfinCrew(t *testing.T, nfoPath string) {
 	t.Helper()
-	writeFile(t, sidecar, `<?xml version="1.0" encoding="utf-8"?>
+	writeFile(t, nfoPath, `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <title>Winter Harbour</title>
   <year>2011</year>

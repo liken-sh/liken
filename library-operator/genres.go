@@ -1,12 +1,12 @@
 package main
 
-// genres.go is the genres table: one row per title and genre, in the order
-// the sidecar lists them. The body column holds the same genres as JSON, which
-// no index reaches, so a read over one genre needs this table. The order is
-// kept because the sidecar's first genre is the title's main genre. The rows
-// are derived from the sidecar, so the walk writes them and the mark-and-sweep
-// prune takes them with the title, the way it takes credits. This file holds
-// the row, the writes and deletes, and the sweep reads.
+// genres.go is the genres table: one row per title and genre, in the order the
+// .nfo file lists them. The body column holds the same genres as JSON, which no
+// index reaches, so a read over one genre needs this table. The table keeps the
+// order because the first genre in the .nfo file is the title's main genre. The
+// rows come from the .nfo file, so the walk writes them, and the mark-and-sweep
+// prune removes them with the title, the way it removes credits. This file
+// holds the row, the writes and deletes, and the sweep reads.
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// One genre of one title. The rank is its position in the sidecar's list,
+// One genre of one title. The rank is its position in the .nfo file's list,
 // from zero, and it is the key beside the item, the way a credit keys on its
 // billing.
 type genreRow struct {
@@ -24,7 +24,7 @@ type genreRow struct {
 	Genre   string
 }
 
-// The rows of one title, in the sidecar's order.
+// The rows of one title, in the .nfo file's order.
 func genreRows(library, item string, genres []string) []genreRow {
 	rows := make([]genreRow, 0, len(genres))
 	for rank, genre := range genres {
@@ -34,7 +34,7 @@ func genreRows(library, item string, genres []string) []genreRow {
 }
 
 // A repeat write updates the genre in place, keyed by the title and the rank,
-// so a sidecar that reorders its genres updates the rows.
+// so an .nfo file that reorders its genres updates the rows.
 func (c *Catalog) UpsertGenres(ctx context.Context, rows []genreRow) (int, error) {
 	statements := make([]statement, len(rows))
 	for i, row := range rows {

@@ -35,7 +35,7 @@ pub const METRICS_ADDRESS: &str = "METRICS_LISTEN_ADDRESS";
 pub const HELP: &str = "\
 media-browser [FLAGS]
 
-  --catalog PATH           the sidecar's SQLite file; without it, the sample
+  --catalog PATH           the catalog agent's SQLite file; without it, the sample
   --updates URL            the agent's HTTP API base
   --progress PATH          the progress store's SQLite file
   --progress-updates URL   the progress agent's HTTP API base
@@ -74,7 +74,7 @@ pub enum Invocation {
 /// The flags the media browser accepts.
 #[derive(Debug, PartialEq)]
 pub struct Options {
-    /// The sidecar's SQLite file. Without it the binary browses the
+    /// The catalog agent's SQLite file. Without it the binary browses the
     /// sample catalog and reads no volume.
     pub catalog: Option<PathBuf>,
     /// The base of the agent's HTTP API, where the update streams are.

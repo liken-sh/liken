@@ -61,7 +61,7 @@ func isMovieTitleFolder(dir string) bool {
 // scanMovieFolder reads one title folder into the result: a movie row, a file
 // row per video file, a genre row per genre, and the alias rows. The identity
 // comes from movie.nfo where the folder holds one, and from the folder name
-// where it does not. A folder that yields neither a sidecar nor a year is
+// where it does not. A folder that yields neither an .nfo file nor a year is
 // counted unidentified and cataloged by its folder name, so it is still
 // browsable and the count is accurate. The added column is the arrival of the
 // folder's first video, the one movie.nfo describes.
@@ -69,7 +69,7 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 	root, library := scan.root, scan.library
 	name := filepath.Base(dir)
 	meta, identified, err := movieIdentity(dir, name)
-	// A folder whose sidecar could not be read has no identity this
+	// A folder whose .nfo file could not be read has no identity this
 	// pass, so it writes no row. A row written from the name alone would
 	// carry a different id from the one the catalog holds. The walk is
 	// already marked incomplete, so the rows the catalog holds stand.
@@ -143,7 +143,7 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 	scanMovieFiles(root, dir, library, id, videos, ledgers, result)
 
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeMovie, meta.ProviderIDs, key, id)...)
-	readLikenSidecar(likenSidecar{root: root, dir: dir, library: library, item: id}, result)
+	readLikenDir(likenDir{root: root, dir: dir, library: library, item: id}, result)
 	result.titles++
 	if !identified {
 		result.unidentified++
@@ -153,13 +153,13 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 
 // movieIdentity reads a folder's identity. A readable movie.nfo with a title
 // is the identity, and the folder is identified. A folder with no usable
-// sidecar falls back to the name parse, and it is identified only when the
-// name yields a year or a provider id, the signal that the parse read a real
-// release and not an arbitrary folder. A name's provider ids fill what the
-// sidecar left out, so a person confirms a candidate by naming the folder in
-// Jellyfin's form. A sidecar that is not there falls through to the name
-// parse. A sidecar the scanner cannot read is an error, because falling
-// through would mint a different id and sweep the title's own rows.
+// .nfo file falls back to the name parse. It is identified only when the
+// name yields a year or a provider id, because that shows the parse read a
+// real release and not an arbitrary folder. A name's provider ids fill what
+// the .nfo file left out, so a person confirms a candidate by naming the
+// folder in Jellyfin's form. A missing .nfo file falls through to the name
+// parse. An .nfo file that the scanner cannot read is an error, because the
+// fall-through would make a different id and sweep the title's own rows.
 func movieIdentity(dir, name string) (movieMeta, bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "movie.nfo"))
 	switch {
@@ -190,7 +190,7 @@ func releasedFromYear(year int) string {
 	return strconv.Itoa(year)
 }
 
-// movie.nfo describes the first video of a title folder, and the sidecar
+// movie.nfo describes the first video of a title folder, and the .nfo file
 // beside a file describes every other video. That is the same division the
 // probe writes them under.
 func movieFileStream(dir, file string, index int, folder streamInfo) (*streamInfo, error) {
@@ -204,7 +204,7 @@ func movieFileStream(dir, file string, index int, folder streamInfo) (*streamInf
 }
 
 // movieFileRow reads one video file into a file row linked to its movie. The
-// technical attributes come from the sidecar's streamdetails where one was
+// technical attributes come from the .nfo file's streamdetails where one was
 // present, and from the file name where none was.
 func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo, arrived int64) (fileRow, error) {
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(file, stream)
@@ -234,9 +234,9 @@ func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo, a
 	}, nil
 }
 
-// scanMovieFiles reads the rest of a movie title folder: the sidecar, the art,
-// the subtitles, the trickplay directory, and the extras folders beside the
-// feature. Every one of them links to the movie.
+// scanMovieFiles reads the rest of a movie title folder: the .nfo file, the
+// art, the subtitles, the trickplay directory, and the extras folders beside
+// the feature. Every one of them links to the movie.
 func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, ledgers *probeLedgers, result *walkResult) {
 	probes, err := ledgers.of(dir)
 	result.noteReadError(err)

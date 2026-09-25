@@ -151,7 +151,7 @@ func TestAFreshProbeWritesOneStreamRowPerStream(t *testing.T) {
 	}
 }
 
-func TestAStaleProbeLeavesTheColumnsToTheNameAndTheSidecar(t *testing.T) {
+func TestAStaleProbeLeavesTheColumnsToTheNameAndTheNFO(t *testing.T) {
 	root := t.TempDir()
 	folder := filepath.Join(root, "The Thing (1982)")
 	video := filepath.Join(folder, "The Thing (1982) 720p.mkv")

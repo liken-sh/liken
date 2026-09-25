@@ -22,7 +22,7 @@ use std::sync::atomic::Ordering;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-use super::SidecarSource;
+use super::LocalCatalog;
 use crate::catalog::{
     Answer, Change, Counts, Credit, FileFacts, Fold, InSeries, LibraryEntry, Mark, MovieDetails,
     PlayItem, Presentation, Query, Selection, SeriesDetails, Slot, Sort, Source,

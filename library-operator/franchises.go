@@ -154,7 +154,7 @@ var errFranchiseUnreadable = errors.New("the scanner could not read the file")
 
 // scanFranchiseDirectory reads one franchise directory into its rows. A
 // file the schema refuses leaves the directory counted unidentified and
-// named, the same reporting path a folder no sidecar identifies takes. A
+// named, the same reporting path a folder that no .nfo file identifies takes. A
 // file the scanner cannot read marks the pass incomplete, so a checkout it
 // could not read never sweeps the rows the catalog holds.
 func scanFranchiseDirectory(checkout, artRoot, name, library string, result *walkResult) {

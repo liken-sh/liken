@@ -14,7 +14,7 @@ import (
 )
 
 // What the namespace's reporter says about one library: how many
-// titles the catalog holds, how many folders no sidecar identified, when
+// titles the catalog holds, how many folders no .nfo file identified, when
 // the last walk ended and the last change landed, and the run of every
 // worker. The reporter publishes it retained, so the broker holds the
 // current counts for a subscriber that arrives later.

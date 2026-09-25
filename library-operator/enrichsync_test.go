@@ -223,9 +223,9 @@ func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 		t.Fatalf("the probe container failed: %v", err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(work.root, folder, movieSidecarName))
-	if !strings.Contains(sidecar, "<codec>h264</codec>") {
-		t.Errorf("the sidecar holds no stream details:\n%s", sidecar)
+	nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
+	if !strings.Contains(nfo, "<codec>h264</codec>") {
+		t.Errorf("the .nfo file holds no stream details:\n%s", nfo)
 	}
 }
 
@@ -256,9 +256,9 @@ func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 		t.Fatalf("the identity container failed: %v", err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(work.root, folder, movieSidecarName))
-	if !strings.Contains(sidecar, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
-		t.Errorf("the sidecar holds no id:\n%s", sidecar)
+	nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
+	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
+		t.Errorf("the .nfo file holds no id:\n%s", nfo)
 	}
 }
 

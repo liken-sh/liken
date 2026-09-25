@@ -1,6 +1,6 @@
 package main
 
-// The sets a movies library derives: the id a sidecar's set element
+// The sets a movies library derives: the id an .nfo file's set element
 // yields, the fold that picks a set's earliest member, and the walk and the
 // rescan that write and prune the rows.
 
@@ -176,9 +176,9 @@ func TestASetWritesAnEmptyBody(t *testing.T) {
 	}
 }
 
-// The walk reads the set off each sidecar: the collection id Jellyfin
-// writes on the element, the name a Kodi sidecar carries alone, and no set
-// where the sidecar names none.
+// The walk reads the set from each .nfo file: the collection id Jellyfin
+// writes on the element, the name alone in a Kodi .nfo file, and no set
+// where the .nfo file names none.
 func TestAWalkCarriesTheSetOfEveryTitle(t *testing.T) {
 	movies := moviesByTitle(walkMovies("testdata/sets", "house/movies", nil))
 
@@ -198,12 +198,12 @@ func TestAWalkCarriesTheSetOfEveryTitle(t *testing.T) {
 		})
 	}
 	if got := moviesByTitle(walkMovies("testdata/movies", "house/movies", nil))["The Matrix"].SetID; got != "set:name:the-matrix-collection" {
-		t.Errorf("setID = %q, want the named set of a sidecar with no collection id", got)
+		t.Errorf("setID = %q, want the named set of an .nfo file with no collection id", got)
 	}
 }
 
 // setTitle is one title folder a set drill writes: the folder's name, the
-// title in its sidecar, its release date, and the set it names.
+// title in its .nfo file, its release date, and the set it names.
 type setTitle struct {
 	folder   string
 	title    string
@@ -213,8 +213,8 @@ type setTitle struct {
 	colID    string
 }
 
-// setTree writes a movies volume of title folders, each with a sidecar that
-// names its set, so a walk of the root derives the sets from real files.
+// setTree writes a movies volume of title folders, each with an .nfo file
+// that names its set, so a walk of the root derives the sets from real files.
 func setTree(t *testing.T, titles ...setTitle) string {
 	t.Helper()
 	root := t.TempDir()

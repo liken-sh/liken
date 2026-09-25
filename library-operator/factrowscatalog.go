@@ -86,7 +86,7 @@ func (c *Catalog) updateItems(ctx context.Context, table string, columns []strin
 	return c.apply(ctx, statements)
 }
 
-// The duration of an item, which the probe owns where the sidecar states no
+// The duration of an item, which the probe owns where the .nfo file states no
 // runtime of its own.
 func (c *Catalog) UpdateItemDurations(ctx context.Context, table string, rows []itemUpdate) (int, error) {
 	return c.updateItems(ctx, table, []string{"duration"}, rows)
@@ -99,7 +99,7 @@ func (c *Catalog) UpdateItemAdded(ctx context.Context, table string, rows []item
 }
 
 // The body and the nfo_facts of a title, the nfo phase's columns, from a
-// re-parse of the sidecar it wrote.
+// re-parse of the .nfo file it wrote.
 func (c *Catalog) UpdateItemBodies(ctx context.Context, table string, rows []itemUpdate) (int, error) {
 	return c.updateItems(ctx, table, []string{"body", "nfo_facts"}, rows)
 }

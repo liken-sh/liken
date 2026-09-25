@@ -19,7 +19,7 @@ size and row count of a large kind must fit a memory budget.
 
 ## Photos and home video
 
-The metadata comes from EXIF and from XMP sidecars. The library is
+The metadata comes from EXIF and from XMP files. The library is
 organized by date, place, and person. No metadata provider exists to
 enrich from. A photo library has about a hundred thousand small items.
 The proof of concept measured this scale at 105,000 rows. The idle
@@ -35,9 +35,10 @@ file.
 ## Books
 
 The catalog records books like the other kinds, with covers and an OPF
-or Calibre sidecar. No screen shows books, because people read a book
-on a phone or a tablet. A reader app is one more consumer of the same
-catalog. This is why the library layer runs below playback.
+file, such as Calibre's metadata.opf. No screen shows books, because
+people read a book on a phone or a tablet. A reader app is one more
+consumer of the same catalog. This is why the library layer runs below
+playback.
 
 ## Games
 

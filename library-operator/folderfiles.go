@@ -27,7 +27,7 @@ type folderFiles struct {
 	// belongs to both of its episodes.
 	item func(name string) []string
 	// held is the names the item walk already wrote a row for, so this pass
-	// adds no second row for a video that carries its sidecar's attributes.
+	// adds no second row for a video that has the attributes from its .nfo file.
 	held map[string]bool
 	// The probe records of the ledger that names this directory's files. The
 	// caller reads the ledger once and hands it to every read of the folder.
@@ -76,8 +76,7 @@ func (f folderFiles) read() ([]fileRow, []streamRow, []string, error) {
 
 // A video or an audio file with a record in the folder's probe ledger takes
 // its technical columns and its stream rows from that record. A video with
-// no record reads the sidecar beside it, as it did before the ledger
-// existed.
+// no record reads the .nfo file beside it.
 func (f folderFiles) row(name string, class fileClass) (fileRow, []streamRow, error) {
 	absolute := filepath.Join(f.dir, name)
 	size, modified, err := statFile(absolute)
@@ -115,14 +114,15 @@ func (f folderFiles) row(name string, class fileClass) (fileRow, []streamRow, er
 	return row, streams, nil
 }
 
-// The probe writes one video's stream details into the sidecar beside it,
-// under the same name with the .nfo extension. The sidecar is read for its
-// streamdetails alone, so a movie sidecar and an episode sidecar both answer
-// here. A video with no sidecar is not an error and reads its name instead. A
-// sidecar the scanner cannot read is an error, because a row from the name
-// would replace the details the volume holds and the prune would act on it.
+// The probe writes one video's stream details into the .nfo file beside it,
+// under the same name with the .nfo extension. The scanner reads only the
+// streamdetails of that file, so a movie .nfo file and an episode .nfo file
+// both answer here. A video with no .nfo file is not an error, and the
+// scanner reads its name instead. An .nfo file that the scanner cannot read is
+// an error. A row from the name would replace the details the volume holds,
+// and the prune would act on that row.
 func streamBeside(dir, file string) (*streamInfo, error) {
-	data, err := os.ReadFile(sidecarBeside(filepath.Join(dir, file)))
+	data, err := os.ReadFile(nfoBeside(filepath.Join(dir, file)))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -146,7 +146,7 @@ func constantItem(item string) func(string) []string {
 // with, and with the series where it matches none, which is where a season
 // poster lands. The longest match wins, so an episode does not take a file that
 // belongs to another episode whose name it is a prefix of.
-// A video of two episodes carries both ids, so its sidecar, its subtitle, and
+// A video of two episodes carries both ids, so its .nfo file, its subtitle, and
 // its still link to the same episodes the video does.
 func episodeItem(episodes map[string][]string, series string) func(string) []string {
 	return func(name string) []string {

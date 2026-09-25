@@ -28,7 +28,7 @@ right, select, and back.
 
 **A kind is a plugin in the scanner and a screen design in the
 browser.** The scanner side stays data: how to walk a root and how to
-read that kind's sidecars. The browser side is code, on purpose. The
+read that kind's metadata files. The browser side is code, on purpose. The
 browser holds shared drawing primitives, and a screen per kind composes
 them. The primitives this plan needs are a wall of art slots with a
 slot ratio, a header band over a backdrop, a text block, a button row,
@@ -101,8 +101,8 @@ the scrim, then everything else.
 header columns the other item tables carry, and a `set_id` column on
 `movies` that names the set's id, indexed. The id is provider scoped
 like every other item: `set:tmdb:<id>` from the `tmdbcolid` attribute
-Jellyfin writes on the `<set>` element, and `set:name:<slug>` where a
-sidecar names a set with no id. The set's `released` is its earliest
+Jellyfin writes on the `<set>` element, and `set:name:<slug>` where an
+`.nfo` file names a set with no id. The set's `released` is its earliest
 member's, its `art` is that member's poster, and its `body` is empty.
 A set is derived from its members, so the mark-and-sweep prune covers
 it: a set whose last member leaves the library leaves with it. The
@@ -155,8 +155,8 @@ land. The headless mode captures each new screen with `--script` and
 ## What was set aside
 
 Franchises. A franchise, the whole MCU as one item in one order, has no
-source in any sidecar, and its order is an opinion and not a fact of
-the files. It is a screen kind of its own and a later plan.
+source in any `.nfo` file, and its order is an opinion and not a fact
+of the files. It is a screen kind of its own and a later plan.
 
 A set as one poster on the wall. Jellyfin offers it as an option. It
 hides the film a person scans for, and it needs set art the volume does

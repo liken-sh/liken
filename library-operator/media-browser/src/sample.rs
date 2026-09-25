@@ -1,5 +1,5 @@
 // A deterministic invented catalog, so the binary browses something
-// before the sidecar source lands. Every name here is synthesized; nothing
+// when the run names no catalog file. Every name here is synthesized; nothing
 // resembles a real library.
 
 use crate::art::{Art, Image};
@@ -23,7 +23,7 @@ mod draw;
 mod orders;
 
 // The search index over the invented rows, so a local run with no
-// catalog and a test search the way a run over a sidecar does.
+// catalog and a test search the way a run over the local catalog does.
 mod search;
 
 // Enough movies to exercise the wall's culling, near the
@@ -347,7 +347,7 @@ const PLOT: &str = "A survey party reaches the coppice at dusk and finds the gro
 // and the serials for any other, each slot stamped with that library and
 // its kind.
 // How one plain sort compares two invented slots, in the order the
-// sidecar's ORDER BY answers: the release, then the title, which takes
+// local catalog's ORDER BY answers: the release, then the title, which takes
 // the place of the catalog's sort key here.
 pub(super) fn sorted(sort: Sort, one: &Slot, other: &Slot) -> std::cmp::Ordering {
     let key = |slot: &Slot| slot.title.to_lowercase();
@@ -360,7 +360,7 @@ pub(super) fn sorted(sort: Sort, one: &Slot, other: &Slot) -> std::cmp::Ordering
 }
 
 // The sample has no SQL, so it sorts its invented rows here, in the
-// same order the sidecar's ORDER BY answers.
+// same order the local catalog's ORDER BY answers.
 fn titles(library: &str, sort: Sort) -> Vec<Slot> {
     let mut slots: Vec<Slot> = match library == FEATURES {
         true => (1..=MOVIES)
@@ -383,7 +383,7 @@ pub(super) fn tagline(number: i64) -> String {
     }
 }
 
-// One invented serial as a slot, with the season count the sidecar's
+// One invented serial as a slot, with the season count the local catalog's
 // series read carries.
 pub(super) fn serial_slot(library: &str, number: i64) -> Slot {
     Slot {

@@ -64,7 +64,7 @@ func TestOnlyANameWithTheTemporaryMarkIsRemoved(t *testing.T) {
 		removed bool
 	}{
 		{name: "a temporary this package made", file: "movie.nfo" + likenTempMark + "movies-enrich", removed: true},
-		{name: "the sidecar itself", file: "movie.nfo", removed: false},
+		{name: "the .nfo file itself", file: "movie.nfo", removed: false},
 		{name: "a video file", file: "The Thing (1982).mkv", removed: false},
 		{name: "a name that only looks like a temporary", file: "liken-tmp-movies-enrich", removed: false},
 	}

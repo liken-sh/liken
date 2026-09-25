@@ -1,6 +1,6 @@
 package main
 
-// files.go classifies every file a title folder carries: the sidecars, the
+// files.go classifies every file in a title folder: the .nfo files, the
 // art, the subtitles, the trickplay tiles, and the extras beside the video.
 // The classification reads a file's name and the place that holds it, and
 // opens no media file, so a re-walk classifies a file the same way every time
@@ -71,7 +71,8 @@ var (
 	}
 )
 
-// metadataExtension is the sidecar Jellyfin, Kodi, and the *arr tools write.
+// metadataExtension is the extension of the .nfo files that Jellyfin, Kodi,
+// and the *arr tools write.
 const metadataExtension = ".nfo"
 
 // trickplayExtension names the directory of thumbnail tiles Jellyfin writes
@@ -369,8 +370,9 @@ func imageArt(base string) (role string, rank int, bare bool) {
 	return "", len(imageMarks), false
 }
 
-// metadataRole reads which sidecar an .nfo is. The fixed names win, and a
-// sidecar named after its own file takes the kind of the library that holds it.
+// metadataRole reads which kind of .nfo file a file is. The fixed names win,
+// and an .nfo file named after its own video takes the kind of the library
+// that holds it.
 func metadataRole(base string, place filePlace) string {
 	switch {
 	case base == fileRoleMovie:

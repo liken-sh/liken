@@ -83,7 +83,7 @@ fn a_title_splits_its_credits_by_part_in_billing_order() {
     let path = fixture(&dir);
     a_credited_film(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let credits = source.credits("default/films", "one");
     assert_eq!(
         credits.cast,
@@ -116,7 +116,7 @@ fn a_credit_the_store_holds_no_entry_for_carries_no_headshot() {
     // path ever equals.
     insert_contributor(&path, "default/films", "", "Nobody", (1, 1));
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let credits = source.credits("default/films", "one");
     assert_eq!(credits.writers[0].contributor, "");
     assert!(!credits.writers[0].headshot);
@@ -128,7 +128,7 @@ fn a_title_with_no_credits_carries_three_empty_stripes() {
     let path = fixture(&dir);
     insert_page(&path, "default/films", "one", "1994", "", BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(source.credits("default/films", "one"), Credits::default());
 }
 
@@ -144,7 +144,7 @@ fn a_person_comes_back_with_the_dates_and_the_files_their_entry_holds() {
         (1, 1),
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let person = source
         .person("default/films", ".contributors/first")
         .expect("the store holds this person");
@@ -170,7 +170,7 @@ fn a_person_no_library_holds_comes_back_as_nothing() {
         (1, 1),
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(source.person("default/films", ".contributors/other"), None);
     assert_eq!(source.person("default/shows", ".contributors/first"), None);
 }
@@ -217,7 +217,7 @@ fn a_credit_of_a_part_the_page_does_not_draw_is_left_out() {
         (".contributors/producer", "A Producer"),
         ("producer", ""),
     );
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let credits = source.credits("default/films", "movie:path:one");
     assert!(credits.directors.is_empty());
@@ -247,7 +247,7 @@ fn a_persons_alias_into_a_library_with_no_entry_is_passed_over() {
         "31",
         ".contributors/a-first",
     );
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let person = source
         .person("default/films", ".contributors/first")
@@ -275,7 +275,7 @@ fn the_first_library_that_holds_both_files_ends_the_search() {
         "31",
         ".contributors/first-again",
     );
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let person = source
         .person("default/films", ".contributors/first")
@@ -290,7 +290,7 @@ fn a_persons_files_come_from_whichever_library_holds_them() {
     let path = fixture(&dir);
     a_person_in_two_libraries(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let person = source
         .person("default/films", ".contributors/first")
         .expect("the store holds this person");
@@ -316,7 +316,7 @@ fn a_person_no_library_holds_a_headshot_for_names_no_library_for_it() {
         (0, 0),
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let person = source
         .person("default/films", ".contributors/first")
         .expect("the store holds this person");
@@ -372,7 +372,7 @@ fn a_persons_works_gather_every_library_newest_first_with_their_facts() {
     let path = fixture(&dir);
     a_worked_person(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&person_wall("default/films", ".contributors/first"));
     assert_eq!(answer.name, "A First");
     assert_eq!(
@@ -426,7 +426,7 @@ fn a_person_credited_in_nothing_has_an_empty_wall() {
     let path = fixture(&dir);
     a_person_in_two_libraries(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&person_wall("default/films", ".contributors/first"));
     assert_eq!(answer.name, "A First");
     assert!(answer.slots.is_empty());
@@ -438,7 +438,7 @@ fn a_person_the_library_does_not_hold_answers_nothing() {
     let path = fixture(&dir);
     a_worked_person(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.wall(&person_wall("default/films", ".contributors/nobody")),
         Answer::default()
@@ -454,7 +454,7 @@ fn a_sets_wall_is_headed_by_its_title_and_holds_its_members_in_release_order() {
     insert_page(&path, "default/films", "one", "1994", "set:one", BODY);
     insert_page(&path, "default/films", "three", "2003", "", BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let set = Query::Set {
         library: "default/films".into(),
         id: "set:one".into(),

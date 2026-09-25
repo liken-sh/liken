@@ -137,7 +137,7 @@ func readContributorFolder(root, library, dir string, result *walkResult) {
 			})
 		}
 	}
-	readLikenSidecar(likenSidecar{
+	readLikenDir(likenDir{
 		root: root, dir: dir, library: library, item: path, facts: contributorLedgerFacts,
 	}, result)
 }
@@ -309,9 +309,9 @@ func creditPruneSQL() string {
 // scopedCreditPruneSQL selects the credits of one title folder that the
 // current epoch did not mark. A rescan reaches them through the title
 // row the folder holds, so this sweep runs before the item sweeps take
-// that row, the way the genre sweep does. A sidecar that lists fewer
-// people than before leaves its higher billings unmarked, and they leave
-// here.
+// that row, the way the genre sweep does. An .nfo file that lists fewer
+// people than before leaves its higher billings unmarked, and this sweep
+// removes them.
 func scopedCreditPruneSQL() string {
 	scope := func(table string) string {
 		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")

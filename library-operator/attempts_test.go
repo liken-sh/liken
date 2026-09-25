@@ -60,7 +60,7 @@ func TestAProbeAttemptKeysOnTheFilePath(t *testing.T) {
 	}
 }
 
-func TestTheLikenDirectoryIsReadAsASidecarAndNeverAsATitle(t *testing.T) {
+func TestTheLikenDirectoryIsReadAsMetadataAndNeverAsATitle(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Star Wars (1977)")
 	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
@@ -77,7 +77,7 @@ func TestTheLikenDirectoryIsReadAsASidecarAndNeverAsATitle(t *testing.T) {
 		}
 	}
 	if len(result.attempts) != 1 {
-		t.Errorf("attempts = %+v, want the sidecar read", result.attempts)
+		t.Errorf("attempts = %+v, want the .liken/ directory read", result.attempts)
 	}
 }
 

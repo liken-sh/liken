@@ -1,5 +1,5 @@
 // The Source over plan 06's delivery. Every read is a SQLite read of
-// the sidecar's local file, and a background stream marks changes, so
+// the agent's local file, and a background stream marks changes, so
 // the views re-read the file and never ask a service.
 
 use std::collections::HashMap;
@@ -38,7 +38,7 @@ mod updates;
 // The file opens read-only because only scanners write, through their
 // agents. A write from here would bypass the agent's CRDT bookkeeping,
 // and the row would never reach a peer.
-pub struct SidecarSource {
+pub struct LocalCatalog {
     database: PathBuf,
     // The progress store's file, attached beside the catalog on the same
     // connection, so a progress read is one statement across the two.
@@ -62,8 +62,8 @@ struct PageReads {
     kinds: Option<Arc<HashMap<String, String>>>,
 }
 
-impl SidecarSource {
-    // `database` is the sidecar's SQLite file, and `api` is the agent's
+impl LocalCatalog {
+    // `database` is the agent's SQLite file, and `api` is the agent's
     // loopback HTTP base. One stream per item table follows updates
     // from construction on, so an event before the first read still
     // marks a re-read and nothing lands unseen.
@@ -114,7 +114,7 @@ impl SidecarSource {
     }
 
     // The connection opens on demand and drops on any failure, because
-    // plan 06 lets the sidecar be absent for a moment. A missing or
+    // plan 06 lets the agent be absent for a moment. A missing or
     // half-born file reads as empty, and the next call retries. The
     // failure is logged, because a wall that draws nothing looks the
     // same whether the catalog is empty or the file is unreachable, and
@@ -217,7 +217,7 @@ impl SidecarSource {
     }
 }
 
-impl Drop for SidecarSource {
+impl Drop for LocalCatalog {
     fn drop(&mut self) {
         if self.streams {
             self.shared.halt();
@@ -306,7 +306,7 @@ fn collect<T>(
     rows.collect()
 }
 
-impl Source for SidecarSource {
+impl Source for LocalCatalog {
     fn begin_page_read(&mut self) {
         self.page_reads = Some(PageReads::default());
     }

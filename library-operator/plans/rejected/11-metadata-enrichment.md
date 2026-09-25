@@ -4,7 +4,7 @@ Superseded on 2026-09-02 by [plan 27](../completed/27-enrichment.md), which keep
 
 Plan 11. A stub for a later agent to shape. It builds the third
 responsibility from the design: fetching what the volume does not hold,
-from named providers, into the same sidecar files the scanners read.
+from named providers, into the same metadata files the scanners read.
 
 ## The problem
 
@@ -13,7 +13,7 @@ setting writes `movie.nfo`, `tvshow.nfo`, the artwork, and the
 `.trickplay` tiles beside the files, from TMDb, OMDb, and Fanart. The
 `*arr` tools' own metadata writers are off. That works, and it makes the
 catalog depend on a program outside the cluster. About a fifth of the
-lab's movies had no sidecar when the design was made, and a scanner can
+lab's movies had no `.nfo` file when the design was made, and a scanner can
 only report that.
 
 ## The shape
@@ -26,7 +26,7 @@ only report that.
 - An enricher per provider, in its own pod, because it holds keys and is
   the only part of the operator that connects to the internet. Its
   network policy allows that and no other pod's does.
-- It writes sidecars in the ecosystem's formats and nothing of its own:
+- It writes metadata files in the ecosystem's formats and nothing of its own:
   `.nfo`, art files, and WebVTT thumbnail sprites, which a text file and
   a JPEG describe and which web players and Roku read. The scanner
   detects the new files and updates the catalog. The enricher never

@@ -6,11 +6,11 @@ weight: 40
 # The franchise file
 
 A franchise is the films and series of one story, in the order the
-story plays. A set is smaller: the chain of sequels a film's sidecar
-names, in release order. A franchise is the long storyline those
+story plays. A set is smaller: the chain of sequels a film's `.nfo`
+file names, in release order. A franchise is the long storyline those
 chains belong to, with the series that run between the films and
-the prequels that play first. No metadata provider holds that order.
-TMDB collections hold films only, in release order, and no source
+the prequels that play first. No metadata provider stores that order.
+TMDB collections contain films only, in release order, and no source
 agrees on where a series appears between two films. So a person or an
 agent writes the order into a file, and the file is the truth.
 
@@ -110,7 +110,7 @@ part of it plays here, a `seasons` list.
 A provider id is `scheme:id`. Films use `tmdb` and series use
 `tvdb`, because those are the ids the movies and series libraries
 write into the catalog. Another scheme is legal and resolves only if
-some sidecar carries it.
+some `.nfo` file contains it.
 
 A `series` with no `seasons` means the whole show. A season with no
 `episodes` means the whole season, in aired order. An `episodes`
@@ -123,7 +123,7 @@ cuts it into runs.
 An episode code names the provider's numbering, and the provider
 does not always number a season the way it aired. TheTVDB numbers
 Firefly in aired order, so its pilot is `S01E11`, and a file that
-plays the pilot first lists `S01E11` first. A library whose sidecars
+plays the pilot first lists `S01E11` first. A library whose `.nfo` files
 came from a provider with a different numbering needs a different
 list, so a franchise file names one provider's codes and the
 directory's `AGENTS.md` says which.

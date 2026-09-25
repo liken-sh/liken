@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 
 use crate::catalog::Slot;
+use crate::catalog::local::item;
 use crate::catalog::search::{Builder, Index, Item, Kind, Person, Place, Where};
-use crate::catalog::sidecar::item;
 
 // The place of each item, keyed by library and id, so an episode or an
 // alias read later finds the item its strings fold onto.

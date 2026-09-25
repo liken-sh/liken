@@ -29,7 +29,7 @@ generate from the CRD schemas from the start. This plan writes the site.
   repository provides and the link checker the other sites run.
 - The pages for what a person runs beside the operator: the webhooks to
   configure in Radarr, Sonarr, and Jellyfin, and the Jellyfin setting
-  that keeps the sidecars written.
+  that keeps the `.nfo` files written.
 - The subdomain, its DNS, and its Pages configuration, done as the other
   operators' were.
 - Prose in the voice the brand's `voice.md` sets, for a reader who has

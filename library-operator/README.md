@@ -17,7 +17,7 @@ media browser is a native Wayland client. It replaces the idle screen on
 a `Player`, lets a person walk into a library, and starts a `Play` on
 that `Player`.
 
-The volume stays the source of truth. The files, the `.nfo` sidecars,
+The volume stays the source of truth. The files, the `.nfo` files,
 and the artwork are what the operator reads and writes. The catalog is
 derived and rebuildable.
 

@@ -1,8 +1,8 @@
 package main
 
-// The art answerer Fanart.tv serves through. Its two lookup keys are the
-// whole reason the identity fact writes every id it can: a movie reads on its
-// TMDb id, and a series reads on its TheTVDB id, which the sidecar carries.
+// The art answerer for Fanart.tv. The identity fact writes every id it can
+// because of the two lookup keys Fanart.tv uses. A movie reads on its TMDb id,
+// and a series reads on its TheTVDB id, which the .nfo file holds.
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func (a fanartArtAnswerer) candidates(ctx context.Context, fact string, gap artG
 }
 
 // A movie reads on the TMDb id the gap carries, and on the IMDb id where the
-// sidecar holds one and the gap holds no TMDb id, because Fanart.tv reads
+// .nfo file holds one and the gap holds no TMDb id, because Fanart.tv reads
 // both as one lookup key.
 func (a fanartArtAnswerer) movieCandidates(ctx context.Context, fact string, gap artGap,
 	title titleRef) ([]artCandidate, error) {
@@ -62,7 +62,7 @@ func fanartMovieKey(gap artGap, title titleRef) string {
 }
 
 // A series reads on the TheTVDB id alone, which is what the identity fact
-// wrote into the sidecar. A series with none is no answer and not an error,
+// wrote into the .nfo file. A series with none is no answer and not an error,
 // because a title this provider cannot be asked about is the ordinary case.
 func (a fanartArtAnswerer) seriesCandidates(ctx context.Context, fact string, gap artGap,
 	title titleRef) ([]artCandidate, error) {

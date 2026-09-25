@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::catalog::Change;
+use crate::catalog::local::search::read;
 use crate::catalog::search::PEOPLE;
-use crate::catalog::sidecar::search::read;
 
 const FEATURES: &str = "screening/features";
 const SERIALS: &str = "screening/serials";
@@ -195,7 +195,7 @@ fn awaited(source: &mut dyn Source, query: &Query) -> Answer {
 fn a_change_on_the_feed_rebuilds_the_index_after_the_quiet_period() {
     let dir = TempDir::new().unwrap();
     let path = indexed(&dir);
-    let mut source = SidecarSource::quieting(&path, NO_AGENT, Duration::from_millis(50));
+    let mut source = LocalCatalog::quieting(&path, NO_AGENT, Duration::from_millis(50));
     let query = Query::Search {
         text: "Coppice Cycle".into(),
     };
@@ -216,7 +216,7 @@ fn a_change_on_the_feed_rebuilds_the_index_after_the_quiet_period() {
 fn a_source_answers_a_search_once_the_first_build_lands() {
     let dir = TempDir::new().unwrap();
     let path = indexed(&dir);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let query = Query::Search {
         text: "Coppice Cycle".into(),
     };
@@ -237,8 +237,10 @@ fn a_source_answers_a_search_once_the_first_build_lands() {
 fn a_second_source_over_one_file_answers_a_search_from_the_same_index() {
     let dir = TempDir::new().unwrap();
     let path = indexed(&dir);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
-    let mut reader = source.reader().expect("the sidecar gives a second read");
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let mut reader = source
+        .reader()
+        .expect("the local catalog gives a second read");
     let query = Query::Search {
         text: "Marsh".into(),
     };

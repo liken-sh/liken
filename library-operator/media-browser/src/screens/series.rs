@@ -141,7 +141,7 @@ pub struct Series {
     /// The scores the ratings line draws, in the order it draws them. They
     /// are the series' own, so the line stays while a still holds focus.
     pub ratings: Vec<ratings::Score>,
-    /// The tagline, empty where the sidecar named none.
+    /// The tagline, empty where the .nfo file named none.
     pub tagline: String,
     /// The series' plot. The header draws it while no still holds focus:
     /// on a series with no episodes, and while a stripe holds focus.

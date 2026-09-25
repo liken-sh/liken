@@ -51,7 +51,7 @@ func (e *enricher) identityGap(ctx context.Context, client *tmdbClient) error {
 	return nil
 }
 
-// One title: climb the ladder, write the id into the sidecar where the ladder
+// One title: climb the ladder, write the id into the .nfo file where the ladder
 // is sure, and record the answer in the ledger either way.
 func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item identityItem) {
 	folder := filepath.Join(e.root, item.path)
@@ -80,15 +80,15 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 }
 
 // The other databases' ids follow the provider's own: one call to TMDb's
-// external ids gives them, each one goes into the sidecar as its own
+// external ids gives them, each one goes into the .nfo file as its own
 // uniqueid, and the scanner lifts every one into aliases. That is what makes
 // a provider that keys on an IMDb id or a TheTVDB id reachable with no
 // account at that database.
 func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder string,
 	item identityItem, answer identityAnswer) {
 	id := strconv.Itoa(answer.id)
-	sidecar, rootElement := identitySidecar(e.kind, folder)
-	if err := e.writeUniqueID(sidecar, rootElement, item.title, "tmdb", id); err != nil {
+	nfoPath, rootElement := identityNFO(e.kind, folder)
+	if err := e.writeUniqueID(nfoPath, rootElement, item.title, "tmdb", id); err != nil {
 		e.logf("could not write the id of %s: %v", item.path, err)
 		e.recordIdentity(folder, nil, attemptError)
 		return
@@ -96,7 +96,7 @@ func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder
 	ids := providerIDs{"tmdb": id}
 	external := e.externalIDs(ctx, client, item, answer.id)
 	for _, provider := range sortedKeys(external) {
-		if err := e.writeUniqueID(sidecar, rootElement, item.title, provider, external[provider]); err != nil {
+		if err := e.writeUniqueID(nfoPath, rootElement, item.title, provider, external[provider]); err != nil {
 			e.logf("could not write the %s id of %s: %v", provider, item.path, err)
 			continue
 		}
@@ -123,12 +123,12 @@ func (e *enricher) externalIDs(ctx context.Context, client *tmdbClient,
 
 // The default mark goes on the provider this operator keys its own ids on, so
 // a reader takes that one first.
-func (e *enricher) writeUniqueID(sidecar, rootElement, title, provider, id string) error {
+func (e *enricher) writeUniqueID(nfoPath, rootElement, title, provider, id string) error {
 	element := fmt.Appendf(nil, `<uniqueid type=%q>%s</uniqueid>`, provider, id)
 	if provider == "tmdb" {
 		element = fmt.Appendf(nil, `<uniqueid type="tmdb" default="true">%s</uniqueid>`, id)
 	}
-	return e.writer.editNFO(sidecar, rootElement, title,
+	return e.writer.editNFO(nfoPath, rootElement, title,
 		xmlElement{name: "uniqueid", attribute: "type", value: provider}, element)
 }
 
@@ -152,16 +152,16 @@ func (e *enricher) recordIdentity(folder string, entry *likenItem, result string
 	e.writeRows(factIdentity, folder, false)
 }
 
-// Which sidecar carries a title's id: tvshow.nfo for a series, movie.nfo for
+// Which .nfo file holds a title's id: tvshow.nfo for a series, movie.nfo for
 // a movie.
-func identitySidecar(kind, folder string) (string, string) {
+func identityNFO(kind, folder string) (string, string) {
 	if kind == libraryKindSeries {
-		return filepath.Join(folder, seriesSidecarName), nfoRootSeries
+		return filepath.Join(folder, seriesNFOName), nfoRootSeries
 	}
-	return filepath.Join(folder, movieSidecarName), nfoRootMovie
+	return filepath.Join(folder, movieNFOName), nfoRootMovie
 }
 
-// The runtime comes off the sidecar where the catalog has none, because the
+// The runtime comes from the .nfo file where the catalog has none, because the
 // probe container wrote it in this same Job and no scan has read it yet.
 func (e *enricher) runtimeOf(item identityItem, folder string) time.Duration {
 	if item.duration > 0 {
@@ -170,7 +170,7 @@ func (e *enricher) runtimeOf(item identityItem, folder string) time.Duration {
 	if e.kind != libraryKindMovies {
 		return 0
 	}
-	data, err := os.ReadFile(filepath.Join(folder, movieSidecarName))
+	data, err := os.ReadFile(filepath.Join(folder, movieNFOName))
 	if err != nil {
 		return 0
 	}

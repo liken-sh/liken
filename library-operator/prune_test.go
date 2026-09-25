@@ -686,8 +686,8 @@ func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
 		t.Fatalf("movies = %v, want the title under its path-derived id", fake.held(fake.movies))
 	}
 
-	// The sidecar arrives, so the walk reads a provider id and the title's
-	// canonical id becomes the tmdb one.
+	// The test writes the .nfo file, so the walk reads a provider id and the
+	// title's canonical id becomes the tmdb one.
 	writeFile(t, filepath.Join(root, "The Signal (2024)", "movie.nfo"),
 		`<movie><title>The Signal</title><year>2024</year><uniqueid type="tmdb">424242</uniqueid></movie>`)
 	scan.fullWalk(ctx)
@@ -885,11 +885,11 @@ func TestPruneLibraryDeletesTheLinksOfAPrunedItem(t *testing.T) {
 	}
 }
 
-// Two title folders can derive the same provider id, and a corrected sidecar
+// Two title folders can derive the same provider id, and a corrected .nfo file
 // then moves one folder's files from the first item to the second. The file
-// stays on the volume and both items stand, so a delete driven by a departed
-// file or a departed item reaches nothing. This is the case that needs the
-// walk to mark the link it read and the sweep to remove the one it did not.
+// stays on the volume and both items remain, so a delete driven by a departed
+// file or a departed item reaches nothing. This is the case that needs the walk
+// to mark the link it read and the sweep to remove the one it did not.
 func TestPruneLibraryDeletesAStaleLinkWhileTheFileAndItemStand(t *testing.T) {
 	catalog, fake := newFakeCatalog(t)
 	ctx := context.Background()

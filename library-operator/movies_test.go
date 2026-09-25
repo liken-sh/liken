@@ -1,7 +1,7 @@
 package main
 
 // These tests walk the testdata movies tree, so the
-// grouping-folder descent, the sidecar and name identities, the file
+// grouping-folder descent, the .nfo file and name identities, the file
 // attributes, and the unidentified count are proved against real files.
 
 import (
@@ -215,7 +215,7 @@ func TestWalkMoviesReadsFileAttributesFromStreamdetails(t *testing.T) {
 	}
 }
 
-func TestWalkMoviesReadsResolutionFromTheNameWithoutASidecar(t *testing.T) {
+func TestWalkMoviesReadsResolutionFromTheNameWithoutAnNFO(t *testing.T) {
 	result := walkMovies("testdata/movies", "house/movies", nil)
 	movies := moviesByTitle(result)
 	thing, held := movies["The Thing"]
@@ -272,7 +272,7 @@ func TestWalkMoviesOnAMissingRoot(t *testing.T) {
 // A loose file at the root is skipped, and a root-level title folder
 // with a movie.nfo is read as a title, so the walk reads both shapes
 // the root can hold.
-func TestWalkMoviesReadsARootLevelSidecarTitle(t *testing.T) {
+func TestWalkMoviesReadsARootLevelNFOTitle(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "readme.txt"), "not a title")
 	writeFile(t, filepath.Join(root, "Solaris (1972)", "movie.nfo"), `<movie><title>Solaris</title><year>1972</year><uniqueid type="tmdb">7451</uniqueid></movie>`)
@@ -280,10 +280,10 @@ func TestWalkMoviesReadsARootLevelSidecarTitle(t *testing.T) {
 
 	result := walkMovies(root, "house/movies", nil)
 	if result.titles != 1 {
-		t.Fatalf("titles = %d, want the one sidecar title and not the loose file", result.titles)
+		t.Fatalf("titles = %d, want the one .nfo file title and not the loose file", result.titles)
 	}
 	if result.movies[0].Id != "movie:tmdb:7451" {
-		t.Errorf("id = %q, want the sidecar id", result.movies[0].Id)
+		t.Errorf("id = %q, want the .nfo file's id", result.movies[0].Id)
 	}
 }
 
@@ -345,32 +345,32 @@ func TestWalkMoviesDescendsThroughNestedGroupingFolders(t *testing.T) {
 	}
 }
 
-// A sidecar that is not there is an ordinary title with no provider id:
+// A title with no .nfo file is an ordinary title with no provider id:
 // the walk falls back to the folder name and reads the volume in full.
-func TestAMovieWithNoSidecarKeepsThePathIdentity(t *testing.T) {
+func TestAMovieWithNoNFOKeepsThePathIdentity(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "Solaris (1972)", "movie.mkv"), "video")
 
 	result := walkMovies(root, "house/movies", nil)
 
 	if result.readError {
-		t.Error("a title with no sidecar marked the walk incomplete")
+		t.Error("a title with no .nfo file marked the walk incomplete")
 	}
 	if len(result.movies) != 1 || result.movies[0].Id != "movie:path:solaris-1972" {
 		t.Errorf("movies = %+v, want the path-derived id", result.movies)
 	}
 }
 
-// A sidecar the scanner cannot read is not a sidecar that is not there.
-// The fall-back would mint a path-derived id for a title the catalog
+// An .nfo file that the scanner cannot read is not the same as a missing .nfo
+// file. The fall-back would make a path-derived id for a title the catalog
 // holds under its provider id, and the sweep would then delete the
 // provider-derived rows. The walk marks itself incomplete instead, and
 // the prune stands down.
-func TestAnUnreadableMovieSidecarMarksTheWalkIncomplete(t *testing.T) {
+func TestAnUnreadableMovieNFOMarksTheWalkIncomplete(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Solaris (1972)")
 	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
-	// A directory in the sidecar's place is a read that fails for a
+	// A directory in the .nfo file's place is a read that fails for a
 	// reason other than an absent file, on every filesystem and for any
 	// user.
 	if err := os.MkdirAll(filepath.Join(dir, "movie.nfo"), 0o755); err != nil {
@@ -380,7 +380,7 @@ func TestAnUnreadableMovieSidecarMarksTheWalkIncomplete(t *testing.T) {
 	result := walkMovies(root, "house/movies", nil)
 
 	if !result.readError {
-		t.Error("a sidecar that could not be read left the walk complete")
+		t.Error("an .nfo file that could not be read left the walk complete")
 	}
 }
 
@@ -417,11 +417,11 @@ func TestAFolderOfAppleDoubleStubsIsNoTitle(t *testing.T) {
 	}
 }
 
-// A folder whose sidecar could not be read writes no row this pass. A
+// A folder whose .nfo file could not be read writes no row this pass. A
 // row read from the folder name would carry a path-derived id beside the
 // provider-derived one the catalog already holds, and a browser would
 // then draw the title twice.
-func TestAnUnreadableSidecarWritesNoRow(t *testing.T) {
+func TestAnUnreadableNFOWritesNoRow(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Solaris (1972)")
 	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
@@ -439,7 +439,7 @@ func TestAnUnreadableSidecarWritesNoRow(t *testing.T) {
 	}
 }
 
-// streamNFO is the sidecar the probe writes for one video: the root element
+// streamNFO is the .nfo file the probe writes for one video: the root element
 // the scanner reads, and the stream details inside it. The root is the
 // caller's, because the probe writes movie in a movies library and
 // episodedetails in a series library.
@@ -453,9 +453,9 @@ func streamNFO(rootElement, title, videoCodec, audioCodec string, width, height,
 		`</streamdetails></fileinfo></` + rootElement + `>`
 }
 
-// partedMovieFolder holds every shape the sidecar rule covers: the first
+// partedMovieFolder holds every shape the .nfo file rule covers: the first
 // video, which the folder's own movie.nfo describes, a second video with its
-// own sidecar, a second video with none, and an extra with its own.
+// own .nfo file, a second video with none, and an extra with its own.
 func partedMovieFolder(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -472,9 +472,9 @@ func partedMovieFolder(t *testing.T) string {
 	return root
 }
 
-// Every video reads the sidecar the probe wrote for it, and a video with no
-// sidecar still reads its name.
-func TestEveryVideoReadsTheSidecarBesideIt(t *testing.T) {
+// Every video reads the .nfo file the probe wrote for it, and a video with no
+// .nfo file still reads its name.
+func TestEveryVideoReadsTheNFOBesideIt(t *testing.T) {
 	files := filesByPath(walkMovies(partedMovieFolder(t), "house/movies", nil))
 
 	cases := []struct {
@@ -488,12 +488,12 @@ func TestEveryVideoReadsTheSidecarBesideIt(t *testing.T) {
 		{name: "the first video reads the folder's movie.nfo",
 			path: "Solaris (1972) - part1.mkv", wantWidth: 1920, wantHeight: 1080,
 			wantVideoCodec: "h264", wantDurationMs: 8000000},
-		{name: "a second video reads its own sidecar",
+		{name: "a second video reads its own .nfo file",
 			path: "Solaris (1972) - part2.mkv", wantWidth: 3840, wantHeight: 2160,
 			wantVideoCodec: "hevc", wantDurationMs: 3000000},
-		{name: "a video with no sidecar reads its name",
+		{name: "a video with no .nfo file reads its name",
 			path: "Solaris (1972) - part3.720p.mkv", wantWidth: 1280, wantHeight: 720},
-		{name: "an extra reads its own sidecar",
+		{name: "an extra reads its own .nfo file",
 			path: filepath.Join("Extras", "Making Of.mkv"), wantWidth: 640, wantHeight: 480,
 			wantVideoCodec: "mpeg4", wantDurationMs: 600000},
 	}
@@ -511,32 +511,32 @@ func TestEveryVideoReadsTheSidecarBesideIt(t *testing.T) {
 	}
 }
 
-// A per-file sidecar the scanner cannot read marks the walk incomplete, the
-// way an unreadable movie.nfo does, so the prune stands down.
-func TestAnUnreadablePerFileSidecarMarksTheWalkIncomplete(t *testing.T) {
+// A per-file .nfo file that the scanner cannot read marks the walk incomplete,
+// the way an unreadable movie.nfo does, so the prune stands down.
+func TestAnUnreadablePerFileNFOMarksTheWalkIncomplete(t *testing.T) {
 	cases := []struct {
-		name    string
-		sidecar string
+		name string
+		nfo  string
 	}{
-		{name: "beside a second video", sidecar: "Solaris (1972) - part2.nfo"},
-		{name: "inside an extras folder", sidecar: filepath.Join("Extras", "Making Of.nfo")},
+		{name: "beside a second video", nfo: "Solaris (1972) - part2.nfo"},
+		{name: "inside an extras folder", nfo: filepath.Join("Extras", "Making Of.nfo")},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			root := partedMovieFolder(t)
-			sidecar := filepath.Join(root, "Solaris (1972)", test.sidecar)
-			// A directory in the sidecar's place is a read that fails for a
+			nfoPath := filepath.Join(root, "Solaris (1972)", test.nfo)
+			// A directory in the .nfo file's place is a read that fails for a
 			// reason other than an absent file, on every filesystem and for any
 			// user.
-			if err := os.RemoveAll(sidecar); err != nil {
+			if err := os.RemoveAll(nfoPath); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.MkdirAll(sidecar, 0o755); err != nil {
+			if err := os.MkdirAll(nfoPath, 0o755); err != nil {
 				t.Fatal(err)
 			}
 
 			if result := walkMovies(root, "house/movies", nil); !result.readError {
-				t.Error("a sidecar that could not be read left the walk complete")
+				t.Error("an .nfo file that could not be read left the walk complete")
 			}
 		})
 	}
@@ -581,9 +581,9 @@ func TestWalkMoviesReadsNoTitleFromAnExtrasFolderAtTheRoot(t *testing.T) {
 	}
 }
 
-// The sidecar and the tiles an earlier run left beside a pulled trailer are
+// The .nfo file and the tiles an earlier run left beside a pulled trailer are
 // rows of the title that holds them, and the walk removes neither.
-func TestWalkMoviesReadsTheSidecarAndTheTilesBesideAPulledTrailer(t *testing.T) {
+func TestWalkMoviesReadsTheNFOAndTheTilesBesideAPulledTrailer(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Solaris (1972)")
 	writeFile(t, filepath.Join(dir, "Solaris.mkv"), "video")

@@ -160,15 +160,15 @@ which is the second finding.
 
 **Two folders can derive one id.** A few pairs of folders resolved to a
 single item. Each pair is a film and its remake or its later sequel,
-where both sidecars carry the original's provider id. Both folders then
+where both `.nfo` files contain the original's provider id. Both folders then
 derive the same id, and one of the two films is unreachable: it has no
 row, its title reads as the other's, and its video and artwork link to
 the wrong work.
 
 This is the scanner following plan 04's rule that identity is read off
-the volume and never minted. A wrong id in a sidecar is a wrong item in
+the volume and never minted. A wrong id in an `.nfo` file is a wrong item in
 the catalog, and no rule here can tell a bad id from a good one. The
-repair is on the volume, in the sidecar that carries the wrong id.
+repair is on the volume, in the `.nfo` file that contains the wrong id.
 
 **A pruned item left its file links behind.** The prune deletes a link
 row in `file_items` only when a file leaves the volume, by its path. An
@@ -187,9 +187,10 @@ names an item no table holds. The invariant is that a link names an item,
 and a walk proves it rather than trusting every path into the catalog to
 have remembered.
 
-It names the cost of the derived id in a way the design did not.
-[Plan 29](29-identification.md), which writes ids back to the volume,
-covers the sidecar-less case. This is the opposite case, a sidecar that
-is present and wrong, and the catalog has no defence against it. A later
-plan could report a collision rather than absorb it: two folders that
-derive one id is a fact the scanner knows and does not say.
+It names the cost of the derived id in a way the design did not. [Plan
+29](29-identification.md), which writes ids back to the volume, covers
+the case of a folder with no `.nfo` file. This is the opposite case, an
+`.nfo` file that is present and wrong, and the catalog has no defence
+against it. A later plan could report a collision rather than absorb it:
+two folders that derive one id is a fact the scanner knows and does not
+say.

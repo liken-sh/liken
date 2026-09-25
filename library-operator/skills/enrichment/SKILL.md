@@ -1,6 +1,6 @@
 ---
 name: enrichment
-description: "Enrich a library with titles, plots, ratings, art, and people from metadata providers, written as .nfo sidecars and art files beside the media. Use when declaring a MetadataProvider, naming sources on a Library, or handing metadata to Jellyfin."
+description: "Enrich a library with titles, plots, ratings, art, and people from metadata providers, written as .nfo files and art files beside the media. Use when declaring a MetadataProvider, naming sources on a Library, or handing metadata to Jellyfin."
 ---
 
 This skill is the guide at https://library.liken.sh/docs/guides/enrichment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -10,7 +10,7 @@ This skill is the guide at https://library.liken.sh/docs/guides/enrichment/, emi
 Enrichment adds the information that the volume does not hold: a media
 folder's title, plot, ratings, art, and people. The operator asks
 metadata providers and writes their answers beside the media. Kodi and
-Jellyfin read the resulting `.nfo` sidecars and art files. The volume
+Jellyfin read the resulting `.nfo` files and art files. The volume
 remains the source of truth, and the catalog is derived from it.
 
 ## 1. Declare a provider
@@ -112,7 +112,7 @@ The operator creates an enrich `Job` named `<library>-enrich` when a
 walk has finished and a fact still has an open gap. The `Job` runs its
 facts in order, each in a container of its own: `probe` reads each
 video's streams, `arrival` records when a file was first seen,
-`identity` names each title, `nfo` fills the sidecar, `art` downloads
+`identity` names each title, `nfo` fills the `.nfo` file, `art` downloads
 the images, `trailer` records where each title's trailers are, `marks`
 records where each video's intro and credits are, and `contributors`
 fills the people.
@@ -149,14 +149,14 @@ then, for a series, the episode names, then the runtime within five
 minutes. The episode test reads the episode titles from the file names
 of the folder's first season. It keeps a candidate whose season on TMDb
 has at least two of them and at least half. So a series folder named
-with the title alone identifies without a sidecar. One survivor is the
+with the title alone identifies without an `.nfo` file. One survivor is the
 answer, and its reason is recorded. Several survivors become candidates
 in `.liken/identity.yaml`, and the title counts in `status.waiting`
 until a person names the right `uniqueid` in the `.nfo`. A title no
 provider can name counts in `status.unresolved`.
 
 After identifying a title through TMDb, the enricher requests its IMDb
-and TVDB ids and writes any returned ids into the sidecar. OMDb uses
+and TVDB ids and writes any returned ids into the `.nfo` file. OMDb uses
 the IMDb id to look up the title. Fanart.tv uses the TMDb id for a
 movie and the TVDB id for a series. These ids identify the title;
 OMDb and Fanart.tv still require their own API keys, configured through
@@ -164,7 +164,7 @@ each provider's `secretRef`.
 
 ### The write rule
 
-Each fact owns a fixed group of elements in the sidecar and writes
+Each fact owns a fixed group of elements in the `.nfo` file and writes
 nothing outside it. The `overview` fact owns the plot, the tagline,
 the genres, the studios, the premiere date, and the runtime. Each
 rating owns its one element. `credits` owns the actors, directors,
@@ -281,7 +281,7 @@ goes to the files the spent provider missed and not again to the ones
 it answered.
 
 Neither Jellyfin nor Kodi reads these marks. Jellyfin keeps its media
-segments in its own database, and Kodi's `.edl` sidecar is a different
+segments in its own database, and Kodi's `.edl` file is a different
 format, so the fact writes no file other than its ledger.
 
 ### Trailer files
@@ -345,10 +345,10 @@ it. The [scanning guide](https://library.liken.sh/docs/guides/scanning/) describ
 
 ## 4. The Jellyfin handover
 
-Jellyfin reads the sidecars and art this operator writes, under the
+Jellyfin reads the `.nfo` files and the art that this operator writes, under the
 same names its own scraper uses. **Turn off Jellyfin's
 `SaveLocalMetadata` for a library this operator enriches.** With it
-on, two writers change the same sidecars, and the fight check leaves
+on, two writers change the same `.nfo` files, and the fight check leaves
 the file to Jellyfin.
 
 ## Reading progress

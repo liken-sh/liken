@@ -246,19 +246,19 @@ func (e *enricher) trailerOne(ctx context.Context, line *trailerLine, item ident
 	return true
 }
 
-// The ids a provider keys on come off the sidecar, where the identity fact
+// The ids a provider keys on come from the .nfo file, where the identity fact
 // wrote every one of them. The title and the year come off the catalog, for a
-// provider keyed by search. A folder with no sidecar carries no id, which is
+// provider keyed by search. A folder with no .nfo file has no id, which is
 // not an error.
 func (e *enricher) trailerTitle(item identityItem, folder string) trailerTitle {
 	title := trailerTitle{kind: e.kind, title: item.title, year: item.year,
 		languages: commaNames(os.Getenv(libraryLanguagesVariable))}
-	sidecar, _ := identitySidecar(e.kind, folder)
-	document, err := os.ReadFile(sidecar)
+	nfoPath, _ := identityNFO(e.kind, folder)
+	document, err := os.ReadFile(nfoPath)
 	if err != nil {
 		return title
 	}
-	title.ids = sidecarIDs(document)
+	title.ids = nfoIDs(document)
 	return title
 }
 

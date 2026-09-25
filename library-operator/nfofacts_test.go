@@ -1,7 +1,7 @@
 package main
 
 // what these tests read: which titles each nfo fact's gap holds, against the
-// shipped schema in a real database, and what a sidecar says it already
+// shipped schema in a real database, and what an .nfo file says it already
 // answers.
 
 import (
@@ -32,7 +32,7 @@ func seedNFOFactRows(t *testing.T, catalog *Catalog) {
 	}
 }
 
-func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *testing.T) {
+func TestAnNFOGapHoldsTheTitlesWhoseNFOLacksTheFactAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedNFOFactRows(t, catalog)
 	now := time.Now().UTC()
@@ -65,7 +65,7 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 	}
 }
 
-// The credits gap is credits.yaml and never the sidecar's actors: a title
+// The credits gap is credits.yaml and never the .nfo file's actors: a title
 // Jellyfin gave a cast is a gap until the fact wrote the file, and a title
 // whose providers named no cast holds it through the attempt window.
 func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T) {
@@ -200,29 +200,29 @@ func TestTheFightCountReadsEveryFactsFights(t *testing.T) {
 	}
 }
 
-// The scanner reads which facts a sidecar answers off the elements it holds, so
-// a title Jellyfin filled is no gap at all.
-func TestASidecarSaysWhichFactsItAnswers(t *testing.T) {
+// The scanner reads which facts an .nfo file answers off the elements it holds,
+// so a title Jellyfin filled is no gap at all.
+func TestAnNFOSaysWhichFactsItAnswers(t *testing.T) {
 	cases := []struct {
-		name    string
-		sidecar string
-		want    []string
+		name string
+		nfo  string
+		want []string
 	}{
 		{
-			name:    "a sidecar with the title alone",
-			sidecar: "<movie><title>One</title></movie>",
-			want:    nil,
+			name: "an .nfo file with the title alone",
+			nfo:  "<movie><title>One</title></movie>",
+			want: nil,
 		},
 		{
-			name: "a sidecar Jellyfin filled",
-			sidecar: `<movie><title>One</title><plot>A plot.</plot><mpaa>PG</mpaa>` +
+			name: "an .nfo file Jellyfin filled",
+			nfo: `<movie><title>One</title><plot>A plot.</plot><mpaa>PG</mpaa>` +
 				`<ratings><rating name="themoviedb" max="10"><value>8</value></rating></ratings>` +
 				`<actor><name>Nora Vance</name></actor></movie>`,
 			want: []string{factOverview, factCertification, factRatingTMDb},
 		},
 		{
-			name: "a sidecar with the rating of each site",
-			sidecar: `<movie><title>One</title><ratings>` +
+			name: "an .nfo file with the rating of each site",
+			nfo: `<movie><title>One</title><ratings>` +
 				`<rating name="imdb" max="10"><value>7</value></rating>` +
 				`<rating name="tomatometerallcritics" max="100"><value>91</value></rating>` +
 				`<rating name="metacritic" max="100"><value>76</value></rating>` +
@@ -230,15 +230,15 @@ func TestASidecarSaysWhichFactsItAnswers(t *testing.T) {
 			want: []string{factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic},
 		},
 		{
-			name: "a sidecar with a site no fact holds",
-			sidecar: `<movie><title>One</title>` +
+			name: "an .nfo file with a site no fact holds",
+			nfo: `<movie><title>One</title>` +
 				`<ratings><rating name="trakt" max="10"><value>7</value></rating></ratings></movie>`,
 			want: nil,
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			meta, err := parseMovieNFO([]byte(test.sidecar))
+			meta, err := parseMovieNFO([]byte(test.nfo))
 			if err != nil {
 				t.Fatal(err)
 			}

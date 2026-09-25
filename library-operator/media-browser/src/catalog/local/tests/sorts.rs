@@ -1,4 +1,4 @@
-// The four orders a wall's rail cycles through, as the sidecar answers
+// The four orders a wall's rail cycles through, as the local catalog answers
 // them: the three plain orders on a library wall, and those three under
 // the leading order on a genre wall.
 
@@ -64,7 +64,7 @@ fn a_library_wall_answers_each_of_its_three_orders() {
     let path = fixture(&dir);
     films(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let mut wall = |sort| {
         source.wall(&Query::Library {
             library: FILMS.into(),
@@ -83,7 +83,7 @@ fn a_series_library_answers_the_same_three_orders() {
     insert_show(&path, "one", "amber", "1999");
     insert_show(&path, "two", "brine", "1994");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let mut wall = |sort| {
         source.wall(&Query::Library {
             library: SHOWS.into(),
@@ -112,7 +112,7 @@ fn a_genre_wall_answers_each_of_its_four_orders() {
     let path = fixture(&dir);
     action(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let mut wall = |sort| {
         source.wall(&Query::Genre {
             name: "Action".into(),
@@ -132,7 +132,7 @@ fn a_genre_wall_is_headed_by_its_name_and_the_counts_by_kind() {
     let path = fixture(&dir);
     action(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let query = Query::Genre {
         name: "Action".into(),
         order: Order::Released,

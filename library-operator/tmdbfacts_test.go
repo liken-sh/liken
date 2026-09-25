@@ -193,7 +193,7 @@ func TestTheTMDbAnswererServesTheFactsTheTableHolds(t *testing.T) {
 	}
 }
 
-// A person with no picture at the provider carries none into the sidecar.
+// A person with no picture at the provider gets no thumb in the .nfo file.
 func TestAPersonWithNoPictureCarriesNoThumb(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
 		tmdbKey("/3/movie/4242/credits", "", ""): `{"cast":[{"name":"Nora Vance","character":"Captain","profile_path":""}]}`,
@@ -210,7 +210,7 @@ func TestAPersonWithNoPictureCarriesNoThumb(t *testing.T) {
 	}
 }
 
-// The other databases' ids answer as the map the sidecar and the ledger carry,
+// The other databases' ids answer as the map the .nfo file and the ledger hold,
 // with an id the provider left empty dropped.
 func TestTheExternalIDsDropWhatTheProviderLeftEmpty(t *testing.T) {
 	cases := []struct {

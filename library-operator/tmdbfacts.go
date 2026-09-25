@@ -23,9 +23,9 @@ const tmdbProfileSize = "original"
 // The host every image path hangs off, which only a test replaces.
 var tmdbImageBase = "https://image.tmdb.org/t/p/"
 
-// Why the cast is cut: a title carries a hundred credited people at TMDb, and
-// the sidecar is read on every walk, so the fact writes the billed cast and
-// no further.
+// Why the cast is cut: a title has a hundred credited people at TMDb, and the
+// scanner reads the .nfo file on every walk, so the fact writes the billed cast
+// and no further.
 const tmdbCastLimit = 25
 
 // What the external ids call answers: the ids of the same title in the other
@@ -36,7 +36,7 @@ type tmdbExternalIDs struct {
 	TVDbID int    `json:"tvdb_id"`
 }
 
-// The ids as a map of the same shape the sidecar and the ledger carry, with
+// The ids as a map of the same shape the .nfo file and the ledger hold, with
 // an id the provider left empty dropped.
 func (ids tmdbExternalIDs) providerIDs() providerIDs {
 	held := providerIDs{}

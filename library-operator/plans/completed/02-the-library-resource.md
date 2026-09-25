@@ -42,7 +42,7 @@ The spec has three parts.
   plan changes no shape.
 
 The status reports what the scanner reports. It has the count of titles,
-the count of folders with no sidecar and no confident parse, the time of
+the count of folders with no `.nfo` file and no confident parse, the time of
 the last full walk, the time of the last change applied, the scanner
 pod's name, and conditions. The scanner does not write status itself. It
 publishes a retained report on `media-operator`'s bus, under this

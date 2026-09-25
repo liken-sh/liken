@@ -8,10 +8,10 @@ the screen.
 
 ## The problem
 
-A set is what a movie sidecar names, one collection per film, and plan
+A set is what a movie's `.nfo` file names, one collection per film, and plan
 22 draws it as a strip on the film's page. A franchise is bigger than a
 set and crosses kinds: the films of one universe in release order or in
-story order, and the series that belong beside them. No sidecar carries
+story order, and the series that belong beside them. No `.nfo` file contains
 it. The order is a person's opinion, and a person may hold two orders
 for the same universe. So a franchise cannot be derived from the
 volume, and the scanner cannot write it.

@@ -116,7 +116,7 @@ pub struct Movie {
     pub facts: String,
     /// The scores the ratings line draws, in the order it draws them.
     pub ratings: Vec<ratings::Score>,
-    /// The tagline, empty where the sidecar named none.
+    /// The tagline, empty where the .nfo file named none.
     pub tagline: String,
     /// The plot. The page cuts it to four lines.
     pub plot: String,

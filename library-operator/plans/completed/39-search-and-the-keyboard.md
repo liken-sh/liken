@@ -57,7 +57,7 @@ first. Escape with an empty field leaves the wall.
 
 ### The index
 
-The sidecar source owns the index, because the source owns the replica
+`LocalCatalog` owns the index, because that source owns the replica
 and already follows the updates feed. The index holds one folded entry
 per searchable string. Folding is lowercase, diacritics stripped, and
 split on every character that is not a letter or a digit.

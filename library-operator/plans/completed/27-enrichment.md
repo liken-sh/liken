@@ -12,10 +12,10 @@ Jellyfin enriches the lab's volume today, and Radarr and Sonarr
 organize it. That makes the catalog depend on programs outside the
 cluster, and it caps what the catalog holds at what those programs
 write. A person on the screen cannot follow a name to the other films
-that person is in, because the sidecar names a person with no id and
+that person is in, because the `.nfo` file names a person with no id and
 no picture. A franchise that crosses films and series in story order
 has no file anywhere, because no tool has a format for one. About a
-fifth of the lab's movies have no sidecar at all, and the scanner can
+fifth of the lab's movies have no `.nfo` file at all, and the scanner can
 only report that.
 
 The design answers all of these with one rule: the volume holds every
@@ -131,7 +131,7 @@ The scanner still opens no video file. A video probe over a whole
 library is slow, so the `probe` fact opens the file once and writes
 the answer into the `.nfo`, and a rebuild reads the `.nfo` and probes
 nothing. A music scanner reads tags itself, because the ecosystem keeps
-no per-track sidecar to write them into.
+no per-track metadata file to write them into.
 
 ## Providers
 
@@ -222,7 +222,7 @@ is no rate limiter: a `429` is a cooldown inside the container. Plan
 
 Plan 12, the organizer, stays apart. Imports and moves are a different
 loop with a different risk. Sets stay as plan 22 built them: derived
-from the sidecars, release order, movies only.
+from the `.nfo` files, release order, movies only.
 
 ## What is not decided
 

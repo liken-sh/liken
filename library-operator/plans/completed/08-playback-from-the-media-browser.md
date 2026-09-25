@@ -7,7 +7,7 @@ outcome is complete: index, browse, pick, play.
 ## The problem
 
 The media browser has the title and the `Player` it draws on. A `Play`
-needs a media reference the `Player` accepts, the trickplay sidecar
+needs a media reference the `Player` accepts, the trickplay tiles
 the display draws on the scrub bar, and the words the film's own
 display shows. And something has to create it. The screen pod holds no
 API credential, by `media-operator`'s rule, and the media browser is

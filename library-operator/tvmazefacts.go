@@ -33,7 +33,7 @@ func tvmazePlot(summary string) string {
 	return strings.Join(paragraphs, "\n\n")
 }
 
-// Who broadcast the show is the studio the sidecar carries. A show on a
+// Who broadcast the show is the studio the .nfo file records. A show on a
 // streaming service names a web channel where a broadcaster would be.
 func tvmazeStudios(show tvmazeShow) []string {
 	for _, source := range []*tvmazeNetwork{show.Network, show.WebChannel} {
@@ -57,7 +57,7 @@ func tvmazeRuntimeMinutes(show tvmazeShow) int {
 }
 
 // The cast in the order TVmaze holds it, which is the billing order the
-// sidecar carries, with the character each person plays and the picture
+// .nfo file records, with the character each person plays and the picture
 // TVmaze holds of them.
 func tvmazeCast(members []tvmazeCastMember) []creditedActor {
 	cast := make([]creditedActor, 0, len(members))
@@ -121,11 +121,11 @@ func (a tvmazeAnswerer) answer(ctx context.Context, fact string, title titleRef)
 // The IMDb id is asked first because every provider states one. A title with
 // neither id, and an id TVmaze does not hold, are both no answer.
 func (a tvmazeAnswerer) show(ctx context.Context, ids providerIDs) (*tvmazeShow, error) {
-	for _, key := range []struct{ sidecar, scheme string }{
-		{sidecar: "imdb", scheme: tvmazeSchemeIMDb},
-		{sidecar: "tvdb", scheme: tvmazeSchemeTheTVDB},
+	for _, key := range []struct{ provider, scheme string }{
+		{provider: "imdb", scheme: tvmazeSchemeIMDb},
+		{provider: "tvdb", scheme: tvmazeSchemeTheTVDB},
 	} {
-		id := strings.TrimSpace(ids[key.sidecar])
+		id := strings.TrimSpace(ids[key.provider])
 		if id == "" {
 			continue
 		}

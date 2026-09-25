@@ -85,7 +85,7 @@ fn released_comes_back_newest_first_across_the_libraries() {
     let path = fixture(&dir);
     a_catalog(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Released {
         fold: Fold::Episodes,
     });
@@ -129,7 +129,7 @@ fn added_comes_back_by_arrival_and_not_by_release() {
     let path = fixture(&dir);
     a_catalog(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Added {
         fold: Fold::Episodes,
     });
@@ -151,7 +151,7 @@ fn the_airing_fold_keeps_the_new_episodes_and_folds_the_back_catalog() {
     let path = fixture(&dir);
     a_catalog(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Released { fold: Fold::Airing });
     assert_eq!(
         ids(&answer),
@@ -177,7 +177,7 @@ fn the_titles_fold_is_all_posters() {
     let path = fixture(&dir);
     a_catalog(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Added { fold: Fold::Titles });
     assert_eq!(ids(&answer), [SERIAL, "movie:tmdb:2", "movie:tmdb:1"]);
     assert!(answer.slots.iter().all(|slot| !slot.still()));
@@ -204,7 +204,7 @@ fn an_episode_with_no_still_draws_the_art_of_its_series() {
     a_serial_with_art(&path);
     clear_episode_art(&path, SHOWS, "episode:tvdb:3");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Released {
         fold: Fold::Episodes,
     });
@@ -221,7 +221,7 @@ fn a_show_folded_on_an_episode_with_no_still_draws_the_art_of_its_series() {
     a_serial_with_art(&path);
     clear_episode_art(&path, SHOWS, "episode:tvdb:3");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Released {
         fold: Fold::Shows {
             today: date_seconds("2026-09-03").unwrap(),
@@ -239,7 +239,7 @@ fn an_episode_of_a_series_with_no_art_draws_no_still_at_all() {
     set_series_art(&path, SHOWS, SERIAL, "", &[]);
     clear_episode_art(&path, SHOWS, "episode:tvdb:3");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Released {
         fold: Fold::Episodes,
     });
@@ -253,7 +253,7 @@ fn an_episode_whose_series_row_is_missing_is_left_out() {
     let path = fixture(&dir);
     insert_arrived_episode(&path, "episode:tvdb:9", (1, 1), "2026-09-01", 0);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(
         source
             .wall(&Query::Released {
@@ -278,7 +278,7 @@ fn a_full_page_of_titles_is_the_read_s_fill() {
         );
     }
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Released { fold: Fold::Titles });
     assert_eq!(answer.slots.len(), CANDIDATES);
     assert_eq!(answer.slots[0].id, format!("movie:tmdb:{}", CANDIDATES + 4));
@@ -311,7 +311,7 @@ fn a_season_drop_does_not_starve_the_read() {
         );
     }
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&Query::Added { fold: Fold::Titles });
     let ids: Vec<&str> = answer.slots.iter().map(|slot| slot.id.as_str()).collect();
     assert_eq!(

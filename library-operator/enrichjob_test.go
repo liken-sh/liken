@@ -34,7 +34,7 @@ func testEnrichJob(library *Library, path string, providers ...*MetadataProvider
 }
 
 // the pod holds the catalog agent, then the two facts that edit the
-// sidecar in order, then the container that writes the runs row.
+// .nfo file in order, then the container that writes the runs row.
 func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 

@@ -181,7 +181,7 @@ func (e *enricher) logf(format string, args ...any) {
 }
 
 // The folder whose .liken directory records a file fact's attempt: the
-// folder the walk reads a sidecar from, which is the title folder even where
+// folder the walk reads an .nfo file from, which is the title folder even where
 // the file is in a movie's extras.
 func likenFolderFor(kind, absolute string) (string, string) {
 	dir := filepath.Dir(absolute)

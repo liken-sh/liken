@@ -104,7 +104,7 @@ entry yet takes its change time for the pass, so a walk that runs
 before the fact still catalogs, and a read-only mount catalogs too.
 
 **The genres table.** The scan writes a `genres` table with one row per
-title and genre, in the order the sidecar lists them:
+title and genre, in the order the `.nfo` file lists them:
 
 ```sql
 CREATE TABLE genres (
@@ -119,14 +119,14 @@ CREATE INDEX genres_library_genre ON genres (library, genre);
 
 The shape is the credits table's: the key is the title and a position,
 and the index answers the range read. The order is kept because the
-sidecar's first genre is the title's main genre, and a Westerns strip
+`.nfo` file's first genre is the title's main genre, and a Westerns strip
 puts the titles whose first genre is Western ahead of the ones that
-list it fourth. The rows are derived from the sidecar, so the
+list it fourth. The rows are derived from the `.nfo` file, so the
 mark-and-sweep prune covers them the way it covers credits. The table
 answers both reads the home page makes: the titles of one genre in one
 indexed range, and which genres exist with how many titles each, as one
 grouped read over the same index. The facts that write genres into the
-sidecar write these rows too under plan 34's rule, and until then the
+`.nfo` file write these rows too under plan 34's rule, and until then the
 next walk writes them. Corrosion's schema allows only `CREATE TABLE`
 and `CREATE INDEX`, so an array column would be JSON text with no index
 over its elements, and a genre read would be a scan again.

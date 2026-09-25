@@ -523,13 +523,13 @@ func TestTheKeySpacesSeparateAnAliasFromAnItemAgainstTheRealSchema(t *testing.T)
 		t.Fatal(err)
 	}
 
-	// The first walk read the folder with no sidecar, so its id is the
+	// The first walk read the folder with no .nfo file, so its id is the
 	// folder key.
 	if err := flushWalk(ctx, catalog, walkOfOneTitle("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001"), time.Now().Add(-time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 
-	// The sidecar arrived, so the title's id is now the provider id and
+	// The .nfo file arrived, so the title's id is now the provider id and
 	// the old id is one of its aliases.
 	second := time.Now().UnixNano()
 	if err := flushWalk(ctx, catalog, walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001"), second); err != nil {
@@ -817,7 +817,7 @@ func TestTheRescanReportsTheStepItsCatalogRefused(t *testing.T) {
 	}
 }
 
-// Two folders whose sidecars carry one provider id are one title in the
+// Two folders whose .nfo files hold one provider id are one title in the
 // catalog, because the id is the item's key. The walk reports the titles the
 // catalog holds and the folders it read, so the number in the log is the
 // number the Library's status carries.

@@ -66,7 +66,7 @@ The listing shows the counts and the phase:
 
 `Titles` is what the last walk cataloged. `Items` counts movies, or
 series and episodes together. `Files` counts the video files with their
-sidecars, art, subtitles, and trickplay directories. `Waiting` counts
+`.nfo` files, art, subtitles, and trickplay directories. `Waiting` counts
 the titles a provider returned candidates for, which a person resolves
 by naming the right `uniqueid` in the `.nfo`. With `-o wide` the listing
 adds the claim and the `Unidentified` count. Those are the folders the

@@ -169,8 +169,8 @@ func TestTheWalkWritesARunRowPerSeasonAndEpisode(t *testing.T) {
 }
 
 // A file that breaks the schema is counted unidentified and named, the way a
-// folder no sidecar identifies is. The other files of the same checkout still
-// write their rows.
+// folder that no .nfo file identifies is. The other files of the same checkout
+// still write their rows.
 func TestTheWalkSkipsAFileThatBreaksTheSchema(t *testing.T) {
 	root := franchiseCheckout(t, map[string]string{
 		"Alien/franchise.yaml":   "name: Alien\norder: []\n",

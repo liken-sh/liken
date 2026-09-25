@@ -88,18 +88,18 @@ func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap a
 	return e.writeArt(ctx, answerer, art, gap, folder, target, image)
 }
 
-// The ids a fact asks with come off the sidecar itself, which is where the
-// identity fact wrote every one of them. The art phase reads them because the
-// gap carries the TMDb id alone and two of the three providers key on another
-// id. A folder with no sidecar carries no id, which leaves those two providers
-// no answer and is not an error.
+// A fact reads the ids it asks with from the .nfo file, because the identity
+// fact wrote every one of them there. The art phase reads them because the
+// gap holds only the TMDb id, and two of the three providers key on another
+// id. A folder with no .nfo file has no ids. Those two providers then give no
+// answer, and that is not an error.
 func (e *enricher) artTitle(gap artGap) titleRef {
-	sidecar, _ := identitySidecar(e.kind, filepath.Join(e.root, gap.folder()))
-	document, err := os.ReadFile(sidecar)
+	nfoPath, _ := identityNFO(e.kind, filepath.Join(e.root, gap.folder()))
+	document, err := os.ReadFile(nfoPath)
 	if err != nil {
 		return titleRef{kind: e.kind}
 	}
-	return titleRef{kind: e.kind, ids: sidecarIDs(document)}
+	return titleRef{kind: e.kind, ids: nfoIDs(document)}
 }
 
 // The download and the write. The bytes live from the answer to the rename

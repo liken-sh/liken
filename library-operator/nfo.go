@@ -1,6 +1,6 @@
 package main
 
-// The episode sidecar's reader is in nfoepisode.go.
+// The episode .nfo file's reader is in nfoepisode.go.
 
 import (
 	"bytes"
@@ -31,7 +31,7 @@ type nfoActor struct {
 
 // nfoSet is a set element, either a plain name or a nested name element.
 // tmdbcolid is the collection id Jellyfin writes on the element, and it
-// scopes the set's id where the sidecar carries one.
+// scopes the set's id where the .nfo file holds one.
 type nfoSet struct {
 	TMDBColID string `xml:"tmdbcolid,attr"`
 	Name      string `xml:"name"`
@@ -52,7 +52,7 @@ type nfoAudio struct {
 	Codec string `xml:"codec"`
 }
 
-// nfoStreamDetails is the technical block a sidecar carries for a file.
+// nfoStreamDetails is the technical block an .nfo file holds for a file.
 type nfoStreamDetails struct {
 	Video []nfoVideo `xml:"video"`
 	Audio []nfoAudio `xml:"audio"`
@@ -63,9 +63,9 @@ type nfoFileInfo struct {
 	StreamDetails nfoStreamDetails `xml:"streamdetails"`
 }
 
-// movieNFO mirrors movie.nfo. Every field the movie body carries has a source
+// movieNFO mirrors movie.nfo. Every field the movie body holds has a source
 // here, and the convenience id tags are read beside uniqueid because older
-// sidecars wrote them.
+// .nfo files wrote them.
 type movieNFO struct {
 	XMLName       xml.Name      `xml:"movie"`
 	Title         string        `xml:"title"`
@@ -116,17 +116,17 @@ type seriesNFO struct {
 	ID            string        `xml:"id"`
 }
 
-// streamDetailsNFO is the one block a per-file sidecar is read for, under
-// whatever root the sidecar carries. It names no root element on purpose, so
-// encoding/xml takes the document's own: movie in a movies library,
+// streamDetailsNFO is the one block a per-file .nfo file is read for, under
+// whatever root element the .nfo file has. It names no root element on purpose,
+// so encoding/xml takes the document's own: movie in a movies library,
 // episodedetails in a series library.
 type streamDetailsNFO struct {
 	FileInfo nfoFileInfo `xml:"fileinfo"`
 }
 
-// parseStreamNFO reads the stream details out of a sidecar of either root. It
-// reads that block alone, because a per-file sidecar has nothing else a file
-// row takes, and a movie and an episode sidecar answer the same way.
+// parseStreamNFO reads the stream details out of an .nfo file of either root.
+// It reads that block alone, because a per-file .nfo file has nothing else a
+// file row takes, and a movie and an episode .nfo file answer the same way.
 func parseStreamNFO(data []byte) (streamInfo, error) {
 	var raw streamDetailsNFO
 	if err := lenientXML(data).Decode(&raw); err != nil {
@@ -152,7 +152,7 @@ func (s streamInfo) present() bool {
 
 // movieMeta is what parseMovieNFO reads: the identity, the release, the provider
 // ids, the movie body, the item duration, the file stream, and the id of the
-// set the sidecar names, empty where it names none.
+// set the .nfo file names, empty where it names none.
 type movieMeta struct {
 	Title       string
 	Year        int
@@ -162,14 +162,14 @@ type movieMeta struct {
 	Duration    int64
 	Stream      streamInfo
 	SetID       string
-	// The nfo facts this sidecar already answers, in the form the nfo_facts
+	// The nfo facts this .nfo file already answers, in the form the nfo_facts
 	// column holds.
 	NFOFacts string
 }
 
 // parseMovieNFO reads movie.nfo into a movieMeta. The art and the provider-id
 // copy on the body are filled by the walk, because they come from the folder
-// beside the sidecar.
+// beside the .nfo file.
 func parseMovieNFO(data []byte) (movieMeta, error) {
 	var raw movieNFO
 	if err := lenientXML(data).Decode(&raw); err != nil {
@@ -213,8 +213,8 @@ type seriesMeta struct {
 	Released    string
 	ProviderIDs map[string]string
 	Body        seriesBody
-	// The nfo facts this sidecar already answers, in the form the nfo_facts
-	// column holds; a series sidecar answers the same facts a movie one does.
+	// The nfo facts this .nfo file already answers, in the form the nfo_facts
+	// column holds; a series .nfo file answers the same facts a movie one does.
 	NFOFacts string
 }
 
@@ -282,7 +282,7 @@ func collectProviders(uids []nfoUniqueID, imdb, tmdb, tvdb, id string) map[strin
 	return providers
 }
 
-// castMembers keeps the credited people with a name, in the sidecar's own
+// castMembers keeps the credited people with a name, in the .nfo file's own
 // order, which is billing order.
 func castMembers(actors []nfoActor) []castMember {
 	var out []castMember
@@ -330,8 +330,8 @@ func collectionName(set nfoSet) string {
 	return strings.TrimSpace(set.Value)
 }
 
-// contentRating prefers mpaa and falls back to certification, the two tags a
-// sidecar writes the rating in.
+// contentRating prefers mpaa and falls back to certification, the two tags that
+// hold the rating in an .nfo file.
 func contentRating(mpaa, certification string) string {
 	if r := strings.TrimSpace(mpaa); r != "" {
 		return r
@@ -393,7 +393,7 @@ func normalizeCodec(codec string) string {
 }
 
 // itemDuration is the item's runtime in seconds: the stream's own duration where
-// the sidecar carried one, or runtime in minutes.
+// the .nfo file stated one, or runtime in minutes.
 func itemDuration(stream streamInfo, runtimeMinutes int) int64 {
 	if stream.DurationMs > 0 {
 		return stream.DurationMs / 1000
@@ -404,7 +404,7 @@ func itemDuration(stream streamInfo, runtimeMinutes int) int64 {
 	return 0
 }
 
-// Every read of a sidecar is lenient. Jellyfin writes a bare ampersand in a
+// Every read of an .nfo file is lenient. Jellyfin writes a bare ampersand in a
 // URL, as in a thumb that names an image server's id, and the strict reader
 // stops at the first one, which failed a rating on a third of the series.
 // A lenient reader passes an unknown entity through as text, and every

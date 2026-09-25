@@ -483,7 +483,7 @@ fn spelling(query: &Query) -> Spelling {
     }
 }
 
-// The words a card leads with: a film's tagline where the sidecar wrote
+// The words a card leads with: a film's tagline where the .nfo file held
 // one, and the title everywhere else. A film's poster carries its title,
 // so the card says something the poster cannot; a series is known by its
 // name.
@@ -705,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn a_film_the_sidecar_wrote_no_tagline_for_leads_with_its_title() {
+    fn a_film_the_nfo_held_no_tagline_for_leads_with_its_title() {
         assert_eq!(Item::of(&library(), specimen()).caption(), "Specimen 0001");
     }
 

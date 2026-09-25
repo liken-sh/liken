@@ -113,8 +113,8 @@ fn a_show(catalog: &Path) {
 }
 
 // The source both files are read through.
-fn source_over(catalog: &Path, store: PathBuf) -> SidecarSource {
-    SidecarSource::new(catalog, NO_AGENT).with_progress(store, NO_AGENT)
+fn source_over(catalog: &Path, store: PathBuf) -> LocalCatalog {
+    LocalCatalog::new(catalog, NO_AGENT).with_progress(store, NO_AGENT)
 }
 
 fn watching(source: &mut dyn Source, people: &[&str]) -> Vec<Resume> {

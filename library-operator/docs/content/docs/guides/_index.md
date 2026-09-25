@@ -31,9 +31,9 @@ walks the volume with a catalog agent beside it and writes rows into the
 namespace's catalog. The `Job` exits when a catalog pod confirms its
 run. A webhook from Radarr, Sonarr, or Jellyfin runs the same walk over
 one folder. An enrich `Job` asks the providers a `Library` names and
-writes the answers beside the media, as the sidecars and art Kodi and
-Jellyfin read. The volume stays the source of truth, and the catalog is
-derived from it.
+writes the answers beside the media, as the `.nfo` files and the art
+that Kodi and Jellyfin read. The volume stays the source of truth, and
+the catalog is derived from it.
 
 A screen is a `Player` that `media-operator` owns. When its idle
 controller names this operator, the operator runs a pod on the

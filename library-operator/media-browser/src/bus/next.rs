@@ -144,8 +144,8 @@ mod tests {
         }
     }
 
-    // The block a request round-trips through, as the sidecar sends it back
-    // byte for byte.
+    // The block a request round-trips through, as the Play's command sidecar
+    // sends it back byte for byte.
     fn returned(next: &Next) -> Option<Request> {
         request(value(next)["request"].to_string().as_bytes())
     }

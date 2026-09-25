@@ -261,7 +261,7 @@ fn quoted(argument: &str) -> String {
     format!("'{}'", argument.replace('\'', r"'\''"))
 }
 
-// A catalog fixture in the shape the sidecar's file has, with one
+// A catalog fixture in the shape the agent's file has, with one
 // library of one movie and a poster beside it on the volume.
 fn fixture(dir: &Path) -> (PathBuf, PathBuf) {
     let database = dir.join("state.db");

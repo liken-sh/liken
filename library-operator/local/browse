@@ -19,7 +19,7 @@ repo="$(cd "$here/.." && pwd)"
 
 # The first agent's file and API. The media browser reads the file
 # straight off the disk and takes its update streams from the API, which is
-# the pod's shape from plan 06 with the sidecar on loopback.
+# the pod's shape from plan 06 with the agent on loopback.
 catalog="$repo/local/state/catalog/agent-1/state.db"
 updates="http://127.0.0.1:20081"
 

@@ -110,7 +110,7 @@ impl Builder {
         self.people.push(someone);
     }
 
-    /// Fold one more string onto an item already added. The sidecar read
+    /// Fold one more string onto an item already added. The local catalog read
     /// streams aliases and episodes in their own passes after the titles,
     /// and both reach their item through the place `add` answered.
     pub fn fold(&mut self, place: Place, rung: Where, text: &str) {

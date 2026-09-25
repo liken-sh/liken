@@ -31,11 +31,11 @@ pub struct Title {
     /// content rating of a movie, or the year, the season count, and the
     /// content rating of a series. The genres take the line under it.
     pub facts: String,
-    /// The genres on one line, empty where the sidecar named none.
+    /// The genres on one line, empty where the .nfo file named none.
     pub genres: String,
     /// The scores the ratings row draws, in the order it draws them.
     pub ratings: Vec<ratings::Score>,
-    /// The tagline, empty where the sidecar named none.
+    /// The tagline, empty where the .nfo file named none.
     pub tagline: String,
 }
 

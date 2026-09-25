@@ -69,7 +69,7 @@ pub fn person(library: &str, path: &str) -> Option<Person> {
 /// page opens on a wall of three, and the prolific writer's wall holds
 /// the first `PROLIFIC_WORKS` movies as their writer, so the sample's pool
 /// has one person over the floor.
-/// The slots carry the duration and the rating, as the sidecar's works
+/// The slots carry the duration and the rating, as the local catalog's works
 /// read does, so a card under a one-role heading draws the facts line
 /// every other strip draws.
 pub fn works(library: &str, path: &str) -> Vec<Slot> {

@@ -43,7 +43,7 @@ func TestEachTVmazeArtTypeLandsUnderItsName(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, folder, "Season 01", "Quiet Harbor - S01E05.mkv"), "video")
-			writeSeriesSidecar(t, root, folder, "81189")
+			writeSeriesNFO(t, root, folder, "81189")
 			seedArtSeries(t, catalog, folder, []int{1})
 			work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 			answers := map[string]string{tvmazeLookupPath: tvmazeShowAnswer}

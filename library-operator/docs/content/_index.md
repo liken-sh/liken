@@ -20,7 +20,7 @@ browser is a native Wayland client. It takes the place of the idle
 screen on a `Player`, lets a person walk into a library, and starts a
 `Play` on that `Player`.
 
-The volume stays the source of truth. The files, the `.nfo` sidecars,
+The volume stays the source of truth. The files, the `.nfo` files,
 and the artwork are what the operator reads and writes, in the forms
 Kodi and Jellyfin read. The catalog is derived and rebuildable.
 

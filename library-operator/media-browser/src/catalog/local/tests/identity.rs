@@ -9,7 +9,7 @@ use crate::catalog::Identity;
 const FILMS: &str = "screening/films";
 const SHOWS: &str = "screening/shows";
 
-// One film the catalog holds under three names, which is what a sidecar
+// One film the catalog holds under three names, which is what an .nfo file
 // with two provider ids and a folder key leaves behind.
 fn a_named_film(path: &Path) {
     insert_movie(path, FILMS, "movie:tmdb:603", "Some Film", "some film");
@@ -30,7 +30,7 @@ fn a_named_series(path: &Path) {
 }
 
 fn identity(path: &Path, library: &str, selection: &Selection) -> Identity {
-    SidecarSource::new(path, NO_AGENT).identity(library, selection)
+    LocalCatalog::new(path, NO_AGENT).identity(library, selection)
 }
 
 #[test]

@@ -53,7 +53,7 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	root, library, ignore := scan.root, scan.library, scan.ignore
 	name := filepath.Base(dir)
 	meta, identified, err := seriesIdentity(dir, name)
-	// The same rule the movies walk follows: a folder whose sidecar could
+	// The same rule the movies walk follows: a folder whose .nfo file could
 	// not be read has no identity this pass, so it writes no row.
 	if err != nil {
 		result.noteReadError(err)
@@ -90,7 +90,7 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	})
 	result.genres = append(result.genres, genreRows(library, seriesID, body.Genres)...)
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeSeries, meta.ProviderIDs, key, seriesID)...)
-	readLikenSidecar(likenSidecar{root: root, dir: dir, library: library, item: seriesID}, result)
+	readLikenDir(likenDir{root: root, dir: dir, library: library, item: seriesID}, result)
 	result.titles++
 	if !identified {
 		result.unidentified++
@@ -224,7 +224,7 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, fold
 		result.noteReadError(err)
 		result.files = append(result.files, rows...)
 		result.streams = append(result.streams, streams...)
-		readLikenSidecar(likenSidecar{
+		readLikenDir(likenDir{
 			root: root, dir: child, library: library,
 			item: seriesID, items: folders.items[child],
 		}, result)
@@ -233,9 +233,9 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, fold
 
 // seriesIdentity reads a series folder's identity, the same ladder the movies
 // walk uses: a readable tvshow.nfo with a title, or the folder name,
-// identified when the name yields a year or a provider id. The sidecar read
-// answers the way movieIdentity's does: an absent sidecar falls through to
-// the name, and a sidecar the scanner cannot read is an error.
+// identified when the name yields a year or a provider id. The .nfo read
+// answers the way movieIdentity's does: an absent .nfo file falls through to
+// the name, and an .nfo file the scanner cannot read is an error.
 func seriesIdentity(dir, name string) (seriesMeta, bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "tvshow.nfo"))
 	switch {
@@ -258,7 +258,7 @@ func seriesIdentity(dir, name string) (seriesMeta, bool, error) {
 }
 
 // episodeFile is one episode file and the directory that holds it, so the
-// season folder's name is at hand where the sidecar carried no season number.
+// season folder's name is at hand where the .nfo file held no season number.
 type episodeFile struct {
 	dir  string
 	file string
@@ -323,7 +323,7 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 // out and reports no id, because it has no place under the series.
 func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fileArrival, probes folderProbes, result *walkResult) []string {
 	metas, err := episodeIdentity(episode)
-	// An episode whose sidecar could not be read has no numbers this
+	// An episode whose .nfo file could not be read has no numbers this
 	// pass, and a row read from the file name alone could carry another
 	// episode's id.
 	if err != nil {
@@ -413,15 +413,15 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 // episodeIdentity reads the numbers and the body of every episode one file
 // holds. A range marker in the name numbers each of them, within one season.
 //
-// A sidecar of several episodedetails blocks gives each episode its own title
-// and body, in the sidecar's own order. An episode past the last block takes
+// An .nfo file of several episodedetails blocks gives each episode its own
+// title and body, in the file's own order. An episode past the last block takes
 // the file's technical attributes and no title of its own, so scanEpisode
 // names it S04E11 and no episode ever carries another episode's title.
 //
-// The .nfo beside the file
-// is the source where one exists; the season folder and the file name fill a
-// number the sidecar left at zero, so a sidecar that names only the episode
-// still takes its season from the folder.
+// The .nfo file beside the video is the source where one exists. The season
+// folder and the file name fill a number the .nfo file left at zero, so an
+// .nfo file that names only the episode still takes its season from the
+// folder.
 func episodeIdentity(episode episodeFile) ([]episodeMeta, error) {
 	var blocks []episodeMeta
 	nfoPath := filepath.Join(episode.dir, stripExtension(episode.file)+".nfo")

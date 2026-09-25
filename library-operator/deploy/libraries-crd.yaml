@@ -447,14 +447,14 @@ spec:
                   minimum: 0
                   description: >-
                     How many files this library holds: the video files and
-                    everything beside them, the sidecars, the artwork, the
+                    everything beside them, the `.nfo` files, the artwork, the
                     subtitles, and the trickplay directories.
                 unidentified:
                   type: integer
                   minimum: 0
                   description: >-
                     How many folders the last walk could not identify:
-                    no sidecar file, and no confident parse of the
+                    no `.nfo` file, and no confident parse of the
                     folder name. They are cataloged under their folder
                     names, so they are still browsable.
                 removedLastSweep:

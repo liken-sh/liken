@@ -139,7 +139,7 @@ library.
 **No `.nfo` convention exists for these spans.** Kodi's and Jellyfin's
 `.nfo` formats have no element for an intro or credits segment.
 Jellyfin stores its media segments in its own database. The only file
-convention is Kodi's `.edl` sidecar, whose action codes (cut, mute,
+convention is Kodi's `.edl` file, whose action codes (cut, mute,
 scene marker, and commercial break) have no word for intro or credits.
 So the fact writes no `.nfo` and no `.edl`.
 

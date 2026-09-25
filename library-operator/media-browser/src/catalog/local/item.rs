@@ -79,7 +79,7 @@ pub fn strings(json: &str) -> Vec<String> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
-/// The body's ratings, as pairs of the sidecar's own name for the site and
+/// The body's ratings, as pairs of the .nfo file's own name for the site and
 /// the score on that site's scale. A score that is not a number is left
 /// out.
 pub fn ratings(json: &str) -> Vec<(String, f64)> {

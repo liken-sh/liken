@@ -37,7 +37,7 @@ next walk, exactly as a video does.
 
 The walk reads three places for one title:
 
-* the title folder itself, for the sidecar, the art, the subtitles, and
+* the title folder itself, for the `.nfo` file, the art, the subtitles, and
   the video;
 * a season folder under a series, for the same;
 * an extras folder under a title folder, for the trailers and the
@@ -73,7 +73,7 @@ same file the same way.
 | `audio` | a theme song, and a music track when music arrives |
 | `subtitle` | a subtitle track beside the video |
 | `image` | a poster, a backdrop, a logo, or a thumbnail |
-| `metadata` | an `.nfo` sidecar |
+| `metadata` | an `.nfo` file |
 | `trickplay` | a directory of thumbnail tiles |
 | `other` | a file in none of the categories above |
 
@@ -140,7 +140,7 @@ person cannot trust to answer "what is in this folder". They are typed
 
 ## The proof
 
-The unit tests read a folder tree of every case: a movie with a sidecar,
+The unit tests read a folder tree of every case: a movie with an `.nfo` file,
 art, two subtitles with languages and a forced flag, a trickplay
 directory, and an `Extras` folder; a series with a `tvshow.nfo`, a
 season poster, an episode with its own `.nfo`, thumbnail, and subtitle;
@@ -167,8 +167,8 @@ point of the plan. Metadata and subtitles follow. Fewer than one file in
 a thousand fell into `other`.
 
 The roles divide as the plan expected. Posters, backdrops, logos,
-thumbnails, and banners each land under their own word, one
-`metadata/movie` sidecar sits with most titles, and a trickplay directory
+thumbnails, and banners each land under their own word, most titles
+have one `metadata/movie` file, and a trickplay directory
 is one `trickplay/tiles` row and never one row per tile.
 
 **The language read was wrong for one form.** A subtitle named

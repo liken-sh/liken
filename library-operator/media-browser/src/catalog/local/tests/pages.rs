@@ -9,7 +9,7 @@ fn a_title_carries_the_duration_and_the_rating_its_row_holds() {
     let path = fixture(&dir);
     insert_page(&path, "default/films", "one", "1994", "", BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let slots = source.wall(&library("default/films")).slots;
     assert_eq!(slots[0].duration, 6720);
     assert_eq!(slots[0].rating, "PG");
@@ -21,7 +21,7 @@ fn a_title_whose_body_names_no_rating_carries_none() {
     let path = fixture(&dir);
     insert_movie(&path, "default/films", "one", "Film one", "film one");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let slots = source.wall(&library("default/films")).slots;
     assert_eq!(slots[0].rating, "");
     assert_eq!(slots[0].duration, 0);
@@ -65,7 +65,7 @@ fn a_movie_page_reads_its_body_and_its_art_by_role() {
         "poster",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let details = source
         .movie("default/films", "one")
         .expect("the library holds this movie");
@@ -106,7 +106,7 @@ fn a_movie_with_an_empty_body_reads_as_a_page_of_its_columns() {
     let path = fixture(&dir);
     insert_page(&path, "default/films", "one", "1994", "", "{}");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let details = source
         .movie("default/films", "one")
         .expect("the library holds this movie");
@@ -136,7 +136,7 @@ fn a_title_reads_the_files_it_holds_with_their_technical_columns() {
         "subtitle",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let files = source.files("default/films", "one");
     assert_eq!(
         files,
@@ -168,7 +168,7 @@ fn a_title_another_library_holds_reads_none_of_its_files_here() {
     insert_page(&path, "default/films", "one", "1994", "", BODY);
     insert_video_file(&path, "default/films", "Film one/film.mkv", "one", "");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.files("default/other", "one").is_empty());
     assert!(source.files("default/films", "gone").is_empty());
 }
@@ -179,7 +179,7 @@ fn a_movie_another_library_holds_has_no_page_here() {
     let path = fixture(&dir);
     insert_page(&path, "default/films", "one", "1994", "", BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(source.movie("default/other", "one"), None);
     assert_eq!(source.movie("default/films", "gone"), None);
 }
@@ -194,7 +194,7 @@ fn a_set_comes_back_named_with_its_members_in_release_order() {
     insert_page(&path, "default/films", "apart", "1990", "", BODY);
     insert_page(&path, "default/other", "elsewhere", "1991", "set:one", BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let set = source
         .set("default/films", "set:one")
         .expect("the library holds this set");
@@ -214,7 +214,7 @@ fn a_set_no_row_names_is_nothing() {
     let path = fixture(&dir);
     insert_page(&path, "default/films", "one", "1994", "set:gone", BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(source.set("default/films", "set:gone"), None);
 }
 
@@ -224,7 +224,7 @@ fn a_set_with_no_member_left_comes_back_empty() {
     let path = fixture(&dir);
     insert_set(&path, "default/films", "set:one", "The Set");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let set = source
         .set("default/films", "set:one")
         .expect("the library holds this set");

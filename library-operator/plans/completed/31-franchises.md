@@ -13,11 +13,11 @@ in a public repository.
 
 ## The problem
 
-A set is what a movie sidecar names, one collection per film in
+A set is what a movie's `.nfo` file names, one collection per film in
 release order, and plan 22 draws it as a strip on the film's page. A
 franchise is bigger and crosses kinds: the Marvel films with the
 series that run between them, or Alien with its prequels in story
-order. No sidecar carries it, the order is an opinion, and the members
+order. No `.nfo` file contains it, the order is an opinion, and the members
 are in different libraries on different volumes. So no member library
 can hold it, and the scanner cannot derive it.
 
@@ -64,8 +64,8 @@ is the truth, not a cache of a source, and research writes it.
   the scanner.
 - **The join.** A member is a provider id, and the screen resolves it
   through the `aliases` table to a row in whichever library of the
-  namespace holds it. The scanner already writes every provider id a
-  sidecar carries as an alias of the form `movie:tmdb:1771` or
+  namespace holds it. The scanner already writes every provider id an
+  `.nfo` file contains as an alias of the form `movie:tmdb:1771` or
   `series:tvdb:263365`, so a member line resolves by string match.
   The franchise scanner never reads another library's volume. A
   member no library holds draws as a gap in the order with its
@@ -240,7 +240,7 @@ The rules:
 - A provider id is `scheme:id`. Films use `tmdb` and series use
   `tvdb`, because those are the schemes the movies and series
   libraries write to `aliases`. Another scheme is legal and resolves
-  only if some sidecar carries it.
+  only if some `.nfo` file contains it.
 - `title` is optional, and it carries no year. The page draws it only
   when no library holds the member. `release_year` is the year a film
   was released or a series first aired, the real-world year and never

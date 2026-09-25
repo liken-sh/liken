@@ -199,8 +199,8 @@ func TestWalkSeriesSkipsAnUnnumberedEpisode(t *testing.T) {
 	}
 }
 
-// A season folder names the season where an episode sidecar carries
-// only its episode number.
+// A season folder names the season where an episode's .nfo file
+// holds only its episode number.
 func TestWalkSeriesTakesSeasonFromTheFolder(t *testing.T) {
 	root := t.TempDir()
 	seasonDir := filepath.Join(root, "Show", "Season 03")
@@ -213,7 +213,7 @@ func TestWalkSeriesTakesSeasonFromTheFolder(t *testing.T) {
 		t.Fatalf("episodes = %d, want 1", len(result.episodes))
 	}
 	if result.episodes[0].Season != 3 || result.episodes[0].Episode != 7 {
-		t.Errorf("placement = s%02de%02d, want s03e07 from the folder and the sidecar", result.episodes[0].Season, result.episodes[0].Episode)
+		t.Errorf("placement = s%02de%02d, want s03e07 from the folder and the .nfo file", result.episodes[0].Season, result.episodes[0].Episode)
 	}
 }
 
@@ -240,15 +240,15 @@ func TestWalkSeriesSkipsIgnoredFolders(t *testing.T) {
 }
 
 // doubleEpisodeVolume writes a series folder holding one file of two episodes,
-// with the sidecar the test gives it, and reports the season folder.
-func doubleEpisodeVolume(t *testing.T, root, video, sidecar string) string {
+// with the .nfo file the test gives it, and reports the season folder.
+func doubleEpisodeVolume(t *testing.T, root, video, nfo string) string {
 	t.Helper()
 	show := filepath.Join(root, "Coastline")
 	season := filepath.Join(show, "Season 04")
 	writeFile(t, filepath.Join(show, "tvshow.nfo"), `<tvshow><title>Coastline</title><uniqueid type="tvdb">7</uniqueid></tvshow>`)
 	writeFile(t, filepath.Join(season, video), "video")
-	if sidecar != "" {
-		writeFile(t, filepath.Join(season, stripExtension(video)+".nfo"), sidecar)
+	if nfo != "" {
+		writeFile(t, filepath.Join(season, stripExtension(video)+".nfo"), nfo)
 	}
 	return season
 }
@@ -308,9 +308,9 @@ func TestWalkSeriesReadsADoubleEpisodeFile(t *testing.T) {
 	}
 }
 
-// A sidecar of two episodedetails blocks gives each episode its own title and
-// plot, in the order the sidecar wrote them.
-func TestWalkSeriesReadsAMultiEpisodeSidecar(t *testing.T) {
+// An .nfo file of two episodedetails blocks gives each episode its own title
+// and plot, in the order the file lists them.
+func TestWalkSeriesReadsAMultiEpisodeNFO(t *testing.T) {
 	root := t.TempDir()
 	doubleEpisodeVolume(t, root, "Coastline - S04E10-E11.mkv",
 		`<episodedetails><title>The Long Way Down</title><season>4</season><episode>10</episode><plot>The crew descends.</plot></episodedetails>
@@ -336,10 +336,10 @@ func TestWalkSeriesReadsAMultiEpisodeSidecar(t *testing.T) {
 	}
 }
 
-// A sidecar of one block titles the first episode of the range. The second
+// An .nfo file of one block titles the first episode of the range. The second
 // takes the numbered title, because the block describes the first episode and
 // no episode carries another episode's title.
-func TestWalkSeriesNumbersTheSecondEpisodeOfASingleBlockSidecar(t *testing.T) {
+func TestWalkSeriesNumbersTheSecondEpisodeOfASingleBlockNFO(t *testing.T) {
 	root := t.TempDir()
 	doubleEpisodeVolume(t, root, "Coastline - S04E10-E11.mkv",
 		`<episodedetails><title>The Long Way Down</title><season>4</season><episode>10</episode><plot>The crew descends.</plot></episodedetails>`)
@@ -439,7 +439,7 @@ func TestWalkSeriesOnAMissingRoot(t *testing.T) {
 // A series folder with no tvshow.nfo takes its identity from the
 // folder name: a name with a year is identified, one without is counted
 // unidentified and still cataloged. A top-level episode file with a
-// marker in its name is placed with no season folder and no sidecar.
+// marker in its name is placed with no season folder and no .nfo file.
 func TestWalkSeriesFallsBackToFolderNames(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "The Show (2010)", "The Show S01E01.mkv"), "video")
@@ -464,14 +464,14 @@ func TestWalkSeriesFallsBackToFolderNames(t *testing.T) {
 
 // A series folder with no tvshow.nfo falls back to the folder name, and
 // the walk is complete.
-func TestASeriesWithNoSidecarKeepsThePathIdentity(t *testing.T) {
+func TestASeriesWithNoNFOKeepsThePathIdentity(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "Show (2019)", "Season 01", "Show S01E01.mkv"), "video")
 
 	result := walkSeries(root, "house/series", nil)
 
 	if result.readError {
-		t.Error("a series with no sidecar marked the walk incomplete")
+		t.Error("a series with no .nfo file marked the walk incomplete")
 	}
 	if len(result.series) != 1 || result.series[0].Id != "series:path:show-2019" {
 		t.Errorf("series = %+v, want the path-derived id", result.series)
@@ -481,7 +481,7 @@ func TestASeriesWithNoSidecarKeepsThePathIdentity(t *testing.T) {
 // A tvshow.nfo the scanner cannot read marks the walk incomplete, for
 // the reason the movies walk does: the fall-back would change the series
 // id, and the sweep would then delete every episode under the old one.
-func TestAnUnreadableSeriesSidecarMarksTheWalkIncomplete(t *testing.T) {
+func TestAnUnreadableSeriesNFOMarksTheWalkIncomplete(t *testing.T) {
 	root := t.TempDir()
 	show := filepath.Join(root, "Show (2019)")
 	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
@@ -492,14 +492,14 @@ func TestAnUnreadableSeriesSidecarMarksTheWalkIncomplete(t *testing.T) {
 	result := walkSeries(root, "house/series", nil)
 
 	if !result.readError {
-		t.Error("a series sidecar that could not be read left the walk complete")
+		t.Error("a tvshow.nfo that could not be read left the walk complete")
 	}
 }
 
-// An episode sidecar that cannot be read marks the walk incomplete too,
+// An episode's .nfo file that cannot be read marks the walk incomplete too,
 // so an episode whose numbers the walk could not read is not swept as
 // departed.
-func TestAnUnreadableEpisodeSidecarMarksTheWalkIncomplete(t *testing.T) {
+func TestAnUnreadableEpisodeNFOMarksTheWalkIncomplete(t *testing.T) {
 	root := t.TempDir()
 	season := filepath.Join(root, "Show (2019)", "Season 01")
 	writeFile(t, filepath.Join(season, "Show S01E01.mkv"), "video")
@@ -510,7 +510,7 @@ func TestAnUnreadableEpisodeSidecarMarksTheWalkIncomplete(t *testing.T) {
 	result := walkSeries(root, "house/series", nil)
 
 	if !result.readError {
-		t.Error("an episode sidecar that could not be read left the walk complete")
+		t.Error("an episode's .nfo file that could not be read left the walk complete")
 	}
 }
 
@@ -555,9 +555,9 @@ func TestAnUnreadableServiceDirectoryLeavesASeriesWalkComplete(t *testing.T) {
 	}
 }
 
-// A series library's per-file sidecar carries the episodedetails root, so a
+// A series library's per-file .nfo file has the episodedetails root, so a
 // video that is no episode reads the stream details the probe wrote beside it.
-func TestAVideoThatIsNoEpisodeReadsTheSidecarBesideIt(t *testing.T) {
+func TestAVideoThatIsNoEpisodeReadsTheNFOBesideIt(t *testing.T) {
 	cases := []struct {
 		name   string
 		folder string
@@ -581,7 +581,7 @@ func TestAVideoThatIsNoEpisodeReadsTheSidecarBesideIt(t *testing.T) {
 				t.Fatalf("the walk read no row for %s", path)
 			}
 			if row.Width != 3840 || row.Height != 2160 || row.VideoCodec != "hevc" || row.DurationMs != 3000000 {
-				t.Errorf("attributes = %dx%d %s %dms, want the stream details the sidecar carries",
+				t.Errorf("attributes = %dx%d %s %dms, want the stream details the .nfo file holds",
 					row.Width, row.Height, row.VideoCodec, row.DurationMs)
 			}
 		})

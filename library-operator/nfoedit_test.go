@@ -1,7 +1,7 @@
 package main
 
 // what these tests read: the group edit writes the elements one fact owns, and
-// leaves every other byte of the sidecar as it was.
+// leaves every other byte of the .nfo file as it was.
 
 import (
 	"bytes"
@@ -13,9 +13,9 @@ import (
 	"testing"
 )
 
-// jellyfinSidecar is a full sidecar of the shape Jellyfin writes, the one the
+// jellyfinNFO is a full .nfo file of the shape Jellyfin writes, the one the
 // diff test proves the edit keeps.
-const jellyfinSidecar = `<?xml version="1.0" encoding="utf-8"?>
+const jellyfinNFO = `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <plot>An old plot.</plot>
   <outline>An outline no fact owns.</outline>
@@ -92,7 +92,7 @@ func TestAGroupEditKeepsEveryByteOutsideTheGroup(t *testing.T) {
 	for _, fact := range nfoFacts {
 		t.Run(fact, func(t *testing.T) {
 			group := nfoGroup(fact)
-			document := []byte(jellyfinSidecar)
+			document := []byte(jellyfinNFO)
 
 			edited, err := editElementGroup(document, group, nfoElements(fact, answer))
 			if err != nil {
@@ -103,7 +103,7 @@ func TestAGroupEditKeepsEveryByteOutsideTheGroup(t *testing.T) {
 				t.Errorf("the edit changed bytes outside the group:\nbefore:\n%s\nafter:\n%s", before, after)
 			}
 			if _, err := parseMovieNFO(edited); err != nil {
-				t.Errorf("the edited sidecar does not parse: %v", err)
+				t.Errorf("the edited .nfo file does not parse: %v", err)
 			}
 		})
 	}
@@ -152,26 +152,26 @@ func TestAGroupEditWritesEachFactsOwnElements(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
-			edited, err := editElementGroup([]byte(jellyfinSidecar), nfoGroup(test.fact),
+			edited, err := editElementGroup([]byte(jellyfinNFO), nfoGroup(test.fact),
 				nfoElements(test.fact, answer))
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, want := range test.want {
 				if !strings.Contains(string(edited), want) {
-					t.Errorf("the sidecar holds no %s:\n%s", want, edited)
+					t.Errorf("the .nfo file holds no %s:\n%s", want, edited)
 				}
 			}
 			for _, gone := range test.gone {
 				if strings.Contains(string(edited), gone) {
-					t.Errorf("the sidecar still holds %s:\n%s", gone, edited)
+					t.Errorf("the .nfo file still holds %s:\n%s", gone, edited)
 				}
 			}
 		})
 	}
 }
 
-func TestAGroupEditFillsASidecarThatHoldsNoneOfIt(t *testing.T) {
+func TestAGroupEditFillsAnNFOThatHoldsNoneOfIt(t *testing.T) {
 	answer := factAnswer{
 		Plot: "A new plot.", Certification: "PG-13",
 		Rating: &titleRating{Value: 8.4},
@@ -191,17 +191,18 @@ func TestAGroupEditFillsASidecarThatHoldsNoneOfIt(t *testing.T) {
 			}
 			hash, err := groupHash(edited, nfoGroup(fact))
 			if err != nil {
-				t.Fatalf("the edited sidecar does not parse: %v", err)
+				t.Fatalf("the edited .nfo file does not parse: %v", err)
 			}
 			if hash == "" {
-				t.Errorf("the sidecar holds none of the %s group:\n%s", fact, edited)
+				t.Errorf("the .nfo file holds none of the %s group:\n%s", fact, edited)
 			}
 		})
 	}
 }
 
-// The rating of one site arrives inside the ratings element, and the ratings
-// element is created for the first one that lands in a sidecar with none.
+// The edit writes the rating of one site inside the ratings element, and it
+// creates the ratings element for the first rating it writes into an .nfo file
+// with none.
 func TestARatingLandsInsideTheRatingsElement(t *testing.T) {
 	document := minimalNFO(nfoRootMovie, "Winter Harbour")
 	answer := factAnswer{Rating: &titleRating{Value: 8.4, Votes: 12}}
@@ -234,7 +235,7 @@ func TestARatingLandsInsideTheRatingsElement(t *testing.T) {
 // rest of the document changes, which is what the fight check reads.
 func TestTheGroupHashFollowsTheGroupAlone(t *testing.T) {
 	group := nfoGroup(factOverview)
-	document := []byte(jellyfinSidecar)
+	document := []byte(jellyfinNFO)
 	first, err := groupHash(document, group)
 	if err != nil {
 		t.Fatal(err)
@@ -263,15 +264,15 @@ func TestTheGroupHashFollowsTheGroupAlone(t *testing.T) {
 // writes.
 func TestAGroupEditLeavesNoTemporaryBehind(t *testing.T) {
 	dir := t.TempDir()
-	sidecar := filepath.Join(dir, movieSidecarName)
-	writeFile(t, sidecar, jellyfinSidecar)
-	edited, err := editElementGroup([]byte(jellyfinSidecar), nfoGroup(factCertification),
+	nfoPath := filepath.Join(dir, movieNFOName)
+	writeFile(t, nfoPath, jellyfinNFO)
+	edited, err := editElementGroup([]byte(jellyfinNFO), nfoGroup(factCertification),
 		nfoElements(factCertification, factAnswer{Certification: "PG-13"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := newVolumeWriter("movies-enrich").write(sidecar, edited); err != nil {
+	if err := newVolumeWriter("movies-enrich").write(nfoPath, edited); err != nil {
 		t.Fatal(err)
 	}
 
@@ -279,13 +280,13 @@ func TestAGroupEditLeavesNoTemporaryBehind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != movieSidecarName {
-		t.Errorf("the directory holds %v, want the sidecar alone", entries)
+	if len(entries) != 1 || entries[0].Name() != movieNFOName {
+		t.Errorf("the directory holds %v, want the .nfo file alone", entries)
 	}
 }
 
-// A sidecar the parser stops on fails the group edit, and the bytes stay as
-// they were.
+// An .nfo file that the parser cannot read fails the group edit, and the bytes
+// stay as they were.
 func TestAGroupEditFailsOnADocumentThatIsNotXML(t *testing.T) {
 	for _, fact := range nfoFacts {
 		t.Run(fact, func(t *testing.T) {
@@ -321,7 +322,7 @@ func TestAGroupLandsUnderAnEmptyParent(t *testing.T) {
 
 	var read movieNFO
 	if err := xml.Unmarshal(edited, &read); err != nil {
-		t.Fatalf("the edited sidecar does not parse: %v\n%s", err, edited)
+		t.Fatalf("the edited .nfo file does not parse: %v\n%s", err, edited)
 	}
 	if rating := ratingNamed(read.Ratings.Ratings, tmdbRatingName); rating == nil || rating.Value != "8.4" {
 		t.Errorf("read %+v, want the rating under the parent it found:\n%s", read.Ratings, edited)
@@ -347,7 +348,7 @@ func TestTheRatingOfEachSiteSitsBesideTheOthers(t *testing.T) {
 
 	var read movieNFO
 	if err := xml.Unmarshal(document, &read); err != nil {
-		t.Fatalf("the edited sidecar does not parse: %v\n%s", err, document)
+		t.Fatalf("the edited .nfo file does not parse: %v\n%s", err, document)
 	}
 	marked := []string{}
 	for fact, want := range scores {
@@ -383,8 +384,8 @@ func TestTheGroupHashFailsOnADocumentThatIsNotXML(t *testing.T) {
 	}
 }
 
-// A sidecar with no child element at all takes the group at the indentation of
-// a first child.
+// An .nfo file with no child element at all gets the group at the indentation
+// of a first child.
 func TestAGroupLandsInADocumentWithNoChildren(t *testing.T) {
 	edited, err := editElementGroup([]byte("<movie></movie>\n"), nfoGroup(factOverview),
 		nfoElements(factOverview, factAnswer{Plot: "A new plot."}))
@@ -394,7 +395,7 @@ func TestAGroupLandsInADocumentWithNoChildren(t *testing.T) {
 
 	meta, err := parseMovieNFO(edited)
 	if err != nil {
-		t.Fatalf("the edited sidecar does not parse: %v\n%s", err, edited)
+		t.Fatalf("the edited .nfo file does not parse: %v\n%s", err, edited)
 	}
 	if meta.Body.Plot != "A new plot." {
 		t.Errorf("plot = %q, want the one the fact wrote:\n%s", meta.Body.Plot, edited)
@@ -414,7 +415,7 @@ func TestAFactOfALaterWaveOwnsNoElement(t *testing.T) {
 	}
 }
 
-// A sidecar Jellyfin wrote may hold a bare ampersand in a URL, and a strict
+// An .nfo file Jellyfin wrote may hold a bare ampersand in a URL, and a strict
 // reader stops at it. The edit finds its group past that entity, and every
 // byte of the document outside the group stays, the entity included.
 func TestAGroupEditReadsPastABareAmpersand(t *testing.T) {

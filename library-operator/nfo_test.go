@@ -1,6 +1,6 @@
 package main
 
-// These tests read the .nfo sidecars against inline XML, so
+// These tests read the .nfo files against inline XML, so
 // the movie, series, and episode fields, the provider ids, and the
 // streamdetails a file's attributes come from are proved with no volume.
 
@@ -114,7 +114,7 @@ func TestParseEpisodeNFO(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(metas) != 1 {
-		t.Fatalf("blocks = %d, want the one the sidecar holds", len(metas))
+		t.Fatalf("blocks = %d, want the one the .nfo file holds", len(metas))
 	}
 	meta := metas[0]
 	if meta.Season != 2 || meta.Episode != 5 || meta.Title != "Breakage" {
@@ -144,8 +144,8 @@ func TestParseEpisodeNFOFallsBackToPremiered(t *testing.T) {
 	}
 }
 
-// A sidecar beside a file of two episodes holds one episodedetails block per
-// episode, and each block carries its own title and plot.
+// An .nfo file beside a file of two episodes holds one episodedetails block per
+// episode, and each block has its own title and plot.
 func TestParseEpisodeNFOsReadsEveryBlock(t *testing.T) {
 	metas, err := parseEpisodeNFOs([]byte(`<?xml version="1.0" encoding="utf-8"?>
 <episodedetails><title>The Long Way Down</title><season>4</season><episode>10</episode><plot>The crew descends.</plot></episodedetails>
@@ -154,7 +154,7 @@ func TestParseEpisodeNFOsReadsEveryBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(metas) != 2 {
-		t.Fatalf("blocks = %d, want both episodes the sidecar names", len(metas))
+		t.Fatalf("blocks = %d, want both episodes the .nfo file names", len(metas))
 	}
 	if metas[0].Title != "The Long Way Down" || metas[0].Episode != 10 {
 		t.Errorf("first block = %q e%02d", metas[0].Title, metas[0].Episode)
@@ -167,8 +167,8 @@ func TestParseEpisodeNFOsReadsEveryBlock(t *testing.T) {
 	}
 }
 
-// A sidecar whose second block is unreadable keeps the blocks that read, so one
-// broken block does not lose the episode before it.
+// The reader keeps the blocks that read from an .nfo file whose second block is
+// unreadable, so one broken block does not lose the episode before it.
 func TestParseEpisodeNFOsKeepsTheBlocksItRead(t *testing.T) {
 	metas, err := parseEpisodeNFOs([]byte(`<episodedetails><title>First</title><season>1</season><episode>1</episode></episodedetails><episodedetails`))
 	if err != nil {
@@ -249,8 +249,8 @@ func TestParseMovieNFODerivesYearFromPremiered(t *testing.T) {
 }
 
 // The set element comes in three shapes: the collection id Jellyfin writes
-// on it, the nested name Kodi writes, and the bare name an older sidecar
-// carries. The id scopes the set where there is one, and the name is the
+// on it, the nested name Kodi writes, and the bare name that an older .nfo
+// file holds. The id scopes the set where there is one, and the name is the
 // set's title in every shape.
 func TestParseMovieNFOReadsTheSet(t *testing.T) {
 	cases := []struct {
@@ -278,7 +278,7 @@ func TestParseMovieNFOReadsTheSet(t *testing.T) {
 			wantCollection: "Quiet Harbor Collection",
 		},
 		{
-			name:    "a sidecar with no set names none",
+			name:    "an .nfo file with no set names none",
 			element: "",
 		},
 	}
@@ -298,10 +298,11 @@ func TestParseMovieNFOReadsTheSet(t *testing.T) {
 	}
 }
 
-// byteOrderMark is the three bytes Jellyfin opens a sidecar it wrote with.
+// byteOrderMark is the three bytes at the start of an .nfo file that Jellyfin
+// wrote.
 const byteOrderMark = "\ufeff"
 
-func TestAMovieSidecarThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
+func TestAMovieNFOThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
 	data := []byte(byteOrderMark + streamNFO(nfoRootMovie, "Solaris", "h264", "dts", 1920, 1080, 8000))
 
 	meta, err := parseMovieNFO(data)
@@ -310,12 +311,12 @@ func TestAMovieSidecarThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	if meta.Title != "Solaris" || meta.Stream.Width != 1920 {
-		t.Errorf("meta = %q %dx%d, want the title and the stream the sidecar carries",
+		t.Errorf("meta = %q %dx%d, want the title and the stream the .nfo file holds",
 			meta.Title, meta.Stream.Width, meta.Stream.Height)
 	}
 }
 
-func TestAnEpisodeSidecarThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
+func TestAnEpisodeNFOThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
 	data := []byte(byteOrderMark + streamNFO(nfoRootEpisode, "Breakage", "h264", "ac3", 1280, 720, 2700))
 
 	metas, err := parseEpisodeNFOs(data)
@@ -327,20 +328,20 @@ func TestAnEpisodeSidecarThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
 		t.Fatalf("metas = %+v, want the one block", metas)
 	}
 	if metas[0].Title != "Breakage" || metas[0].Stream.Width != 1280 {
-		t.Errorf("meta = %q %dx%d, want the title and the stream the sidecar carries",
+		t.Errorf("meta = %q %dx%d, want the title and the stream the .nfo file holds",
 			metas[0].Title, metas[0].Stream.Width, metas[0].Stream.Height)
 	}
 }
 
-// A per-file sidecar is read for its stream details alone, so the root it
-// carries makes no difference to what a file row takes from it.
+// A per-file .nfo file is read for its stream details alone, so the root
+// element it has makes no difference to what a file row takes from it.
 func TestTheStreamDetailsReadTheSameUnderEitherRoot(t *testing.T) {
 	cases := []struct {
 		name        string
 		rootElement string
 	}{
-		{name: "a movies library's sidecar", rootElement: nfoRootMovie},
-		{name: "a series library's sidecar", rootElement: nfoRootEpisode},
+		{name: "a movies library's .nfo file", rootElement: nfoRootMovie},
+		{name: "a series library's .nfo file", rootElement: nfoRootEpisode},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -359,13 +360,13 @@ func TestTheStreamDetailsReadTheSameUnderEitherRoot(t *testing.T) {
 	}
 }
 
-func TestASidecarThatIsNotXMLYieldsNoStreamDetails(t *testing.T) {
+func TestAnNFOThatIsNotXMLYieldsNoStreamDetails(t *testing.T) {
 	if _, err := parseStreamNFO([]byte("this is not xml <<<")); err == nil {
 		t.Error("the parse reported no error, want one")
 	}
 }
 
-// The ratings block reaches the movie body under the sidecar's own
+// The ratings block reaches the movie body under the .nfo file's own
 // rating names, on each site's own scale.
 func TestTheMovieBodyCarriesTheRatingsBlock(t *testing.T) {
 	meta, err := parseMovieNFO([]byte(`<movie>
@@ -396,7 +397,7 @@ func TestTheMovieBodyCarriesTheRatingsBlock(t *testing.T) {
 
 // A score that is not a number, or an empty one, drops that one score and
 // nothing else: the title keeps its plot and the sites that scored, where a
-// numeric field on the element would have failed the whole sidecar.
+// numeric field on the element would have failed the whole .nfo file.
 func TestAScoreThatIsNotANumberDropsOnlyThatScore(t *testing.T) {
 	meta, err := parseMovieNFO([]byte(`<movie>
   <title>Winter Harbour</title>
@@ -411,7 +412,7 @@ func TestAScoreThatIsNotANumberDropsOnlyThatScore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if meta.Body.Plot != "A keeper watches the ice." {
-		t.Errorf("plot = %q, want the sidecar's plot kept", meta.Body.Plot)
+		t.Errorf("plot = %q, want the .nfo file's plot kept", meta.Body.Plot)
 	}
 	want := map[string]float64{"tomatometerallcritics": 83}
 	if !reflect.DeepEqual(meta.Body.Ratings, want) {
@@ -419,7 +420,7 @@ func TestAScoreThatIsNotANumberDropsOnlyThatScore(t *testing.T) {
 	}
 }
 
-// A series sidecar carries the same block into the series body.
+// The same block reaches the series body from a series .nfo file.
 func TestTheSeriesBodyCarriesTheRatingsBlock(t *testing.T) {
 	meta, err := parseSeriesNFO([]byte(`<tvshow>
   <title>The Long Winter</title>
@@ -455,8 +456,8 @@ func TestARatingWithNoValueIsLeftOutOfTheBody(t *testing.T) {
 	}
 }
 
-// An item whose sidecar holds no ratings block has no ratings key.
-func TestASidecarWithNoRatingsBlockHasNoRatingsKey(t *testing.T) {
+// An item whose .nfo file holds no ratings block has no ratings key.
+func TestAnNFOWithNoRatingsBlockHasNoRatingsKey(t *testing.T) {
 	meta, err := parseMovieNFO([]byte(`<movie><title>Winter Harbour</title></movie>`))
 	if err != nil {
 		t.Fatal(err)

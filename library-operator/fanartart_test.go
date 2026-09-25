@@ -72,11 +72,11 @@ func fanartSeriesArt(base string) string {
 		{"id":"10","url":"` + base + `/art/seasonbanner-all.jpg","lang":"en","likes":"1","season":"all"}]}`
 }
 
-// The sidecar the identity fact left in a series folder, which is where the
-// art phase reads the TheTVDB id Fanart.tv keys on.
-func writeSeriesSidecar(t *testing.T, root, folder, tvdb string) {
+// The .nfo file the identity fact wrote in a series folder. The art phase
+// reads the TheTVDB id that Fanart.tv keys on from this file.
+func writeSeriesNFO(t *testing.T, root, folder, tvdb string) {
 	t.Helper()
-	writeFile(t, filepath.Join(root, folder, seriesSidecarName),
+	writeFile(t, filepath.Join(root, folder, seriesNFOName),
 		`<tvshow><uniqueid type="tvdb">`+tvdb+`</uniqueid></tvshow>`)
 }
 
@@ -124,7 +124,7 @@ func TestEachFanartMovieTypeLandsUnderItsName(t *testing.T) {
 }
 
 // Every art type Fanart.tv holds for a series lands under its own name, read
-// on the TheTVDB id the sidecar carries, and the season art lands in the
+// on the TheTVDB id the .nfo file holds, and the season art lands in the
 // series folder under the season's own name.
 func TestEachFanartSeriesTypeLandsUnderItsName(t *testing.T) {
 	folder := "Quiet Harbor (2008)"
@@ -147,7 +147,7 @@ func TestEachFanartSeriesTypeLandsUnderItsName(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, folder, "Season 01", "Quiet Harbor - S01E05.mkv"), "video")
-			writeSeriesSidecar(t, root, folder, "81189")
+			writeSeriesNFO(t, root, folder, "81189")
 			seedArtSeries(t, catalog, folder, []int{1})
 			work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 			answers := map[string]string{}
@@ -172,7 +172,7 @@ func TestASeasonWithoutItsOwnArtTakesTheArtOfEverySeason(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, folder, "Season 03", "Quiet Harbor - S03E05.mkv"), "video")
-	writeSeriesSidecar(t, root, folder, "81189")
+	writeSeriesNFO(t, root, folder, "81189")
 	seedArtSeries(t, catalog, folder, []int{3})
 	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 	answers := map[string]string{}
@@ -196,7 +196,7 @@ func TestASeriesWithNoTheTVDBIDIsAMissWithADate(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, folder, "Season 01", "Quiet Harbor - S01E05.mkv"), "video")
-	writeFile(t, filepath.Join(root, folder, seriesSidecarName),
+	writeFile(t, filepath.Join(root, folder, seriesNFOName),
 		`<tvshow><uniqueid type="tmdb">1396</uniqueid></tvshow>`)
 	seedArtSeries(t, catalog, folder, []int{1})
 	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
@@ -255,7 +255,7 @@ func TestTheHighDefinitionListComesFirst(t *testing.T) {
 	}
 }
 
-// A movie reads on the TMDb id the gap carries, and on the ids the sidecar
+// A movie reads on the TMDb id the gap carries, and on the ids the .nfo file
 // holds where the gap carries none.
 func TestWhichIDFanartReadsAMovieOn(t *testing.T) {
 	cases := []struct {
@@ -265,7 +265,7 @@ func TestWhichIDFanartReadsAMovieOn(t *testing.T) {
 		want  string
 	}{
 		{name: "the id the gap carries", gap: artGap{tmdb: "603"}, want: "603"},
-		{name: "the id the sidecar carries", title: titleRef{ids: providerIDs{"tmdb": "550"}}, want: "550"},
+		{name: "the id the .nfo file holds", title: titleRef{ids: providerIDs{"tmdb": "550"}}, want: "550"},
 		{name: "the IMDb id where there is no other",
 			title: titleRef{ids: providerIDs{"imdb": "tt2910814"}}, want: "tt2910814"},
 		{name: "no id at all"},

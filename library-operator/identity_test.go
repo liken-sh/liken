@@ -24,7 +24,7 @@ func TestAliasRowsForItemAddsEveryProvider(t *testing.T) {
 }
 
 // Two extra providers are added in sorted order, so a re-walk of the
-// same sidecar writes the same rows.
+// same .nfo file writes the same rows.
 func TestAliasRowsForItemIsDeterministic(t *testing.T) {
 	providers := map[string]string{"tmdb": "1", "zdb": "z", "adb": "a"}
 	first := aliasRowsForItem("movies", scopeMovie, providers, "", "movie:tmdb:1")

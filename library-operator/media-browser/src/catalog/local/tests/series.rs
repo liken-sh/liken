@@ -24,7 +24,7 @@ fn a_series_reads_its_trailer_by_role_and_takes_one_of_several() {
             "trailer",
         );
     }
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source
         .series("default/shows", "series:path:one")
@@ -83,7 +83,7 @@ fn a_series_page_reads_its_body_its_seasons_and_its_art_by_role() {
         "trailer",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let details = source
         .series("default/shows", "one")
         .expect("the library holds this series");
@@ -118,7 +118,7 @@ fn a_series_with_an_empty_body_reads_as_a_page_of_its_columns() {
     let path = fixture(&dir);
     insert_series_page(&path, "default/shows", "one", "2004", "{}");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let details = source
         .series("default/shows", "one")
         .expect("the library holds this series");
@@ -140,7 +140,7 @@ fn a_series_another_library_holds_has_no_page_here() {
     let path = fixture(&dir);
     insert_series_page(&path, "default/shows", "one", "2004", SERIES_BODY);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(source.series("default/other", "one"), None);
     assert_eq!(source.series("default/shows", "gone"), None);
 }
@@ -169,7 +169,7 @@ fn every_episode_carries_its_plot_its_runtime_and_its_still() {
         "{}",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let episodes = source.episodes("default/shows", "one");
     assert_eq!(episodes.len(), 2);
     assert_eq!(episodes[0].id, "episode:1:1");
@@ -220,7 +220,7 @@ fn an_episode_with_no_still_draws_the_art_of_its_series() {
         let path = fixture(&dir);
         a_series_with_a_gap(&path, art, arts);
 
-        let mut source = SidecarSource::new(&path, NO_AGENT);
+        let mut source = LocalCatalog::new(&path, NO_AGENT);
         let episodes = source.episodes("default/shows", "one");
         assert_eq!(episodes[0].art, "episode:1:1.jpg");
         assert_eq!(episodes[1].art, drawn);

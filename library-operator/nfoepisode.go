@@ -1,8 +1,8 @@
 package main
 
-// The episode sidecar, the one document that places a file under its series.
-// It stands apart from nfo.go because an episode file may hold two episodes,
-// so the reader streams the document and keeps every block it holds.
+// The episode .nfo file, the one document that places a file under its series.
+// It is in a file apart from nfo.go because an episode file may hold two
+// episodes, so the reader streams the document and keeps every block it holds.
 
 import (
 	"encoding/xml"
@@ -43,8 +43,8 @@ type episodeMeta struct {
 }
 
 // parseEpisodeNFOs reads every episodedetails block an episode .nfo holds, in
-// the order the sidecar wrote them. A file that holds two episodes carries one
-// block for each, which is how Kodi and Jellyfin write it.
+// the order they appear in the .nfo file. A file that holds two episodes has
+// one block for each, which is how Kodi and Jellyfin write it.
 //
 // It streams the decoder over the file rather than unmarshaling once, because
 // those blocks are consecutive root elements and encoding/xml reads only the

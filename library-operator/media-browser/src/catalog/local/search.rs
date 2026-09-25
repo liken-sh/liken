@@ -1,5 +1,5 @@
-// The search index over the sidecar's replica. The sidecar owns it
-// because the sidecar owns the replica and already follows the updates
+// The search index over the agent's replica. The local catalog builds the
+// index, because it already reads the replica and follows the updates
 // feed, so the signal that a row changed is the signal to build again.
 // The build runs on a thread of its own with a read-only connection of
 // its own, never on the frame, and a `Search` answers an empty wall

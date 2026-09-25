@@ -93,7 +93,7 @@ impl Shared {
 }
 
 // The thread runs for the life of the source. The backoff resets once
-// a stream answers, so a healthy sidecar is rejoined at the floor
+// a stream answers, so a healthy agent is rejoined at the floor
 // after a single drop.
 pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str, change: Change) {
     thread::spawn(move || {

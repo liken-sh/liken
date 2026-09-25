@@ -30,7 +30,7 @@ func seedIdentityGap(t *testing.T, catalog *Catalog, kind, folder, released stri
 	}
 }
 
-func TestTheIdentityFactWritesTheIdIntoTheSidecar(t *testing.T) {
+func TestTheIdentityFactWritesTheIdIntoTheNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "The Thing (1982)"
@@ -45,9 +45,9 @@ func TestTheIdentityFactWritesTheIdIntoTheSidecar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(root, folder, movieSidecarName))
-	if !strings.Contains(sidecar, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
-		t.Errorf("the sidecar holds no id:\n%s", sidecar)
+	nfo := readFileString(t, filepath.Join(root, folder, movieNFOName))
+	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
+		t.Errorf("the .nfo file holds no id:\n%s", nfo)
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestTheIdentityFactWritesTheIdIntoTheSidecar(t *testing.T) {
 	}
 }
 
-// Every id the provider knows goes into the sidecar as its own uniqueid, and
+// Every id the provider knows goes into the .nfo file as its own uniqueid, and
 // the scanner lifts each one into aliases, which is what makes a provider that
 // keys on an IMDb id or a TheTVDB id reachable.
 func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
@@ -83,14 +83,14 @@ func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(root, folder, movieSidecarName))
+	nfo := readFileString(t, filepath.Join(root, folder, movieNFOName))
 	for _, want := range []string{
 		`<uniqueid type="tmdb" default="true">1091</uniqueid>`,
 		`<uniqueid type="imdb">tt0084787</uniqueid>`,
 		`<uniqueid type="tvdb">12345</uniqueid>`,
 	} {
-		if !strings.Contains(sidecar, want) {
-			t.Errorf("the sidecar holds no %s:\n%s", want, sidecar)
+		if !strings.Contains(nfo, want) {
+			t.Errorf("the .nfo file holds no %s:\n%s", want, nfo)
 		}
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
@@ -171,14 +171,14 @@ func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 			if len(ledger.Items) != test.wantItems {
 				t.Errorf("items = %+v, want %d", ledger.Items, test.wantItems)
 			}
-			if _, err := os.Stat(filepath.Join(root, folder, movieSidecarName)); err == nil {
-				t.Error("the fact wrote a sidecar for an answer it was not sure of")
+			if _, err := os.Stat(filepath.Join(root, folder, movieNFOName)); err == nil {
+				t.Error("the fact wrote an .nfo file for an answer it was not sure of")
 			}
 		})
 	}
 }
 
-func TestASeriesTakesItsIdFromTheSeriesSidecar(t *testing.T) {
+func TestASeriesTakesItsIdFromTheSeriesNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Twin Peaks (1990)"
@@ -193,18 +193,18 @@ func TestASeriesTakesItsIdFromTheSeriesSidecar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sidecar := readFileString(t, filepath.Join(root, folder, seriesSidecarName))
-	if !strings.Contains(sidecar, "<tvshow>") || !strings.Contains(sidecar, ">1920<") {
-		t.Errorf("the series sidecar reads:\n%s", sidecar)
+	nfo := readFileString(t, filepath.Join(root, folder, seriesNFOName))
+	if !strings.Contains(nfo, "<tvshow>") || !strings.Contains(nfo, ">1920<") {
+		t.Errorf("the series .nfo file reads:\n%s", nfo)
 	}
 }
 
-func TestTheRuntimeRungReadsTheSidecarTheProbeJustWrote(t *testing.T) {
+func TestTheRuntimeRungReadsTheNFOTheProbeJustWrote(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "The Thing (1982)"
 	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
-	writeFile(t, filepath.Join(root, folder, movieSidecarName),
+	writeFile(t, filepath.Join(root, folder, movieNFOName),
 		"<movie>\n  <title>The Thing</title>\n  <fileinfo><streamdetails><video>"+
 			"<durationinseconds>6540</durationinseconds></video></streamdetails></fileinfo>\n</movie>\n")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
@@ -238,19 +238,19 @@ func TestTheRuntimeComesOffTheCatalogWhereItHoldsOne(t *testing.T) {
 		name     string
 		kind     string
 		duration int64
-		sidecar  string
+		nfo      string
 		want     time.Duration
 	}{
 		{name: "the catalog holds it", kind: libraryKindMovies, duration: 6540, want: 6540 * time.Second},
-		{name: "no sidecar and no catalog duration", kind: libraryKindMovies, want: 0},
-		{name: "a sidecar that is not XML", kind: libraryKindMovies, sidecar: "<<<", want: 0},
+		{name: "no .nfo file and no catalog duration", kind: libraryKindMovies, want: 0},
+		{name: "an .nfo file that is not XML", kind: libraryKindMovies, nfo: "<<<", want: 0},
 		{name: "a series states none at the title", kind: libraryKindSeries, want: 0},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			if test.sidecar != "" {
-				writeFile(t, filepath.Join(root, movieSidecarName), test.sidecar)
+			if test.nfo != "" {
+				writeFile(t, filepath.Join(root, movieNFOName), test.nfo)
 			}
 			work, _ := testEnricher(t, test.kind, root, nil)
 
@@ -347,11 +347,11 @@ func TestTheIdentityFactFailsWhereItCannotReadItsGap(t *testing.T) {
 	}
 }
 
-func TestASidecarThatWillNotTakeTheIdRecordsAnError(t *testing.T) {
+func TestAnNFOThatWillNotTakeTheIdRecordsAnError(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(root, folder, movieSidecarName), "this is not xml <<<")
+	writeFile(t, filepath.Join(root, folder, movieNFOName), "this is not xml <<<")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{

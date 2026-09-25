@@ -156,11 +156,11 @@ The log stays for an hour after the `Job` ends.
 
 Jellyfin writes beside the media too, unless its library settings say
 otherwise. For this operator to be the only writer of art and
-sidecars, turn these off on each Jellyfin library that reads a
+`.nfo` files, turn these off on each Jellyfin library that reads a
 `Library`'s volume:
 
 * Saving artwork into media folders. The art fact writes the images.
-* The NFO metadata saver. The nfo fact writes the sidecar.
+* The NFO metadata saver. The nfo fact writes the `.nfo` file.
 * Any subtitle download plugin. Plan 60 covers subtitles.
 
 Leave Jellyfin's trickplay extraction on. With extraction off for a

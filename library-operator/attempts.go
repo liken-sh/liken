@@ -126,7 +126,7 @@ func scopedAttemptPruneParams(library, folder string, epoch int64) []any {
 
 // What one folder's .liken directory means to the scanner: which item the
 // folder's own entry names, and which item each file under it names.
-type likenSidecar struct {
+type likenDir struct {
 	root    string
 	dir     string
 	library string
@@ -140,7 +140,7 @@ type likenSidecar struct {
 
 // The facts this folder is read for, which is the title list where the caller
 // names none.
-func (s likenSidecar) ledgerFacts() []string {
+func (s likenDir) ledgerFacts() []string {
 	if s.facts != nil {
 		return s.facts
 	}
@@ -160,7 +160,7 @@ var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 
 // The rows one folder's trailer ledger becomes: one per trailer the providers
 // hold, keyed on the item its own entry names.
-func (s likenSidecar) trailerRows(entries []trailerEntry) []trailerRow {
+func (s likenDir) trailerRows(entries []trailerEntry) []trailerRow {
 	rows := make([]trailerRow, 0, len(entries))
 	for _, entry := range entries {
 		item := s.itemOf(factTrailer, entry.Path)
@@ -179,7 +179,7 @@ func (s likenSidecar) trailerRows(entries []trailerEntry) []trailerRow {
 
 // The rows one folder's marks ledger becomes: one per span, keyed on the
 // file its entry names, numbered in ledger order within each file.
-func (s likenSidecar) markRows(entries []markEntry) []markRow {
+func (s likenDir) markRows(entries []markEntry) []markRow {
 	rows := make([]markRow, 0, len(entries))
 	ordinals := map[string]int{}
 	for _, entry := range entries {
@@ -210,7 +210,7 @@ type likenRows struct {
 // none.
 // One pass answers for every kind of row, because the credits ledger, the
 // trailer ledger, and the marks ledger are files this pass already opens.
-func (s likenSidecar) read() (likenRows, error) {
+func (s likenDir) read() (likenRows, error) {
 	held := likenRows{}
 	for _, fact := range s.ledgerFacts() {
 		ledger, err := readLikenLedger(s.dir, fact)
@@ -245,7 +245,7 @@ func (s likenSidecar) read() (likenRows, error) {
 
 // How an entry's path resolves: a file fact names the file itself, and an
 // item fact names the title the folder holds.
-func (s likenSidecar) itemOf(fact, path string) string {
+func (s likenDir) itemOf(fact, path string) string {
 	if _, art := artTypes[fact]; fact == factProbe || fact == factArrival || fact == factTrickplay ||
 		fact == factMarks || art {
 		return relativePath(s.root, filepath.Join(s.dir, path))
@@ -257,10 +257,10 @@ func (s likenSidecar) itemOf(fact, path string) string {
 }
 
 // A folder whose .liken files cannot be read marks the pass incomplete, the
-// way an unreadable sidecar does, so the sweep never removes rows the volume
+// way an unreadable .nfo file does, so the sweep never removes rows the volume
 // still holds.
-func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
-	held, err := sidecar.read()
+func readLikenDir(liken likenDir, result *walkResult) {
+	held, err := liken.read()
 	result.noteReadError(err)
 	result.attempts = append(result.attempts, held.attempts...)
 	result.credits = append(result.credits, held.credits...)

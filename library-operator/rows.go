@@ -24,15 +24,15 @@ const (
 	scopeEpisode = "episode"
 )
 
-// The provider preference per scope. itemID takes the first provider present
-// in this order, so one title resolves to one canonical id whichever databases
-// its sidecar names. The order leads with the database the project trusts most.
+// The provider preference per scope. itemID takes the first provider present in
+// this order, so one title resolves to one canonical id whichever databases its
+// .nfo file names. The order leads with the database the project trusts most.
 var providerOrder = map[string][]string{
 	scopeMovie:  {"tmdb", "imdb"},
 	scopeSeries: {"tvdb", "tmdb", "imdb"},
 }
 
-// The sources an alias row records: a provider id read from the sidecar, or
+// The sources an alias row records: a provider id read from the .nfo file, or
 // the folder name the scanner fell back to. The source says how the name was
 // learned, so a later pass tells a durable provider id from a guessed folder.
 const (
@@ -60,7 +60,7 @@ type movieBody struct {
 	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
 	Country       string            `json:"country,omitempty"`
 	ContentRating string            `json:"contentRating,omitempty"`
-	// The sidecar's ratings block, each site's own name against its
+	// The ratings block of the .nfo file, each site's own name against its
 	// score on that site's scale.
 	Ratings map[string]float64 `json:"ratings,omitempty"`
 }
@@ -77,7 +77,7 @@ type seriesBody struct {
 	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
 	Country       string            `json:"country,omitempty"`
 	ContentRating string            `json:"contentRating,omitempty"`
-	// The sidecar's ratings block, the same shape a movie carries.
+	// The ratings block of the .nfo file, in the same shape as a movie's.
 	Ratings map[string]float64 `json:"ratings,omitempty"`
 }
 
@@ -92,7 +92,7 @@ type episodeBody struct {
 
 // movieRow is one row of the movies item table: the header columns every
 // kind sorts on, the movie body, and the id of the set the movie belongs
-// to, empty where the sidecar names no set.
+// to, empty where the .nfo file names no set.
 type movieRow struct {
 	Id       string
 	Library  string
@@ -108,7 +108,7 @@ type movieRow struct {
 	Duration int64
 	Body     movieBody
 	SetID    string
-	// The nfo_facts column: the nfo facts the title's sidecar already answers,
+	// The nfo_facts column: the nfo facts the title's .nfo file already answers,
 	// each name wrapped in commas. The gap query of each nfo fact reads it.
 	NFOFacts string
 }
@@ -212,7 +212,7 @@ type aliasRow struct {
 
 // itemID derives the provider-scoped canonical id. It takes the first provider
 // present in the scope's fixed order and mints none, so a re-walk of an
-// unchanged sidecar derives the same id, movie:tmdb:603. A folder with no
+// unchanged .nfo file derives the same id, movie:tmdb:603. A folder with no
 // provider id falls back to movie:path:<key>, which a move of that folder
 // breaks. That is the weak case the design accepts, in place of a minted id
 // the derived catalog has nowhere to keep.
@@ -228,8 +228,8 @@ func itemID(kind string, providerIDs map[string]string, folderKey string) string
 // episodeID reuses the series' provider tail under the episode scope, with a
 // zero-padded season and episode, so series:tvdb:81189 yields
 // episode:tvdb:81189:s02e05. A path-fallback series id carries its tail
-// through unchanged, so a sidecar-less series still gives its episodes a stable
-// id for as long as its folder holds.
+// through unchanged, so a series with no .nfo file still gives its episodes a
+// stable id for as long as its folder stays in place.
 func episodeID(seriesID string, season, episode int) string {
 	_, tail, _ := strings.Cut(seriesID, ":")
 	return fmt.Sprintf("%s:%s:s%02de%02d", scopeEpisode, tail, season, episode)

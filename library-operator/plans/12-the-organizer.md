@@ -17,7 +17,7 @@ file where the convention says it goes.
 
 - The organizer is a separate loop, and it is the only loop that moves or
   renames anything. The scanner only reads files. The enricher only adds
-  sidecars beside files. The organizer moves folders.
+  metadata files beside the media. The organizer moves folders.
 - It reads the convention from the same settings block that the scanner
   uses to parse names, so the two agree on what a name means.
 - The organizer reports a move to the scanner through the same webhook

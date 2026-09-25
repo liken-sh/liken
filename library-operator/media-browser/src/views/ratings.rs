@@ -33,7 +33,7 @@ const BETWEEN: f32 = 28.0;
 // touch the large one.
 const SCALE_GAP: f32 = 4.0;
 
-// The name the sidecar's ratings block writes for each of the three
+// The name the .nfo file's ratings block holds for each of the three
 // sites the line draws. Jellyfin reads a name holding "tomato" as the
 // critic rating, and tomatometerallcritics is the name it writes.
 const IMDB: &str = "imdb";

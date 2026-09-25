@@ -323,11 +323,11 @@ func TestEachArtFactNamesItsFile(t *testing.T) {
 // The scanner lifts an art attempt onto the file it names, the way it lifts a
 // probe attempt, so the gap query reads what the container wrote.
 func TestTheScannerKeysAnArtAttemptOnTheFile(t *testing.T) {
-	sidecar := likenSidecar{
+	liken := likenDir{
 		root: "/media", dir: "/media/The Signal (2014)", library: artLibrary,
 		item: "movie:tmdb:603",
 	}
-	if got := sidecar.itemOf(factPoster, "poster.jpg"); got != "The Signal (2014)/poster.jpg" {
+	if got := liken.itemOf(factPoster, "poster.jpg"); got != "The Signal (2014)/poster.jpg" {
 		t.Errorf("item = %q, want the file the fact writes", got)
 	}
 }

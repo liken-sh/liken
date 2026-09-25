@@ -12,9 +12,9 @@ import (
 	"strings"
 )
 
-// What a fact knows about a title before it asks: the kind of library it sits
-// in, and every id its sidecar carries. A provider keys on the id it knows,
-// so the ids the identity fact wrote are what make the other providers
+// What a fact reads about a title before it asks: the kind of library that
+// holds the title, and every id in its .nfo file. A provider keys on the id it
+// has, so the ids the identity fact wrote are what make the other providers
 // reachable.
 type titleRef struct {
 	kind string
@@ -244,14 +244,14 @@ func filledPerson(held, adding creditedPerson) creditedPerson {
 	return held
 }
 
-// Whether the merged cast is what the sidecar already holds, which is what
+// Whether the merged cast is what the .nfo file already holds, which is what
 // says if the actor group is rewritten. The ids are out of the comparison,
 // because they never reach the .nfo.
-func sameCast(sidecar, merged []creditedActor) bool {
-	if len(sidecar) != len(merged) {
+func sameCast(nfo, merged []creditedActor) bool {
+	if len(nfo) != len(merged) {
 		return false
 	}
-	for at, held := range sidecar {
+	for at, held := range nfo {
 		if held.Name != merged[at].Name || held.Role != merged[at].Role || held.Thumb != merged[at].Thumb {
 			return false
 		}
@@ -259,14 +259,14 @@ func sameCast(sidecar, merged []creditedActor) bool {
 	return true
 }
 
-// Whether one crew list is what the sidecar already holds. The ids are out of
+// Whether one crew list is what the .nfo file already holds. The ids are out of
 // the comparison, as they are for the cast, because they never reach the
 // .nfo.
-func samePeople(sidecar, merged []creditedPerson) bool {
-	if len(sidecar) != len(merged) {
+func samePeople(nfo, merged []creditedPerson) bool {
+	if len(nfo) != len(merged) {
 		return false
 	}
-	for at, held := range sidecar {
+	for at, held := range nfo {
 		if held.Name != merged[at].Name {
 			return false
 		}

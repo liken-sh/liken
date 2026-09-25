@@ -172,7 +172,7 @@ fn a_titles_strip_holds_the_whole_order_the_libraries_hold() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let strips = source.franchises_of("screening/films", "movie:path:one");
 
@@ -203,7 +203,7 @@ fn one_read_answers_every_franchise_any_of_many_works_belongs_to_once() {
         "[]",
     );
     insert_movie(&path, "screening/films", "movie:path:lone", "Lone", "lone");
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let works = [
         ("screening/films".to_string(), "movie:path:one".to_string()),
@@ -232,7 +232,7 @@ fn a_strip_carries_the_library_and_the_kind_a_press_opens() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let strips = source.franchises_of("screening/shows", "series:path:one");
 
@@ -248,7 +248,7 @@ fn a_strip_carries_the_count_of_every_entry_by_kind() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let strips = source.franchises_of("screening/films", "movie:path:one");
 
@@ -264,7 +264,7 @@ fn the_home_page_reads_every_franchise_in_sort_order() {
     let path = fixture(&dir);
     an_order(&path);
     insert_franchise(&path, "franchise:name:another", "Another Order", "{}");
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let entries = source.franchises();
 
@@ -295,7 +295,7 @@ fn a_franchise_entry_counts_every_entry_of_its_order_by_kind() {
     let path = fixture(&dir);
     an_order(&path);
     insert_franchise(&path, "franchise:name:another", "Another Order", "{}");
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let entries = source.franchises();
 
@@ -315,7 +315,7 @@ fn a_franchise_with_no_art_draws_the_poster_of_its_first_held_member() {
     connection
         .execute("UPDATE franchises SET art = '' WHERE id = ?", (CYCLE,))
         .unwrap();
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let entries = source.franchises();
 
@@ -330,7 +330,7 @@ fn a_franchise_with_art_of_its_own_keeps_it() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let entries = source.franchises();
 
@@ -350,7 +350,7 @@ fn a_franchise_no_library_holds_a_member_of_draws_no_art() {
             (),
         )
         .unwrap();
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let entries = source.franchises();
 
@@ -362,7 +362,7 @@ fn a_franchise_no_library_holds_a_member_of_draws_no_art() {
 fn a_catalog_with_no_franchises_reads_none() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     assert!(source.franchises().is_empty());
 }
@@ -373,7 +373,7 @@ fn a_title_in_no_franchise_draws_no_strip() {
     let path = fixture(&dir);
     an_order(&path);
     insert_movie(&path, "screening/films", "movie:path:lone", "Lone", "lone");
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     assert!(
         source
@@ -387,7 +387,7 @@ fn the_page_holds_every_entry_in_story_order_with_its_gaps() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
 
@@ -419,7 +419,7 @@ fn the_page_carries_a_release_date_at_the_precision_the_file_gave() {
     let path = fixture(&dir);
     an_order(&path);
     date_member(&path, CYCLE, 3, "2026-10-12");
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
     assert_eq!(page.entries[2].released, "2026-10-12");
@@ -450,7 +450,7 @@ fn both_reads_carry_the_tagline_of_a_held_member_and_the_page_carries_its_plot()
         Some((-32.0, -32.0)),
         "[]",
     );
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
     let held = page.entries[0].held.as_ref().expect("the film is held");
@@ -470,7 +470,7 @@ fn the_page_carries_the_calendar_the_eras_and_the_spans() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
 
@@ -499,7 +499,7 @@ fn a_series_run_counts_the_episodes_the_catalog_holds() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     // A run with no rows is the whole show.
     let whole = source.franchise(ORDERS, CYCLE).expect("the order is there");
@@ -523,7 +523,7 @@ fn a_run_that_names_episodes_counts_the_ones_it_names() {
     let path = fixture(&dir);
     an_order(&path);
     insert_run(&path, CYCLE, 2, 2, 3);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
 
@@ -537,7 +537,7 @@ fn both_reads_carry_the_runs_of_a_series_member() {
     an_order(&path);
     insert_run(&path, CYCLE, 2, 1, 0);
     insert_run(&path, CYCLE, 2, 2, 3);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
     let strip = source.franchises_of("screening/films", "movie:path:one");
@@ -552,7 +552,7 @@ fn a_franchise_no_library_holds_has_no_page_and_no_answer() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     assert_eq!(source.franchise(ORDERS, "franchise:name:none"), None);
     assert_eq!(
@@ -569,7 +569,7 @@ fn the_franchise_query_answers_the_held_members_as_slots() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     an_order(&path);
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let answer = source.wall(&Query::Franchise {
         library: ORDERS.into(),
@@ -599,7 +599,7 @@ fn two_libraries_that_hold_one_member_draw_the_first_by_name() {
     an_order(&path);
     insert_movie(&path, "screening/copies", "movie:path:one", "One", "one");
     insert_alias(&path, "screening/copies", "movie:tmdb:1", "movie:path:one");
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
 
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
 

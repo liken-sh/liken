@@ -267,7 +267,7 @@ mod tests {
     use super::*;
     use crate::catalog::InSeries;
 
-    // One film leaf whose sidecar wrote a tagline, which the browser's own
+    // One film leaf whose .nfo file held a tagline, which the browser's own
     // card would lead with.
     fn film() -> Slot {
         Slot {

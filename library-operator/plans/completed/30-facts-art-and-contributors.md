@@ -213,9 +213,9 @@ second. The lesson for every gap query: no subquery reads the outer
 row.
 
 **A bare ampersand.** Jellyfin writes a source URL after the root
-element of a sidecar, in Kodi's scraper form, and a TVDB URL carries
+element of an `.nfo` file, in Kodi's scraper form, and a TVDB URL carries
 `&id=`. The strict XML reader stopped there, so 67 series recorded an
-error for every nfo fact. Release -006 reads every sidecar leniently,
+error for every nfo fact. Release -006 reads every `.nfo` file leniently,
 and the group edit keeps the URL where it was.
 
 **What the facts wrote.** On the movies library: the overview of
@@ -228,10 +228,10 @@ other three sites and the five Fanart.tv art types stay open until
 the keys exist, and 29 people wait for the next run of the
 contributors container.
 
-**The overview took over.** Every movie sidecar Jellyfin wrote counted
+**The overview took over.** Every movie `.nfo` file Jellyfin wrote counted
 as an overview gap on the first run, so the fact replaced the plot,
 tagline, genres, studios, premiere, and runtime of 1,407 titles with
-TMDb's, and left every other element. The next walk read the sidecars
+TMDb's, and left every other element. The next walk read the `.nfo` files
 as answering, so it was one pass. The cause is not settled: the first
 walk under -001 may have left `nfo_facts` empty. It is an open item.
 
@@ -250,8 +250,8 @@ of the sync wait.
 **Left for later, as fixes and enhancements.** The who-answered and
 rate drills against OMDb over a full run; the fight drill with a
 hand-edited plot; the rebuild drill; the overview take-over's cause;
-and the open items the waves recorded: the nfo container reads a
-sidecar once per fact, a rescan does not walk `.contributors/`,
+and the open items the waves recorded: the nfo container reads an
+`.nfo` file once per fact, a rescan does not walk `.contributors/`,
 TVmaze's identity rung, and a language field on the `Library`.
 
 ## What is set aside

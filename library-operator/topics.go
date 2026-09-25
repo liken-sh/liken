@@ -39,7 +39,7 @@ const (
 )
 
 // Carries one Library's report: its counts, the folders no
-// sidecar identified, and the runs of every worker. The namespace's
+// .nfo file identified, and the runs of every worker. The namespace's
 // reporter publishes it retained, so an operator that restarts reads the
 // current counts back from the broker without waiting for a walk.
 func libraryStatusTopic(base, namespace, name string) string {

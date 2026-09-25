@@ -41,7 +41,7 @@ use keys::key_of;
 use refresh::Refresh;
 
 /// The browsing screen, generic over where its rows and its art
-/// come from, so one browser draws the sidecar's file, a test fixture, and
+/// come from, so one browser draws the agent's file, a test fixture, and
 /// the sample the same way.
 pub struct Browser<S: Source, A: Art> {
     source: S,

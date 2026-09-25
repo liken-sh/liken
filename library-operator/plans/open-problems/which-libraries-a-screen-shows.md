@@ -15,7 +15,7 @@ recently added from a library, a hand-made collection, or a grouping
 such as a set or a decade. Rows are queries against the catalog, so a
 row needs no new data. A hand-made collection is a folder of symlinks on
 the volume that the scanner reads as an attribute. A ratings ceiling,
-from the sidecars' certification fields, hides a title above the
+from the `.nfo` files' certification fields, hides a title above the
 ceiling on a children's screen.
 
 Nothing about it is decided: the resource's name, whether rows are

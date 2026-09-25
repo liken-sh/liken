@@ -80,7 +80,7 @@ fn a_genre_reads_the_titles_that_lead_with_it_first_and_then_newest_release() {
     let path = fixture(&dir);
     westerns(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&genre("Western", Order::Released));
 
     assert_eq!(answer.name, "Western");
@@ -109,7 +109,7 @@ fn a_series_of_a_genre_carries_the_seasons_its_episodes_fall_into() {
         );
     }
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&genre("Western", Order::Released));
 
     assert_eq!(answer.slots[0].id, "serial");
@@ -123,7 +123,7 @@ fn a_genre_ordered_by_arrival_keeps_the_rank_first() {
     let path = fixture(&dir);
     westerns(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&genre("Western", Order::Added));
 
     assert_eq!(ids(&answer), ["old", "new", "serial", "streak"]);
@@ -135,7 +135,7 @@ fn a_genre_no_title_carries_answers_nothing() {
     let path = fixture(&dir);
     westerns(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&genre("Musical", Order::Released));
 
     assert_eq!(answer.name, "Musical");
@@ -163,7 +163,7 @@ fn every_genre_carries_its_count_and_the_posters_of_its_newest_titles() {
     let path = fixture(&dir);
     westerns(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let entries = source.genres();
 
     let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
@@ -196,7 +196,7 @@ fn a_genre_leads_with_the_titles_it_is_the_main_genre_of_then_fills_by_release()
         insert_genre(&path, FILMS, id, rank, "Western");
     }
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let entries = source.genres();
 
     assert_eq!(
@@ -230,7 +230,7 @@ fn a_genres_posters_come_from_every_library_and_skip_the_titles_with_no_art() {
     insert_genre(&path, FILMS, "bare", 1, "Silent");
     insert_genre(&path, SHOWS, "serial", 1, "Drama");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let entries = source.genres();
 
     assert_eq!(
@@ -313,7 +313,7 @@ fn the_pool_holds_every_genre_weighed_with_its_leading_titles_twice() {
     let path = fixture(&dir);
     a_pool(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let pool = source.pool();
 
     let genres: Vec<(&str, u64)> = pool
@@ -338,7 +338,7 @@ fn the_pool_holds_a_person_over_the_floor_and_a_set_of_two() {
     let path = fixture(&dir);
     a_pool(&path);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let pool = source.pool();
 
     let rest: Vec<&Candidate> = pool
@@ -373,6 +373,6 @@ fn an_empty_catalog_has_an_empty_pool() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.pool().is_empty());
 }

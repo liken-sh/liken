@@ -1,5 +1,5 @@
 // The reads behind a movie's page. The item's own columns come off the
-// movies row. The fields the sidecar wrote come out of the body column
+// movies row. The fields the .nfo file held come out of the body column
 // with SQLite's json_extract. The backdrop, the logo, and the trailer
 // come off the files table through file_items, by role.
 

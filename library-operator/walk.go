@@ -1,7 +1,7 @@
 package main
 
 // walk.go reads a library's title folders with a fixed pool of workers. Almost
-// all of a walk is waiting: every folder costs a directory read, a sidecar
+// all of a walk is waiting: every folder costs a directory read, an .nfo file
 // read, and a stat of each file, and each of those is a round trip to a network
 // volume. Folders share no state, and their rows are written by key, so the
 // order they are read in changes nothing, and eight folders read at once wait

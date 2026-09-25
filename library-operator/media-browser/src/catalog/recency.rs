@@ -1,4 +1,4 @@
-// The fold behind the two recency queries. The sidecar and the sample
+// The fold behind the two recency queries. The local catalog and the sample
 // answer the same query, so one rule decides what a strip shows. This
 // module holds the constants the recency queries are bounded by, the
 // candidate a read answers with before the fold, and the fold that turns

@@ -1,7 +1,7 @@
 package main
 
 // The nfo container's run of one fact. One title's work, in order: read the
-// sidecar, compare the fact's element group with the hash the ledger holds,
+// .nfo file, compare the fact's element group with the hash the ledger holds,
 // ask the providers, write the group, and record the answer and the attempt.
 
 import (
@@ -151,15 +151,15 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 	return nil
 }
 
-// One title's fill, in order: the sidecar is read, the fight check runs, the
+// One title's fill, in order: the .nfo file is read, the fight check runs, the
 // providers are asked, the group is written, and the answer is recorded. A
 // group another writer changed stops this title and nothing else.
 func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLine, item identityItem) string {
 	folder := filepath.Join(e.root, item.path)
-	sidecar, rootElement := identitySidecar(e.kind, folder)
-	document, err := os.ReadFile(sidecar)
+	nfoPath, rootElement := identityNFO(e.kind, folder)
+	document, err := os.ReadFile(nfoPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		e.logf("could not read the sidecar of %s: %v", item.path, err)
+		e.logf("could not read the .nfo file of %s: %v", item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
 		return attemptError
 	}
@@ -178,7 +178,7 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 		return attemptFight
 	}
 
-	answers, spent, err := line.ask(ctx, fact, titleRef{kind: e.kind, ids: sidecarIDs(document)})
+	answers, spent, err := line.ask(ctx, fact, titleRef{kind: e.kind, ids: nfoIDs(document)})
 	if err != nil {
 		e.logf("could not ask for the %s of %s: %v", fact, item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
@@ -195,35 +195,35 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 
 	merged, names := mergeAnswers(fact, answers)
 	if fact == factCredits {
-		merged = creditsOrSidecar(merged, document)
+		merged = creditsOrNFO(merged, document)
 	}
 	if !answersFact(fact, merged) {
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
 		return attemptNothing
 	}
-	return e.writeNFOFact(folder, sidecar, fact, item, group, document, merged, names)
+	return e.writeNFOFact(folder, nfoPath, fact, item, group, document, merged, names)
 }
 
 // A provider that named any person is the whole cast and crew, and the
-// sidecar's people stand only where no provider named one.
+// people in the .nfo file stay only where no provider named one.
 // Jellyfin writes a producer as an actor element whose role is
 // "Producer" and whose type element is absent, so a union keeps the
 // producer in the cast and names a person who acts and produces twice.
 // A word list on the role is wrong, because a library holds a character
 // named "Director".
-func creditsOrSidecar(merged factAnswer, document []byte) factAnswer {
+func creditsOrNFO(merged factAnswer, document []byte) factAnswer {
 	if len(merged.Cast) > 0 || len(merged.Directors) > 0 || len(merged.Writers) > 0 {
 		return merged
 	}
-	merged.Cast = sidecarCast(document)
-	merged.Directors, merged.Writers = sidecarCrew(document)
+	merged.Cast = nfoCast(document)
+	merged.Directors, merged.Writers = nfoCrew(document)
 	return merged
 }
 
 // The write is the group edit and the ledger entry together. The hash the
 // ledger keeps is read back off the document the edit left, so the next run
 // compares like with like.
-func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem, group elementGroup,
+func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem, group elementGroup,
 	document []byte, merged factAnswer, names providerNames) string {
 	edited := document
 	if groupNeedsWrite(fact, document, merged) {
@@ -233,7 +233,7 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 			e.recordNFO(folder, fact, nil, attemptError, names)
 			return attemptError
 		}
-		if err := e.writer.write(sidecar, written); err != nil {
+		if err := e.writer.write(nfoPath, written); err != nil {
 			e.logf("could not write the %s of %s: %v", fact, item.path, err)
 			e.recordNFO(folder, fact, nil, attemptError, names)
 			return attemptError
@@ -263,20 +263,20 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 // credits fact leaves the actor, director, and writer elements where
 // credits.yaml and the .contributors/ entries are written either way.
 // The credits fact rewrites nothing where the people it holds are the
-// people the sidecar holds.
+// people the .nfo file holds.
 func groupNeedsWrite(fact string, document []byte, merged factAnswer) bool {
 	if fact != factCredits {
 		return true
 	}
-	directors, writers := sidecarCrew(document)
-	return !sameCast(sidecarCast(document), merged.Cast) ||
+	directors, writers := nfoCrew(document)
+	return !sameCast(nfoCast(document), merged.Cast) ||
 		!samePeople(directors, merged.Directors) ||
 		!samePeople(writers, merged.Writers)
 }
 
 // The fight check compares the group on disk with the hash the ledger holds.
 // A fact with no entry in its ledger has written nothing yet, so whatever the
-// sidecar holds is another writer's, and this fact takes the group over.
+// .nfo file holds is another writer's, and this fact rewrites the group.
 func (e *enricher) groupHeldByAnother(folder, fact string, group elementGroup, document []byte) (bool, error) {
 	ledger, err := readLikenLedger(folder, fact)
 	if err != nil {
@@ -311,13 +311,13 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 	e.writeRows(fact, folder, result == attemptFound)
 }
 
-// The actors the sidecar holds, in billing order. An actor element with an
-// order takes that place, and one without
+// The actors the .nfo file holds, in billing order. An actor element with an
+// order gets that place, and one without
 // follows every actor that has one, in document order. A document this reader
 // cannot parse holds no cast, and the fill has already recorded that as an
 // error.
 // They are the cast where no provider named one.
-func sidecarCast(document []byte) []creditedActor {
+func nfoCast(document []byte) []creditedActor {
 	var read struct {
 		Actors []nfoActor `xml:"actor"`
 	}
@@ -352,12 +352,12 @@ func billingOf(actor nfoActor) int {
 	return *actor.Order
 }
 
-// The crew the sidecar holds, in its own order. Kodi writes a writer into the
+// The crew the .nfo file holds, in its own order. Kodi writes a writer into the
 // credits element and Jellyfin into the
 // writer element, so the two read as one list of writers, the way the scanner
 // reads them.
 // They are the crew where no provider named one.
-func sidecarCrew(document []byte) (directors, writers []creditedPerson) {
+func nfoCrew(document []byte) (directors, writers []creditedPerson) {
 	var read struct {
 		Directors []string `xml:"director"`
 		Writers   []string `xml:"writer"`
@@ -379,9 +379,9 @@ func namedPeople(names []string) []creditedPerson {
 	return people
 }
 
-// The ids a fact asks with come off the sidecar itself, which is where the
-// identity fact wrote every one of them.
-func sidecarIDs(document []byte) providerIDs {
+// The ids that a fact asks with come from the .nfo file itself, which is where
+// the identity fact wrote every one of them.
+func nfoIDs(document []byte) providerIDs {
 	var read struct {
 		UniqueIDs []nfoUniqueID `xml:"uniqueid"`
 		IMDBID    string        `xml:"imdbid"`

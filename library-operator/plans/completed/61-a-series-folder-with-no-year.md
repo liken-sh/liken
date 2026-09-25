@@ -3,7 +3,7 @@
 Built on 2026-09-11. The identity ladder gained a rung that reads the
 episode titles off a series folder's file names and matches them
 against each candidate's season on TMDb. A series folder named with the
-title alone now identifies without a sidecar.
+title alone now identifies without an `.nfo` file.
 
 ## The problem
 
@@ -55,4 +55,4 @@ Table tests cover the clue parser, the rung with two candidates where
 the episode names pick one, where neither matches, where both match,
 where fewer than two match, and a movie kind, which never asks for a
 season. One test walks the whole identity fact over a bare series
-folder against a fake TMDb and reads the id out of the sidecar.
+folder against a fake TMDb and reads the id out of the `.nfo` file.

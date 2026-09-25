@@ -38,7 +38,7 @@ and the walk descends through it, up to eight levels deep:
 A readable `movie.nfo` with a title names the movie. Without one, the
 folder name is parsed as `Title (Year)` or `Title [Year]`, or cut at
 the first release token such as `bluray` or `x264`. A folder with no
-sidecar and no year is counted in `status.unidentified` and cataloged
+`.nfo` file and no year is counted in `status.unidentified` and cataloged
 under its folder name.
 
 ### Series
@@ -90,7 +90,7 @@ after a language tag marks it hearing-impaired. Dot-named entries,
 `Thumbs.db`, `desktop.ini`, and the trash and service directories of
 common NAS systems are skipped.
 
-### Sidecars and art
+### .nfo files and art
 
 The scanner reads `movie.nfo`, `tvshow.nfo`, and the `.nfo` beside
 each episode, leniently, because Jellyfin writes bare ampersands in
@@ -106,8 +106,8 @@ title folder, `season02-poster.jpg` beside `tvshow.nfo`, and
 
 ### The `.liken/` directory
 
-Beside a title, a dot-named directory holds what the sidecar has no
-element for: one YAML file per fact, named for the fact. `identity.yaml`
+Beside a title, a dot-named directory holds the data that the `.nfo` file has
+no element for: one YAML file per fact, named for the fact. `identity.yaml`
 holds the provider ids, or the candidates left for a person to choose
 from. `arrival.yaml` holds when each video file was first seen. Every
 other `<fact>.yaml` holds what that fact wrote, which provider answered,

@@ -47,12 +47,12 @@ func answeredSpan(block, kind string, start, end int64) markEntry {
 const marksLibrary = "house/movies"
 
 // One identified movie on the volume and in the catalog: its folder, its
-// sidecar, its main video with the length the probe measured, and its ids.
+// .nfo file, its main video with the length the probe measured, and its ids.
 func seedMarkedMovie(t *testing.T, catalog *Catalog, root, folder, id string, duration int64) string {
 	t.Helper()
 	video := filepath.Join(folder, folder+".mkv")
 	writeFile(t, filepath.Join(root, video), "video")
-	writeFile(t, filepath.Join(root, folder, movieSidecarName),
+	writeFile(t, filepath.Join(root, folder, movieNFOName),
 		`<movie><title>The Matrix</title><year>1999</year><uniqueid type="tmdb">603</uniqueid></movie>`)
 	seed := &walkResult{
 		movies: []movieRow{{Id: id, Library: marksLibrary, Kind: libraryKindMovies, Path: folder, Title: "The Matrix"}},

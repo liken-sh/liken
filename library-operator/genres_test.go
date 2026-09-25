@@ -1,7 +1,7 @@
 package main
 
-// genres_test.go proves the genre rows the walk lifts out of a sidecar, in
-// its order, and the two sweeps that take them with the title.
+// genres_test.go proves the genre rows the walk reads from an .nfo file, in
+// its order, and the two sweeps that remove them with the title.
 
 import (
 	"path/filepath"
@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// A movie folder and a series folder whose sidecars each list two genres,
+// A movie folder and a series folder whose .nfo files each list two genres,
 // the first one the main genre.
 func genreVolume(t *testing.T) (string, string) {
 	t.Helper()
@@ -23,7 +23,7 @@ func genreVolume(t *testing.T) (string, string) {
 	return movies, series
 }
 
-func TestTheWalkLiftsAGenreRowPerGenreInTheSidecarsOrder(t *testing.T) {
+func TestTheWalkLiftsAGenreRowPerGenreInTheNFOsOrder(t *testing.T) {
 	movies, series := genreVolume(t)
 
 	movieResult := &walkResult{}
@@ -128,7 +128,7 @@ func TestARescanTakesTheGenresATitleLost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The rescan of One (2001) read a sidecar that now lists Western alone.
+	// The rescan of One (2001) read an .nfo file that now lists only Western.
 	epoch := int64(2000)
 	reread := &walkResult{movies: held.movies[:1], genres: held.genres[:1]}
 	if err := flushWalk(ctx, catalog, reread, epoch); err != nil {

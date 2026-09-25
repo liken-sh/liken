@@ -2,9 +2,9 @@ package main
 
 // names.go reads a title, a year, a season and episode, and a provider id off
 // a folder or file name in the *arr and Jellyfin forms, for a folder or file
-// with no sidecar. The token lists are fixed, so a re-walk of the same volume
+// with no .nfo file. The token lists are fixed, so a re-walk of the same volume
 // reads the same names every time. It also reads a file's technical
-// attributes off its name where a sidecar carried none, and discovers the art
+// attributes off its name where no .nfo file states them, and discovers the art
 // and the trickplay directory a folder holds.
 
 import (
@@ -62,7 +62,7 @@ var (
 	seasonFolder = regexp.MustCompile(`(?i)^season\s*0*(\d+)$`)
 	// A provider id in a name, in Jellyfin's form, as in [tmdbid-603] or
 	// [imdbid-tt0133093]. It is how a person confirms a candidate without
-	// opening the sidecar.
+	// opening the .nfo file.
 	providerIDToken = regexp.MustCompile(`(?i)\[(tmdb|imdb|tvdb)id-([^]\s]+)]`)
 	// episodeMarker reads the season and episode off an s02e05 or 2x05 name,
 	// wherever it sits.
@@ -129,9 +129,9 @@ func isReleaseToken(token string) bool {
 	return false
 }
 
-// The years a release can carry. The scanner reads a year off a folder
-// name and off a sidecar's date, and both read the same range, so one
-// title cannot be identified by its sidecar and unidentified by its
+// The years a release can have. The scanner reads a year off a folder
+// name and off an .nfo file's date, and both read the same range, so one
+// title cannot be identified by its .nfo file and unidentified by its
 // folder.
 const (
 	firstReleaseYear = 1900
@@ -175,7 +175,7 @@ func stripExtension(name string) string {
 
 // parseProviderIDs reads every provider id a folder or file name carries in
 // Jellyfin's form, keyed by the lowercased provider, so a name states an id
-// the way a sidecar does.
+// the way an .nfo file does.
 func parseProviderIDs(name string) map[string]string {
 	ids := map[string]string{}
 	for _, match := range providerIDToken.FindAllStringSubmatch(name, -1) {
@@ -190,8 +190,8 @@ func parseProviderIDs(name string) map[string]string {
 	return ids
 }
 
-// A sidecar's ids win over a name's, because the sidecar is the fuller
-// record. A name's ids still fill the providers the sidecar left out.
+// An .nfo file's ids win over a name's, because the .nfo file is the fuller
+// record. A name's ids still fill the providers the .nfo file left out.
 func mergeProviderIDs(held, more map[string]string) map[string]string {
 	if len(more) == 0 {
 		return held
@@ -281,8 +281,8 @@ func isAlphanumeric(c byte) bool {
 
 // resolutionFromName reads a file's resolution off a token in its name, the
 // width and height of the standard 16:9 frame that token names. It is the
-// resolution a sidecar's streamdetails would state, read from the name where the
-// sidecar carried none.
+// resolution an .nfo file's streamdetails would state, read from the name where
+// the .nfo file states none.
 func resolutionFromName(name string) (int, int) {
 	lower := strings.ToLower(name)
 	switch {
@@ -306,9 +306,10 @@ func containerFromExtension(name string) string {
 
 // fileAttributes reads a file's technical attributes: the container off the
 // extension, the resolution off the name, and the codecs, the resolution, and
-// the duration off the sidecar's streamdetails where one was present. The
-// sidecar wins over the name, because it read the file itself. There is no media
-// probe: the scanner image carries none.
+// the duration off the .nfo file's streamdetails where one was present. The
+// .nfo file wins over the name, because its writer read the media file itself.
+// The walk runs no probe of its own, because the scanner image has no ffprobe.
+// The enricher's probe phase runs ffprobe in its own image.
 func fileAttributes(name string, stream *streamInfo) (container, videoCodec, audioCodec string, width, height int, durationMs int64) {
 	container = containerFromExtension(name)
 	width, height = resolutionFromName(name)
@@ -455,9 +456,9 @@ func episodeThumb(root, dir, file string) (string, error) {
 	return "", nil
 }
 
-// folderKey is the slug of a folder's own name, the key a title with no provider
-// id rests its id on. It is stable for a folder that does not move, which is the
-// weak case the scanner accepts for a sidecar-less title.
+// folderKey is the slug of a folder's own name, the key that a title with no
+// provider id uses for its id. It is stable for a folder that does not move,
+// which is the weak case the scanner accepts for a title with no .nfo file.
 //
 // A slug with no letter says too little to key on: a non-Latin name
 // folds away to its year, or to nothing at all, and two such titles of

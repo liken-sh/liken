@@ -92,7 +92,7 @@ func enrichPodTemplate(library *Library, providers providerSet, languages []stri
 
 	// The agent starts first, and the facts run in order behind it, because
 	// the kubelet starts an init container only when the one before it is up.
-	// The facts here edit the same sidecar file, so they must never run at
+	// The facts here edit the same .nfo file, so they must never run at
 	// once.
 	facts := []Container{
 		probeContainer(library, path, ffmpegImage),

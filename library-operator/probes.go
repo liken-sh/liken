@@ -44,7 +44,7 @@ func (l *probeLedgers) of(dir string) (folderProbes, error) {
 
 // fill writes the technical columns of one file row from the record the
 // ledger holds for it, and returns one stream row per stream. A file with no
-// record keeps what the sidecar and the name gave it.
+// record keeps what the .nfo file and the name gave it.
 //
 // A record whose modified stamp is not the file's own describes an earlier
 // file at that path. It fills only the probed column. The probe gap compares

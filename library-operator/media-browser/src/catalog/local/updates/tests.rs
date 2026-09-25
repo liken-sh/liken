@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use crate::catalog::sidecar::SidecarSource;
+use crate::catalog::local::LocalCatalog;
 use crate::catalog::{Change, Source};
 
 // One event as the pinned Corrosion agent sent it, captured from
@@ -145,8 +145,8 @@ fn request_line(stream: &mut TcpStream) -> Option<String> {
     Some(text.lines().next().unwrap_or_default().to_string())
 }
 
-fn source_against(agent: &FakeAgent, dir: &TempDir) -> SidecarSource {
-    SidecarSource::new(dir.path().join("catalog.db"), &agent.base())
+fn source_against(agent: &FakeAgent, dir: &TempDir) -> LocalCatalog {
+    LocalCatalog::new(dir.path().join("catalog.db"), &agent.base())
 }
 
 #[test]

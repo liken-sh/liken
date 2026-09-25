@@ -17,8 +17,8 @@
 -- This file defines the item tables movies, sets, series, and episodes,
 -- the runs table at the end,
 -- and the shared files, file_items, and aliases tables. An item's id is
--- provider-scoped and derived from the sidecar, movie:tmdb:603, so a
--- re-walk of an unchanged sidecar reads the same id. A folder with no
+-- provider-scoped and derived from the .nfo file, movie:tmdb:603, so a
+-- re-walk of an unchanged .nfo file reads the same id. A folder with no
 -- provider id falls back to movie:path:<key>.
 --
 -- An id is unique inside one library and never across the namespace,
@@ -26,7 +26,7 @@
 -- the same id, or the same relative path, without touching each other.
 --
 --   library   the Library that holds the item, as namespace/name
---   id        the item's provider-scoped id, derived from the sidecar
+--   id        the item's provider-scoped id, derived from the .nfo file
 --   kind      the kind that wrote the row
 --   path      the item's path on the volume, relative to the library root
 --   title     the name a person reads
@@ -66,13 +66,13 @@ CREATE TABLE movies (
 
 -- The movie item table adds one column after the header: set_id is the
 -- id of the set the movie belongs to, a row of the sets table, or empty
--- where the sidecar names none.
+-- where the .nfo file names none.
 --
--- nfo_facts holds the names of the nfo facts the title's sidecar already
+-- nfo_facts holds the names of the nfo facts the title's .nfo file already
 -- answers, each name wrapped in commas, as in ",overview,credits,". The
--- scanner derives it from the elements the sidecar holds, and a gap query
--- reads it with instr(). The list carries the names and not the values,
--- so a new nfo fact needs no new column.
+-- scanner derives it from the elements the .nfo file contains, and a gap
+-- query reads it with instr(). The list stores the names only. It does not
+-- store the values, so a new nfo fact needs no new column.
 CREATE INDEX movies_library_sort_key ON movies (library, sort_key);
 CREATE INDEX movies_library_released ON movies (library, released);
 CREATE INDEX movies_library_added ON movies (library, added);
@@ -82,10 +82,10 @@ CREATE INDEX movies_library_added ON movies (library, added);
 CREATE INDEX movies_library_set_id ON movies (library, set_id);
 
 -- The sets item table: the item header, and no body of its own. A set
--- is the collection a movie sidecar names, such as a film and its
+-- is the collection a movie's .nfo file names, such as a film and its
 -- sequels, and the scanner derives every row from the movies that name
 -- it. Its id is provider-scoped like a movie's, set:tmdb:<id> from the
--- id the sidecar carries, or set:name:<slug> where it carries a name
+-- id the .nfo file contains, or set:name:<slug> where it contains a name
 -- alone. Its released and art are its earliest member's, so a set sorts
 -- and draws by its first film. A set with no member leaves the catalog
 -- with the prune, because nothing else holds it.
@@ -319,11 +319,11 @@ CREATE TABLE file_items (
 -- with the library, as every index in this schema does.
 CREATE INDEX file_items_library_item ON file_items (library, item);
 
--- An alias maps one of an item's names to the item, inside one
--- library: every provider id the sidecar carries, and the folder-name
--- key. So several names resolve to one work, and a lost sidecar still
--- resolves the folder. The library and the alias together are the
--- primary key, and source records how the name was learned.
+-- An alias maps one of an item's names to the item, inside one library: every
+-- provider id the .nfo file contains, and the folder-name key. So several names
+-- resolve to one work, and the folder-name key still resolves the folder after
+-- its .nfo file is lost. The library and the alias together are the primary
+-- key, and source records how the name was learned.
 --
 -- A join from the item column to an item id must match the library as
 -- well, because an id names one row only inside its own library.
@@ -480,8 +480,8 @@ CREATE INDEX credits_library_contributor ON credits (library, contributor);
 -- These columns cover both the grouping and the distinct title count.
 CREATE INDEX credits_library_contributor_item ON credits (library, contributor, item);
 
--- One genre of one title, lifted from the sidecar in its order. The rank is
--- the key beside the item because the first genre is the title's main genre,
+-- One genre of one title, read from the .nfo file in the file's order. The rank
+-- is the key beside the item because the first genre is the title's main genre,
 -- and a genre strip puts the titles that lead with it first. This is a table
 -- and not an array column because Corrosion indexes nothing inside JSON. The
 -- walk writes it, and the prune sweeps it the way it sweeps credits.

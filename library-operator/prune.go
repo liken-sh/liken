@@ -226,11 +226,11 @@ func markKeys(result *walkResult) []string {
 	return keys
 }
 
-// incompleteWalk reports whether a walk read only part of the volume, so
-// the caller skips the prune and keeps the rows. A read error anywhere
-// in the walk, at any depth, in a directory, a sidecar, or a file, is one
-// signal. A walk that found far fewer items than the catalog holds is the
-// other, once the catalog holds more than the ratio floor.
+// incompleteWalk reports whether a walk read only part of the volume, so the
+// caller skips the prune and keeps the rows. A read error anywhere in the walk,
+// at any depth, in a directory, an .nfo file, or another file, is one signal. A
+// walk that found far fewer items than the catalog holds is the other, once the
+// catalog holds more than the ratio floor.
 func incompleteWalk(readError bool, items, catalogItems int) bool {
 	if readError {
 		return true
@@ -383,8 +383,8 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
-	// The genres of a title that left the volume are unmarked with it, and a
-	// sidecar that lists fewer genres than before leaves its higher ranks
+	// The genres of a title that left the volume are unmarked with it, and an
+	// .nfo file that lists fewer genres than before leaves its higher ranks
 	// unmarked.
 	n, err = catalog.sweep(ctx, genrePruneSQL(), []any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
@@ -604,8 +604,8 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	}
 	removed += n
 
-	// The credits of the folder's title, swept the way its genres are. A
-	// sidecar that lists fewer people than before leaves its higher
+	// The credits of the folder's title are swept the way its genres are. An
+	// .nfo file that lists fewer people than before leaves its higher
 	// billings unmarked, and a title that left the volume leaves every
 	// credit it held.
 	n, err = catalog.sweep(ctx, scopedCreditPruneSQL(), scopedCreditPruneParams(library, folder, epoch),

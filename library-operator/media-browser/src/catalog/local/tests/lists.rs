@@ -23,7 +23,7 @@ fn libraries_come_back_counted_and_ordered_by_name() {
         "matrix reloaded",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.libraries(),
         vec![
@@ -57,7 +57,7 @@ fn a_library_draws_no_more_posters_than_its_tile_holds() {
         );
     }
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.libraries()[0].art,
         [
@@ -88,7 +88,7 @@ fn a_library_draws_as_the_posters_of_its_newest_added_titles_with_art() {
         )
         .unwrap();
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let libraries = source.libraries();
     assert_eq!(libraries[0].library, "default/bare");
     assert!(libraries[0].art.is_empty());
@@ -122,7 +122,7 @@ fn a_library_wall_comes_back_in_sort_key_order() {
         "elsewhere",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let answer = source.wall(&library("default/films"));
     assert_eq!(answer.name, "films");
     let ids: Vec<&str> = answer.slots.iter().map(|slot| slot.id.as_str()).collect();
@@ -148,7 +148,7 @@ fn a_slot_carries_the_tagline_its_card_leads_with() {
     insert_page(&path, "default/films", "one", "1999", "", BODY);
     insert_page(&path, "default/films", "two", "1999", "", "{}");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let slots = source.wall(&library("default/films")).slots;
     assert_eq!(slots[0].tagline, "One line.");
     assert_eq!(slots[1].tagline, "");
@@ -167,7 +167,7 @@ fn a_series_library_wall_stamps_every_slot_with_its_kind() {
     );
     insert_series(&path, "default/shows", "series:tvdb:73739", "Lost", "lost");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let slots = source.wall(&library("default/shows")).slots;
     assert_eq!(slots.len(), 1);
     assert_eq!(slots[0].id, "series:tvdb:73739");
@@ -201,7 +201,7 @@ fn a_series_slot_counts_the_seasons_its_episodes_fall_into_and_a_movie_counts_no
         );
     }
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let shows = source.wall(&library("default/shows")).slots;
     let counted: Vec<(&str, i64)> = shows
         .iter()
@@ -229,7 +229,7 @@ fn episodes_come_back_by_season_and_then_by_episode() {
         1,
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     let episodes = source.episodes("default/shows", series);
     let numbers: Vec<(i64, i64)> = episodes
         .iter()
@@ -242,11 +242,11 @@ fn episodes_come_back_by_season_and_then_by_episode() {
 }
 
 #[test]
-fn a_missing_file_reads_as_empty_until_the_sidecar_writes_it() {
+fn a_missing_file_reads_as_empty_until_the_agent_writes_it() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("catalog.db");
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.libraries().is_empty());
     assert!(source.wall(&library("default/films")).slots.is_empty());
     assert!(
@@ -282,7 +282,7 @@ fn a_file_without_the_schema_reads_as_empty() {
     let path = dir.path().join("catalog.db");
     Connection::open(&path).unwrap();
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.libraries().is_empty());
     assert!(source.wall(&library("default/films")).slots.is_empty());
 }
@@ -292,7 +292,7 @@ fn a_fresh_source_reports_no_change() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(source.changed(), Change::None);
 }
 
@@ -308,8 +308,8 @@ fn a_reader_reads_the_same_file_and_leaves_the_streams_running() {
         "matrix",
     );
 
-    let mut source = SidecarSource::new(&path, NO_AGENT);
-    let mut reader = source.reader().expect("the sidecar answers a reader");
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let mut reader = source.reader().expect("the local catalog answers a reader");
     reader.wake_by(Arc::new(|| {}));
 
     assert_eq!(reader.libraries(), source.libraries());

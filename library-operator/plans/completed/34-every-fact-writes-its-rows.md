@@ -68,9 +68,9 @@ walk, which marks it.
 | Table, column | Owner | Its write |
 |---|---|---|
 | `files`: `video_codec`, `audio_codec`, `width`, `height`, `duration_ms` | probe | one `UPDATE` per file it probed |
-| `movies`/`episodes`: `duration` | probe | one `UPDATE` per item whose sidecar had no runtime |
+| `movies`/`episodes`: `duration` | probe | one `UPDATE` per item whose `.nfo` file had no runtime |
 | `movies`/`series`: `id`, `title`, `released`, `slug`, `sort_key`, `set_id`; `aliases`; `episodes`: `id`, `series` | identity | the folder rescan: read the folder into rows, upsert, prune the folder's old rows |
-| `movies`/`series`/`episodes`: `body`, `nfo_facts` | nfo | one `UPDATE` per folder, from a re-parse of the sidecar it wrote |
+| `movies`/`series`/`episodes`: `body`, `nfo_facts` | nfo | one `UPDATE` per folder, from a re-parse of the `.nfo` file it wrote |
 | `credits` | nfo (credits fact) | delete the item's rows, insert the new set |
 | `contributors`, `contributor_aliases`: rows for an entry it created | nfo (credits fact) | one insert per new person, none for a person that exists |
 | `movies`/`series`/`episodes`: `art`, `arts` | art | one `UPDATE` per title after each image lands |

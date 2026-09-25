@@ -336,12 +336,12 @@ func TestATrailerAskAssemblesInTheOrderOfTheLine(t *testing.T) {
 	}
 }
 
-// One identified movie with a sidecar that carries its ids, which is the
+// One identified movie with an .nfo file that holds its ids, which is the
 // shape of every trailer gap.
 func seedTrailerGap(t *testing.T, catalog *Catalog, root, folder string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, folder, folder+".mkv"), "video")
-	writeFile(t, filepath.Join(root, folder, movieSidecarName),
+	writeFile(t, filepath.Join(root, folder, movieNFOName),
 		`<movie><title>The Signal</title><year>2014</year><uniqueid type="tmdb">603</uniqueid></movie>`)
 	seed := &walkResult{
 		movies: []movieRow{{
@@ -617,7 +617,7 @@ func TestTheTrailerFactRecordsTheTrimmedList(t *testing.T) {
 	}
 }
 
-// The ids the fact asks with come off the sidecar the identity fact wrote.
+// The ids the fact asks with come from the .nfo file the identity fact wrote.
 func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
@@ -631,7 +631,7 @@ func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 	}
 
 	if asked.title.ids["tmdb"] != "603" {
-		t.Errorf("the ask carried %v, want the ids of the sidecar", asked.title.ids)
+		t.Errorf("the ask carried %v, want the ids of the .nfo file", asked.title.ids)
 	}
 	if asked.title.title != "The Signal" || asked.title.year != 2014 {
 		t.Errorf("the ask carried %q of %d, want the title and the year", asked.title.title, asked.title.year)

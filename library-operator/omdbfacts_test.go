@@ -278,10 +278,10 @@ func TestAKeyWithNoCallsLeftAnswersTheDailyLimit(t *testing.T) {
 	}
 }
 
-// One title with an IMDb id in its sidecar, which is what OMDb keys on.
+// One title with an IMDb id in its .nfo file, which is what OMDb keys on.
 func seedOMDbGap(t *testing.T, catalog *Catalog, root, folder, id string) {
 	t.Helper()
-	writeFile(t, filepath.Join(root, folder, movieSidecarName), `<?xml version="1.0" encoding="utf-8"?>
+	writeFile(t, filepath.Join(root, folder, movieNFOName), `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <title>Winter Harbour</title>
   <uniqueid type="imdb">`+id+`</uniqueid>
