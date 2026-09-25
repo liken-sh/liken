@@ -58,15 +58,15 @@ version="$(cat "$here/VERSION")"
 tarball="linux-firmware-$version.tar.xz"
 url="https://cdn.kernel.org/pub/linux/kernel/firmware/$tarball"
 
-digest="ac17c34fe73756926a961fbafadf8d8f07a3bd2dd2f4ea31a0fb5d50c714a49a"
+digest="f80dcb757a623deda62200c08e0e1a88c76fb6b54964f31b35fa74da1c90ccc5"
 
 # The nested pin. wireless-regdb names its releases for the date, the
 # way linux-firmware does, and kernel.org publishes one clearsigned
 # sha256sums.asc for the directory. linux-firmware/latest.sh --bump
 # wireless-regdb moves this pair. The two pins move independently,
 # because the two upstreams cut releases on their own schedules.
-regdb_version="2026.05.30"
-regdb_digest="8a27bfc081bafed8c24dd70fab0d96f098e5a0bfcd08d3da672595f225ab8993"
+regdb_version="2026.09.03"
+regdb_digest="b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d"
 
 cache="$here/cache"
 mkdir -p "$cache"

@@ -222,7 +222,7 @@ place() {
 # module package.
 # Tracks kernel/VERSION.
 mirror "kernel/$kernel_version" "linux-$kernel_version.tar.xz" \
-    "f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3" \
+    "039aef84f2b0994aeda3f4fcfc3d02ec9d7a9bbb9020ea264c43f446c860f606" \
     "https://cdn.kernel.org/pub/linux/kernel/v${kernel_version%%.*}.x/linux-$kernel_version.tar.xz"
 place "kernel/$kernel_version" "config" "$here/../kernel/dist/$kernel_version/config"
 
@@ -294,9 +294,9 @@ done
 mirror "toolchain/alpine-3.22" "musl-1.2.5.tar.gz" \
     "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4" \
     "https://musl.libc.org/releases/musl-1.2.5.tar.gz"
-mirror "toolchain/alpine-3.22" "util-linux-2.41.tar.xz" \
-    "81ee93b3cfdfeb7d7c4090cedeba1d7bbce9141fd0b501b686b3fe475ddca4c6" \
-    "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-2.41.tar.xz"
+mirror "toolchain/alpine-3.22" "util-linux-2.41.6.tar.xz" \
+    "e596083744e746be7d2823b62b43f4418dd7bf56303b4dc09e6fe8112fe3d7ed" \
+    "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-2.41.6.tar.xz"
 mirror "toolchain/alpine-3.22" "libnl-3.11.0.tar.gz" \
     "2a56e1edefa3e68a7c00879496736fdbf62fc94ed3232c0baba127ecfa76874d" \
     "https://github.com/thom311/libnl/releases/download/libnl3_11_0/libnl-3.11.0.tar.gz"
@@ -378,7 +378,7 @@ place "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" \
 # to keep the channel's rule whole. Tracks the regdb pin in
 # linux-firmware/fetch.sh.
 mirror "wireless-regdb/$regdb_version" "wireless-regdb-$regdb_version.tar.xz" \
-    "8a27bfc081bafed8c24dd70fab0d96f098e5a0bfcd08d3da672595f225ab8993" \
+    "b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d" \
     "https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-$regdb_version.tar.xz"
 
 echo

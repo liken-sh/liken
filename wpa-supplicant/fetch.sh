@@ -63,7 +63,7 @@ version="$(cat "$here/VERSION")"
 # domain.
 # The digest pins the tarball that wpa-supplicant/VERSION names.
 # Building another version means moving both together.
-builder="docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce" # 3.22
+builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
 wpasupplicant_sha256="08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6"
 
 cache="$here/cache/$version"
