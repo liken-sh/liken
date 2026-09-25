@@ -9,7 +9,6 @@ package main
 import (
 	"bytes"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,14 +23,22 @@ var datasetsModified = testNow.Add(-6 * time.Hour)
 // imdb block on the dataset server.
 func imdbEnricher(t *testing.T, kind string) (*enricher, *Catalog, *datasetServer, string) {
 	t.Helper()
-	catalog, _ := newSQLiteCatalog(t)
+	work, catalog, _, server, root := imdbEnricherOnAgent(t, kind)
+	return work, catalog, server, root
+}
+
+// The same enricher, with the catalog's agent, which a test tells to refuse
+// a read or a write.
+func imdbEnricherOnAgent(t *testing.T, kind string) (*enricher, *Catalog, *sqliteAgent, *datasetServer, string) {
+	t.Helper()
+	catalog, agent := newSQLiteCatalog(t)
 	root := t.TempDir()
 	server := newDatasetServer(t, datasetsModified)
 	t.Setenv(librarySourcesVariable, providerBlockIMDb)
 	t.Setenv(imdbEndpointVariable, server.URL)
 	work, _ := testEnricher(t, kind, root, catalog)
 	work.ratingScope = ratingGapScope{reopen: datasetsModified.Unix(), episodes: true}
-	return work, catalog, server, root
+	return work, catalog, agent, server, root
 }
 
 // The run of the fact the way the container runs it: the reads start, then
@@ -284,129 +291,5 @@ func TestAFileIMDbWillNotServeLeavesTheGap(t *testing.T) {
 	}
 	if got := strings.Count(log.String(), "IMDb answered 500 for title.ratings"); got != 1 {
 		t.Errorf("log = %q, want the answer once", log.String())
-	}
-}
-
-// An episode .nfo file the container cannot read records an error.
-func TestAnEpisodeNFOThatWillNotReadIsAnError(t *testing.T) {
-	work, catalog, _, root := imdbEnricher(t, libraryKindSeries)
-	nfoPath, _ := seedIMDbEpisode(t, catalog, root, "tt9000003")
-	if err := os.Remove(nfoPath); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(nfoPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	runIMDbRating(t, work)
-
-	ledger, err := readLikenLedger(filepath.Dir(nfoPath), factRatingIMDb)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptError {
-		t.Errorf("attempts = %+v, want one error", ledger.Attempts)
-	}
-}
-
-// An episode the container leaves records nothing: one outside the Job's
-// folder, and one in a container that runs no dataset reads.
-func TestAnEpisodeTheRunLeavesRecordsNothing(t *testing.T) {
-	cases := []struct {
-		name   string
-		scopes []string
-		facts  []string
-	}{
-		{name: "outside the Job's folder", scopes: []string{"Another Series (2020)"}, facts: []string{factRatingIMDb}},
-		{name: "no dataset reads"},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			work, catalog, _, root := imdbEnricher(t, libraryKindSeries)
-			nfoPath, id := seedIMDbEpisode(t, catalog, root, "tt9000003")
-			work.scopes = one.scopes
-			work.startDatasetReads(t.Context(), one.facts)
-
-			if got := work.fillEpisodeRating(t.Context(), id); got != "" {
-				t.Errorf("result = %q, want none", got)
-			}
-			if names := namesIn(t, filepath.Dir(nfoPath)); slices.Contains(names, likenDirectory) {
-				t.Errorf("folder = %v, want no ledger", names)
-			}
-		})
-	}
-}
-
-// The answerer answers only the rating, and only once a container has reads.
-func TestTheIMDbAnswererAnswersOnlyTheRatingItRead(t *testing.T) {
-	done := make(chan struct{})
-	close(done)
-	read := &datasetReads{done: done, ratings: map[string]titleRating{"tt9000001": {Value: 7.9}}}
-	cases := []struct {
-		name  string
-		fact  string
-		reads *datasetReads
-		held  bool
-	}{
-		{name: "the rating", fact: factRatingIMDb, reads: read, held: true},
-		{name: "another fact", fact: factOverview, reads: read},
-		{name: "no reads", fact: factRatingIMDb},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			answerer := imdbAnswerer{reads: func() *datasetReads { return one.reads }}
-
-			_, held, err := answerer.answer(t.Context(), one.fact, titleRef{ids: providerIDs{"imdb": "tt9000001"}})
-
-			if held != one.held || err != nil {
-				t.Errorf("answer = %v, %v, want %v", held, err, one.held)
-			}
-		})
-	}
-}
-
-// An attempt records the dataset time only once the reads have ended.
-func TestAnAttemptBeforeTheReadsEndRecordsNoTime(t *testing.T) {
-	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), nil)
-	work.datasets = &datasetReads{done: make(chan struct{}), modified: datasetsModified}
-
-	if got := work.datasetTimeOf(factRatingIMDb, nil); !got.IsZero() {
-		t.Errorf("time = %v, want none", got)
-	}
-}
-
-// A ledger the container cannot read is an error for the episode, and the
-// log names the ledger's own error.
-func TestAnEpisodeLedgerThatWillNotReadIsAnError(t *testing.T) {
-	work, catalog, _, root := imdbEnricher(t, libraryKindSeries)
-	nfoPath, id := seedIMDbEpisode(t, catalog, root, "tt9000003")
-	writeFile(t, filepath.Join(filepath.Dir(nfoPath), likenDirectory, likenLedgerName(factRatingIMDb)), "items: [")
-	work.startDatasetReads(t.Context(), []string{factRatingIMDb})
-
-	if got := work.fillEpisodeRating(t.Context(), id); got != attemptError {
-		t.Errorf("result = %q, want an error", got)
-	}
-	if log := work.log.(*bytes.Buffer).String(); !strings.Contains(log, "could not record the rating.imdb attempt") {
-		t.Errorf("log = %q, want the ledger's error", log)
-	}
-}
-
-// A title that enters the gap after the container's first read, as one the
-// identity phase names during the Job does, is read on the pass that finds
-// it, and the first read is not repeated for the titles it covered.
-func TestALaterPassReadsTheTitlesTheFirstReadMissed(t *testing.T) {
-	work, catalog, server, root := imdbEnricher(t, libraryKindMovies)
-	work.startDatasetReads(t.Context(), []string{factRatingIMDb})
-	nfoPath := seedIMDbMovie(t, catalog, root, "tt9000001", "", "")
-
-	if err := work.nfoGap(t.Context(), factRatingIMDb, work.nfoAnswerLine()); err != nil {
-		t.Fatal(err)
-	}
-
-	if written := readFileString(t, nfoPath); !strings.Contains(written, "<value>7.9</value>") {
-		t.Errorf(".nfo = %s, want the rating", written)
-	}
-	if got := server.log(); !slices.Equal(got, []string{"GET title.ratings 200"}) {
-		t.Errorf("requests = %v, want one read, on the pass", got)
 	}
 }

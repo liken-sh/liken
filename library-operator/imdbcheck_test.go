@@ -40,7 +40,8 @@ func TestTheIMDbCheckHeadsEachFileAndReportsItsHeaders(t *testing.T) {
 	if ready := conditionNamed(written.Status.Conditions, conditionReady); ready.Reason != reasonReachable {
 		t.Fatalf("Ready = %s/%s, want Reachable", ready.Status, ready.Reason)
 	}
-	want := []string{"HEAD title.episode 200", "HEAD title.ratings 200"}
+	want := []string{"HEAD title.episode 200", "HEAD title.ratings 200",
+		"HEAD title.principals 200", "HEAD name.basics 200"}
 	if got := server.log(); !slices.Equal(got, want) {
 		t.Errorf("requests = %v, want %v", got, want)
 	}
@@ -52,8 +53,8 @@ func TestTheIMDbCheckHeadsEachFileAndReportsItsHeaders(t *testing.T) {
 	if !written.Status.IMDb.Updated.Equal(modified) {
 		t.Errorf("updated = %v, want %v", written.Status.IMDb.Updated, modified)
 	}
-	if got := written.Status.Facts; !slices.Equal(got, []string{factRatingIMDb}) {
-		t.Errorf("facts = %v, want the rating", got)
+	if got := written.Status.Facts; !slices.Equal(got, []string{factRatingIMDb, factCredits}) {
+		t.Errorf("facts = %v, want the rating and the credits", got)
 	}
 }
 
@@ -212,6 +213,91 @@ func TestACacheTheClusterRefusesIsClaimFailed(t *testing.T) {
 			}
 			if !written.ready() {
 				t.Error("the provider is not Ready, want Ready whatever the cache")
+			}
+		})
+	}
+}
+
+// A provider that spec.facts narrows to one fact checks only that fact's
+// files.
+func TestANarrowedIMDbProviderChecksItsOwnFiles(t *testing.T) {
+	cases := []struct {
+		fact string
+		want []string
+	}{
+		{fact: factRatingIMDb, want: []string{"HEAD title.episode 200", "HEAD title.ratings 200"}},
+		{fact: factCredits, want: []string{"HEAD title.principals 200", "HEAD name.basics 200"}},
+	}
+	for _, one := range cases {
+		t.Run(one.fact, func(t *testing.T) {
+			cluster := newFakeCluster()
+			provider := seedIMDbProvider(cluster, "imdb", one.fact)
+			server := newDatasetServer(t, testNow)
+
+			datasetOperator(t, cluster, server).checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+			if got := server.log(); !slices.Equal(got, one.want) {
+				t.Errorf("requests = %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
+// A provider no check has read reports no dataset, and one with no Stale
+// condition is not stale.
+func TestAnUncheckedIMDbProviderHoldsNothing(t *testing.T) {
+	provider := &MetadataProvider{Spec: MetadataProviderSpec{IMDb: &ProviderIMDb{}}}
+
+	if _, held := provider.Status.IMDb.dataset(datasetTitleRatings); held || provider.stale() || provider.cached() {
+		t.Error("the provider reports a dataset or a condition, want none")
+	}
+}
+
+// A status that holds other files reports none of the one asked for.
+func TestAStatusWithoutTheFileReportsNone(t *testing.T) {
+	status := &IMDbStatus{Datasets: []IMDbDataset{{Name: datasetTitleEpisode}}}
+
+	if _, held := status.dataset(datasetTitleRatings); held {
+		t.Error("held = true, want false")
+	}
+}
+
+// An address the check cannot make a request of is Unreachable.
+func TestAnIMDbAddressThatDoesNotParseIsUnreachable(t *testing.T) {
+	cluster := newFakeCluster()
+	provider := seedIMDbProvider(cluster, "imdb")
+	operator := testOperator(t, cluster)
+	operator.providerBases[providerBlockIMDb] = "http://%zz"
+
+	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+	if ready := conditionNamed(cluster.heldProvider("imdb").Status.Conditions, conditionReady); ready.Reason != reasonUnreachable {
+		t.Errorf("Ready = %s/%s, want Unreachable", ready.Status, ready.Reason)
+	}
+}
+
+// A status write the API server refuses as a conflict waits for the next
+// pass, and any other refusal is the check's error.
+func TestARefusedStatusWriteIsAnErrorUnlessItConflicts(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		failed bool
+	}{
+		{name: "a conflict", status: http.StatusConflict},
+		{name: "a server error", status: http.StatusInternalServerError, failed: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			provider := seedIMDbProvider(cluster, "imdb")
+			cluster.broken["PUT "+metadataProviderPath("house", "imdb")+"/status"] = one.status
+			server := newDatasetServer(t, testNow)
+
+			err := datasetOperator(t, cluster, server).checkProvider(t.Context(), provider, testNow)
+
+			if (err != nil) != one.failed {
+				t.Errorf("check = %v, want failed %v", err, one.failed)
 			}
 		})
 	}

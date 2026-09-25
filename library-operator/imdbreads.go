@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,12 +64,16 @@ func (r *datasetReads) wait(ctx context.Context) error {
 	}
 }
 
-// startDatasetReads starts the reads of a container that runs rating.imdb
-// and names the imdb block among its sources. A gap with no title sends no
-// request, and a container that runs no dataset fact reads nothing.
+// startDatasetReads starts the reads of each dataset fact the container
+// runs, where its sources name the imdb block. Each fact's reads run apart,
+// so the rating is not held behind the longer read of the credits. A gap with
+// no title sends no request, and a container that runs no dataset fact reads
+// nothing.
 func (e *enricher) startDatasetReads(ctx context.Context, facts []string) {
-	sources := commaNames(os.Getenv(librarySourcesVariable))
-	if !slices.Contains(facts, factRatingIMDb) || !slices.Contains(sources, providerBlockIMDb) {
+	if datasetFactRuns(facts, factCredits) {
+		e.startCreditReads(ctx)
+	}
+	if !datasetFactRuns(facts, factRatingIMDb) {
 		return
 	}
 	reads := &datasetReads{done: make(chan struct{}), targets: map[string]*imdbTarget{},
@@ -242,16 +245,9 @@ func (e *enricher) imdbTargets(ctx context.Context, ids []string) (map[string]*i
 	for _, id := range ids {
 		targets[id] = &imdbTarget{id: id}
 	}
-	aliases := map[string]string{}
-	err := e.catalog.stream(ctx, `SELECT item, alias FROM aliases WHERE library = ? AND alias LIKE '%:imdb:%'`,
-		[]any{e.library}, func(cells []any) error {
-			item, _ := cells[0].(string)
-			alias, _ := cells[1].(string)
-			aliases[item] = alias[strings.LastIndex(alias, ":")+1:]
-			return nil
-		})
+	aliases, err := e.imdbAliases(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("reading the IMDb ids of %s: %w", e.library, err)
+		return nil, err
 	}
 	for id, target := range targets {
 		target.imdb = aliases[id]

@@ -18,31 +18,50 @@ import (
 // The reads log their own error once.
 var errDatasetsUnread = errors.New("the IMDb datasets could not be read in this run")
 
-// The answerer reads the container's reads through a function, because the
-// line is built before the reads start.
+// The answerer reads the container's reads through two functions, because
+// the line is built before the reads start.
 type imdbAnswerer struct {
-	reads func() *datasetReads
+	reads   func() *datasetReads
+	credits func() *creditReads
 }
 
 func (a imdbAnswerer) providerBlock() string { return providerBlockIMDb }
 
 func (a imdbAnswerer) serves(fact string) bool { return blockServes(providerBlockIMDb, fact) }
 
-// A title with no IMDb id, and a title title.ratings does not hold, is no
-// answer, which the fact records as a miss with a date.
+// A title with no IMDb id, and a title the files do not hold, is no answer,
+// which the fact records as a miss with a date.
 func (a imdbAnswerer) answer(ctx context.Context, fact string, title titleRef) (factAnswer, bool, error) {
-	reads := a.reads()
-	if !a.serves(fact) || reads == nil {
-		return factAnswer{}, false, nil
+	imdb := strings.TrimSpace(title.ids[providerBlockIMDb])
+	switch fact {
+	case factRatingIMDb:
+		reads := a.reads()
+		if reads == nil {
+			return factAnswer{}, false, nil
+		}
+		if err := reads.wait(ctx); err != nil {
+			return factAnswer{}, false, errDatasetsUnread
+		}
+		rating, held := reads.ratings[imdb]
+		if !held {
+			return factAnswer{}, false, nil
+		}
+		return factAnswer{Rating: &rating}, true, nil
+	case factCredits:
+		reads := a.credits()
+		if reads == nil {
+			return factAnswer{}, false, nil
+		}
+		if err := reads.wait(ctx); err != nil {
+			return factAnswer{}, false, errDatasetsUnread
+		}
+		credits, held := reads.credits[imdb]
+		if !held {
+			return factAnswer{}, false, nil
+		}
+		return factAnswer{Cast: credits.Cast, Directors: credits.Directors, Writers: credits.Writers}, true, nil
 	}
-	if err := reads.wait(ctx); err != nil {
-		return factAnswer{}, false, errDatasetsUnread
-	}
-	rating, held := reads.ratings[strings.TrimSpace(title.ids[providerBlockIMDb])]
-	if !held {
-		return factAnswer{}, false, nil
-	}
-	return factAnswer{Rating: &rating}, true, nil
+	return factAnswer{}, false, nil
 }
 
 // The nfo container's line: the table every block builds from, with the imdb
@@ -50,7 +69,10 @@ func (a imdbAnswerer) answer(ctx context.Context, fact string, title titleRef) (
 func (e *enricher) nfoAnswerLine() *answerLine {
 	table := maps.Clone(nfoAnswerers)
 	table[providerBlockIMDb] = func(string, string, *tallies) answerer {
-		return imdbAnswerer{reads: func() *datasetReads { return e.datasets }}
+		return imdbAnswerer{
+			reads:   func() *datasetReads { return e.datasets },
+			credits: func() *creditReads { return e.credits },
+		}
 	}
 	return &answerLine{
 		answerers: recordingAnswerers(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies, table),

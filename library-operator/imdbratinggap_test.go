@@ -6,6 +6,7 @@ package main
 // the operator schedules on that gap by the answerer of the Library.
 
 import (
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -262,6 +263,57 @@ func TestAnAgedRatingIsACauseForAJobThatFillsGaps(t *testing.T) {
 			}
 			if !slices.Equal(names, one.phases) {
 				t.Errorf("phases = %v, want %v", names, one.phases)
+			}
+		})
+	}
+}
+
+// The reporter counts the episodes of the rating gap apart, and a read the
+// catalog refuses is an error.
+func TestTheReporterCountsTheEpisodesOfTheRatingGap(t *testing.T) {
+	cases := []struct {
+		name    string
+		refused int
+		want    map[string]int
+		failed  bool
+	}{
+		{name: "the catalog answers", want: map[string]int{factRatingIMDb: 1}},
+		{name: "the catalog refuses the read", refused: 1, failed: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			catalog, agent := newSQLiteCatalog(t)
+			seedGapEpisodes(t, catalog)
+			agent.queriesLeft = one.refused
+
+			got, err := catalog.episodeGapCounts(t.Context(), "house/movies", testNow)
+
+			if (err != nil) != one.failed || !maps.Equal(got, one.want) {
+				t.Errorf("counts = %v, %v, want %v", got, err, one.want)
+			}
+		})
+	}
+}
+
+// A rating opens again only once its 30 days have passed.
+func TestAReopenWaitsForTheThirtyDays(t *testing.T) {
+	cases := []struct {
+		name   string
+		oldest map[string]time.Time
+		open   bool
+	}{
+		{name: "no attempt yet", oldest: map[string]time.Time{}},
+		{name: "ten days old", oldest: map[string]time.Time{factRatingIMDb: testNow.Add(-10 * 24 * time.Hour)}},
+		{name: "31 days old", oldest: map[string]time.Time{factRatingIMDb: testNow.Add(-31 * 24 * time.Hour)},
+			open: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			library, providers := ratedLibrary(providerBlockIMDb, false)
+			report := &libraryReport{OldestAttempts: one.oldest}
+
+			if got := datasetRefreshHasWork(library, report, providers, factRatingIMDb, testNow); got != one.open {
+				t.Errorf("work = %v, want %v", got, one.open)
 			}
 		})
 	}

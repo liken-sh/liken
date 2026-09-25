@@ -122,6 +122,9 @@ func mergeAnswers(fact string, answers []providerAnswer) (factAnswer, providerNa
 				note(held.block)
 			}
 		case fact == factCredits:
+			if len(names) > 0 && slices.Contains(blockOf(held.block).fallback, fact) {
+				continue
+			}
 			mergeCredits(&merged, held, note)
 		}
 	}

@@ -71,9 +71,10 @@ The providers, and the facts each one serves:
   id and needs no account. Declare it with an empty block,
   `introdb: {}`.
 * `imdb`, IMDb's published datasets: the IMDb rating of movies, series,
-  and episodes, from files that IMDb replaces every day. It needs no
-  account and has no daily limit. Declare it with an empty block,
-  `imdb: {}`. [IMDb ratings from the datasets](#imdb-ratings-from-the-datasets)
+  and episodes, and the principal credits of movies and series, from
+  files that IMDb replaces every day. It needs no account and has no
+  daily limit. Declare it with an empty block, `imdb: {}`.
+  [IMDb ratings and credits from the datasets](#imdb-ratings-and-credits-from-the-datasets)
   describes how the files are read and kept.
 
 The operator checks that each provider answers with one call: when it
@@ -125,6 +126,12 @@ source that serves `rating.imdb`:
         - tmdb
         - imdb
         - omdb
+
+Keep `tmdb` before `imdb` for the credits. IMDb's datasets hold about
+nine people for each title, the billed cast and the key crew, and TMDb
+holds the full cast. So `imdb` answers the credits of a title only where
+no source before it answered: a title TMDb does not hold, or a
+`Library` with no TMDb key.
 
 ## 3. What the phases do
 
@@ -239,6 +246,13 @@ id first, when the `Library`'s sources name a `Ready` `tmdb` provider.
 When no id finds an entry, the credit uses the entry at the slug of
 the name. A second person of the same name gets the slug with an id,
 such as `tom-hanks-tmdb-992`.
+
+A credit from IMDb's datasets names a person by the IMDb id alone. So
+it finds the entry a TMDb credit wrote for the same person by that id,
+or through the TMDb id that TMDb's find call gives for it, and the
+person keeps one entry. An entry the datasets created holds the IMDb id,
+and `contributor.ids` fills its TMDb id, its biography, and its
+headshot the same way.
 
 The `contributors` container fills each entry. `contributor.ids`
 writes the birth date, the death date, and the person's ids in other
@@ -418,7 +432,7 @@ two titles pull at once inside it. Like `trickplay`, the phase starts
 no new title fifteen minutes into a run, and the next `Job` goes on
 with the rest. The fact takes no `spec.refresh`.
 
-### IMDb ratings from the datasets
+### IMDb ratings and credits from the datasets
 
 IMDb publishes its datasets as gzipped files at `datasets.imdbws.com`
 for personal and non-commercial use. No `liken` image carries them, so
@@ -441,6 +455,21 @@ episode by its season and episode numbers under the series' IMDb id. It
 records the id it found in `.liken/rating.imdb.yaml`, so a later run
 does not read `title.episode` again for that episode. A file that holds
 two episodes gets no rating, because its ledger entry names one episode.
+
+The credits read two files in sequence. The container reads
+`title.principals` once and keeps the rows of the titles in its
+`credits` gap, then reads `name.basics` once for the names of the
+people those rows name. It does not read `name.basics` when every one
+of those people already has an entry in `.contributors/`, because the
+entry holds the name. Decompressing and reading the two files took
+about 32 seconds on a cloud host in September 2026, however many titles
+they fill, and the downloads add to that on the first run of a node. `actor`, `actress`, and `self`
+rows are the cast, in IMDb's order, with the characters as the role.
+`director` and `writer` rows are the crew. The other categories, such
+as `producer` and `composer`, have no part in the credits and are not
+written, and neither are `archive_footage` and `archive_sound`. The
+credits are not asked for again on a timer. Set `credits` in
+`spec.refresh` to ask again.
 
 The rating is written into the `.nfo` file as OMDb writes it: the
 `imdb` rating, out of 10, with the vote count. The container writes the
@@ -470,7 +499,7 @@ logs the filesystem's error. With no per-node class, every run reads
 the files from IMDb.
 
     kubectl -n media get metadataprovider imdb -o jsonpath='{.status.imdb.datasets}'
-    kubectl -n media logs job/<job> -c nfo | grep title.ratings
+    kubectl -n media logs job/<job> -c nfo | grep -E 'title.ratings|title.principals'
 
 ### When a fact asks again
 

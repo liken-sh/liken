@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -584,4 +585,27 @@ func TestAReporterWithNoLogWritesNowhere(t *testing.T) {
 	report := &reporter{}
 
 	report.logf("nothing reads this")
+}
+
+// Every read a report makes, refused in its turn, fails the report, so a
+// reporter never publishes a count it did not read. The reads are counted
+// first, off a pass that refuses none.
+func TestEachReadTheCatalogRefusesFailsTheReport(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	seedTwoLibrariesInEveryTable(t, catalog)
+	report := &reporter{catalog: catalog, log: io.Discard}
+	agent.queriesLeft = -1
+	if _, err := report.buildReport(t.Context(), "house/movies"); err != nil {
+		t.Fatal(err)
+	}
+	reads := -1 - agent.queriesLeft
+	for refused := 1; refused <= reads; refused++ {
+		t.Run(fmt.Sprintf("read %d", refused), func(t *testing.T) {
+			agent.queriesLeft = refused
+
+			if _, err := report.buildReport(t.Context(), "house/movies"); err == nil {
+				t.Error("report = nil error, want the refused read's")
+			}
+		})
+	}
 }

@@ -66,6 +66,10 @@ type providerBlock struct {
 	// such a block reads the headers of each file its served facts read, and
 	// makes no call to reach.
 	datasets bool
+	// The set facts this block answers only where no source before it in the
+	// Library's order answered, because its answer is a smaller set than
+	// theirs.
+	fallback []string
 	// The account this spec names for the block, or nothing where the spec names
 	// another block.
 	account func(*MetadataProviderSpec) *providerAccount
@@ -247,10 +251,13 @@ var providerBlocks = []providerBlock{
 	// IMDb's datasets are bulk files, so a fact reads each file once per run
 	// and not once per title. The pace is the interval between two file
 	// requests of one container. The block serves the IMDb rating of movies,
-	// series, and episodes.
+	// series, and episodes, and the principal credits of movies and series,
+	// about nine people a title, which answer only where no source before it
+	// in the Library's order answered.
 	{
 		name:     providerBlockIMDb,
-		facts:    []string{factRatingIMDb},
+		facts:    []string{factRatingIMDb, factCredits},
+		fallback: []string{factCredits},
 		pace:     time.Second,
 		base:     imdbDatasetsBase,
 		datasets: true,

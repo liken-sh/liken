@@ -306,3 +306,94 @@ func TestAWaitForThePaceEndsWithTheContext(t *testing.T) {
 		t.Error("read = nil, want the context's error")
 	}
 }
+
+// Each way the cache can refuse a download still hands the rows to the fact,
+// and the log names the filesystem's error.
+func TestACacheThatRefusesTheDownloadStillReadsTheFile(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, cache string, server *datasetServer)
+		log   string
+	}{
+		{name: "the cache root is a file", log: "not a directory",
+			setup: func(t *testing.T, cache string, _ *datasetServer) {
+				writeFile(t, filepath.Join(cache, "root"), "a file")
+			}},
+		{name: "a directory holds the copy's name", log: "could not keep",
+			setup: func(t *testing.T, cache string, server *datasetServer) {
+				name := datasetCopyName(server.etag(datasetTitleRatings))
+				writeFile(t, filepath.Join(cache, "root", datasetTitleRatings, name, "held"), "x")
+			}},
+		{name: "a directory holds the record's name", log: "could not keep",
+			setup: func(t *testing.T, cache string, _ *datasetServer) {
+				writeFile(t, filepath.Join(cache, "root", datasetTitleRatings, datasetRecordName, "held"), "x")
+			}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			server := newDatasetServer(t, testNow)
+			cache := t.TempDir()
+			one.setup(t, cache, server)
+			fetcher, log := testFetcher(server, filepath.Join(cache, "root"))
+
+			if got := readIDs(t, fetcher, datasetTitleRatings); !slices.Equal(got, fixtureRatingIDs) {
+				t.Errorf("rows = %v, want %v", got, fixtureRatingIDs)
+			}
+			if !strings.Contains(log.String(), one.log) {
+				t.Errorf("log = %q, want %q", log.String(), one.log)
+			}
+		})
+	}
+}
+
+// A previous copy that will not delete is logged, and the new copy stands.
+func TestAPreviousCopyThatWillNotDeleteIsLogged(t *testing.T) {
+	server := newDatasetServer(t, testNow)
+	cache := t.TempDir()
+	dir := filepath.Join(cache, datasetTitleRatings)
+	old := datasetCopyName(`"old"`)
+	writeFile(t, filepath.Join(dir, old, "held"), "x")
+	writeFile(t, filepath.Join(dir, datasetRecordName), `{"etag":"\"old\""}`)
+	fetcher, log := testFetcher(server, cache)
+
+	readIDs(t, fetcher, datasetTitleRatings)
+
+	if !strings.Contains(log.String(), "could not keep") {
+		t.Errorf("log = %q, want the delete's error", log.String())
+	}
+	if record, held := readDatasetRecord(dir); !held || record.ETag != server.etag(datasetTitleRatings) {
+		t.Errorf("record = %+v, want the new copy's", record)
+	}
+}
+
+// A read that gets no file it can read is an error: a body that is not gzip,
+// an address that does not parse, and a server that does not answer.
+func TestAReadWithNoFileIsAnError(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(server *datasetServer, fetcher *datasetFetcher)
+	}{
+		{name: "a body that is not gzip", setup: func(server *datasetServer, _ *datasetFetcher) {
+			server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("tconst\taverageRating\n"))
+			})
+		}},
+		{name: "an address that does not parse", setup: func(_ *datasetServer, fetcher *datasetFetcher) {
+			fetcher.base = "http://%zz"
+		}},
+		{name: "a server that does not answer", setup: func(server *datasetServer, _ *datasetFetcher) {
+			server.Close()
+		}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			server := newDatasetServer(t, testNow)
+			fetcher, _ := testFetcher(server, "")
+			one.setup(server, fetcher)
+
+			if _, err := fetcher.read(t.Context(), datasetTitleRatings, func([][]byte) {}); err == nil {
+				t.Error("read = nil, want an error")
+			}
+		})
+	}
+}

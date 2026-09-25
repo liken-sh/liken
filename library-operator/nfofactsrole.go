@@ -128,8 +128,11 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 	if err != nil {
 		return err
 	}
-	if fact == factRatingIMDb {
+	switch fact {
+	case factRatingIMDb:
 		e.coverDatasetGap(ctx, ids)
+	case factCredits:
+		e.coverCreditGap(ctx, ids)
 	}
 	wrote, fights, left := 0, 0, 0
 	for _, id := range ids {

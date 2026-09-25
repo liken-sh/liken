@@ -29,8 +29,11 @@ const (
 // The files each served fact reads, in the order a run reads them. The rating
 // reads title.episode first, because an episode with no IMDb id takes its id
 // from that file, and the read of title.ratings keeps only the ids it holds.
+// The credits read title.principals first, because it names the people whose
+// names name.basics holds.
 var datasetsOfFact = map[string][]string{
 	factRatingIMDb: {datasetTitleEpisode, datasetTitleRatings},
+	factCredits:    {datasetTitlePrincipals, datasetNameBasics},
 }
 
 // Every file the given facts read, in the order of the table, with no file

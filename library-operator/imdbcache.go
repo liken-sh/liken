@@ -208,10 +208,8 @@ func (f *datasetFetcher) landCopy(dir, target, temporary string, staged *dataset
 		staged.discard(f.writer)
 		return err
 	}
-	data, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
+	// A record of strings, times, and a number always marshals.
+	data, _ := json.Marshal(record)
 	if err := f.writer.write(filepath.Join(dir, datasetRecordName), data); err != nil {
 		return err
 	}

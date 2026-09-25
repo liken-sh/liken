@@ -60,8 +60,10 @@ type enricher struct {
 	// Whether the rating.imdb gap holds episodes, and which old ratings it
 	// opens, from the environment.
 	ratingScope ratingGapScope
-	// The IMDb dataset reads the nfo container starts when it starts.
+	// The IMDb dataset reads the nfo container starts when it starts: the
+	// rating's and the credits'.
 	datasets *datasetReads
+	credits  *creditReads
 	// The providers a container can ask, built once and held here, so a provider
 	// that spends its day in one fact is not asked again in the next fact of the
 	// same container.
