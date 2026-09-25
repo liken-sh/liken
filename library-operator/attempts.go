@@ -153,7 +153,7 @@ func (s likenDir) ledgerFacts() []string {
 var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 	factOverview, factCertification,
 	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
-	factCredits,
+	factCredits, factCreditsMove,
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
 	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
 	factTrailer, factTrailerFile, factMarks}

@@ -47,8 +47,12 @@ type fakeCatalog struct {
 	// and one per credited slot of a title.
 	contributors       map[string]fakeRow
 	contributorAliases map[string]fakeRow
-	credits            map[string]fakeRow
-	genres             map[string]fakeRow
+	// Every id of every entry, keyed by the entry and the scheme, and the
+	// entries a merge removed, keyed by the path.
+	contributorIDs    map[string]fakeRow
+	contributorMerges map[string]fakeRow
+	credits           map[string]fakeRow
+	genres            map[string]fakeRow
 	// One row per trailer a provider named for a title, keyed by the title, the
 	// provider, and that provider's own key.
 	trailers   map[string]fakeRow
@@ -93,6 +97,8 @@ func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 		attempts:           map[string]fakeRow{},
 		contributors:       map[string]fakeRow{},
 		contributorAliases: map[string]fakeRow{},
+		contributorIDs:     map[string]fakeRow{},
+		contributorMerges:  map[string]fakeRow{},
 		credits:            map[string]fakeRow{},
 		genres:             map[string]fakeRow{},
 		trailers:           map[string]fakeRow{},
@@ -173,6 +179,14 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		f.contributorAliases[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = fakeRow{library: str(p[0]), path: str(p[3])}
 	case strings.HasPrefix(s.sql, "DELETE FROM contributor_aliases"):
 		delete(f.contributorAliases, fakeKey(str(p[0]), str(p[1]), str(p[2])))
+	case strings.HasPrefix(s.sql, "INSERT INTO contributor_ids"):
+		f.contributorIDs[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM contributor_ids"):
+		delete(f.contributorIDs, fakeKey(str(p[0]), str(p[1]), str(p[2])))
+	case strings.HasPrefix(s.sql, "INSERT INTO contributor_merges"):
+		f.contributorMerges[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM contributor_merges"):
+		delete(f.contributorMerges, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "INSERT INTO credits"):
 		f.credits[fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
 	case strings.HasPrefix(s.sql, "DELETE FROM credits"):
@@ -303,6 +317,8 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		return f.unmarkedLinks(sql, p)
 	case strings.Contains(sql, "FROM contributor_aliases"):
 		return f.unmarkedPairs(sql, p, f.contributorAliases)
+	case strings.Contains(sql, "FROM contributor_ids"):
+		return f.unmarkedPairs(sql, p, f.contributorIDs)
 	case strings.Contains(sql, "FROM aliases"):
 		return f.unmarkedAliases(sql, p)
 	default:
@@ -574,6 +590,8 @@ func (f *fakeCatalog) tableOf(sql string) map[string]fakeRow {
 		return f.episodes
 	case strings.Contains(sql, "FROM contributors"):
 		return f.contributors
+	case strings.Contains(sql, "FROM contributor_merges"):
+		return f.contributorMerges
 	default:
 		return f.files
 	}

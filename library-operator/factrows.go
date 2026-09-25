@@ -39,6 +39,7 @@ func (e *enricher) rowsOf(fact, folder string) *walkResult {
 
 var contributorFactSet = map[string]bool{
 	factContributorIDs: true, factContributorBiography: true, factContributorHeadshot: true,
+	factContributorMerge: true,
 }
 
 // The rows one fact owns, written after its ledger. Every fact writes its own
@@ -88,6 +89,8 @@ func (e *enricher) writeOwnedRows(ctx context.Context, fact string, result *walk
 			return err
 		}
 		return e.writeCreditRows(ctx, result)
+	case fact == factCreditsMove:
+		return e.writeCreditRows(ctx, result)
 	case fact == factTrailer:
 		return e.writeTrailerRows(ctx, result)
 	case fact == factMarks:
@@ -103,7 +106,7 @@ func (e *enricher) writeOwnedRows(ctx context.Context, fact string, result *walk
 		if _, err := e.catalog.UpdateContributorFacts(ctx, result.contributors); err != nil {
 			return err
 		}
-		_, err := e.catalog.UpsertContributorAliases(ctx, result.contributorAliases)
+		_, err := e.catalog.UpsertContributorIDs(ctx, result.contributorAliases)
 		return err
 	}
 	return nil
@@ -268,7 +271,7 @@ func (e *enricher) writePersonRows(directory string) {
 		e.logf("could not write the row of %s: %v", directory, err)
 		return
 	}
-	if _, err := e.catalog.UpsertContributorAliases(ctx, result.contributorAliases); err != nil {
+	if _, err := e.catalog.UpsertContributorIDs(ctx, result.contributorAliases); err != nil {
 		e.logf("could not write the ids of %s: %v", directory, err)
 	}
 }

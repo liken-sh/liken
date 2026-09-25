@@ -65,9 +65,14 @@ type walkResult struct {
 	trailers []trailerRow
 	// The marks of each video file, off the marks ledger of the folder that
 	// holds the file, the way the streams come off the probe ledger.
-	marks              []markRow
-	contributors       []contributorRow
+	marks        []markRow
+	contributors []contributorRow
+	// The ids of the people. Each row becomes one row of contributor_aliases
+	// and one row of contributor_ids.
 	contributorAliases []contributorAliasRow
+	// The entries a merge removed, one row each, which the walk reads in place
+	// of a person.
+	contributorMerges []contributorMergeRow
 	// The genres of each movie and series, in the .nfo file's order, derived
 	// from the .nfo file the way the attempts are derived from the ledgers.
 	genres []genreRow
@@ -126,6 +131,7 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.marks = append(buffer.marks, folder.marks...)
 	buffer.contributors = append(buffer.contributors, folder.contributors...)
 	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
+	buffer.contributorMerges = append(buffer.contributorMerges, folder.contributorMerges...)
 	buffer.genres = append(buffer.genres, folder.genres...)
 	buffer.franchises = append(buffer.franchises, folder.franchises...)
 	buffer.franchiseMembers = append(buffer.franchiseMembers, folder.franchiseMembers...)

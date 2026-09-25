@@ -206,6 +206,56 @@ counts the fights.
 An art file that already exists is never replaced. The fact records it
 as answered and downloads nothing.
 
+### People
+
+The `credits` fact writes each title's cast and crew into
+`.liken/credits.yaml`, and it gives each credited person one entry in
+`.contributors/` at the library root. A credit looks for its entry by
+id first. When the catalog holds an entry with one of the credit's
+ids, the credit names that entry, whatever the spelling of the name.
+A credit that holds an IMDb id and no TMDb id asks TMDb for the TMDb
+id first, when the `Library`'s sources name a `Ready` `tmdb` provider.
+When no id finds an entry, the credit uses the entry at the slug of
+the name. A second person of the same name gets the slug with an id,
+such as `tom-hanks-tmdb-992`.
+
+The `contributors` container fills each entry. `contributor.ids`
+writes the birth date, the death date, and the person's ids in other
+databases into `contributor.yaml`. For an entry that holds only an
+IMDb id, it asks TMDb for the TMDb id first. `contributor.biography`
+and `contributor.headshot` write `biography.txt` and `headshot.jpg`
+beside the entry where no file of that name exists.
+
+Two entries can hold one id, for example when two providers spell one
+name two ways. After it writes the ids, `contributor.ids` merges each
+group of entries that share an id into one entry:
+
+- The entry at the slug of its own name, with no id suffix, stays. If
+  no entry of the group is at such a slug, the entry with the most ids
+  stays.
+- The entry that stays gets every id of the group. `biography.txt` and
+  `headshot.jpg` move to it where it has no file of that name.
+- Each other entry keeps a `contributor.yaml` with one field,
+  `mergedInto`, the path of the entry that stays. The catalog shows no
+  person for such an entry.
+- The next `Job` of the `Library` moves each credit that names a
+  removed entry to the entry that stays. The nfo phase moves the
+  credits, and it can end before the merge, so the move waits for that
+  `Job`. The contributors phase of the same `Job` then deletes each
+  removed entry that no credit names.
+
+The merge leaves a group whole in two cases, and
+`.liken/contributor.merge.yaml` in each entry of the group records
+the reason. A `held` attempt means a person edited a
+`contributor.yaml` of the group, and `status.fights` counts each entry
+of it. A `conflict` attempt means two entries hold two different ids
+in one scheme, so they are two people and one of them holds a wrong
+id. The merge asks about the group again after thirty days. To hand
+an edited entry back to the merge sooner, delete
+`.liken/contributor.ids.yaml` and `.liken/contributor.merge.yaml` in
+that entry. The next walk opens the gap, and `contributor.ids` then
+reads the file as its own.
+
 ### Trailers
 
 The `trailer` fact records links, not files. It asks every source

@@ -95,6 +95,12 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		{librarySweepContributorAliasSQL(), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteContributorAliases(ctx, library, contributorAliasKeys(keys))
 		}},
+		{librarySweepContributorIDSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteContributorIDs(ctx, library, contributorIDKeys(keys))
+		}},
+		{librarySweepSQL("contributor_merges", "path"), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteContributorMerges(ctx, library, keys)
+		}},
 		{librarySweepSQL("contributors", "path"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteContributors(ctx, library, keys)
 		}},

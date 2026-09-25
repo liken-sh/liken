@@ -473,3 +473,36 @@ func TestTheTrickplayDoorRemovesTheMapAndLeavesTheSheet(t *testing.T) {
 		t.Errorf("the layout folder holds %v, want the sheet alone", left)
 	}
 }
+
+// The two doors a merge takes refuse every path that is not theirs, so no
+// merge can take a file a person keeps.
+func TestTheMergeDoorsRefuseEveryOtherPath(t *testing.T) {
+	root := t.TempDir()
+	writer := newVolumeWriter("test")
+	person := filepath.Join(root, contributorDirectory("tom-hanks"))
+	record := filepath.Join(root, contributorDirectory("thomas-hanks"))
+	title := filepath.Join(root, "The Signal (2014)")
+	writeFile(t, filepath.Join(person, contributorFileName), "name: Tom Hanks\n")
+	writeFile(t, filepath.Join(record, contributorFileName), "mergedInto: .contributors/to/tom-hanks\n")
+	writeFile(t, filepath.Join(title, contributorFileName), "mergedInto: .contributors/to/tom-hanks\n")
+	writeFile(t, filepath.Join(title, contributorBiographyName), "a file of a title")
+	writeFile(t, filepath.Join(record, "notes.txt"), "a note")
+
+	for _, dir := range []string{person, title} {
+		if err := writer.removeMergedEntry(dir); err == nil {
+			t.Errorf("the remove took %s, want a refusal", dir)
+		}
+	}
+	moves := [][2]string{
+		{filepath.Join(title, contributorBiographyName), filepath.Join(person, contributorBiographyName)},
+		{filepath.Join(record, "notes.txt"), filepath.Join(person, "notes.txt")},
+	}
+	for _, move := range moves {
+		if _, err := writer.moveContributorFile(move[0], move[1]); err == nil {
+			t.Errorf("the move took %s, want a refusal", move[0])
+		}
+	}
+	if err := writer.removeMergedEntry(record); err != nil {
+		t.Errorf("the remove refused the record: %v", err)
+	}
+}

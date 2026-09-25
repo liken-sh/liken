@@ -55,12 +55,16 @@ type creditRow struct {
 }
 
 // The ledger files a person's own directory holds. They are not in likenFacts,
-// because a title folder holds none of them, and a walk that read three files
+// because a title folder holds none of them, and a walk that read four files
 // per title that are never there would cost a round trip each on a network
 // volume.
 var contributorLedgerFacts = []string{
-	factContributorIDs, factContributorBiography, factContributorHeadshot,
+	factContributorIDs, factContributorBiography, factContributorHeadshot, factContributorMerge,
 }
+
+// The one ledger an entry that a merge removed holds: the attempt at deleting
+// it, where the delete failed.
+var mergedEntryLedgerFacts = []string{factContributorMerge}
 
 // The walk of one library's .contributors/ store, one person per result. The
 // walk of the titles skips every dot directory, and this one is the exception,
@@ -112,7 +116,9 @@ func readFailed(err error) *walkResult {
 
 // One person's directory into its rows. A directory with no contributor.yaml
 // is not a person and writes no row, so a stray directory under the store is
-// left out of the catalog.
+// left out of the catalog. An entry that a merge removed is a record of the
+// merge and not a person, so it writes its merge row and no person, and the
+// people pool and the person pages never show it.
 func readContributorFolder(root, library, dir string, result *walkResult) {
 	held, data, err := readContributorFile(filepath.Join(dir, contributorFileName))
 	result.noteReadError(err)
@@ -120,6 +126,15 @@ func readContributorFolder(root, library, dir string, result *walkResult) {
 		return
 	}
 	path := relativePath(root, dir)
+	if held.MergedInto != "" {
+		result.contributorMerges = append(result.contributorMerges, contributorMergeRow{
+			Library: library, Path: path, MergedInto: held.MergedInto,
+		})
+		readLikenDir(likenDir{
+			root: root, dir: dir, library: library, item: path, facts: mergedEntryLedgerFacts,
+		}, result)
+		return
+	}
 	biography, err := fileExists(filepath.Join(dir, contributorBiographyName))
 	result.noteReadError(err)
 	headshot, err := fileExists(filepath.Join(dir, contributorHeadshotName))
@@ -185,17 +200,23 @@ func presentValue(held bool) int {
 	return 0
 }
 
-// The write of one id, in place. The scheme and the id are the key beside the
-// library, so an id that moves to another person resolves to the person who
-// holds it now.
-func (c *Catalog) UpsertContributorAliases(ctx context.Context, rows []contributorAliasRow) (int, error) {
-	statements := make([]statement, len(rows))
-	for i, row := range rows {
-		statements[i] = statement{
+// The write of one id, in place, into both tables that hold the ids. In
+// contributor_aliases the scheme and the id are the key beside the library,
+// so an id that moves to another person resolves to the person who holds it
+// now. In contributor_ids the entry and the scheme are the key, so two entries
+// that hold one id are two rows.
+func (c *Catalog) UpsertContributorIDs(ctx context.Context, rows []contributorAliasRow) (int, error) {
+	statements := make([]statement, 0, 2*len(rows))
+	for _, row := range rows {
+		statements = append(statements, statement{
 			sql: `INSERT INTO contributor_aliases (library, scheme, id, path) VALUES (?, ?, ?, ?) ` +
 				`ON CONFLICT (library, scheme, id) DO UPDATE SET path = excluded.path`,
 			params: []any{row.Library, row.Scheme, row.ID, row.Path},
-		}
+		}, statement{
+			sql: `INSERT INTO contributor_ids (library, path, scheme, id) VALUES (?, ?, ?, ?) ` +
+				`ON CONFLICT (library, path, scheme) DO UPDATE SET id = excluded.id`,
+			params: []any{row.Library, row.Path, row.Scheme, row.ID},
+		})
 	}
 	return c.apply(ctx, statements)
 }

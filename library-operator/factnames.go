@@ -51,7 +51,46 @@ const (
 	factContributorIDs       = "contributor.ids"
 	factContributorBiography = "contributor.biography"
 	factContributorHeadshot  = "contributor.headshot"
+
+	// Two gaps that join two entries of .contributors/ that hold one id. The
+	// contributor.ids fact runs the merge gap, and the credits fact runs the
+	// move gap, because each of them is the one writer of the files its gap
+	// changes. Neither gap asks a provider of its own, so both are out of
+	// factVocabulary and out of spec.refresh, and gapFact names the fact
+	// whose container runs each one.
+	factContributorMerge = "contributor.merge"
+	factCreditsMove      = "credits.move"
 )
+
+// The fact whose container runs a gap. A gap that is also a fact runs in its
+// own container. The operator reads a gap's work through this fact, so a
+// merge counts as work only where a source serves contributor.ids.
+func gapFact(gap string) string {
+	switch gap {
+	case factContributorMerge:
+		return factContributorIDs
+	case factCreditsMove:
+		return factCredits
+	}
+	return gap
+}
+
+// The gaps that run in the container of another fact. gapFact names that fact.
+var containedGaps = []string{factContributorMerge, factCreditsMove}
+
+// Every gap a phase reads: the gap of each fact it runs, then each contained
+// gap whose fact the phase runs. A phase whose only work is a merge or a
+// credit move must still see that work, both in the operator's check and in
+// its own loop.
+func phaseGapNames(facts []string) []string {
+	names := slices.Clone(facts)
+	for _, gap := range containedGaps {
+		if slices.Contains(facts, gapFact(gap)) {
+			names = append(names, gap)
+		}
+	}
+	return names
+}
 
 // Every fact a MetadataProvider may name, in the order the groups run. The
 // CRD's spec.facts enum holds the same names, and a test reads the two

@@ -102,12 +102,23 @@ func (l *answerLine) ask(ctx context.Context, fact string, title titleRef) ([]pr
 // only where a source serves one of its facts.
 func (e *enricher) nfoFact(ctx context.Context, fact string) error {
 	if e.providers == nil {
-		e.providers = newAnswerLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
+		sources := commaNames(os.Getenv(librarySourcesVariable))
+		e.providers = newAnswerLine(sources, os.Getenv, e.tallies)
+		e.personFinder = newPersonFinder(sources, os.Getenv, e.tallies)
 	}
 	if len(e.providers.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)
 	}
-	return e.nfoGap(ctx, fact, e.providers)
+	if err := e.nfoGap(ctx, fact, e.providers); err != nil {
+		return err
+	}
+	// A merge of two .contributors/ entries leaves credits that name the entry
+	// it removed. The credits fact is the one writer of credits.yaml, so it
+	// moves them after its own gap.
+	if fact == factCredits {
+		return e.moveCredits(ctx)
+	}
+	return nil
 }
 
 // A catalog read that fails ends the container, because the gap list is the

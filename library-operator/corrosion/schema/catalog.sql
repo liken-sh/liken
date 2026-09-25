@@ -453,6 +453,35 @@ CREATE INDEX contributor_aliases_library_path ON contributor_aliases (library, p
 -- before the lookup.
 CREATE INDEX contributor_aliases_scheme_id ON contributor_aliases (scheme, id);
 
+-- Every id of every entry in a library's .contributors/ store. The key is the
+-- entry and the scheme, so two entries that hold the same id are two rows.
+-- contributor_aliases keeps one path for each id, and it cannot show that
+-- two entries are one person. The contributor.merge gap reads this table to
+-- find those entries, and the credits fact reads it to find a person's entry
+-- by id before it looks by name.
+CREATE TABLE contributor_ids (
+    library TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    scheme TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, path, scheme)
+);
+
+-- The read from one id to every entry that holds it.
+CREATE INDEX contributor_ids_library_scheme_id ON contributor_ids (library, scheme, id);
+
+-- One entry of the .contributors/ store that a merge removed. Its
+-- contributor.yaml holds only mergedInto, the path of the entry that stays.
+-- The credits fact reads this table to find the credits that still name the
+-- removed entry, and the contributor.ids fact deletes the entry when no
+-- credit names it.
+CREATE TABLE contributor_merges (
+    library TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    merged_into TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, path)
+);
+
 -- One credited person on one title, lifted from the title's own credits.yaml.
 -- billing is the billing order, and it is the key beside the item because a
 -- title gives each of its people one slot; the column is not named order,

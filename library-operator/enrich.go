@@ -95,6 +95,13 @@ const (
 // gave no answer is asked again the next day. The marks fact records it. A
 // result of its own, and not an error, says in the ledger that the answer
 // holds data.
+//
+// The merge of two .contributors/ entries records two results of its own,
+// and both are facts with a date. A held merge is a group whose
+// contributor.yaml a person edited, so the merge left every entry of it, and
+// Library status counts it with the fights. A conflict is a group whose
+// entries hold two different ids in one scheme, so they are two people and
+// one of them holds a wrong id.
 const (
 	attemptFound      = "found"
 	attemptCandidates = "candidates"
@@ -102,6 +109,8 @@ const (
 	attemptError      = "error"
 	attemptFight      = "fight"
 	attemptPartial    = "partial"
+	attemptHeld       = "held"
+	attemptConflict   = "conflict"
 )
 
 // How long an attempt stands before the fact that wrote it asks again. A
@@ -304,6 +313,12 @@ var gapQueries = map[string]string{
 	factContributorIDs:       contributorIDsGapSQL(),
 	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),
 	factContributorHeadshot:  contributorFileGapSQL(factContributorHeadshot, "headshot"),
+
+	// The entries that hold one id with another entry, and the entries a merge
+	// removed that no credit names.
+	factContributorMerge: contributorMergeGapSQL(),
+	// The titles whose credits name an entry a merge removed.
+	factCreditsMove: creditsMoveGapSQL(),
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting

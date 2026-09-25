@@ -29,19 +29,29 @@ const (
 )
 
 // The schemes a slug may take its suffix from, in the order the suffix prefers
-// them, and the scheme every contributor gap keys on.
-const contributorTMDbScheme = "tmdb"
+// them. Every contributor gap keys on the TMDb scheme, and the ids fact finds
+// a TMDb id by the IMDb id.
+const (
+	contributorTMDbScheme = "tmdb"
+	contributorIMDbScheme = "imdb"
+)
 
-var contributorSchemes = []string{contributorTMDbScheme, "imdb"}
+var contributorSchemes = []string{contributorTMDbScheme, contributorIMDbScheme}
 
 // Contributor.yaml, the file the credits fact creates and the contributor.ids
 // fact fills. The ids carry every scheme the providers gave, so one person
 // joins across libraries by any of them.
+//
+// MergedInto is the one field of an entry that a merge removed. It holds the
+// path of the entry that stays, relative to the library root. The credits
+// fact reads it to move each credit to that entry, and the entry is deleted
+// when no credit names it.
 type contributorFile struct {
-	Name string      `yaml:"name"`
-	IDs  providerIDs `yaml:"ids,omitempty"`
-	Born string      `yaml:"born,omitempty"`
-	Died string      `yaml:"died,omitempty"`
+	Name       string      `yaml:"name,omitempty"`
+	IDs        providerIDs `yaml:"ids,omitempty"`
+	Born       string      `yaml:"born,omitempty"`
+	Died       string      `yaml:"died,omitempty"`
+	MergedInto string      `yaml:"mergedInto,omitempty"`
 }
 
 // The part a person took on the title. The part tells the cast from the crew,
@@ -150,14 +160,33 @@ func (f contributorFile) isPerson(ids providerIDs) bool {
 	return true
 }
 
-// The directory one credited person's files sit in, created with
-// contributor.yaml where none exists. The plain slug belongs to the first
-// person written under it, and a second person of the same name takes the slug
-// with the id suffix. The read of the entry that is already there is what
-// tells the two apart, so the answer is the same whichever title reaches the
-// person first, and a run over a library that already holds the person writes
-// nothing.
+// The directory one credited person's files sit in. The ids decide first,
+// because a name can be spelled two ways and two people can share one: an id
+// of the credit that the catalog resolves to an entry links the credit to
+// that entry, whatever its slug. A credit with an IMDb id and no TMDb id gets
+// its TMDb id from TMDb first, so it compares with the entries the TMDb
+// credits created. The slug join runs only when no id resolves.
 func (e *enricher) contributorFor(person creditedPerson) (string, error) {
+	if directory := e.contributorByID(person.IDs); directory != "" {
+		return directory, nil
+	}
+	if found := e.findCreditedTMDb(person.IDs); found != "" {
+		person.IDs = withID(person.IDs, contributorTMDbScheme, found)
+		if directory := e.contributorByID(providerIDs{contributorTMDbScheme: found}); directory != "" {
+			return directory, nil
+		}
+	}
+	return e.contributorBySlug(person)
+}
+
+// The slug join, created with contributor.yaml where none exists. The plain
+// slug belongs to the first person written under it, and a second person of
+// the same name takes the slug with the id suffix. The read of the entry that
+// is already there is what tells the two apart, so the answer is the same
+// whichever title reaches the person first, and a run over a library that
+// already holds the person writes nothing. An entry a merge removed names the
+// entry that stays, and the credit links there.
+func (e *enricher) contributorBySlug(person creditedPerson) (string, error) {
 	slug := contributorSlug(person.Name, person.IDs)
 	if slug == "" {
 		return "", nil
@@ -178,6 +207,12 @@ func (e *enricher) contributorFor(person creditedPerson) (string, error) {
 			}
 			e.writePersonRows(directory)
 			return directory, nil
+		}
+		if held.MergedInto != "" {
+			if stays := e.entryThatStays(directory); stays != "" {
+				return stays, nil
+			}
+			continue
 		}
 		if held.isPerson(person.IDs) {
 			return directory, nil

@@ -4,8 +4,9 @@ package main
 // goes through. On the lab that volume is the production copy, so the rules
 // here are what keep a bad write from losing a file a person cares about: a
 // temporary and a rename, an edit of one element, a remove that refuses
-// every name but a temporary's, and a remove that takes one file this
-// operator wrote and nothing else reads, the trickplay map.
+// every name but a temporary's, a remove that takes one file this
+// operator wrote and nothing else reads, the trickplay map, and the move and
+// the remove a merge of two .contributors/ entries makes.
 
 import (
 	"bytes"
@@ -414,4 +415,48 @@ func elementMatches(token xml.StartElement, element xmlElement) bool {
 		}
 	}
 	return false
+}
+
+// Whether a directory is one entry of a .contributors/ store: the entry, under
+// its two-character bucket, under the store.
+func isContributorEntry(dir string) bool {
+	return filepath.Base(filepath.Dir(filepath.Dir(dir))) == contributorsDirectory
+}
+
+// The move a merge makes of a person's biography or headshot, from the entry
+// the merge removes to the entry that stays. The link fails where the entry
+// that stays holds a file of that name, and that file is kept, so the move
+// never replaces a file. The answer says whether this call moved the file. It
+// refuses every other name and every directory outside the store.
+func (w *volumeWriter) moveContributorFile(from, to string) (bool, error) {
+	name := filepath.Base(from)
+	if (name != contributorBiographyName && name != contributorHeadshotName) || filepath.Base(to) != name ||
+		!isContributorEntry(filepath.Dir(from)) || !isContributorEntry(filepath.Dir(to)) {
+		return false, fmt.Errorf("refusing to move %s to %s: it is no %s or %s of a %s entry",
+			from, to, contributorBiographyName, contributorHeadshotName, contributorsDirectory)
+	}
+	if err := os.Link(from, to); errors.Is(err, fs.ErrExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, os.Remove(from)
+}
+
+// The remove of an entry a merge removed, once no credit names it. It takes
+// the whole directory, and it refuses every directory that is not an entry of
+// the store or whose contributor.yaml holds anything but mergedInto, so a
+// person's entry is out of reach of this call.
+func (w *volumeWriter) removeMergedEntry(dir string) error {
+	held, data, err := readContributorFile(filepath.Join(dir, contributorFileName))
+	if err != nil {
+		return err
+	}
+	record := held.MergedInto != "" && held.Name == "" && len(held.IDs) == 0 &&
+		held.Born == "" && held.Died == ""
+	if !isContributorEntry(dir) || data == nil || !record {
+		return fmt.Errorf("refusing to remove %s: it is no %s entry that holds only mergedInto",
+			dir, contributorsDirectory)
+	}
+	return os.RemoveAll(dir)
 }

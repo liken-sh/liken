@@ -42,6 +42,9 @@ func walkOfOnePerson(library, item, slug string) *walkResult {
 		contributorAliases: []contributorAliasRow{{
 			Library: library, Scheme: contributorTMDbScheme, ID: slug, Path: directory,
 		}},
+		contributorMerges: []contributorMergeRow{{
+			Library: library, Path: directory + "-merged", MergedInto: directory,
+		}},
 		credits: []creditRow{{
 			Library: library, Item: item, Contributor: directory, Name: slug,
 			Part: creditPartActor, Billing: 0,
@@ -79,7 +82,7 @@ func seedTwoLibrariesInEveryTable(t *testing.T, catalog *Catalog) {
 // The tables a whole-library sweep deletes from, the item tables and
 // the people tables both.
 var everyCatalogTable = []string{"aliases", "movies", "series", "episodes", "file_items", "files", "genres",
-	"credits", "trailers", "contributors", "contributor_aliases"}
+	"credits", "trailers", "contributors", "contributor_aliases", "contributor_ids", "contributor_merges"}
 
 // The sweep takes every row of the departing library in every table and
 // leaves the survivor whole.
@@ -181,9 +184,10 @@ func TestSweepLibraryChunksALargeDelete(t *testing.T) {
 	}
 
 	// Ten titles, each one movie row, one file row, one link, two aliases,
-	// a genre, a credit, a contributor, and a contributor alias.
-	if removed != 90 {
-		t.Errorf("removed = %d, want the 90 rows the ten titles hold", removed)
+	// a genre, a credit, a contributor, a contributor alias, the same id in
+	// contributor_ids, and a merge record.
+	if removed != 110 {
+		t.Errorf("removed = %d, want the 110 rows the ten titles hold", removed)
 	}
 	if agent.largestBatch > pruneBatch {
 		t.Errorf("one transaction carried %d statements, want no more than %d", agent.largestBatch, pruneBatch)

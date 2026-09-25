@@ -82,3 +82,27 @@ func TestTheRefreshVocabularyIsTheFactsAndTheWalk(t *testing.T) {
 			got, len(factVocabulary))
 	}
 }
+
+// A phase reads the gap of each fact it runs, and the gaps that one of those
+// facts runs as well, so a merge or a credit move keeps its phase working.
+func TestAPhaseReadsTheGapsItsFactsRun(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts []string
+		want  []string
+	}{
+		{name: "the contributors phase", facts: []string{factContributorIDs, factContributorBiography},
+			want: []string{factContributorIDs, factContributorBiography, factContributorMerge}},
+		{name: "the nfo phase", facts: []string{factOverview, factCredits},
+			want: []string{factOverview, factCredits, factCreditsMove}},
+		{name: "a phase that runs neither fact", facts: []string{factIdentity},
+			want: []string{factIdentity}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := phaseGapNames(test.facts); !slices.Equal(got, test.want) {
+				t.Errorf("phaseGapNames(%v) = %v, want %v", test.facts, got, test.want)
+			}
+		})
+	}
+}

@@ -69,14 +69,22 @@ func (e *enricher) contributorGap(ctx context.Context, fact string, client *tmdb
 		}
 	}
 	e.logf("wrote the %s of %d of the %d people that lacked it", fact, written, len(gaps))
+	// The ids this fact wrote can make two entries hold one id, so the merge
+	// runs after them, and the biography and headshot facts that run next
+	// fill the entry that stays.
+	if fact == factContributorIDs {
+		return e.mergeContributors(ctx)
+	}
 	return nil
 }
 
 // One person's gap: the directory the person's files sit in, relative to the
-// library root, and the TMDb id the calls key on.
+// library root, the TMDb id the calls key on, and the IMDb id the ids fact
+// finds the TMDb id by where the entry holds none.
 type contributorGap struct {
 	path string
 	tmdb string
+	imdb string
 }
 
 func (e *enricher) fillContributor(ctx context.Context, client *tmdbClient, fact string, gap contributorGap) bool {
@@ -122,6 +130,13 @@ func (e *enricher) fillContributorIDs(ctx context.Context, client *tmdbClient,
 		return false
 	}
 
+	if gap.tmdb == "" {
+		found, held := e.findContributorTMDb(ctx, client, folder, gap)
+		if !held {
+			return false
+		}
+		gap.tmdb = found
+	}
 	person, err := client.person(ctx, gap.tmdb)
 	if err != nil {
 		e.logf("could not read the person of %s: %v", gap.path, err)
@@ -135,6 +150,26 @@ func (e *enricher) fillContributorIDs(ctx context.Context, client *tmdbClient,
 		return false
 	}
 	return e.writeContributorIDs(folder, gap, held, data, person, ids)
+}
+
+// An entry that holds an IMDb id and no TMDb id, which a credit from IMDb's
+// datasets creates, gets its TMDb id from TMDb's find call. Every call the
+// contributor facts make after it keys on the TMDb id. An IMDb id TMDb names
+// no person for is a miss.
+func (e *enricher) findContributorTMDb(ctx context.Context, client *tmdbClient,
+	folder string, gap contributorGap) (string, bool) {
+	found, err := client.personByIMDb(ctx, gap.imdb)
+	if err != nil {
+		e.logf("could not find the TMDb id of %s: %v", gap.path, err)
+		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
+		return "", false
+	}
+	if found == "" {
+		e.logf("the provider names no person for the IMDb id %s of %s", gap.imdb, gap.path)
+		e.recordContributor(folder, factContributorIDs, "", attemptNothing, "")
+		return "", false
+	}
+	return found, true
 }
 
 // The write. An id the file already carries stands, because the ids of a
@@ -311,20 +346,23 @@ func (e *enricher) recordContributor(folder, fact, provider, result, wrote strin
 
 // One fact's work list, out of the local copy of the catalog, with the same
 // query the reporter counts the gap with. Every row names the person's
-// directory and the TMDb id to ask for.
+// directory, the TMDb id to ask for, and the IMDb id. The TMDb id is empty
+// only in the ids gap, for an entry the ids fact finds the TMDb id of by the
+// IMDb id.
 func (c *Catalog) contributorGaps(ctx context.Context, library, fact string,
 	now, refresh time.Time) ([]contributorGap, error) {
 	var gaps []contributorGap
 	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, refresh), func(cells []any) error {
-		if len(cells) < 2 {
+		if len(cells) < 3 {
 			return nil
 		}
 		path, _ := cells[0].(string)
-		id, _ := cells[1].(string)
-		if path == "" || id == "" {
+		tmdb, _ := cells[1].(string)
+		imdb, _ := cells[2].(string)
+		if path == "" || (tmdb == "" && imdb == "") {
 			return nil
 		}
-		gaps = append(gaps, contributorGap{path: path, tmdb: id})
+		gaps = append(gaps, contributorGap{path: path, tmdb: tmdb, imdb: imdb})
 		return nil
 	})
 	if err != nil {
@@ -333,24 +371,32 @@ func (c *Catalog) contributorGaps(ctx context.Context, library, fact string,
 	return gaps, nil
 }
 
-// The gap query of one contributor fact. A person with no TMDb id is no gap,
-// because every call this image makes keys on that id, and the join is what
-// reads it. The query excludes a person with an attempt inside that attempt's
-// own window.
+// The gap query of the biography fact and the headshot fact. A person with no
+// TMDb id is no gap, because every call these facts make keys on that id, and
+// the join is what reads it. The query excludes a person with an attempt
+// inside that attempt's own window.
 func contributorGapSQL(fact, condition string) string {
-	return `SELECT c.path, a.id FROM contributors AS c ` +
-		`JOIN contributor_aliases AS a ON a.library = c.library AND a.path = c.path ` +
+	return `SELECT c.path, a.id, '' FROM contributors AS c ` +
+		`JOIN contributor_ids AS a ON a.library = c.library AND a.path = c.path ` +
 		`AND a.scheme = '` + contributorTMDbScheme + `' ` +
 		`WHERE c.library = ?1 AND ` + gapClause(fact, "c.path", condition)
 }
 
-// The ids gap: a person with no birth date, or with no id under any scheme but
-// TMDb's own. Both are what the ids fact fills, and either one alone is work.
+// The ids gap: a person with no TMDb id and an IMDb id, a person with no birth
+// date, or a person with no id under any scheme but TMDb's own. Each one is
+// what the ids fact fills, and any one alone is work. A person with neither
+// id is no gap, because the ids fact has no id to ask with.
 func contributorIDsGapSQL() string {
-	return contributorGapSQL(factContributorIDs,
-		`c.born = '' OR NOT EXISTS (SELECT 1 FROM contributor_aliases AS o `+
-			`WHERE o.library = c.library AND o.path = c.path `+
-			`AND o.scheme != '`+contributorTMDbScheme+`')`)
+	return `SELECT c.path, coalesce(t.id, ''), coalesce(i.id, '') FROM contributors AS c ` +
+		`LEFT JOIN contributor_ids AS t ON t.library = c.library AND t.path = c.path ` +
+		`AND t.scheme = '` + contributorTMDbScheme + `' ` +
+		`LEFT JOIN contributor_ids AS i ON i.library = c.library AND i.path = c.path ` +
+		`AND i.scheme = '` + contributorIMDbScheme + `' ` +
+		`WHERE c.library = ?1 AND (t.id IS NOT NULL OR i.id IS NOT NULL) AND ` +
+		gapClause(factContributorIDs, "c.path",
+			`t.id IS NULL OR c.born = '' OR NOT EXISTS (SELECT 1 FROM contributor_ids AS o `+
+				`WHERE o.library = c.library AND o.path = c.path `+
+				`AND o.scheme != '`+contributorTMDbScheme+`')`)
 }
 
 // The gap of a fact that writes one file: the column the scanner sets where

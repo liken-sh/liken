@@ -254,7 +254,7 @@ func TestEachContributorFactReadsItsOwnGap(t *testing.T) {
 	}
 	empty := contributorRow{Library: contributorLibrary, Path: ".contributors/pe/person-2", Name: "Two"}
 	seedContributors(t, catalog, filled, empty)
-	if _, err := catalog.UpsertContributorAliases(t.Context(), []contributorAliasRow{{
+	if _, err := catalog.UpsertContributorIDs(t.Context(), []contributorAliasRow{{
 		Library: contributorLibrary, Scheme: "imdb", ID: "nm0000158", Path: filled.Path,
 	}}); err != nil {
 		t.Fatal(err)

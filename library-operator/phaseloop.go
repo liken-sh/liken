@@ -94,7 +94,8 @@ func (e *enricher) phaseLoop(ctx context.Context, facts []string) error {
 	if timeLimitedPhases[e.container] {
 		e.stopStarting = time.Now().Add(phaseTimeLimit)
 	}
-	wake, stop, err := e.wakes(ctx, facts)
+	gaps := phaseGapNames(facts)
+	wake, stop, err := e.wakes(ctx, gaps)
 	if err != nil {
 		return err
 	}
@@ -107,7 +108,7 @@ func (e *enricher) phaseLoop(ctx context.Context, facts []string) error {
 			return nil
 		}
 		ended := e.needsEnded(ctx)
-		snapshot, err := e.gapSnapshot(ctx, facts)
+		snapshot, err := e.gapSnapshot(ctx, gaps)
 		if err != nil {
 			return err
 		}

@@ -61,7 +61,8 @@ type libraryReport struct {
 	Waiting    int `json:"waiting"`
 	Unresolved int `json:"unresolved"`
 	// The count of titles a fact left because another writer holds the element
-	// group it writes. The operator folds it into Library status.
+	// group it writes, with the .contributors/ entries a merge left because a
+	// person edited one of them. The operator folds it into Library status.
 	Fights int `json:"fights"`
 	// The counts the Jobs raised inside containers that have exited. The
 	// operator turns them into Prometheus counters.

@@ -150,7 +150,7 @@ func phaseNeedsOf(name string, included []string) []string {
 // Whether one phase has work in the last report: a fact whose gap the
 // reporter counted, or whose refresh time has titles left to ask about.
 func phaseGapOpen(library *Library, report *libraryReport, facts []string) bool {
-	return slices.ContainsFunc(facts, func(fact string) bool {
-		return report.Gaps[fact] > 0 || refreshHasWork(library, report, fact)
+	return slices.ContainsFunc(phaseGapNames(facts), func(gap string) bool {
+		return report.Gaps[gap] > 0 || refreshHasWork(library, report, gap)
 	})
 }

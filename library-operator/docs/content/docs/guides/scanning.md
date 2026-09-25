@@ -122,7 +122,11 @@ the first two characters of the person's slug. Each holds
 `contributor.yaml` with the name and the provider ids, and, once the
 contributors phase fills them, `biography.txt` and `headshot.jpg`. The walk
 reads this directory after the titles. It is the one dot-named
-directory the walk enters.
+directory the walk enters. An entry whose `contributor.yaml` holds
+only `mergedInto` is one that a merge of two entries removed. The walk
+records the merge and no person for it. The
+[enrichment guide](/docs/guides/enrichment/#people) describes the
+merge.
 
 ## When a scan runs
 

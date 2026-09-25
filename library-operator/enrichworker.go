@@ -61,6 +61,10 @@ type enricher struct {
 	// that spends its day in one fact is not asked again in the next fact of the
 	// same container.
 	providers *answerLine
+	// The TMDb account the credits fact asks for the TMDb id of a credit that
+	// holds only an IMDb id, built with the answer line. It is nil where the
+	// Library's sources reach no TMDb account.
+	personFinder *tmdbClient
 	// The providers the art container can ask, built once and held here, so
 	// the settings one of them states are read once for the whole container.
 	art *artLine

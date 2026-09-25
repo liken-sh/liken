@@ -74,6 +74,10 @@ const (
 	seenContributor      = "contributor:"
 	seenContributorAlias = "contributor-alias:"
 	seenCredit           = "credit:"
+	// Every id of every entry keys on the entry and the scheme joined, and a
+	// merge record keys on the path of the entry the merge removed.
+	seenContributorID    = "contributor-id:"
+	seenContributorMerge = "contributor-merge:"
 	// A genre keys on the title and the rank joined, in a key space of its own,
 	// the way a credit does.
 	seenGenre = "genre:"
@@ -204,6 +208,10 @@ func markKeys(result *walkResult) []string {
 	}
 	for _, row := range result.contributorAliases {
 		add(seenContributorAlias, contributorAliasSeenKey(row))
+		add(seenContributorID, contributorIDSeenKey(row))
+	}
+	for _, row := range result.contributorMerges {
+		add(seenContributorMerge, row.Path)
 	}
 	for _, row := range result.credits {
 		add(seenCredit, creditSeenKey(row))
@@ -377,6 +385,25 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	n, err = catalog.sweep(ctx, contributorAliasPruneSQL(), []any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteContributorAliases(ctx, library, contributorAliasKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, contributorIDPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributorIDs(ctx, library, contributorIDKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, itemPruneSQL("contributor_merges", "path", seenContributorMerge),
+		[]any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributorMerges(ctx, library, keys)
 		})
 	if err != nil {
 		return removed, err

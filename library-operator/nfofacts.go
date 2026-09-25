@@ -93,6 +93,8 @@ func creditsGapQuery() string {
 		`id NOT IN (SELECT item FROM credits WHERE credits.library = ?1)`)
 }
 
-// The count of fights every fact of one library recorded. The reporter
-// publishes it and the operator folds it into Library status.
-const fightsQuery = `SELECT count(*) FROM attempts WHERE library = ? AND result = '` + attemptFight + `'`
+// The count of fights every fact of one library recorded, with the entries a
+// merge left because a person edited them. The reporter publishes it and the
+// operator folds it into Library status.
+const fightsQuery = `SELECT count(*) FROM attempts WHERE library = ? ` +
+	`AND result IN ('` + attemptFight + `', '` + attemptHeld + `')`
