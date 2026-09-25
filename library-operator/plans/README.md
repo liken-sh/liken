@@ -243,7 +243,7 @@ Plan 32 covers a separate part of the system from the enrichment work.
 * [61, A series folder with no year](completed/61-a-series-folder-with-no-year.md).
   Built on 2026-09-11. The ladder reads the episode titles off the
   file names and matches them against each candidate's season on
-  TMDb, so a bare series folder identifies without a sidecar.
+  TMDb, so a bare series folder identifies without an `.nfo` file.
 * [59, Trickplay removes WebVTT maps](completed/59-trickplay-removes-webvtt-maps.md).
   Built on 2026-09-11. The trickplay fact writes no WebVTT map, sweeps
   the maps earlier runs wrote, and leaves the tile directory Jellyfin's
@@ -416,7 +416,7 @@ that took a hearing-impaired flag for Hindi.
   person with a wall of their works across the libraries. The same
   release adds `spec.refresh` to `Library`, one time per fact from
   which a fact asks its provider again, and makes a provider's cast
-  and crew replace the sidecar's. The drill's one gap, an enricher
+  and crew replace the ones in the `.nfo` file. The drill's one gap, an enricher
   that read its gap before a count-neutral walk reached its copy, is
   closed in 2026.09.03-010.
 
