@@ -5,7 +5,8 @@ package main
 // episode or film in the days after it comes out, and the first answers are
 // few and rough, so a new work is asked again sooner than an old one. The
 // window follows the release date the catalog holds for the work in the
-// file, and an error holds for its own one day whatever the work's age.
+// file. An error or a partial attempt holds for its own one day whatever the
+// work's age.
 
 import (
 	"strconv"
@@ -73,8 +74,8 @@ func marksAttemptClause() string {
 	return `path NOT IN (SELECT a.item FROM attempts AS a ` +
 		`LEFT JOIN (` + marksReleaseDates() + `) AS r ON r.library = a.library AND r.item = a.item ` +
 		`WHERE a.library = ?1 AND a.` + attemptFactColumn + ` = '` + factMarks + `' AND a.at >= ?4 ` +
-		`AND ((a.result = '` + attemptError + `' AND a.at >= ?3) ` +
-		`OR (a.result != '` + attemptError + `' AND a.at >= CASE ` +
+		`AND ((a.result IN ` + retriedResults + ` AND a.at >= ?3) ` +
+		`OR (a.result NOT IN ` + retriedResults + ` AND a.at >= CASE ` +
 		`WHEN r.released >= ` + newSince + ` THEN ?6 ` +
 		`WHEN r.released >= ` + recentSince + ` THEN ?7 ` +
 		`ELSE ?2 END)))`

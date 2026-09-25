@@ -415,8 +415,8 @@ func TestTheMarkLineCarriesTheTheIntroDBKey(t *testing.T) {
 	}, nil)
 	line.answerers[0].(theintrodbMarkAnswerer).client.base = server.URL
 
-	if _, _, err := line.ask(t.Context(), markFile{movie: true, ids: providerIDs{"tmdb": "603"}}); err != nil {
-		t.Fatal(err)
+	if answer := line.ask(t.Context(), markFile{movie: true, ids: providerIDs{"tmdb": "603"}}); answer.failure != nil {
+		t.Fatal(answer.failure)
 	}
 	if got := fake.requests[0].Header.Get("Authorization"); got != "Bearer a-key" {
 		t.Errorf("Authorization = %q, want the key that reached the container", got)
@@ -430,40 +430,5 @@ func TestAMarksContainerWithNoProviderFails(t *testing.T) {
 
 	if err := work.marksFact(t.Context()); err == nil || !strings.Contains(err.Error(), factMarks) {
 		t.Errorf("err = %v, want the failure that names the fact", err)
-	}
-}
-
-// One file's spans replace its own in the ledger's list, at the place its
-// first span held, and the other files keep their places.
-func TestReplacedMarksKeepsTheOtherFilesInPlace(t *testing.T) {
-	held := []markEntry{
-		{Path: "a.mkv", Kind: markKindIntro}, {Path: "b.mkv", Kind: markKindIntro},
-		{Path: "b.mkv", Kind: markKindCredits}, {Path: "c.mkv", Kind: markKindIntro},
-	}
-	cases := []struct {
-		name    string
-		entry   string
-		entries []markEntry
-		want    []string
-	}{
-		{name: "a file the list holds", entry: "b.mkv",
-			entries: []markEntry{{Kind: markKindRecap}},
-			want:    []string{"a.mkv intro", "b.mkv recap", "c.mkv intro"}},
-		{name: "a file the list does not hold", entry: "d.mkv",
-			entries: []markEntry{{Kind: markKindPreview}},
-			want:    []string{"a.mkv intro", "b.mkv intro", "b.mkv credits", "c.mkv intro", "d.mkv preview"}},
-		{name: "no span", entry: "b.mkv",
-			want: []string{"a.mkv intro", "c.mkv intro"}},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			got := []string{}
-			for _, one := range replacedMarks(held, test.entry, test.entries) {
-				got = append(got, one.Path+" "+one.Kind)
-			}
-			if !slices.Equal(got, test.want) {
-				t.Errorf("marks = %v, want %v", got, test.want)
-			}
-		})
 	}
 }

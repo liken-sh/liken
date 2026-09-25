@@ -90,12 +90,21 @@ const (
 // a key that was refused, or a file that would not open. An error stands for
 // its own shorter window, so a fault that lasts is tried again the next day
 // and not on every run.
+//
+// A partial attempt is one a fact that takes the union of its providers
+// records when some of them answered and one failed or was not asked,
+// because its allowance for the day was spent. The spans the others answered
+// are written, and the attempt takes the error window, so the provider that
+// gave no answer is asked again the next day. The marks fact records it. A
+// result of its own, and not an error, says in the ledger that the answer
+// holds data.
 const (
 	attemptFound      = "found"
 	attemptCandidates = "candidates"
 	attemptNothing    = "nothing"
 	attemptError      = "error"
 	attemptFight      = "fight"
+	attemptPartial    = "partial"
 )
 
 // How long an attempt stands before the fact that wrote it asks again. A
@@ -153,7 +162,8 @@ func refreshSeconds(refresh, now time.Time) int64 {
 
 // The attempt window every gap query carries. An item whose last attempt is a
 // dated fact inside the retry window is no gap, and an item whose last
-// attempt is an error is no gap until the error window has passed. The
+// attempt is an error or partial is no gap until the error window has
+// passed. The
 // library is bound by number and never read off the outer row, because a
 // subquery that reads the outer row runs again for every item.
 //
@@ -162,9 +172,12 @@ func refreshSeconds(refresh, now time.Time) int64 {
 func attemptClause(fact, column string) string {
 	return column + ` NOT IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
 		`AND ` + attemptFactColumn + ` = '` + fact + `' AND at >= ?4 ` +
-		`AND ((result != '` + attemptError + `' AND at >= ?2) ` +
-		`OR (result = '` + attemptError + `' AND at >= ?3)))`
+		`AND ((result NOT IN ` + retriedResults + ` AND at >= ?2) ` +
+		`OR (result IN ` + retriedResults + ` AND at >= ?3)))`
 }
+
+// The results that take the error window, as a list SQL reads.
+const retriedResults = `('` + attemptError + `', '` + attemptPartial + `')`
 
 // The items this fact attempted before the refresh time. They are a gap
 // again whatever the fact's own condition says, because the file the

@@ -263,10 +263,21 @@ the episode sets the wait after a find or a miss:
 A file that holds two episodes takes the later of their dates. An
 error waits one day, whatever the date.
 
+The table applies only where every provider the `Library` names
+answered. Where one provider failed, or was not asked, the attempt
+records the result `partial`. The file keeps the spans the other
+providers answered, keeps the spans the silent provider answered
+before, and waits one day, so that provider is asked again the next
+day.
+
 A provider that answers `429` waits for the reset its headers name and
 asks again. When a provider has spent its allowance for the day, the
 reset is hours away, and the fact asks that provider nothing more in
-this run. The files it did not reach stay in the gap for a later run.
+this run. Every later file of the run is `partial`, and the run stops
+when every provider has spent its allowance. A file that every provider
+answered keeps the window in the table, so the next day's allowance
+goes to the files the spent provider missed and not again to the ones
+it answered.
 
 Neither Jellyfin nor Kodi reads these marks. Jellyfin keeps its media
 segments in its own database, and Kodi's `.edl` sidecar is a different

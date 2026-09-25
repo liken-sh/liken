@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,70 +17,6 @@ import (
 
 // The name of the container that runs the marks group, which is one fact.
 const marksContainerName = "marks"
-
-// The answerers the marks container asks, in the order the Library's sources
-// name their blocks.
-type markLine struct {
-	answerers []markAnswerer
-}
-
-// The answerer of each block the marks fact can ask. TheIntroDB takes the
-// token where one reached the container, and IntroDB takes none.
-var markAnswerers = map[string]func(base, token string, record *tallies) markAnswerer{
-	providerBlockTheIntroDB: func(base, token string, record *tallies) markAnswerer {
-		client := newTheIntroDBClient(base, token)
-		client.recordTo(record)
-		return newTheIntroDBMarkAnswerer(client)
-	},
-	providerBlockIntroDB: func(base, _ string, record *tallies) markAnswerer {
-		client := newIntroDBClient(base)
-		client.recordTo(record)
-		return newIntroDBMarkAnswerer(client)
-	},
-}
-
-// The line, in the order the Library's own spec.sources names the blocks.
-func newMarkLine(blocks []string, value func(string) string, record *tallies) *markLine {
-	return &markLine{answerers: recordingAnswerers(blocks, value, record, markAnswerers)}
-}
-
-// One file's ask: every answerer, because the marks of a file are the union
-// of what the providers hold. A provider that is down does not discard the
-// answers of the other blocks, so the ask returns an error only when no block
-// answered at all.
-//
-// A provider that answers 429 after its cooldowns has spent its allowance for
-// the day, and it leaves the line for the rest of this run, so the run does
-// not spend three requests a file on an answer that cannot change until the
-// allowance resets.
-func (l *markLine) ask(ctx context.Context, file markFile) ([]markEntry, []string, error) {
-	var entries []markEntry
-	var blocks []string
-	var failure error
-	remaining := make([]markAnswerer, 0, len(l.answerers))
-	for _, one := range l.answerers {
-		held, err := one.marks(ctx, file)
-		if !answeredWith(err, http.StatusTooManyRequests) {
-			remaining = append(remaining, one)
-		}
-		if err != nil {
-			if failure == nil {
-				failure = err
-			}
-			continue
-		}
-		if len(held) == 0 {
-			continue
-		}
-		entries = append(entries, held...)
-		blocks = append(blocks, one.providerBlock())
-	}
-	l.answerers = remaining
-	if len(entries) == 0 {
-		return nil, nil, failure
-	}
-	return entries, blocks, nil
-}
 
 // The line is built once for the container, so the settings a provider states
 // are read once. A container with no answerer at all is a manifest to repair,
@@ -109,7 +44,7 @@ func (e *enricher) marksGap(ctx context.Context, line *markLine) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if len(line.answerers) == 0 {
+		if line.exhausted() {
 			e.logf("every provider of the %s fact has spent its allowance for the day, "+
 				"and %d files wait for a later run", factMarks, len(paths)-reached)
 			break
@@ -141,37 +76,29 @@ func (e *enricher) marksGap(ctx context.Context, line *markLine) error {
 func (e *enricher) marksOne(ctx context.Context, line *markLine, path string, file markFile) bool {
 	folder, entry := likenFolderFor(e.kind, filepath.Join(e.root, path))
 	if file.episodes > 1 {
-		e.recordMarks(folder, entry, []markEntry{}, nil, attemptNothing)
+		e.recordMarks(folder, entry, markAnswer{complete: true}, attemptNothing)
 		return false
 	}
-	entries, blocks, err := line.ask(ctx, file)
-	if err != nil {
-		e.logf("could not read the marks of %s: %v", path, err)
-		e.recordMarks(folder, entry, nil, nil, attemptError)
-		return false
+	answer := line.ask(ctx, file)
+	if answer.failure != nil {
+		e.logf("could not read the marks of %s: %v", path, answer.failure)
 	}
-	if len(entries) == 0 {
-		e.recordMarks(folder, entry, []markEntry{}, nil, attemptNothing)
-		return false
-	}
-	e.recordMarks(folder, entry, entries, blocks, attemptFound)
-	return true
+	e.recordMarks(folder, entry, answer, answer.result())
+	return len(answer.entries) > 0
 }
 
 // The spans and the attempt are one write of one file, so a reader never sees
-// an answer without its attempt. The spans of this file replace the ones the
-// ledger held for it, because the ledger says what the providers hold now.
-// A provider that was down leaves the spans as they are, because a failed ask
-// says nothing about where the credits are. The spans of the folder's other
-// files stay as they are.
-func (e *enricher) recordMarks(folder, entry string, entries []markEntry, blocks []string, result string) {
+// an answer without its attempt. The spans of each block that answered
+// replace the ones that block held for the file, because the ledger says what
+// the providers hold now. A block that failed or was not asked leaves its
+// spans as they are, because its silence says nothing about where the
+// credits are. The spans of the folder's other files stay as they are.
+func (e *enricher) recordMarks(folder, entry string, answer markAnswer, result string) {
 	e.tallies.add(tallyAttempts, 1, "fact", factMarks, "result", result)
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, factMarks, func(ledger *likenLedger) {
-		if result != attemptError {
-			ledger.Marks = replacedMarks(ledger.Marks, entry, entries)
-		}
-		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result, Provider: blocks})
+		ledger.Marks = replacedMarks(ledger.Marks, entry, answer.answered, answer.entries)
+		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result, Provider: answer.held})
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v",
@@ -180,13 +107,30 @@ func (e *enricher) recordMarks(folder, entry string, entries []markEntry, blocks
 	e.writeRows(factMarks, folder, result != attemptError)
 }
 
-// The ledger's list with one file's spans replaced. The other files' spans
-// keep their places, and the new spans go where the file's first span was, or
-// at the end for a file the list did not hold.
-func replacedMarks(held []markEntry, entry string, entries []markEntry) []markEntry {
-	at := slices.IndexFunc(held, func(one markEntry) bool { return one.Path == entry })
-	kept := slices.DeleteFunc(slices.Clone(held), func(one markEntry) bool { return one.Path == entry })
-	if at < 0 || at > len(kept) {
+// The ledger's list with one file's spans from the answered sources replaced.
+// The file's other spans and the other files' spans keep their places. The
+// new spans go where the first replaced span was, or after the file's last
+// kept span, or at the end for a file the list did not hold.
+func replacedMarks(held []markEntry, entry string, answered []string, entries []markEntry) []markEntry {
+	at, last := -1, -1
+	kept := make([]markEntry, 0, len(held))
+	for _, one := range held {
+		if one.Path == entry && slices.Contains(answered, one.Source) {
+			if at < 0 {
+				at = len(kept)
+			}
+			continue
+		}
+		kept = append(kept, one)
+		if one.Path == entry {
+			last = len(kept) - 1
+		}
+	}
+	switch {
+	case at >= 0:
+	case last >= 0:
+		at = last + 1
+	default:
 		at = len(kept)
 	}
 	fresh := make([]markEntry, 0, len(entries))
