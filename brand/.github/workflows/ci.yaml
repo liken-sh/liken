@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   go:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
 
@@ -41,7 +41,7 @@ jobs:
   # change to either original that the crate cannot read. It opens no
   # window and needs no GPU, so the runner installs no graphics.
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: iced
