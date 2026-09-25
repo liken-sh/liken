@@ -8,8 +8,9 @@
 # bump re-derives it.
 #
 # Derivation is the floor, not the whole set: the Bluetooth patch
-# families below ship beside the declared names, because their
-# drivers construct those names at runtime and declare nothing.
+# families and the stepped Intel Wi-Fi files below ship beside the
+# declared names, because their drivers construct those names at
+# runtime and never declare them.
 #
 # The full linux-firmware tree is about 1.9 GB, and most of it
 # describes hardware that an x86 server kernel cannot drive (ARM
@@ -45,6 +46,15 @@
 # drops the controller to its ROM and the kernel asks for a file the
 # image never carried, which leaves an unpatched radio. See
 # ship_bluetooth below.
+#
+# Intel Wi-Fi is the second named inclusion, and it is narrower. The
+# iwlwifi driver builds a newer chip's file name from the silicon
+# step it reads off the part, for example iwlwifi-bz-b0-fm-c0, but
+# it declares only the a0 names. The tree carries files for the
+# later steps, and derivation cannot see them, so a b0 part asks for
+# a file that the image never carried. The driver does declare its
+# API ceiling in those a0 names, and ship_iwlwifi below uses that
+# ceiling to ship the one file per step that the driver loads first.
 #
 # A name that resolves no way at all is recorded in the manifest.
 # These are drivers whose firmware upstream never shipped (some
@@ -135,6 +145,7 @@ shipped=0
 aliased=0
 excluded=0
 bluetooth=0
+iwlwifi=0
 unshipped=()
 
 # resolve_link prints the tree-relative target of an alias, or
@@ -191,6 +202,73 @@ ship_bluetooth() {
     )
 }
 
+# ship_iwlwifi ships the stepped siblings of the iwlwifi names that
+# the driver declares. The driver names a file
+# iwlwifi-<mac>-<step>0-<rf>-<step>0-<api>.ucode, and it takes the
+# steps from the part itself (iwl_drv_get_fwname_pre in iwl-drv.c).
+# It asks for its highest API first and counts down. It declares
+# one name per MAC and RF pair, at a0 steps and at that pair's
+# highest API. A "c" before the number marks a firmware core
+# version, which the driver counts above every plain API number.
+#
+# So the ceiling of a pair comes from the declared names, and a MAC
+# with an RF that no declared name pairs it with gets the MAC's
+# highest ceiling. For each stepped prefix in the tree, the function
+# ships the newest file at or under that ceiling, which is the file
+# the driver loads. The files above the ceiling belong to a newer
+# kernel, and the ones below it are never reached. The prefix's
+# .pnvm, the platform data that the driver loads beside the ucode by
+# the same prefix, ships with it. Only the MACs that appear in a
+# declared stepped name take part. The older chips have fixed names,
+# and derivation already ships them by those names.
+ship_iwlwifi() {
+    local file
+    while IFS= read -r file; do
+        [[ -f "$fw/$file" ]] || iwlwifi=$((iwlwifi + 1))
+        ship "$file"
+    done < <(
+        find intel/iwlwifi -maxdepth 1 -type f -name 'iwlwifi-*' -printf '%f\n' |
+            sort |
+            awk -v declared="$names" '
+                function api(s) { return s ~ /^c/ ? 1000 + substr(s, 2) : s + 0 }
+                # parse splits a stepped name into p[1] the MAC, p[2]
+                # the RF without its "4" (the kernel adds it for a
+                # CDB part, which has the same RF), and p[3] the API. It rejects every
+                # other shape, which is how the fixed names stay out.
+                function parse(n, p,    f) {
+                    if (n !~ /\.ucode$/) return 0
+                    sub(/\.ucode$/, "", n)
+                    if (split(n, f, "-") != 6 || f[1] != "iwlwifi") return 0
+                    if (f[3] !~ /^[a-z]0$/ || f[5] !~ /^[a-z]0$/) return 0
+                    if (f[4] !~ /^[a-z]+4?$/ || f[6] !~ /^c?[0-9]+$/) return 0
+                    p[1] = f[2]; p[2] = f[4]; sub(/4$/, "", p[2]); p[3] = f[6]
+                    return 1
+                }
+                BEGIN {
+                    while ((getline n < declared) > 0) {
+                        if (!parse(n, p)) continue
+                        v = api(p[3])
+                        if (v > pair[p[1] "/" p[2]]) pair[p[1] "/" p[2]] = v
+                        if (v > mac[p[1]]) mac[p[1]] = v
+                    }
+                }
+                /\.pnvm$/ { pnvm[$0] = 1; next }
+                parse($0, p) && (p[1] in mac) {
+                    ceiling = (p[1] "/" p[2]) in pair ? pair[p[1] "/" p[2]] : mac[p[1]]
+                    prefix = $0
+                    sub(/-c?[0-9]+\.ucode$/, "", prefix)
+                    v = api(p[3])
+                    if (v <= ceiling && v > best[prefix]) { best[prefix] = v; file[prefix] = $0 }
+                }
+                END {
+                    for (prefix in file) {
+                        print "intel/iwlwifi/" file[prefix]
+                        if ((prefix ".pnvm") in pnvm) print "intel/iwlwifi/" prefix ".pnvm"
+                    }
+                }'
+    )
+}
+
 cd "$tree"
 while IFS= read -r name; do
     if [[ "$name" == nvidia/* ]]; then
@@ -229,6 +307,7 @@ while IFS= read -r name; do
 done <"$names"
 
 ship_bluetooth
+ship_iwlwifi
 
 # Materialize every alias whose target shipped. Aliases beyond the
 # declared names cost nothing and cover names that drivers construct
@@ -259,10 +338,11 @@ cp -r "$tree/LICENSES" "$fw/LICENSES"
     echo
     echo "shipped: $shipped names as files, $aliased through WHENCE links"
     echo "bluetooth: $bluetooth files from the four named vendor families"
+    echo "iwlwifi: $iwlwifi stepped files the declared names missed"
     echo "excluded: $excluded names under nvidia/ (the named exception)"
     echo "unshipped: ${#unshipped[@]} names with no file in this release:"
     printf '  %s\n' "${unshipped[@]}"
 } >"$manifest"
 
 echo "firmware for kernel $release:"
-du -sh "$fw" | cut -f1 | xargs -I{} echo "  {} from $shipped names, $aliased aliases, $bluetooth Bluetooth files, ${#unshipped[@]} unshipped (see derived.txt)"
+du -sh "$fw" | cut -f1 | xargs -I{} echo "  {} from $shipped names, $aliased aliases, $bluetooth Bluetooth files, $iwlwifi iwlwifi files, ${#unshipped[@]} unshipped (see derived.txt)"
