@@ -20,7 +20,7 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 67.
+milestone is 69.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and
@@ -272,6 +272,10 @@ milestone number because their implementation scope is not settled.
   flush and a completion marker, init's supervisor bounds its waits
   and its reaped-status map, the operators refuse to publish on a
   failed read, and the CRD and CI contracts match what the code does.
+* **68.** [Init holds the hardware watchdog](68-init-holds-the-hardware-watchdog.md).
+  A kernel lockup becomes a panic, and init resets the chipset's
+  watchdog from boot to reboot, so a machine that hangs below the
+  kernel resets itself and the next boot reports it.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
