@@ -20,7 +20,7 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 69.
+milestone is 70.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and
@@ -276,6 +276,11 @@ milestone number because their implementation scope is not settled.
   A kernel lockup becomes a panic, and init resets the chipset's
   watchdog from boot to reboot, so a machine that hangs below the
   kernel resets itself and the next boot reports it.
+* **69.** [`liken` builds every component it ships](69-liken-builds-every-component-it-ships.md).
+  Each vendored domain declares a component that builds from source
+  in pinned, signed stagex images. A component builds only when its
+  pin changes, and each build goes to `releases.liken.sh/components/`
+  once, with its source, its recipe, and a signed attestation.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
