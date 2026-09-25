@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   go:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
 
@@ -68,7 +68,7 @@ jobs:
           retention-days: 7
 
   docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # The theme is the brand repository, a submodule at
       # docs/themes/brand. A checkout without it builds a site with
@@ -119,7 +119,7 @@ jobs:
   # it, so a pull request's builds start from the layers the last
   # build on main left.
   images:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # A push to main gets its Dockerfile verdict from release.yaml,
     # which builds every image for that commit at the same moment, so
     # this job runs on a pull request only and no layer builds twice.
@@ -200,7 +200,7 @@ jobs:
   # from this exact workflow run. Nothing else can push content under
   # this site's name.
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # A pull request never publishes. The docs job already proves the
     # site builds, so a pull request needs nothing from here.
