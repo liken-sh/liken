@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -78,7 +78,7 @@ jobs:
   # on a pull request that the site still builds. The publish job
   # below deploys the tree this job built, so the site builds once.
   docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       # The submodule is the brand theme, the presentation every
@@ -160,7 +160,7 @@ jobs:
   publish:
     needs: [checks, docs]
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # A site build and publish takes under 10 minutes, so 15 stops a
     # hung run without killing a real one.
     timeout-minutes: 15
