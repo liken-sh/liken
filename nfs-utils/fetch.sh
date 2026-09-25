@@ -62,10 +62,10 @@ version="$(cat "$here/VERSION")"
 # Every input is pinned by hash, the same discipline as every vendored
 # domain. The nfs-utils pin matches nfs-utils/VERSION. To build any
 # other version, update both.
-builder="docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce" # 3.22
-nfsutils_sha256="e1dd8a9c95af15492065942cc3b52b1339ffd586baa2280ed86c9d3dc4097e8c"
-libtirpc_version="1.3.7"
-libtirpc_sha256="b47d3ac19d3549e54a05d0019a6c400674da716123858cfdb6d3bdd70a66c702"
+builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
+nfsutils_sha256="7dbc05eb8b32828b322872b759a62cb3979cb4118f344dd8616813d1390e84e0"
+libtirpc_version="1.3.8"
+libtirpc_sha256="8839959bfcc7a0f4c609d8e4f53f1c67ae33de23775ec35beb39ff15adf11920"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
@@ -136,12 +136,6 @@ make -j"$(nproc)" install >/dev/null
 # PKG_CONFIG is preset because configure's own pkg-config detection
 # sits inside the readahead block that --disable-nfsrahead skips, so
 # every later PKG_CHECK_MODULES call would report pkg-config missing.
-#
-# CFLAGS adds -include stddef.h because support/nfs/getport.c uses
-# offsetof without including that header. glibc's headers pull it in
-# transitively and musl's do not, so the preprocessor reads it first
-# here. This works around an upstream bug; a release that adds the
-# include makes the flag unnecessary.
 tar xJf "/in/nfs-utils-$VERSION.tar.xz" -C /build
 cd "/build/nfs-utils-$VERSION"
 ./configure --disable-gss --disable-nfsv4 \
@@ -149,7 +143,7 @@ cd "/build/nfs-utils-$VERSION"
     --disable-nfsdcld --disable-nfsdctl --disable-junction \
     --disable-nfsrahead \
     PKG_CONFIG=/usr/bin/pkg-config \
-    CFLAGS="-g -O2 -include stddef.h" >/dev/null
+    CFLAGS="-g -O2" >/dev/null
 make -j"$(nproc)" -C support >/dev/null
 make -j"$(nproc)" -C utils/mount LDFLAGS="-all-static" >/dev/null
 

@@ -76,8 +76,8 @@ version="$(cat "$here/VERSION")"
 # source by the sha256 of its tarball. A bump to any of them is a
 # reviewable diff on this file. The open-iscsi pin matches the version
 # in open-iscsi/VERSION. To build any other version, update both.
-builder="docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce" # 3.22
-openiscsi_sha256="e2441b61e4b05cd5f0f94b35dcdf460e8d542e40d71b480882628170d6462d9a"
+builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
+openiscsi_sha256="1c3a8ad7d86e57d247a08c013f5055ef695b3a07ed760d1aea7d90b9f9011602"
 kmod_version="34"
 kmod_sha256="12e7884484151fbd432b6a520170ea185c159f4393c7a2c2a886ab820313149a"
 libeconf_version="0.8.4"

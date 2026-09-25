@@ -11,9 +11,7 @@
 // a fetch script, so this domain needs neither.
 module github.com/liken-sh/liken/docs
 
-go 1.26.5
-
-toolchain go1.27.0
+go 1.27.0
 
 tool (
 	github.com/gohugoio/hugo
@@ -23,10 +21,7 @@ tool (
 	honnef.co/go/tools/cmd/staticcheck
 )
 
-require (
-	github.com/liken-sh/brand v0.0.0-20260917175004-3475e2fbf5af
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
+require github.com/liken-sh/brand v0.0.0-20260917175004-3475e2fbf5af
 
 require (
 	cel.dev/expr v0.25.3 // indirect
@@ -104,14 +99,14 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/frankban/quicktest v1.14.6 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
-	github.com/getkin/kin-openapi v0.148.0 // indirect
+	github.com/getkin/kin-openapi v0.149.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
 	github.com/go-openapi/testify/v2 v2.6.1 // indirect
 	github.com/gobuffalo/flect v1.0.3 // indirect
-	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/gobwas/glob v1.0.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/gohugoio/gift v0.2.0 // indirect
@@ -119,7 +114,7 @@ require (
 	github.com/gohugoio/go-radix v1.2.0 // indirect
 	github.com/gohugoio/hashstructure v1.0.0 // indirect
 	github.com/gohugoio/httpcache v0.9.0 // indirect
-	github.com/gohugoio/hugo v0.165.0 // indirect
+	github.com/gohugoio/hugo v0.166.0 // indirect
 	github.com/gohugoio/hugo-goldmark-extensions/extras v0.7.0 // indirect
 	github.com/gohugoio/hugo-goldmark-extensions/passthrough v0.5.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
@@ -172,7 +167,7 @@ require (
 	github.com/tdewolff/minify/v2 v2.24.17 // indirect
 	github.com/tdewolff/parse/v2 v2.8.16 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
-	github.com/yuin/goldmark v1.8.5 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.46.0 // indirect
@@ -189,10 +184,10 @@ require (
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260824195058-e88cd73687aa // indirect
 	golang.org/x/image v0.45.0 // indirect
-	golang.org/x/mod v0.40.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
@@ -204,6 +199,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
 	howett.net/plist v1.0.1 // indirect
 	rsc.io/qr v0.2.0 // indirect

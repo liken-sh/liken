@@ -91,7 +91,7 @@ version="$(cat "$here/VERSION")"
 # domains that compile from source. zic is a few thousand lines of C
 # with no dependency beyond libc, and its output is architecture
 # independent data, so the toolchain has little effect on the result.
-builder="docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce" # 3.22
+builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
 
 releases="https://data.iana.org/time-zones/releases"
 
