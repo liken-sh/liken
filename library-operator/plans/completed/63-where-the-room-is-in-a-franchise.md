@@ -5,7 +5,7 @@ screen, the viewers, have reached some point in that story. This plan
 shows that point on the page and draws a progress bar under every
 member. It also makes a selection of a split series member open the
 series at the viewers' position inside that member's run. Designed
-2026-09-14.
+and built 2026-09-14, and released in 2026.09.15-001 on 2026-09-15.
 
 ## The problem
 

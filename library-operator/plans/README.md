@@ -104,16 +104,18 @@ they share, and plans 28 to 31 build them in order.
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
-* [63, Showing the viewers' place in a franchise](63-where-the-room-is-in-a-franchise.md).
-  A column of circles marks where the room and each person stand in
-  the story, every held member carries a bar, and a press on a split
-  series member opens inside its run.
 
 Plan 32 covers a separate part of the system from the enrichment work.
 
 
 ## Completed
 
+* [63, Showing the viewers' place in a
+  franchise](completed/63-where-the-room-is-in-a-franchise.md). Built
+  on 2026-09-14 and released in 2026.09.15-001. A column of circles
+  marks where the room and each person stand in the story, every held
+  member carries a bar, and a press on a split series member opens
+  inside its run.
 * [62, Intro and credits
   marks](completed/62-intro-and-credits-marks.md). Built, and drilled
   on `liken-1` on 2026-09-25. The `marks` fact reads intro, recap,
