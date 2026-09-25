@@ -53,7 +53,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # The idle image compiles liken-iced out of the brand submodule
       # at docs/themes/brand, and the documentation builds against the
