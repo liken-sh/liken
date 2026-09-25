@@ -3,9 +3,15 @@
 This plan joins two stubs: plan 62 from a 2026-09-14 conversation,
 which recorded the problem, and plan 65 from a 2026-09-22 conversation,
 which named the sources. The design is from a 2026-09-24 conversation.
-The first version is built in this repository and in
+Built in this repository and in
 [`media-operator`](https://github.com/liken-sh/media-operator) on
-2026-09-24, and it is not yet drilled on a cluster.
+2026-09-24, and drilled on `liken-1` on 2026-09-25 with library-operator
+2026.09.19-002-dev-008-fc1c8720 and media-operator
+2026.09.19-001-dev-003-8beb09e1. The `marks` fact reads TheIntroDB and
+IntroDB, the media browser forwards every candidate span on the Play,
+and the display offers a skip over the recap and the intro and raises
+the up-next card at the credits. [The drill](#the-drill-on-liken-1)
+records what a real episode showed.
 
 ## The problem
 
@@ -92,7 +98,7 @@ its rule later without a new lookup.
 
 `marks` is one more fact in the enricher, with the same vocabulary as
 the others: a name in `spec.facts` and `spec.refresh`, its own
-container, its own `.liken/` file, a miss with a date, and the retry
+container, its own `.liken/` file, a miss with a date, and a retry
 window.
 
 - **The gap** is the main video of each identified movie or episode,
@@ -109,6 +115,20 @@ window.
 - **A file that holds two episodes** records a miss without a lookup,
   because the first episode's spans would give wrong times for the
   file.
+- **A partial attempt** is one where some providers answered and one
+  failed or was not asked, because its daily allowance was spent. Each
+  provider that answered replaces only its own spans, the others keep
+  theirs, and the file takes the one-day error window. So the next
+  day's allowance goes to the files that are still missing an answer.
+
+**The retry window follows the release.** The community adds spans
+for a new episode or film in the days after it comes out, and the
+first answers are few and rough. A find or a miss holds for one day
+while the work is in its first seven days, for seven days until it is
+ninety days old, and for the usual thirty days after that, or when the
+work has no release date. An error or a partial attempt holds for one
+day at any age. An attempt made before the release date reopens on the
+release day, as it does for the other facts that read a release date.
 
 The catalog has a `marks` table with one row per span:
 library, path, ordinal, kind, `start_ms`, `end_ms`, and source.
@@ -129,9 +149,19 @@ So the fact writes no `.nfo` and no `.edl`.
 waits and goes out again. A request whose cooldown is longer fails at
 once with the provider's answer, and the fact asks again on a later
 run. When a provider has spent its daily allowance, the run stops
-asking it. At 1000 calls a day, a first pass over a library of several
-thousand episodes takes several days, and the retry window spreads the
-load.
+asking it, and the files it did not answer become partial attempts. On
+`liken-1`, the allowance of 1000 ran out about five minutes into a run.
+After the first run, 509 movie files and 519 series files had answers
+from both databases, and 943 movie files and 5863 series files were
+partial. At 1000 calls a day, TheIntroDB reaches the rest in about a
+week.
+
+**The provider check.** The operator checks a provider on its first
+pass, when the provider or its `Secret` changes, and otherwise once an
+hour after an answer or every five minutes after an outage. The check
+ran on every pass before, at least every ten seconds, so OMDb's check
+alone could spend 8640 calls a day of a free key's 1000. TheIntroDB's
+check reads `/health`, which spends none of its allowance.
 
 ### The Play
 
@@ -177,18 +207,22 @@ the playhead is inside the credits and a scene follows, the display
 offers "Skip to post-credits scene" with the same control. The target
 is the start of the first `post-credits` span after the playhead. With
 no such span, the target is the end of the first of two or more credits
-spans. A film with credits and no scene offers no control. The card
-and the control are up together in the credits, and a wake focuses the
-control, because a skip is a seek that a seek back undoes, and the
-offer ends the run. In a local run with TheIntroDB's form, two credits
+spans. A film with credits and no scene offers no control. The
+up-next card waits until after the scene, so in the first credits span
+the control is the only thing on the screen. In a local run with TheIntroDB's form, two credits
 candidates merged to 120.25 to 170.1 seconds, and the skip landed at
 170.1 seconds.
 
 **Up next.** The card rises at the start of the earliest merged
 credits span that starts in the second half of the runtime. A credits
 span in the first half is an opening title sequence, and it moves
-nothing. With no such span, the card rises by the time that remains, as
-before. In the local run, a 200-second test file with credits at
+nothing. When a scene follows the credits, the card rises at the later
+of the start of the last credits span and the end of the last scene,
+so a person who takes the offer does not miss the scene. That point is
+capped at the time rule, because a `post-credits` span with no end
+would otherwise put the rise at the end of the file, and the card would
+never show. With no credits span, the card rises by the time that
+remains, as before. In the local run, a 200-second test file with credits at
 150 seconds raised the card at 2:31. The time rule would have raised it
 at 3:14.
 
@@ -234,12 +268,6 @@ lets a person correct a span could send the correction back.
 
 - Whether to write an `.edl` beside the media for Kodi. It would carry
   only a start, an end, and an action code, and it would drop the kind.
-- Whether the up-next offer should do anything different when a
-  post-credits scene is still ahead. A person who takes the offer in
-  the first credits span does not see the scene, and nothing on the
-  screen says a scene follows. One option adds a line to the card.
-  Another raises the card at the start of the last credits span,
-  after the scene.
 - The databases' terms of use. Neither database states terms for its
   read API.
 
@@ -254,11 +282,43 @@ overlapping candidates, a null start, a null end, two credits spans, an
 unknown kind, and a credits span in the first half. The watched rule's
 tests use the same cases.
 
-A headless local run of the display, with a generated test video,
-proved the skip and the credits card. The drill on `liken-1` is not
-done: it plays an episode that both databases have and a film with a
-post-credits scene, and a person checks the skip, the card, and the
-watched state in Jellyfin.
+Table tests over the catalog test the retry windows by release age,
+the partial attempt, and a provider that runs out of allowance partway
+through a run. A headless local run of the display, with a generated
+test video, proved the skip, the skip to the scene, and the credits
+card before the drill.
+
+## The drill on liken-1
+
+On 2026-09-25, 12 Monkeys S01E02 played on `lab-portable`, driven by
+remote presses published on the bus and captured through `media-api`.
+The picker answer was "Nobody", so the drill wrote no progress. Both
+databases had the episode: a recap from 0 to 38 seconds, an intro from
+38 to 53.5 seconds and from 39 to 54 seconds, and credits from 42:43 and
+42:48 in a runtime of 43:33.
+
+- The Play held all six candidates, exactly as the catalog stored them.
+- "Skip recap" showed from the start, and its skip landed at 0:38.
+- "Skip intro" showed over the title sequence, and its skip landed on
+  the first frame of the story.
+- At 42:24 no card showed. The time rule would have raised it at 42:15.
+  The card rose about three seconds after the credits began, at the
+  merged mark.
+
+The drill found three things to decide in person:
+
+- The display hides four seconds after a wake. A select that comes
+  later reaches the bare video and pauses the film, so a person who
+  reads the skip control before pressing it can pause instead of skip.
+- A fine scrub moves a cursor, and select commits it only while the
+  scan runs. After the display hides and wakes again, the old cursor
+  still draws, and select pauses the film.
+- `status.position` on the Play lags the screen by ten to twenty
+  seconds, and it does not move while the film is paused.
+
+Two parts are not drilled: the watched state that the jellyfin role
+writes from the credits mark, and the skip to a post-credits scene on a
+real film.
 
 ## Sources
 

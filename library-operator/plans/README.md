@@ -104,11 +104,6 @@ they share, and plans 28 to 31 build them in order.
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
-* [62, Intro and credits marks](62-intro-and-credits-marks.md). Built
-  on 2026-09-24 and not yet drilled. The `marks` fact reads intro,
-  recap, credits, and post-credits spans from TheIntroDB and IntroDB
-  and stores every candidate. The player offers a skip, and the up-next
-  card and the watched rule use the credits start.
 * [63, Where the room is in a franchise](63-where-the-room-is-in-a-franchise.md).
   A column of circles marks where the room and each person stand in
   the story, every held member carries a bar, and a press on a split
@@ -119,6 +114,13 @@ Plan 32 covers a separate part of the system from the enrichment work.
 
 ## Completed
 
+* [62, Intro and credits
+  marks](completed/62-intro-and-credits-marks.md). Built, and drilled
+  on `liken-1` on 2026-09-25. The `marks` fact reads intro, recap,
+  credits, and post-credits spans from TheIntroDB and IntroDB and stores
+  every candidate, and a new release is asked again daily in its first
+  week. The display offers a skip over the recap and the intro, and the
+  up-next card and the watched rule use the credits start.
 * [64, A refresh that walks a
   library](completed/64-a-refresh-that-walks-a-library.md). Built, and
   drilled on `liken-1` on 2026-09-19, in release
