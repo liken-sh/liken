@@ -16,10 +16,10 @@ asked. The `trailer` and `marks` facts take the union of their
 providers, so they ask every provider in the list that serves them.
 
 A `MetadataProvider` names exactly one provider block: `tmdb`,
-`omdb`, `fanart`, `tvmaze`, `peertube`, `archive`, `theintrodb`, or
-`introdb`. TMDb, OMDb, and Fanart.tv take a key from a `Secret`;
-TVmaze, the Internet Archive, and IntroDB take none, so their blocks
-are empty. TheIntroDB takes a key where its block names a `Secret`
+`omdb`, `fanart`, `tvmaze`, `peertube`, `archive`, `theintrodb`,
+`introdb`, or `imdb`. TMDb, OMDb, and Fanart.tv take a key from a
+`Secret`; TVmaze, the Internet Archive, IntroDB, and IMDb take none,
+so their blocks are empty. TheIntroDB takes a key where its block names a `Secret`
 and asks with none where it names none. PeerTube takes no key either,
 but it is software that many people run, so its block names the
 address of one instance. The `PROVIDER` column shows the block.
@@ -64,12 +64,20 @@ empty while the provider is not `Ready`.
       tvmaze: {}
     ---
     apiVersion: library.liken.sh/v1alpha1
+    kind: MetadataProvider
+    metadata:
+      name: imdb
+      namespace: media
+    spec:
+      imdb: {}
+    ---
+    apiVersion: library.liken.sh/v1alpha1
     kind: Library
     metadata:
       name: movies
       namespace: media
     spec:
-      sources: [tmdb, omdb, tvmaze]
+      sources: [tmdb, imdb, omdb, tvmaze]
       # the rest as before
 
 The operator checks each provider with one call to the provider, and
@@ -92,6 +100,38 @@ so an edit of the `Secret` is what calls again at once. An account with
 a daily allowance, such as OMDb's thousand calls, spends at most
 twenty-four of them a day on the check.
 
+The `imdb` block has no API to call. IMDb publishes its datasets as
+files, so the check sends one `HEAD` request for each file that the
+provider's served facts read: `title.ratings` and `title.episode` for
+`rating.imdb`. Every file must answer `200` for `Reachable`. Any other
+status is `Unavailable`, and the message names the file. The check
+keeps the same schedule as every other provider, so while IMDb
+answers it sends one `HEAD` request for each file an hour. A `HEAD`
+request transfers no file.
+
+`status.imdb.datasets` lists what IMDb returned for each file: its
+`lastModified`, `etag`, and `size`. A failed check leaves the entries
+of the last check that read the files. The `UPDATED` column shows the
+oldest `lastModified`. IMDb replaces each file every day, so a file
+older than three days writes the `Stale` condition with status `True`,
+and its message names the file and its date. `Stale` does not change
+`Ready`, because a file from last week still gives correct ratings.
+
+    $ kubectl -n media get metadataprovider imdb
+    NAME   PROVIDER   READY   REASON      UPDATED   AGE
+    imdb   imdb       True    Reachable   9h        3d
+
+The operator caches the files on the claim `<provider>-datasets`, 3Gi,
+in the provider's namespace. The provider owns the claim, so deleting
+the provider deletes the cache. The claim is on the cluster's
+`StorageClass` whose provisioner is `per-node.liken.sh`, whatever class
+the libraries use, and each node keeps its own copy of each file. The
+`Cached` condition is `True` with the reason `PerNodeClass` when the
+claim exists. A cluster with no per-node class gets no claim, and
+`Cached` is `False` with the reason `NoPerNodeClass`. Each enricher
+run then reads the files from IMDb directly. `Cached` does not change
+`Ready` either.
+
 One account with one metadata provider, named by the Libraries of its namespace in spec.sources.
 
 ## spec
@@ -108,6 +148,7 @@ The provider this account is with, and the facts it may serve. A spec that names
 | <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second. |
 | <span id="spec--theintrodb"></span>`theintrodb` | [object](#spectheintrodb) | no | The account is with TheIntroDB, a community database of the intro, recap, credits, and preview spans of movies and episodes. It provides only the marks fact, and it finds a work by its TMDb id. A key is optional. Without one, TheIntroDB answers 500 asks a day for each address and serves accepted submissions alone. With one, it answers 1000 asks a day for the account and adds the account's own pending submissions. The operator checks it at /health, which spends none of the daily allowance and cannot test the key. |
 | <span id="spec--introdb"></span>`introdb` | object | no | The account is with IntroDB, a community database of the intro, recap, credits, and post-credits spans of movies and episodes. It provides only the marks fact, finds a work by its IMDb id, and needs no account. The block is empty, and its presence says that the operator may ask IntroDB. |
+| <span id="spec--imdb"></span>`imdb` | object | no | The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and need no account. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there. |
 | <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
@@ -195,11 +236,32 @@ What the operator's own check found, written only by the library operator.
 | <span id="status--provider"></span>`provider` | string | no | The provider block this account names. The PROVIDER column reads it here, because no printer column can read which block a spec holds. |
 | <span id="status--facts"></span>`facts` | []string | no | The facts this provider serves now: what the operator can request from this provider, narrowed by spec.facts. The list is empty while the Ready condition is not True, because an unreachable provider serves nothing. |
 | <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. The time remains after the key works again, so a person can see that it once failed. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. |
+| <span id="status--imdb"></span>`imdb` | [object](#statusimdb) | no | What the check of an imdb block read from IMDb. A failed check leaves the entries of the last check that read the files, because the last version IMDb published is still a fact. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb. |
+
+### status.imdb
+
+What the check of an imdb block read from IMDb. A failed check leaves the entries of the last check that read the files, because the last version IMDb published is still a fact.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusimdb--updated"></span>`updated` | string | no | The oldest lastModified in datasets, which the UPDATED column shows. |
+| <span id="statusimdb--datasets"></span>`datasets` | [\[\]object](#statusimdbdatasets) | no | One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode. |
+
+#### status.imdb.datasets[]
+
+One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusimdbdatasets--name"></span>`name` | string | yes | The file's name at IMDb, without the .tsv.gz suffix. |
+| <span id="statusimdbdatasets--lastmodified"></span>`lastModified` | string | no | When IMDb last replaced the file, from its Last-Modified header. IMDb replaces each file every day. |
+| <span id="statusimdbdatasets--etag"></span>`etag` | string | no | The file's ETag header. |
+| <span id="statusimdbdatasets--size"></span>`size` | integer | no | The size of the gzipped file in bytes, from its Content-Length header. |
 
 ### status.conditions[]
 
-Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code.
+Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

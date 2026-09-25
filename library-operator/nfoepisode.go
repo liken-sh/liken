@@ -28,6 +28,7 @@ type episodeNFO struct {
 	Actors    []nfoActor    `xml:"actor"`
 	UniqueIDs []nfoUniqueID `xml:"uniqueid"`
 	FileInfo  nfoFileInfo   `xml:"fileinfo"`
+	Ratings   nfoRatings    `xml:"ratings"`
 }
 
 // episodeMeta is what parseEpisodeNFOs reads from an episode .nfo.
@@ -40,6 +41,8 @@ type episodeMeta struct {
 	Body        episodeBody
 	Duration    int64
 	Stream      streamInfo
+	// The nfo facts the block answers, in the form the nfo_facts column holds.
+	NFOFacts string
 }
 
 // parseEpisodeNFOs reads every episodedetails block an episode .nfo holds, in
@@ -89,7 +92,9 @@ func episodeMetaFrom(raw episodeNFO) episodeMeta {
 			Writers:     mergeDedup(raw.Writers, raw.Credits),
 			Cast:        castMembers(raw.Actors),
 			ProviderIDs: providers,
+			Ratings:     bodyRatings(raw.Ratings.Ratings),
 		},
+		NFOFacts: nfoFactsAnswered(raw.Plot, "", raw.Ratings.Ratings),
 		Duration: itemDuration(stream, raw.Runtime),
 		Stream:   stream,
 	}

@@ -93,6 +93,11 @@ func (s providerSet) servingAny(namespace string, sources, facts []string) *Meta
 type providerVerdict struct {
 	reason  string
 	message string
+	// What the check of a datasets block read: the headers of each file, and
+	// the verdict on the cache of the files. Every other block leaves both
+	// empty.
+	datasets []IMDbDataset
+	cached   *Condition
 }
 
 // The pass checks every provider once and answers with the set the Libraries
@@ -162,6 +167,7 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 		status.Facts = provider.servedFacts()
 	}
 	status.Conditions = SetCondition(slices.Clone(provider.Status.Conditions), condition, now)
+	deriveDatasetStatus(&status, provider, verdict, now)
 	return status
 }
 
@@ -197,6 +203,9 @@ func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider
 // The one call to the provider and the verdict its answer earns.
 func (o *operator) callProvider(ctx context.Context, provider *MetadataProvider, key string) providerVerdict {
 	block := provider.block()
+	if blockOf(block).datasets {
+		return o.checkDatasets(ctx, provider)
+	}
 	status, err := o.askProvider(ctx, provider, key)
 	if err != nil {
 		return providerVerdict{reason: reasonUnreachable, message: err.Error()}

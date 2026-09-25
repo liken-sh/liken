@@ -181,6 +181,10 @@ type likenAttempt struct {
 	At       time.Time     `yaml:"at"`
 	Result   string        `yaml:"result"`
 	Provider providerNames `yaml:"provider,omitempty"`
+	// The Last-Modified time of the dataset file that answered, for a fact that
+	// reads a bulk file. The rating.imdb gap reads it to decide whether a newer
+	// file is worth a read.
+	DatasetModified time.Time `yaml:"datasetModified,omitempty"`
 }
 
 // A fact's file is named for the fact itself, so the one-file-per-

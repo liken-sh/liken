@@ -256,6 +256,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(list)
 	case strings.Contains(r.URL.Path, "/persistentvolumeclaims/"):
 		f.serveClaim(w, r, name)
+	case r.URL.Path == storageClassesPath:
+		list := StorageClassList{}
+		for _, key := range sortedNames(f.storageClasses) {
+			list.Items = append(list.Items, *f.storageClasses[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
 	case strings.Contains(r.URL.Path, "/storageclasses/"):
 		answer(w, f.storageClasses[name])
 	case r.URL.Path == volumesPath:

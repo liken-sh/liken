@@ -379,7 +379,7 @@ func TestARefreshGivesAPhaseWork(t *testing.T) {
 			library.Spec.Refresh = one.refresh
 			report := &libraryReport{OldestAttempts: map[string]time.Time{factIdentity: oldest}}
 
-			if got := phaseGapOpen(library, report, []string{factIdentity}); got != one.want {
+			if got := phaseGapOpen(library, report, providerSet{}, []string{factIdentity}, time.Now()); got != one.want {
 				t.Errorf("phaseGapOpen = %v, want %v", got, one.want)
 			}
 		})

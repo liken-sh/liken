@@ -317,6 +317,10 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 		return libraryReport{}, err
 	}
 	report.Gaps = gaps
+	report.EpisodeGaps, err = r.catalog.episodeGapCounts(ctx, library, time.Now().UTC())
+	if err != nil {
+		return libraryReport{}, err
+	}
 	report.OldestAttempts, err = r.catalog.oldestAttempts(ctx, library)
 	if err != nil {
 		return libraryReport{}, err

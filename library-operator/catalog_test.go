@@ -232,8 +232,8 @@ func TestUpsertEpisodesCarriesTheSeriesColumns(t *testing.T) {
 	if !strings.Contains(got.sql, "INSERT INTO episodes") || !strings.Contains(got.sql, "series = excluded.series") {
 		t.Errorf("sql = %q, want an upsert on episodes with the series columns", got.sql)
 	}
-	if len(got.params) != 16 {
-		t.Fatalf("params = %d, want 16", len(got.params))
+	if len(got.params) != 17 {
+		t.Fatalf("params = %d, want 17", len(got.params))
 	}
 	if got.params[12] != "series:tvdb:81189" {
 		t.Errorf("params[12] = %v, want the series id", got.params[12])

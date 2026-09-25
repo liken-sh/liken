@@ -200,10 +200,17 @@ func walkRequested(library *Library, last time.Time) bool {
 // does not start a Job on every pass.
 func gapPhases(library *Library, report *libraryReport, providers providerSet,
 	served []servedPhase, now time.Time) []servedPhase {
-	due := enrichDue(enrichCause(library, report.Runs, providers, now), report.Runs)
+	cause := enrichCause(library, report.Runs, providers, now)
+	// An IMDb rating that became old enough to read again is a cause of its
+	// own, at the time it became old, so one Job answers it and the next
+	// waits for the next rating to age.
+	if reopened := datasetReopenCause(library, report, providers, now); reopened.After(cause) {
+		cause = reopened
+	}
+	due := enrichDue(cause, report.Runs)
 	var phases []servedPhase
 	for _, phase := range served {
-		if !phaseGapOpen(library, report, phase.served) {
+		if !phaseGapOpen(library, report, providers, phase.served, now) {
 			continue
 		}
 		if timeLimitedPhases[phase.name] || due {

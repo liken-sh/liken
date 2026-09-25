@@ -133,6 +133,30 @@ func (w *volumeWriter) removeTemporary(path string) error {
 	return os.Remove(path)
 }
 
+// land renames a temporary this writer filled onto its target, for a file
+// too large to hold in memory, which write cannot take. It refuses a source
+// with no temporary mark, so it moves only what this binary wrote.
+func (w *volumeWriter) land(temporary, target string) error {
+	if !strings.Contains(filepath.Base(temporary), likenTempMark) {
+		return fmt.Errorf("refusing to move %s: it carries no %s mark", temporary, likenTempMark)
+	}
+	if filepath.Dir(temporary) != filepath.Dir(target) {
+		return fmt.Errorf("refusing to move %s out of its own directory", temporary)
+	}
+	return os.Rename(temporary, target)
+}
+
+// removeDatasetCopy deletes one superseded copy of an IMDb dataset file from
+// the provider's cache claim. The cache is not a library volume, and the
+// remove refuses every name but the one the cache gives a copy: sixteen
+// lowercase hex characters and the .tsv.gz suffix.
+func (w *volumeWriter) removeDatasetCopy(path string) error {
+	if !isDatasetCopyName(filepath.Base(path)) {
+		return fmt.Errorf("refusing to remove %s: it is not a dataset copy", path)
+	}
+	return os.Remove(path)
+}
+
 // The WebVTT map earlier releases of the trickplay fact wrote beside the sheets.
 const trickplayMapName = "tiles.vtt"
 

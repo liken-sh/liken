@@ -255,14 +255,15 @@ func (c *Catalog) UpsertEpisodes(ctx context.Context, rows []episodeRow) (int, e
 	for i, row := range rows {
 		payload, _ := json.Marshal(row.Body)
 		statements[i] = statement{
-			sql: `INSERT INTO episodes (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, series, season, episode, arts) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO episodes (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, series, season, episode, arts, nfo_facts) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, id) DO UPDATE SET ` +
 				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
-				`series = excluded.series, season = excluded.season, episode = excluded.episode, arts = excluded.arts`,
-			params: []any{row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, string(payload), row.Slug, row.Series, row.Season, row.Episode, artsParam(row.Arts)},
+				`series = excluded.series, season = excluded.season, episode = excluded.episode, arts = excluded.arts, ` +
+				`nfo_facts = excluded.nfo_facts`,
+			params: []any{row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, string(payload), row.Slug, row.Series, row.Season, row.Episode, artsParam(row.Arts), row.NFOFacts},
 		}
 	}
 	return c.apply(ctx, statements)

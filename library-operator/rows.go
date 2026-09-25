@@ -83,11 +83,12 @@ type seriesBody struct {
 
 // episodeBody is what an episode .nfo holds beyond the shared header.
 type episodeBody struct {
-	Plot        string            `json:"plot,omitempty"`
-	Directors   []string          `json:"directors,omitempty"`
-	Writers     []string          `json:"writers,omitempty"`
-	Cast        []castMember      `json:"cast,omitempty"`
-	ProviderIDs map[string]string `json:"providerIds,omitempty"`
+	Plot        string             `json:"plot,omitempty"`
+	Directors   []string           `json:"directors,omitempty"`
+	Writers     []string           `json:"writers,omitempty"`
+	Cast        []castMember       `json:"cast,omitempty"`
+	ProviderIDs map[string]string  `json:"providerIds,omitempty"`
+	Ratings     map[string]float64 `json:"ratings,omitempty"`
 }
 
 // movieRow is one row of the movies item table: the header columns every
@@ -152,6 +153,7 @@ type episodeRow struct {
 	Series   string
 	Season   int
 	Episode  int
+	NFOFacts string
 }
 
 // fileRow is one physical file and the item ids it belongs to. Items drives

@@ -132,7 +132,7 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 		AutomountServiceAccountToken:  &noToken,
 		InitContainers:                []Container{catalogSidecar(images.corrosion)},
 		Containers:                    containers,
-		Volumes:                       libraryJobVolumes(library),
+		Volumes:                       libraryJobVolumes(library, providers, included),
 	}
 	// The pod holds the render claim only where the Library names a render
 	// block and the Job runs trickplay. With none it decodes in software.
@@ -157,8 +157,10 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 // volume, and the scan container mounts it read-only, so a scanner a person
 // supplies never writes the media. The phases write beside the media, into
 // the claim a screen reads: the storage claim, or a franchises library's art
-// claim, which the scan also writes the downloaded art into.
-func libraryJobVolumes(library *Library) []Volume {
+// claim, which the scan also writes the downloaded art into. A Job that runs
+// the nfo phase also holds the cache of the IMDb dataset files, where the
+// Library's sources name an imdb provider that has one.
+func libraryJobVolumes(library *Library, providers providerSet, included []string) []Volume {
 	volumes := []Volume{
 		// The agent's state is the Library's own durable claim. It keeps the
 		// agent's actor id and its rows between runs, so a run syncs a delta
@@ -178,6 +180,9 @@ func libraryJobVolumes(library *Library) []Volume {
 			Name:                  artVolumeName,
 			PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: claim},
 		})
+	}
+	if slices.Contains(included, nfoContainerName) {
+		volumes = append(volumes, datasetsCacheVolumes(library, providers)...)
 	}
 	return volumes
 }
@@ -222,6 +227,9 @@ func phaseContainer(library *Library, providers providerSet, languages []string,
 		container.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
 	case trailerFileContainerName:
 		container.Resources.Limits = map[string]string{"memory": trailersMemoryLimit}
+	case nfoContainerName:
+		// The nfo container alone mounts the cache of the IMDb dataset files.
+		mountDatasetsCache(library, providers, &container)
 	}
 	// The source order, the keys, and the languages travel in one
 	// environment, so a container asks its providers in the order

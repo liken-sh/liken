@@ -132,5 +132,9 @@ func (e *enricher) runSynced(ctx context.Context, facts []string,
 		return err
 	}
 	e.logf("the catalog synced in %s", time.Since(started).Round(time.Second))
+	// The dataset reads start once for the container, and they run beside
+	// the facts, so a read of a large file does not delay the plot or the
+	// other ratings.
+	e.startDatasetReads(ctx, facts)
 	return work(ctx, facts)
 }

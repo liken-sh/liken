@@ -5,6 +5,7 @@ package main
 // serve, and the read that copies the scores into an item's body.
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -90,4 +91,24 @@ func bodyRatings(ratings []nfoRating) map[string]float64 {
 		return nil
 	}
 	return held
+}
+
+// Whether the IMDb rating an answer holds differs from the one the .nfo file
+// holds, at the one decimal IMDb states and the media browser shows. A change
+// in the vote count alone is no change, because the count of almost every
+// title changes each month, and a refresh that wrote it would rewrite every
+// .nfo file of a library and start a rescan of every folder.
+func ratingChanged(document []byte, merged factAnswer) bool {
+	var read struct {
+		Ratings nfoRatings `xml:"ratings"`
+	}
+	if merged.Rating == nil || lenientXML(document).Decode(&read) != nil {
+		return true
+	}
+	held := ratingNamed(read.Ratings.Ratings, imdbRatingName)
+	if held == nil {
+		return true
+	}
+	value, scored := held.score()
+	return !scored || math.Round(value*10) != math.Round(merged.Rating.Value*10)
 }

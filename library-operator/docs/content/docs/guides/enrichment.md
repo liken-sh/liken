@@ -70,6 +70,11 @@ The providers, and the facts each one serves:
   post-credits spans of movies and episodes. It finds a work by its IMDb
   id and needs no account. Declare it with an empty block,
   `introdb: {}`.
+* `imdb`, IMDb's published datasets: the IMDb rating of movies, series,
+  and episodes, from files that IMDb replaces every day. It needs no
+  account and has no daily limit. Declare it with an empty block,
+  `imdb: {}`. [IMDb ratings from the datasets](#imdb-ratings-from-the-datasets)
+  describes how the files are read and kept.
 
 The operator checks that each provider answers with one call: when it
 starts, when you edit the provider or its `Secret`, and then once an
@@ -79,9 +84,13 @@ minutes until it does. A refused key waits the hour, so edit its
 a phase container of the `Library`'s `Job`, so no long-running pod stores it.
 
     $ kubectl -n media get metadataproviders
-    NAME    PROVIDER   READY   REASON      AGE
-    tmdb    tmdb       True    Reachable   3d
-    omdb    omdb       False   Refused     3d
+    NAME    PROVIDER   READY   REASON      UPDATED   AGE
+    tmdb    tmdb       True    Reachable             3d
+    omdb    omdb       False   Refused               3d
+    imdb    imdb       True    Reachable   9h        3d
+
+`UPDATED` is for `imdb` alone: the oldest time IMDb replaced one of the
+files the provider reads.
 
 `spec.facts` narrows what one account serves.
 [MetadataProvider](/docs/reference/metadataproviders/) describes every
@@ -104,6 +113,18 @@ genres, takes the union of every provider that answers. Art takes the
 first provider that holds an image. The `Sources` condition on the
 `Library` reports whether every name resolves and every fact the
 library needs has a provider.
+
+Put `imdb` before `omdb` for the IMDb rating. The datasets rate every
+title in one read of one file, and OMDb's thousand calls a day then go
+to the plot, the certification, and the Rotten Tomatoes and Metacritic
+ratings. Only `imdb` rates episodes, and only when it is the first
+source that serves `rating.imdb`:
+
+    spec:
+      sources:
+        - tmdb
+        - imdb
+        - omdb
 
 ## 3. What the phases do
 
@@ -396,6 +417,60 @@ The `trailer-files` phase of the `Library`'s `Job` runs the fact, and
 two titles pull at once inside it. Like `trickplay`, the phase starts
 no new title fifteen minutes into a run, and the next `Job` goes on
 with the rest. The fact takes no `spec.refresh`.
+
+### IMDb ratings from the datasets
+
+IMDb publishes its datasets as gzipped files at `datasets.imdbws.com`
+for personal and non-commercial use. No `liken` image carries them, so
+each cluster downloads them from IMDb. IMDb's terms require this credit
+where the data is shown:
+
+> Information courtesy of IMDb (https://www.imdb.com). Used with
+> permission.
+
+The `nfo` container reads its whole `rating.imdb` gap first. Then it
+reads `title.ratings` once, from start to end, and keeps only the rows
+of the titles in the gap, so one read serves one title or ten thousand.
+The read starts when the container starts, and the other facts run
+while it works. A run with no `rating.imdb` gap sends no request.
+
+A movie or a series is found by the IMDb id in its `.nfo` file. An
+episode is found by its own IMDb id where its `.nfo` file names one.
+Otherwise the container reads `title.episode` once and finds the
+episode by its season and episode numbers under the series' IMDb id. It
+records the id it found in `.liken/rating.imdb.yaml`, so a later run
+does not read `title.episode` again for that episode. A file that holds
+two episodes gets no rating, because its ledger entry names one episode.
+
+The rating is written into the `.nfo` file as OMDb writes it: the
+`imdb` rating, out of 10, with the vote count. The container writes the
+file only when the rating at one decimal changed. A change in the vote
+count alone writes nothing, so a library's `.nfo` files do not all
+change every month. The attempt records the `Last-Modified` time of the
+`title.ratings` copy it read.
+
+A rating from the datasets is asked for again after 30 days, but only
+when IMDb has published a newer `title.ratings` than the one the
+attempt read. A rating OMDb wrote counts as older, so a library that
+moves from `omdb` to `imdb` moves each title within 30 days. While the
+provider's `Stale` condition is `True`, IMDb has published no newer
+file, and the operator starts no `Job` that fills gaps for these ratings
+alone.
+
+With a per-node `StorageClass` in the cluster, the operator keeps the
+files on the claim `<provider>-datasets`, which the `nfo` container
+mounts. Each node's copy fills the first time a run on that node needs
+a file. Every later run asks IMDb with the copy's `ETag`, gets `304 Not
+Modified` while the file is unchanged, and reads the copy from disk. A
+new version replaces the copy only after the whole file arrived and its
+gzip checksum is correct. Two runs on one node download a file once:
+the second waits for the first and reads its copy. When the claim is
+full or cannot be written, the container reads the file from IMDb and
+logs the filesystem's error. With no per-node class, every run reads
+the files from IMDb.
+
+    kubectl -n media get metadataprovider imdb -o jsonpath='{.status.imdb.datasets}'
+    kubectl -n media logs job/<job> -c nfo | grep title.ratings
 
 ### When a fact asks again
 

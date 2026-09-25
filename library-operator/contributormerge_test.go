@@ -300,7 +300,7 @@ func TestAMergeGapOpensThePhaseThatRunsItsFact(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			report := &libraryReport{Gaps: map[string]int{test.gap: 1}}
 
-			if got := phaseGapOpen(studioMovies(), report, test.facts); got != test.want {
+			if got := phaseGapOpen(studioMovies(), report, providerSet{}, test.facts, time.Now()); got != test.want {
 				t.Errorf("phaseGapOpen = %v, want %v", got, test.want)
 			}
 		})

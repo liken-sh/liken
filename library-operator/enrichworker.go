@@ -57,6 +57,11 @@ type enricher struct {
 	// How long a container waits for its own copy to hold the walk
 	// that the catalog pods hold.
 	syncTimeout time.Duration
+	// Whether the rating.imdb gap holds episodes, and which old ratings it
+	// opens, from the environment.
+	ratingScope ratingGapScope
+	// The IMDb dataset reads the nfo container starts when it starts.
+	datasets *datasetReads
 	// The providers a container can ask, built once and held here, so a provider
 	// that spends its day in one fact is not asked again in the next fact of the
 	// same container.
@@ -117,6 +122,7 @@ func newEnricher(log io.Writer) (*enricher, error) {
 		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable)),
 		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
 		worker:      worker,
+		ratingScope: ratingScopeFromEnvironment(time.Now().UTC()),
 	}
 	if work.board = boardOf(os.Getenv(libraryPhasesVariable)); work.board != nil {
 		work.writer.locks = work.board.dir
@@ -178,8 +184,13 @@ func (e *enricher) mayStartTitle() bool {
 // Reads one fact's work list out of the local copy of the catalog, with
 // the same query the reporter counts the gap with.
 func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]string, error) {
-	keys, err := e.catalog.queryStrings(ctx, gapQueries[fact],
-		gapParams(fact, e.library, now, e.refresh[fact]))
+	params := gapParams(fact, e.library, now, e.refresh[fact])
+	if fact == factRatingIMDb {
+		// The reporter binds its own pair, and the container binds the pair its
+		// environment states.
+		copy(params[len(params)-2:], imdbRatingGapParams(e.ratingScope))
+	}
+	keys, err := e.catalog.queryStrings(ctx, gapQueries[fact], params)
 	if err != nil {
 		return nil, fmt.Errorf("reading the %s gap of %s: %w", fact, e.library, err)
 	}

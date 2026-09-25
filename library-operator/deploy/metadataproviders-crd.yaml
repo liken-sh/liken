@@ -36,6 +36,11 @@ spec:
         - name: Reason
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        # The oldest time IMDb replaced one of the dataset files an imdb
+        # provider reads. The column is empty for every other block.
+        - name: Updated
+          type: date
+          jsonPath: .status.imdb.updated
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -57,11 +62,11 @@ spec:
                     [has(self.tmdb), has(self.omdb), has(self.fanart),
                     has(self.tvmaze), has(self.peertube),
                     has(self.archive), has(self.theintrodb),
-                    has(self.introdb)].exists_one(block, block)
+                    has(self.introdb), has(self.imdb)].exists_one(block, block)
                   message: >-
                     A MetadataProvider names exactly one provider block:
                     tmdb, omdb, fanart, tvmaze, peertube, archive,
-                    theintrodb, or introdb.
+                    theintrodb, introdb, or imdb.
               properties:
                 tmdb:
                   type: object
@@ -157,6 +162,9 @@ spec:
                 introdb:
                   type: object
                   description: "The account is with IntroDB, a community database of the intro, recap, credits, and post-credits spans of movies and episodes. It provides only the marks fact, finds a work by its IMDb id, and needs no account. The block is empty, and its presence says that the operator may ask IntroDB."
+                imdb:
+                  type: object
+                  description: "The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and need no account. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there."
                 facts:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -214,9 +222,41 @@ spec:
                   type: string
                   format: date-time
                   description: "When the provider last refused the key. The time remains after the key works again, so a person can see that it once failed."
+                imdb:
+                  type: object
+                  description: "What the check of an imdb block read from IMDb. A failed check leaves the entries of the last check that read the files, because the last version IMDb published is still a fact."
+                  properties:
+                    updated:
+                      type: string
+                      format: date-time
+                      description: "The oldest lastModified in datasets, which the UPDATED column shows."
+                    datasets:
+                      type: array
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
+                      maxItems: 8
+                      description: "One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode."
+                      items:
+                        type: object
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            description: "The file's name at IMDb, without the .tsv.gz suffix."
+                          lastModified:
+                            type: string
+                            format: date-time
+                            description: "When IMDb last replaced the file, from its Last-Modified header. IMDb replaces each file every day."
+                          etag:
+                            type: string
+                            description: "The file's ETag header."
+                          size:
+                            type: integer
+                            format: int64
+                            description: "The size of the gzipped file in bytes, from its Content-Length header."
                 conditions:
                   type: array
-                  description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code."
+                  description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, Unreachable, or Unavailable. Unreachable is a check that got no answer at all, and its message is the error the check read. Unavailable is a check the provider answered with a status that says nothing about the account, and its message names that status code. For an imdb block, the check sends one HEAD request for each file, and Unavailable names the file. An imdb block also carries two conditions that do not change Ready. Stale is True with the reason NotReplaced when IMDb has not replaced a file for more than three days, and its message names the file and its date. Cached is True with the reason PerNodeClass when the claim <provider>-datasets holds the files, and False with the reason NoPerNodeClass when the cluster has no per-node class, so each run reads the files from IMDb."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

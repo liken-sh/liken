@@ -368,6 +368,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 			Series:   seriesID,
 			Season:   meta.Season,
 			Episode:  meta.Episode,
+			NFOFacts: meta.NFOFacts,
 		})
 		result.aliases = append(result.aliases, aliasRowsForItem(library, scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
 		episodeItemIDs = append(episodeItemIDs, episodeItemID)

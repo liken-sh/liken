@@ -32,6 +32,9 @@ type attemptRow struct {
 	// The provider block that answered, empty for a fact that asks no provider.
 	// A set fact joins the blocks it took the union of with commas.
 	Provider string
+	// The Last-Modified time, in Unix seconds, of the dataset file that answered
+	// the attempt, and 0 where no dataset file answered it.
+	DatasetModified int64
 }
 
 // One attempts row, by the two key columns that follow the library.
@@ -47,10 +50,11 @@ func (c *Catalog) UpsertAttempts(ctx context.Context, rows []attemptRow) (int, e
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		statements[i] = statement{
-			sql: `INSERT INTO attempts (library, item, ` + attemptFactColumn + `, at, result, provider) VALUES (?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO attempts (library, item, ` + attemptFactColumn + `, at, result, provider, dataset_modified) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, item, ` + attemptFactColumn + `) DO UPDATE SET at = excluded.at, ` +
-				`result = excluded.result, provider = excluded.provider`,
-			params: []any{row.Library, row.Item, row.Fact, row.At, row.Result, row.Provider},
+				`result = excluded.result, provider = excluded.provider, dataset_modified = excluded.dataset_modified`,
+			params: []any{row.Library, row.Item, row.Fact, row.At, row.Result, row.Provider, row.DatasetModified},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -231,16 +235,26 @@ func (s likenDir) read() (likenRows, error) {
 				continue
 			}
 			held.attempts = append(held.attempts, attemptRow{
-				Library:  s.library,
-				Item:     item,
-				Fact:     fact,
-				At:       attempt.At.Unix(),
-				Result:   attempt.Result,
-				Provider: strings.Join(attempt.Provider, ","),
+				Library:         s.library,
+				Item:            item,
+				Fact:            fact,
+				At:              attempt.At.Unix(),
+				Result:          attempt.Result,
+				Provider:        strings.Join(attempt.Provider, ","),
+				DatasetModified: unixOrZero(attempt.DatasetModified),
 			})
 		}
 	}
 	return held, nil
+}
+
+// A time in Unix seconds, and 0 for the zero time, which the column holds for
+// an attempt that no dataset file answered.
+func unixOrZero(at time.Time) int64 {
+	if at.IsZero() {
+		return 0
+	}
+	return at.Unix()
 }
 
 // How an entry's path resolves: a file fact names the file itself, and an

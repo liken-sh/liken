@@ -50,6 +50,10 @@ type libraryReport struct {
 	// the phases whose counts are above zero, so a fact with no key
 	// here never runs in one.
 	Gaps map[string]int `json:"gaps,omitempty"`
+	// The part of each gap that is episodes, for a fact whose episodes only
+	// some provider blocks answer. The operator takes it out of the gap for a
+	// Library whose sources answer the fact with another block.
+	EpisodeGaps map[string]int `json:"episodeGaps,omitempty"`
 	// The oldest attempt this library holds for each fact. The operator
 	// reads it against the Library's spec.refresh: a refresh later than
 	// the oldest attempt is a fact with work left, whatever the gap

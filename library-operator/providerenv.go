@@ -74,13 +74,15 @@ func providerKeyEnv(library *Library, providers providerSet) []EnvVar {
 // The whole provider environment of a facts container: the keys, and the
 // order the blocks are asked in. Both come from one walk of spec.sources, so
 // the container asks in the order a person wrote.
-// The languages travel with the keys, from the same call.
+// The languages travel with the keys, from the same call, and so does the time
+// of the newest title.ratings where an imdb provider answers the rating.
 func providerEnv(library *Library, providers providerSet, languages []string) []EnvVar {
 	env := append(providerKeyEnv(library, providers),
 		EnvVar{Name: librarySourcesVariable, Value: strings.Join(sourceBlocks(library, providers), ",")},
 		EnvVar{Name: libraryLanguagesVariable,
 			Value: strings.Join(libraryLanguages(library, languages), ",")})
-	return append(env, providerEndpointEnv(library, providers)...)
+	env = append(env, providerEndpointEnv(library, providers)...)
+	return append(env, imdbRatingEnv(library, providers)...)
 }
 
 // The library's own languages first, then the household's that the library

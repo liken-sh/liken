@@ -175,8 +175,10 @@ func (e *enricher) writeArrivalRows(ctx context.Context, result *walkResult) err
 	return err
 }
 
-// The nfo phase owns the body and the nfo_facts of the title itself. The
-// phase edits no episode .nfo file, so the episode rows stay as they are.
+// The nfo phase owns the body and the nfo_facts of the title itself. The one
+// nfo fact that edits an episode .nfo file, rating.imdb, writes that
+// episode's row itself, so a write to the series .nfo file leaves the episode
+// rows as they are.
 func (e *enricher) writeBodyRows(ctx context.Context, result *walkResult) error {
 	var rows []itemUpdate
 	for _, row := range result.movies {

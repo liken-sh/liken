@@ -137,6 +137,10 @@ CREATE INDEX series_library_added ON series (library, added);
 -- the episode under its series. series is the parent series id, and season and
 -- episode are its aired numbers.
 --
+-- nfo_facts is the column movies and series carry, read from the episode's
+-- own .nfo file. The rating.imdb gap reads it, because the imdb block rates
+-- episodes too.
+--
 -- A join from the series column to a series id must match the library
 -- as well, because an id names one row only inside its own library.
 CREATE TABLE episodes (
@@ -156,6 +160,7 @@ CREATE TABLE episodes (
     series TEXT NOT NULL DEFAULT '',
     season INTEGER NOT NULL DEFAULT 0,
     episode INTEGER NOT NULL DEFAULT 0,
+    nfo_facts TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, id)
 );
 
@@ -401,6 +406,12 @@ CREATE TABLE confirmations (
 -- provider names the provider block that answered, as in "tmdb", or the
 -- blocks joined by commas where a set fact took the union of several. It
 -- is empty for a fact that asks no provider, such as probe.
+--
+-- dataset_modified is the Last-Modified time, in Unix seconds, of the
+-- dataset file that answered the attempt, and 0 for an attempt that no
+-- dataset file answered. The rating.imdb gap compares it with the time of
+-- the newest title.ratings, so no run reads the same file again for a
+-- title it already read that file for.
 CREATE TABLE attempts (
     library TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
@@ -408,6 +419,7 @@ CREATE TABLE attempts (
     at INTEGER NOT NULL DEFAULT 0,
     result TEXT NOT NULL DEFAULT '',
     provider TEXT NOT NULL DEFAULT '',
+    dataset_modified INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, item, concern)
 );
 

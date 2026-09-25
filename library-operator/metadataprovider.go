@@ -47,7 +47,10 @@ type MetadataProviderSpec struct {
 	// The two community databases of intro, recap, and credits spans.
 	TheIntroDB *ProviderTheIntroDB `json:"theintrodb,omitempty"`
 	IntroDB    *ProviderIntroDB    `json:"introdb,omitempty"`
-	Facts      []string            `json:"facts,omitempty"`
+	// IMDb's published dataset files, which the operator downloads in place of
+	// asking an API.
+	IMDb  *ProviderIMDb `json:"imdb,omitempty"`
+	Facts []string      `json:"facts,omitempty"`
 }
 
 // The TMDb block names the Secret alone. The endpoint is TMDb's own, and the
@@ -93,6 +96,10 @@ type ProviderTheIntroDB struct {
 // account. The block alone says that the operator may ask it.
 type ProviderIntroDB struct{}
 
+// The IMDb block is empty, because IMDb publishes its datasets with no
+// account. The block alone says that the operator may download them.
+type ProviderIMDb struct{}
+
 // One key in one Secret of the provider's own namespace.
 type SecretKeyRef struct {
 	Name string `json:"name"`
@@ -121,6 +128,9 @@ type MetadataProviderStatus struct {
 	Provider    string      `json:"provider,omitempty"`
 	Facts       []string    `json:"facts,omitempty"`
 	LastRefusal time.Time   `json:"lastRefusal,omitzero"`
+	// What the check of an imdb block read, under the block's own name, as its
+	// settings are under spec.imdb.
+	IMDb *IMDbStatus `json:"imdb,omitempty"`
 }
 
 // The reasons the Ready condition takes, one per answer the check can get.

@@ -216,6 +216,11 @@ type StorageClass struct {
 	Provisioner string     `json:"provisioner,omitempty"`
 }
 
+// The collection ListStorageClasses answers.
+type StorageClassList struct {
+	Items []StorageClass `json:"items"`
+}
+
 // The marks the objects this operator writes carry. The name
 // label is the standard Kubernetes one, and its value tells a Job of
 // this operator's from a catalog pod and from a screen pod, so one

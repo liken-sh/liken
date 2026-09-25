@@ -157,10 +157,12 @@ rules:
   # The StorageClass every claim names, read by name for one answer: the
   # provisioner behind it. A class the per-node driver serves is the one
   # the operator writes the volume for itself. The operator never
-  # matches a class by name.
+  # matches a class by name. The list finds the per-node class the cache
+  # of an imdb provider's dataset files needs, whatever class the
+  # libraries use.
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
-    verbs: [get]
+    verbs: [get, list]
   # The nodes, read for the Ready verdict of the machine each durable
   # copy of a store runs on. A copy on a node that stays NotReady is
   # deleted, with its claim on a class that binds the claim to the

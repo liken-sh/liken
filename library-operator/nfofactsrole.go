@@ -82,7 +82,7 @@ func (l *answerLine) ask(ctx context.Context, fact string, title titleRef) ([]pr
 			continue
 		}
 		answer, held, err := one.answer(ctx, fact, title)
-		if errors.Is(err, errDailyLimit) {
+		if errors.Is(err, errDailyLimit) || errors.Is(err, errDatasetsUnread) {
 			l.spent[block], spentNow = true, true
 			continue
 		}
@@ -102,9 +102,8 @@ func (l *answerLine) ask(ctx context.Context, fact string, title titleRef) ([]pr
 // only where a source serves one of its facts.
 func (e *enricher) nfoFact(ctx context.Context, fact string) error {
 	if e.providers == nil {
-		sources := commaNames(os.Getenv(librarySourcesVariable))
-		e.providers = newAnswerLine(sources, os.Getenv, e.tallies)
-		e.personFinder = newPersonFinder(sources, os.Getenv, e.tallies)
+		e.providers = e.nfoAnswerLine()
+		e.personFinder = newPersonFinder(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv, e.tallies)
 	}
 	if len(e.providers.answerers) == 0 {
 		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)
@@ -129,10 +128,23 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 	if err != nil {
 		return err
 	}
+	if fact == factRatingIMDb {
+		e.coverDatasetGap(ctx, ids)
+	}
 	wrote, fights, left := 0, 0, 0
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		// An episode's rating is the imdb block's alone, so it takes its own path.
+		if isEpisodeID(id) {
+			switch e.fillEpisodeRating(ctx, id) {
+			case attemptFight:
+				fights++
+			case attemptFound:
+				wrote++
+			}
+			continue
 		}
 		item, held, err := e.catalog.identityItem(ctx, e.library, id)
 		if err != nil {
@@ -157,7 +169,7 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 	e.logf("wrote the %s of %d of the %d titles that lacked it, with %d held by another writer",
 		fact, wrote, len(ids), fights)
 	if left > 0 {
-		e.logf("left the %s of %d titles for the next run, because every provider has spent its day", fact, left)
+		e.logf("left the %s of %d titles for the next run, because no provider can answer again in this run", fact, left)
 	}
 	return nil
 }
@@ -286,11 +298,15 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 }
 
 // Which facts write their group on every answer and which compare first. The
+// IMDb rating compares its value, as ratingChanged says. The
 // credits fact leaves the actor, director, and writer elements where
 // credits.yaml and the .contributors/ entries are written either way.
 // The credits fact rewrites nothing where the people it holds are the
 // people the .nfo file holds.
 func groupNeedsWrite(fact string, document []byte, merged factAnswer) bool {
+	if fact == factRatingIMDb {
+		return ratingChanged(document, merged)
+	}
 	if fact != factCredits {
 		return true
 	}
@@ -329,6 +345,7 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 		}
 		ledger.noteAttempt(likenAttempt{
 			Path: likenSelfPath, At: time.Now().UTC(), Result: result, Provider: names,
+			DatasetModified: e.datasetTimeOf(fact, names),
 		})
 	})
 	if err != nil {

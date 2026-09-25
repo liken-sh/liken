@@ -138,7 +138,9 @@ const (
 // form the released column holds, because an attempt made before an item
 // was released stands only until that date. A fact whose items carry
 // none names no fifth parameter, so it binds none. The marks fact binds two
-// more, the cutoffs of its shorter windows, which marksgap.go names.
+// more, the cutoffs of its shorter windows, which marksgap.go names. The
+// rating.imdb fact binds two more as well, which imdbratinggap.go names. This
+// function binds the reporter's pair, and the nfo container binds its own.
 func gapParams(fact, library string, now, refresh time.Time) []any {
 	params := []any{library,
 		now.Add(-defaultRetryInterval).Unix(),
@@ -150,6 +152,9 @@ func gapParams(fact, library string, now, refresh time.Time) []any {
 	params = append(params, now.UTC().Format(time.DateOnly))
 	if fact == factMarks {
 		params = append(params, marksGapParams(now)...)
+	}
+	if fact == factRatingIMDb {
+		params = append(params, imdbRatingGapParams(ratingGapScope{episodes: true})...)
 	}
 	return params
 }
@@ -261,8 +266,9 @@ func gapClause(fact, column, missing string) string {
 //
 // Every query binds the fact's refresh time as ?4. A query whose items
 // carry a release date binds today's date as ?5, and no other query
-// names a fifth parameter. The marks query alone names a sixth and a
-// seventh, the cutoffs of its shorter windows.
+// names a fifth parameter. The marks query names a sixth and a seventh, the
+// cutoffs of its shorter windows, and the rating.imdb query names a sixth and
+// a seventh of its own.
 //
 // A probe gap is a present video or audio file whose probed column is not
 // its modified column: no probe has read the file, or the file changed after
@@ -289,7 +295,7 @@ var gapQueries = map[string]string{
 	factOverview:             nfoGapQuery(factOverview),
 	factCertification:        nfoGapQuery(factCertification),
 	factRatingTMDb:           nfoGapQuery(factRatingTMDb),
-	factRatingIMDb:           nfoGapQuery(factRatingIMDb),
+	factRatingIMDb:           imdbRatingGapQuery(),
 	factRatingRottenTomatoes: nfoGapQuery(factRatingRottenTomatoes),
 	factRatingMetacritic:     nfoGapQuery(factRatingMetacritic),
 	factCredits:              creditsGapQuery(),

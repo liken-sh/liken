@@ -469,6 +469,17 @@ func GetStorageClass(ctx context.Context, c *Client, name string) (*StorageClass
 	return class, nil
 }
 
+// ListStorageClasses reads every class the cluster serves, for the one class
+// whose provisioner is per-node. The cache of a provider's dataset files
+// needs that class whatever class the libraries use.
+func ListStorageClasses(ctx context.Context, c *Client) (*StorageClassList, error) {
+	list := &StorageClassList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, storageClassesPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // CreatePersistentVolume writes the volume a per-node claim binds to. The
 // operator writes it before the claim, because the claim names it and no
 // provisioner answers a claim of that class.

@@ -8,6 +8,7 @@ package main
 
 import (
 	"slices"
+	"time"
 )
 
 // One phase of a library Job. The name is the container's name, and every
@@ -148,9 +149,14 @@ func phaseNeedsOf(name string, included []string) []string {
 }
 
 // Whether one phase has work in the last report: a fact whose gap the
-// reporter counted, or whose refresh time has titles left to ask about.
-func phaseGapOpen(library *Library, report *libraryReport, facts []string) bool {
+// reporter counted, whose refresh time has titles left to ask about, or
+// whose IMDb ratings are old enough to read again. The reporter reads no
+// Library, so scheduledGap takes out the gap's episodes where no container
+// of this Library asks for them.
+func phaseGapOpen(library *Library, report *libraryReport, providers providerSet,
+	facts []string, now time.Time) bool {
 	return slices.ContainsFunc(phaseGapNames(facts), func(gap string) bool {
-		return report.Gaps[gap] > 0 || refreshHasWork(library, report, gap)
+		return scheduledGap(library, report, providers, gap) > 0 || refreshHasWork(library, report, gap) ||
+			datasetRefreshHasWork(library, report, providers, gap, now)
 	})
 }

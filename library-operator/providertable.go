@@ -28,6 +28,9 @@ const (
 	// where the account names one, and IntroDB takes none.
 	providerBlockTheIntroDB = "theintrodb"
 	providerBlockIntroDB    = "introdb"
+	// The imdb block is IMDb's dataset files, at one fixed address and with no
+	// account.
+	providerBlockIMDb = "imdb"
 )
 
 // What one account of a block holds, as the spec states it: the Secret that
@@ -59,6 +62,10 @@ type providerBlock struct {
 	// key where it names none. A block with an optional key is not a keyed
 	// block, because an account with no Secret is still an account.
 	keyOptional bool
+	// Whether the block publishes bulk files in place of an API. The check of
+	// such a block reads the headers of each file its served facts read, and
+	// makes no call to reach.
+	datasets bool
 	// The account this spec names for the block, or nothing where the spec names
 	// another block.
 	account func(*MetadataProviderSpec) *providerAccount
@@ -69,9 +76,9 @@ type providerBlock struct {
 // The paces follow what each provider publishes. TMDb states about 40 to 50
 // requests a second; OMDb a daily count and no rate; TVmaze 20 calls every
 // 10 seconds; a PeerTube instance 50 every 10 seconds by default; TheIntroDB
-// 30 asks every 10 seconds; Fanart.tv, the Internet Archive, and IntroDB no
-// number for these calls. Each pace sits at or under its provider's number,
-// and the 429 cooldown covers a stricter day.
+// 30 asks every 10 seconds; Fanart.tv, the Internet Archive, IntroDB, and the
+// IMDb datasets no number for these calls. Each pace is at or under its
+// provider's number, and the 429 cooldown covers a stricter day.
 var providerBlocks = []providerBlock{
 	{
 		name: providerBlockTMDb,
@@ -232,6 +239,23 @@ var providerBlocks = []providerBlock{
 		base:  introdbAPIBase,
 		account: func(spec *MetadataProviderSpec) *providerAccount {
 			if spec.IntroDB == nil {
+				return nil
+			}
+			return &providerAccount{}
+		},
+	},
+	// IMDb's datasets are bulk files, so a fact reads each file once per run
+	// and not once per title. The pace is the interval between two file
+	// requests of one container. The block serves the IMDb rating of movies,
+	// series, and episodes.
+	{
+		name:     providerBlockIMDb,
+		facts:    []string{factRatingIMDb},
+		pace:     time.Second,
+		base:     imdbDatasetsBase,
+		datasets: true,
+		account: func(spec *MetadataProviderSpec) *providerAccount {
+			if spec.IMDb == nil {
 				return nil
 			}
 			return &providerAccount{}
