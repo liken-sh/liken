@@ -1,43 +1,46 @@
 # More kinds
 
-Plan 13. A stub for later agents to shape, one kind at a time. The
-design names music, photos, audiobooks, books, and games. Each is a new
-scanner image, a new settings block on `Library`, a body shape in the
-catalog, and screens in the media browser designed for that kind and
-composed from the browser's shared primitives, as plan 22 sets out.
+Plan 13. This is a stub for later agents to design, one kind at a time.
+The design names music, photos, audiobooks, books, and games. Each kind
+needs a new scanner image, a new settings block on `Library`, and a body
+layout in the catalog. Each kind also needs screens in the media browser
+for that kind, built from the browser's shared primitives, as plan 22
+sets out.
 
 ## Music
 
-Tags in the files are the truth, and the folder layout is a hint.
-`media-operator` plays an album as one timeline with tracks as chapters
-and reads album art from the files, so the catalog's music body contains
-what the player already reads. Music libraries reach a hundred thousand
-files. Every screen stores the whole catalog, so a large kind's row
-size and count set a budget on a one-gigabyte box.
+The tags in the files are the authoritative metadata, and the folder
+layout is only a hint. `media-operator` plays an album as one timeline
+with tracks as chapters, and it reads album art from the files. The
+catalog's music body therefore contains the fields that the player
+already reads. A music library can have a hundred thousand files. Every
+screen stores the whole catalog, so on a one-gigabyte machine, the row
+size and row count of a large kind must fit a memory budget.
 
 ## Photos and home video
 
-EXIF and XMP sidecars are the metadata. Dates, places, and people are
-the structure. There is no provider to enrich from. A photo library is a
-hundred thousand small items, the scale the proof of concept measured at
-105,000 rows. The idle screen is its first consumer: a slideshow is a
-`Play` of a folder.
+The metadata comes from EXIF and from XMP sidecars. The library is
+organized by date, place, and person. No metadata provider exists to
+enrich from. A photo library has about a hundred thousand small items.
+The proof of concept measured this scale at 105,000 rows. The idle
+screen is the first consumer of photos: a slideshow is a `Play` of a
+folder.
 
 ## Audiobooks
 
 Audiobooks play on speakers like music. The structure is author, then
-book, then chapters, and watch state has to record the position inside a
-long file.
+book, then chapters. Watch state must record the position inside a long
+file.
 
 ## Books
 
-Books are cataloged like the rest, with covers and an OPF or Calibre
-sidecar, and have no consumer on a screen: a book is read on a phone or
-a tablet. A reader is one more consumer of the same catalog, which is
-why the library layer runs below playback.
+The catalog records books like the other kinds, with covers and an OPF
+or Calibre sidecar. No screen shows books, because people read a book
+on a phone or a tablet. A reader app is one more consumer of the same
+catalog. This is why the library layer runs below playback.
 
 ## Games
 
-Games are named so the design leaves room. An emulator is one more
-consumer, like a player, and a game library's structure is platform,
-then title.
+The design names games so that a later plan can add them. An emulator
+is one more consumer of the catalog, like a player. A game library's
+structure is platform, then title.

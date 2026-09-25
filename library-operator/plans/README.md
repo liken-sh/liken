@@ -72,7 +72,7 @@ for a later agent to shape.
   a library's naming convention.
 * [13, More kinds](13-more-kinds.md). Music, photos, audiobooks, books,
   and games.
-* [23, Motion](23-motion.md). Focus that slides, walls that glide, and
+* [23, Animation in the media browser](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
 * [56, Backing up progress](56-backing-up-progress.md). A stub: a
   copy of the progress store a person can take off the cluster and
@@ -97,14 +97,14 @@ they share, and plans 28 to 31 build them in order.
   writes its files, only the columns it owns, with the art list in its
   own `arts` column and a prune that spares a row newer than the
   walk's start.
-* [57, The phases fan out](57-the-phases-fan-out.md). A stub from plan
+* [57, Running the enricher phases in parallel](57-the-phases-fan-out.md). A stub from plan
   34: the phases that share no file run at once, behind a mark per
   finished phase on a shared `emptyDir`.
-* [60, The subtitle fact](60-the-subtitle-fact.md). For later. The
+* [60, A fact that fetches subtitles](60-the-subtitle-fact.md). For later. The
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
-* [63, Where the room is in a franchise](63-where-the-room-is-in-a-franchise.md).
+* [63, Showing the viewers' place in a franchise](63-where-the-room-is-in-a-franchise.md).
   A column of circles marks where the room and each person stand in
   the story, every held member carries a bar, and a press on a split
   series member opens inside its run.
@@ -423,8 +423,8 @@ that took a hearing-impaired flag for Hindi.
 * [Clients that cannot run an
   agent](open-problems/clients-that-cannot-run-an-agent.md). Phones and
   laptops have no path to the catalog.
-* [The power key's browser half is not
-  proved](open-problems/the-power-keys-browser-half-is-not-proved.md).
+* [The power key's effect on the media browser is not
+  tested](open-problems/the-power-keys-browser-half-is-not-proved.md).
   Nothing here reads the `awake` edge, and neither of plan 46's two
   cases is drilled.
 * [A fresh agent's first version arrives

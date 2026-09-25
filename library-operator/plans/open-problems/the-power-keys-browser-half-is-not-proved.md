@@ -1,55 +1,60 @@
-# The power key's browser half is not proved
+# The power key's effect on the media browser is not tested
 
 Open problem. [Plan 46](../completed/46-the-power-key-brings-the-room-up.md)
-built the receiver half on 2026-09-07: a press of the X6's power key
-raises the panel desire, the `Receiver` session carries an `awake`
-flag, and the equipment operator powers the receiver on and selects
-the input. The plan's other half, that the media browser is visible
-and has focus when the panel lights, is drilled in
-neither case the plan names.
+built the receiver half on 2026-09-07. A press of the X6's power key
+publishes a panel desire of `ON`, which is a request to turn the panel
+on. The `Receiver` session gets an `awake` flag, and the equipment
+operator powers the receiver on and selects the input. The plan's other
+half says that the media browser is visible and has focus when the
+panel turns on. No drill has tested that half in either of the two
+cases that the plan names.
 
 ## The evidence
 
-Nothing in this repository reads an `awake` edge. The word appears in
-no Go file and in no Rust file here. The browser's cue is the shade
-moment the `media-screen` crate makes: a press while the screen sleeps
-sets `Moment::Wake`, and the browser answers it with
-`refresh.shade(false)`, `refresh.cover(false)`, `presented()`, and
-`lifted()`, which reads the home page again. The same crate publishes
-the panel `ON` desire on that press, and the desire is what the media
-operator turns into the session's `awake` flag.
+Nothing in this repository reads the change of the `awake` flag to on.
+The word `awake` appears in no Go file and in no Rust file here. The
+browser reacts instead to a shade moment from the `media-screen` crate.
+The shade is the overlay that covers a sleeping screen, and a
+shade moment is the crate's signal that the shade changed. A press
+while the screen sleeps sets `Moment::Wake`. The browser handles it
+with `refresh.shade(false)`, `refresh.cover(false)`, `presented()`, and
+`lifted()`, which reads the home page again. On that same press, the
+crate publishes the panel desire `ON`, and the media operator turns
+that desire into the session's `awake` flag.
 
-So the browser has a cue on the press, and neither of plan 46's two
-cases is drilled:
+So the browser reacts to the press, and no drill has tested either of
+plan 46's two cases:
 
-* The panel wakes while a `Play` still stands. The film should be on
-  top and hold the focus, and the browser should stay covered.
+* The panel wakes while a `Play` still exists. The film should be on
+  top and have the focus, and the browser should stay covered.
   `Moment::Wake` calls `refresh.cover(false)` whatever the activity
-  is, and the next status is what covers the browser again.
+  is, and the next status covers the browser again.
 * The panel wakes after a `Play` ended while the panel was dark. The
-  browser should be presented and hold the focus, with no film under
+  browser should be presented and have the focus, with no film under
   it.
 
-## Why the plan's shape no longer fits
+## Why plan 46's design no longer fits
 
-Plan 46's third contract bullet says the browser reads the `awake`
-edge from the bus and re-presents itself on it when no `Play` stands.
+Plan 46's third contract bullet says that the browser reads the change
+of `awake` to on from the bus and presents itself again when no `Play`
+exists.
 [Plan 54](../completed/54-the-browser-returns-on-the-status-edge.md)
-removed the re-present: `Moment::Present`, `surface_due`,
-`surface_pending`, `represent`, and the held `wgpu::Instance` are
-gone, the browser reads nothing off the commands topic, and under
-ivi-shell the compositor shows the browser's window again the moment
-the film's surface goes. The browser maps no fresh window, and it
-passes no app-id, so there is nothing for an `awake` edge to
-re-present. Focus is the compositor's, not the browser's.
+removed that re-present path. `Moment::Present`, `surface_due`,
+`surface_pending`, `represent`, and the retained `wgpu::Instance` are
+gone, and the browser reads nothing from the commands topic. Under
+ivi-shell, the compositor shows the browser's window again as soon as
+the film's surface closes. The browser maps no new window and passes no
+app-id, so a change of `awake` would have nothing to present again. The
+compositor sets the focus, and the browser does not.
 
-## What would settle it
+## The drill that would close this problem
 
-A drill on the living room, in both cases. Dark panel with no `Play`:
-press power, and read whether the browser draws and takes the presses.
-Dark panel with a film paused: press power, and read whether the film
-holds the screen and the browser stays covered. If both hold, the
-answer is that the shade moment already does the browser's half, and
-the open problem closes with the drill written down. If one fails, the
-fix is a new contract bullet in the shape plan 54 left: an edge the
-browser already reads, and no window of its own.
+A drill on the living room screen, in both cases. With the panel dark
+and no `Play`: press power, and check whether the browser draws and
+receives the presses. With the panel dark and a film paused: press
+power, and check whether the film stays on the screen and the browser
+stays covered. If both pass, the shade moment already does the
+browser's half, and the open problem closes with the drill recorded. If
+one fails, the fix is a new contract bullet that fits the design plan
+54 left: the browser reacts to a signal that it already reads, and it
+opens no window of its own.

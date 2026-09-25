@@ -2,15 +2,16 @@
 
 The catalog reaches a screen because the screen runs a Corrosion
 sidecar. A phone, a web browser on a laptop, and a Home Assistant
-integration run none, and they have no path to the catalog. Jellyfin
-stays the app for those devices for that reason.
+integration run no sidecar, so they cannot read the catalog. For that
+reason, Jellyfin stays the app for those devices.
 
-Three paths exist and none is built. Corrosion's HTTP API on any agent
-answers queries over the network, and one agent in the cluster could be
-exposed read-only for that. Corrosion also has an experimental
-PostgreSQL wire-protocol listener, which would let any Postgres client
-read the catalog. And the scanners' status goes over the bus, so a
-client that needs only "something changed" has that.
+There are three possible paths, and none is built. Corrosion's HTTP API
+on any agent answers queries over the network, so one agent in the
+cluster could be exposed read-only for these clients. Corrosion also
+has an experimental PostgreSQL wire-protocol listener, which would let
+any Postgres client read the catalog. Also, the scanners publish their
+status on the bus, so a client that needs to know only that something
+changed can read that already.
 
-Whichever is chosen is a service in the read path for those clients
-only. The rule for screens stands: a screen reads its own file.
+The chosen path adds a service to the read path for those clients
+only. A screen still reads its own copy of the catalog file.

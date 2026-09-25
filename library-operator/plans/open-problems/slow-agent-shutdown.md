@@ -6,9 +6,9 @@ in 5 to 10 s. Kubernetes gives a pod 30 s by default before it kills
 what is left.
 
 Plans 03 and 06 set a longer grace period on every pod that runs an
-agent. That stops the kill and does not explain the delay. What the
-agent does in that time, whether a kill mid-sync leaves its file in a
-state the next start recovers from, and whether the delay grows with the
-cluster, are unmeasured. A drill that kills a screen's pod mid-sync and
-times the next start is the next step, and plan 09's reboot step is the
-first look.
+agent. That prevents the kill, but it does not explain the delay. Three
+things are not measured: what the agent does in that time, whether a
+kill during a sync leaves its file in a state that the next start
+recovers from, and whether the delay grows with the cluster. The next
+step is a drill that kills a screen's pod during a sync and times the
+next start. Plan 09's reboot step is the first test of this.

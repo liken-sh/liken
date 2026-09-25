@@ -1,6 +1,6 @@
 # The IMDb datasets
 
-Plan 33. A stub from the 2026-09-03 shaping of [plan 30](completed/30-facts-art-and-contributors.md).
+Plan 33. This is a stub from the 2026-09-03 design discussion of [plan 30](completed/30-facts-art-and-contributors.md).
 IMDb has no free API, but it publishes daily datasets: ratings,
 basics, principals, and names, from a few megabytes to several hundred
 gzipped, at [datasets.imdbws.com](https://datasets.imdbws.com/). They
@@ -11,20 +11,20 @@ contributor ids for everyone IMDb knows.
 
 Every other `MetadataProvider` is a call per title. The datasets are
 bulk files. A fact cannot fetch a hundred megabytes per title, and
-Corrosion should not hold ninety million principal rows. So this
+Corrosion should not store ninety million principal rows. So this
 provider needs a store: something downloads the files on a schedule
 onto a claim, and the facts read from that claim instead of the
-network. That is a different kind of provider, with a schedule and a
-size where the others have a key.
+network. This provider is a different kind: it has a schedule and a
+storage size, where the other providers have an API key.
 
-## The shape, not yet decided
+## Possible design, not decided
 
 A `spec.imdb` block with a `schedule` and a `storage` size. A
 `CronJob` per provider that downloads the files onto a claim and
 builds an index the facts can read by IMDb id without a full scan,
 such as one SQLite file per dataset. The enricher `Job` mounts the
 claim read-only where the `Library`'s `sources` name the provider.
-`status.facts` is empty until the first download lands.
+`status.facts` is empty until the first download completes.
 
 Until this plan is built, OMDb serves `rating.imdb` at a thousand
 calls a day, and plan 30's rate rule leaves the rest as gaps.
