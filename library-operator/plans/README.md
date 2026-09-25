@@ -89,9 +89,12 @@ they share, and plans 28 to 31 build them in order.
 * [31, Franchises](completed/31-franchises.md). Built. A library kind whose files hold
   one story in story order, with a calendar and universes, resolved
   across the namespace by provider id.
-* [33, The IMDb datasets](33-the-imdb-datasets.md). A stub: a provider
-  with a store, because the datasets are bulk files and not a call per
-  title. OMDb serves `rating.imdb` until then.
+* [33, The IMDb datasets](33-the-imdb-datasets.md). An `imdb` block
+  that serves `rating.imdb` for movies, series, and episodes, and
+  `credits` for movies and series. A run reads each dataset file once
+  and keeps the rows in its gap list. A claim per provider caches the
+  files, and the status reports when IMDb last published each one.
+  OMDb serves `rating.imdb` until then.
 * [34, Every fact writes its rows](completed/34-every-fact-writes-its-rows.md).
   Built on 2026-09-03. Each fact writes its own catalog rows as it
   writes its files, only the columns it owns, with the art list in its
