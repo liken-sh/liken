@@ -4,12 +4,13 @@ weight: 10
 ---
 
 A person or an operator writes two objects. The `PersistentVolume`
-names the driver, the handle, the class, `ReadWriteMany`, a capacity,
+names the driver, the handle, the class, an access mode, a capacity,
 `Retain`, and a `claimRef`. The capacity is a hint, not a limit. The
 driver enforces no size limit. The `claimRef` binds the volume to one
-claim and no other. The claim names the class, `ReadWriteMany`, and the
-same size. Many nodes mount this one volume read-write, and each node
-keeps its own copy.
+claim and no other. The claim names the class, the same access mode,
+and the same size. In this example the access mode is `ReadWriteMany`:
+many nodes mount this one volume read-write, and each node keeps its
+own copy.
 
 ```yaml
 apiVersion: v1
@@ -56,13 +57,29 @@ event on the pod.
 
 ## The access mode
 
-The access mode is `ReadWriteMany`, because many nodes do mount one
-volume read-write, and each node holds its own copy. `ReadWriteOnce`
-would say that one node holds the volume, which is false.
-`ReadWriteOncePod` would let one pod in the cluster mount it, which
-breaks the `Deployment`. The driver enforces one pod per node per
-volume itself, and refuses a second pod on the same node with a
-`PerNodeVolumeHeld` event.
+Use `ReadWriteMany` for a volume that pods on many nodes mount. Many
+nodes do mount one volume read-write, and each node holds its own copy.
+The driver enforces one pod per node per volume itself, and refuses a
+second pod on the same node with a `PerNodeVolumeHeld` event.
+
+Use `ReadWriteOncePod` for a volume that only one pod in the whole
+cluster may mount, such as a database with one writer. Set it on the
+`PersistentVolume` and on the claim. The scheduler admits one pod of a
+`ReadWriteOncePod` claim in the cluster, and keeps every other pod of
+the claim `Pending` until that pod is gone. A pod that starts on a
+different node gets that node's copy, not the copy on the node the
+last pod left. A `Deployment` with the `RollingUpdate` strategy cannot
+start a new pod while its old pod holds the claim, so give it the
+`Recreate` strategy.
+
+Do not use `ReadWriteOnce`. It says that one node holds the volume,
+which is false, because every node keeps its own copy.
+
+The node plugin declares the CSI capability `SINGLE_NODE_MULTI_WRITER`,
+so the kubelet sends the CSI access mode `SINGLE_NODE_SINGLE_WRITER`
+for a `ReadWriteOncePod` claim. The driver publishes every access mode
+the same way: it binds this node's copy onto the pod's target,
+read-only when the pod mounts the volume read-only.
 
 ## What deleting removes
 

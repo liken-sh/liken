@@ -70,10 +70,16 @@ over.
    asks for a handle another pod holds is refused with an event on the
    pod. The scheduler's anti-affinity prevents this; the driver
    enforces it.
-5. **The access mode is `ReadWriteMany`.** Many nodes do mount one
-   volume read-write. Every page of the manual that shows a claim also
-   says that each node holds its own copy. `ReadWriteOnce` would lie about the nodes,
-   and `ReadWriteOncePod` would break the Deployment.
+5. **The access mode is `ReadWriteMany` for a volume that many nodes
+   mount.** Many nodes do mount one volume read-write. Every page of
+   the manual that shows a claim also says that each node has its own
+   copy. `ReadWriteOnce` would say that one node has the volume, which
+   is false. `ReadWriteOncePod` is for a volume that only one pod in the
+   cluster may mount, such as a catalog with one writer. It stops a
+   `Deployment` with the `RollingUpdate` strategy from starting its new
+   pod, so a `Deployment` on such a claim uses `Recreate`. The node
+   plugin declares `SINGLE_NODE_MULTI_WRITER`, so the kubelet sends
+   `SINGLE_NODE_SINGLE_WRITER` for that mode.
 6. **No attach, no stage, no capacity.** `attachRequired: false`, no
    `STAGE_UNSTAGE_VOLUME` capability, `storageCapacity: false`. A
    publish is a `mkdir` and a bind mount.

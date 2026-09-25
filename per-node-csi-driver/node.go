@@ -66,21 +66,36 @@ func (n *node) NodeGetInfo(
 	return &csi.NodeGetInfoResponse{NodeId: n.nodeID}, nil
 }
 
-// NodeGetCapabilities declares GET_VOLUME_STATS alone. A publish is a
-// mkdir and a bind mount, so there is nothing to stage, and a copy has
-// no size of its own to expand.
+// NodeGetCapabilities declares GET_VOLUME_STATS and
+// SINGLE_NODE_MULTI_WRITER. A publish is a mkdir and a bind mount, so
+// there is nothing to stage, and a copy has no size of its own to
+// expand.
+//
+// SINGLE_NODE_MULTI_WRITER tells the kubelet to send
+// SINGLE_NODE_SINGLE_WRITER for a ReadWriteOncePod claim, where it
+// otherwise sends SINGLE_NODE_WRITER. NodePublishVolume reads no access
+// mode, so every mode gets the same bind of this node's copy. The
+// scheduler, not the driver, keeps a ReadWriteOncePod claim to one pod
+// in the cluster.
 func (n *node) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {
 	return &csi.NodeGetCapabilitiesResponse{
-		Capabilities: []*csi.NodeServiceCapability{{
-			Type: &csi.NodeServiceCapability_Rpc{
-				Rpc: &csi.NodeServiceCapability_RPC{
-					Type: csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
-				},
-			},
-		}},
+		Capabilities: []*csi.NodeServiceCapability{
+			rpcCapability(csi.NodeServiceCapability_RPC_GET_VOLUME_STATS),
+			rpcCapability(csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER),
+		},
 	}, nil
+}
+
+// rpcCapability wraps one RPC type in the message NodeGetCapabilities
+// returns.
+func rpcCapability(kind csi.NodeServiceCapability_RPC_Type) *csi.NodeServiceCapability {
+	return &csi.NodeServiceCapability{
+		Type: &csi.NodeServiceCapability_Rpc{
+			Rpc: &csi.NodeServiceCapability_RPC{Type: kind},
+		},
+	}
 }
 
 // NodePublishVolume gives the pod this node's copy of the handle, and

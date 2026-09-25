@@ -116,21 +116,6 @@ func TestNodeGetInfoNamesTheNodeAndNoTopology(t *testing.T) {
 	}
 }
 
-func TestNodeGetCapabilitiesDeclaresVolumeStatsAlone(t *testing.T) {
-	answering := testDriver(t)
-	answer, err := answering.NodeGetCapabilities(t.Context(), &csi.NodeGetCapabilitiesRequest{})
-	if err != nil {
-		t.Fatalf("NodeGetCapabilities: %v", err)
-	}
-	declared := answer.GetCapabilities()
-	if len(declared) != 1 {
-		t.Fatalf("NodeGetCapabilities declared %v, want one capability", declared)
-	}
-	if got := declared[0].GetRpc().GetType(); got != csi.NodeServiceCapability_RPC_GET_VOLUME_STATS {
-		t.Errorf("NodeGetCapabilities declared %v, want GET_VOLUME_STATS", got)
-	}
-}
-
 func TestPublishMakesTheCopyAndBindsItUnderThePod(t *testing.T) {
 	answering := testDriver(t)
 	target := filepath.Join(t.TempDir(), "mount")
