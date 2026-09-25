@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   go:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
 
@@ -64,7 +64,7 @@ jobs:
           retention-days: 7
 
   docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # The theme is the brand repository, a submodule at
       # docs/themes/brand. A checkout without it builds a site with
@@ -118,7 +118,7 @@ jobs:
   # set once by hand, the same class of one-time act as creating the
   # DNS record that points the name at Pages.
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     needs: [go, docs]
     if: github.event_name != 'pull_request'
