@@ -53,8 +53,10 @@ way, and it keeps the checkout current:
       volumeName: franchises-repo
       resources: {requests: {storage: 1Gi}}
 
-The walk of every `Job` and every screen mount the storage claim read-only,
-which is what the driver requires of a `ReadOnlyMany` volume.
+Every `Job` of the library mounts the storage claim with `readOnly: true`
+on the pod's volume, which is what the driver requires of a
+`ReadOnlyMany` volume. A screen does not mount the storage claim. It reads
+the art claim.
 [Read-only volumes](https://git.liken.sh/docs/guides/read-only/) in
 the driver's manual covers `offline: allowStale` and private
 repositories.

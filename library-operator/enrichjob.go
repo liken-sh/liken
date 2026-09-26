@@ -153,11 +153,14 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 	}
 }
 
-// The volumes of the pod. The storage claim is mounted read-write at the
-// volume, and the scan container mounts it read-only, so a scanner a person
-// supplies never writes the media. The phases write beside the media, into
-// the claim a screen reads: the storage claim, or a franchises library's art
-// claim, which the scan also writes the downloaded art into. A Job that runs
+// The volumes of the pod. The scan container mounts the storage claim
+// read-only, so a scanner a person supplies never writes the media. The
+// phases write into the claim a screen reads. For movies and series that is
+// the storage claim, beside the media, so the storage volume is read-write.
+// For a franchises library it is the art claim, which the scan also writes
+// the downloaded art into. No container of that Job writes the storage
+// claim, so the storage volume is read-only, which a claim on git-csi-driver
+// requires before its pod starts. A Job that runs
 // the nfo phase also holds the cache of the IMDb dataset files, where the
 // Library's sources name an imdb provider that has one.
 func libraryJobVolumes(library *Library, providers providerSet, included []string) []Volume {
@@ -170,6 +173,7 @@ func libraryJobVolumes(library *Library, providers providerSet, included []strin
 		}},
 		{Name: libraryVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
 			ClaimName: library.Spec.Storage.Claim,
+			ReadOnly:  phaseVolumeOf(library) != libraryVolumeName,
 		}},
 		// The marks and the .nfo locks. An emptyDir is local to the node, so
 		// flock reaches every container, and a retried pod starts clean.

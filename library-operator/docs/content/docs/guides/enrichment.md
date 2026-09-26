@@ -481,7 +481,13 @@ change every month. The attempt records the `Last-Modified` time of the
 A rating from the datasets is asked for again after 30 days, but only
 when IMDb has published a newer `title.ratings` than the one the
 attempt read. A rating OMDb wrote counts as older, so a library that
-moves from `omdb` to `imdb` moves each title within 30 days. While the
+moves from `omdb` to `imdb` moves each title within 30 days. A rating
+that another tool, such as Radarr or Jellyfin, wrote into the `.nfo`
+file has no attempt. The next `nfo` container that reads the datasets
+reads that rating once and records an attempt, and it writes the file
+only when the rating at one decimal differs. The gap count in the
+status does not include these ratings, so they start no `Job` of their
+own. While the
 provider's `Stale` condition is `True`, IMDb has published no newer
 file, and the operator starts no `Job` that fills gaps for these ratings
 alone.

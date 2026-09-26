@@ -213,6 +213,49 @@ func TestTheJobOfAFranchisesLibraryWritesIntoTheArtClaim(t *testing.T) {
 	}
 }
 
+// A franchises library's phases write only into the art claim, so its
+// storage claim is read-only at the volume, which a git checkout claim
+// requires. The phases of every other kind write beside the media, so their
+// storage claim is read-write at the volume.
+func TestTheStorageVolumeIsReadOnlyWhereThePhasesWriteElsewhere(t *testing.T) {
+	series := studioMovies()
+	series.Spec.Kind = libraryKindSeries
+	cases := []struct {
+		name     string
+		library  *Library
+		readOnly bool
+	}{
+		{name: "movies", library: studioMovies()},
+		{name: "series", library: series},
+		{name: "franchises", library: studioFranchises(), readOnly: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			job := testEnrichJob(one.library, "")
+
+			for _, volume := range job.Spec.Template.Spec.Volumes {
+				if volume.Name == libraryVolumeName && volume.PersistentVolumeClaim.ReadOnly != one.readOnly {
+					t.Errorf("library volume = %+v, want read-only %v", volume.PersistentVolumeClaim, one.readOnly)
+				}
+			}
+		})
+	}
+}
+
+// Every container of a franchises Job that mounts the storage claim mounts
+// it read-only, to match the volume.
+func TestEveryFranchisesMountOfTheStorageIsReadOnly(t *testing.T) {
+	job := testEnrichJob(studioFranchises(), "")
+
+	for _, container := range job.Spec.Template.Spec.Containers {
+		for _, mount := range container.VolumeMounts {
+			if mount.Name == libraryVolumeName && !mount.ReadOnly {
+				t.Errorf("%s mounts the storage as %+v, want read-only", container.Name, mount)
+			}
+		}
+	}
+}
+
 // The key reaches every phase through a secretKeyRef, so no container reads
 // the API server, and the agent carries none.
 func TestEveryPhaseCarriesEveryProviderKey(t *testing.T) {

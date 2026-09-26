@@ -3,11 +3,13 @@ package main
 // what these tests read: the nfo container reads the IMDb datasets once for
 // the whole rating.imdb gap, writes the rating as OMDb writes it, writes a
 // .nfo file only when the one-decimal rating changed, records the time of
-// the file it read, and rates episodes, finding an episode's IMDb id in
-// title.episode where its .nfo file has none.
+// the file it read, reads once a rating another tool wrote, and rates
+// episodes, finding an episode's IMDb id in title.episode where its .nfo
+// file has none.
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -132,6 +134,18 @@ func TestTheRatingIsWrittenOnlyWhenItChanges(t *testing.T) {
 	}
 }
 
+// An attempt that read the newest title.ratings, which closes the rating
+// gap of the item.
+func seedNewestRatingAttempt(t *testing.T, catalog *Catalog, item string) {
+	t.Helper()
+	seed := &walkResult{attempts: []attemptRow{{Library: "house/movies", Item: item, Fact: factRatingIMDb,
+		At: datasetsModified.Unix(), Result: attemptFound, Provider: providerBlockIMDb,
+		DatasetModified: datasetsModified.Unix()}}}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A run whose gap holds no title sends no request.
 func TestAnEmptyGapReadsNoFile(t *testing.T) {
 	work, catalog, server, root := imdbEnricher(t, libraryKindMovies)
@@ -140,11 +154,37 @@ func TestAnEmptyGapReadsNoFile(t *testing.T) {
     <rating name="imdb" max="10"><value>7.9</value></rating>
   </ratings>
 `, nfoFactList([]string{factRatingIMDb}))
+	seedNewestRatingAttempt(t, catalog, "movie:imdb:tt9000001")
 
 	runIMDbRating(t, work)
 
 	if got := server.log(); len(got) != 0 {
 		t.Errorf("requests = %v, want none", got)
+	}
+}
+
+// A rating another tool wrote has no attempt. The run reads it once and
+// records an attempt with the time of the file it read. The .nfo file
+// already holds the one-decimal rating, so the run leaves it as it was.
+func TestARatingAnotherToolWroteGainsAnAttempt(t *testing.T) {
+	work, catalog, _, root := imdbEnricher(t, libraryKindMovies)
+	nfoPath := seedIMDbMovie(t, catalog, root, "tt9000001",
+		`  <ratings>
+    <rating name="imdb" max="10"><value>7.9</value></rating>
+  </ratings>
+`, nfoFactList([]string{factRatingIMDb}))
+	before := readFileString(t, nfoPath)
+
+	runIMDbRating(t, work)
+
+	if readFileString(t, nfoPath) != before {
+		t.Errorf(".nfo = %s, want it as it was", readFileString(t, nfoPath))
+	}
+	attempts := catalogLines(t, catalog, `SELECT item || ' ' || dataset_modified FROM attempts `+
+		`WHERE library = ? AND concern = 'rating.imdb'`)
+	want := fmt.Sprintf("movie:imdb:tt9000001 %d", datasetsModified.Unix())
+	if !slices.Equal(attempts, []string{want}) {
+		t.Errorf("attempts = %v, want %s", attempts, want)
 	}
 }
 
@@ -180,6 +220,7 @@ func seedIMDbEpisode(t *testing.T, catalog *Catalog, root, seriesIMDb string) (s
 func TestAnEpisodeTakesItsIDFromTitleEpisodeAndItsRating(t *testing.T) {
 	work, catalog, server, root := imdbEnricher(t, libraryKindSeries)
 	nfoPath, id := seedIMDbEpisode(t, catalog, root, "tt9000003")
+	seedNewestRatingAttempt(t, catalog, "series:imdb:tt9000003")
 
 	runIMDbRating(t, work)
 
@@ -203,7 +244,8 @@ func TestAnEpisodeTakesItsIDFromTitleEpisodeAndItsRating(t *testing.T) {
 		t.Errorf("nfo_facts = %v, want the rating on the episode's row", facts)
 	}
 	attempts := catalogLines(t, catalog,
-		`SELECT item || ' ' || result FROM attempts WHERE library = ? AND concern = 'rating.imdb'`)
+		`SELECT item || ' ' || result FROM attempts WHERE library = ? AND concern = 'rating.imdb' `+
+			`AND item LIKE 'episode:%'`)
 	if !slices.Equal(attempts, []string{id + " " + attemptFound}) {
 		t.Errorf("attempts = %v, want the episode's", attempts)
 	}

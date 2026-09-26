@@ -4,7 +4,8 @@ package main
 // every other nfo gap in two ways. The imdb block rates episodes, and no other
 // block does, so the gap holds episodes only where imdb answers the fact. And
 // IMDb replaces title.ratings every day, so a rating the datasets wrote is a
-// gap again after 30 days when a newer file exists.
+// gap again after 30 days when a newer file exists. A rating another tool
+// wrote into the .nfo file has no attempt, and the container reads it once.
 
 import (
 	"context"
@@ -15,8 +16,8 @@ import (
 // The two parameters the rating.imdb query binds after the release date: the
 // dataset cutoff as ?6 and the episode switch as ?7. An attempt older than
 // the retry window whose dataset time is older than the cutoff is a gap
-// again. A cutoff of 0 opens no attempt, because no dataset time is below
-// zero.
+// again, and a cutoff above 0 also opens a rating that has no attempt. A
+// cutoff of 0 opens neither, because no dataset time is below zero.
 type ratingGapScope struct {
 	reopen   int64
 	episodes bool
@@ -67,6 +68,13 @@ func imdbRatingGapQuery() string {
 	missing := `instr(nfo_facts, '` + nfoFactSeparator + factRatingIMDb + nfoFactSeparator + `') = 0`
 	reopened := `id IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
 		`AND ` + attemptFactColumn + ` = '` + factRatingIMDb + `' AND at < ?2 AND dataset_modified < ?6)`
+	// A rating another tool wrote into the .nfo file has no attempt, so the
+	// 30 days never open it. The container reads it once, in a scope that
+	// reopens, and the attempt it records then carries the dataset time.
+	// The reporter binds no reopen, so it does not count these titles, and
+	// a Library whose rating another block answers starts no Job for them.
+	unattempted := `(?6 > 0 AND id NOT IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
+		`AND ` + attemptFactColumn + ` = '` + factRatingIMDb + `'))`
 	return `SELECT id FROM (` +
 		`SELECT library, id, nfo_facts FROM movies WHERE id NOT LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id, nfo_facts FROM series WHERE id NOT LIKE 'series:path:%' ` +
@@ -74,7 +82,7 @@ func imdbRatingGapQuery() string {
 		`AND series NOT LIKE 'series:path:%' ` +
 		`AND path NOT IN (SELECT path FROM episodes WHERE library = ?1 GROUP BY path HAVING count(*) > 1)` +
 		`) AS items ` +
-		`WHERE library = ?1 AND ` + gapClause(factRatingIMDb, "id", missing+` OR `+reopened)
+		`WHERE library = ?1 AND ` + gapClause(factRatingIMDb, "id", missing+` OR `+reopened+` OR `+unattempted)
 }
 
 // The episodes among the rating.imdb gap the reporter counts. The operator

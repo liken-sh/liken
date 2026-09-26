@@ -1,9 +1,10 @@
 package main
 
 // what these tests read: the rating.imdb gap opens a rating the datasets
-// wrote after 30 days when a newer title.ratings exists, holds episodes only
-// when the container's scope says so, and leaves out a file of two episodes;
-// the operator schedules on that gap by the answerer of the Library.
+// wrote after 30 days when a newer title.ratings exists, opens once in the
+// container a rating another tool wrote, holds episodes only when the
+// container's scope says so, and leaves out a file of two episodes; the
+// operator schedules on that gap by the answerer of the Library.
 
 import (
 	"maps"
@@ -70,6 +71,60 @@ func TestARatingOpensAgainAfterThirtyDaysWhenANewerFileExists(t *testing.T) {
 
 			if (len(got) == 1) != one.open {
 				t.Errorf("gap = %v, want open %v", got, one.open)
+			}
+		})
+	}
+}
+
+// one movie whose .nfo file holds an IMDb rating that another tool wrote, so
+// no attempt of the fact exists.
+func seedNFORatedMovie(t *testing.T, catalog *Catalog) {
+	t.Helper()
+	seed := &walkResult{movies: []movieRow{{Id: "movie:imdb:tt9000001", Library: "house/movies",
+		Kind: libraryKindMovies, Path: "Winter Harbour (2011)", Title: "Winter Harbour", Released: "2011",
+		NFOFacts: nfoFactList([]string{factRatingIMDb})}}}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// the gap the reporter counts, which binds no dataset time.
+func reportedRatingGap(t *testing.T, catalog *Catalog) []string {
+	t.Helper()
+	ids, err := catalog.queryStrings(t.Context(), gapQueries[factRatingIMDb],
+		gapParams(factRatingIMDb, "house/movies", testNow, time.Time{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ids
+}
+
+// A rating another tool wrote has no attempt, so the datasets read it once
+// in a Job whose imdb provider answers the rating. The reporter does not
+// count it, or a Library whose rating another block answers would start a
+// Job on every pass.
+func TestARatingAnotherToolWroteIsReadOnceFromTheDatasets(t *testing.T) {
+	newest := testNow.Add(-time.Hour)
+	cases := []struct {
+		name string
+		seed func(*testing.T, *Catalog)
+		job  int
+	}{
+		{name: "no attempt", seed: seedNFORatedMovie, job: 1},
+		{name: "a fresh dataset attempt", seed: func(t *testing.T, catalog *Catalog) {
+			seedRatedMovie(t, catalog, 24*time.Hour, newest)
+		}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			one.seed(t, catalog)
+
+			if got := ratingGap(t, catalog, ratingGapScope{reopen: newest.Unix(), episodes: true}); len(got) != one.job {
+				t.Errorf("Job gap = %v, want %d items", got, one.job)
+			}
+			if got := reportedRatingGap(t, catalog); len(got) != 0 {
+				t.Errorf("reported gap = %v, want none", got)
 			}
 		})
 	}
