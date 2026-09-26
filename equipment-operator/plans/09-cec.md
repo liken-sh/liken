@@ -554,6 +554,17 @@ several sources. `liken`'s kernel ships `vivid` with
    `status.displays`.
 3. The session match and the wake job, which close plan 07's TV wake.
 4. The `Receiver`'s `cec:` block and System Audio Mode.
+5. A CEC setup guide in `docs/content/docs/guides/` and a matching
+   skill in `skills/`. The guide follows one room from a new adapter
+   to a TV that wakes: the `Machine`'s `spec.modules` and `spec.serio`
+   (`liken` plan 70), the `Display`'s physical address
+   (display-operator plan 23), a `CECBus` from `Listen` to `Control`,
+   the `Television` and the `Receiver`'s `cec:` block, and a `Remote`
+   on the input device (media-operator plan 35). It states what the
+   drills taught: the adapter goes on a spare input with only its own
+   cable, many HDMI cables leave out the CEC wire, and another source
+   can take the input after a wake. It links the kernel's CEC admin
+   guide, the Pulse-Eight pages, and `cec-ctl` for a check by hand.
 
 ## Verification
 
