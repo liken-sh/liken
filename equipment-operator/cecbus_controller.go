@@ -55,7 +55,12 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	var list *CECBusList
 	for ctx.Err() == nil {
 		var err error
-		if list, err = ListCECBuses(c.client); err == nil {
+		err = retryThrottled(ctx, func() error {
+			var err error
+			list, err = ListCECBuses(c.client)
+			return err
+		})
+		if err == nil {
 			break
 		}
 		fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)

@@ -10,11 +10,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -113,9 +115,12 @@ type cecNode struct {
 	caps      cec.Caps
 	directory *cec.Directory
 	now       func() time.Time
-	wake      chan struct{}
-	dirty     chan struct{}
-	failed    chan error
+	// log takes the lines a person reads to follow the adapter: what it
+	// held when the pod opened it, and each change of the entry's state.
+	log    io.Writer
+	wake   chan struct{}
+	dirty  chan struct{}
+	failed chan error
 
 	mutex sync.Mutex
 	// bus is the CECBus this adapter reports to, and applied is the
@@ -137,6 +142,8 @@ type cecNode struct {
 	// is the wait that set it.
 	retryAt   time.Time
 	retryWait time.Duration
+	// logged is the state and the message the log last stated.
+	logged CECAdapterStatus
 	// stopMode ends the scan loop of the mode the adapter runs, and
 	// returns once the loop has stopped.
 	stopMode func()
@@ -156,6 +163,7 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 		caps:      caps,
 		directory: cec.NewDirectory(),
 		now:       time.Now,
+		log:       os.Stderr,
 		wake:      make(chan struct{}, 1),
 		dirty:     make(chan struct{}, 1),
 		failed:    make(chan error, 1),
@@ -167,6 +175,7 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 // ends or a call on the adapter fails. Either way it takes the adapter
 // off the bus and writes a Stopped entry before it returns.
 func (n *cecNode) run(ctx context.Context) error {
+	n.logOpened()
 	loop, cancel := context.WithCancel(ctx)
 	var started sync.WaitGroup
 	started.Go(func() {
@@ -188,9 +197,61 @@ func (n *cecNode) run(ctx context.Context) error {
 	return err
 }
 
+// logOpened states the logical addresses the kernel holds for the
+// adapter when the pod opens it, before the pod clears or claims
+// anything. A previous pod that stopped cleanly released the adapter,
+// so this line shows whether it did.
+func (n *cecNode) logOpened() {
+	held, err := n.device.Addresses()
+	switch {
+	case err != nil:
+		fmt.Fprintf(n.log, "the adapter on %s (%s) did not report its logical addresses when the pod opened it: %v\n", n.machine, n.caps.Driver, err)
+	case len(held.Logical) == 0:
+		fmt.Fprintf(n.log, "the adapter on %s (%s) holds no logical address when the pod opens it\n", n.machine, n.caps.Driver)
+	default:
+		addresses := make([]string, 0, len(held.Logical))
+		for _, address := range held.Logical {
+			addresses = append(addresses, fmt.Sprint(uint8(address)))
+		}
+		noun := "address"
+		if len(addresses) > 1 {
+			noun = "addresses"
+		}
+		fmt.Fprintf(n.log, "the adapter on %s (%s) holds logical %s %s as %q when the pod opens it\n",
+			n.machine, n.caps.Driver, noun, strings.Join(addresses, ", "), held.OSDName)
+	}
+}
+
+// logState states a change of the entry's state or message. A report
+// that changes only the devices or the time logs nothing, so the log
+// stays quiet while the adapter scans and reports.
+func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
+	if entry.State == n.logged.State && entry.Message == n.logged.Message {
+		return
+	}
+	from := string(n.logged.State)
+	if from == "" {
+		from = "none"
+	}
+	line := fmt.Sprintf("CECBus %s: the adapter on %s went from %s to %s", bus, n.machine, from, entry.State)
+	if entry.Message != "" {
+		line += ": " + entry.Message
+	}
+	fmt.Fprintln(n.log, line)
+	n.logged = entry
+}
+
 // loop is run's body: the first list, the watch, and the passes.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
-	list, err := ListCECBuses(n.client)
+	var list *CECBusList
+	err := retryThrottled(ctx, func() error {
+		var err error
+		list, err = ListCECBuses(n.client)
+		return err
+	})
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("listing CECBuses: %w", err)
 	}
@@ -238,6 +299,7 @@ func (n *cecNode) stop(cause string) {
 		return
 	}
 	entry.ReportedAt = timestamp(n.now())
+	n.logState(bus, entry)
 	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, &entry); err != nil {
 		fmt.Fprintf(os.Stderr, "writing machine %s's last entry in CECBus %s: %v\n", n.machine, bus, err)
 	}
@@ -275,6 +337,7 @@ func (n *cecNode) report(force bool) {
 	if written != nil && reflect.DeepEqual(*written, entry) && !force {
 		return
 	}
+	n.logState(bus, entry)
 	stamped := entry
 	stamped.ReportedAt = timestamp(n.now())
 	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, &stamped); err != nil {

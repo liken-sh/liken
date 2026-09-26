@@ -819,14 +819,23 @@ func operate() {
 // serve proves the collection can be read, starts the watch from the
 // version that first list carried, and runs the loop until ctx ends.
 func serve(ctx context.Context, client *Client, busAddress string, readings *metrics) error {
-	list, err := ListReceivers(client)
+	var list *ReceiverList
+	err := retryThrottled(ctx, func() error {
+		var err error
+		list, err = ListReceivers(client)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("listing receivers: %w", err)
 	}
 
+	// serve returns only after the goroutines it started stop, so none
+	// of them reads the API after it.
 	operator := newController(client, busAddress, readings)
-	go watchReceivers(ctx, client, list.Metadata.ResourceVersion, operator.wake, readings)
-	go newCECBusController(client).run(ctx, readings)
+	var started sync.WaitGroup
+	started.Go(func() { watchReceivers(ctx, client, list.Metadata.ResourceVersion, operator.wake, readings) })
+	started.Go(func() { newCECBusController(client).run(ctx, readings) })
 	operator.run(ctx)
+	started.Wait()
 	return nil
 }

@@ -24,7 +24,7 @@ The adapters connected to this wire, one for each machine.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specadapters--machine"></span>`machine` | string | yes | The Machine that carries the adapter. liken publishes the adapter as the machine's -cec device, and the node workload on that machine holds it. |
-| <span id="specadapters--display"></span>`display` | string | no | The Display whose physical address the adapter announces in Control. display-operator reads the address from the EDID and publishes it at the Display's status.physicalAddress. The adapter is connected to a spare input and carries no video, and the address makes an Active Source from the adapter switch the TV and the receiver to this Display's input. |
+| <span id="specadapters--display"></span>`display` | string | no | The Display whose physical address the adapter announces in Control. display-operator reads the address from the EDID and publishes it at the Display's status.physicalAddress. The adapter announces this address whether it is connected to a spare input and carries no video, or sits inline in the machine's video path, because either way the address is the place in the tree where this Display's picture enters. An Active Source from the adapter then switches the TV, and any receiver between, to this Display's input. |
 
 ## status
 
@@ -34,7 +34,7 @@ What the adapters report and what the operator derives from their reports.
 | --- | --- | --- | --- |
 | <span id="status--adapters"></span>`adapters` | [\[\]object](#statusadapters) | no | One entry for each adapter, written by the node workload on that adapter's machine under its own field manager. Only the entries of machines the spec names count. |
 | <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | Every device on the wire, merged from the adapters' reports by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter first in spec.adapters wins. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, and an adapter that does not is on a different wire than the spec states. Scanned: the device list is complete, which only Control achieves; a bus where an adapter finds no device says that the cable between the adapter and the receiver may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their OSD names. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, and an adapter that does not is on a different wire than the spec states. Scanned: the device list is complete, which only Control achieves; a bus where an adapter finds no device says that the HDMI cable at the adapter's output may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their OSD names. |
 
 ### status.adapters[]
 
@@ -83,7 +83,7 @@ Every device on the wire, merged from the adapters' reports by physical address,
 
 ### status.conditions[]
 
-AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, and an adapter that does not is on a different wire than the spec states. Scanned: the device list is complete, which only Control achieves; a bus where an adapter finds no device says that the cable between the adapter and the receiver may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their OSD names.
+AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, and an adapter that does not is on a different wire than the spec states. Scanned: the device list is complete, which only Control achieves; a bus where an adapter finds no device says that the HDMI cable at the adapter's output may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their OSD names.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

@@ -243,8 +243,10 @@ func sees(seer, seen CECAdapterStatus) bool {
 // silentCable is the end of the message when an adapter finds no
 // device. A drill found that many HDMI cables leave out the CEC wire,
 // and an adapter on such a cable hears nothing and every poll it sends
-// goes unacknowledged.
-const silentCable = "the cable between the adapter and the receiver may not carry the CEC wire"
+// goes unacknowledged. The message names no device at the cable's far
+// end, because an adapter can connect to a receiver's input or sit
+// inline between a machine and a TV.
+const silentCable = "the HDMI cable at the adapter's output may not carry the CEC wire"
 
 // scanned: the device list is complete. In Control that means every
 // adapter finished a scan and found at least one device. In Listen the

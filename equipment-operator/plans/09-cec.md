@@ -259,8 +259,8 @@ adapters' reports, and it merges the devices by physical address.
 * `Scanned`: the device list is complete. Only `Control` completes
   it: every adapter finished a scan and found at least one device. A
   bus in `Listen` reports `False` with the reason `Listening`. An
-  adapter that finds no device reports that the cable between the
-  adapter and the receiver may not carry the CEC wire.
+  adapter that finds no device reports that the HDMI cable at the
+  adapter's output may not carry the CEC wire.
 
 Each entry carries the time of its last report, and the node pod
 writes the entry every 30 seconds even when nothing changed. A pod

@@ -143,7 +143,7 @@ func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 		{"a refusal", busWith(CECControl, []string{"node-1"}, CECAdapterStatus{Machine: "node-1", State: AdapterRefused, Message: "CEC_S_MODE: device or resource busy"}),
 			conditionJoined, "the adapter on node-1: CEC_S_MODE: device or resource busy"},
 		{"a silent cable", busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4)),
-			conditionScanned, "no device answered the polls of the adapter on node-1; the cable between the adapter and the receiver may not carry the CEC wire"},
+			conditionScanned, "no device answered the polls of the adapter on node-1; the HDMI cable at the adapter's output may not carry the CEC wire"},
 		{"two wires", busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4, tvDevice), scannedEntry("node-2", 4, tvDevice)),
 			conditionCoherent, `the adapter on node-1 does not see the adapter on node-2 by its OSD name "node-2"; the two adapters may be on different wires`},
 		{"a stale entry", busWith(CECControl, []string{"node-1"}, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))),

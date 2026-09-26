@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,9 +164,67 @@ func (c *Client) requestJSON(method, path, contentType string, body []byte, out 
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
+		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return &throttledError{err: err, wait: retryAfter(resp.Header.Get("Retry-After"), message)}
+		}
+		return err
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// retryAfterUnit is one second of an API server's retry advice. It is
+// a variable so a test waits milliseconds instead.
+var retryAfterUnit = time.Second
+
+// throttledError is a 429 from the API server, which asks the client
+// to wait and ask again. The server answers so for a second or two
+// while the storage of a CRD it just received starts, with the reason
+// "storage is (re)initializing".
+type throttledError struct {
+	err  error
+	wait time.Duration
+}
+
+func (e *throttledError) Error() string { return e.err.Error() }
+func (e *throttledError) Unwrap() error { return e.err }
+
+// retryAfter reads how long a 429 asks the client to wait: the
+// Retry-After header, or the retryAfterSeconds of the Status body, or
+// one second when the answer states neither.
+func retryAfter(header string, body []byte) time.Duration {
+	if seconds, err := strconv.Atoi(header); err == nil && seconds > 0 {
+		return time.Duration(seconds) * retryAfterUnit
+	}
+	var status struct {
+		Details struct {
+			RetryAfterSeconds int `json:"retryAfterSeconds"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(body, &status) == nil && status.Details.RetryAfterSeconds > 0 {
+		return time.Duration(status.Details.RetryAfterSeconds) * retryAfterUnit
+	}
+	return retryAfterUnit
+}
+
+// retryThrottled makes a call until it answers something other than a
+// 429, waiting as long as each 429 asks. It stops when ctx ends and
+// answers the last 429 then. Any other answer, an error included, is
+// the caller's.
+func retryThrottled(ctx context.Context, call func() error) error {
+	for {
+		err := call()
+		var throttled *throttledError
+		if !errors.As(err, &throttled) {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "%v; asking again in %s\n", err, throttled.wait)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(throttled.wait):
+		}
+	}
 }
 
 // drain reads whatever the caller left in the body, then closes it.
