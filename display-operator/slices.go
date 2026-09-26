@@ -170,6 +170,10 @@ func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 // and the link history is what decides when a dark connector has been
 // dark long enough to count.
 func sliceDevices(outputs []Output) []SliceDevice {
+	// A monitor two connectors both serve, with different physical
+	// addresses, so neither connector's device states one: a claim
+	// that read either address would hand a CEC consumer a guess.
+	ambiguous := ambiguousAddresses(outputs)
 	devices := make([]SliceDevice, 0, len(outputs))
 	for _, output := range outputs {
 		name := deviceName(output.Connector)
@@ -218,8 +222,14 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			// 1.2.0.0, from the EDID on the wire now. A dark connector
 			// publishes none, because a device the scheduler allocates
 			// describes the hardware as it is now. The Display's status
-			// keeps the last address while the connector is dark.
-			addAttribute(device.Attributes, "physicalAddress", output.Monitor.PhysicalAddress)
+			// keeps the last address while the connector is dark. An
+			// ambiguous monitor publishes none either, because the two
+			// connectors serving it disagree about which one it is.
+			address := output.Monitor.PhysicalAddress
+			if _, unclear := ambiguous[monitorID(monitor)]; unclear {
+				address = ""
+			}
+			addAttribute(device.Attributes, "physicalAddress", address)
 			// Each control attribute promises one thing: the panel
 			// answered the VCP code behind it when the operator asked.
 			// A claim that states the matching parameter has something

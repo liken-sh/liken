@@ -17,7 +17,9 @@ The collision takes three forms:
 - **Two cables from one node to one receiver.** The receiver serves
   the same EDID identity on each of its inputs, so this is the same
   case. The CEC setup of plan 23 needs only one cable, so it does not
-  cause it.
+  cause it. When the two cables carry different physical addresses,
+  the `Display` refuses to publish either one as current instead of
+  picking a guess.
 - **Two monitors of one model on different nodes.** Both nodes write
   the one `Display`, and its `status.node` and `status.connector`
   alternate on every pass of either node, about every ten seconds.

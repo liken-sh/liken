@@ -161,6 +161,9 @@ func (d *displayControl) pass(ctx context.Context) error {
 			present[name] = output
 		}
 	}
+	// A monitor two connectors both serve, with different physical
+	// addresses, so the Display for it publishes no current address.
+	ambiguous := ambiguousAddresses(outputs)
 	// The sweep for panels that left is the only work in a pass
 	// that reads every resource, and nothing about it follows the
 	// poll's cadence: a panel that leaves raises a uevent, and the
@@ -183,7 +186,7 @@ func (d *displayControl) pass(ctx context.Context) error {
 		failures = append(failures, err)
 	}
 	for name, output := range present {
-		if err := d.reconcile(ctx, name, output, held); err != nil {
+		if err := d.reconcile(ctx, name, output, held, ambiguous[name]); err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", name, err))
 		}
 	}
@@ -310,7 +313,7 @@ func (d *displayControl) claimed() (map[string]bool, error) {
 // One panel. The resource is created empty when it is absent,
 // the panel is actuated, and the status is written last, so it reports
 // what the actuation left behind.
-func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held map[string]bool) error {
+func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
 	display, err := getDisplay(d.client, name)
 	if errors.Is(err, ErrNotFound) {
 		display, err = createDisplay(d.client, name)
@@ -324,7 +327,7 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 	// through the compositor and not on the DDC wire, so it runs
 	// beside the controls rather than among them.
 	rested := d.restMode(ctx, display, output, held)
-	published := d.publish(display, d.statusOf(display, output, d.controls.factsFor(output)))
+	published := d.publish(display, d.statusOf(display, output, d.controls.factsFor(output), ambiguous))
 	return errors.Join(actuated, rested, published)
 }
 
@@ -700,8 +703,10 @@ func capturedRaw(captured *DisplayValues, code byte) (uint16, bool) {
 	return captured.raw(code)
 }
 
-// The status of a panel that is on its connector now.
-func (d *displayControl) statusOf(display *Display, output Output, facts panelFacts) DisplayStatus {
+// The status of a panel that is on its connector now. Ambiguous
+// names another connector on this node serving the same monitor a
+// different physical address, or is empty when this is the only one.
+func (d *displayControl) statusOf(display *Display, output Output, facts panelFacts, ambiguous string) DisplayStatus {
 	status := display.Status
 	status.Node = d.node
 	status.Connector = output.Connector
@@ -725,7 +730,7 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, true,
 		"PanelAttached", output.Connector+" carries this panel"))
 	status.Conditions = setCondition(status.Conditions, d.responsive(facts))
-	return d.withPhysicalAddress(status, output)
+	return d.withPhysicalAddress(status, output, ambiguous)
 }
 
 // The mode block of one output, and nothing at all when

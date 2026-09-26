@@ -24,18 +24,22 @@ package main
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
 // The condition that states where status.physicalAddress came from,
-// and its two reasons. ReadFromEDID is an address the connector's
+// and its three reasons. ReadFromEDID is an address the connector's
 // current EDID serves. Retained is the last valid address, kept while
 // the connector serves no EDID for this monitor or serves no valid
-// address in it.
+// address in it. Ambiguous is a monitor that two connectors on this
+// node both serve, with different addresses.
 const (
 	PhysicalAddressCurrentCondition = "PhysicalAddressCurrent"
 	ReadFromEDIDReason              = "ReadFromEDID"
 	RetainedReason                  = "Retained"
+	AmbiguousReason                 = "Ambiguous"
 )
 
 // The CTA-861 data block collection starts at byte 4 of the extension
@@ -106,13 +110,88 @@ func addressText(high, low byte) string {
 	return fmt.Sprintf("%x.%x.%x.%x", digits[0], digits[1], digits[2], digits[3])
 }
 
+// ambiguousAddresses groups a card's connected outputs by monitor
+// identity, and names every identity that two or more of its
+// connectors serve with different physical addresses.
+//
+// Pulse-Eight's two-cable setup drives this: one cable carries the
+// picture into a receiver input, and a second, through a CEC adapter,
+// into another input of the same receiver. Both connectors answer to
+// the receiver's own EDID for that monitor, so they share one
+// identity, and each serves the address of the input it is plugged
+// into. A CEC consumer that read either one would switch the room to
+// a guess, so this operator publishes no address while the two
+// disagree.
+func ambiguousAddresses(outputs []Output) map[string]string {
+	byIdentity := map[string][]Output{}
+	for _, output := range outputs {
+		if !output.Connected {
+			continue
+		}
+		if name := monitorID(output.Monitor); name != "" {
+			byIdentity[name] = append(byIdentity[name], output)
+		}
+	}
+	messages := map[string]string{}
+	for name, group := range byIdentity {
+		if message, ambiguous := ambiguousAddress(group); ambiguous {
+			messages[name] = message
+		}
+	}
+	return messages
+}
+
+// ambiguousAddress answers whether one monitor's connectors serve two
+// or more different physical addresses, and the message that names
+// each connector and the address it serves, sorted by connector name
+// so the message reads the same whichever order the caller found the
+// connectors in.
+//
+// A connector with no valid address takes no side, because it answers
+// no address to disagree with. So a lone dark connector beside a lone
+// lit one is not ambiguous, and neither are two connectors that both
+// serve the same address.
+func ambiguousAddress(outputs []Output) (string, bool) {
+	byAddress := map[string]Output{}
+	for _, output := range outputs {
+		if output.Monitor.PhysicalAddress != "" {
+			byAddress[output.Monitor.PhysicalAddress] = output
+		}
+	}
+	if len(byAddress) < 2 {
+		return "", false
+	}
+	named := make([]Output, 0, len(byAddress))
+	for _, output := range byAddress {
+		named = append(named, output)
+	}
+	slices.SortFunc(named, func(a, b Output) int {
+		return strings.Compare(a.Connector, b.Connector)
+	})
+	parts := make([]string, len(named))
+	for i, output := range named {
+		parts[i] = fmt.Sprintf("%s serves %s", output.Connector, output.Monitor.PhysicalAddress)
+	}
+	return strings.Join(parts, " and ") +
+		" for this monitor; the address is not published while more than one connector serves it", true
+}
+
 // withPhysicalAddress sets status.physicalAddress and its condition for
-// a monitor whose connector serves an EDID for it now.
+// a monitor whose connector serves an EDID for it now, or refuses the
+// address when ambiguous names another connector on this node serving
+// the same monitor a different address.
 //
 // The field keeps the last valid address when the current EDID states
-// none. A receiver in standby can serve an EDID with no vendor block,
-// and the machine's port has not moved while it sleeps.
-func (d *displayControl) withPhysicalAddress(status DisplayStatus, output Output) DisplayStatus {
+// none, and it keeps that same last valid address while the
+// connectors disagree: a receiver in standby can serve an EDID with
+// no vendor block, and a CEC consumer already relying on the last
+// known-good address must not have it overwritten by a guess.
+func (d *displayControl) withPhysicalAddress(status DisplayStatus, output Output, ambiguous string) DisplayStatus {
+	if ambiguous != "" {
+		status.Conditions = setCondition(status.Conditions, d.condition(PhysicalAddressCurrentCondition, false,
+			AmbiguousReason, ambiguous))
+		return status
+	}
 	address := output.Monitor.PhysicalAddress
 	if address == "" {
 		return d.retainAddress(status,

@@ -296,3 +296,138 @@ func (f *displayFixture) serve(step edidStep) {
 	f.present[f.wired[0].Connector] = !step.disconnected
 	f.wired[0].Monitor.PhysicalAddress = step.address
 }
+
+// Pulse-Eight's two-cable setup: one cable carries the picture into a
+// receiver input, and a second, through a CEC adapter, into another
+// input of the same receiver. Both connectors answer to the
+// receiver's own EDID for the panel, so they share one monitor
+// identity and each serves the address of the input it is plugged
+// into.
+func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
+	cases := []struct {
+		name    string
+		wired   []wiredPanel
+		address string
+		status  string
+		reason  string
+		message string
+	}{
+		{
+			name: "two connectors serving different addresses",
+			wired: []wiredPanel{
+				address(t, "HDMI-A-1", "1.2.0.0"),
+				address(t, "HDMI-A-2", "1.1.0.0"),
+			},
+			status: conditionFalse,
+			reason: AmbiguousReason,
+			message: "HDMI-A-1 serves 1.2.0.0 and HDMI-A-2 serves 1.1.0.0 for this monitor; " +
+				"the address is not published while more than one connector serves it",
+		},
+		{
+			// The message names the connectors in the same order
+			// whichever one this card happened to enumerate first.
+			name: "the same two connectors, found in the other order",
+			wired: []wiredPanel{
+				address(t, "HDMI-A-2", "1.1.0.0"),
+				address(t, "HDMI-A-1", "1.2.0.0"),
+			},
+			status: conditionFalse,
+			reason: AmbiguousReason,
+			message: "HDMI-A-1 serves 1.2.0.0 and HDMI-A-2 serves 1.1.0.0 for this monitor; " +
+				"the address is not published while more than one connector serves it",
+		},
+		{
+			// The same address on both connectors is not a
+			// disagreement, so the merge's own choice of connector
+			// reports it as it would for one connector alone.
+			name: "two connectors serving the same address",
+			wired: []wiredPanel{
+				address(t, "HDMI-A-1", "1.2.0.0"),
+				address(t, "HDMI-A-2", "1.2.0.0"),
+			},
+			address: "1.2.0.0",
+			status:  conditionTrue,
+			reason:  ReadFromEDIDReason,
+			message: "HDMI-A-2 serves 1.2.0.0 in its EDID",
+		},
+		{
+			// A connector with no valid address takes no side, so a
+			// monitor lit on one connector and dark on the other is
+			// not ambiguous either.
+			name: "one connector dark",
+			wired: []wiredPanel{
+				address(t, "HDMI-A-1", ""),
+				address(t, "HDMI-A-2", "1.2.0.0"),
+			},
+			address: "1.2.0.0",
+			status:  conditionTrue,
+			reason:  ReadFromEDIDReason,
+			message: "HDMI-A-2 serves 1.2.0.0 in its EDID",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newDisplayBench(t, c.wired...)
+
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+
+			display := fixture.display()
+			if display.Status.PhysicalAddress != c.address {
+				t.Errorf("physicalAddress = %q, want %q", display.Status.PhysicalAddress, c.address)
+			}
+			got := condition(display, PhysicalAddressCurrentCondition)
+			if got.Status != c.status || got.Reason != c.reason || got.Message != c.message {
+				t.Errorf("condition = %q %q %q, want %q %q %q",
+					got.Status, got.Reason, got.Message, c.status, c.reason, c.message)
+			}
+		})
+	}
+}
+
+// One connector of the bench, serving the lab monitor's identity
+// at the given physical address.
+func address(t *testing.T, connector, physicalAddress string) wiredPanel {
+	t.Helper()
+	monitor := labMonitor()
+	monitor.PhysicalAddress = physicalAddress
+	return wiredPanel{Connector: connector, Monitor: monitor, Panel: drillPanel(t, "lg-hdr-wqhd")}
+}
+
+// An ambiguous pass never overwrites a physical address a CEC
+// consumer may already be relying on: the field keeps the last one
+// this Display served while its connectors disagree, the same way it
+// keeps the last one while a connector goes dark.
+func TestAnAmbiguousAddressKeepsTheLastKnownGoodAddress(t *testing.T) {
+	fixture := newDisplayBench(t,
+		address(t, "HDMI-A-1", "1.2.0.0"),
+		address(t, "HDMI-A-2", "1.1.0.0"),
+	)
+	// The second connector's picture is not there yet on the first
+	// pass, so the first cable is the only one the monitor answers.
+	fixture.present["HDMI-A-2"] = false
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixture.display().Status.PhysicalAddress; got != "1.2.0.0" {
+		t.Fatalf("physicalAddress = %q, want 1.2.0.0 before the second cable arrives", got)
+	}
+
+	// The second cable arrives serving a different input, so the
+	// two connectors now disagree.
+	fixture.present["HDMI-A-2"] = true
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display := fixture.display()
+	if got := display.Status.PhysicalAddress; got != "1.2.0.0" {
+		t.Errorf("physicalAddress = %q, want the retained 1.2.0.0, not the ambiguous read", got)
+	}
+	got := condition(display, PhysicalAddressCurrentCondition)
+	if got.Status != conditionFalse || got.Reason != AmbiguousReason {
+		t.Errorf("condition = %q %q, want %q %q", got.Status, got.Reason, conditionFalse, AmbiguousReason)
+	}
+}

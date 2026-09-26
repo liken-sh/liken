@@ -97,7 +97,7 @@ send a CEC message, or read a CEC bus. It reports the fact that the
 EDID states, and equipment-operator owns everything that speaks CEC
 ([plan 09](https://github.com/liken-sh/equipment-operator/blob/main/plans/09-cec.md)).
 The adapter on the machine comes from `liken`'s
-[milestone 70](https://github.com/liken-sh/liken/blob/main/plans/70-init-attaches-serio-devices.md).
+[milestone 70](https://github.com/liken-sh/liken/blob/main/plans/completed/70-init-attaches-serio-devices.md).
 
 **Two connectors to one receiver.** A second drill on 2026-09-26
 found that the CEC adapter works on a spare receiver input with
@@ -118,7 +118,10 @@ leaves out the serial, so two monitors of one model on one node
 collide the same way. Across nodes the collision is worse: two
 nodes on one receiver each write the one `Display`, and its
 `status.node` and `status.connector` alternate on every pass of
-either node.
+either node. When the two connected connectors serve different
+physical addresses, the `Display` refuses to publish either one as
+current, with the `PhysicalAddressCurrent` condition's `Ambiguous`
+reason.
 
 ## What was considered and set aside
 

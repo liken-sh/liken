@@ -81,6 +81,7 @@ from:
 | --- | --- | --- |
 | `True` | `ReadFromEDID` | The connector's current EDID serves this address. |
 | `False` | `Retained` | The connector serves no EDID for this monitor, or serves no valid address in it. The message names the time it stopped serving the address. |
+| `False` | `Ambiguous` | Two connected connectors serve this monitor with different addresses. The message names both connectors and both addresses. |
 
 The condition is absent while the monitor has never served a valid
 address, for example on a DisplayPort cable. `0.0.0.0` is the TV's
@@ -97,6 +98,14 @@ connector. Two connectors on one machine that serve EDIDs with the
 same identity, such as two cables to one receiver, map to one
 `Display`, and it reports the connector that sorts last by name
 among those that are connected.
+
+Those two connectors can serve different addresses, for example one
+cable that carries the picture into a receiver input and a second,
+through a CEC adapter, into another input of the same receiver. When
+they disagree, the `Display` publishes no current address:
+`PhysicalAddressCurrent` reads `Ambiguous`, neither connector's
+device states a `physicalAddress` attribute, and `status.physicalAddress`
+keeps the value it held before the two disagreed.
 
 ## Shared screens
 

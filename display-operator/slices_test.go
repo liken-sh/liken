@@ -427,6 +427,59 @@ func TestSliceDevicesPublishesThePhysicalAddressOnlyFromTheWire(t *testing.T) {
 	}
 }
 
+// Two connectors on one node can answer to the same monitor identity
+// with different physical addresses, the Pulse-Eight two-cable setup:
+// one cable carries the picture into a receiver input, and a second,
+// through a CEC adapter, into another input of the same receiver. A
+// claim that read either device's address would hand a CEC consumer
+// a guess, so neither device states one.
+func TestSliceDevicesPublishesNoAddressForAnAmbiguousMonitor(t *testing.T) {
+	monitor := EDID{Manufacturer: "DON", ProductCode: 0x0001, ModelName: "DENON-AVR"}
+	served := monitor
+	served.PhysicalAddress = "1.2.0.0"
+	adapted := monitor
+	adapted.PhysicalAddress = "1.1.0.0"
+	outputs := []Output{
+		{Connector: "HDMI-A-1", Connected: true, Monitor: served},
+		{Connector: "HDMI-A-2", Connected: true, Monitor: adapted},
+	}
+
+	devices := sliceDevices(outputs)
+
+	for _, name := range []string{"hdmi-a-1", "hdmi-a-2"} {
+		index := slices.IndexFunc(devices, func(d SliceDevice) bool { return d.Name == name })
+		if index < 0 {
+			t.Fatalf("sliceDevices published no %s", name)
+		}
+		if got := devices[index].Attributes["physicalAddress"].String; got != nil {
+			t.Errorf("%s publishes physicalAddress %q, want none while the two connectors disagree", name, *got)
+		}
+	}
+}
+
+// The same address on both connectors is not a disagreement, so each
+// connector still states the address it reads from its own wire.
+func TestSliceDevicesPublishesTheAddressWhenTwoConnectorsAgree(t *testing.T) {
+	monitor := EDID{Manufacturer: "DON", ProductCode: 0x0001, ModelName: "DENON-AVR", PhysicalAddress: "1.2.0.0"}
+	outputs := []Output{
+		{Connector: "HDMI-A-1", Connected: true, Monitor: monitor},
+		{Connector: "HDMI-A-2", Connected: true, Monitor: monitor},
+	}
+
+	devices := sliceDevices(outputs)
+
+	for _, name := range []string{"hdmi-a-1", "hdmi-a-2"} {
+		index := slices.IndexFunc(devices, func(d SliceDevice) bool { return d.Name == name })
+		if index < 0 {
+			t.Fatalf("sliceDevices published no %s", name)
+		}
+		got := devices[index].Attributes["physicalAddress"].String
+		if got == nil || *got != "1.2.0.0" {
+			t.Errorf("%s publishes physicalAddress %v, want 1.2.0.0", name, got)
+		}
+	}
+}
+
 func TestSliceDevicesLeavesAConnectorThatGainedItsMonitorClear(t *testing.T) {
 	// A monitor plugged into a connector that was dark at startup
 	// routes like any other, because the config names every
