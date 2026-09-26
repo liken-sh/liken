@@ -21,8 +21,8 @@ mobile app cannot reach a server on the LAN at all: a custom
 connector connects from Anthropic's cloud and needs a public
 address, on every client
 ([help center](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp),
-read 2026-09-16). So the agent-facing surface is skills, and the
-skills are the guides.
+read 2026-09-16). So agents get the guides as skills, and each
+skill is generated from one guide.
 
 ## The design
 
@@ -62,8 +62,8 @@ The body is the guide's body, with two changes:
   nothing.
 * One fixed paragraph opens the body, before the H1: where the guide
   lives on the site, and an instruction to confirm the `kubectl`
-  context before the first command. The testbed-context mistake is
-  the first thing an agent gets wrong.
+  context before the first command. The first mistake an agent
+  makes is to run a command against the wrong cluster context.
 
 The generator owns the output directory. After it writes, it removes
 every subdirectory it did not write, so a renamed or deleted guide
@@ -78,8 +78,8 @@ programs agree on what a link is.
 Each repository with a docs site gets:
 
 * A `description` line in every guide's front matter, written as a
-  trigger: what the guide does, and when an agent should reach for
-  it. Hugo can show the same line on the guides index later.
+  trigger: what the guide does, and when an agent should use it.
+  Hugo can show the same line on the guides index later.
 * A `skills` target in `docs/Makefile` that runs the generator into
   `../skills`, and a line in the root `test-docs` target that runs it
   and fails when `git` reports the directory changed or untracked.
@@ -107,11 +107,12 @@ reads both
 
 ### No CLI verb
 
-The shape conversation named `liken debug <node>` as a candidate
-verb for the busybox-with-hostPath recipe. `kubectl debug
-node/<node> --profile=sysadmin` already gives a host-PID shell with
-the node's filesystem at `/host`, so the verb is one line in the
-troubleshoot guide, not code.
+The design discussion named `liken debug <node>` as a candidate
+verb for the recipe that runs a busybox pod with a `hostPath` mount.
+`kubectl debug node/<node> --profile=sysadmin` already gives a
+host-PID shell with the node's filesystem at `/host`. So the
+troubleshoot guide gets one line with that command, and the CLI
+gets no new code.
 
 ## Open problems
 
@@ -121,9 +122,10 @@ troubleshoot guide, not code.
   ([plugin dependencies](https://code.claude.com/docs/en/plugin-dependencies)).
   The marketplace pins each repository to a ref, and a pinned ref
   means a catalog commit per operator release. An unpinned entry
-  floats to main and loses the known-good set. Neither is chosen.
-  The catalog would be a new `liken-sh/plugins` repository; nothing
-  else in the org is about the org.
+  follows main, so the catalog no longer names a set of versions
+  known to work together. Neither is chosen. The catalog would be a
+  new `liken-sh/plugins` repository, because no other repository in
+  the org has the org itself as its subject.
 * **Skills for other harnesses.** `npx skills add liken-sh/<repo>
   --list` finds every skill under `skills/` at the repository root,
   with its description, checked against media-operator on
@@ -133,4 +135,4 @@ troubleshoot guide, not code.
   (the catalog, scanning, franchises) and give no steps. They emit
   as skills too, and their `description` says what they explain.
   Whether an agent benefits from them as skills, or only from the
-  procedures, is a question for use.
+  procedures, is not known until agents use them.

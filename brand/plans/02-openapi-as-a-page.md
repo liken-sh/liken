@@ -19,10 +19,10 @@ in each response. That list is in the document, which a reader reaches
 today as raw JSON.
 
 A rendered viewer was the first idea. Swagger UI and Redoc are
-JavaScript bundles that would arrive on three static sites, carry
-their own look, and break the link check, which resolves a link
-against the headings a page renders. A generated page costs one
-program and keeps the sites as they are.
+JavaScript bundles. They would add scripts to three static sites,
+bring their own styling, and break the link check, which resolves a
+link against the headings a page renders. A generated page needs one
+program and leaves the sites unchanged.
 
 ## The design
 
@@ -67,14 +67,14 @@ response that names a schema links to that schema's section. Last
 come the security schemes and the requirement over every route, then
 the hand-written postamble.
 
-Every link the page writes lands on a heading or a row of the same
+Every link the page writes points to a heading or a row of the same
 page, and both ends come from `linkcheck.Anchor`, which contains the one
 implementation of Hugo's id algorithm. A test renders the display
 manual's own document and resolves every link on the result.
 
-The reader follows the document's order and not Go's map order, so
-the paths, the methods, and the statuses read in the order the
-program that wrote the document declared them.
+The generator reads the document in its own order, not in Go's map
+order. So the paths, the methods, and the statuses appear in the
+order that the program that wrote the document declared them.
 
 ### Each manual
 
@@ -97,10 +97,10 @@ Each repository with an API gets:
 The generated page's weight puts it directly after the API page in
 the reference section.
 
-### How it is proved
+### How it is tested
 
 `make test` in this repository runs the generator's tests: a golden
-page from a small document that exercises every shape (an operation with
+page from a small document that exercises every case (an operation with
 no parameters, a path parameter an operation overrides, several media
 types under one status, an enum, a reference chain, a request body,
 response headers, a link relation, a nested object, a map, a type
@@ -119,8 +119,8 @@ generated page.
   print a name no caller uses. The preamble says where the API is.
 * **A `HEAD` section repeats its `GET` section.** The documents
   describe the two operations separately, with the same parameters
-  and the same statuses, so the page writes both. Folding them would
-  mean the page deciding that two operations are one.
+  and the same statuses, so the page writes both. To merge them, the
+  generator would have to treat two operations as one.
 * **The title is set in the code face.** It is `display-api` and
   `media-api` in two documents, which are program names, and a
   sentence in the third. That one reads oddly in a code face.
