@@ -68,15 +68,28 @@ const (
 
 // The two values the power parameter takes. Both power the panel on
 // at prepare. Only onWhileClaimed powers it back down when the claim
-// ends. The two exist apart because a Deployment that replaces its
-// pod ends one claim and makes another, and an unconditional
-// power-off at claim end would blink every screen on every rollout.
-// A claim that states neither leaves the panel's power alone in both
-// directions.
+// ends, after powerReleaseGrace, and a prepare on the same connector
+// inside that period cancels the power-down. The two exist apart
+// because a claim with on is for a workload that never wants the
+// panel turned off, and the grace period covers only a replacement
+// pod that prepares inside it. A claim that states neither leaves the
+// panel's power alone in both directions.
 const (
 	powerOn             = "on"
 	powerOnWhileClaimed = "onWhileClaimed"
 )
+
+// The power record's value for a panel whose onWhileClaimed claim
+// ended and whose standby waits out the grace period. It is a value
+// of the record file only, and no claim states it.
+const powerReleased = "released"
+
+// How long a panel stays on after its onWhileClaimed claim ends. A
+// Deployment that replaces its pod ends one claim and prepares the
+// next one on the same connector a few seconds later, and a standby
+// between the two would blink the panel. A prepare on the connector
+// inside this period cancels the standby.
+const powerReleaseGrace = 30 * time.Second
 
 // Every parameter this driver reads. Two parsers walk the same opaque
 // block, each taking the keys it acts on and skipping the others, so
@@ -408,7 +421,9 @@ func (c *panelControls) client(bus controlBus) *DDC {
 
 // Set applies what one request stated, both controls on one open bus.
 // Power goes first, because a panel in standby must be awake before a
-// brightness can land on it.
+// brightness can land on it. Each control is read before it is
+// written, and a panel that already holds the value takes no write, so
+// a new claim on a lit panel changes nothing a person sees.
 func (c *panelControls) set(connector string, want requestedControls) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -439,8 +454,11 @@ func (c *panelControls) set(connector string, want requestedControls) error {
 // The readback is what proves the control moved. A display
 // acknowledges the write on the wire whether it takes the value or
 // not, so a Set with no Get after it proves nothing.
+//
+// The read of the range also reads the value the panel holds, and a
+// panel that already holds the value takes no write.
 func setBrightness(ddc *DDC, connector string, percent int) error {
-	_, max, err := ddc.GetVCP(vcpBrightness)
+	held, max, err := ddc.GetVCP(vcpBrightness)
 	if err != nil {
 		return fmt.Errorf("reading the brightness range of %s: %w", connector, err)
 	}
@@ -448,6 +466,10 @@ func setBrightness(ddc *DDC, connector string, percent int) error {
 		return fmt.Errorf("%s reports a brightness range of zero, so %d%% names no value", connector, percent)
 	}
 	value := brightnessValue(percent, max)
+	if held == value {
+		return nil
+	}
+	announceWrite(connector, vcpBrightness, held, true, value)
 	if err := ddc.SetVCP(vcpBrightness, value); err != nil {
 		return fmt.Errorf("setting the brightness of %s: %w", connector, err)
 	}
@@ -470,11 +492,25 @@ func brightnessValue(percent int, max uint16) uint16 {
 	return uint16((percent*int(max) + 50) / 100)
 }
 
-// SetPower writes one power mode and reads it back, like the
-// brightness. A readback that disagrees means the panel carries the
-// code and refuses this value, which the standard allows: a display
-// implements the subset of a non-continuous code that it chooses.
+// SetPower reads the power mode, writes the one the claim states when
+// the panel holds another, and reads it back, like the brightness. A
+// readback that disagrees means the panel carries the code and refuses
+// this value, which the standard allows: a display implements the
+// subset of a non-continuous code that it chooses.
+//
+// A panel that does not answer the first read gets no write. A panel
+// in standby still answers DDC/CI, and a write to a panel that answers
+// nothing proves nothing, so the prepare fails with the read's error
+// and the kubelet's retry reads again.
 func setPower(ddc *DDC, connector string, mode uint16) error {
+	held, _, err := ddc.GetVCP(vcpPowerMode)
+	if err != nil {
+		return fmt.Errorf("reading the power mode of %s: %w", connector, err)
+	}
+	if held == mode {
+		return nil
+	}
+	announceWrite(connector, vcpPowerMode, held, true, mode)
 	if err := ddc.SetVCP(vcpPowerMode, mode); err != nil {
 		return fmt.Errorf("setting the power mode of %s: %w", connector, err)
 	}
@@ -488,16 +524,21 @@ func setPower(ddc *DDC, connector string, mode uint16) error {
 	return nil
 }
 
-// standby powers a panel down at the end of a claim. Panels differ in
-// which values they accept for the power code, so the operator first
-// writes standby and then reads the result. A panel that stops
-// answering may have gone dark. A panel that reports standby accepted
-// the value. Any other reported value means the panel refused standby,
-// which is what a panel whose 0xD6 subset omits standby does. The
-// operator writes off for that last case. It does not read after the
-// off write because the panel may stop answering as it powers down. A
-// failed read is treated as success for this same reason. Reporting it
-// as a failure would call a successful power-down an error.
+// standby powers a panel down at the end of a claim. The operator
+// reads the power mode first, and a panel that is already down takes
+// no write. A panel that does not answer the read takes no write
+// either, because the operator writes nothing it has not read.
+//
+// Panels differ in which values they accept for the power code, so the
+// operator then writes standby and reads the result. A panel that
+// stops answering may have gone dark. A panel that reports standby
+// accepted the value. Any other reported value means the panel refused
+// standby, which is what a panel whose 0xD6 subset omits standby does.
+// The operator writes off for that last case. It does not read after
+// the off write because the panel may stop answering as it powers
+// down. A failed read after the standby write is treated as success
+// for this same reason. Reporting it as a failure would call a
+// successful power-down an error.
 func (c *panelControls) standby(connector string) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -506,6 +547,14 @@ func (c *panelControls) standby(connector string) error {
 	defer bus.Close()
 
 	ddc := c.client(bus)
+	held, _, err := ddc.GetVCP(vcpPowerMode)
+	if err != nil {
+		return fmt.Errorf("reading the power mode of %s: %w", connector, err)
+	}
+	if held != powerModeOn {
+		return nil
+	}
+	announceWrite(connector, vcpPowerMode, held, true, powerModeStandby)
 	if err := ddc.SetVCP(vcpPowerMode, powerModeStandby); err != nil {
 		return err
 	}
@@ -513,6 +562,7 @@ func (c *panelControls) standby(connector string) error {
 	if err != nil || current == powerModeStandby {
 		return nil
 	}
+	announceWrite(connector, vcpPowerMode, current, true, powerModeOff)
 	return ddc.SetVCP(vcpPowerMode, powerModeOff)
 }
 
@@ -526,6 +576,12 @@ func (c *panelControls) standby(connector string) error {
 // a prepare on a panel that speaks no DDC/CI opens no bus and costs
 // nothing.
 func (p *draPlugin) applyControls(output Output, want requestedControls) error {
+	// A prepare on this connector keeps the panel for the new claim,
+	// so a standby that waits for the end of an earlier claim is
+	// cancelled, whatever this claim states.
+	if err := p.cancelRelease(output.Connector); err != nil {
+		return err
+	}
 	if want.Power == "" && !want.Brightness.Stated {
 		return nil
 	}
@@ -571,13 +627,16 @@ func (p *draPlugin) recordPower(connector, power string) error {
 	return writePowerRecord(p.powerPath, record)
 }
 
-// ReleasePower powers down the panels recorded for this claim. A wire
-// failure goes to stderr and does not abort the other releases.
-// Returning the error would prevent the kubelet from completing the
-// unprepare, so a panel that cannot power down could keep the claim open
-// indefinitely. The operator deletes each entry from the record before
-// the attempt, writes the resulting record after all attempts, and does
-// not retain an entry when an attempt fails.
+// ReleasePower marks the panels recorded for this claim as released,
+// and each one goes to standby when the grace period ends with no new
+// prepare on its connector. The mark is in the record file, so an
+// operator container that restarts inside the period finds it and
+// starts the period again.
+//
+// A failure goes to stderr and does not fail the unprepare. Returning
+// the error would prevent the kubelet from completing the unprepare,
+// so a panel that cannot power down could keep the claim open
+// indefinitely.
 func (p *draPlugin) releasePower(devices []string) {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -587,23 +646,101 @@ func (p *draPlugin) releasePower(devices []string) {
 		fmt.Fprintf(os.Stderr, "reading the power record: %v\n", err)
 		return
 	}
-	released := false
-	for connector := range record {
-		if !slices.Contains(devices, deviceName(connector)) {
+	var released []string
+	for connector, power := range record {
+		if power != powerOnWhileClaimed || !slices.Contains(devices, deviceName(connector)) {
 			continue
 		}
-		delete(record, connector)
-		released = true
-		if err := p.controls.standby(connector); err != nil {
-			fmt.Fprintf(os.Stderr, "putting %s to standby: %v\n", connector, err)
-		}
+		record[connector] = powerReleased
+		released = append(released, connector)
 	}
-	if !released {
+	if len(released) == 0 {
 		return
 	}
 	if err := writePowerRecord(p.powerPath, record); err != nil {
 		fmt.Fprintf(os.Stderr, "writing the power record: %v\n", err)
+		return
 	}
+	for _, connector := range released {
+		p.scheduleStandby(connector)
+	}
+}
+
+// ResumeReleases starts the grace period again for every panel the
+// record marks as released. A released mark in the record at startup
+// is a standby that an earlier operator container scheduled and did
+// not live to run.
+func (p *draPlugin) resumeReleases() {
+	p.powerRecords.Lock()
+	defer p.powerRecords.Unlock()
+
+	record, err := readPowerRecord(p.powerPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the power record: %v\n", err)
+		return
+	}
+	for connector, power := range record {
+		if power == powerReleased {
+			p.scheduleStandby(connector)
+		}
+	}
+}
+
+// ScheduleStandby runs the standby of one released panel after the
+// grace period. The timer does not own the decision: when it fires,
+// the record is read again, and only a mark that still stands puts the
+// panel down.
+func (p *draPlugin) scheduleStandby(connector string) {
+	grace := p.releaseGrace
+	after := p.afterGrace
+	if after == nil {
+		after = func(delay time.Duration, run func()) { time.AfterFunc(delay, run) }
+	}
+	after(grace, func() { p.standbyReleased(connector) })
+}
+
+// StandbyReleased puts one panel down if its released mark still
+// stands. The entry leaves the record before the attempt, and it does
+// not come back when the attempt fails, so a panel that cannot power
+// down is tried once and not on every restart.
+func (p *draPlugin) standbyReleased(connector string) {
+	p.powerRecords.Lock()
+	defer p.powerRecords.Unlock()
+
+	record, err := readPowerRecord(p.powerPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the power record: %v\n", err)
+		return
+	}
+	if record[connector] != powerReleased {
+		return
+	}
+	delete(record, connector)
+	if err := writePowerRecord(p.powerPath, record); err != nil {
+		fmt.Fprintf(os.Stderr, "writing the power record: %v\n", err)
+		return
+	}
+	if err := p.controls.standby(connector); err != nil {
+		fmt.Fprintf(os.Stderr, "putting %s to standby: %v\n", connector, err)
+	}
+}
+
+// CancelRelease removes the released mark of one connector, which is
+// what a new prepare on it does inside the grace period. The timer
+// still fires, reads no mark, and writes nothing.
+func (p *draPlugin) cancelRelease(connector string) error {
+	p.powerRecords.Lock()
+	defer p.powerRecords.Unlock()
+
+	record, err := readPowerRecord(p.powerPath)
+	if err != nil {
+		return err
+	}
+	if record[connector] != powerReleased {
+		return nil
+	}
+	delete(record, connector)
+	return writePowerRecord(p.powerPath, record)
 }
 
 // ReadPowerRecord treats a missing file as an empty record. A pod that

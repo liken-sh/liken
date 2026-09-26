@@ -29,7 +29,18 @@ func compositorFixture(t *testing.T) string {
 	swapPath(t, &driRoot, dri)
 	swapPath(t, &westonConfigPath, filepath.Join(config, "weston", "weston.ini"))
 	swapPath(t, &modeRecordPath, filepath.Join(config, "weston", "modes.json"))
+	// No Display rests at a mode unless the test states one.
+	swapDisplays(t, nil)
 	return westonConfigPath
+}
+
+// swapDisplays states the Displays the declare container reads, in
+// place of the API server.
+func swapDisplays(t *testing.T, displays []Display) {
+	t.Helper()
+	previous := declaredDisplays
+	declaredDisplays = func() []Display { return displays }
+	t.Cleanup(func() { declaredDisplays = previous })
 }
 
 // swapPath points one of the operator's roots at a directory the test

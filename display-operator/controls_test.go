@@ -757,6 +757,9 @@ func labPluginWithPanels(t *testing.T, config string, monitors map[string]*fakeM
 	controls, bench := benchPanels(t, plugin.sysRoot, plugin.card, monitors)
 	plugin.controls = controls
 	plugin.powerPath = filepath.Join(t.TempDir(), "power.json")
+	// A grace period that never ends, unless a test holds it with
+	// holdGrace and ends it, so no standby runs behind a test's back.
+	plugin.afterGrace = func(time.Duration, func()) {}
 	return plugin, bench
 }
 
@@ -931,11 +934,13 @@ func TestPrepareWithNoControlOpensNoBus(t *testing.T) {
 func TestUnprepareStandsThePanelDown(t *testing.T) {
 	panel := newFakeMonitor()
 	plugin, _ := labPluginWithPanels(t, claimControl(`{"power": "onWhileClaimed"}`), claimedPanel(panel))
+	grace := holdGrace(plugin)
 	if claim := prepare(t, plugin); claim.Error != "" {
 		t.Fatal(claim.Error)
 	}
 
 	unprepare(t, plugin)
+	grace.end()
 
 	want := []uint16{powerModeOn, powerModeStandby}
 	if got := panel.took(vcpPowerMode); len(got) != 2 || got[1] != powerModeStandby {
@@ -955,11 +960,13 @@ func TestUnprepareTurnsOffAPanelThatRefusesStandby(t *testing.T) {
 	panel := newFakeMonitor()
 	panel.clamps[vcpPowerMode] = powerModeOn
 	plugin, _ := labPluginWithPanels(t, claimControl(`{"power": "onWhileClaimed"}`), claimedPanel(panel))
+	grace := holdGrace(plugin)
 	if claim := prepare(t, plugin); claim.Error != "" {
 		t.Fatal(claim.Error)
 	}
 
 	unprepare(t, plugin)
+	grace.end()
 
 	want := []uint16{powerModeOn, powerModeStandby, powerModeOff}
 	if got := panel.took(vcpPowerMode); !slices.Equal(got, want) {
@@ -991,12 +998,14 @@ func TestUnprepareLeavesAPanelTheClaimOnlyPoweredOn(t *testing.T) {
 func TestUnprepareStandsThePanelDownOnce(t *testing.T) {
 	panel := newFakeMonitor()
 	plugin, _ := labPluginWithPanels(t, claimControl(`{"power": "onWhileClaimed"}`), claimedPanel(panel))
+	grace := holdGrace(plugin)
 	if claim := prepare(t, plugin); claim.Error != "" {
 		t.Fatal(claim.Error)
 	}
 
 	unprepare(t, plugin)
 	unprepare(t, plugin)
+	grace.end()
 
 	if got := panel.took(vcpPowerMode); len(got) != 2 {
 		t.Errorf("the panel took %v, want the power-on and one standby", got)
@@ -1009,12 +1018,14 @@ func TestUnprepareStandsThePanelDownOnce(t *testing.T) {
 func TestUnprepareEndsTheClaimWhenThePanelWillNotAnswer(t *testing.T) {
 	panel := newFakeMonitor()
 	plugin, _ := labPluginWithPanels(t, claimControl(`{"power": "onWhileClaimed"}`), claimedPanel(panel))
+	grace := holdGrace(plugin)
 	if claim := prepare(t, plugin); claim.Error != "" {
 		t.Fatal(claim.Error)
 	}
 	panel.silent = true
 
 	unprepare(t, plugin)
+	grace.end()
 
 	if got := powerRecord(t, plugin); len(got) != 0 {
 		t.Errorf("record = %v, want the entry gone whether the panel answered or not", got)

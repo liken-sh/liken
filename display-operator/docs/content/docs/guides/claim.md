@@ -228,11 +228,17 @@ should hold with no claim attached, declare it on the panel's
 
 `brightness` is a percentage from 0 to 100 of the panel's own
 maximum. `power: on` powers the panel on at prepare. `power:
-onWhileClaimed` also powers it back down when the claim ends, so a
-movie pod that ends leaves a dark screen. Use `on` for a workload a
-`Deployment` replaces on rollouts, because each replacement pod is a
-new claim, and `onWhileClaimed` would blink the screen on every
-rollout.
+onWhileClaimed` also powers it back down 30 seconds after the claim
+ends, so a movie pod that ends leaves a dark screen. A new claim that
+prepares on the same connector inside the 30 seconds cancels the
+power-down, so a `Deployment` rollout does not blink the screen. Use
+`on` for a workload whose screen must stay on when its pod stops for
+longer than that.
+
+The operator reads each control before it writes it, and a panel
+that already holds the value takes no write. So a prepare on a panel
+that is already on at the stated brightness changes nothing a person
+sees.
 
 Not every panel takes these. The operator asks each panel which
 controls it has and publishes the answers as the `controlsBrightness`

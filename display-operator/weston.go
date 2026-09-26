@@ -97,11 +97,12 @@ const (
 
 // westonConfig builds the weston.ini for one set of outputs.
 //
-// Modes is the record of what the claims on this machine asked
-// for, keyed by connector. A connector with an entry gets that
-// mode, name or name@refresh exactly as the claim spelled it,
-// because weston's mode= line reads both forms. Every other
-// connector gets the one its monitor prefers.
+// Modes is the record of the modes stated for this machine, keyed
+// by connector: a claim's mode, or the resting mode of a monitor's
+// Display. A connector with an entry gets that mode, name or
+// name@refresh exactly as it was spelled, because weston's mode= line
+// reads both forms. Every other connector gets the one its monitor
+// prefers.
 // The config is always built from a fresh connector walk and the
 // record, and never parsed back, so this function is the only thing
 // that knows the file's shape.
@@ -238,6 +239,11 @@ func writeWestonConfig(path string, outputs []Output, modes map[string]string) e
 	return os.WriteFile(path, []byte(westonConfig(outputs, modes)), 0o644)
 }
 
+// declaredDisplays reads the Displays the declare container seeds
+// the resting modes from. It is a variable so a test runs declare
+// with no API server.
+var declaredDisplays = restingDisplays
+
 // declare enumerates the card's connectors, writes the compositor's
 // config, and ends the process.
 //
@@ -273,14 +279,16 @@ func declare() {
 	}
 	// The record states the modes the claims on this machine
 	// asked for. It is empty on a pod that has just started, because
-	// the volume is the pod's own, and a machine with no consumer left
-	// comes up with every screen at the mode its monitor prefers. It
-	// carries entries when the kubelet restarts the pod's containers
-	// under claims that are still held.
+	// the volume is the pod's own. It carries entries when the kubelet
+	// restarts the pod's containers under claims that are still held.
+	// Each connector the record says nothing about starts at the mode
+	// its monitor's Display rests at, or at the mode the monitor
+	// prefers when the Display states none.
 	record, err := readModeRecord(modeRecordPath)
 	if err != nil {
 		fatal("%v", err)
 	}
+	record = seedModes(record, live, declaredDisplays())
 	if err := writeModeRecord(modeRecordPath, record); err != nil {
 		fatal("writing %s: %v", modeRecordPath, err)
 	}

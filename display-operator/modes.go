@@ -16,9 +16,9 @@ package main
 //
 // What survives what. The volume is the pod's own, so a
 // compositor restart keeps the record and a pod restart erases it. A
-// machine that comes up with no consumer left runs every screen at
-// the mode its monitor prefers, which is what an unclaimed screen
-// should run.
+// new pod's declare container fills the record again from each
+// monitor's Display, so a screen with a resting mode starts at it, and
+// every other screen starts at the mode its monitor prefers.
 //
 // Weston falls back to the preferred mode silently when it
 // cannot match the name in the config, with no log line and no failed
@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +62,13 @@ const modeSwitchTimeout = 10 * time.Second
 // raises an event a program can wait on, so the wait polls, and a
 // quarter second adds little to the second the restart already takes.
 const modeSwitchInterval = 250 * time.Millisecond
+
+// errModeDeclined marks a switch whose restart ran and whose
+// compositor serves another mode. A caller that reads it knows a
+// second restart would give the same answer, so the Display pass
+// records the mode in status.unconfirmed and does not restart the
+// compositor for it again until spec changes.
+var errModeDeclined = errors.New("the compositor declined the mode")
 
 // AllocatedConfig is one entry of the configuration the scheduler
 // resolved for an allocation.
@@ -396,7 +404,7 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	// second restart would blank every screen on the machine for the
 	// same wrong answer.
 	if record[output.Connector] == mode && p.restarted[output.Connector] == mode {
-		return fmt.Errorf("the compositor declined the mode %s on %s", mode, output.Connector)
+		return fmt.Errorf("%w %s on %s", errModeDeclined, mode, output.Connector)
 	}
 	record[output.Connector] = mode
 	if err := p.rewriteConfig(record); err != nil {
@@ -409,6 +417,10 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	// replaced.
 	before := p.compositorOutputs().session
 
+	// A restart blanks every screen on the card, so each one prints
+	// one line that names the screen and the change that caused it.
+	fmt.Printf("%s: the mode goes from %s to %s, and the compositor restarts\n",
+		output.Connector, reportedMode(current[output.Connector]), mode)
 	// The blast. The kubelet restarts the container, the new
 	// compositor parses the rewritten config, and every client on every
 	// output of this card loses its connection. That is the accepted
@@ -422,7 +434,13 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	}
 	p.restarted[output.Connector] = mode
 	if err := p.awaitMode(ctx, output.Connector, mode, before); err != nil {
-		return err
+		// The restart ran, and the compositor that came back serves
+		// another mode, which is the decline itself. A wait the
+		// operator's shutdown ended is not.
+		if ctx.Err() != nil {
+			return err
+		}
+		return fmt.Errorf("%w: %w", errModeDeclined, err)
 	}
 	p.republishSlice()
 	return nil

@@ -99,6 +99,8 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels. |
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart. |
+| <span id="status--unconfirmed"></span>`unconfirmed` | [\[\]object](#statusunconfirmed) | no | Each write that the device did not confirm, for the current metadata.generation. A panel can read back a value other than the value the operator wrote, a restore can run out of attempts, the compositor can serve a mode other than the mode spec.mode states, and a panel can change a declared value by itself after the operator wrote it back three times. The operator makes such a write once and records it here. It does not make the write again, after a restart too, until spec changes. The record goes when the device holds the value. A restore that stops here keeps status.captured. |
+| <span id="status--written"></span>`written` | [\[\]object](#statuswritten) | no | How many times the operator wrote each declared value in the current metadata.generation, with the panel confirming each write. The first write sets the value, and each later write puts it back after the panel moved away from it. The operator writes a value back at most three times in one generation, and then records it in status.unconfirmed. |
 | <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs. |
 | <span id="status--layout"></span>`layout` | [object](#statuslayout) | no | The arrangement the screen is drawn to, and what each region shows. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address. |
@@ -135,6 +137,30 @@ The last value the operator read or wrote for each control. It reads the panel d
 | <span id="statusobserved--audiovolume"></span>`audioVolume` | integer | no |  |
 | <span id="statusobserved--audiomute"></span>`audioMute` | boolean | no |  |
 | <span id="statusobserved--power"></span>`power` | string | no |  |
+
+### status.unconfirmed[]
+
+Each write that the device did not confirm, for the current metadata.generation. A panel can read back a value other than the value the operator wrote, a restore can run out of attempts, the compositor can serve a mode other than the mode spec.mode states, and a panel can change a declared value by itself after the operator wrote it back three times. The operator makes such a write once and records it here. It does not make the write again, after a restart too, until spec changes. The record goes when the device holds the value. A restore that stops here keeps status.captured.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusunconfirmed--control"></span>`control` | string | yes | The control, in the spelling of status.capabilities, or mode for spec.mode. |
+| <span id="statusunconfirmed--value"></span>`value` | string | yes | The value the operator wrote. |
+| <span id="statusunconfirmed--readback"></span>`readback` | string | no | The value the device held after the write. Absent when the device did not answer. |
+| <span id="statusunconfirmed--generation"></span>`generation` | integer | yes | The metadata.generation the write was made for. |
+| <span id="statusunconfirmed--message"></span>`message` | string | no | The failure, in the words of the party that reported it. |
+| <span id="statusunconfirmed--time"></span>`time` | string | yes | When the operator recorded the write. |
+
+### status.written[]
+
+How many times the operator wrote each declared value in the current metadata.generation, with the panel confirming each write. The first write sets the value, and each later write puts it back after the panel moved away from it. The operator writes a value back at most three times in one generation, and then records it in status.unconfirmed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuswritten--control"></span>`control` | string | yes | The control, in the spelling of status.capabilities. |
+| <span id="statuswritten--value"></span>`value` | string | yes | The declared value. |
+| <span id="statuswritten--generation"></span>`generation` | integer | yes | The metadata.generation the writes were made for. |
+| <span id="statuswritten--count"></span>`count` | integer | yes | The number of confirmed writes. |
 
 ### status.surfaces[]
 
@@ -199,6 +225,27 @@ pass and is never written. An empty `spec` writes nothing at all.
 The operator invents no value, ever: a panel with no declarations
 keeps whatever its own menu holds.
 
+A panel can take a write and read back another value. For example, a
+panel can report its input under a code other than the one the
+operator wrote. The operator writes such a value once for each
+`metadata.generation`, records it in `status.unconfirmed` with the
+value the panel read back, and does not write it again until `spec`
+changes. The record is in status, so a restarted operator does not
+write it again either.
+
+A panel can also take the write, confirm it, and later change the
+value by itself. For example, a panel can switch to the input that
+carries a signal. The operator writes a declared value back at most
+three times in one generation after the first write, and counts the
+writes in `status.written`. After the third write back, it records
+the value in `status.unconfirmed` with a message that says the panel
+keeps changing it, and it writes the value again only after `spec`
+changes. A person who changes a value at the panel's own buttons
+uses the same count.
+
+Each write to a panel prints one line in the operator's log, with
+the value before and the value after.
+
 ## The override
 
 `spec.override` holds a temporary state above the resting layer, the
@@ -214,7 +261,10 @@ value to `status.captured`, and only a committed capture is followed
 by the write that darkens the panel. A capture in `etcd` survives an
 operator restart, a pod move, and a reboot, so the restore does too.
 The restore retries until the panel reads back the value, because a
-panel that is waking answers late.
+panel that is waking answers late. It makes at most eight writes of
+each control, over about 90 seconds. A restore that runs out of
+writes keeps `status.captured`, and `status.unconfirmed` names the
+control. An edit to `spec` starts the restore again.
 
 An override has no timeout. If the writer that set one crashes, the
 panel stays dark until the writer returns or a person deletes the
@@ -232,6 +282,13 @@ claim holds the screen. A claim's own `mode` parameter wins for the
 claim's lifetime, a `spec.mode` edit during a claim waits for the
 claim to end, and the unprepare that frees the screen restores the
 declaration promptly.
+
+A new operator pod starts the compositor at each monitor's resting
+mode, so the screen takes one modeset, not a modeset to the
+preferred mode and a second one to `spec.mode`. When the compositor
+serves another mode after its restart, the operator records the
+mode in `status.unconfirmed` and does not restart the compositor for
+it again until `spec` changes.
 
 ## The two values of the mode
 
@@ -318,7 +375,7 @@ panel that is lit and under no override. That last read is what
 finds a change a person made at the panel's own menu, and it is
 what makes
 a resting declaration hold: the pass that finds the divergence
-writes the declaration back. A panel in standby or off, a panel an
+writes the declaration back, up to three times in one generation. A panel in standby or off, a panel an
 override holds, and a panel that answers nothing are never read on
 a timer, because a DDC/CI read is itself a wake stimulus on some
 panels, and a polling loop would relight the screens the override

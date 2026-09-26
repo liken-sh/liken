@@ -126,6 +126,11 @@ type draPlugin struct {
 	// guards the mode record. It is a second lock because a power-down
 	// on the wire must not wait behind a compositor restart.
 	powerRecords sync.Mutex
+	// The grace period between the end of an onWhileClaimed claim and
+	// the standby, and the timer that waits it out. The timer is a
+	// field so a test runs the standby when it chooses.
+	releaseGrace time.Duration
+	afterGrace   func(delay time.Duration, run func())
 	// Restarted remembers the restart this process already
 	// ordered for a connector, which is the restart budget: a readback
 	// that still disagrees after one restart means weston declined the
@@ -165,6 +170,7 @@ func newDRAPlugin(client *Client, card, socketDir string, layout *layoutLink) *d
 		killCompositor: func() error { return killCompositor(procRoot) },
 		switchTimeout:  modeSwitchTimeout,
 		switchInterval: modeSwitchInterval,
+		releaseGrace:   powerReleaseGrace,
 	}
 }
 
@@ -493,7 +499,8 @@ func controlTakesNoParameters(device, mode string, want requestedControls) error
 // monitor prefers.
 //
 // The panel's power goes back the same way: a claim that stated
-// onWhileClaimed powers its panel down here, and a claim that stated
+// onWhileClaimed powers its panel down after the grace period, unless
+// a new claim prepares on the connector first, and a claim that stated
 // on leaves the panel as it is.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}

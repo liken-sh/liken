@@ -9,6 +9,27 @@ pass and is never written. An empty `spec` writes nothing at all.
 The operator invents no value, ever: a panel with no declarations
 keeps whatever its own menu holds.
 
+A panel can take a write and read back another value. For example, a
+panel can report its input under a code other than the one the
+operator wrote. The operator writes such a value once for each
+`metadata.generation`, records it in `status.unconfirmed` with the
+value the panel read back, and does not write it again until `spec`
+changes. The record is in status, so a restarted operator does not
+write it again either.
+
+A panel can also take the write, confirm it, and later change the
+value by itself. For example, a panel can switch to the input that
+carries a signal. The operator writes a declared value back at most
+three times in one generation after the first write, and counts the
+writes in `status.written`. After the third write back, it records
+the value in `status.unconfirmed` with a message that says the panel
+keeps changing it, and it writes the value again only after `spec`
+changes. A person who changes a value at the panel's own buttons
+uses the same count.
+
+Each write to a panel prints one line in the operator's log, with
+the value before and the value after.
+
 ## The override
 
 `spec.override` holds a temporary state above the resting layer, the
@@ -24,7 +45,10 @@ value to `status.captured`, and only a committed capture is followed
 by the write that darkens the panel. A capture in `etcd` survives an
 operator restart, a pod move, and a reboot, so the restore does too.
 The restore retries until the panel reads back the value, because a
-panel that is waking answers late.
+panel that is waking answers late. It makes at most eight writes of
+each control, over about 90 seconds. A restore that runs out of
+writes keeps `status.captured`, and `status.unconfirmed` names the
+control. An edit to `spec` starts the restore again.
 
 An override has no timeout. If the writer that set one crashes, the
 panel stays dark until the writer returns or a person deletes the
@@ -42,6 +66,13 @@ claim holds the screen. A claim's own `mode` parameter wins for the
 claim's lifetime, a `spec.mode` edit during a claim waits for the
 claim to end, and the unprepare that frees the screen restores the
 declaration promptly.
+
+A new operator pod starts the compositor at each monitor's resting
+mode, so the screen takes one modeset, not a modeset to the
+preferred mode and a second one to `spec.mode`. When the compositor
+serves another mode after its restart, the operator records the
+mode in `status.unconfirmed` and does not restart the compositor for
+it again until `spec` changes.
 
 ## The two values of the mode
 
@@ -128,7 +159,7 @@ panel that is lit and under no override. That last read is what
 finds a change a person made at the panel's own menu, and it is
 what makes
 a resting declaration hold: the pass that finds the divergence
-writes the declaration back. A panel in standby or off, a panel an
+writes the declaration back, up to three times in one generation. A panel in standby or off, a panel an
 override holds, and a panel that answers nothing are never read on
 a timer, because a DDC/CI read is itself a wake stimulus on some
 panels, and a polling loop would relight the screens the override

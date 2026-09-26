@@ -119,7 +119,10 @@ spec:
         # The connector enumeration and the config write run as an
         # init step, because the compositor parses weston.ini once at
         # startup, and the kubelet starts the container that reads the
-        # file only after this one exits.
+        # file only after this one exits. The step reads each monitor's
+        # Display with the pod's service account, so the compositor
+        # starts at the mode spec.mode states and a new pod sets each
+        # mode once.
         - name: declare
           image: ghcr.io/liken-sh/display-operator:latest
           args: ["declare"]

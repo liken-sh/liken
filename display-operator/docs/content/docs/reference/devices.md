@@ -275,18 +275,28 @@ A claim sets two opaque parameters, beside
 
 `brightness` is a whole number from 0 to 100, a percentage of the
 panel's own maximum, because one panel counts its scale to 100 and
-another to 255. The operator sets it at prepare and reads it back,
-and a readback that disagrees fails the claim, because a panel
-acknowledges a write whether it applies the value or not.
+another to 255. The operator reads the brightness at prepare, sets it
+when the panel holds another value, and reads it back. A readback
+that disagrees fails the claim, because a panel acknowledges a write
+whether it applies the value or not.
 
 `power` takes two values. `on` powers the panel on at prepare and
 never touches it again. `onWhileClaimed` also powers the panel back
-down when the claim ends, for a claimant that owns the screen
-outright. The two exist apart because a `Deployment` that replaces
-its pod ends one claim and makes another, and a power-down between
-them would blink the screen on every rollout. The power-down writes
+down 30 seconds after the claim ends, for a claimant that owns the
+screen outright. A `Deployment` that replaces its pod ends one claim
+and makes another, so a prepare on the same connector inside the 30
+seconds cancels the power-down, and the screen does not blink on a
+rollout. The operator records the pending power-down in its pod's
+config volume, so an operator container restart inside the 30
+seconds starts the period again. The power-down reads the power mode
+first and writes nothing to a panel that is already down. It writes
 standby first and falls back to off, because some panels implement
 only a subset of the power values.
+
+At prepare, the operator reads the power mode before it writes it,
+and a panel that is already on takes no write. A panel that does not
+answer the read takes no write, and the prepare fails with the
+read's error.
 
 For a claim, the operator writes to a panel only when the claim
 states one of these parameters. A claim with no parameters changes

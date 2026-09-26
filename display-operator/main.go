@@ -246,6 +246,9 @@ func operate() {
 	// nothing at all.
 	plugin := newDRAPlugin(client, card, socketDir, layout)
 	plugin.metrics = readings
+	// A panel whose claim ended while the last operator container ran
+	// may still wait for its standby, and the record says which.
+	plugin.resumeReleases()
 
 	// Every connection to the module starts with no socket open,
 	// because the compositor's restart took them, so the link replays

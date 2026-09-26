@@ -277,6 +277,7 @@ func (c *panelControls) writeControl(connector string, code byte, raw uint16) er
 	defer bus.Close()
 
 	ddc := c.client(bus)
+	c.announce(connector, code, raw)
 	if err := ddc.SetVCP(code, raw); err != nil {
 		return fmt.Errorf("setting the %s of %s: %w", capabilityName(code), connector, err)
 	}
@@ -302,9 +303,31 @@ func (c *panelControls) writeControlBlind(connector string, code byte, raw uint1
 	}
 	defer bus.Close()
 
+	c.announce(connector, code, raw)
 	if err := c.client(bus).SetVCP(code, raw); err != nil {
 		return fmt.Errorf("setting the %s of %s: %w", capabilityName(code), connector, err)
 	}
 	c.observe(connector, code, raw)
 	return nil
+}
+
+// Every write to a panel changes what a person sees or hears, so
+// each one prints one line in the operator's log. The line names the
+// value the operator last saw beside the value it writes, so a person
+// who saw the screen change reads why.
+func (c *panelControls) announce(connector string, code byte, raw uint16) {
+	facts, _ := c.cached(connector)
+	from, known := facts.Observed[code]
+	announceWrite(connector, code, from, known, raw)
+}
+
+// The line itself, for the callers that read the value on the wire
+// before they write and hold no cache entry to read it from.
+func announceWrite(connector string, code byte, from uint16, known bool, to uint16) {
+	name := capabilityName(code)
+	if !known {
+		fmt.Printf("%s: the %s goes to %s\n", connector, name, spokenValue(code, to))
+		return
+	}
+	fmt.Printf("%s: the %s goes from %s to %s\n", connector, name, spokenValue(code, from), spokenValue(code, to))
 }

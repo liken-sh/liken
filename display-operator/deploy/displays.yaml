@@ -203,6 +203,53 @@ spec:
                   type: object
                   description: "The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart."
                   properties: *values
+                unconfirmed:
+                  type: array
+                  description: "Each write that the device did not confirm, for the current metadata.generation. A panel can read back a value other than the value the operator wrote, a restore can run out of attempts, the compositor can serve a mode other than the mode spec.mode states, and a panel can change a declared value by itself after the operator wrote it back three times. The operator makes such a write once and records it here. It does not make the write again, after a restart too, until spec changes. The record goes when the device holds the value. A restore that stops here keeps status.captured."
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [control, value, generation, time]
+                    properties:
+                      control:
+                        type: string
+                        description: "The control, in the spelling of status.capabilities, or mode for spec.mode."
+                      value:
+                        type: string
+                        description: "The value the operator wrote."
+                      readback:
+                        type: string
+                        description: "The value the device held after the write. Absent when the device did not answer."
+                      generation:
+                        type: integer
+                        description: "The metadata.generation the write was made for."
+                      message:
+                        type: string
+                        description: "The failure, in the words of the party that reported it."
+                      time:
+                        type: string
+                        format: date-time
+                        description: "When the operator recorded the write."
+                written:
+                  type: array
+                  description: "How many times the operator wrote each declared value in the current metadata.generation, with the panel confirming each write. The first write sets the value, and each later write puts it back after the panel moved away from it. The operator writes a value back at most three times in one generation, and then records it in status.unconfirmed."
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [control, value, generation, count]
+                    properties:
+                      control:
+                        type: string
+                        description: "The control, in the spelling of status.capabilities."
+                      value:
+                        type: string
+                        description: "The declared value."
+                      generation:
+                        type: integer
+                        description: "The metadata.generation the writes were made for."
+                      count:
+                        type: integer
+                        description: "The number of confirmed writes."
                 surfaces:
                   type: array
                   description: "Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs."

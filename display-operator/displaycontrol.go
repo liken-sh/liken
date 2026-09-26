@@ -21,12 +21,16 @@ import (
 
 // The restore's backoff. A panel that is waking answers slowly,
 // so the first retry is soon and the interval doubles to this ceiling.
-// Nothing caps the attempts: the operator's own context is the bound,
-// because a panel that is dark and a person who is waiting for it are
-// both still there after ten attempts.
+// The attempts are capped, because a person sees each write on the
+// panel. Eight writes with this backoff span about 90 seconds, and the
+// operator treats a panel that has not taken the value by then as a
+// panel that does not take it.
+// The restore that gives up is recorded in status.unconfirmed, and an
+// edit to spec starts a new restore.
 const (
 	restoreFirstDelay = 1 * time.Second
 	restoreMaxDelay   = 30 * time.Second
+	restoreAttempts   = 8
 )
 
 // The controller's own state. The outputs seam is the same
@@ -46,6 +50,10 @@ type displayControl struct {
 	// what keeps a second pass from starting a second one.
 	mu        sync.Mutex
 	restoring map[string]bool
+	// The restores that ran out of attempts, by connector, until the
+	// pass records them in status. The restore writes no status of
+	// its own, so this is how its result reaches the pass.
+	abandoned map[string][]abandonedRestore
 	// The last poll failure reported for each connector, so a
 	// panel that stays quiet prints one line and not one a minute.
 	pollFaults map[string]string
@@ -101,6 +109,7 @@ func newDisplayControl(client *Client, node string, controls *panelControls, out
 		prepared:   preparedOutputs,
 		wakes:      make(chan struct{}, 1),
 		restoring:  map[string]bool{},
+		abandoned:  map[string][]abandonedRestore{},
 		pollFaults: map[string]string{},
 	}
 }
@@ -322,12 +331,16 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 		return err
 	}
 	facts := d.controls.factsFor(output)
-	actuated := d.actuate(ctx, display, output, facts)
+	ledger := ledgerOf(display)
+	actuated := d.actuate(ctx, display, output, facts, ledger)
 	// The mode is the screen's, not the panel's: it lands
 	// through the compositor and not on the DDC wire, so it runs
 	// beside the controls rather than among them.
-	rested := d.restMode(ctx, display, output, held)
-	published := d.publish(display, d.statusOf(display, output, d.controls.factsFor(output), ambiguous))
+	rested := d.restMode(ctx, display, output, held, ledger)
+	status := d.statusOf(display, output, d.controls.factsFor(output), ambiguous)
+	status.Unconfirmed = ledger.published()
+	status.Written = ledger.writtenPublished()
+	published := d.publish(display, status)
 	return errors.Join(actuated, rested, published)
 }
 
@@ -335,8 +348,10 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 // holds the screen, so a declaration edited during a claim waits for
 // the claim to end, and the pass that finds the screen free applies
 // it. The apply is the prepare path's own, so it restarts the
-// compositor once and reads the mode back.
-func (d *displayControl) restMode(ctx context.Context, display *Display, output Output, held map[string]bool) error {
+// compositor once and reads the mode back. A mode the compositor
+// declined is recorded in the ledger, and the operator does not
+// restart the compositor for it again until spec changes.
+func (d *displayControl) restMode(ctx context.Context, display *Display, output Output, held map[string]bool, ledger *unconfirmedLedger) error {
 	if display.Spec.Mode == nil {
 		return nil
 	}
@@ -349,15 +364,32 @@ func (d *displayControl) restMode(ctx context.Context, display *Display, output 
 		return nil
 	}
 	if modeMatches(want, output.CurrentMode) {
+		ledger.clear(modeControl)
 		return nil
 	}
-	return d.setMode(ctx, output, want)
+	if ledger.declined(modeControl, want) {
+		return nil
+	}
+	err := d.setMode(ctx, output, want)
+	if errors.Is(err, errModeDeclined) {
+		ledger.record(modeControl, want, d.modeNow(output), err, d.now())
+	}
+	return err
+}
+
+// The mode the screen runs after a switch: what the compositor
+// serves, or the card's own readback while no compositor answers.
+func (d *displayControl) modeNow(output Output) string {
+	if served := d.servedMode(output.Connector); served != "" {
+		return served
+	}
+	return output.CurrentMode
 }
 
 // What one pass writes to the panel. The override wins over the
 // resting layer, a capture that stands with no override is restored,
 // and an empty spec falls through all of it and writes nothing.
-func (d *displayControl) actuate(ctx context.Context, display *Display, output Output, facts panelFacts) error {
+func (d *displayControl) actuate(ctx context.Context, display *Display, output Output, facts panelFacts, ledger *unconfirmedLedger) error {
 	// A connector whose restore is running is left to that
 	// restore. One writer at a time reaches one panel's wire, and the
 	// restore is the writer while it runs.
@@ -383,7 +415,7 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 	// state an operator that restarted while an override stood comes
 	// back to.
 	if !display.Status.Captured.empty() {
-		return d.restore(ctx, display, output)
+		return d.restore(ctx, display, output, ledger)
 	}
 	if !facts.Responsive {
 		return nil
@@ -392,7 +424,7 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 	// resting layer, so one pass finds a value a person changed at the
 	// panel's own buttons and writes the declaration back over it.
 	d.poll(output, facts)
-	return d.rest(display, output, d.controls.factsFor(output))
+	return d.rest(display, output, d.controls.factsFor(output), ledger)
 }
 
 // The guarded read. A DDC read is a wake stimulus on some
@@ -500,11 +532,34 @@ func (d *displayControl) capture(display *Display, output Output, code byte) err
 // hold up every other panel's reconcile. The pass starts the restore
 // and moves on, and the restore's own wake brings the pass back to
 // clear the capture once the panel holds the values again.
-func (d *displayControl) restore(ctx context.Context, display *Display, output Output) error {
+//
+// A control whose restore ran out of attempts in this generation is
+// not written again. The capture stands, so the value is not lost, and
+// status.unconfirmed says which control did not come back.
+func (d *displayControl) restore(ctx context.Context, display *Display, output Output, ledger *unconfirmedLedger) error {
 	targets := restoreTargets(display.Spec, *display.Status.Captured)
 	facts := d.controls.factsFor(output)
+	for _, gaveUp := range d.takeAbandoned(output.Connector, ledger.generation) {
+		name := capabilityName(gaveUp.target.Code)
+		ledger.record(name, spokenValue(gaveUp.target.Code, gaveUp.target.Want),
+			readbackOf(facts, gaveUp.target.Code), gaveUp.failure, d.now())
+	}
+	var pending []controlTarget
+	for _, target := range targets {
+		name := capabilityName(target.Code)
+		if current, known := facts.Observed[target.Code]; known && current == target.Want {
+			ledger.clear(name)
+			continue
+		}
+		if !ledger.declined(name, spokenValue(target.Code, target.Want)) {
+			pending = append(pending, target)
+		}
+	}
+	if len(pending) > 0 {
+		d.startRestore(ctx, output.Connector, ledger.generation, pending)
+		return nil
+	}
 	if !restored(targets, facts) {
-		d.startRestore(ctx, output.Connector, targets)
 		return nil
 	}
 	status := display.Status
@@ -545,20 +600,56 @@ func restored(targets []controlTarget, facts panelFacts) bool {
 
 // One restore per connector at a time. A pass that finds one
 // running leaves it alone, so two passes never write one panel twice.
-func (d *displayControl) startRestore(ctx context.Context, connector string, targets []controlTarget) {
+func (d *displayControl) startRestore(ctx context.Context, connector string, generation int64, targets []controlTarget) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.restoring[connector] {
 		return
 	}
 	d.restoring[connector] = true
-	go d.runRestore(ctx, connector, targets)
+	go d.runRestore(ctx, connector, generation, targets)
 }
 
-// The restore itself, on its own goroutine. It writes the wire
-// and records what the panel took, and it writes no status: the wake
-// it ends with brings the pass back, and the pass is the one writer of
-// status.
+// One control whose restore ran out of attempts, the spec generation
+// the restore ran for, and the last failure the panel answered.
+type abandonedRestore struct {
+	target     controlTarget
+	generation int64
+	failure    error
+}
+
+func (d *displayControl) abandon(connector string, gaveUp abandonedRestore) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.abandoned[connector] = append(d.abandoned[connector], gaveUp)
+}
+
+// The restores of one connector that gave up, taken once. A restore
+// that ran for an earlier generation ran against a spec that no longer
+// stands, so it records nothing.
+func (d *displayControl) takeAbandoned(connector string, generation int64) []abandonedRestore {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var current []abandonedRestore
+	for _, gaveUp := range d.abandoned[connector] {
+		if gaveUp.generation == generation {
+			current = append(current, gaveUp)
+		}
+	}
+	delete(d.abandoned, connector)
+	return current
+}
+
+// What the panel held after the last write, as status spells it,
+// and nothing when the operator never read it.
+func readbackOf(facts panelFacts, code byte) string {
+	current, known := facts.Observed[code]
+	if !known {
+		return ""
+	}
+	return spokenValue(code, current)
+}
+
 // Whether this pass lists the resources. It does when the
 // panels on this node are not the panels of the last sweep, so a panel
 // that arrives or leaves is answered on the pass that finds it, and
@@ -580,7 +671,12 @@ func (d *displayControl) sweepDue(present map[string]Output) bool {
 	return true
 }
 
-func (d *displayControl) runRestore(ctx context.Context, connector string, targets []controlTarget) {
+// The restore itself, on its own goroutine. It writes the wire
+// and records what the panel took, and it writes no status: the wake
+// it ends with brings the pass back, and the pass is the one writer of
+// status. A control that ran out of attempts goes to the abandoned
+// list, and the pass records it in status.unconfirmed.
+func (d *displayControl) runRestore(ctx context.Context, connector string, generation int64, targets []controlTarget) {
 	defer func() {
 		d.mu.Lock()
 		delete(d.restoring, connector)
@@ -588,9 +684,17 @@ func (d *displayControl) runRestore(ctx context.Context, connector string, targe
 		d.wake()
 	}()
 	for _, target := range targets {
-		if err := d.restoreOne(ctx, connector, target.Code, target.Want); err != nil {
-			return
+		err := d.restoreOne(ctx, connector, target.Code, target.Want)
+		if err == nil {
+			continue
 		}
+		// A restore the operator's shutdown ended did not run out of
+		// attempts, so it records nothing, and the next operator
+		// starts it again.
+		if ctx.Err() == nil {
+			d.abandon(connector, abandonedRestore{target: target, generation: generation, failure: err})
+		}
+		return
 	}
 }
 
@@ -611,30 +715,40 @@ func restoreTarget(spec DisplaySpec, captured DisplayValues, code byte) (uint16,
 	return captured.raw(code)
 }
 
-// The write repeats until the readback matches. A panel that is
-// waking answers late, refuses a write, or answers a value it has not
-// applied yet, and the operator's context is the only bound.
+// The write repeats until the readback matches, up to
+// restoreAttempts writes. A panel that is waking answers late, refuses
+// a write, or answers a value it has not applied yet. The last failure
+// is the one the restore reports.
 func (d *displayControl) restoreOne(ctx context.Context, connector string, code byte, want uint16) error {
 	delay := restoreFirstDelay
-	for attempt := 0; ; attempt++ {
+	var err error
+	for attempt := 0; attempt < restoreAttempts; attempt++ {
 		if attempt > 0 {
-			if err := d.wait(ctx, delay); err != nil {
-				return err
+			if waited := d.wait(ctx, delay); waited != nil {
+				return waited
 			}
 			delay = min(delay*2, restoreMaxDelay)
 		}
-		err := d.controls.writeControl(connector, code, want)
+		err = d.controls.writeControl(connector, code, want)
 		if err == nil {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "restoring the %s of %s: %v\n", capabilityName(code), connector, err)
 	}
+	return err
 }
 
 // The resting layer, written only where the panel diverges from
 // the declaration. A value the capability list refuses is reported and
-// never written.
-func (d *displayControl) rest(display *Display, output Output, facts panelFacts) error {
+// never written. A write the panel did not confirm is recorded in the
+// ledger and not repeated in this generation, because a panel that
+// reads an input back under another code would otherwise take the
+// write, and show its input banner, on every poll. A confirmed write
+// is counted, and a value the panel moves away from again is written
+// back at most writeBackLimit times in one generation. After that the
+// value is recorded as unconfirmed, because a panel that changes it by
+// itself would otherwise take a write every poll.
+func (d *displayControl) rest(display *Display, output Output, facts panelFacts, ledger *unconfirmedLedger) error {
 	var failures []error
 	for _, control := range coreControls {
 		want, stated := display.Spec.raw(control.Code)
@@ -646,11 +760,27 @@ func (d *displayControl) rest(display *Display, output Output, facts panelFacts)
 			continue
 		}
 		if current, known := facts.Observed[control.Code]; known && current == want {
+			ledger.clear(control.Name)
+			continue
+		}
+		value := spokenValue(control.Code, want)
+		if ledger.declined(control.Name, value) {
+			continue
+		}
+		if ledger.writes(control.Name, value) > writeBackLimit {
+			stopped := fmt.Errorf("the panel keeps changing the %s by itself: the operator wrote %s back %d times"+
+				" in this generation, and writes it again after an edit to spec", control.Name, value, writeBackLimit)
+			ledger.record(control.Name, value, readbackOf(facts, control.Code), stopped, d.now())
+			fmt.Fprintf(os.Stderr, "%s: %v\n", output.Connector, stopped)
 			continue
 		}
 		if err := d.controls.writeControl(output.Connector, control.Code, want); err != nil {
+			after, _ := d.controls.cached(output.Connector)
+			ledger.record(control.Name, value, readbackOf(after, control.Code), err, d.now())
 			failures = append(failures, err)
+			continue
 		}
+		ledger.wrote(control.Name, value)
 	}
 	return errors.Join(failures...)
 }

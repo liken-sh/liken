@@ -69,6 +69,11 @@ type DisplayMeta struct {
 	// it, because kubectl describe searches for a resource's Events
 	// by uid and finds none written without it.
 	UID string `json:"uid,omitempty"`
+	// The API server counts every change to spec here, and never a
+	// change to status. A write the panel did not confirm is recorded
+	// against this number, so an edit to spec is what lets the
+	// operator try that write again.
+	Generation int64 `json:"generation,omitempty"`
 }
 
 // The settings the panel rests at. Every control field is a pointer
@@ -130,6 +135,17 @@ type DisplayStatus struct {
 	Capabilities map[string]panelCapability `json:"capabilities,omitempty"`
 	Observed     *DisplayValues             `json:"observed,omitempty"`
 	Captured     *DisplayValues             `json:"captured,omitempty"`
+	// Each write the device did not confirm, and the spec generation
+	// it was made for. The operator does not repeat that write until
+	// spec changes, and the record is in status so that a restarted
+	// operator does not repeat it either.
+	Unconfirmed []DisplayUnconfirmed `json:"unconfirmed,omitempty"`
+	// How many times the operator wrote each declared value in this
+	// spec generation, with the panel confirming each write. The count
+	// is what bounds the writes back to a panel that keeps changing a
+	// value by itself, and it is in status so that a restart does not
+	// reset it.
+	Written []DisplayWritten `json:"written,omitempty"`
 	// Every surface the compositor holds on this screen, in the order
 	// they arrived, and the layout they were drawn to.
 	Surfaces   []DisplaySurface   `json:"surfaces,omitempty"`

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -407,5 +408,33 @@ func TestAKillThatFoundNoCompositorCountsNothing(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(readings.compositorRestarts.WithLabelValues("hung")); got != 0 {
 		t.Errorf("display_compositor_restarts_total{reason=\"hung\"} = %v, want 0", got)
+	}
+}
+
+// The Display pass records a declined mode in status and restarts
+// nothing for it again, so both answers of a decline carry the mark it
+// reads: the switch whose restart served another mode, and the switch
+// the in-memory budget refused.
+func TestADeclinedModeCarriesTheMarkTheDisplayPassReads(t *testing.T) {
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), "")
+	compositor.declines = true
+	var portable Output
+	for _, output := range discoverOutputs(plugin.sysRoot, plugin.card) {
+		if output.Connector == "HDMI-A-2" {
+			portable = output
+		}
+	}
+
+	first := plugin.applyMode(t.Context(), portable, "1280x720")
+	second := plugin.applyMode(t.Context(), portable, "1280x720")
+
+	if !errors.Is(first, errModeDeclined) {
+		t.Errorf("the switch that restarted answered %v, want the decline", first)
+	}
+	if !errors.Is(second, errModeDeclined) {
+		t.Errorf("the switch the budget refused answered %v, want the decline", second)
+	}
+	if compositor.ended() != 1 {
+		t.Errorf("the compositor was ended %d times, want once", compositor.ended())
 	}
 }
