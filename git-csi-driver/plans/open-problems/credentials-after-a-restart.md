@@ -30,8 +30,9 @@ restarts the application.
 
 ## What would settle it
 
-A decision between the two shapes: read the `Secret` back through the
+A decision between the two designs: read the `Secret` back through the
 API at resume, with the grant that needs, or keep the credential on the
 node's disk with the store's permissions. Then a lab drill: stage a
 writeable volume with a deploy key against the forge, delete the
-driver's pod, write in the application pod, and see the push land.
+driver's pod, write in the application pod, and check that the push
+reaches the forge.
