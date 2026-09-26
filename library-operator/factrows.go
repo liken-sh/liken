@@ -58,7 +58,7 @@ func (e *enricher) writeRows(fact, folder string, wrote bool) {
 	ctx := context.Background()
 	if wrote {
 		if err := e.writeOwnedRows(ctx, fact, result); err != nil {
-			e.logf("could not write the %s rows of %s: %v", fact, relativePath(e.root, folder), err)
+			e.logf("could not write the %s rows of %s: %v", fact, e.named(folder), err)
 		}
 	}
 	var attempts []attemptRow
@@ -68,7 +68,7 @@ func (e *enricher) writeRows(fact, folder string, wrote bool) {
 		}
 	}
 	if _, err := e.catalog.UpsertAttempts(ctx, attempts); err != nil {
-		e.logf("could not write the %s attempt row of %s: %v", fact, relativePath(e.root, folder), err)
+		e.logf("could not write the %s attempt row of %s: %v", fact, e.named(folder), err)
 	}
 }
 
@@ -270,11 +270,11 @@ func (e *enricher) writePersonRows(directory string) {
 	readContributorFolder(e.root, e.library, filepath.Join(e.root, directory), result)
 	ctx := context.Background()
 	if _, err := e.catalog.InsertContributors(ctx, result.contributors); err != nil {
-		e.logf("could not write the row of %s: %v", directory, err)
+		e.logf("could not write the row of %s: %v", entryNamed(directory), err)
 		return
 	}
 	if _, err := e.catalog.UpsertContributorIDs(ctx, result.contributorAliases); err != nil {
-		e.logf("could not write the ids of %s: %v", directory, err)
+		e.logf("could not write the ids of %s: %v", entryNamed(directory), err)
 	}
 }
 
@@ -288,7 +288,7 @@ func (e *enricher) rescanTitle(folder string) {
 	}
 	title := e.titleFolder(folder)
 	if _, _, err := rescanFolder(context.Background(), e.catalog, e.folderScan(), title); err != nil {
-		e.logf("could not rescan %s after its identity: %v", relativePath(e.root, folder), err)
+		e.logf("could not rescan %s after its identity: %v", e.named(folder), err)
 	}
 }
 
@@ -300,7 +300,7 @@ func (e *enricher) rescanTitle(folder string) {
 func titleFolderOf(root, kind, absolute string) (string, bool) {
 	relative := relativePath(root, absolute)
 	// The guard names the climb itself and not every name that opens with
-	// two dots, so a title such as "...And Justice for All (1979)" is a
+	// two dots, so a title such as "...And Then the Sea (1979)" is a
 	// title folder and never a path that left the root.
 	if relative == absolute || relative == "." ||
 		relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {

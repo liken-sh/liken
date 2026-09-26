@@ -70,8 +70,8 @@ func (f *fakeBackfillJellyfin) ServeHTTP(w http.ResponseWriter, request *http.Re
 // the one series every episode of these tests belongs to.
 func backfillSeries() map[string]jellyfinItem {
 	return map[string]jellyfinItem{
-		"item-office": {ID: "item-office", Type: "Series",
-			ProviderIds: map[string]string{"Tmdb": "2316", "Tvdb": "73244"}},
+		"item-series": {ID: "item-series", Type: "Series",
+			ProviderIds: map[string]string{"Tmdb": "2101", "Tvdb": "3101"}},
 	}
 }
 
@@ -119,54 +119,54 @@ func TestOneJellyfinItemBecomesAnOutsidePlay(t *testing.T) {
 	}{
 		{
 			name: "a film with a resume point",
-			item: jellyfinItem{ID: "item-matrix", Type: "Movie",
-				ProviderIds:  map[string]string{"Tmdb": "603", "Imdb": "tt0133093"},
+			item: jellyfinItem{ID: "item-film", Type: "Movie",
+				ProviderIds:  map[string]string{"Tmdb": "1101", "Imdb": "tt9001101"},
 				RunTimeTicks: 81600000000,
 				UserData: jellyfinUserData{PlaybackPositionTicks: 42100000000,
 					LastPlayedDate: "2026-09-07T10:54:56.1234567Z"}},
-			play: "jellyfin-user-chris-item-matrix",
-			want: outsidePlay{Player: "jellyfin", People: []string{"Chris"},
-				Aliases:  map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+			play: "jellyfin-user-a-item-film",
+			want: outsidePlay{Player: "jellyfin", People: []string{"Person-A"},
+				Aliases:  map[string]string{"tmdb": "1101", "imdb": "tt9001101"},
 				Position: 4210, Duration: 8160, At: played},
 		},
 		{
 			name: "an episode the person finished, under the series' ids",
-			item: jellyfinItem{ID: "item-office-3-5", Type: "Episode", SeriesID: "item-office",
+			item: jellyfinItem{ID: "item-series-3-5", Type: "Episode", SeriesID: "item-series",
 				ParentIndexNumber: 3, IndexNumber: 5,
 				ProviderIds:  map[string]string{"Tmdb": "999"},
 				RunTimeTicks: 13200000000,
 				UserData: jellyfinUserData{PlaybackPositionTicks: 13200000000, Played: true,
 					LastPlayedDate: "2026-09-07T10:54:56Z"}},
-			play: "jellyfin-user-chris-item-office-3-5",
-			want: outsidePlay{Player: "jellyfin", People: []string{"Chris"},
-				Aliases: map[string]string{"tmdb": "2316", "tvdb": "73244"},
+			play: "jellyfin-user-a-item-series-3-5",
+			want: outsidePlay{Player: "jellyfin", People: []string{"Person-A"},
+				Aliases: map[string]string{"tmdb": "2101", "tvdb": "3101"},
 				Season:  3, Episode: 5, Position: 1320, Duration: 1320, Ended: true, At: played},
 		},
 		{
 			name: "an item a person marked played by hand, at no position and with no date",
-			item: jellyfinItem{ID: "item-arrival", Type: "Movie",
-				ProviderIds:  map[string]string{"Tmdb": "329865"},
+			item: jellyfinItem{ID: "item-other-film", Type: "Movie",
+				ProviderIds:  map[string]string{"Tmdb": "1102"},
 				RunTimeTicks: 71400000000,
 				UserData:     jellyfinUserData{Played: true}},
-			play: "jellyfin-user-chris-item-arrival",
-			want: outsidePlay{Player: "jellyfin", People: []string{"Chris"},
-				Aliases:  map[string]string{"tmdb": "329865"},
+			play: "jellyfin-user-a-item-other-film",
+			want: outsidePlay{Player: "jellyfin", People: []string{"Person-A"},
+				Aliases:  map[string]string{"tmdb": "1102"},
 				Position: 7140, Duration: 7140, Ended: true, At: 1},
 		},
 		{
 			name: "an item whose date is of another shape",
-			item: jellyfinItem{ID: "item-arrival", Type: "Movie",
-				ProviderIds: map[string]string{"Tmdb": "329865"},
+			item: jellyfinItem{ID: "item-other-film", Type: "Movie",
+				ProviderIds: map[string]string{"Tmdb": "1102"},
 				UserData:    jellyfinUserData{LastPlayedDate: "yesterday"}},
-			play: "jellyfin-user-chris-item-arrival",
-			want: outsidePlay{Player: "jellyfin", People: []string{"Chris"},
-				Aliases: map[string]string{"tmdb": "329865"}, At: 1},
+			play: "jellyfin-user-a-item-other-film",
+			want: outsidePlay{Player: "jellyfin", People: []string{"Person-A"},
+				Aliases: map[string]string{"tmdb": "1102"}, At: 1},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
-				users:     []jellyfinUser{{Name: "Chris", ID: "user-chris"}},
-				resumable: map[string][]jellyfinItem{"user-chris": {test.item}},
+				users:     []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+				resumable: map[string][]jellyfinItem{"user-a": {test.item}},
 				series:    backfillSeries(),
 			})
 
@@ -194,9 +194,9 @@ func TestOneJellyfinItemBecomesAnOutsidePlay(t *testing.T) {
 // message is not retained, because a rerun repeats the position.
 func TestTheBackfillReadsBothFiltersAndRetainsNothing(t *testing.T) {
 	fake := &fakeBackfillJellyfin{
-		users: []jellyfinUser{{Name: "Chris", ID: "user-chris"}},
-		resumable: map[string][]jellyfinItem{"user-chris": {{ID: "item-matrix", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "603"}}}},
+		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+		resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+			ProviderIds: map[string]string{"Tmdb": "1101"}}}},
 	}
 	backfill, messages, _ := standBackfill(t, fake)
 
@@ -204,7 +204,7 @@ func TestTheBackfillReadsBothFiltersAndRetainsNothing(t *testing.T) {
 		t.Fatalf("running the backfill: %v", err)
 	}
 
-	items := "/Items?userId=user-chris&recursive=true&includeItemTypes=Movie,Episode" +
+	items := "/Items?userId=user-a&recursive=true&includeItemTypes=Movie,Episode" +
 		"&fields=ProviderIds&enableImages=false"
 	want := []string{
 		"/Users",
@@ -223,12 +223,12 @@ func TestTheBackfillReadsBothFiltersAndRetainsNothing(t *testing.T) {
 // read is the one that stands, because it says the person finished.
 func TestAnItemInBothReadsIsPublishedOnce(t *testing.T) {
 	backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
-		users: []jellyfinUser{{Name: "Chris", ID: "user-chris"}},
-		resumable: map[string][]jellyfinItem{"user-chris": {{ID: "item-matrix", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "603"},
+		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+		resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+			ProviderIds: map[string]string{"Tmdb": "1101"},
 			UserData:    jellyfinUserData{PlaybackPositionTicks: 42100000000}}}},
-		played: map[string][]jellyfinItem{"user-chris": {{ID: "item-matrix", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "603"},
+		played: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+			ProviderIds: map[string]string{"Tmdb": "1101"},
 			UserData:    jellyfinUserData{PlaybackPositionTicks: 81600000000, Played: true}}}},
 	})
 
@@ -241,7 +241,7 @@ func TestAnItemInBothReadsIsPublishedOnce(t *testing.T) {
 		t.Fatalf("published = %d, want one", counts.published)
 	}
 	play := messages.outsidePlays(t)[playOutsideTopic(defaultTopicBase, "house",
-		"jellyfin-user-chris-item-matrix")]
+		"jellyfin-user-a-item-film")]
 	if play.Position != 8160 || !play.Ended {
 		t.Errorf("play = %+v, want the played read's position and its ended mark", play)
 	}
@@ -254,16 +254,16 @@ func TestAnItemWithNoProviderIdsIsSkipped(t *testing.T) {
 		name string
 		item jellyfinItem
 	}{
-		{name: "a film with no provider ids", item: jellyfinItem{ID: "item-home", Type: "Movie"}},
+		{name: "a film with no provider ids", item: jellyfinItem{ID: "item-bare", Type: "Movie"}},
 		{name: "an episode that names no series",
-			item: jellyfinItem{ID: "item-home", Type: "Episode", ProviderIds: map[string]string{"Tmdb": "999"}}},
+			item: jellyfinItem{ID: "item-bare", Type: "Episode", ProviderIds: map[string]string{"Tmdb": "999"}}},
 		{name: "an episode of a series the server does not hold",
-			item: jellyfinItem{ID: "item-home", Type: "Episode", SeriesID: "item-none"}},
+			item: jellyfinItem{ID: "item-bare", Type: "Episode", SeriesID: "item-none"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			backfill, messages, logged := standBackfill(t, &fakeBackfillJellyfin{
-				users:     []jellyfinUser{{Name: "Chris", ID: "user-chris"}},
-				resumable: map[string][]jellyfinItem{"user-chris": {test.item}},
+				users:     []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+				resumable: map[string][]jellyfinItem{"user-a": {test.item}},
 				series:    backfillSeries(),
 			})
 

@@ -61,7 +61,7 @@ CREATE TABLE play_aliases (
     PRIMARY KEY (play, provider)
 );
 
--- "Continue watching for chris" reads every Play one person was in, so
+-- "Continue watching for person-a" reads every Play one person was in, so
 -- the person leads this index while the primary key leads with the Play.
 CREATE INDEX play_people_person ON play_people (person);
 

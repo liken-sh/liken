@@ -79,10 +79,10 @@ The drill ran on `liken-1` on 2026-09-19, in release
 franchises` wrote `spec.refresh.scan`, and the operator stood
 `franchises-walk-dljfu24crrau` within a second. The `Job` started at
 16:36:29Z and finished at 16:36:43Z, and the scan run reached
-`status.runs` with a start of 16:36:33Z, after the request at
-16:36:28Z. The same verb on `movies` stood `movies-walk-dljfuoquaunf`,
-which started at 16:37:19Z, walked 1,434 titles in four minutes and 27
-seconds, and finished at 16:41:46Z. A second `rescan franchises` on the
-same Library stood a second `Job` under a new name, so setting a later
-time asks again. The API server refused `spec.refresh.bogus` with the
-rule's own message, and the operator logged no error.
+`status.runs` with a start of 16:36:33Z, after the request at 16:36:28Z.
+The same verb on `movies` stood `movies-walk-dljfuoquaunf`, which
+started at 16:37:19Z, walked every title of the library in four minutes
+and 27 seconds, and finished at 16:41:46Z. A second `rescan franchises`
+on the same Library stood a second `Job` under a new name, so setting a
+later time asks again. The API server refused `spec.refresh.bogus` with
+the rule's own message, and the operator logged no error.

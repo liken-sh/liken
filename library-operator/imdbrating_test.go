@@ -112,11 +112,11 @@ func TestTheRatingIsWrittenOnlyWhenItChanges(t *testing.T) {
 		logged  []string
 	}{
 		{name: "the same rating with other votes", held: "7.9", written: false, logged: []string{
-			"the .nfo file of Winter Harbour (2011) already holds the rating.imdb from imdb",
+			"the .nfo file of movie:imdb:tt9000001 already holds the rating.imdb from imdb",
 			"answered the rating.imdb of 1 of the 1 titles that lacked it and changed 0 .nfo files",
 		}},
 		{name: "a rating that moved", held: "7.8", written: true, logged: []string{
-			"wrote the rating.imdb of Winter Harbour (2011) from imdb",
+			"wrote the rating.imdb of movie:imdb:tt9000001 from imdb",
 			"answered the rating.imdb of 1 of the 1 titles that lacked it and changed 1 .nfo files",
 		}},
 	}
@@ -369,9 +369,8 @@ func TestAnEpisodeWhoseRatingHoldsIsAnsweredAndNotWritten(t *testing.T) {
 	if result != attemptFound || written || readFileString(t, nfoPath) != before {
 		t.Errorf("result = %q, written = %v, want found and no write", result, written)
 	}
-	want := "the .nfo file of Harbour Watch (2019)/Season 01/Harbour Watch - S01E02.mkv " +
-		"already holds the rating.imdb from imdb"
-	if !strings.Contains(log.String(), want) {
-		t.Errorf("log = %s, want %q", log, want)
+	want := "the .nfo file of " + opaqueID(id) + " already holds the rating.imdb from imdb"
+	if !strings.Contains(log.String(), want) || strings.Contains(log.String(), "Harbour Watch") {
+		t.Errorf("log = %s, want %q and no title", log, want)
 	}
 }

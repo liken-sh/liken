@@ -18,20 +18,20 @@ func findAnswer(people string) string {
 
 func TestTheIDsFactFindsTheTMDbIDOfAnEntryThatHoldsOnlyAnIMDbID(t *testing.T) {
 	root := t.TempDir()
-	folder := seedEntry(t, root, "tom-hanks", "name: Tom Hanks\nids: {imdb: nm0000158}\n")
+	folder := seedEntry(t, root, "tod-harker", "name: Tod Harker\nids: {imdb: nm9000158}\n")
 	work, log := testEnricher(t, libraryKindMovies, root, nil)
 	client, _ := newPersonTMDb(t, map[string]string{
-		tmdbKey("/3/find/nm0000158", "", ""):         findAnswer(`{"id":31,"name":"Tom Hanks"}`),
-		tmdbKey("/3/person/31", "", ""):              personAnswer("1956-07-09", "", "", ""),
-		tmdbKey("/3/person/31/external_ids", "", ""): `{"imdb_id":"nm0000158"}`,
+		tmdbKey("/3/find/nm9000158", "", ""):           findAnswer(`{"id":4031,"name":"Tod Harker"}`),
+		tmdbKey("/3/person/4031", "", ""):              personAnswer("1961-03-14", "", "", ""),
+		tmdbKey("/3/person/4031/external_ids", "", ""): `{"imdb_id":"nm9000158"}`,
 	})
 
 	if !work.fillContributorIDs(t.Context(), client, folder,
-		contributorGap{path: contributorDirectory("tom-hanks"), imdb: "nm0000158"}) {
+		contributorGap{path: contributorDirectory("tod-harker"), imdb: "nm9000158"}) {
 		t.Fatalf("the fact wrote nothing, log = %q", log.String())
 	}
 
-	want := "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\nborn: \"1956-07-09\"\n"
+	want := "name: Tod Harker\nids: {imdb: nm9000158, tmdb: 4031}\nborn: \"1961-03-14\"\n"
 	if got := readFileString(t, filepath.Join(folder, contributorFileName)); got != want {
 		t.Errorf("contributor.yaml = %q, want %q", got, want)
 	}
@@ -40,15 +40,15 @@ func TestTheIDsFactFindsTheTMDbIDOfAnEntryThatHoldsOnlyAnIMDbID(t *testing.T) {
 // An IMDb id TMDb names no person for is a miss, and the entry stays as it is.
 func TestAnIMDbIDTMDbDoesNotKnowIsAMiss(t *testing.T) {
 	root := t.TempDir()
-	entry := "name: Tom Hanks\nids: {imdb: nm0000158}\n"
-	folder := seedEntry(t, root, "tom-hanks", entry)
+	entry := "name: Tod Harker\nids: {imdb: nm9000158}\n"
+	folder := seedEntry(t, root, "tod-harker", entry)
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 	client, fake := newPersonTMDb(t, map[string]string{
-		tmdbKey("/3/find/nm0000158", "", ""): findAnswer(""),
+		tmdbKey("/3/find/nm9000158", "", ""): findAnswer(""),
 	})
 
 	if work.fillContributorIDs(t.Context(), client, folder,
-		contributorGap{path: contributorDirectory("tom-hanks"), imdb: "nm0000158"}) {
+		contributorGap{path: contributorDirectory("tod-harker"), imdb: "nm9000158"}) {
 		t.Error("the fact reported a write, want none")
 	}
 
@@ -68,11 +68,11 @@ func TestAnIMDbIDTMDbDoesNotKnowIsAMiss(t *testing.T) {
 // biography gap does not, because the biography call keys on the TMDb id.
 func TestTheIDsGapNamesAnEntryWithOnlyAnIMDbID(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	path := ".contributors/to/tom-hanks"
+	path := ".contributors/to/tod-harker"
 	if err := upsertWalk(t.Context(), catalog, &walkResult{
-		contributors: []contributorRow{{Library: contributorLibrary, Path: path, Name: "Tom Hanks", Born: "1956-07-09"}},
+		contributors: []contributorRow{{Library: contributorLibrary, Path: path, Name: "Tod Harker", Born: "1961-03-14"}},
 		contributorAliases: []contributorAliasRow{
-			{Library: contributorLibrary, Scheme: contributorIMDbScheme, ID: "nm0000158", Path: path},
+			{Library: contributorLibrary, Scheme: contributorIMDbScheme, ID: "nm9000158", Path: path},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestTheIDsGapNamesAnEntryWithOnlyAnIMDbID(t *testing.T) {
 		fact string
 		want []contributorGap
 	}{
-		{fact: factContributorIDs, want: []contributorGap{{path: path, imdb: "nm0000158"}}},
+		{fact: factContributorIDs, want: []contributorGap{{path: path, imdb: "nm9000158"}}},
 		{fact: factContributorBiography},
 	}
 	for _, test := range cases {
@@ -101,13 +101,13 @@ func TestTheIDsGapNamesAnEntryWithOnlyAnIMDbID(t *testing.T) {
 // A find call TMDb refuses is an error attempt, so the next run asks again.
 func TestAFindCallTMDbRefusesIsAnErrorAttempt(t *testing.T) {
 	root := t.TempDir()
-	folder := seedEntry(t, root, "tom-hanks", "name: Tom Hanks\nids: {imdb: nm0000158}\n")
+	folder := seedEntry(t, root, "tod-harker", "name: Tod Harker\nids: {imdb: nm9000158}\n")
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 	client, fake := newPersonTMDb(t, map[string]string{})
-	fake.statuses[tmdbKey("/3/find/nm0000158", "", "")] = http.StatusUnauthorized
+	fake.statuses[tmdbKey("/3/find/nm9000158", "", "")] = http.StatusUnauthorized
 
 	if work.fillContributorIDs(t.Context(), client, folder,
-		contributorGap{path: contributorDirectory("tom-hanks"), imdb: "nm0000158"}) {
+		contributorGap{path: contributorDirectory("tod-harker"), imdb: "nm9000158"}) {
 		t.Error("the fact reported a write, want none")
 	}
 

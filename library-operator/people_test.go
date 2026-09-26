@@ -32,11 +32,11 @@ func publishForgotten(operator *operator, person, namespace string) {
 // person's rows.
 func TestAPassHoldsEveryPerson(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	seedPerson(cluster, "chris")
+	seedPerson(cluster, "person-a")
 
 	operator.pass()
 
-	if person := cluster.heldPerson("chris"); person == nil || !person.Metadata.holds(progressFinalizer) {
+	if person := cluster.heldPerson("person-a"); person == nil || !person.Metadata.holds(progressFinalizer) {
 		t.Errorf("person = %+v, want it to hold %s", person, progressFinalizer)
 	}
 }
@@ -46,7 +46,7 @@ func TestAPassHoldsEveryPerson(t *testing.T) {
 func TestADeletingPersonIsAskedForOnceAndHeld(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
-	person := seedPerson(cluster, "chris")
+	person := seedPerson(cluster, "person-a")
 	person.Metadata.Finalizers = []string{progressFinalizer}
 	person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 	operator, broker := operatorOnABroker(t, cluster)
@@ -56,7 +56,7 @@ func TestADeletingPersonIsAskedForOnceAndHeld(t *testing.T) {
 	operator.bus.Publish("liken/library/drills/marker", []byte("done"), false)
 
 	message := waitForPublish(t, broker.pubs)
-	if message.topic != personForgetTopic(defaultTopicBase, "chris") || !message.retained {
+	if message.topic != personForgetTopic(defaultTopicBase, "person-a") || !message.retained {
 		t.Fatalf("published on %s, want a retained ask on the forget topic", message.topic)
 	}
 	ask := personForgetRequest{}
@@ -69,7 +69,7 @@ func TestADeletingPersonIsAskedForOnceAndHeld(t *testing.T) {
 	if next := waitForPublish(t, broker.pubs); next.topic != "liken/library/drills/marker" {
 		t.Errorf("the second pass published on %s, want nothing before the marker", next.topic)
 	}
-	if cluster.heldPerson("chris") == nil {
+	if cluster.heldPerson("person-a") == nil {
 		t.Error("the person is gone before any store answered")
 	}
 }
@@ -79,28 +79,28 @@ func TestADeletingPersonIsAskedForOnceAndHeld(t *testing.T) {
 func TestAForgottenPersonIsReleasedAndTheTopicsCleared(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
-	person := seedPerson(cluster, "chris")
+	person := seedPerson(cluster, "person-a")
 	person.Metadata.Finalizers = []string{progressFinalizer}
 	person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 	operator, broker := operatorOnABroker(t, cluster)
-	publishForgotten(operator, "chris", testLibraryNamespace)
+	publishForgotten(operator, "person-a", testLibraryNamespace)
 
 	operator.pass()
 
-	if cluster.heldPerson("chris") != nil {
+	if cluster.heldPerson("person-a") != nil {
 		t.Error("the person is held after every store answered")
 	}
 	waitForPublish(t, broker.pubs)
 	cleared := clearedTopics(t, broker, 2)
 	for _, topic := range []string{
-		personForgetTopic(defaultTopicBase, "chris"),
-		personForgottenTopic(defaultTopicBase, "chris", testLibraryNamespace),
+		personForgetTopic(defaultTopicBase, "person-a"),
+		personForgottenTopic(defaultTopicBase, "person-a", testLibraryNamespace),
 	} {
 		if !cleared[topic] {
 			t.Errorf("the release cleared %v, want %s among them", cleared, topic)
 		}
 	}
-	if operator.marks.forgottenBy("chris") != nil {
+	if operator.marks.forgottenBy("person-a") != nil {
 		t.Error("the desk still holds the answers about a person that is gone")
 	}
 }
@@ -111,15 +111,15 @@ func TestAPersonWaitsOnEveryNamespaceThatHoldsACatalog(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	boundStudio(cluster)
-	person := seedPerson(cluster, "chris")
+	person := seedPerson(cluster, "person-a")
 	person.Metadata.Finalizers = []string{progressFinalizer}
 	person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 	operator := testOperator(t, cluster)
-	publishForgotten(operator, "chris", testLibraryNamespace)
+	publishForgotten(operator, "person-a", testLibraryNamespace)
 
 	operator.pass()
 
-	if cluster.heldPerson("chris") == nil {
+	if cluster.heldPerson("person-a") == nil {
 		t.Error("the person is gone while one namespace has not answered")
 	}
 }
@@ -129,14 +129,14 @@ func TestAPersonWaitsOnEveryNamespaceThatHoldsACatalog(t *testing.T) {
 func TestTheDeskFoldsAndDropsAnAnswerAboutAPerson(t *testing.T) {
 	operator := testOperator(t, newFakeCluster())
 
-	publishForgotten(operator, "chris", testLibraryNamespace)
-	if !operator.marks.forgottenBy("chris")[testLibraryNamespace] {
+	publishForgotten(operator, "person-a", testLibraryNamespace)
+	if !operator.marks.forgottenBy("person-a")[testLibraryNamespace] {
 		t.Error("the desk holds no answer for the namespace that answered")
 	}
 
 	operator.handleBusMessage(
-		personForgottenTopic(defaultTopicBase, "chris", testLibraryNamespace), nil)
-	if operator.marks.forgottenBy("chris")[testLibraryNamespace] {
+		personForgottenTopic(defaultTopicBase, "person-a", testLibraryNamespace), nil)
+	if operator.marks.forgottenBy("person-a")[testLibraryNamespace] {
 		t.Error("the desk holds an answer the broker cleared")
 	}
 }
@@ -146,7 +146,7 @@ func TestTheDeskFoldsAndDropsAnAnswerAboutAPerson(t *testing.T) {
 func TestListPeopleReadsTheClusterScopedCollection(t *testing.T) {
 	client, recorded := recordingAPI(t, PersonList{
 		Metadata: ListMeta{ResourceVersion: "1200"},
-		Items:    []Person{{Metadata: ObjectMeta{Name: "chris"}, Spec: PersonSpec{DisplayName: "Chris"}}},
+		Items:    []Person{{Metadata: ObjectMeta{Name: "person-a"}, Spec: PersonSpec{DisplayName: "Person A"}}},
 	})
 
 	list, err := ListPeople(t.Context(), client)
@@ -155,7 +155,7 @@ func TestListPeopleReadsTheClusterScopedCollection(t *testing.T) {
 	}
 
 	expectRequest(t, recorded, http.MethodGet, "/apis/people.liken.sh/v1alpha1/people")
-	if len(list.Items) != 1 || list.Items[0].Spec.DisplayName != "Chris" {
+	if len(list.Items) != 1 || list.Items[0].Spec.DisplayName != "Person A" {
 		t.Errorf("items = %+v, want the one Person the server answered", list.Items)
 	}
 }
@@ -165,13 +165,13 @@ func TestPatchPersonFinalizersSendsAConditionalMergePatch(t *testing.T) {
 		"metadata": map[string]any{"resourceVersion": "1201"},
 	})
 
-	version, err := PatchPersonFinalizers(t.Context(), client, "chris", "1200",
+	version, err := PatchPersonFinalizers(t.Context(), client, "person-a", "1200",
 		[]string{progressFinalizer})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectRequest(t, recorded, http.MethodPatch, "/apis/people.liken.sh/v1alpha1/people/chris")
+	expectRequest(t, recorded, http.MethodPatch, "/apis/people.liken.sh/v1alpha1/people/person-a")
 	expectPatchBody(t, recorded, `"finalizers":["library.liken.sh/progress"]`, "ownerReferences")
 	if version != "1201" {
 		t.Errorf("resourceVersion = %q, want the one the write produced", version)
@@ -182,12 +182,12 @@ func TestPatchPersonFinalizersSendsAConditionalMergePatch(t *testing.T) {
 // so the finalizer goes on at the next pass.
 func TestAHoldTheAPIServerRefusesLeavesThePersonAlone(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	seedPerson(cluster, "chris")
-	cluster.broken[http.MethodPatch+" "+personPath("chris")] = http.StatusInternalServerError
+	seedPerson(cluster, "person-a")
+	cluster.broken[http.MethodPatch+" "+personPath("person-a")] = http.StatusInternalServerError
 
 	operator.pass()
 
-	if person := cluster.heldPerson("chris"); person.Metadata.holds(progressFinalizer) {
+	if person := cluster.heldPerson("person-a"); person.Metadata.holds(progressFinalizer) {
 		t.Errorf("person = %+v, want the finalizer left for the next pass", person.Metadata)
 	}
 }
@@ -206,16 +206,16 @@ func TestAPersonWhoseReleaseDoesNotLandIsHeld(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			boundHouse(cluster)
-			person := seedPerson(cluster, "chris")
+			person := seedPerson(cluster, "person-a")
 			person.Metadata.Finalizers = []string{progressFinalizer}
 			person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
-			cluster.broken[http.MethodPatch+" "+personPath("chris")] = testCase.status
+			cluster.broken[http.MethodPatch+" "+personPath("person-a")] = testCase.status
 			operator := testOperator(t, cluster)
-			publishForgotten(operator, "chris", testLibraryNamespace)
+			publishForgotten(operator, "person-a", testLibraryNamespace)
 
 			operator.pass()
 
-			if operator.marks.forgottenBy("chris") == nil {
+			if operator.marks.forgottenBy("person-a") == nil {
 				t.Error("the desk dropped the answers about a person the operator still holds")
 			}
 		})

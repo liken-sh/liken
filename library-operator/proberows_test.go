@@ -11,7 +11,7 @@ import (
 func TestTheProbeWritesTheProbedColumn(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
@@ -20,7 +20,7 @@ func TestTheProbeWritesTheProbedColumn(t *testing.T) {
 
 	matched, err := catalog.queryInt(t.Context(),
 		`SELECT count(*) FROM files WHERE library = ? AND path = ? AND probed = modified AND probed != 0`,
-		[]any{"house/movies", filepath.Join("The Thing (1982)", "The Thing (1982).mkv")})
+		[]any{"house/movies", filepath.Join("The Long Survey (1982)", "The Long Survey (1982).mkv")})
 	if err != nil {
 		t.Fatal(err)
 	}

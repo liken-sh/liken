@@ -104,25 +104,25 @@ func (e *enricher) trailerFileOne(ctx context.Context, line *trailerFetchLine,
 	folder := filepath.Join(e.root, item.path)
 	row, held := pickTrailerRow(rows, line.sources)
 	if !held {
-		e.logf("no trailer of %s plays from a site this fact can fetch", item.id)
+		e.logf("no trailer of %s plays from a site this fact can fetch", opaqueID(item.id))
 		e.recordTrailerFile(folder, "", nil, attemptNothing)
 		return false
 	}
 	source := line.sources[row.Site]
 	files, err := source.fetcher.files(ctx, row)
 	if err != nil {
-		e.logf("could not read the files of %s: %v", row.URL, err)
+		e.logf("could not read the files of %s: %v", opaqueText(row.URL), err)
 		e.recordTrailerFile(folder, row.Site, nil, attemptError)
 		return false
 	}
 	file, held := pickTrailerFile(files, ceiling)
 	if !held {
-		e.logf("%s holds no video file of %s", row.Site, row.Key)
+		e.logf("%s holds no video file of the trailer of %s", row.Site, opaqueID(item.id))
 		e.recordTrailerFile(folder, row.Site, nil, attemptNothing)
 		return false
 	}
 	e.logf("taking the %s of %s from %s: %dp, of the %d files it holds, under a feature of %dp",
-		row.Kind, item.id, row.Site, file.Height, len(files), ceiling)
+		row.Kind, opaqueID(item.id), row.Site, file.Height, len(files), ceiling)
 
 	entry, result := e.pullTrailerFile(ctx, source, item, row, file, folder)
 	e.recordTrailerFile(folder, row.Site, entry, result)
@@ -142,7 +142,7 @@ func (e *enricher) recordTrailerFile(folder, site string, entry *trailerFileEntr
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v",
-			factTrailerFile, relativePath(e.root, folder), err)
+			factTrailerFile, e.named(folder), err)
 	}
 	e.writeRows(factTrailerFile, folder, result == attemptFound)
 }

@@ -108,7 +108,7 @@ and the browser ignored it.
 
 ## The proof
 
-Local, on vega, before any push:
+Local, on a workstation, before any push:
 
 1. `local/browse --size 3840x2160 --scale 2 --headless --capture`
    draws the home page with the 1080p layout and poster textures at

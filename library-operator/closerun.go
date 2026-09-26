@@ -82,7 +82,9 @@ func (r *closeRun) runJob(ctx context.Context) error {
 		}
 	}
 	run.Finished = time.Now().UTC()
-	run.Failure = strings.Join(failures, "; ")
+	// The failure reaches the Library's log word for word, so a path in it
+	// turns opaque here, where the root is known.
+	run.Failure = opaqueText(strings.Join(failures, "; "), r.root)
 	return handOff(ctx, r.catalog, r.library, run, r.log, r.handoffTimeout)
 }
 

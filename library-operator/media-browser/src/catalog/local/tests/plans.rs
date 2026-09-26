@@ -32,7 +32,7 @@ fn requires_index(index: &str, read: impl Fn(&Connection) -> rusqlite::Result<()
 #[test]
 fn the_alias_read_requires_the_shipped_path_index() {
     requires_index("contributor_aliases_library_path", |connection| {
-        people::entries(connection, "test/films", "a-person").map(|_| ())
+        people::entries(connection, "test/films", "someone").map(|_| ())
     });
 }
 

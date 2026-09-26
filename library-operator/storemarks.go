@@ -127,15 +127,17 @@ func (m *storeMarks) dropForgotten(person string) {
 // foldMark decodes one retained mark and hands it to the fold. An empty
 // payload is how a retained topic is cleared, so it folds nothing and
 // the desk drops the entry, and a payload that does not decode is
-// reported and folded nowhere.
-func foldMark[T any](topic string, payload []byte, fold func(*T)) {
+// reported and folded nowhere. The report names the mark by about and not
+// by its topic, because a Play's topic carries the Play's name, which the
+// API server mints from the title.
+func foldMark[T any](about string, payload []byte, fold func(*T)) {
 	if len(payload) == 0 {
 		fold(nil)
 		return
 	}
 	mark := new(T)
 	if err := json.Unmarshal(payload, mark); err != nil {
-		fmt.Fprintf(os.Stderr, "reading the mark on %s: %v\n", topic, err)
+		fmt.Fprintf(os.Stderr, "reading %s: %v\n", about, err)
 		return
 	}
 	fold(mark)
@@ -148,7 +150,7 @@ func foldMark[T any](topic string, payload []byte, fold func(*T)) {
 func (o *operator) publishMark(topic string, mark any) {
 	payload, err := json.Marshal(mark)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "publishing on %s: %v\n", topic, err)
+		fmt.Fprintf(os.Stderr, "could not encode a mark: %v\n", err)
 		return
 	}
 	if held, standing := o.published[topic]; standing && held == string(payload) {

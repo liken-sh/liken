@@ -246,7 +246,7 @@ A credit that holds an IMDb id and no TMDb id asks TMDb for the TMDb
 id first, when the `Library`'s sources name a `Ready` `tmdb` provider.
 When no id finds an entry, the credit uses the entry at the slug of
 the name. A second person of the same name gets the slug with an id,
-such as `tom-hanks-tmdb-992`.
+such as `nora-vance-tmdb-992`.
 
 A credit from IMDb's datasets names a person by the IMDb id alone. So
 it finds the entry a TMDb credit wrote for the same person by that id,
@@ -334,16 +334,16 @@ what it finds to `.liken/marks.yaml` in the folder that holds the file,
 the folder whose `.liken/probe.yaml` records the same file:
 
     marks:
-      - path: Game of Thrones - S01E02.mkv
+      - path: A Series - S01E02.mkv
         kind: intro
         end: 107000
         source: theintrodb
-      - path: Game of Thrones - S01E02.mkv
+      - path: A Series - S01E02.mkv
         kind: intro
         start: 7007
         end: 106482
         source: theintrodb
-      - path: Game of Thrones - S01E02.mkv
+      - path: A Series - S01E02.mkv
         kind: credits
         start: 3253000
         end: 3316000

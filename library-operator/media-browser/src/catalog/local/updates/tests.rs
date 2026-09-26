@@ -12,7 +12,7 @@ use crate::catalog::{Change, Source};
 
 // One event as the pinned Corrosion agent sent it, captured from
 // `/v1/updates/movies` on the local harness.
-const EVENT: &str = r#"{"notify":["update",["default/scratch-drill","movie:tmdb:603"]]}"#;
+const EVENT: &str = r#"{"notify":["update",["default/scratch-drill","movie:tmdb:7001"]]}"#;
 
 const DEADLINE: Duration = Duration::from_secs(10);
 

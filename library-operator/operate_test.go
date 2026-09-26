@@ -331,7 +331,7 @@ func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
 		namespace string
 		owner     string
 		address   string
-	}{{"house", "house-catalog", "10.42.1.7"}, {"studio", "studio-catalog", "10.42.3.2"}} {
+	}{{"house", "house", "10.42.1.7"}, {"studio", "studio", "10.42.3.2"}} {
 		service := cluster.heldService(one.namespace, catalogServiceName)
 		if service == nil {
 			t.Fatalf("the pass wrote no catalog Service in %s", one.namespace)
@@ -360,13 +360,13 @@ func TestPassStandsTheScreenOfADelegatedPlayer(t *testing.T) {
 	boundHouse(cluster)
 	scanner := scannerPodAt("movies-scan-1", testLibraryNamespace, "10.42.1.7", "nuc-1")
 	cluster.pods[scanner.Metadata.Name] = &scanner
-	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	seedPlayer(cluster, "kitchen-radio", testLibraryNamespace, "media.liken.sh/idle-screen")
 	operator := testOperator(t, cluster)
 
 	operator.pass()
 
-	pod := cluster.heldPod("den-tv-media-browser")
+	pod := cluster.heldPod("den-media-browser")
 	if pod == nil {
 		t.Fatal("the pass stood no screen pod")
 	}
@@ -618,8 +618,8 @@ func TestPassServesTheHeldWebhookPaths(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	operator := testOperator(t, cluster)
-	operator.paths.hold("house", "movies", "/library/movies/Arrival (2016)")
-	operator.paths.hold("house", "gone", "/library/movies/Dune (2021)")
+	operator.paths.hold("house", "movies", "/library/movies/Landfall (2016)")
+	operator.paths.hold("house", "gone", "/library/movies/Salt Flats (2021)")
 	// The report carries a scan run, so the pass starts no first walk
 	// of its own, and the one Job it creates is the webhook's.
 	operator.reports.fold("house", "movies", *scanRunReport())

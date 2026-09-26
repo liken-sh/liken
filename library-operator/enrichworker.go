@@ -151,7 +151,7 @@ func (e *enricher) narrowedScopes() []string {
 	for _, scanPath := range e.scanPaths {
 		absolute := resolveVolumePath(e.root, scanPath)
 		if absolute == "" {
-			e.logf("could not map %s onto the volume, working over the whole library", scanPath)
+			e.logf("could not map %s onto the volume, working over the whole library", e.named(scanPath))
 			return nil
 		}
 		relative := relativePath(e.root, absolute)
@@ -218,16 +218,26 @@ func (e *enricher) recordAttempt(folder, fact, entryPath, result string, at time
 		ledger.noteAttempt(likenAttempt{Path: entryPath, At: at, Result: result})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", fact, entryPath, err)
+		e.logf("could not record the %s attempt at %s: %v", fact, e.named(filepath.Join(folder, entryPath)), err)
 	}
 	e.writeRows(fact, folder, result == attemptFound)
 }
 
+// logf writes one line of this Job. An error in the line keeps its cause and
+// loses every path and address through opaqueError, because an os error
+// names the whole path it failed on and a failed request names the whole
+// address it asked.
 func (e *enricher) logf(format string, args ...any) {
 	if e.log == nil {
 		return
 	}
-	fmt.Fprintf(e.log, "library.liken.sh: "+format+"\n", args...)
+	fmt.Fprintf(e.log, "library.liken.sh: "+format+"\n", opaqueErrors(args, e.root)...)
+}
+
+// named is a path on the volume, absolute or relative to the root, as a line
+// of this Job names it.
+func (e *enricher) named(path string) string {
+	return opaquePath(e.root, path)
 }
 
 // The folder whose .liken directory records a file fact's attempt: the

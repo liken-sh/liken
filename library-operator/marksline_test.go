@@ -41,7 +41,7 @@ var spentAllowance = providerStatusError{provider: providerBlockTheIntroDB, path
 
 // The three films every case of the run seeds, in the order the gap names
 // them.
-var partialFilms = []string{"Alien (1979)", "Aliens (1986)", "Alien 3 (1992)"}
+var partialFilms = []string{"Deep Hull (1979)", "Deep Hulls (1986)", "Deep Hull 3 (1992)"}
 
 // The last attempt and the sources of the spans one film's ledger holds.
 func filmRecord(t *testing.T, root, folder string) (likenAttempt, []string) {
@@ -144,9 +144,9 @@ func TestAnAttemptIsPartialWhereAProviderGaveNoAnswer(t *testing.T) {
 			work, log := testEnricher(t, libraryKindMovies, root, nil)
 			line := markLineOf(scriptedMarks{block: providerBlockTheIntroDB, entries: []markEntry{span}}, test.introdb)
 
-			work.marksOne(t.Context(), line, "Alien (1979)/Alien (1979).mkv", markFile{episodes: 1})
+			work.marksOne(t.Context(), line, "Deep Hull (1979)/Deep Hull (1979).mkv", markFile{episodes: 1})
 
-			attempt, sources := filmRecord(t, root, "Alien (1979)")
+			attempt, sources := filmRecord(t, root, "Deep Hull (1979)")
 			if attempt.Result != test.wantResult {
 				t.Errorf("the attempt is %s, want %s", attempt.Result, test.wantResult)
 			}

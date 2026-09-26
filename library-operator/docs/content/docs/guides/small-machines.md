@@ -54,7 +54,7 @@ happens once:
     apiVersion: library.liken.sh/v1alpha1
     kind: Catalog
     metadata:
-      name: catalog
+      name: media
       namespace: media
     spec:
       storage:

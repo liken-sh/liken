@@ -124,7 +124,7 @@ func TestATrailerAskTakesTheAnswerOfEveryBlock(t *testing.T) {
 		}},
 	)
 
-	entries, blocks, err := line.ask(t.Context(), trailerTitle{title: "The Signal", year: 2014})
+	entries, blocks, err := line.ask(t.Context(), trailerTitle{title: "The Relay", year: 2014})
 
 	if err != nil {
 		t.Fatal(err)
@@ -342,11 +342,11 @@ func seedTrailerGap(t *testing.T, catalog *Catalog, root, folder string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, folder, folder+".mkv"), "video")
 	writeFile(t, filepath.Join(root, folder, movieNFOName),
-		`<movie><title>The Signal</title><year>2014</year><uniqueid type="tmdb">603</uniqueid></movie>`)
+		`<movie><title>The Relay</title><year>2014</year><uniqueid type="tmdb">1001</uniqueid></movie>`)
 	seed := &walkResult{
 		movies: []movieRow{{
-			Id: "movie:tmdb:603", Library: "house/movies", Kind: libraryKindMovies,
-			Path: folder, Title: "The Signal", Released: "2014-06-13",
+			Id: "movie:tmdb:1001", Library: "house/movies", Kind: libraryKindMovies,
+			Path: folder, Title: "The Relay", Released: "2014-06-13",
 		}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -359,7 +359,7 @@ func seedTrailerGap(t *testing.T, catalog *Catalog, root, folder string) {
 func TestTheTrailerFactWritesTheLedgerAndTheRowsOfOneTitle(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "The Relay (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	line := trailerLineOf(
@@ -396,7 +396,7 @@ func TestTheTrailerFactWritesTheLedgerAndTheRowsOfOneTitle(t *testing.T) {
 	}
 	rows, err := catalog.queryStrings(t.Context(),
 		`SELECT provider || ':' || key FROM trailers WHERE library = ? AND item = ? ORDER BY provider, key`,
-		[]any{"house/movies", "movie:tmdb:603"})
+		[]any{"house/movies", "movie:tmdb:1001"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,40 +508,40 @@ func TestTheTrimLeavesOneEntryPerNameAndAtMostFivePerProvider(t *testing.T) {
 		{
 			name: "nine uploads of one name collapse to the highest score",
 			entries: []trailerEntry{
-				namedTrailer(providerBlockArchive, "tcm1", "The Ghost Breakers", 40, "2019-03-02"),
-				namedTrailer(providerBlockArchive, "tcm2", "THE GHOST BREAKERS", 45, "2019-03-03"),
-				namedTrailer(providerBlockArchive, "tcm3", "The Ghost Breakers!", 30, "2019-03-04"),
-				namedTrailer(providerBlockArchive, "tcm4", "The Ghost Breakers", 70, "2019-03-05"),
-				namedTrailer(providerBlockArchive, "tcm5", "The Ghost Breakers", 55, "2019-03-06"),
-				namedTrailer(providerBlockArchive, "tcm6", "The Ghost Breakers", 20, "2019-03-07"),
-				namedTrailer(providerBlockArchive, "tcm7", "The Ghost Breakers", 65, "2019-03-08"),
-				namedTrailer(providerBlockArchive, "tcm8", "The Ghost Breakers", 35, "2019-03-09"),
-				namedTrailer(providerBlockArchive, "tcm9", "The Ghost Breakers", 50, "2019-03-10"),
+				namedTrailer(providerBlockArchive, "tcm1", "The Fog Wardens", 40, "2019-03-02"),
+				namedTrailer(providerBlockArchive, "tcm2", "THE FOG WARDENS", 45, "2019-03-03"),
+				namedTrailer(providerBlockArchive, "tcm3", "The Fog Wardens!", 30, "2019-03-04"),
+				namedTrailer(providerBlockArchive, "tcm4", "The Fog Wardens", 70, "2019-03-05"),
+				namedTrailer(providerBlockArchive, "tcm5", "The Fog Wardens", 55, "2019-03-06"),
+				namedTrailer(providerBlockArchive, "tcm6", "The Fog Wardens", 20, "2019-03-07"),
+				namedTrailer(providerBlockArchive, "tcm7", "The Fog Wardens", 65, "2019-03-08"),
+				namedTrailer(providerBlockArchive, "tcm8", "The Fog Wardens", 35, "2019-03-09"),
+				namedTrailer(providerBlockArchive, "tcm9", "The Fog Wardens", 50, "2019-03-10"),
 			},
 			want: []string{"tcm4"},
 		},
 		{
 			name: "a tie on score keeps the earliest date",
 			entries: []trailerEntry{
-				namedTrailer(providerBlockArchive, "late", "Dune", 50, "2026-08-01"),
-				namedTrailer(providerBlockArchive, "early", "Dune", 50, "2019-03-02"),
-				namedTrailer(providerBlockArchive, "undated", "Dune", 50, ""),
+				namedTrailer(providerBlockArchive, "late", "Kestrel", 50, "2026-08-01"),
+				namedTrailer(providerBlockArchive, "early", "Kestrel", 50, "2019-03-02"),
+				namedTrailer(providerBlockArchive, "undated", "Kestrel", 50, ""),
 			},
 			want: []string{"early"},
 		},
 		{
 			name: "a tie on score keeps a dated entry over one with no date",
 			entries: []trailerEntry{
-				namedTrailer(providerBlockArchive, "undated", "Dune", 50, ""),
-				namedTrailer(providerBlockArchive, "dated", "Dune", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "undated", "Kestrel", 50, ""),
+				namedTrailer(providerBlockArchive, "dated", "Kestrel", 50, "2020-01-01"),
 			},
 			want: []string{"dated"},
 		},
 		{
 			name: "a tie on score and date keeps the first seen",
 			entries: []trailerEntry{
-				namedTrailer(providerBlockArchive, "first", "Dune", 50, "2020-01-01"),
-				namedTrailer(providerBlockArchive, "second", "Dune", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "first", "Kestrel", 50, "2020-01-01"),
+				namedTrailer(providerBlockArchive, "second", "Kestrel", 50, "2020-01-01"),
 			},
 			want: []string{"first"},
 		},
@@ -573,8 +573,8 @@ func TestTheTrimLeavesOneEntryPerNameAndAtMostFivePerProvider(t *testing.T) {
 		{
 			name: "two providers that name one video keep both",
 			entries: []trailerEntry{
-				namedTrailer(providerBlockArchive, "arc", "Dune Official Trailer", 40, "2020-01-01"),
-				namedTrailer(providerBlockPeerTube, "pt", "Dune Official Trailer", 90, "2021-01-01"),
+				namedTrailer(providerBlockArchive, "arc", "Kestrel Official Trailer", 40, "2020-01-01"),
+				namedTrailer(providerBlockPeerTube, "pt", "Kestrel Official Trailer", 90, "2021-01-01"),
 			},
 			want: []string{"arc", "pt"},
 		},
@@ -600,12 +600,12 @@ func TestTheTrimLeavesOneEntryPerNameAndAtMostFivePerProvider(t *testing.T) {
 func TestTheTrailerFactRecordsTheTrimmedList(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "The Relay (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	var held []trailerEntry
 	for _, key := range []string{"tcm1", "tcm2", "tcm3", "tcm4", "tcm5", "tcm6"} {
-		held = append(held, namedTrailer(providerBlockArchive, key, "The Signal", 40, "2019-03-02"))
+		held = append(held, namedTrailer(providerBlockArchive, key, "The Relay", 40, "2019-03-02"))
 	}
 	line := trailerLineOf(scriptedTrailers{block: providerBlockArchive, entries: held})
 
@@ -621,7 +621,7 @@ func TestTheTrailerFactRecordsTheTrimmedList(t *testing.T) {
 func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "The Relay (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	asked := &askedTrailerTitle{}
@@ -630,10 +630,10 @@ func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if asked.title.ids["tmdb"] != "603" {
+	if asked.title.ids["tmdb"] != "1001" {
 		t.Errorf("the ask carried %v, want the ids of the .nfo file", asked.title.ids)
 	}
-	if asked.title.title != "The Signal" || asked.title.year != 2014 {
+	if asked.title.title != "The Relay" || asked.title.year != 2014 {
 		t.Errorf("the ask carried %q of %d, want the title and the year", asked.title.title, asked.title.year)
 	}
 	if asked.title.kind != libraryKindMovies {
@@ -647,7 +647,7 @@ func TestATrailerAskCarriesTheIdsAndTheTitleOfTheFolder(t *testing.T) {
 func TestATrailerAskCarriesTheLanguagesOfTheLibrary(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedTrailerGap(t, catalog, root, "The Signal (2014)")
+	seedTrailerGap(t, catalog, root, "The Relay (2014)")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	asked := &askedTrailerTitle{}
 	t.Setenv(libraryLanguagesVariable, "en-US, fr,")
@@ -676,7 +676,7 @@ func (a *askedTrailerTitle) trailers(_ context.Context, title trailerTitle) ([]t
 // The title the trailer gap holds, as the run reads it out of the catalog.
 func trailerItem(t *testing.T, catalog *Catalog) identityItem {
 	t.Helper()
-	item, held, err := catalog.identityItem(t.Context(), "house/movies", "movie:tmdb:603")
+	item, held, err := catalog.identityItem(t.Context(), "house/movies", "movie:tmdb:1001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +691,7 @@ func trailerItem(t *testing.T, catalog *Catalog) identityItem {
 func TestATitleNoProviderHoldsATrailerForLosesTheListItHeld(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "The Relay (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	item := trailerItem(t, catalog)
@@ -716,7 +716,7 @@ func TestATitleNoProviderHoldsATrailerForLosesTheListItHeld(t *testing.T) {
 func TestATrailerAskThatFailedKeepsTheListAndRecordsTheError(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "The Relay (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	item := trailerItem(t, catalog)
@@ -746,7 +746,7 @@ func TestATrailerAskThatFailedKeepsTheListAndRecordsTheError(t *testing.T) {
 func TestTheTrailerFactSkipsATitleOutsideTheJobsScope(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "The Relay (2014)"
 	seedTrailerGap(t, catalog, root, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	work.scopes = []string{"Another Film (2001)"}

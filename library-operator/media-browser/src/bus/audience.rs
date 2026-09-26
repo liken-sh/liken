@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn the_message_carries_the_room_and_the_second_of_the_last_press() {
         let bytes = payload(
-            &watching(&[("chris", "Chris"), ("second", "Second")]),
+            &watching(&[("person-a", "Person A"), ("second", "Second")]),
             1_757_350_000,
         );
 
@@ -79,7 +79,7 @@ mod tests {
             serde_json::from_slice::<Value>(&bytes).expect("the message is JSON"),
             serde_json::json!({
                 "people": [
-                    {"name": "chris", "displayName": "Chris"},
+                    {"name": "person-a", "displayName": "Person A"},
                     {"name": "second", "displayName": "Second"},
                 ],
                 "at": 1_757_350_000,
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn the_room_comes_back_the_way_it_went_out() {
-        let people = watching(&[("chris", "Chris")]);
+        let people = watching(&[("person-a", "Person A")]);
 
         assert_eq!(
             held(&payload(&people, 1_757_350_000)),
@@ -118,9 +118,10 @@ mod tests {
 
     #[test]
     fn a_person_the_message_names_without_a_display_name_draws_by_name() {
-        let back = held(br#"{"people":[{"name":"chris"}],"at":7}"#).expect("the message decodes");
+        let back =
+            held(br#"{"people":[{"name":"person-a"}],"at":7}"#).expect("the message decodes");
 
-        assert_eq!(back.people, watching(&[("chris", "chris")]));
+        assert_eq!(back.people, watching(&[("person-a", "person-a")]));
     }
 
     #[test]
@@ -132,7 +133,7 @@ mod tests {
             br#"{"people":[]}"#,
             br#"{"at":7}"#,
             br#"{"people":7,"at":7}"#,
-            br#"{"people":[{"displayName":"Chris"}],"at":7}"#,
+            br#"{"people":[{"displayName":"Person A"}],"at":7}"#,
         ];
         for payload in cases {
             assert_eq!(held(payload), None);

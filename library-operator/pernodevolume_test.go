@@ -31,11 +31,11 @@ func TestBuildPerNodeVolumeNamesTheDriverAndTheClaim(t *testing.T) {
 
 	volume := buildPerNodeVolume(buildCatalogPodClaim(catalog))
 
-	if volume.Metadata.Name != "house-house-catalog-catalog" {
+	if volume.Metadata.Name != "house-house-catalog" {
 		t.Errorf("name = %q, want the namespace and the claim", volume.Metadata.Name)
 	}
 	labels := volume.Metadata.Labels
-	if labels[claimNamespaceLabelKey] != "house" || labels[claimLabelKey] != "house-catalog-catalog" {
+	if labels[claimNamespaceLabelKey] != "house" || labels[claimLabelKey] != "house-catalog" {
 		t.Errorf("labels = %v, want the claim's namespace and name", labels)
 	}
 	if volume.Spec.CSI == nil || volume.Spec.CSI.Driver != perNodeProvisioner ||
@@ -43,7 +43,7 @@ func TestBuildPerNodeVolumeNamesTheDriverAndTheClaim(t *testing.T) {
 		t.Errorf("csi = %+v, want the driver and the volume's own name as the handle", volume.Spec.CSI)
 	}
 	if volume.Spec.ClaimRef == nil || volume.Spec.ClaimRef.Namespace != "house" ||
-		volume.Spec.ClaimRef.Name != "house-catalog-catalog" {
+		volume.Spec.ClaimRef.Name != "house-catalog" {
 		t.Errorf("claimRef = %+v, want the claim it is reserved for", volume.Spec.ClaimRef)
 	}
 	if len(volume.Spec.AccessModes) != 1 || volume.Spec.AccessModes[0] != accessModeReadWriteMany {
@@ -71,17 +71,17 @@ func TestStandClaimWritesTheVolumeBeforeTheClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	claim := cluster.heldClaim("house-catalog-catalog")
+	claim := cluster.heldClaim("house-catalog")
 	if claim == nil {
 		t.Fatal("the pass provisioned no claim")
 	}
-	if claim.Spec.VolumeName != "house-house-catalog-catalog" {
+	if claim.Spec.VolumeName != "house-house-catalog" {
 		t.Errorf("volumeName = %q, want the volume the pass wrote", claim.Spec.VolumeName)
 	}
 	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteMany {
 		t.Errorf("accessModes = %v, want ReadWriteMany", claim.Spec.AccessModes)
 	}
-	if cluster.heldVolume("house-house-catalog-catalog") == nil {
+	if cluster.heldVolume("house-house-catalog") == nil {
 		t.Fatal("the pass wrote no volume for the claim")
 	}
 	volumes := cluster.firstRequest(http.MethodPost, "persistentvolumes")
@@ -114,7 +114,7 @@ func TestStandClaimWritesNoVolumeOnAnotherClass(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			claim := cluster.heldClaim("house-catalog-catalog")
+			claim := cluster.heldClaim("house-catalog")
 			if claim == nil {
 				t.Fatal("the pass provisioned no claim")
 			}
@@ -188,7 +188,7 @@ func TestStandClaimReplacesTheVolumeOfAClaimThatIsGone(t *testing.T) {
 	if err := operator.standClaim(t.Context(), buildCatalogPodClaim(catalog)); err != nil {
 		t.Fatal(err)
 	}
-	if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog-catalog"); err != nil {
+	if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,7 +196,7 @@ func TestStandClaimReplacesTheVolumeOfAClaimThatIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	volume := cluster.heldVolume("house-house-catalog-catalog")
+	volume := cluster.heldVolume("house-house-catalog")
 	if volume == nil {
 		t.Fatal("the pass left no volume for the claim it wrote")
 	}
@@ -209,8 +209,8 @@ func TestStandClaimReplacesTheVolumeOfAClaimThatIsGone(t *testing.T) {
 	if got := cluster.countRequests(http.MethodDelete, "persistentvolumes"); got != 1 {
 		t.Errorf("volume deletes = %d, want the one volume of the claim that is gone", got)
 	}
-	claim := cluster.heldClaim("house-catalog-catalog")
-	if claim == nil || claim.Spec.VolumeName != "house-house-catalog-catalog" {
+	claim := cluster.heldClaim("house-catalog")
+	if claim == nil || claim.Spec.VolumeName != "house-house-catalog" {
 		t.Errorf("claim = %+v, want it naming the volume the pass wrote", claim)
 	}
 }
@@ -224,7 +224,7 @@ func TestStandClaimKeepsAVolumeNoClaimHasLeft(t *testing.T) {
 		uid   string
 	}{
 		{name: "a volume waiting for its claim"},
-		{name: "a volume already bound to it", phase: claimBound, uid: "house-catalog-catalog-uid"},
+		{name: "a volume already bound to it", phase: claimBound, uid: "house-catalog-uid"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -242,12 +242,12 @@ func TestStandClaimKeepsAVolumeNoClaimHasLeft(t *testing.T) {
 			if got := cluster.countRequests(http.MethodDelete, "persistentvolumes"); got != 0 {
 				t.Errorf("volume deletes = %d, want the standing volume kept", got)
 			}
-			volume := cluster.heldVolume("house-house-catalog-catalog")
+			volume := cluster.heldVolume("house-house-catalog")
 			if volume == nil || volume.Spec.ClaimRef.UID != one.uid {
 				t.Errorf("volume = %+v, want the one that already stood", volume)
 			}
-			claim := cluster.heldClaim("house-catalog-catalog")
-			if claim == nil || claim.Spec.VolumeName != "house-house-catalog-catalog" {
+			claim := cluster.heldClaim("house-catalog")
+			if claim == nil || claim.Spec.VolumeName != "house-house-catalog" {
 				t.Errorf("claim = %+v, want it naming the volume that stood", claim)
 			}
 		})
@@ -262,8 +262,8 @@ func TestStandClaimReportsWhatTheServerRefusesOverAStandingVolume(t *testing.T) 
 		name    string
 		request string
 	}{
-		{name: "the read", request: "GET " + volumesPath + "/house-house-catalog-catalog"},
-		{name: "the delete", request: "DELETE " + volumesPath + "/house-house-catalog-catalog"},
+		{name: "the read", request: "GET " + volumesPath + "/house-house-catalog"},
+		{name: "the delete", request: "DELETE " + volumesPath + "/house-house-catalog"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -273,7 +273,7 @@ func TestStandClaimReportsWhatTheServerRefusesOverAStandingVolume(t *testing.T) 
 			if err := operator.standClaim(t.Context(), buildCatalogPodClaim(catalog)); err != nil {
 				t.Fatal(err)
 			}
-			if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog-catalog"); err != nil {
+			if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog"); err != nil {
 				t.Fatal(err)
 			}
 			cluster.broken[one.request] = http.StatusInternalServerError
@@ -283,7 +283,7 @@ func TestStandClaimReportsWhatTheServerRefusesOverAStandingVolume(t *testing.T) 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the pass could not read past")
 			}
-			if cluster.heldClaim("house-catalog-catalog") != nil {
+			if cluster.heldClaim("house-catalog") != nil {
 				t.Error("the pass wrote a claim over a volume it could not read")
 			}
 		})
@@ -295,8 +295,8 @@ func TestStandClaimReportsWhatTheServerRefusesOverAStandingVolume(t *testing.T) 
 func TestStandClaimLeavesAnExistingClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := perNodeCatalog(cluster)
-	cluster.claims["house-catalog-catalog"] = &PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"},
+	cluster.claims["house-catalog"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"},
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	}
 
@@ -349,7 +349,7 @@ func TestStandClaimReportsAClassItCannotRead(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 				t.Fatalf("err = %v, want the server's own message", err)
 			}
-			if cluster.heldClaim("house-catalog-catalog") != nil {
+			if cluster.heldClaim("house-catalog") != nil {
 				t.Error("the pass wrote a claim it could not write a volume for")
 			}
 		})
@@ -387,7 +387,7 @@ func TestTheSweepDeletesTheVolumeOfAClaimThatIsGone(t *testing.T) {
 	if err := operator.standClaim(t.Context(), buildCatalogPodClaim(catalog)); err != nil {
 		t.Fatal(err)
 	}
-	if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog-catalog"); err != nil {
+	if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,7 +395,7 @@ func TestTheSweepDeletesTheVolumeOfAClaimThatIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldVolume("house-house-catalog-catalog") != nil {
+	if cluster.heldVolume("house-house-catalog") != nil {
 		t.Error("the volume of a claim that is gone stands, want it swept")
 	}
 }
@@ -416,7 +416,7 @@ func TestTheSweepLeavesEveryVolumeButItsOwnReleasedOnes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldVolume("house-house-catalog-catalog") == nil {
+	if cluster.heldVolume("house-house-catalog") == nil {
 		t.Error("the sweep took the volume of a claim that stands")
 	}
 	if cluster.heldVolume("pv-of-another-writer") == nil {
@@ -432,7 +432,7 @@ func TestTheSweepReportsWhatTheServerRefuses(t *testing.T) {
 		request string
 	}{
 		{name: "the list", request: volumesPath},
-		{name: "the delete", request: "DELETE " + volumesPath + "/house-house-catalog-catalog"},
+		{name: "the delete", request: "DELETE " + volumesPath + "/house-house-catalog"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -442,7 +442,7 @@ func TestTheSweepReportsWhatTheServerRefuses(t *testing.T) {
 			if err := operator.standClaim(t.Context(), buildCatalogPodClaim(catalog)); err != nil {
 				t.Fatal(err)
 			}
-			if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog-catalog"); err != nil {
+			if err := DeletePersistentVolumeClaim(t.Context(), operator.client, "house", "house-catalog"); err != nil {
 				t.Fatal(err)
 			}
 			cluster.broken[one.request] = http.StatusInternalServerError
@@ -460,13 +460,13 @@ func TestTheSweepReportsWhatTheServerRefuses(t *testing.T) {
 // is deleted loses the volumes behind its stores.
 func TestAPassSweepsTheReleasedVolumes(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.volumes["house-house-catalog-catalog"] = `{"metadata":{"name":"house-house-catalog-catalog",` +
-		`"labels":{"` + claimNamespaceLabelKey + `":"house","` + claimLabelKey + `":"house-catalog-catalog"}},` +
+	cluster.volumes["house-house-catalog"] = `{"metadata":{"name":"house-house-catalog",` +
+		`"labels":{"` + claimNamespaceLabelKey + `":"house","` + claimLabelKey + `":"house-catalog"}},` +
 		`"status":{"phase":"Released"},"spec":{"csi":{"driver":"` + perNodeProvisioner + `"}}}`
 
 	testOperator(t, cluster).pass()
 
-	if cluster.heldVolume("house-house-catalog-catalog") != nil {
+	if cluster.heldVolume("house-house-catalog") != nil {
 		t.Error("the pass left a released volume of its own")
 	}
 }
@@ -488,21 +488,21 @@ func TestEveryClaimTheOperatorWritesGoesThroughStandClaim(t *testing.T) {
 		},
 		{
 			name:   "the catalog store",
-			volume: "house-house-catalog-catalog",
+			volume: "house-house-catalog",
 			stand: func(o *operator, catalog *NamespaceCatalog) error {
 				return o.standCatalogPodClaim(t.Context(), catalog)
 			},
 		},
 		{
 			name:   "the progress store",
-			volume: "house-house-catalog-progress",
+			volume: "house-house-progress",
 			stand: func(o *operator, catalog *NamespaceCatalog) error {
 				return o.standProgressClaim(t.Context(), catalog)
 			},
 		},
 		{
 			name:   "the claims of a screen",
-			volume: "house-den-tv-media-browser-catalog",
+			volume: "house-den-media-browser-catalog",
 			stand: func(o *operator, catalog *NamespaceCatalog) error {
 				return o.standScreenClaims(t.Context(), denScreen(), catalog)
 			},

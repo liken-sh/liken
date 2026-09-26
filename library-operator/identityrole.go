@@ -63,7 +63,7 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 		episodes: e.episodeClues(folder),
 	})
 	if err != nil {
-		e.logf("could not identify %s: %v", item.path, err)
+		e.logf("could not identify %s: %v", opaqueID(item.id), err)
 		e.recordIdentity(folder, nil, attemptError)
 		return
 	}
@@ -71,10 +71,10 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 	case answer.id > 0:
 		e.writeIdentity(ctx, client, folder, item, answer)
 	case len(answer.candidates) > 0:
-		e.logf("%s waits for a person, with %d candidates", item.path, len(answer.candidates))
+		e.logf("%s waits for a person, with %d candidates", opaqueID(item.id), len(answer.candidates))
 		e.recordIdentity(folder, &likenItem{Path: likenSelfPath, Candidates: answer.candidates}, attemptCandidates)
 	default:
-		e.logf("no provider named %s", item.path)
+		e.logf("no provider named %s", opaqueID(item.id))
 		e.recordIdentity(folder, nil, attemptNothing)
 	}
 }
@@ -89,7 +89,7 @@ func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder
 	id := strconv.Itoa(answer.id)
 	nfoPath, rootElement := identityNFO(e.kind, folder)
 	if err := e.writeUniqueID(nfoPath, rootElement, item.title, "tmdb", id); err != nil {
-		e.logf("could not write the id of %s: %v", item.path, err)
+		e.logf("could not write the id of %s: %v", opaqueID(item.id), err)
 		e.recordIdentity(folder, nil, attemptError)
 		return
 	}
@@ -97,12 +97,12 @@ func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder
 	external := e.externalIDs(ctx, client, item, answer.id)
 	for _, provider := range sortedKeys(external) {
 		if err := e.writeUniqueID(nfoPath, rootElement, item.title, provider, external[provider]); err != nil {
-			e.logf("could not write the %s id of %s: %v", provider, item.path, err)
+			e.logf("could not write the %s id of %s: %v", provider, opaqueID(item.id), err)
 			continue
 		}
 		ids[provider] = external[provider]
 	}
-	e.logf("identified %s as tmdb %s, by %s", item.path, id, answer.reason)
+	e.logf("identified %s as tmdb %s, by %s", opaqueID(item.id), id, answer.reason)
 	e.recordIdentity(folder, &likenItem{
 		Path: likenSelfPath, ID: ids, Reason: answer.reason, Written: time.Now().UTC(),
 	}, attemptFound)
@@ -115,7 +115,7 @@ func (e *enricher) externalIDs(ctx context.Context, client *tmdbClient,
 	item identityItem, id int) providerIDs {
 	external, err := client.externalIDs(ctx, e.kind, id)
 	if err != nil {
-		e.logf("could not read the other ids of %s: %v", item.path, err)
+		e.logf("could not read the other ids of %s: %v", opaqueID(item.id), err)
 		return nil
 	}
 	return external.providerIDs()
@@ -143,7 +143,7 @@ func (e *enricher) recordIdentity(folder string, entry *likenItem, result string
 		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: time.Now().UTC(), Result: result})
 	})
 	if err != nil {
-		e.logf("could not record the identity attempt at %s: %v", folder, err)
+		e.logf("could not record the identity attempt at %s: %v", e.named(folder), err)
 	}
 	if result == attemptFound {
 		e.rescanTitle(folder)

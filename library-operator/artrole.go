@@ -65,7 +65,7 @@ func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap a
 	folder := filepath.Join(e.root, gap.folder())
 	target := filepath.Join(folder, art.fileFor(gap))
 	if held, err := fileExists(target); err != nil {
-		e.logf("could not read %s: %v", target, err)
+		e.logf("could not read %s: %v", e.named(target), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	} else if held {
@@ -75,13 +75,13 @@ func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap a
 
 	answerer, candidates, err := line.ask(ctx, art.fact, gap, e.artTitle(gap))
 	if err != nil {
-		e.logf("could not read the %s of %s: %v", art.fact, gap.key, err)
+		e.logf("could not read the %s of %s: %v", art.fact, e.named(gap.key), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	}
 	image, held := chooseArt(candidates, artLanguage)
 	if answerer == nil || !held {
-		e.logf("no provider holds the %s of %s", art.fact, gap.key)
+		e.logf("no provider holds the %s of %s", art.fact, e.named(gap.key))
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptNothing)
 		return false
 	}
@@ -109,13 +109,13 @@ func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artTy
 	folder, target string, image artCandidate) bool {
 	data, err := answerer.fetchFile(ctx, image.URL)
 	if err != nil {
-		e.logf("could not read %s: %v", image.URL, err)
+		e.logf("could not read %s: %v", opaqueText(image.URL), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	}
 	written, err := e.writer.createOnce(target, data)
 	if err != nil {
-		e.logf("could not write %s: %v", target, err)
+		e.logf("could not write %s: %v", e.named(target), err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	}
@@ -123,7 +123,7 @@ func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artTy
 		e.recordArt(folder, art.fact, gap.entry(), artProviderExisting, attemptFound)
 		return false
 	}
-	e.logf("wrote the %s of %s from %s", art.fact, gap.key, answerer.providerBlock())
+	e.logf("wrote the %s of %s from %s", art.fact, e.named(gap.key), answerer.providerBlock())
 	e.recordArt(folder, art.fact, gap.entry(), answerer.providerBlock(), attemptFound)
 	return true
 }
@@ -145,7 +145,7 @@ func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
 		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", fact, entry, err)
+		e.logf("could not record the %s attempt at %s: %v", fact, e.named(filepath.Join(folder, entry)), err)
 	}
 	e.writeRows(fact, folder, result == attemptFound)
 }

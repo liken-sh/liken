@@ -112,7 +112,7 @@ pub struct Index {
 
 impl Index {
     /// The ranked hits for this text. Every word of the text must match
-    /// the same item, so "batman 1989" narrows instead of widening. Text
+    /// the same item, so "gullwing 1989" narrows instead of widening. Text
     /// that folds to no words answers nothing.
     pub fn find(&self, text: &str) -> Vec<Slot> {
         let asked = fold::words(text);

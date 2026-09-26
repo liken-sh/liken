@@ -470,16 +470,16 @@ or beside each IMDb rating and IMDb credit.
   `ReadWriteMany` on the per-node class.
 - **Episodes.** With `imdb` after `tmdb` and before `omdb` in the
   sources of both Libraries, one gap `Job` of the series wrote
-  `rating.imdb` for 6,277 of the 6,343 episodes that had none, in
+  `rating.imdb` for almost every episode that had none, in
   2 min 45 s. It read `title.episode` in 5.3 s, which gave the IMDb id
-  of 6,288 episodes, and `title.ratings` in 0.8 s. The writes of the
+  of almost every episode, and `title.ratings` in 0.8 s. The writes of the
   `.nfo` files took most of the time.
 - **The cache.** A later run of the movies got `304` for
   `title.ratings` and read the cached copy in 0.58 s.
 - **The movies.** After the fix, a `spec.refresh` of `rating.imdb`
-  answered 1,436 movies from the cached file. Only 29 `movie.nfo`
-  files changed, because the rest already had the same rating at one
-  decimal.
+  answered every movie from the cached file. Only a few dozen
+  `movie.nfo` files changed, because the rest already had the same
+  rating at one decimal.
 
 ## What is still open
 

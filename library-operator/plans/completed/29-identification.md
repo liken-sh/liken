@@ -133,17 +133,17 @@ rarely carry a useful one.
 # .liken/identity.yaml, in a title's folder
 items:
   - path: .
-    id: {tmdb: 603}
+    id: {tmdb: 1001}
     reason: title and year
     written: 2026-09-02T14:00:00Z
   - path: .
     candidates:
-      - id: {tmdb: 11}
-        title: Star Wars
+      - id: {tmdb: 1002}
+        title: The Long Survey
         year: 1977
         receipt: {title: match, year: match, runtime: 3 minutes off}
-      - id: {tmdb: 1893}
-        title: Star Wars
+      - id: {tmdb: 1003}
+        title: The Long Survey
         year: 1999
         receipt: {title: match, year: no match}
 ```
@@ -152,7 +152,7 @@ items:
 # .liken/identity.yaml is the ledger; the attempts sit beside it
 # .liken/probe.yaml
 attempts:
-  - path: Big Trouble in Little China (1986).mkv
+  - path: Another Film (1986).mkv
     at: 2026-09-02T14:00:00Z
     result: found
 ```

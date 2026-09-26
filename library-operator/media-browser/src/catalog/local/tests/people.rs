@@ -354,7 +354,7 @@ fn a_worked_person(path: &Path) {
         "two",
         0,
         (".contributors/first", "A First"),
-        ("actor", "Tony"),
+        ("actor", "Wren"),
     );
     insert_credit(
         path,
@@ -413,7 +413,7 @@ fn a_persons_works_gather_every_library_newest_first_with_their_facts() {
                 duration: 6_720,
                 rating: "PG".into(),
                 tagline: "One line.".into(),
-                parts: "as Tony".into(),
+                parts: "as Wren".into(),
                 ..Slot::default()
             },
         ]

@@ -22,10 +22,10 @@ func TestWalkSeries(t *testing.T) {
 		t.Fatalf("series rows = %d, want 1", len(result.series))
 	}
 	series := result.series[0]
-	if series.Id != "series:tvdb:81189" {
-		t.Errorf("series id = %q, want series:tvdb:81189", series.Id)
+	if series.Id != "series:tvdb:800001" {
+		t.Errorf("series id = %q, want series:tvdb:800001", series.Id)
 	}
-	if series.Title != "Breaking Bad" || series.Slug != "breaking-bad-2008" {
+	if series.Title != "Copper Line" || series.Slug != "copper-line-2008" {
 		t.Errorf("series identity = %q %q", series.Title, series.Slug)
 	}
 
@@ -33,8 +33,8 @@ func TestWalkSeries(t *testing.T) {
 		t.Fatalf("episode rows = %d, want 1", len(result.episodes))
 	}
 	episode := result.episodes[0]
-	if episode.Id != "episode:tvdb:81189:s02e05" {
-		t.Errorf("episode id = %q, want episode:tvdb:81189:s02e05", episode.Id)
+	if episode.Id != "episode:tvdb:800001:s02e05" {
+		t.Errorf("episode id = %q, want episode:tvdb:800001:s02e05", episode.Id)
 	}
 	if episode.Season != 2 || episode.Episode != 5 {
 		t.Errorf("placement = s%02de%02d, want s02e05", episode.Season, episode.Episode)
@@ -42,7 +42,7 @@ func TestWalkSeries(t *testing.T) {
 	if episode.Series != series.Id {
 		t.Errorf("episode series = %q, want %q", episode.Series, series.Id)
 	}
-	if episode.Title != "Breakage" || episode.Released != "2009-04-05" {
+	if episode.Title != "Tin Roof" || episode.Released != "2009-04-05" {
 		t.Errorf("episode identity = %q %q", episode.Title, episode.Released)
 	}
 	if episode.Art == "" {
@@ -52,14 +52,14 @@ func TestWalkSeries(t *testing.T) {
 
 func TestWalkSeriesEpisodeFile(t *testing.T) {
 	result := walkSeries("testdata/series", "house/series", nil)
-	file, held := fileByItem(result, "episode:tvdb:81189:s02e05")
+	file, held := fileByItem(result, "episode:tvdb:800001:s02e05")
 	if !held {
 		t.Fatal("the episode has no file linked")
 	}
 	if file.Width != 1280 || file.Height != 720 || file.VideoCodec != "h264" || file.AudioCodec != "ac3" {
 		t.Errorf("attributes = %dx%d %s/%s, want the episode streamdetails", file.Width, file.Height, file.VideoCodec, file.AudioCodec)
 	}
-	if file.Path != filepath.Join("Breaking Bad", "Season 02", "Breaking Bad - S02E05.mkv") {
+	if file.Path != filepath.Join("Copper Line", "Season 02", "Copper Line - S02E05.mkv") {
 		t.Errorf("path = %q, want the episode file relative to the root", file.Path)
 	}
 }
@@ -70,7 +70,7 @@ func TestWalkSeriesEpisodeFile(t *testing.T) {
 func TestWalkSeriesReadsEveryFileTheSeriesCarries(t *testing.T) {
 	result := walkSeries("testdata/series", "house/series", nil)
 	files := filesByPath(result)
-	season := filepath.Join("Breaking Bad", "Season 02")
+	season := filepath.Join("Copper Line", "Season 02")
 
 	cases := []struct {
 		path         string
@@ -80,32 +80,32 @@ func TestWalkSeriesReadsEveryFileTheSeriesCarries(t *testing.T) {
 		wantItem     string
 	}{
 		{
-			path:     filepath.Join("Breaking Bad", "tvshow.nfo"),
-			wantType: fileTypeMetadata, wantRole: fileRoleTVShow, wantItem: "series:tvdb:81189",
+			path:     filepath.Join("Copper Line", "tvshow.nfo"),
+			wantType: fileTypeMetadata, wantRole: fileRoleTVShow, wantItem: "series:tvdb:800001",
 		},
 		{
-			path:     filepath.Join("Breaking Bad", "folder.jpg"),
-			wantType: fileTypeImage, wantRole: fileRolePoster, wantItem: "series:tvdb:81189",
+			path:     filepath.Join("Copper Line", "folder.jpg"),
+			wantType: fileTypeImage, wantRole: fileRolePoster, wantItem: "series:tvdb:800001",
 		},
 		{
 			path:     filepath.Join(season, "season02-poster.jpg"),
-			wantType: fileTypeImage, wantRole: fileRolePoster, wantItem: "series:tvdb:81189",
+			wantType: fileTypeImage, wantRole: fileRolePoster, wantItem: "series:tvdb:800001",
 		},
 		{
-			path:     filepath.Join(season, "Breaking Bad - S02E05.mkv"),
-			wantType: fileTypeVideo, wantRole: fileRolePrimary, wantItem: "episode:tvdb:81189:s02e05",
+			path:     filepath.Join(season, "Copper Line - S02E05.mkv"),
+			wantType: fileTypeVideo, wantRole: fileRolePrimary, wantItem: "episode:tvdb:800001:s02e05",
 		},
 		{
-			path:     filepath.Join(season, "Breaking Bad - S02E05.nfo"),
-			wantType: fileTypeMetadata, wantRole: fileRoleEpisode, wantItem: "episode:tvdb:81189:s02e05",
+			path:     filepath.Join(season, "Copper Line - S02E05.nfo"),
+			wantType: fileTypeMetadata, wantRole: fileRoleEpisode, wantItem: "episode:tvdb:800001:s02e05",
 		},
 		{
-			path:     filepath.Join(season, "Breaking Bad - S02E05-thumb.jpg"),
-			wantType: fileTypeImage, wantRole: fileRoleThumb, wantItem: "episode:tvdb:81189:s02e05",
+			path:     filepath.Join(season, "Copper Line - S02E05-thumb.jpg"),
+			wantType: fileTypeImage, wantRole: fileRoleThumb, wantItem: "episode:tvdb:800001:s02e05",
 		},
 		{
-			path:     filepath.Join(season, "Breaking Bad - S02E05.en.srt"),
-			wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en", wantItem: "episode:tvdb:81189:s02e05",
+			path:     filepath.Join(season, "Copper Line - S02E05.en.srt"),
+			wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en", wantItem: "episode:tvdb:800001:s02e05",
 		},
 	}
 	for _, testCase := range cases {
@@ -174,7 +174,7 @@ func TestWalkSeriesEmitsEpisodeAlias(t *testing.T) {
 	result := walkSeries("testdata/series", "house/series", nil)
 	found := false
 	for _, alias := range result.aliases {
-		if alias.Alias == "episode:tvdb:340124" && alias.Item == "episode:tvdb:81189:s02e05" {
+		if alias.Alias == "episode:tvdb:800105" && alias.Item == "episode:tvdb:800001:s02e05" {
 			found = true
 		}
 	}
@@ -410,21 +410,21 @@ func writeFile(t *testing.T, path, content string) {
 // name-prefixed poster beside tvshow.nfo is the series art.
 func TestWalkSeriesReadsNamePrefixedArt(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Twin Peaks (1990)")
-	writeFile(t, filepath.Join(dir, "Season 01", "Twin Peaks - S01E01.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Twin Peaks (1990)-poster.jpg"), "image")
-	writeFile(t, filepath.Join(dir, "Twin Peaks (1990)-clearlogo.png"), "image")
+	dir := filepath.Join(root, "Pine Hollow (1990)")
+	writeFile(t, filepath.Join(dir, "Season 01", "Pine Hollow - S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Pine Hollow (1990)-poster.jpg"), "image")
+	writeFile(t, filepath.Join(dir, "Pine Hollow (1990)-clearlogo.png"), "image")
 
 	result := walkSeries(root, "house/series", nil)
 	if len(result.series) != 1 {
 		t.Fatalf("series rows = %d, want 1", len(result.series))
 	}
 	series := result.series[0]
-	poster := filepath.Join("Twin Peaks (1990)", "Twin Peaks (1990)-poster.jpg")
+	poster := filepath.Join("Pine Hollow (1990)", "Pine Hollow (1990)-poster.jpg")
 	if series.Art != poster {
 		t.Errorf("art = %q, want %q", series.Art, poster)
 	}
-	want := []string{poster, filepath.Join("Twin Peaks (1990)", "Twin Peaks (1990)-clearlogo.png")}
+	want := []string{poster, filepath.Join("Pine Hollow (1990)", "Pine Hollow (1990)-clearlogo.png")}
 	if !reflect.DeepEqual(series.Arts, want) {
 		t.Errorf("arts = %v, want %v", series.Arts, want)
 	}
@@ -569,12 +569,12 @@ func TestAVideoThatIsNoEpisodeReadsTheNFOBesideIt(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			dir := filepath.Join(root, "Twin Peaks (1990)", test.folder)
+			dir := filepath.Join(root, "Pine Hollow (1990)", test.folder)
 			writeFile(t, filepath.Join(dir, "A Documentary.mkv"), "video")
 			writeFile(t, filepath.Join(dir, "A Documentary.nfo"),
 				streamNFO(nfoRootEpisode, "A Documentary", "hevc", "eac3", 3840, 2160, 3000))
 
-			path := filepath.Join("Twin Peaks (1990)", test.folder, "A Documentary.mkv")
+			path := filepath.Join("Pine Hollow (1990)", test.folder, "A Documentary.mkv")
 			row, held := filesByPath(walkSeries(root, "house/series", nil))[path]
 
 			if !held {

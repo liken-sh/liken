@@ -128,13 +128,13 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	noPod.choice = catalogChoice{catalog: testNamespaceCatalog()}
 
 	failedPod := scanning()
-	failed := readyCatalogPod("house-catalog", "house")
+	failed := readyCatalogPod("house", "house")
 	failed.Status.Phase = podFailed
 	failed.Status.Reason = "Evicted"
 	failedPod.choice = catalogChoice{catalog: testNamespaceCatalog(), pod: failed}
 
 	startingPod := scanning()
-	starting := readyCatalogPod("house-catalog", "house")
+	starting := readyCatalogPod("house", "house")
 	starting.Status.ContainerStatuses[0].Ready = false
 	startingPod.choice = catalogChoice{catalog: testNamespaceCatalog(), pod: starting}
 
@@ -283,7 +283,7 @@ func TestReadyConditionRefusesAPodTheKubeletHasNotSpokenFor(t *testing.T) {
 	seen.choice = catalogChoice{
 		catalog: testNamespaceCatalog(),
 		pod: &Pod{
-			Metadata: ObjectMeta{Name: "house-catalog-catalog"},
+			Metadata: ObjectMeta{Name: "house-catalog"},
 			Status:   PodStatus{Phase: podRunning},
 		},
 	}

@@ -41,39 +41,39 @@ func TestACreditFindsItsEntryByIDBeforeItsName(t *testing.T) {
 	}{
 		{
 			name:   "a TMDb id the store holds under another spelling",
-			credit: creditedActor{Name: "Thomas Hanks", IDs: providerIDs{"tmdb": "31"}},
-			want:   ".contributors/to/tom-hanks",
+			credit: creditedActor{Name: "Theodore Harker", IDs: providerIDs{"tmdb": "4031"}},
+			want:   ".contributors/to/tod-harker",
 		},
 		{
 			name:   "an IMDb id the store holds",
-			credit: creditedActor{Name: "Thomas Hanks", IDs: providerIDs{"imdb": "nm0000158"}},
-			want:   ".contributors/to/tom-hanks",
+			credit: creditedActor{Name: "Theodore Harker", IDs: providerIDs{"imdb": "nm9000158"}},
+			want:   ".contributors/to/tod-harker",
 		},
 		{
 			name:   "an IMDb id whose TMDb id the store holds",
-			credit: creditedActor{Name: "Thomas Hanks", IDs: providerIDs{"imdb": "nm9999999"}},
+			credit: creditedActor{Name: "Theodore Harker", IDs: providerIDs{"imdb": "nm9999999"}},
 			answers: map[string]string{
-				tmdbKey("/3/find/nm9999999", "", ""): findAnswer(`{"id":31}`),
+				tmdbKey("/3/find/nm9999999", "", ""): findAnswer(`{"id":4031}`),
 			},
-			want: ".contributors/to/tom-hanks",
+			want: ".contributors/to/tod-harker",
 		},
 		{
 			name:   "an IMDb id of another person of the same name",
-			credit: creditedActor{Name: "Tom Hanks", IDs: providerIDs{"imdb": "nm7777777"}},
+			credit: creditedActor{Name: "Tod Harker", IDs: providerIDs{"imdb": "nm7777777"}},
 			answers: map[string]string{
 				tmdbKey("/3/find/nm7777777", "", ""): findAnswer(`{"id":992}`),
 			},
-			want: ".contributors/to/tom-hanks-tmdb-992",
+			want: ".contributors/to/tod-harker-tmdb-992",
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			seedWalkedEntry(t, catalog, root, "tom-hanks", "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\n")
+			seedWalkedEntry(t, catalog, root, "tod-harker", "name: Tod Harker\nids: {imdb: nm9000158, tmdb: 4031}\n")
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			withPersonFinder(t, work, test.answers)
-			folder := titleFolder(t, root, "The Signal (2014)")
+			folder := titleFolder(t, root, "Quiet Station (2014)")
 
 			work.writeCredits(folder, factAnswer{Cast: []creditedActor{test.credit}})
 
@@ -92,18 +92,18 @@ func TestAFoundTMDbIDLandsInTheNewEntry(t *testing.T) {
 	root := t.TempDir()
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	fake := withPersonFinder(t, work, map[string]string{
-		tmdbKey("/3/find/nm0000158", "", ""): findAnswer(`{"id":31}`),
+		tmdbKey("/3/find/nm9000158", "", ""): findAnswer(`{"id":4031}`),
 	})
-	credit := creditedActor{Name: "Tom Hanks", IDs: providerIDs{"imdb": "nm0000158"}}
+	credit := creditedActor{Name: "Tod Harker", IDs: providerIDs{"imdb": "nm9000158"}}
 
 	work.writeCredits(titleFolder(t, root, "One Film (1999)"), factAnswer{Cast: []creditedActor{credit}})
 	work.writeCredits(titleFolder(t, root, "Another Film (2001)"), factAnswer{Cast: []creditedActor{credit}})
 
-	entry := readFileString(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName))
-	if entry != "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\n" {
+	entry := readFileString(t, filepath.Join(root, ".contributors/to/tod-harker", contributorFileName))
+	if entry != "name: Tod Harker\nids: {imdb: nm9000158, tmdb: 4031}\n" {
 		t.Errorf("contributor.yaml = %q, want the IMDb id and the TMDb id", entry)
 	}
-	if got := fake.served[tmdbKey("/3/find/nm0000158", "", "")]; got != 1 {
+	if got := fake.served[tmdbKey("/3/find/nm9000158", "", "")]; got != 1 {
 		t.Errorf("the find call ran %d times, want 1", got)
 	}
 }
@@ -115,27 +115,27 @@ func TestACreditThatReachesAMergedEntryLinksToTheEntryThatStays(t *testing.T) {
 		name   string
 		credit creditedActor
 	}{
-		{name: "by the id the catalog still holds", credit: creditedActor{Name: "Someone", IDs: providerIDs{"tmdb": "31"}}},
-		{name: "by the slug", credit: creditedActor{Name: "Thomas Hanks"}},
+		{name: "by the id the catalog still holds", credit: creditedActor{Name: "Someone", IDs: providerIDs{"tmdb": "4031"}}},
+		{name: "by the slug", credit: creditedActor{Name: "Theodore Harker"}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			seedWalkedEntry(t, catalog, root, "tom-hanks", "name: Tom Hanks\nids: {tmdb: 31}\n")
+			seedWalkedEntry(t, catalog, root, "tod-harker", "name: Tod Harker\nids: {tmdb: 4031}\n")
 			if _, err := catalog.UpsertContributorIDs(t.Context(), []contributorAliasRow{{
-				Library: "house/movies", Scheme: "tmdb", ID: "31", Path: ".contributors/th/thomas-hanks",
+				Library: "house/movies", Scheme: "tmdb", ID: "4031", Path: ".contributors/th/theodore-harker",
 			}}); err != nil {
 				t.Fatal(err)
 			}
-			writeContributorEntry(t, root, "thomas-hanks", "mergedInto: .contributors/to/tom-hanks\n")
+			writeContributorEntry(t, root, "theodore-harker", "mergedInto: .contributors/to/tod-harker\n")
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-			folder := titleFolder(t, root, "The Signal (2014)")
+			folder := titleFolder(t, root, "Quiet Station (2014)")
 
 			work.writeCredits(folder, factAnswer{Cast: []creditedActor{test.credit}})
 
 			credits := artLedger(t, folder, factCredits).Credits
-			if len(credits) != 1 || credits[0].Contributor != ".contributors/to/tom-hanks" {
+			if len(credits) != 1 || credits[0].Contributor != ".contributors/to/tod-harker" {
 				t.Errorf("credits = %+v, want the entry that stays", credits)
 			}
 		})
@@ -148,17 +148,17 @@ func TestAnIDWhoseEntryLeftTheVolumeFallsBackToTheSlug(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	if _, err := catalog.UpsertContributorIDs(t.Context(), []contributorAliasRow{{
-		Library: "house/movies", Scheme: "tmdb", ID: "31", Path: ".contributors/go/gone",
+		Library: "house/movies", Scheme: "tmdb", ID: "4031", Path: ".contributors/go/gone",
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	folder := titleFolder(t, root, "The Signal (2014)")
+	folder := titleFolder(t, root, "Quiet Station (2014)")
 
-	work.writeCredits(folder, factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", IDs: providerIDs{"tmdb": "31"}}}})
+	work.writeCredits(folder, factAnswer{Cast: []creditedActor{{Name: "Tod Harker", IDs: providerIDs{"tmdb": "4031"}}}})
 
 	credits := artLedger(t, folder, factCredits).Credits
-	if len(credits) != 1 || credits[0].Contributor != ".contributors/to/tom-hanks" {
+	if len(credits) != 1 || credits[0].Contributor != ".contributors/to/tod-harker" {
 		t.Errorf("credits = %+v, want the entry at the slug", credits)
 	}
 }
@@ -197,13 +197,13 @@ func TestAFindCallThatFailsFallsBackToTheSlug(t *testing.T) {
 	root := t.TempDir()
 	work, log := testEnricher(t, libraryKindMovies, root, nil)
 	fake := withPersonFinder(t, work, map[string]string{})
-	fake.statuses[tmdbKey("/3/find/nm0000158", "", "")] = 500
-	folder := titleFolder(t, root, "The Signal (2014)")
+	fake.statuses[tmdbKey("/3/find/nm9000158", "", "")] = 500
+	folder := titleFolder(t, root, "Quiet Station (2014)")
 
-	work.writeCredits(folder, factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", IDs: providerIDs{"imdb": "nm0000158"}}}})
+	work.writeCredits(folder, factAnswer{Cast: []creditedActor{{Name: "Tod Harker", IDs: providerIDs{"imdb": "nm9000158"}}}})
 
-	entry := readFileString(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName))
-	if entry != "name: Tom Hanks\nids: {imdb: nm0000158}\n" {
+	entry := readFileString(t, filepath.Join(root, ".contributors/to/tod-harker", contributorFileName))
+	if entry != "name: Tod Harker\nids: {imdb: nm9000158}\n" {
 		t.Errorf("contributor.yaml = %q, want the ids the credit came with", entry)
 	}
 	if log.Len() == 0 {
@@ -223,27 +223,27 @@ func TestTheLookupByIDReadsEverySchemeAndSurvivesTheCatalog(t *testing.T) {
 			name: "a Wikidata id the store holds",
 			catalog: func(t *testing.T, root string) *Catalog {
 				catalog, _ := newSQLiteCatalog(t)
-				seedWalkedEntry(t, catalog, root, "tom-hanks", "name: Tom Hanks\nids: {wikidata: Q2263}\n")
+				seedWalkedEntry(t, catalog, root, "tod-harker", "name: Tod Harker\nids: {wikidata: Q999001}\n")
 				return catalog
 			},
-			want: ".contributors/to/tom-hanks",
+			want: ".contributors/to/tod-harker",
 		},
 		{
 			name: "a catalog that cannot be read",
 			catalog: func(t *testing.T, _ string) *Catalog {
 				return NewCatalog("http://127.0.0.1:1", http.DefaultClient)
 			},
-			want: ".contributors/th/thomas-hanks",
+			want: ".contributors/th/theodore-harker",
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			work, _ := testEnricher(t, libraryKindMovies, root, test.catalog(t, root))
-			folder := titleFolder(t, root, "The Signal (2014)")
+			folder := titleFolder(t, root, "Quiet Station (2014)")
 
 			work.writeCredits(folder, factAnswer{Cast: []creditedActor{
-				{Name: "Thomas Hanks", IDs: providerIDs{"wikidata": "Q2263"}},
+				{Name: "Theodore Harker", IDs: providerIDs{"wikidata": "Q999001"}},
 			}})
 
 			credits := artLedger(t, folder, factCredits).Credits

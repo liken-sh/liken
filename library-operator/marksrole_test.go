@@ -53,14 +53,14 @@ func seedMarkedMovie(t *testing.T, catalog *Catalog, root, folder, id string, du
 	video := filepath.Join(folder, folder+".mkv")
 	writeFile(t, filepath.Join(root, video), "video")
 	writeFile(t, filepath.Join(root, folder, movieNFOName),
-		`<movie><title>The Matrix</title><year>1999</year><uniqueid type="tmdb">603</uniqueid></movie>`)
+		`<movie><title>Some Film</title><year>1999</year><uniqueid type="tmdb">1001</uniqueid></movie>`)
 	seed := &walkResult{
-		movies: []movieRow{{Id: id, Library: marksLibrary, Kind: libraryKindMovies, Path: folder, Title: "The Matrix"}},
+		movies: []movieRow{{Id: id, Library: marksLibrary, Kind: libraryKindMovies, Path: folder, Title: "Some Film"}},
 		files: []fileRow{{Library: marksLibrary, Path: video, Type: fileTypeVideo, Role: fileRolePrimary,
 			Present: true, DurationMs: duration, Items: []string{id}}},
 		aliases: []aliasRow{
 			{Alias: id, Library: marksLibrary, Item: id, Source: aliasSourceProvider},
-			{Alias: "movie:imdb:tt0133093", Library: marksLibrary, Item: id, Source: aliasSourceProvider},
+			{Alias: "movie:imdb:tt9000001", Library: marksLibrary, Item: id, Source: aliasSourceProvider},
 		},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -75,7 +75,7 @@ func seedMarkedMovie(t *testing.T, catalog *Catalog, root, folder, id string, du
 func TestTheMarksFactWritesTheLedgerAndTheRowsOfOneFile(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	root := t.TempDir()
-	video := seedMarkedMovie(t, catalog, root, "The Matrix (1999)", "movie:tmdb:603", 8160000)
+	video := seedMarkedMovie(t, catalog, root, "Some Film (1999)", "movie:tmdb:1001", 8160000)
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	work.library = marksLibrary
 	opening := markEntry{Kind: markKindIntro, End: milliseconds(23000), Source: providerBlockTheIntroDB}
@@ -92,8 +92,8 @@ func TestTheMarksFactWritesTheLedgerAndTheRowsOfOneFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ledger := artLedger(t, filepath.Join(root, "The Matrix (1999)"), factMarks)
-	entry := "The Matrix (1999).mkv"
+	ledger := artLedger(t, filepath.Join(root, "Some Film (1999)"), factMarks)
+	entry := "Some Film (1999).mkv"
 	want := []markEntry{
 		{Path: entry, Kind: markKindIntro, End: milliseconds(23000), Source: providerBlockTheIntroDB},
 		{Path: entry, Kind: markKindCredits, Start: milliseconds(7800000), End: milliseconds(8100000), Source: providerBlockTheIntroDB},
@@ -130,26 +130,26 @@ func TestTheMarksGapHoldsTheMainVideosOfIdentifiedWorks(t *testing.T) {
 		attempt  *attemptRow
 		want     bool
 	}{
-		{name: "an identified movie", id: "movie:tmdb:603", duration: 8160000, role: fileRolePrimary, want: true},
-		{name: "an unidentified movie", id: "movie:path:the-matrix-1999", duration: 8160000, role: fileRolePrimary},
-		{name: "a file with no length", id: "movie:tmdb:603", role: fileRolePrimary},
-		{name: "an extra", id: "movie:tmdb:603", duration: 60000, role: "extra"},
+		{name: "an identified movie", id: "movie:tmdb:1001", duration: 8160000, role: fileRolePrimary, want: true},
+		{name: "an unidentified movie", id: "movie:path:some-film-1999", duration: 8160000, role: fileRolePrimary},
+		{name: "a file with no length", id: "movie:tmdb:1001", role: fileRolePrimary},
+		{name: "an extra", id: "movie:tmdb:1001", duration: 60000, role: "extra"},
 		{
-			name: "a file attempted this week", id: "movie:tmdb:603", duration: 8160000, role: fileRolePrimary,
+			name: "a file attempted this week", id: "movie:tmdb:1001", duration: 8160000, role: fileRolePrimary,
 			attempt: &attemptRow{Result: attemptNothing, At: time.Now().Add(-7 * 24 * time.Hour).Unix()},
 		},
 		{
-			name: "a file attempted two months ago", id: "movie:tmdb:603", duration: 8160000, role: fileRolePrimary,
+			name: "a file attempted two months ago", id: "movie:tmdb:1001", duration: 8160000, role: fileRolePrimary,
 			attempt: &attemptRow{Result: attemptNothing, At: time.Now().Add(-60 * 24 * time.Hour).Unix()}, want: true,
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
-			path := "The Matrix (1999)/The Matrix (1999).mkv"
+			path := "Some Film (1999)/Some Film (1999).mkv"
 			seed := &walkResult{
 				movies: []movieRow{{Id: test.id, Library: marksLibrary, Kind: libraryKindMovies,
-					Path: "The Matrix (1999)", Title: "The Matrix"}},
+					Path: "Some Film (1999)", Title: "Some Film"}},
 				files: []fileRow{{Library: marksLibrary, Path: path, Type: fileTypeVideo, Role: test.role,
 					Present: true, DurationMs: test.duration, Items: []string{test.id}}},
 			}
@@ -189,15 +189,15 @@ func TestAMarkFileNamesTheWorkItsProviderKeysOn(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
-			series, path := "series:tvdb:121361", "Game of Thrones (2011)/Season 01/Game of Thrones - S01E02.mkv"
+			series, path := "series:tvdb:800101", "Pale Current (2011)/Season 01/Pale Current - S01E02.mkv"
 			seed := &walkResult{
 				series: []seriesRow{{Id: series, Library: marksLibrary, Kind: libraryKindSeries,
-					Path: "Game of Thrones (2011)", Title: "Game of Thrones"}},
+					Path: "Pale Current (2011)", Title: "Pale Current"}},
 				aliases: []aliasRow{
 					{Alias: series, Library: marksLibrary, Item: series, Source: aliasSourceProvider},
-					{Alias: "series:tmdb:1399", Library: marksLibrary, Item: series, Source: aliasSourceProvider},
-					{Alias: "series:imdb:tt0944947", Library: marksLibrary, Item: series, Source: aliasSourceProvider},
-					{Alias: "series:path:game-of-thrones-2011", Library: marksLibrary, Item: series, Source: aliasSourceFolder},
+					{Alias: "series:tmdb:2201", Library: marksLibrary, Item: series, Source: aliasSourceProvider},
+					{Alias: "series:imdb:tt9002201", Library: marksLibrary, Item: series, Source: aliasSourceProvider},
+					{Alias: "series:path:pale-current-2011", Library: marksLibrary, Item: series, Source: aliasSourceFolder},
 				},
 			}
 			file := fileRow{Library: marksLibrary, Path: path, Type: fileTypeVideo, Role: fileRolePrimary,
@@ -224,8 +224,8 @@ func TestAMarkFileNamesTheWorkItsProviderKeysOn(t *testing.T) {
 			if got.episodes != test.wantEpisodes {
 				t.Errorf("episodes = %d, want %d", got.episodes, test.wantEpisodes)
 			}
-			want := providerIDs{"tvdb": "121361", "tmdb": "1399", "imdb": "tt0944947"}
-			if len(got.ids) != len(want) || got.ids["tmdb"] != "1399" || got.ids["imdb"] != "tt0944947" {
+			want := providerIDs{"tvdb": "800101", "tmdb": "2201", "imdb": "tt9002201"}
+			if len(got.ids) != len(want) || got.ids["tmdb"] != "2201" || got.ids["imdb"] != "tt9002201" {
 				t.Errorf("ids = %v, want %v with no folder key", got.ids, want)
 			}
 		})
@@ -341,8 +341,8 @@ func TestASpentProviderLeavesTheLine(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			seedMarkedMovie(t, catalog, root, "The Matrix (1999)", "movie:tmdb:603", 8160000)
-			seedMarkedMovie(t, catalog, root, "The Matrix Reloaded (2003)", "movie:tmdb:604", 8280000)
+			seedMarkedMovie(t, catalog, root, "Some Film (1999)", "movie:tmdb:1001", 8160000)
+			seedMarkedMovie(t, catalog, root, "Another Film (2003)", "movie:tmdb:1002", 8280000)
 			work, log := testEnricher(t, libraryKindMovies, root, catalog)
 			work.library = marksLibrary
 			asked := 0
@@ -355,7 +355,7 @@ func TestASpentProviderLeavesTheLine(t *testing.T) {
 				t.Errorf("the spent provider was asked %d times, want %d", asked, test.wantAsked)
 			}
 			files := 0
-			for _, folder := range []string{"The Matrix (1999)", "The Matrix Reloaded (2003)"} {
+			for _, folder := range []string{"Some Film (1999)", "Another Film (2003)"} {
 				files += len(artLedger(t, filepath.Join(root, folder), factMarks).Attempts)
 			}
 			if files != test.wantFiles {
@@ -407,7 +407,7 @@ func TestTheMarkLineTakesTheBlocksThatCanAnswer(t *testing.T) {
 // The key that reached the container travels on every ask of the line's
 // TheIntroDB answerer.
 func TestTheMarkLineCarriesTheTheIntroDBKey(t *testing.T) {
-	fake := &fakeTheIntroDB{status: http.StatusOK, body: `{"tmdb_id":603,"type":"movie"}`}
+	fake := &fakeTheIntroDB{status: http.StatusOK, body: `{"tmdb_id":1001,"type":"movie"}`}
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	line := newMarkLine([]string{providerBlockTheIntroDB}, func(name string) string {
@@ -415,7 +415,7 @@ func TestTheMarkLineCarriesTheTheIntroDBKey(t *testing.T) {
 	}, nil)
 	line.answerers[0].(theintrodbMarkAnswerer).client.base = server.URL
 
-	if answer := line.ask(t.Context(), markFile{movie: true, ids: providerIDs{"tmdb": "603"}}); answer.failure != nil {
+	if answer := line.ask(t.Context(), markFile{movie: true, ids: providerIDs{"tmdb": "1001"}}); answer.failure != nil {
 		t.Fatal(answer.failure)
 	}
 	if got := fake.requests[0].Header.Get("Authorization"); got != "Bearer a-key" {

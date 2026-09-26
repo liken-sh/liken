@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"strings"
 	"sync"
 	"testing"
@@ -132,6 +133,92 @@ func TestACountCarriesItsNoun(t *testing.T) {
 	for _, c := range cases {
 		if got := counted(c.count, "folder"); got != c.want {
 			t.Errorf("counted(%d) = %q, want %q", c.count, got, c.want)
+		}
+	}
+}
+
+// An error names the path it failed on and the address it asked, and either
+// one can carry a title, so the text keeps its cause and each path under a
+// root and each web address turns into its opaque form. The root itself
+// names no title and stays.
+func TestAnErrorKeepsItsCauseAndLosesItsPaths(t *testing.T) {
+	root := "/srv/movies"
+	cases := []struct {
+		name, text, want string
+	}{
+		{"an os error",
+			"open /srv/movies/Some Film (2001)/movie.nfo: permission denied",
+			"open path:" + hashed("Some Film (2001)/movie.nfo") + ": permission denied"},
+		{"a wrapped error",
+			"reading /srv/movies/Some Film (2001)/credits.yaml: open /srv/movies/Some Film (2001)/credits.yaml: no such file or directory",
+			"reading path:" + hashed("Some Film (2001)/credits.yaml") +
+				": open path:" + hashed("Some Film (2001)/credits.yaml") + ": no such file or directory"},
+		{"a quoted path",
+			`ffmpeg exited: '/srv/movies/Some Film (2001)/a.mkv' holds no stream`,
+			`ffmpeg exited: 'path:` + hashed("Some Film (2001)/a.mkv") + `' holds no stream`},
+		{"two failures in one run",
+			"the art: open /srv/movies/A Film/x.jpg: denied; the probe: open /srv/movies/B Film/y.mkv: denied",
+			"the art: open path:" + hashed("A Film/x.jpg") + ": denied; the probe: open path:" +
+				hashed("B Film/y.mkv") + ": denied"},
+		{"a path under the library claim",
+			"open /library/Some Film/x.nfo: no such file or directory",
+			"open path:" + hashed("Some Film/x.nfo") + ": no such file or directory"},
+		{"a quote inside a title",
+			"open /srv/movies/Someone's Film/x.nfo: denied",
+			"open path:" + hashed("Someone's Film/x.nfo") + ": denied"},
+		{"a path under the art claim",
+			"open /art/Some Story/poster.jpg: no space left on device",
+			"open path:" + hashed("Some Story/poster.jpg") + ": no space left on device"},
+		{"a request",
+			`Get "https://api.example.org/3/search/movie?query=Some+Film": dial tcp: i/o timeout`,
+			`Get "https://api.example.org/` + hashed("3/search/movie?query=Some+Film") + `": dial tcp: i/o timeout`},
+		{"an address at the end of a sentence",
+			"fanart answered more than 10 bytes for https://assets.example.org/some-film-poster.jpg: stop",
+			"fanart answered more than 10 bytes for https://assets.example.org/" +
+				hashed("some-film-poster.jpg") + ": stop"},
+		{"the root alone", "walking /srv/movies: done", "walking /srv/movies: done"},
+		{"a neighbour of the root", "open /srv/moviesx/a: denied", "open /srv/moviesx/a: denied"},
+		{"no path", "tmdb /search/movie: 429: slow down", "tmdb /search/movie: 429: slow down"},
+	}
+	for _, c := range cases {
+		if got := opaqueText(c.text, root); got != c.want {
+			t.Errorf("%s: opaqueText =\n%q\nwant\n%q", c.name, got, c.want)
+		}
+	}
+}
+
+// The error form reads the text of the error, and a nil error reads as the
+// verb prints one.
+func TestAnErrorReadsThroughTheSameFilter(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"a path error",
+			&fs.PathError{Op: "open", Path: "/srv/media/Some Film/x.nfo", Err: fs.ErrPermission},
+			"open path:" + hashed("Some Film/x.nfo") + ": permission denied"},
+		{"no error", nil, "<nil>"},
+	}
+	for _, c := range cases {
+		if got := opaqueError(c.err, "/srv/media"); got != c.want {
+			t.Errorf("%s: opaqueError = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A path the log names on its own reads the same as the same path inside an
+// error, so a person matches the two lines by the hash.
+func TestAPathReadsAsTheHashOfItsPlaceUnderTheRoot(t *testing.T) {
+	cases := []struct {
+		path, want string
+	}{
+		{"/srv/media/Some Film (2001)", "path:" + hashed("Some Film (2001)")},
+		{"Some Film (2001)", "path:" + hashed("Some Film (2001)")},
+	}
+	for _, c := range cases {
+		if got := opaquePath("/srv/media", c.path); got != c.want {
+			t.Errorf("opaquePath(%q) = %q, want %q", c.path, got, c.want)
 		}
 	}
 }

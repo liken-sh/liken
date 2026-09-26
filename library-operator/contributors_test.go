@@ -29,15 +29,15 @@ func TestTheSlugThatNamesAPersonsDirectory(t *testing.T) {
 		ids    providerIDs
 		want   string
 	}{
-		{name: "a plain name", person: "Tom Hanks", ids: providerIDs{"tmdb": "31"}, want: ".contributors/to/tom-hanks"},
-		{name: "an accent folds to ASCII", person: "Penélope Cruz", ids: nil, want: ".contributors/pe/penelope-cruz"},
-		{name: "a punctuated name", person: "Joseph Gordon-Levitt, Jr.", ids: nil,
-			want: ".contributors/jo/joseph-gordon-levitt-jr"},
-		{name: "a name that folds away keeps the id", person: "宮崎 駿",
-			ids: providerIDs{"tmdb": "608"}, want: ".contributors/tm/tmdb-608"},
-		{name: "a name that folds away with no id has no directory", person: "宮崎 駿", ids: nil, want: ""},
+		{name: "a plain name", person: "Oren Tally", ids: providerIDs{"tmdb": "9031"}, want: ".contributors/or/oren-tally"},
+		{name: "an accent folds to ASCII", person: "Renée Solberg", ids: nil, want: ".contributors/re/renee-solberg"},
+		{name: "a punctuated name", person: "Tobias Arden-Wyle, Jr.", ids: nil,
+			want: ".contributors/to/tobias-arden-wyle-jr"},
+		{name: "a name that folds away keeps the id", person: "山田 花子",
+			ids: providerIDs{"tmdb": "9608"}, want: ".contributors/tm/tmdb-9608"},
+		{name: "a name that folds away with no id has no directory", person: "山田 花子", ids: nil, want: ""},
 		{name: "a one-character slug is its own bucket", person: "Q", ids: nil, want: ".contributors/q/q"},
-		{name: "a hyphen in the second place stays", person: "J Lo", ids: nil, want: ".contributors/j-/j-lo"},
+		{name: "a hyphen in the second place stays", person: "J Ro", ids: nil, want: ".contributors/j-/j-ro"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -57,16 +57,16 @@ func TestTheCreditsFactWritesTheCreditsAndTheEntries(t *testing.T) {
 	folder := titleFolder(t, root, "The Signal (2014)")
 
 	work.writeCredits(folder, factAnswer{Cast: []creditedActor{
-		{Name: "Tom Hanks", Role: "The Captain", Order: 0, IDs: providerIDs{"tmdb": "31"}},
-		{Name: "Sigourney Weaver", Order: 1, IDs: providerIDs{"tmdb": "10205"}},
+		{Name: "Oren Tally", Role: "The Captain", Order: 0, IDs: providerIDs{"tmdb": "9031"}},
+		{Name: "Nora Vance", Order: 1, IDs: providerIDs{"tmdb": "9205"}},
 	}})
 
 	ledger := artLedger(t, folder, factCredits)
 	want := []creditEntry{
-		{Name: "Tom Hanks", Part: creditPartActor, Role: "The Captain", Order: 0,
-			Contributor: ".contributors/to/tom-hanks"},
-		{Name: "Sigourney Weaver", Part: creditPartActor, Order: 1,
-			Contributor: ".contributors/si/sigourney-weaver"},
+		{Name: "Oren Tally", Part: creditPartActor, Role: "The Captain", Order: 0,
+			Contributor: ".contributors/or/oren-tally"},
+		{Name: "Nora Vance", Part: creditPartActor, Order: 1,
+			Contributor: ".contributors/no/nora-vance"},
 	}
 	if len(ledger.Credits) != len(want) {
 		t.Fatalf("credits = %+v, want one entry per credited person", ledger.Credits)
@@ -76,8 +76,8 @@ func TestTheCreditsFactWritesTheCreditsAndTheEntries(t *testing.T) {
 			t.Errorf("credit %d = %+v, want %+v", at, ledger.Credits[at], entry)
 		}
 	}
-	entry := readFileString(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName))
-	if entry != "name: Tom Hanks\nids: {tmdb: 31}\n" {
+	entry := readFileString(t, filepath.Join(root, ".contributors/or/oren-tally", contributorFileName))
+	if entry != "name: Oren Tally\nids: {tmdb: 9031}\n" {
 		t.Errorf("contributor.yaml = %q, want the name and the ids the provider gave", entry)
 	}
 }
@@ -89,19 +89,19 @@ func TestASecondPersonOfOneNameTakesTheIDSuffix(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 
 	work.writeCredits(titleFolder(t, root, "One Film (1999)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", IDs: providerIDs{"tmdb": "31"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", IDs: providerIDs{"tmdb": "9031"}}}})
 	work.writeCredits(titleFolder(t, root, "Another Film (2001)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", Role: "The Cook", IDs: providerIDs{"tmdb": "992"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", Role: "The Cook", IDs: providerIDs{"tmdb": "992"}}}})
 
 	second := artLedger(t, filepath.Join(root, "Another Film (2001)"), factCredits)
-	if len(second.Credits) != 1 || second.Credits[0].Contributor != ".contributors/to/tom-hanks-tmdb-992" {
+	if len(second.Credits) != 1 || second.Credits[0].Contributor != ".contributors/or/oren-tally-tmdb-992" {
 		t.Fatalf("credits = %+v, want the slug with the id of the second person", second.Credits)
 	}
-	first := readFileString(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName))
-	if !strings.Contains(first, "tmdb: 31") {
+	first := readFileString(t, filepath.Join(root, ".contributors/or/oren-tally", contributorFileName))
+	if !strings.Contains(first, "tmdb: 9031") {
 		t.Errorf("contributor.yaml = %q, want the entry of the first person, unchanged", first)
 	}
-	other := readFileString(t, filepath.Join(root, ".contributors/to/tom-hanks-tmdb-992", contributorFileName))
+	other := readFileString(t, filepath.Join(root, ".contributors/or/oren-tally-tmdb-992", contributorFileName))
 	if !strings.Contains(other, "tmdb: 992") {
 		t.Errorf("contributor.yaml = %q, want the entry of the second person", other)
 	}
@@ -112,16 +112,16 @@ func TestASecondPersonOfOneNameTakesTheIDSuffix(t *testing.T) {
 func TestOnePersonOnTwoTitlesIsWrittenOnce(t *testing.T) {
 	root := t.TempDir()
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
-	entry := filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName)
+	entry := filepath.Join(root, ".contributors/or/oren-tally", contributorFileName)
 
 	work.writeCredits(titleFolder(t, root, "One Film (1999)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", Role: "The Captain", IDs: providerIDs{"tmdb": "31"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", Role: "The Captain", IDs: providerIDs{"tmdb": "9031"}}}})
 	first, err := os.Stat(entry)
 	if err != nil {
 		t.Fatal(err)
 	}
 	work.writeCredits(titleFolder(t, root, "Another Film (2001)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", Role: "The Cook", IDs: providerIDs{"tmdb": "31"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", Role: "The Cook", IDs: providerIDs{"tmdb": "9031"}}}})
 
 	second, err := os.Stat(entry)
 	if err != nil {
@@ -131,10 +131,10 @@ func TestOnePersonOnTwoTitlesIsWrittenOnce(t *testing.T) {
 		t.Error("the second title wrote the entry again, want the one the first title created")
 	}
 	credits := artLedger(t, filepath.Join(root, "Another Film (2001)"), factCredits)
-	if len(credits.Credits) != 1 || credits.Credits[0].Contributor != ".contributors/to/tom-hanks" {
+	if len(credits.Credits) != 1 || credits.Credits[0].Contributor != ".contributors/or/oren-tally" {
 		t.Errorf("credits = %+v, want the entry the first title created", credits.Credits)
 	}
-	people, err := os.ReadDir(filepath.Join(root, ".contributors/to"))
+	people, err := os.ReadDir(filepath.Join(root, ".contributors/or"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,16 +148,16 @@ func TestOnePersonOnTwoTitlesIsWrittenOnce(t *testing.T) {
 func TestAnEntryWithNoIDIsTheSamePerson(t *testing.T) {
 	root := t.TempDir()
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
-	writeFile(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName), "name: Tom Hanks\n")
+	writeFile(t, filepath.Join(root, ".contributors/or/oren-tally", contributorFileName), "name: Oren Tally\n")
 
 	work.writeCredits(titleFolder(t, root, "One Film (1999)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", IDs: providerIDs{"tmdb": "31"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", IDs: providerIDs{"tmdb": "9031"}}}})
 
-	if got := readFileString(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName)); got != "name: Tom Hanks\n" {
+	if got := readFileString(t, filepath.Join(root, ".contributors/or/oren-tally", contributorFileName)); got != "name: Oren Tally\n" {
 		t.Errorf("contributor.yaml = %q, want the file the person wrote", got)
 	}
 	credits := artLedger(t, filepath.Join(root, "One Film (1999)"), factCredits)
-	if len(credits.Credits) != 1 || credits.Credits[0].Contributor != ".contributors/to/tom-hanks" {
+	if len(credits.Credits) != 1 || credits.Credits[0].Contributor != ".contributors/or/oren-tally" {
 		t.Errorf("credits = %+v, want the entry that was already there", credits.Credits)
 	}
 }
@@ -169,7 +169,7 @@ func TestAPersonWithNoSlugStillHoldsACredit(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 	folder := titleFolder(t, root, "One Film (1999)")
 
-	work.writeCredits(folder, factAnswer{Cast: []creditedActor{{Name: "宮崎 駿", Role: "Himself"}}})
+	work.writeCredits(folder, factAnswer{Cast: []creditedActor{{Name: "山田 花子", Role: "Himself"}}})
 
 	credits := artLedger(t, folder, factCredits)
 	if len(credits.Credits) != 1 || credits.Credits[0].Contributor != "" || credits.Credits[0].Role != "Himself" {
@@ -189,7 +189,7 @@ func TestAStoreTheVolumeRefusesLeavesTheCreditsAlone(t *testing.T) {
 	work, log := testEnricher(t, libraryKindMovies, root, nil)
 
 	work.writeCredits(filepath.Join(root, "One Film (1999)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", IDs: providerIDs{"tmdb": "31"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", IDs: providerIDs{"tmdb": "9031"}}}})
 
 	if !strings.Contains(log.String(), "could not write the credits") {
 		t.Errorf("log = %q, want the line that names the credits it could not write", log.String())
@@ -202,13 +202,13 @@ func TestAStoreTheVolumeRefusesLeavesTheCreditsAlone(t *testing.T) {
 func TestACreditWithNoFreeSlugHoldsNoDirectory(t *testing.T) {
 	root := t.TempDir()
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
-	writeFile(t, filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName),
-		"name: Tom Hanks\nids: {tmdb: 31}\n")
-	writeFile(t, filepath.Join(root, ".contributors/to/tom-hanks-tmdb-992", contributorFileName),
-		"name: Tom Hanks\nids: {tmdb: 1}\n")
+	writeFile(t, filepath.Join(root, ".contributors/or/oren-tally", contributorFileName),
+		"name: Oren Tally\nids: {tmdb: 9031}\n")
+	writeFile(t, filepath.Join(root, ".contributors/or/oren-tally-tmdb-992", contributorFileName),
+		"name: Oren Tally\nids: {tmdb: 1}\n")
 
 	work.writeCredits(titleFolder(t, root, "One Film (1999)"),
-		factAnswer{Cast: []creditedActor{{Name: "Tom Hanks", IDs: providerIDs{"tmdb": "992"}}}})
+		factAnswer{Cast: []creditedActor{{Name: "Oren Tally", IDs: providerIDs{"tmdb": "992"}}}})
 
 	credits := artLedger(t, filepath.Join(root, "One Film (1999)"), factCredits)
 	if len(credits.Credits) != 1 || credits.Credits[0].Contributor != "" {

@@ -40,14 +40,14 @@ func TestAStatusAndAnAudienceBecomeOneWrite(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.status("play-1", []byte(`{"item":0,"position":"1:10:10","duration":"2:16:00"}`))
 	out.tick(t.Context())
 
 	if len(fake.writes) != 1 {
 		t.Fatalf("writes = %+v, want one", fake.writes)
 	}
-	want := fakeJellyfinWrite{item: "item-matrix", user: "user-chris", data: jellyfinUserData{
+	want := fakeJellyfinWrite{item: "item-film", user: "user-a", data: jellyfinUserData{
 		PlaybackPositionTicks: 42_100_000_000, LastPlayedDate: "2026-09-08T20:04:05Z"}}
 	if fake.writes[0] != want {
 		t.Errorf("write = %+v, want %+v", fake.writes[0], want)
@@ -60,11 +60,11 @@ func TestAnEpisodePlayWritesTheEpisodesItem(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "2316"}, 3, 5))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "2101"}, 3, 5))
 	out.status("play-1", []byte(`{"item":4,"position":"0:10:00","duration":"0:22:00"}`))
 	out.tick(t.Context())
 
-	if len(fake.writes) != 1 || fake.writes[0].item != "item-office-3-5" {
+	if len(fake.writes) != 1 || fake.writes[0].item != "item-series-3-5" {
 		t.Errorf("writes = %+v, want one write of the episode", fake.writes)
 	}
 }
@@ -75,11 +75,11 @@ func TestEveryPersonOfAPlayGetsAWrite(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 
-	out.audience("play-1", jellyfinAudience(t, []string{"chris", "kelly"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a", "person-c"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.status("play-1", []byte(`{"item":0,"position":"0:10:00","duration":"2:16:00"}`))
 	out.tick(t.Context())
 
-	if len(fake.writes) != 2 || fake.writes[0].user != "user-chris" || fake.writes[1].user != "user-kelly" {
+	if len(fake.writes) != 2 || fake.writes[0].user != "user-a" || fake.writes[1].user != "user-c" {
 		t.Errorf("writes = %+v, want one for each person", fake.writes)
 	}
 }
@@ -89,7 +89,7 @@ func TestEveryPersonOfAPlayGetsAWrite(t *testing.T) {
 func TestATickWritesOnlyThePositionsThatMoved(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.status("play-1", []byte(`{"item":0,"position":"0:10:00","duration":"2:16:00"}`))
 
 	out.tick(t.Context())
@@ -110,7 +110,7 @@ func TestATickWritesOnlyThePositionsThatMoved(t *testing.T) {
 func TestARunningPlayPastTheWatchedLineIsWrittenWatched(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 
 	out.status("play-1", []byte(`{"item":0,"position":"2:10:59","duration":"2:16:00"}`))
 	out.tick(t.Context())
@@ -132,8 +132,8 @@ func TestARunningPlayPastTheWatchedLineIsWrittenWatched(t *testing.T) {
 func TestACreditsMarkMovesTheLineAPlayIsWrittenWatchedAt(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
-	payload, err := json.Marshal(playAudience{Player: "living-room", People: []string{"chris"},
-		Aliases: map[string]string{"tmdb": "603"}, Credits: []creditsSpan{credit(7680, 8160)}})
+	payload, err := json.Marshal(playAudience{Player: "living-room", People: []string{"person-a"},
+		Aliases: map[string]string{"tmdb": "1101"}, Credits: []creditsSpan{credit(7680, 8160)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestACreditsMarkMovesTheLineAPlayIsWrittenWatchedAt(t *testing.T) {
 func TestAReplayFromTheStartClearsTheWatchedMark(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 
 	out.final(t.Context(), "play-1", []byte(`{"phase":"Finished","item":0,"position":"2:16:00","duration":"2:16:00"}`))
 	out.status("play-1", []byte(`{"item":0,"position":"0:00:30","duration":"2:16:00"}`))
@@ -175,7 +175,7 @@ func TestAReplayFromTheStartClearsTheWatchedMark(t *testing.T) {
 func TestAFinalWritesAtOnce(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 
 	out.final(t.Context(), "play-1", []byte(`{"phase":"Finished","item":0,"position":"2:16:00","duration":"2:16:00"}`))
 
@@ -190,7 +190,7 @@ func TestAPlayWithNoPeopleWritesNothing(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 
-	out.audience("play-1", jellyfinAudience(t, nil, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, nil, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.status("play-1", []byte(`{"item":0,"position":"0:10:00","duration":"2:16:00"}`))
 	out.tick(t.Context())
 
@@ -206,7 +206,7 @@ func TestAPlayThatReportedNoPositionWritesNothing(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.tick(t.Context())
 
 	if len(fake.writes) != 0 {
@@ -223,10 +223,10 @@ func TestAWorkOrAPersonJellyfinDoesNotHoldIsSkipped(t *testing.T) {
 		aliases map[string]string
 		line    string
 	}{
-		{name: "a film jellyfin does not hold", people: []string{"chris"},
+		{name: "a film jellyfin does not hold", people: []string{"person-a"},
 			aliases: map[string]string{"tmdb": "1"}, line: "jellyfin holds no item for the Play of tmdb:1"},
 		{name: "a person jellyfin does not hold", people: []string{"nobody"},
-			aliases: map[string]string{"tmdb": "603"}, line: "jellyfin holds no user named nobody"},
+			aliases: map[string]string{"tmdb": "1101"}, line: "jellyfin holds no user named nobody"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := jellyfinFixture()
@@ -260,7 +260,7 @@ func TestAClearedTopicForgetsThePlay(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fake := jellyfinFixture()
 			out, _ := standJellyfinOutbound(t, fake)
-			out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+			out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 			out.status("play-1", []byte(`{"item":0,"position":"0:10:00","duration":"2:16:00"}`))
 
 			test.clear(out)
@@ -277,13 +277,13 @@ func TestAClearedTopicForgetsThePlay(t *testing.T) {
 func TestAWriteJellyfinRefusedLeavesALine(t *testing.T) {
 	fake := jellyfinFixture()
 	out, logged := standJellyfinOutbound(t, fake)
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.status("play-1", []byte(`{"item":0,"position":"0:10:00","duration":"2:16:00"}`))
 	fake.status = 500
 
 	out.tick(t.Context())
 
-	if !strings.Contains(logged.String(), "could not write the progress of chris") {
+	if !strings.Contains(logged.String(), "could not write the progress of person-a") {
 		t.Errorf("log = %q, want the write it could not make", logged.String())
 	}
 }
@@ -294,11 +294,11 @@ func TestAWriteIsRememberedForTheEchoDrop(t *testing.T) {
 	fake := jellyfinFixture()
 	out, _ := standJellyfinOutbound(t, fake)
 
-	out.audience("play-1", jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+	out.audience("play-1", jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	out.status("play-1", []byte(`{"item":0,"position":"1:10:10","duration":"2:16:00"}`))
 	out.tick(t.Context())
 
-	if !out.echoes.echoed("user-chris", "item-matrix", 4210) {
+	if !out.echoes.echoed("user-a", "item-film", 4210) {
 		t.Error("the role did not remember the position it wrote")
 	}
 }
@@ -313,16 +313,16 @@ func TestWhatCountsAsAnEcho(t *testing.T) {
 		position int
 		echo     bool
 	}{
-		{name: "the position that was written", user: "user-chris", item: "item-matrix", position: 4210, echo: true},
-		{name: "one second later", user: "user-chris", item: "item-matrix", position: 4211, echo: true},
-		{name: "one second earlier", user: "user-chris", item: "item-matrix", position: 4209, echo: true},
-		{name: "two seconds later", user: "user-chris", item: "item-matrix", position: 4212, echo: false},
-		{name: "another item", user: "user-chris", item: "item-arrival", position: 4210, echo: false},
-		{name: "another user", user: "user-kelly", item: "item-matrix", position: 4210, echo: false},
+		{name: "the position that was written", user: "user-a", item: "item-film", position: 4210, echo: true},
+		{name: "one second later", user: "user-a", item: "item-film", position: 4211, echo: true},
+		{name: "one second earlier", user: "user-a", item: "item-film", position: 4209, echo: true},
+		{name: "two seconds later", user: "user-a", item: "item-film", position: 4212, echo: false},
+		{name: "another item", user: "user-a", item: "item-other-film", position: 4210, echo: false},
+		{name: "another user", user: "user-c", item: "item-film", position: 4210, echo: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			echoes := newJellyfinEchoes(newJellyfinClock().now)
-			echoes.remember("user-chris", "item-matrix", 4210)
+			echoes.remember("user-a", "item-film", 4210)
 
 			if got := echoes.echoed(test.user, test.item, test.position); got != test.echo {
 				t.Errorf("echoed = %v, want %v", got, test.echo)
@@ -337,12 +337,12 @@ func TestWhatCountsAsAnEcho(t *testing.T) {
 func TestAWrittenPositionIsDroppedOnceItAges(t *testing.T) {
 	clock := newJellyfinClock()
 	echoes := newJellyfinEchoes(clock.now)
-	echoes.remember("user-chris", "item-matrix", 4210)
+	echoes.remember("user-a", "item-film", 4210)
 
 	clock.advance(jellyfinEchoLife + time.Second)
-	echoes.remember("user-kelly", "item-arrival", 10)
+	echoes.remember("user-c", "item-other-film", 10)
 
-	if echoes.echoed("user-chris", "item-matrix", 4210) {
+	if echoes.echoed("user-a", "item-film", 4210) {
 		t.Error("a write past the echo's life still dropped a post")
 	}
 	if len(echoes.written) != 1 {

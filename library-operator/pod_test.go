@@ -170,7 +170,7 @@ func TestScannerContainerReadsItsJobName(t *testing.T) {
 func TestScannerContainerCarriesTheScanPath(t *testing.T) {
 	cases := []struct{ name, path string }{
 		{name: "a full walk", path: ""},
-		{name: "one folder", path: "/library/movies/Arrival (2016)"},
+		{name: "one folder", path: "/library/movies/Landfall (2016)"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -476,7 +476,7 @@ func containerEnvironment(container Container) map[string]string {
 func TestListCatalogMemberPodsSelectsEveryAgentPod(t *testing.T) {
 	client, recorded := recordingAPI(t, PodList{
 		Metadata: ListMeta{ResourceVersion: "88"},
-		Items:    []Pod{{Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"}}},
+		Items:    []Pod{{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}},
 	})
 
 	list, err := ListCatalogMemberPods(t.Context(), client)
@@ -488,7 +488,7 @@ func TestListCatalogMemberPodsSelectsEveryAgentPod(t *testing.T) {
 	if got := recorded.query.Get("labelSelector"); got != "library.liken.sh/catalog=member" {
 		t.Errorf("labelSelector = %q, want the member selector", got)
 	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog-catalog" {
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog" {
 		t.Errorf("items = %+v, want the one pod the server answered", list.Items)
 	}
 }

@@ -774,17 +774,17 @@ mod tests {
     fn every_choice_names_itself_for_the_log() {
         assert_eq!(
             Selection::Movie {
-                id: "movie:tmdb:603".into()
+                id: "movie:tmdb:7001".into()
             }
             .named(),
-            "movie:tmdb:603"
+            "movie:tmdb:7001"
         );
         assert_eq!(
             Selection::Trailer {
-                id: "movie:tmdb:603".into()
+                id: "movie:tmdb:7001".into()
             }
             .named(),
-            "movie:tmdb:603 trailer"
+            "movie:tmdb:7001 trailer"
         );
         assert_eq!(
             Selection::Episode {

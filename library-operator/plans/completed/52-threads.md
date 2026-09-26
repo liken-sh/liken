@@ -25,9 +25,9 @@ things are wrong with it:
 - **A guest night stalls the thread.** If the rule were the exact set of
   people, one night with a guest would record a play the group never
   sees again, and their thread would offer that episode a second time.
-- **The cards do not say why they are there.** The film after Iron Man 2
-  in its set is Iron Man 3, and the next film in the MCU is The
-  Incredible Hulk. Both belong in the row, and a card that does not say
+- **The cards do not say why they are there.** The film after Kestrel 2
+  in its set is Kestrel 3, and the next film in The Long Survey is
+  Northwind. Both belong in the row, and a card that does not say
   which is which is a guess.
 
 ## The contract
@@ -80,8 +80,8 @@ yours, because their first leaf is not the successor of your last.
 A thread whose leaf is unfinished resumes it. A thread whose leaf is
 finished offers the leaf after it in the container's order, and offers
 nothing when the leaf was the last. The rule never skips a leaf the
-audience finished before: after Iron Man 2, the MCU offers The
-Incredible Hulk even if the audience saw it years ago, because "after
+audience finished before: after Kestrel 2, The Long Survey offers
+Northwind even if the audience saw it years ago, because "after
 what we last watched" is predictable and "the first one we have not
 seen" is not.
 
@@ -94,14 +94,14 @@ The row holds one card per leaf the containers offer. Each container
 that offers a leaf puts a reason on the card:
 
 - **Resume** for a thread whose leaf is unfinished. A series thread
-  says "Resume · The Office".
+  says "Resume · Harbor Lights".
 - **Next in the series**, spelled with the series title.
 - **Next in the set**, spelled with the set title.
 - **Next in the franchise**, spelled with the franchise title.
 
 A leaf two containers offer is one card with both reasons, in this
-order: resume, series, set, franchise. WandaVision S01E04 after S01E03
-reads "Next in WandaVision · Next in the MCU".
+order: resume, series, set, franchise. Harbor Lights S01E04 after S01E03
+reads "Next in Harbor Lights · Next in The Long Survey".
 
 A press goes where the first reason points. Resume, series, and set
 cards open the leaf's own page: the movie page, or the series page with
@@ -132,8 +132,8 @@ back from nobody. The `people` key word raises the picker from any
 page, as plan 49 states, and a remote binds a button to it.
 
 A card of an episode spells the episode on its first line, `E06 ·
-Delusion`, and the season after the reasons on its second, `Next in
-Wilfred (US) · S03`. Two digits for both, as the home page's stills
+The Long Tide`, and the season after the reasons on its second, `Next in
+Quiet Harbor (US) · S03`. Two digits for both, as the home page's stills
 spell them. A film's card keeps its tagline or title on the first line.
 
 ### The marks
@@ -141,7 +141,7 @@ spell them. A film's card keeps its tagline or title on the first line.
 The bars under wall cards and the marks on a series page answer a
 different question, "have we seen this", and follow a different rule. A
 leaf is marked for the people at the screen when every one of them has
-a play of it, in any group. The family's plays mark The Office's
+a play of it, in any group. The family's plays mark Harbor Lights'
 episodes for each of them alone, and the thread stays the family's.
 
 ### The reads
@@ -201,7 +201,7 @@ cover the cards, the collapse, the presses, the circles, and the empty
 audience. The store's rows were read out of the house through the
 progress agent's query API into a file on the workstation, and the
 browser ran headless against that file and a catalog of the same
-libraries, once per audience. A person with sixteen hundred plays saw
+libraries, once per audience. A person with many plays saw
 their own threads and their own resumes; a person with one play saw
 that film alone and nothing of the pair they are in; the pair saw its
 three plays as two threads, one of them stacked with its franchise; a

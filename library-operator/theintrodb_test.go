@@ -109,14 +109,14 @@ func TestTheIntroDBAnswersEveryCandidateOfAnEpisode(t *testing.T) {
 // A movie is asked by its own TMDb id alone, and the four kinds come back in
 // the order intro, recap, credits, preview.
 func TestTheIntroDBAsksAMovieByItsIDAlone(t *testing.T) {
-	client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":603,"type":"movie",
+	client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":1001,"type":"movie",
 		"preview":[{"start_ms":1680000,"end_ms":1740000}],
 		"credits":[{"start_ms":8000000,"end_ms":null}],
 		"recap":[{"start_ms":25000,"end_ms":134000}],
 		"intro":[{"start_ms":null,"end_ms":23000}]}`)
 
 	entries, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(), markFile{
-		movie: true, ids: providerIDs{"tmdb": "603"},
+		movie: true, ids: providerIDs{"tmdb": "1001"},
 	})
 
 	if err != nil {
@@ -147,7 +147,7 @@ func TestTheIntroDBMisses(t *testing.T) {
 		wantNone bool
 	}{
 		{name: "a work TheIntroDB does not hold", ids: providerIDs{"tmdb": "1399"}, asked: 1},
-		{name: "a work with no TMDb id", ids: providerIDs{"imdb": "tt0944947"}, asked: 0},
+		{name: "a work with no TMDb id", ids: providerIDs{"imdb": "tt9004004"}, asked: 0},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -191,10 +191,10 @@ func TestTheIntroDBSendsTheKeyOnlyWhereTheAccountNamesOne(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTheIntroDB(t, test.token, http.StatusOK, `{"tmdb_id":603,"type":"movie"}`)
+			client, fake := newFakeTheIntroDB(t, test.token, http.StatusOK, `{"tmdb_id":1001,"type":"movie"}`)
 
 			if _, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
-				markFile{movie: true, ids: providerIDs{"tmdb": "603"}}); err != nil {
+				markFile{movie: true, ids: providerIDs{"tmdb": "1001"}}); err != nil {
 				t.Fatal(err)
 			}
 			if got := fake.requests[0].Header.Get("Authorization"); got != test.want {
@@ -234,11 +234,11 @@ func TestTheIntroDBCooldownsFollowItsRateHeaders(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":603,"type":"movie"}`)
+			client, fake := newFakeTheIntroDB(t, "", http.StatusOK, `{"tmdb_id":1001,"type":"movie"}`)
 			fake.tooMany, fake.limited = 1, test.limited
 
 			_, err := newTheIntroDBMarkAnswerer(client).marks(t.Context(),
-				markFile{movie: true, ids: providerIDs{"tmdb": "603"}})
+				markFile{movie: true, ids: providerIDs{"tmdb": "1001"}})
 
 			if test.wantError != (err != nil) {
 				t.Errorf("err = %v, want an error: %v", err, test.wantError)

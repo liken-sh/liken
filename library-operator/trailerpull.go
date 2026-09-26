@@ -109,8 +109,7 @@ func ffmpegRemux(ctx context.Context, input, output string) error {
 		"-i", input, "-c", "copy", "-movflags", "+faststart", "-y", output)
 	out, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ffmpeg %s: %w: %s", filepath.Base(input), err,
-			strings.TrimSpace(string(out)))
+		return fmt.Errorf("ffmpeg: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -124,7 +123,7 @@ func trailerFileHolds(ctx context.Context, path string) error {
 	}
 	var read ffprobeAnswer
 	if err := json.Unmarshal(output, &read); err != nil {
-		return fmt.Errorf("reading the probe of %s: %w", filepath.Base(path), err)
+		return fmt.Errorf("reading the probe: %w", err)
 	}
 	record := read.probedFile()
 	videos := 0
@@ -134,11 +133,11 @@ func trailerFileHolds(ctx context.Context, path string) error {
 		}
 	}
 	if videos == 0 {
-		return fmt.Errorf("%s holds no video stream", filepath.Base(path))
+		return errors.New("the file holds no video stream")
 	}
 	length := time.Duration(record.Duration * float64(time.Second))
 	if length < trailerShortest || length > trailerLongest {
-		return fmt.Errorf("%s runs %s, outside %s to %s", filepath.Base(path),
+		return fmt.Errorf("the file runs %s, outside %s to %s",
 			length.Round(time.Second), trailerShortest, trailerLongest)
 	}
 	return nil
@@ -155,22 +154,22 @@ func (e *enricher) pullTrailerFile(ctx context.Context, source trailerSource,
 	// title at the library root has no folder to hold one, and a trailers
 	// folder at the root belongs to no title.
 	if relativePath(e.root, folder) == "." {
-		e.logf("%s has no folder of its own, so this fact pulls no trailer for it", item.id)
+		e.logf("%s has no folder of its own, so this fact pulls no trailer for it", opaqueID(item.id))
 		return nil, attemptNothing
 	}
 	directory := filepath.Join(folder, trailersFolderName)
 	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
-		e.logf("could not make %s: %v", relativePath(e.root, directory), err)
+		e.logf("could not make %s: %v", e.named(directory), err)
 		return nil, attemptError
 	}
 	target := filepath.Join(directory, safeTrailerName(row.Name)+trailerFileExtension)
 	stands, err := fileExists(target)
 	if err != nil {
-		e.logf("could not read %s: %v", relativePath(e.root, target), err)
+		e.logf("could not read %s: %v", e.named(target), err)
 		return nil, attemptError
 	}
 	if stands {
-		e.logf("a file already stands at %s", relativePath(e.root, target))
+		e.logf("a file already stands at %s", e.named(target))
 		return nil, attemptFound
 	}
 	pulled := e.writer.hiddenTemporary(directory, trailerPullMark)
@@ -180,30 +179,30 @@ func (e *enricher) pullTrailerFile(ctx context.Context, source trailerSource,
 
 	size, err := pullTrailerBytes(ctx, source, file, pulled)
 	if err != nil {
-		e.logf("could not pull %s: %v", file.URL, err)
+		e.logf("could not pull %s: %v", opaqueText(file.URL), err)
 		return nil, attemptError
 	}
 	e.tallies.add(tallyTrailerFetchBytes, float64(size), "site", row.Site)
 	if err := ffmpegRemux(ctx, pulled, remuxed); err != nil {
-		e.logf("could not remux the trailer of %s: %v", item.id, err)
+		e.logf("could not remux the trailer of %s: %v", opaqueID(item.id), err)
 		return nil, attemptError
 	}
 	if err := trailerFileHolds(ctx, remuxed); err != nil {
-		e.logf("the trailer of %s is no trailer: %v", item.id, err)
+		e.logf("the trailer of %s is no trailer: %v", opaqueID(item.id), err)
 		return nil, attemptError
 	}
 
 	landed, err := e.writer.createOnceFrom(remuxed, target)
 	if err != nil {
-		e.logf("could not write %s: %v", relativePath(e.root, target), err)
+		e.logf("could not write %s: %v", e.named(target), err)
 		return nil, attemptError
 	}
 	if !landed {
-		e.logf("a file already stands at %s", relativePath(e.root, target))
+		e.logf("a file already stands at %s", e.named(target))
 		return nil, attemptFound
 	}
 	e.logf("wrote %s, %dp and %d bytes, from %s",
-		relativePath(e.root, target), file.Height, size, row.Site)
+		e.named(target), file.Height, size, row.Site)
 	return &trailerFileEntry{
 		Provider: row.Provider, Key: row.Key, URL: file.URL,
 		File:   relativePath(folder, target),
@@ -218,6 +217,6 @@ func (e *enricher) dropTrailerTemporary(path string) {
 		return
 	}
 	if err := e.writer.removeTemporary(path); err != nil {
-		e.logf("could not clear %s: %v", path, err)
+		e.logf("could not clear %s: %v", e.named(path), err)
 	}
 }

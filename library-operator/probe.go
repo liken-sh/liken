@@ -68,7 +68,7 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 	absolute := filepath.Join(e.root, path)
 	result := attemptFound
 	if err := e.recordProbe(ctx, probe, absolute); err != nil {
-		e.logf("could not probe %s: %v", path, err)
+		e.logf("could not probe %s: %v", e.named(path), err)
 		result = attemptError
 	}
 	folder, entry := likenFolderFor(e.kind, absolute)
@@ -278,7 +278,7 @@ func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 		"-v", "error", "-print_format", "json", "-show_format", "-show_streams", path)
 	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("ffprobe %s: %w%s", filepath.Base(path), err, commandStderr(err))
+		return nil, fmt.Errorf("ffprobe: %w%s", err, commandStderr(err))
 	}
 	return output, nil
 }
@@ -321,7 +321,7 @@ func (w *volumeWriter) editNFO(path, rootElement, title string, element xmlEleme
 	}
 	edited, err := editElement(document, element, replacement)
 	if err != nil {
-		return fmt.Errorf("editing %s: %w", filepath.Base(path), err)
+		return fmt.Errorf("editing the .nfo file: %w", err)
 	}
 	return w.write(path, edited)
 }

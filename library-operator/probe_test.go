@@ -60,15 +60,15 @@ func seedProbeGap(t *testing.T, catalog *Catalog, root, folder, file string) {
 func TestTheProbeWritesStreamDetailsIntoAMinimalNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 		t.Fatal(err)
 	}
 
-	body := readFileString(t, filepath.Join(root, "The Thing (1982)", movieNFOName))
-	for _, want := range []string{"<title>The Thing</title>", "<codec>h264</codec>", "<width>1920</width>",
+	body := readFileString(t, filepath.Join(root, "The Long Survey (1982)", movieNFOName))
+	for _, want := range []string{"<title>The Long Survey</title>", "<codec>h264</codec>", "<width>1920</width>",
 		"<durationinseconds>8673</durationinseconds>", "<aspect>1.78</aspect>",
 		"<codec>ac3</codec>", "<channels>6</channels>", "<subtitle>"} {
 		if !strings.Contains(body, want) {
@@ -83,14 +83,14 @@ func TestTheProbeWritesStreamDetailsIntoAMinimalNFO(t *testing.T) {
 func TestTheProbeNFOIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(root, "The Thing (1982)", movieNFOName))
+	data, err := os.ReadFile(filepath.Join(root, "The Long Survey (1982)", movieNFOName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,21 +109,21 @@ func TestTheProbeNFOIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
 func TestTheProbeRecordsItsAttempt(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 		t.Fatal(err)
 	}
 
-	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	ledger, err := readLikenLedger(filepath.Join(root, "The Long Survey (1982)"), factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
 		t.Errorf("ledger = %+v, want one attempt that found the details", ledger.Attempts)
 	}
-	if ledger.Attempts[0].Path != "The Thing (1982).mkv" {
+	if ledger.Attempts[0].Path != "The Long Survey (1982).mkv" {
 		t.Errorf("the attempt names %q, want the file", ledger.Attempts[0].Path)
 	}
 }
@@ -131,8 +131,8 @@ func TestTheProbeRecordsItsAttempt(t *testing.T) {
 func TestTheProbeKeepsEveryOtherByteOfAnNFOThatIsAlreadyThere(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
-	nfoPath := filepath.Join(root, "The Thing (1982)", movieNFOName)
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
+	nfoPath := filepath.Join(root, "The Long Survey (1982)", movieNFOName)
 	writeFile(t, nfoPath, nfoWithUnknownElements)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
@@ -142,7 +142,7 @@ func TestTheProbeKeepsEveryOtherByteOfAnNFOThatIsAlreadyThere(t *testing.T) {
 
 	edited := readFileString(t, nfoPath)
 	for _, want := range []string{"<lockdata>false</lockdata>", "<criticrating>84</criticrating>",
-		`<uniqueid type="imdb">tt0084787</uniqueid>`, "<poster>/volume/poster.jpg</poster>"} {
+		`<uniqueid type="imdb">tt9001002</uniqueid>`, "<poster>/volume/poster.jpg</poster>"} {
 		if !strings.Contains(edited, want) {
 			t.Errorf("the edit lost %s:\n%s", want, edited)
 		}
@@ -170,14 +170,14 @@ func TestTheProbeRecordsAnErrorWhereTheFileWillNotOpen(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+			seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 			if err := work.probeGap(t.Context(), test.probe); err != nil {
 				t.Fatal(err)
 			}
 
-			ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+			ledger, err := readLikenLedger(filepath.Join(root, "The Long Survey (1982)"), factProbe)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -191,25 +191,25 @@ func TestTheProbeRecordsAnErrorWhereTheFileWillNotOpen(t *testing.T) {
 func TestTheProbeWorksOverTheFolderItsJobNames(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
-	writeFile(t, filepath.Join(root, "Alien (1979)", "Alien (1979).mkv"), "video")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
+	writeFile(t, filepath.Join(root, "Tall Grass (1979)", "Tall Grass (1979).mkv"), "video")
 	if err := upsertWalk(t.Context(), catalog, &walkResult{files: []fileRow{
-		{Path: filepath.Join("Alien (1979)", "Alien (1979).mkv"), Library: "house/movies", Present: true, Type: fileTypeVideo},
+		{Path: filepath.Join("Tall Grass (1979)", "Tall Grass (1979).mkv"), Library: "house/movies", Present: true, Type: fileTypeVideo},
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scanPaths = []string{"The Thing (1982)"}
+	work.scanPaths = []string{"The Long Survey (1982)"}
 	work.scopes = work.narrowedScopes()
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "The Thing (1982)", movieNFOName)); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "The Long Survey (1982)", movieNFOName)); err != nil {
 		t.Errorf("the folder the Job named holds no .nfo file: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "Alien (1979)", movieNFOName)); err == nil {
+	if _, err := os.Stat(filepath.Join(root, "Tall Grass (1979)", movieNFOName)); err == nil {
 		t.Error("the probe wrote outside the folder its Job named")
 	}
 }
@@ -225,10 +225,10 @@ func TestTheProbeFailsWhereItCannotReadItsGap(t *testing.T) {
 
 func TestTheNFOAFileWritesIntoIsTheOneTheScannerReads(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "The Thing (1982)", "The Thing 1.mkv"), "video")
-	writeFile(t, filepath.Join(root, "The Thing (1982)", "The Thing 2.mkv"), "video")
-	writeFile(t, filepath.Join(root, "The Thing (1982)", "trailers", "teaser.mkv"), "video")
-	writeFile(t, filepath.Join(root, "Twin Peaks", "Season 01", "s01e01.mkv"), "video")
+	writeFile(t, filepath.Join(root, "The Long Survey (1982)", "The Long Survey 1.mkv"), "video")
+	writeFile(t, filepath.Join(root, "The Long Survey (1982)", "The Long Survey 2.mkv"), "video")
+	writeFile(t, filepath.Join(root, "The Long Survey (1982)", "trailers", "teaser.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Pine Hollow", "Season 01", "s01e01.mkv"), "video")
 
 	cases := []struct {
 		name      string
@@ -241,32 +241,32 @@ func TestTheNFOAFileWritesIntoIsTheOneTheScannerReads(t *testing.T) {
 		{
 			name:      "the first video of a movie folder in name order",
 			kind:      libraryKindMovies,
-			file:      "The Thing (1982)/The Thing 1.mkv",
-			wantNFO:   "The Thing (1982)/movie.nfo",
+			file:      "The Long Survey (1982)/The Long Survey 1.mkv",
+			wantNFO:   "The Long Survey (1982)/movie.nfo",
 			wantRoot:  nfoRootMovie,
-			wantTitle: "The Thing",
+			wantTitle: "The Long Survey",
 		},
 		{
 			name:      "a second encoding beside it",
 			kind:      libraryKindMovies,
-			file:      "The Thing (1982)/The Thing 2.mkv",
-			wantNFO:   "The Thing (1982)/The Thing 2.nfo",
+			file:      "The Long Survey (1982)/The Long Survey 2.mkv",
+			wantNFO:   "The Long Survey (1982)/The Long Survey 2.nfo",
 			wantRoot:  nfoRootMovie,
-			wantTitle: "The Thing 2",
+			wantTitle: "The Long Survey 2",
 		},
 		{
 			name:      "a trailer in an extras folder",
 			kind:      libraryKindMovies,
-			file:      "The Thing (1982)/trailers/teaser.mkv",
-			wantNFO:   "The Thing (1982)/trailers/teaser.nfo",
+			file:      "The Long Survey (1982)/trailers/teaser.mkv",
+			wantNFO:   "The Long Survey (1982)/trailers/teaser.nfo",
 			wantRoot:  nfoRootMovie,
 			wantTitle: "teaser",
 		},
 		{
 			name:      "an episode",
 			kind:      libraryKindSeries,
-			file:      "Twin Peaks/Season 01/s01e01.mkv",
-			wantNFO:   "Twin Peaks/Season 01/s01e01.nfo",
+			file:      "Pine Hollow/Season 01/s01e01.mkv",
+			wantNFO:   "Pine Hollow/Season 01/s01e01.nfo",
 			wantRoot:  nfoRootEpisode,
 			wantTitle: "s01e01",
 		},
@@ -375,14 +375,14 @@ func TestTheStreamDetailsAreWrittenFromTheRecord(t *testing.T) {
 func TestTheProbeWritesTheWholeAnswerIntoItsOwnLedger(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfAnHDRFile)); err != nil {
 		t.Fatal(err)
 	}
 
-	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	ledger, err := readLikenLedger(filepath.Join(root, "The Long Survey (1982)"), factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestTheProbeWritesTheWholeAnswerIntoItsOwnLedger(t *testing.T) {
 		t.Fatalf("probes = %+v, want one record", ledger.Probes)
 	}
 	record := ledger.Probes[0]
-	if record.Path != "The Thing (1982).mkv" || record.Container != "mkv" {
+	if record.Path != "The Long Survey (1982).mkv" || record.Container != "mkv" {
 		t.Errorf("record = %+v, want the file's own path and container", record)
 	}
 	if record.Duration != 8462.752 || record.Bitrate != 19535025 || len(record.Streams) != 4 {
@@ -404,7 +404,7 @@ func TestTheProbeWritesTheWholeAnswerIntoItsOwnLedger(t *testing.T) {
 func TestASecondProbeOfAFileLeavesOneRecordInTheLedger(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	for range 2 {
@@ -413,7 +413,7 @@ func TestASecondProbeOfAFileLeavesOneRecordInTheLedger(t *testing.T) {
 		}
 	}
 
-	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	ledger, err := readLikenLedger(filepath.Join(root, "The Long Survey (1982)"), factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,13 +424,13 @@ func TestASecondProbeOfAFileLeavesOneRecordInTheLedger(t *testing.T) {
 
 func TestAnAudioFileIsRecordedAndGetsNoNFO(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "A Perfect Circle", "01 The Track.mp3"), "audio")
+	writeFile(t, filepath.Join(root, "A Quiet Choir", "01 The Track.mp3"), "audio")
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 
 	work.probeOne(t.Context(), answeringProbe(ffprobeOfAMusicFile),
-		filepath.Join("A Perfect Circle", "01 The Track.mp3"))
+		filepath.Join("A Quiet Choir", "01 The Track.mp3"))
 
-	ledger, err := readLikenLedger(filepath.Join(root, "A Perfect Circle"), factProbe)
+	ledger, err := readLikenLedger(filepath.Join(root, "A Quiet Choir"), factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestAnAudioFileIsRecordedAndGetsNoNFO(t *testing.T) {
 	if ledger.Attempts[0].Result != attemptFound {
 		t.Errorf("attempt = %+v, want one that found the streams", ledger.Attempts[0])
 	}
-	if _, err := os.Stat(filepath.Join(root, "A Perfect Circle", "01 The Track.nfo")); err == nil {
+	if _, err := os.Stat(filepath.Join(root, "A Quiet Choir", "01 The Track.nfo")); err == nil {
 		t.Error("the probe wrote an .nfo file beside a music file")
 	}
 }
@@ -450,9 +450,9 @@ func TestAFileTheProbeCannotStatIsAnError(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 
 	work.probeOne(t.Context(), answeringProbe(ffprobeOfOneFile),
-		filepath.Join("The Thing (1982)", "The Thing (1982).mkv"))
+		filepath.Join("The Long Survey (1982)", "The Long Survey (1982).mkv"))
 
-	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	ledger, err := readLikenLedger(filepath.Join(root, "The Long Survey (1982)"), factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestAnNFOWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s01e01.nfo")
 	// The document ends inside the root, which even a lenient reader cannot
 	// read past.
-	body := "<episodedetails><title>Breakage"
+	body := "<episodedetails><title>Tin Roof"
 	writeFile(t, path, body)
 
 	err := newVolumeWriter("series-enrich").editNFO(path, nfoRootEpisode, "s01e01",
@@ -587,7 +587,7 @@ func TestTheProbeWritesNoNFOBesideAVideoThatIsNotTheFeature(t *testing.T) {
 		wantNFO string
 	}{
 		{
-			name: "the feature", file: "The Thing (1982).mkv",
+			name: "the feature", file: "The Long Survey (1982).mkv",
 			wantNFO: movieNFOName,
 		},
 		{
@@ -606,15 +606,15 @@ func TestTheProbeWritesNoNFOBesideAVideoThatIsNotTheFeature(t *testing.T) {
 			// The feature is on the volume in every case and in the gap in the
 			// first case alone, so the walk reads the folder as a title folder
 			// and the probe reads the case's own file.
-			writeFile(t, filepath.Join(root, "The Thing (1982)", "The Thing (1982).mkv"), "video")
-			seedProbeGap(t, catalog, root, "The Thing (1982)", test.file)
+			writeFile(t, filepath.Join(root, "The Long Survey (1982)", "The Long Survey (1982).mkv"), "video")
+			seedProbeGap(t, catalog, root, "The Long Survey (1982)", test.file)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 			if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
 				t.Fatal(err)
 			}
 
-			folder := filepath.Join(root, "The Thing (1982)")
+			folder := filepath.Join(root, "The Long Survey (1982)")
 			ledger, err := readLikenLedger(folder, factProbe)
 			if err != nil {
 				t.Fatal(err)
@@ -625,7 +625,7 @@ func TestTheProbeWritesNoNFOBesideAVideoThatIsNotTheFeature(t *testing.T) {
 			if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
 				t.Errorf("attempts = %+v, want the one attempt that found the streams", ledger.Attempts)
 			}
-			row, held := filesByPath(walkMovies(root, "house/movies", nil))[filepath.Join("The Thing (1982)", test.file)]
+			row, held := filesByPath(walkMovies(root, "house/movies", nil))[filepath.Join("The Long Survey (1982)", test.file)]
 			if !held || row.VideoCodec != "h264" {
 				t.Errorf("row = %+v, want the walk reading the streams off the ledger", row)
 			}

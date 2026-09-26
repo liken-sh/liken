@@ -15,15 +15,15 @@ import (
 // linkedFranchiseFile is a franchise directory that carries its art as links,
 // the way the public repository does. The five keys are Kodi's names, and each
 // is an https URL.
-const linkedFranchiseFile = `name: Alien
+const linkedFranchiseFile = `name: Kestrel
 art:
-  poster: https://art.example/alien/poster.jpg
-  fanart: https://art.example/alien/fanart.jpg
-  landscape: https://art.example/alien/landscape.jpg
-  logo: https://art.example/alien/logo.png
-  banner: https://art.example/alien/banner.jpg
+  poster: https://art.example/kestrel/poster.jpg
+  fanart: https://art.example/kestrel/fanart.jpg
+  landscape: https://art.example/kestrel/landscape.jpg
+  logo: https://art.example/kestrel/logo.png
+  banner: https://art.example/kestrel/banner.jpg
 order:
-  - movie: tmdb:348
+  - movie: tmdb:1101
 `
 
 // artHost is an art host that answers every path with one image, and counts
@@ -74,14 +74,14 @@ func (h *artHost) reads() []string {
 
 // file is a franchise.yaml whose art links point at this host.
 func (h *artHost) file(keys ...string) string {
-	body := "name: Alien\n"
+	body := "name: Kestrel\n"
 	if len(keys) > 0 {
 		body += "art:\n"
 	}
 	for _, key := range keys {
-		body += "  " + key + ": " + h.server.URL + "/alien/" + key + "\n"
+		body += "  " + key + ": " + h.server.URL + "/kestrel/" + key + "\n"
 	}
-	return body + "order:\n  - movie: tmdb:348\n"
+	return body + "order:\n  - movie: tmdb:1101\n"
 }
 
 // artFetchOf is one scan Job's art fetch over a checkout and a claim of its
@@ -119,7 +119,7 @@ func filesIn(t *testing.T, dir string) []string {
 func TestTheArtFetchWritesEveryLinkUnderItsKodiName(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster", "fanart", "landscape", "logo", "banner")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster", "fanart", "landscape", "logo", "banner")})
 
 	wrote := fetch.fetchAll(t.Context(), checkout, claim)
 
@@ -130,15 +130,15 @@ func TestTheArtFetchWritesEveryLinkUnderItsKodiName(t *testing.T) {
 	// writes, and its extension is the jpeg the host answered and not the png
 	// the url names.
 	want := []string{".liken", "banner.jpg", "clearlogo.jpg", "fanart.jpg", "landscape.jpg", "poster.jpg"}
-	if held := filesIn(t, filepath.Join(claim, "Alien")); !slices.Equal(held, want) {
+	if held := filesIn(t, filepath.Join(claim, "Kestrel")); !slices.Equal(held, want) {
 		t.Errorf("the claim holds %v, want %v", held, want)
 	}
-	ledger, err := readLikenLedger(filepath.Join(claim, "Alien"), franchiseArtFact)
+	ledger, err := readLikenLedger(filepath.Join(claim, "Kestrel"), franchiseArtFact)
 	if err != nil {
 		t.Fatal(err)
 	}
 	item, held := ledger.itemAt("poster")
-	if !held || item.Source != host.server.URL+"/alien/poster" {
+	if !held || item.Source != host.server.URL+"/kestrel/poster" {
 		t.Errorf("the ledger holds %+v, want the link the poster came from", item)
 	}
 }
@@ -148,7 +148,7 @@ func TestTheArtFetchWritesEveryLinkUnderItsKodiName(t *testing.T) {
 func TestTheArtFetchNamesItselfToTheHost(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
 
 	fetch.fetchAll(t.Context(), checkout, claim)
 
@@ -164,7 +164,7 @@ func TestTheArtFetchNamesItselfToTheHost(t *testing.T) {
 func TestTheArtFetchReadsALinkOnce(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
 
 	if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 1 {
 		t.Fatalf("the first fetch wrote %d files, want the one link", wrote)
@@ -184,15 +184,15 @@ func TestTheArtFetchReadsALinkOnce(t *testing.T) {
 // over, because the file is this fetch's own.
 func TestTheArtFetchReadsAChangedLinkAgain(t *testing.T) {
 	host := newArtHost(t)
-	files := map[string]string{"Alien/franchise.yaml": host.file("poster")}
+	files := map[string]string{"Kestrel/franchise.yaml": host.file("poster")}
 	fetch, checkout, claim := artFetchOf(t, host, files)
 	if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 1 {
 		t.Fatalf("the first fetch wrote %d files, want the one link", wrote)
 	}
 
 	host.body = "the second image"
-	changed := strings.Replace(host.file("poster"), "/alien/poster", "/alien/poster-2", 1)
-	if err := os.WriteFile(filepath.Join(checkout, "Alien", franchiseFileName),
+	changed := strings.Replace(host.file("poster"), "/kestrel/poster", "/kestrel/poster-2", 1)
+	if err := os.WriteFile(filepath.Join(checkout, "Kestrel", franchiseFileName),
 		[]byte(changed), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestTheArtFetchReadsAChangedLinkAgain(t *testing.T) {
 	if wrote != 1 {
 		t.Errorf("the fetch wrote %d files, want the changed link", wrote)
 	}
-	held, err := os.ReadFile(filepath.Join(claim, "Alien", "poster.jpg"))
+	held, err := os.ReadFile(filepath.Join(claim, "Kestrel", "poster.jpg"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,11 +215,11 @@ func TestTheArtFetchReadsAChangedLinkAgain(t *testing.T) {
 func TestTheArtFetchKeepsAFileItDidNotWrite(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
-	if err := os.MkdirAll(filepath.Join(claim, "Alien"), 0o755); err != nil {
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
+	if err := os.MkdirAll(filepath.Join(claim, "Kestrel"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(claim, "Alien", "poster.jpg"),
+	if err := os.WriteFile(filepath.Join(claim, "Kestrel", "poster.jpg"),
 		[]byte("the owner's poster"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestTheArtFetchKeepsAFileItDidNotWrite(t *testing.T) {
 	if wrote != 0 {
 		t.Errorf("the fetch wrote %d files, want it to keep the owner's", wrote)
 	}
-	held, err := os.ReadFile(filepath.Join(claim, "Alien", "poster.jpg"))
+	held, err := os.ReadFile(filepath.Join(claim, "Kestrel", "poster.jpg"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,14 +258,14 @@ func TestTheArtFetchLeavesNoFileForALinkThatFails(t *testing.T) {
 			host := newArtHost(t)
 			host.status, host.kind = testCase.status, testCase.kind
 			fetch, checkout, claim := artFetchOf(t, host,
-				map[string]string{"Alien/franchise.yaml": host.file("poster", "fanart")})
+				map[string]string{"Kestrel/franchise.yaml": host.file("poster", "fanart")})
 
 			wrote := fetch.fetchAll(t.Context(), checkout, claim)
 
 			if wrote != 0 {
 				t.Errorf("the fetch wrote %d files, want none", wrote)
 			}
-			if held := filesIn(t, filepath.Join(claim, "Alien")); len(held) != 0 {
+			if held := filesIn(t, filepath.Join(claim, "Kestrel")); len(held) != 0 {
 				t.Errorf("the claim holds %v, want nothing", held)
 			}
 			result := walkFranchises(checkout, claim, "house/franchises")
@@ -285,12 +285,12 @@ func TestTheArtFetchRefusesAnAnswerOverTheCap(t *testing.T) {
 	franchiseArtSizeCap = 4
 	t.Cleanup(func() { franchiseArtSizeCap = was })
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
 
 	if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 0 {
 		t.Errorf("the fetch wrote %d files, want none over the cap", wrote)
 	}
-	if held := filesIn(t, filepath.Join(claim, "Alien")); len(held) != 0 {
+	if held := filesIn(t, filepath.Join(claim, "Kestrel")); len(held) != 0 {
 		t.Errorf("the claim holds %v, want nothing", held)
 	}
 }
@@ -302,7 +302,7 @@ func TestTheRowReadsTheArtTheFetchWroteOntoTheClaim(t *testing.T) {
 	host := newArtHost(t)
 	host.kind = "image/png"
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster", "fanart")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster", "fanart")})
 
 	fetch.fetchAll(t.Context(), checkout, claim)
 	result := walkFranchises(checkout, claim, "house/franchises")
@@ -311,10 +311,10 @@ func TestTheRowReadsTheArtTheFetchWroteOntoTheClaim(t *testing.T) {
 		t.Fatalf("the walk wrote %d rows, want the one directory", len(result.franchises))
 	}
 	row := result.franchises[0]
-	if row.Art != filepath.Join("Alien", "poster.png") {
+	if row.Art != filepath.Join("Kestrel", "poster.png") {
 		t.Errorf("art = %q, want the poster on the claim", row.Art)
 	}
-	want := []string{filepath.Join("Alien", "poster.png"), filepath.Join("Alien", "fanart.png")}
+	want := []string{filepath.Join("Kestrel", "poster.png"), filepath.Join("Kestrel", "fanart.png")}
 	if !slices.Equal(row.Arts, want) {
 		t.Errorf("arts = %v, want %v", row.Arts, want)
 	}
@@ -324,7 +324,7 @@ func TestTheRowReadsTheArtTheFetchWroteOntoTheClaim(t *testing.T) {
 // is an answer and never a read the walk failed.
 func TestTheWalkReadsNoArtForADirectoryTheClaimDoesNotHold(t *testing.T) {
 	result := walkFranchises(franchiseCheckout(t,
-		map[string]string{"Alien/franchise.yaml": linkedFranchiseFile}),
+		map[string]string{"Kestrel/franchise.yaml": linkedFranchiseFile}),
 		t.TempDir(), "house/franchises")
 
 	if len(result.franchises) != 1 {
@@ -356,11 +356,11 @@ func TestTheArtFetchWritesNothingForACheckoutItCannotRead(t *testing.T) {
 func TestTheArtFetchLeavesADirectoryWhoseLedgerItCannotRead(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
-	if err := os.MkdirAll(filepath.Join(claim, "Alien", likenDirectory), 0o755); err != nil {
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
+	if err := os.MkdirAll(filepath.Join(claim, "Kestrel", likenDirectory), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(claim, "Alien", likenDirectory, "art.yaml"),
+	if err := os.WriteFile(filepath.Join(claim, "Kestrel", likenDirectory, "art.yaml"),
 		[]byte("items: [this is not a list of items\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -381,9 +381,9 @@ func TestTheArtFetchLeavesADirectoryWhoseLedgerItCannotRead(t *testing.T) {
 func TestTheArtFetchWritesNothingWhenTheClaimRefusesTheDirectory(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
 	// A file where the directory would go, so the write cannot make it.
-	if err := os.WriteFile(filepath.Join(claim, "Alien"), []byte("not a directory"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(claim, "Kestrel"), []byte("not a directory"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,13 +402,13 @@ func TestTheArtFetchWritesNothingWhenTheClaimRefusesTheDirectory(t *testing.T) {
 func TestTheArtFetchKeepsAFileWhoseMarkItCouldNotWrite(t *testing.T) {
 	host := newArtHost(t)
 	fetch, checkout, claim := artFetchOf(t, host,
-		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+		map[string]string{"Kestrel/franchise.yaml": host.file("poster")})
 	// A ledger directory the writer cannot write into, so the mark fails
 	// and the image still lands beside it.
-	if err := os.MkdirAll(filepath.Join(claim, "Alien"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(claim, "Kestrel"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(claim, "Alien", likenDirectory), 0o500); err != nil {
+	if err := os.Mkdir(filepath.Join(claim, "Kestrel", likenDirectory), 0o500); err != nil {
 		t.Fatal(err)
 	}
 
@@ -435,19 +435,19 @@ func TestTheArtFetchSkipsALinkItCannotReach(t *testing.T) {
 		name string
 		url  string
 	}{
-		{"a host that answers nothing", address + "/alien/poster"},
+		{"a host that answers nothing", address + "/kestrel/poster"},
 		{"a url the client cannot build", "https://art.example/%zz"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			fetch, checkout, claim := artFetchOf(t, host, map[string]string{
-				"Alien/franchise.yaml": "name: Alien\nart:\n  poster: " + testCase.url +
-					"\norder:\n  - movie: tmdb:348\n"})
+				"Kestrel/franchise.yaml": "name: Kestrel\nart:\n  poster: " + testCase.url +
+					"\norder:\n  - movie: tmdb:1101\n"})
 
 			if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 0 {
 				t.Errorf("the fetch wrote %d files, want none", wrote)
 			}
-			if held := filesIn(t, filepath.Join(claim, "Alien")); len(held) != 0 {
+			if held := filesIn(t, filepath.Join(claim, "Kestrel")); len(held) != 0 {
 				t.Errorf("the claim holds %v, want nothing", held)
 			}
 		})

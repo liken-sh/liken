@@ -42,7 +42,7 @@ func newFakePeerTube(t *testing.T, body string) (*peertubeClient, *fakePeerTube)
 func TestAPeerTubeSearchAsksForTheNewestVideos(t *testing.T) {
 	client, fake := newFakePeerTube(t, trailerFixture(t, "peertube-search.json"))
 
-	videos, err := client.search(t.Context(), "Dune: Part Three")
+	videos, err := client.search(t.Context(), "Kestrel: Part Three")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestAPeerTubeSearchAsksForTheNewestVideos(t *testing.T) {
 		t.Errorf("the search asked %q, want the search path", asked.Path)
 	}
 	query := asked.Query()
-	if query.Get("search") != "Dune: Part Three" || query.Get("count") != "20" ||
+	if query.Get("search") != "Kestrel: Part Three" || query.Get("count") != "20" ||
 		query.Get("sort") != "-publishedAt" {
 		t.Errorf("the search asked %v, want the query, the count, and the sort", query)
 	}
@@ -77,7 +77,7 @@ func TestThePeerTubeTrailerAnswererKeepsWhatTheNameMatches(t *testing.T) {
 	answerer := newPeertubeTrailerAnswerer(client)
 
 	entries, err := answerer.trailers(t.Context(),
-		trailerTitle{kind: libraryKindMovies, title: "Dune: Part Three", year: 2026,
+		trailerTitle{kind: libraryKindMovies, title: "Kestrel: Part Three", year: 2026,
 			languages: []string{"en"}})
 	if err != nil {
 		t.Fatal(err)
@@ -87,31 +87,31 @@ func TestThePeerTubeTrailerAnswererKeepsWhatTheNameMatches(t *testing.T) {
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "6e1c2d78-2f3a-4b21-9f9a-0c1d2e3f4a5b",
 			Site: trailerSitePeerTube, URL: client.base + "/w/uCGxtW81oT5vDUc1LoZUDk",
-			Name: "DUNE: PART THREE (2026) - IMAX Trailer [4K Ultra HD]",
+			Name: "KESTREL: PART THREE (2026) - IMAX Trailer [4K Ultra HD]",
 			Kind: trailerKindTrailer, Language: "en", Published: "2026-07-14",
 			Resolution: 2160, Score: 90, Reason: "title and year match; trailer; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "7f2d3e89-3a4b-4c32-8a0b-1d2e3f4a5b6c",
 			Site: trailerSitePeerTube, URL: client.base + "/w/vDHyuX92pU6wEVd2MpAVEl",
-			Name: "DUNE: PART THREE (2026) - Official Trailer [4K Ultra HD]",
+			Name: "KESTREL: PART THREE (2026) - Official Trailer [4K Ultra HD]",
 			Kind: trailerKindTrailer, Language: "en", Published: "2026-06-02",
 			Resolution: 2160, Score: 90, Reason: "title and year match; trailer; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "8a3e4f90-4b5c-4d43-9b1c-2e3f4a5b6c7d",
 			Site: trailerSitePeerTube, URL: client.base + "/w/wEIzvY03qV7xFWe3NqBWFm",
-			Name: "DUNE: PART THREE (2026) - Teaser Trailer [4K Ultra HD]",
+			Name: "KESTREL: PART THREE (2026) - Teaser Trailer [4K Ultra HD]",
 			Kind: trailerKindTeaser, Language: "en", Published: "2026-02-09",
 			Resolution: 2160, Score: 80, Reason: "title and year match; teaser; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "9b4f5a01-5c6d-4e54-8c2d-3f4a5b6c7d8e",
 			Site: trailerSitePeerTube, URL: client.base + "/w/xFJawZ14rW8yGXf4OrCXGn",
-			Name: `DUNE: PART THREE (2026) - "Awakening" Teaser [4K Ultra HD]`,
+			Name: `KESTREL: PART THREE (2026) - "Landfall" Teaser [4K Ultra HD]`,
 			Kind: trailerKindTeaser, Language: "en", Published: "2025-12-20",
 			Resolution: 2160, Score: 80, Reason: "title and year match; teaser; en"},
 		{Path: likenSelfPath, Provider: providerBlockPeerTube,
 			Key:  "1d6b7c23-7e8f-4a76-8e4f-5b6c7d8e9f01",
 			Site: trailerSitePeerTube, URL: client.base + "/w/zHLcyB36tY0AIZh6QtEZIp",
-			Name: `DUNE: PART THREE (2026) - "Sandworm" TV Spot [4K Ultra HD]`,
+			Name: `KESTREL: PART THREE (2026) - "Undertow" TV Spot [4K Ultra HD]`,
 			Kind: trailerKindSpot, Language: "en", Published: "2026-08-01",
 			Resolution: 2160, Score: 60, Reason: "title and year match; spot; en"},
 	}

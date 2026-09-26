@@ -36,50 +36,50 @@ func TestAPostBecomesAnOutsidePlay(t *testing.T) {
 	}{
 		{
 			name: "a film in flight",
-			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "chris", UserID: "u1", ItemID: "i1",
+			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1", ItemID: "i1",
 				ItemType: "Movie", PositionTicks: "42100000000", RunTimeTicks: "81600000000",
-				Paused: "False", Tmdb: "603", Imdb: "tt0133093"},
+				Paused: "False", Tmdb: "1101", Imdb: "tt9001101"},
 			play: "jellyfin-u1-i1",
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases:  map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases:  map[string]string{"tmdb": "1101", "imdb": "tt9001101"},
 				Position: 4210, Duration: 8160, At: at},
 		},
 		{
 			name: "an episode in flight, under the series' ids",
-			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "chris", UserID: "u1", ItemID: "i2",
-				ItemType: "Episode", SeriesID: "item-office", Season: "3", Episode: "5",
+			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1", ItemID: "i2",
+				ItemType: "Episode", SeriesID: "item-series", Season: "3", Episode: "5",
 				PositionTicks: "6000000000", RunTimeTicks: "13200000000", Tmdb: "999"},
 			play: "jellyfin-u1-i2",
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases: map[string]string{"tmdb": "2316", "tvdb": "73244"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases: map[string]string{"tmdb": "2101", "tvdb": "3101"},
 				Season:  3, Episode: 5, Position: 600, Duration: 1320, At: at},
 		},
 		{
 			name: "a stop, which marks the row ended",
-			event: jellyfinEvent{Event: jellyfinStopEvent, User: "chris", UserID: "u1", ItemID: "i1",
+			event: jellyfinEvent{Event: jellyfinStopEvent, User: "person-a", UserID: "u1", ItemID: "i1",
 				ItemType: "Movie", PositionTicks: "81600000000", RunTimeTicks: "81600000000",
-				PlayedToCompletion: "True", Tmdb: "603"},
+				PlayedToCompletion: "True", Tmdb: "1101"},
 			play: "jellyfin-u1-i1",
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases:  map[string]string{"tmdb": "603"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases:  map[string]string{"tmdb": "1101"},
 				Position: 8160, Duration: 8160, Ended: true, At: at},
 		},
 		{
 			name: "a start, with every empty field the template renders",
-			event: jellyfinEvent{Event: jellyfinStartEvent, User: "chris", UserID: "u1", ItemID: "i1",
+			event: jellyfinEvent{Event: jellyfinStartEvent, User: "person-a", UserID: "u1", ItemID: "i1",
 				ItemType: "Movie", PositionTicks: "", RunTimeTicks: "", Season: "", Episode: "",
-				Paused: "", PlayedToCompletion: "", Tmdb: "603", Imdb: "", Tvdb: ""},
+				Paused: "", PlayedToCompletion: "", Tmdb: "1101", Imdb: "", Tvdb: ""},
 			play: "jellyfin-u1-i1",
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases: map[string]string{"tmdb": "603"}, At: at},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases: map[string]string{"tmdb": "1101"}, At: at},
 		},
 		{
 			name: "a film played to the end on another event",
-			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "chris", UserID: "u1", ItemID: "i1",
-				ItemType: "Movie", PlayedToCompletion: "true", Tvdb: "73244"},
+			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1", ItemID: "i1",
+				ItemType: "Movie", PlayedToCompletion: "true", Tvdb: "3101"},
 			play: "jellyfin-u1-i1",
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases: map[string]string{"tvdb": "73244"}, Ended: true, At: at},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases: map[string]string{"tvdb": "3101"}, Ended: true, At: at},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -107,13 +107,13 @@ func TestAPostTheRoleCannotMapIsDropped(t *testing.T) {
 		name  string
 		event jellyfinEvent
 	}{
-		{name: "no user", event: jellyfinEvent{UserID: "u1", ItemID: "i1", ItemType: "Movie", Tmdb: "603"}},
-		{name: "no user id", event: jellyfinEvent{User: "chris", ItemID: "i1", ItemType: "Movie", Tmdb: "603"}},
-		{name: "no item id", event: jellyfinEvent{User: "chris", UserID: "u1", ItemType: "Movie", Tmdb: "603"}},
+		{name: "no user", event: jellyfinEvent{UserID: "u1", ItemID: "i1", ItemType: "Movie", Tmdb: "1101"}},
+		{name: "no user id", event: jellyfinEvent{User: "person-a", ItemID: "i1", ItemType: "Movie", Tmdb: "1101"}},
+		{name: "no item id", event: jellyfinEvent{User: "person-a", UserID: "u1", ItemType: "Movie", Tmdb: "1101"}},
 		{name: "a film with no provider ids",
-			event: jellyfinEvent{User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie"}},
+			event: jellyfinEvent{User: "person-a", UserID: "u1", ItemID: "i1", ItemType: "Movie"}},
 		{name: "an episode that names no series",
-			event: jellyfinEvent{User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Episode", Tmdb: "999"}},
+			event: jellyfinEvent{User: "person-a", UserID: "u1", ItemID: "i1", ItemType: "Episode", Tmdb: "999"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			role, _, logged := standJellyfinRole(t, jellyfinFixture())
@@ -134,8 +134,8 @@ func TestAPostTheRoleCannotMapIsDropped(t *testing.T) {
 // is not retained, because the next post repeats the position.
 func TestAPostGoesOutOnTheOutsideTopic(t *testing.T) {
 	role, messages, _ := standJellyfinRole(t, jellyfinFixture())
-	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "chris", UserID: "u1",
-		ItemID: "i1", ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "603"})
+	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1",
+		ItemID: "i1", ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "1101"})
 
 	answer := jellyfinPosted(t, role, body)
 
@@ -146,7 +146,7 @@ func TestAPostGoesOutOnTheOutsideTopic(t *testing.T) {
 	if want := playOutsideTopic(defaultTopicBase, "house", "jellyfin-u1-i1"); topic != want {
 		t.Errorf("topic = %q, want %q", topic, want)
 	}
-	if play.Position != 4210 || play.People[0] != "chris" {
+	if play.Position != 4210 || play.People[0] != "person-a" {
 		t.Errorf("play = %+v, want the position and the person the post names", play)
 	}
 	if messages.held[0].retained {
@@ -165,11 +165,11 @@ func TestTheStatusEachPostIsAnsweredWith(t *testing.T) {
 		sent   int
 	}{
 		{name: "a post the role maps", status: http.StatusNoContent, sent: 1,
-			body: `{"event":"PlaybackProgress","user":"chris","userId":"u1","itemId":"i1","itemType":"Movie","tmdb":"603"}`},
+			body: `{"event":"PlaybackProgress","user":"person-a","userId":"u1","itemId":"i1","itemType":"Movie","tmdb":"1101"}`},
 		{name: "a body that is no JSON", status: http.StatusBadRequest, sent: 0, body: `{`},
-		{name: "a body of another shape", status: http.StatusBadRequest, sent: 0, body: `["chris"]`},
+		{name: "a body of another shape", status: http.StatusBadRequest, sent: 0, body: `["person-a"]`},
 		{name: "a post that names no work", status: http.StatusOK, sent: 0,
-			body: `{"event":"PlaybackProgress","user":"chris","userId":"u1","itemId":"i1","itemType":"Movie"}`},
+			body: `{"event":"PlaybackProgress","user":"person-a","userId":"u1","itemId":"i1","itemType":"Movie"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			role, messages, _ := standJellyfinRole(t, jellyfinFixture())
@@ -194,8 +194,8 @@ func TestThePostOfTheRolesOwnWriteIsDropped(t *testing.T) {
 	role.out.echoes.remember("u1", "i1", 4210)
 
 	for _, ticks := range []string{"42100000000", "42090000000", "42110000000"} {
-		body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "chris", UserID: "u1",
-			ItemID: "i1", ItemType: "Movie", PositionTicks: ticks, Tmdb: "603"})
+		body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1",
+			ItemID: "i1", ItemType: "Movie", PositionTicks: ticks, Tmdb: "1101"})
 		if answer := jellyfinPosted(t, role, body); answer != http.StatusOK {
 			t.Errorf("status = %d, want %d", answer, http.StatusOK)
 		}
@@ -211,8 +211,8 @@ func TestThePostOfTheRolesOwnWriteIsDropped(t *testing.T) {
 func TestAPostBeyondTheEchoWindowReachesTheBus(t *testing.T) {
 	role, messages, _ := standJellyfinRole(t, jellyfinFixture())
 	role.out.echoes.remember("u1", "i1", 4210)
-	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "chris", UserID: "u1",
-		ItemID: "i1", ItemType: "Movie", PositionTicks: "42120000000", Tmdb: "603"})
+	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1",
+		ItemID: "i1", ItemType: "Movie", PositionTicks: "42120000000", Tmdb: "1101"})
 
 	answer := jellyfinPosted(t, role, body)
 
@@ -349,27 +349,27 @@ func TestAHandMarkBecomesAnOutsidePlay(t *testing.T) {
 		{
 			name: "a film marked played",
 			event: jellyfinEvent{Event: jellyfinUserDataEvent, SaveReason: jellyfinToggleReason,
-				User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie",
-				Played: "True", PositionTicks: "0", RunTimeTicks: "81600000000", Tmdb: "603"},
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases:  map[string]string{"tmdb": "603"},
+				User: "person-a", UserID: "u1", ItemID: "i1", ItemType: "Movie",
+				Played: "True", PositionTicks: "0", RunTimeTicks: "81600000000", Tmdb: "1101"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases:  map[string]string{"tmdb": "1101"},
 				Position: 8160, Duration: 8160, At: at},
 		},
 		{
 			name: "a film marked unplayed",
 			event: jellyfinEvent{Event: jellyfinUserDataEvent, SaveReason: jellyfinToggleReason,
-				User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie",
-				Played: "False", PositionTicks: "0", RunTimeTicks: "81600000000", Tmdb: "603"},
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases: map[string]string{"tmdb": "603"}, Duration: 8160, At: at},
+				User: "person-a", UserID: "u1", ItemID: "i1", ItemType: "Movie",
+				Played: "False", PositionTicks: "0", RunTimeTicks: "81600000000", Tmdb: "1101"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases: map[string]string{"tmdb": "1101"}, Duration: 8160, At: at},
 		},
 		{
 			name: "a film marked played on a server that states no run time",
 			event: jellyfinEvent{Event: jellyfinUserDataEvent, SaveReason: jellyfinToggleReason,
-				User: "chris", UserID: "u1", ItemID: "i1", ItemType: "Movie",
-				Played: "True", PositionTicks: "42100000000", Tmdb: "603"},
-			want: outsidePlay{Player: "jellyfin", People: []string{"chris"},
-				Aliases: map[string]string{"tmdb": "603"}, Position: 4210, At: at},
+				User: "person-a", UserID: "u1", ItemID: "i1", ItemType: "Movie",
+				Played: "True", PositionTicks: "42100000000", Tmdb: "1101"},
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases: map[string]string{"tmdb": "1101"}, Position: 4210, At: at},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -396,9 +396,9 @@ func TestAUserDataSaveOfAnotherReasonIsDropped(t *testing.T) {
 			role, _, _ := standJellyfinRole(t, jellyfinFixture())
 
 			_, _, ok := role.outsideOf(t.Context(), jellyfinEvent{
-				Event: jellyfinUserDataEvent, SaveReason: reason, User: "chris",
+				Event: jellyfinUserDataEvent, SaveReason: reason, User: "person-a",
 				UserID: "u1", ItemID: "i1", ItemType: "Movie", Played: "True",
-				RunTimeTicks: "81600000000", Tmdb: "603"})
+				RunTimeTicks: "81600000000", Tmdb: "1101"})
 
 			if ok {
 				t.Fatal("the role mapped a save it did not ask for")
@@ -414,10 +414,10 @@ func TestAWebhookGuidReadsAsTheApisOwnSpelling(t *testing.T) {
 	role, _, _ := standJellyfinRole(t, jellyfinFixture())
 
 	play, _, ok := role.outsideOf(t.Context(), jellyfinEvent{
-		Event: jellyfinProgressEvent, User: "chris",
+		Event: jellyfinProgressEvent, User: "person-a",
 		UserID:   "A1B2C3D4-E5F6-0011-2233-445566778899",
 		ItemID:   "ffeeddcc-bbaa-0011-2233-445566778899",
-		ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "603"})
+		ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "1101"})
 
 	if !ok {
 		t.Fatal("the role dropped a post that names a person and a work")
@@ -434,10 +434,10 @@ func TestTheEchoDropMatchesADashedGuid(t *testing.T) {
 	role, messages, _ := standJellyfinRole(t, jellyfinFixture())
 	role.out.echoes.remember("a1b2c3d4e5f600112233445566778899",
 		"ffeeddccbbaa00112233445566778899", 4210)
-	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "chris",
+	body := jellyfinPost(t, jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a",
 		UserID:   "A1B2C3D4-E5F6-0011-2233-445566778899",
 		ItemID:   "ffeeddcc-bbaa-0011-2233-445566778899",
-		ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "603"})
+		ItemType: "Movie", PositionTicks: "42100000000", Tmdb: "1101"})
 
 	answer := jellyfinPosted(t, role, body)
 
@@ -449,7 +449,7 @@ func TestTheEchoDropMatchesADashedGuid(t *testing.T) {
 
 // An id that is not a Guid is returned as the post spells it.
 func TestAnIdOfAnotherShapeStands(t *testing.T) {
-	if got := jellyfinID("item-office"); got != "item-office" {
+	if got := jellyfinID("item-series"); got != "item-series" {
 		t.Errorf("id = %q, want the post's own spelling", got)
 	}
 }

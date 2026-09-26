@@ -263,7 +263,7 @@ func (e *enricher) writeCredits(folder string, answer factAnswer) {
 		ledger.Credits = entries
 	})
 	if err != nil {
-		e.logf("could not write the credits at %s: %v", folder, err)
+		e.logf("could not write the credits at %s: %v", e.named(folder), err)
 	}
 }
 
@@ -273,7 +273,7 @@ func (e *enricher) writeCredits(folder string, answer factAnswer) {
 func (e *enricher) contributorPath(person creditedPerson) string {
 	directory, err := e.contributorFor(person)
 	if err != nil {
-		e.logf("could not write the entry of %s: %v", person.Name, err)
+		e.logf("could not write the entry of the person %s: %v", hashed(person.Name), err)
 	}
 	return directory
 }

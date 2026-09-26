@@ -403,19 +403,16 @@ mod tests {
 
     #[test]
     fn a_wrap_breaks_the_words_into_the_lines_the_width_holds() {
-        let lines = wrapped("Years from the Battle of Yavin", 18.0, 80.0);
+        let lines = wrapped("Years from the Long Survey", 18.0, 80.0);
         assert!(lines.len() > 1, "{lines:?}");
-        assert_eq!(lines.concat().replace(' ', ""), "YearsfromtheBattleofYavin");
+        assert_eq!(lines.concat().replace(' ', ""), "YearsfromtheLongSurvey");
         for line in &lines {
             assert!(
                 measured(line, 18.0) <= 80.0 || !line.contains(' '),
                 "{line}"
             );
         }
-        assert_eq!(
-            wrapped("Years from the Battle of Yavin", 18.0, 400.0).len(),
-            1
-        );
+        assert_eq!(wrapped("Years from the Long Survey", 18.0, 400.0).len(), 1);
     }
 
     #[test]

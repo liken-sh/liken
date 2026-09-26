@@ -22,19 +22,19 @@ func testJellyfinBackfillJob(catalog *NamespaceCatalog) *Job {
 func TestJellyfinBackfillJobBelongsToItsCatalog(t *testing.T) {
 	job := testJellyfinBackfillJob(jellyfinCatalog())
 
-	if job.Metadata.Name != "house-catalog-jellyfin-backfill" || job.Metadata.Namespace != "house" {
+	if job.Metadata.Name != "house-jellyfin-backfill" || job.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own backfill Job", job.Metadata)
 	}
 	if len(job.Metadata.OwnerReferences) != 1 {
 		t.Fatalf("ownerReferences = %+v, want the Catalog", job.Metadata.OwnerReferences)
 	}
 	owner := job.Metadata.OwnerReferences[0]
-	if owner.Kind != "Catalog" || owner.Name != "house-catalog" || !owner.Controller {
+	if owner.Kind != "Catalog" || owner.Name != "house" || !owner.Controller {
 		t.Errorf("owner = %+v, want the controlling Catalog", owner)
 	}
 	for _, labels := range []map[string]string{job.Metadata.Labels, job.Spec.Template.Metadata.Labels} {
 		if labels[scannerLabelKey] != workerLabelValue ||
-			labels[libraryLabelKey] != "house-catalog" ||
+			labels[libraryLabelKey] != "house" ||
 			labels[workerLabelKey] != workerJellyfinBackfill {
 			t.Errorf("labels = %v, want the backfill worker of the Catalog", labels)
 		}
@@ -269,7 +269,7 @@ func TestStandJellyfinBackfillFollowsTheCatalogAndTheJob(t *testing.T) {
 			if want := jellyfinStatusJSON(t, one.want); jellyfinStatusJSON(t, got) != want {
 				t.Errorf("status = %s, want %s", jellyfinStatusJSON(t, got), want)
 			}
-			held := cluster.heldJob("house", "house-catalog-jellyfin-backfill") != nil
+			held := cluster.heldJob("house", "house-jellyfin-backfill") != nil
 			if held != one.stands {
 				t.Errorf("the backfill Job stands = %v, want %v", held, one.stands)
 			}
@@ -336,12 +336,12 @@ func TestAFinishedBackfillDropsItsWait(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := jellyfinCatalog()
 	operator := testOperator(t, cluster)
-	operator.backfillStands["house/house-catalog"] = cleanupStand{count: 4, next: testNow.Add(time.Hour)}
+	operator.backfillStands["house/house"] = cleanupStand{count: 4, next: testNow.Add(time.Hour)}
 	held := backfillJobWith(catalog, JobStatus{Succeeded: 1})
 
 	operator.standJellyfinBackfill(t.Context(), catalog, []Job{*held}, nil, testNow)
 
-	if _, waiting := operator.backfillStands["house/house-catalog"]; waiting {
+	if _, waiting := operator.backfillStands["house/house"]; waiting {
 		t.Error("a finished backfill still holds a wait")
 	}
 }
@@ -352,11 +352,11 @@ func TestACatalogWithNoServerDropsItsWait(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	operator := testOperator(t, cluster)
-	operator.backfillStands["house/house-catalog"] = cleanupStand{count: 4, next: testNow.Add(time.Hour)}
+	operator.backfillStands["house/house"] = cleanupStand{count: 4, next: testNow.Add(time.Hour)}
 
 	operator.standJellyfinBackfill(t.Context(), catalog, nil, nil, testNow)
 
-	if _, waiting := operator.backfillStands["house/house-catalog"]; waiting {
+	if _, waiting := operator.backfillStands["house/house"]; waiting {
 		t.Error("a Catalog that names no server still holds a wait")
 	}
 }
@@ -365,7 +365,7 @@ func TestACatalogWithNoServerDropsItsWait(t *testing.T) {
 // one of them and reads what the pass reports.
 const (
 	backfillJobsPath = "/apis/batch/v1/namespaces/house/jobs"
-	backfillJobPath  = backfillJobsPath + "/house-catalog-jellyfin-backfill"
+	backfillJobPath  = backfillJobsPath + "/house-jellyfin-backfill"
 )
 
 // A write the API server refuses costs the pass its Job and nothing else: the
@@ -442,12 +442,12 @@ func TestTheBackfillReportsAFailedDelete(t *testing.T) {
 // person reads one object to see where it stands.
 func TestReconcileCatalogsReportsTheBackfillOnTheCatalog(t *testing.T) {
 	cluster := newFakeCluster()
-	catalog := seedCatalog(cluster, "house-catalog", "house")
+	catalog := seedCatalog(cluster, "house", "house")
 	catalog.Spec.Jellyfin = jellyfinCatalog().Spec.Jellyfin
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
-	status := cluster.heldCatalog("house-catalog").Status.Jellyfin
+	status := cluster.heldCatalog("house").Status.Jellyfin
 	if status == nil {
 		t.Fatal("the Catalog reports no backfill")
 	}

@@ -24,7 +24,7 @@ func seedNFOFactRows(t *testing.T, catalog *Catalog) {
 			{Id: "movie:path:three-2003", Library: "house/movies", Path: "Three (2003)", Title: "Three"},
 		},
 		series: []seriesRow{
-			{Id: "series:tvdb:9", Library: "house/movies", Path: "Nine (2009)", Title: "Nine"},
+			{Id: "series:tvdb:9", Library: "house/movies", Path: "Ninefold (2009)", Title: "Ninefold"},
 		},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {

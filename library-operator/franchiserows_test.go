@@ -19,7 +19,7 @@ func franchiseWalk(t *testing.T, files map[string]string) *walkResult {
 func TestTheFranchiseRowsWriteAgainstTheRealSchema(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	ctx := context.Background()
-	result := franchiseWalk(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	result := franchiseWalk(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
 
 	if err := catalog.ensureSeen(ctx); err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestTheFranchiseRowsWriteAgainstTheRealSchema(t *testing.T) {
 			t.Errorf("%s holds %d rows, want %d", table, held, want)
 		}
 	}
-	if !agent.holdsItem(t, "franchises", "house/franchises", "franchise:name:star-wars") {
+	if !agent.holdsItem(t, "franchises", "house/franchises", "franchise:name:example-saga") {
 		t.Error("the franchises table holds no row for the directory the walk read")
 	}
 }
@@ -46,8 +46,8 @@ func TestThePruneSweepsAFranchiseThatLeftTheRepository(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	ctx := context.Background()
 	both := map[string]string{
-		"Star Wars/franchise.yaml": wholeFranchiseFile,
-		"Firefly/franchise.yaml":   "name: Firefly\norder:\n  - series: tvdb:78874\n",
+		"Example Saga/franchise.yaml": wholeFranchiseFile,
+		"Copper Line/franchise.yaml":  "name: Copper Line\norder:\n  - series: tvdb:800001\n",
 	}
 
 	if err := catalog.ensureSeen(ctx); err != nil {
@@ -58,7 +58,7 @@ func TestThePruneSweepsAFranchiseThatLeftTheRepository(t *testing.T) {
 	}
 
 	epoch := time.Now().UnixNano()
-	delete(both, "Star Wars/franchise.yaml")
+	delete(both, "Example Saga/franchise.yaml")
 	if err := flushWalk(ctx, catalog, franchiseWalk(t, both), epoch); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestThePruneSweepsAFranchiseThatLeftTheRepository(t *testing.T) {
 func TestTheLibrarySweepTakesTheFranchiseRows(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	ctx := context.Background()
-	result := franchiseWalk(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	result := franchiseWalk(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
 
 	if err := catalog.ensureSeen(ctx); err != nil {
 		t.Fatal(err)
@@ -106,20 +106,20 @@ func TestTheLibrarySweepTakesTheFranchiseRows(t *testing.T) {
 func TestThePruneSweepsAMemberTheOrderLost(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	ctx := context.Background()
-	long := "name: Alien\norder:\n  - movie: tmdb:348\n  - movie: tmdb:679\n  - movie: tmdb:8077\n"
-	short := "name: Alien\norder:\n  - movie: tmdb:348\n"
+	long := "name: Kestrel\norder:\n  - movie: tmdb:1101\n  - movie: tmdb:1102\n  - movie: tmdb:1103\n"
+	short := "name: Kestrel\norder:\n  - movie: tmdb:1101\n"
 
 	if err := catalog.ensureSeen(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := flushWalk(ctx, catalog, franchiseWalk(t,
-		map[string]string{"Alien/franchise.yaml": long}), time.Now().UnixNano()); err != nil {
+		map[string]string{"Kestrel/franchise.yaml": long}), time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 
 	epoch := time.Now().UnixNano()
 	if err := flushWalk(ctx, catalog, franchiseWalk(t,
-		map[string]string{"Alien/franchise.yaml": short}), epoch); err != nil {
+		map[string]string{"Kestrel/franchise.yaml": short}), epoch); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pruneLibrary(ctx, catalog, "house/franchises", epoch); err != nil {
@@ -136,11 +136,11 @@ func TestThePruneSweepsAMemberTheOrderLost(t *testing.T) {
 func TestTheMemberRowsCarryTheReleasedDate(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	ctx := context.Background()
-	result := franchiseWalk(t, map[string]string{"Alien/franchise.yaml": "name: Alien\norder:\n" +
-		"  - movie: tmdb:348\n    released: 1979\n" +
-		"  - movie: tmdb:679\n    released: 1986-07\n" +
-		"  - movie: tmdb:8077\n    released: 1992-05-22\n" +
-		"  - movie: tmdb:8078\n"})
+	result := franchiseWalk(t, map[string]string{"Kestrel/franchise.yaml": "name: Kestrel\norder:\n" +
+		"  - movie: tmdb:1101\n    released: 1981\n" +
+		"  - movie: tmdb:1102\n    released: 1987-03\n" +
+		"  - movie: tmdb:1103\n    released: 1994-08-12\n" +
+		"  - movie: tmdb:1104\n"})
 
 	if err := catalog.ensureSeen(ctx); err != nil {
 		t.Fatal(err)
@@ -154,9 +154,9 @@ func TestTheMemberRowsCarryTheReleasedDate(t *testing.T) {
 		released string
 		year     int
 	}{
-		{1, "1979", 1979},
-		{2, "1986-07", 1986},
-		{3, "1992-05-22", 1992},
+		{1, "1981", 1981},
+		{2, "1987-03", 1987},
+		{3, "1994-08-12", 1994},
 		{4, "", 0},
 	}
 	for _, want := range cases {
@@ -193,14 +193,14 @@ func TestTheRunKeysReadBackWhatTheMarkWrote(t *testing.T) {
 	}{
 		{
 			name: "the whole key",
-			key: "franchise:name:alien" + linkKeySeparator + "2" +
+			key: "franchise:name:kestrel" + linkKeySeparator + "2" +
 				linkKeySeparator + "3" + linkKeySeparator + "4",
-			want: franchiseRunKey{Franchise: "franchise:name:alien", Position: 2, Season: 3, Episode: 4},
+			want: franchiseRunKey{Franchise: "franchise:name:kestrel", Position: 2, Season: 3, Episode: 4},
 		},
 		{
 			name: "a key with no season or episode",
-			key:  "franchise:name:alien" + linkKeySeparator + "2",
-			want: franchiseRunKey{Franchise: "franchise:name:alien", Position: 2},
+			key:  "franchise:name:kestrel" + linkKeySeparator + "2",
+			want: franchiseRunKey{Franchise: "franchise:name:kestrel", Position: 2},
 		},
 	}
 	for _, testCase := range cases {

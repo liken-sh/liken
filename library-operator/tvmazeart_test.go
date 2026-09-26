@@ -43,12 +43,12 @@ func TestEachTVmazeArtTypeLandsUnderItsName(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, folder, "Season 01", "Quiet Harbor - S01E05.mkv"), "video")
-			writeSeriesNFO(t, root, folder, "81189")
+			writeSeriesNFO(t, root, folder, "800001")
 			seedArtSeries(t, catalog, folder, []int{1})
 			work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 			answers := map[string]string{tvmazeLookupPath: tvmazeShowAnswer}
 			client, _ := newFakeTVmaze(t, http.StatusOK, answers)
-			answers[tvmazeShowsPath+"1371/images"] = tvmazeImageAnswer(client.base)
+			answers[tvmazeShowsPath+"3001/images"] = tvmazeImageAnswer(client.base)
 			answers[test.want] = test.want
 
 			line := artLineOf(newTVmazeArtAnswerer(client))
@@ -69,9 +69,9 @@ func TestEachTVmazeArtTypeLandsUnderItsName(t *testing.T) {
 func TestTheTVmazeArtAnswererHoldsOneLookupPerTitle(t *testing.T) {
 	answers := map[string]string{tvmazeLookupPath: tvmazeShowAnswer}
 	client, fake := newFakeTVmaze(t, http.StatusOK, answers)
-	answers[tvmazeShowsPath+"1371/images"] = tvmazeImageAnswer(client.base)
+	answers[tvmazeShowsPath+"3001/images"] = tvmazeImageAnswer(client.base)
 	answerer := newTVmazeArtAnswerer(client)
-	title := titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt0098936"}}
+	title := titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt9002002"}}
 
 	for _, fact := range []string{factPoster, factBanner} {
 		candidates, err := answerer.candidates(t.Context(), fact, artGap{}, title)
@@ -103,9 +103,9 @@ func TestWhatTVmazeHoldsNoArtFor(t *testing.T) {
 		title titleRef
 	}{
 		{name: "a movie", fact: factPoster,
-			title: titleRef{kind: libraryKindMovies, ids: providerIDs{"tvdb": "81189"}}},
+			title: titleRef{kind: libraryKindMovies, ids: providerIDs{"tvdb": "800001"}}},
 		{name: "a type TVmaze does not hold", fact: factClearart,
-			title: titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "81189"}}},
+			title: titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "800001"}}},
 		{name: "a series TVmaze does not hold", fact: factPoster,
 			title: titleRef{kind: libraryKindSeries}},
 	}
@@ -132,7 +132,7 @@ func TestWhatTVmazeHoldsNoArtFor(t *testing.T) {
 func TestWhatTheTVmazeArtAnswererDoesWithARefusal(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusInternalServerError, map[string]string{})
 	answerer := newTVmazeArtAnswerer(client)
-	title := titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "81189"}}
+	title := titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "800001"}}
 
 	if _, err := answerer.candidates(t.Context(), factPoster, artGap{}, title); err == nil {
 		t.Error("the answerer reported no error, want one")
@@ -163,7 +163,7 @@ func TestATVmazeImageWithNoAddressIsNoImage(t *testing.T) {
 func TestAnIDTVmazeAnswersNoShowFor(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{tvmazeLookupPath: `{}`})
 	answerer := newTVmazeArtAnswerer(client)
-	title := titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "81189"}}
+	title := titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "800001"}}
 
 	candidates, err := answerer.candidates(t.Context(), factPoster, artGap{}, title)
 

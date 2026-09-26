@@ -12,20 +12,20 @@ const SHOWS: &str = "screening/shows";
 // One film the catalog holds under three names, which is what an .nfo file
 // with two provider ids and a folder key leaves behind.
 fn a_named_film(path: &Path) {
-    insert_movie(path, FILMS, "movie:tmdb:603", "Some Film", "some film");
+    insert_movie(path, FILMS, "movie:tmdb:7001", "Some Film", "some film");
     for alias in [
-        "movie:tmdb:603",
-        "movie:imdb:tt0133093",
+        "movie:tmdb:7001",
+        "movie:imdb:tt9000001",
         "movie:path:some-film-1999",
     ] {
-        insert_alias(path, FILMS, alias, "movie:tmdb:603");
+        insert_alias(path, FILMS, alias, "movie:tmdb:7001");
     }
 }
 
 // One series under two names, with the season every episode test uses.
 fn a_named_series(path: &Path) {
     insert_series(path, SHOWS, SERIES, "Some Show", "some show");
-    insert_alias(path, SHOWS, "series:tvdb:73739", SERIES);
+    insert_alias(path, SHOWS, "series:tvdb:8001", SERIES);
     insert_alias(path, SHOWS, "series:path:some-show", SERIES);
 }
 
@@ -44,8 +44,8 @@ fn a_movie_records_against_every_name_the_catalog_holds_for_it() {
     assert_eq!(
         identity.aliases,
         BTreeMap::from([
-            ("tmdb".to_string(), "603".to_string()),
-            ("imdb".to_string(), "tt0133093".to_string()),
+            ("tmdb".to_string(), "7001".to_string()),
+            ("imdb".to_string(), "tt9000001".to_string()),
             ("path".to_string(), "some-film-1999".to_string()),
         ])
     );
@@ -63,7 +63,7 @@ fn an_episode_records_against_its_series_and_the_two_numbers() {
     assert_eq!(
         identity.aliases,
         BTreeMap::from([
-            ("tvdb".to_string(), "73739".to_string()),
+            ("tvdb".to_string(), "8001".to_string()),
             ("path".to_string(), "some-show".to_string()),
         ])
     );
@@ -80,7 +80,7 @@ fn a_trailer_records_against_no_work() {
         &path,
         FILMS,
         &Selection::Trailer {
-            id: "movie:tmdb:603".into(),
+            id: "movie:tmdb:7001".into(),
         },
     );
 
@@ -91,7 +91,7 @@ fn a_trailer_records_against_no_work() {
 fn a_work_the_catalog_names_nowhere_records_against_nothing() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    insert_movie(&path, FILMS, "movie:tmdb:603", "Some Film", "some film");
+    insert_movie(&path, FILMS, "movie:tmdb:7001", "Some Film", "some film");
 
     assert_eq!(identity(&path, FILMS, &movie_chosen()), Identity::default());
 }
@@ -101,7 +101,7 @@ fn a_name_another_library_holds_is_not_this_works() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     a_named_film(&path);
-    insert_alias(&path, SHOWS, "movie:tvdb:12345", "movie:tmdb:603");
+    insert_alias(&path, SHOWS, "movie:tvdb:12345", "movie:tmdb:7001");
 
     let identity = identity(&path, FILMS, &movie_chosen());
 

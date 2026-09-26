@@ -40,8 +40,9 @@ const (
 // and the next Job follows on the backoff that mayFollow applies.
 //
 // The deadline is above the longest healthy Job. The longest Job measured on
-// liken-1 ran for 7 minutes 53 seconds: a full walk of 1,439 movies onto an
-// empty catalog claim, where the agent's first sync took most of the time.
+// liken-1 ran for 7 minutes 53 seconds: a full walk of a large movies
+// library onto an empty catalog claim, where the agent's first sync took
+// most of the time.
 // Trickplay and the trailer files start no title after phaseTimeLimit, 15
 // minutes, and then finish the title they have. One trickplay title can
 // decode for up to ffmpegTimeout, one hour, and one trailer file can take

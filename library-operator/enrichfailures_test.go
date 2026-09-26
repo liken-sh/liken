@@ -75,7 +75,7 @@ func TestTheIdentityFactFailsWhereAnItemReadIsRefused(t *testing.T) {
 
 func TestAFolderThatWillNotTakeALedgerLogsTheFailure(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
+	folder := filepath.Join(root, "The Long Survey (1982)")
 	writeFile(t, filepath.Join(folder, likenDirectory), "a file where the directory belongs")
 	work, log := testEnricher(t, libraryKindMovies, root, nil)
 
@@ -201,8 +201,8 @@ func TestAnIdentityCountThatIsRefusedIsAnError(t *testing.T) {
 func TestAnAttemptThatCannotBeRecordedLogsTheFailure(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
-	writeFile(t, filepath.Join(root, "The Thing (1982)", likenDirectory), "a file where the directory belongs")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
+	writeFile(t, filepath.Join(root, "The Long Survey (1982)", likenDirectory), "a file where the directory belongs")
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
@@ -226,7 +226,7 @@ func TestACooldownThatEndsOnTheContextIsAnError(t *testing.T) {
 	fake.tooMany = 1
 	client.wait = func(context.Context, time.Duration) error { return context.Canceled }
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err == nil {
+	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
 		t.Error("the search reported no error, want the cooldown's")
 	}
 }
@@ -234,7 +234,7 @@ func TestACooldownThatEndsOnTheContextIsAnError(t *testing.T) {
 func TestAnAddressTheClientCannotBuildIsAnError(t *testing.T) {
 	client := newTMDbClient("http://\x7f", "a-token")
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err == nil {
+	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
 		t.Error("the search reported no error, want one")
 	}
 }
@@ -242,8 +242,8 @@ func TestAnAddressTheClientCannotBuildIsAnError(t *testing.T) {
 func TestTheProbeStopsOnAShutdown(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
-	seedProbeGap(t, catalog, root, "Alien (1979)", "Alien (1979).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
+	seedProbeGap(t, catalog, root, "Orbit (1979)", "Orbit (1979).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	ctx, cancel := context.WithCancel(t.Context())
 	probe := func(context.Context, string) ([]byte, error) {

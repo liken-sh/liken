@@ -83,10 +83,10 @@ func TestAnEnricherWithNoEnvironmentTakesTheDefaults(t *testing.T) {
 
 func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "Action", "The Thing (1982)", "thing.mkv"), "video")
-	writeFile(t, filepath.Join(root, "Action", "Alien (1979)", "alien.mkv"), "video")
-	thing := filepath.Join("Action", "The Thing (1982)")
-	alien := filepath.Join("Action", "Alien (1979)")
+	writeFile(t, filepath.Join(root, "Action", "The Long Survey (1982)", "survey.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Action", "Orbit (1979)", "orbit.mkv"), "video")
+	survey := filepath.Join("Action", "The Long Survey (1982)")
+	orbit := filepath.Join("Action", "Orbit (1979)")
 
 	cases := []struct {
 		name       string
@@ -97,28 +97,28 @@ func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 	}{
 		{
 			name:       "a relative folder under the root",
-			scanPaths:  []string{"Action/The Thing (1982)"},
-			wantScopes: []string{thing},
-			inScope:    filepath.Join(thing, "thing.mkv"),
-			outScope:   filepath.Join(alien, "alien.mkv"),
+			scanPaths:  []string{"Action/The Long Survey (1982)"},
+			wantScopes: []string{survey},
+			inScope:    filepath.Join(survey, "survey.mkv"),
+			outScope:   filepath.Join(orbit, "orbit.mkv"),
 		},
 		{
 			name:       "the media server's own absolute path",
-			scanPaths:  []string{"/data/media/Action/The Thing (1982)"},
-			wantScopes: []string{thing},
-			inScope:    filepath.Join(thing, "thing.mkv"),
+			scanPaths:  []string{"/data/media/Action/The Long Survey (1982)"},
+			wantScopes: []string{survey},
+			inScope:    filepath.Join(survey, "survey.mkv"),
 			outScope:   "Other/other.mkv",
 		},
 		{
 			name:       "two folders",
-			scanPaths:  []string{"Action/The Thing (1982)", "Action/Alien (1979)"},
-			wantScopes: []string{thing, alien},
-			inScope:    filepath.Join(alien, "alien.mkv"),
+			scanPaths:  []string{"Action/The Long Survey (1982)", "Action/Orbit (1979)"},
+			wantScopes: []string{survey, orbit},
+			inScope:    filepath.Join(orbit, "orbit.mkv"),
 			outScope:   "Other/other.mkv",
 		},
 		{
 			name:      "a folder the volume does not hold",
-			scanPaths: []string{"Action/The Thing (1982)", "Action/Not There"},
+			scanPaths: []string{"Action/The Long Survey (1982)", "Action/Not There"},
 			inScope:   "anything at all",
 		},
 		{
@@ -161,22 +161,22 @@ func TestTheLedgerFolderOfAFileIsTheOneTheWalkReads(t *testing.T) {
 		{
 			name:       "a movie's own video",
 			kind:       libraryKindMovies,
-			absolute:   "/library/The Thing (1982)/thing.mkv",
-			wantFolder: "/library/The Thing (1982)",
-			wantEntry:  "thing.mkv",
+			absolute:   "/library/The Long Survey (1982)/survey.mkv",
+			wantFolder: "/library/The Long Survey (1982)",
+			wantEntry:  "survey.mkv",
 		},
 		{
 			name:       "a trailer beside the feature",
 			kind:       libraryKindMovies,
-			absolute:   "/library/The Thing (1982)/trailers/teaser.mkv",
-			wantFolder: "/library/The Thing (1982)",
+			absolute:   "/library/The Long Survey (1982)/trailers/teaser.mkv",
+			wantFolder: "/library/The Long Survey (1982)",
 			wantEntry:  "trailers/teaser.mkv",
 		},
 		{
 			name:       "an episode in a season folder",
 			kind:       libraryKindSeries,
-			absolute:   "/library/Twin Peaks/Season 01/s01e01.mkv",
-			wantFolder: "/library/Twin Peaks/Season 01",
+			absolute:   "/library/Pine Hollow/Season 01/s01e01.mkv",
+			wantFolder: "/library/Pine Hollow/Season 01",
 			wantEntry:  "s01e01.mkv",
 		},
 	}

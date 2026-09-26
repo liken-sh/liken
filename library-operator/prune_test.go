@@ -324,9 +324,9 @@ func TestFullWalkFlushesThePeopleInBoundedChunks(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			root := titleTree(t, "A (2001)")
-			writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\n")
+			writeContributorEntry(t, root, "tam-harlow", "name: Tam Harlow\n")
 			writeContributorEntry(t, root, "iris-kell", "name: Iris Kell\n")
-			writeContributorEntry(t, root, "ann-lee", "name: Ann Lee\n")
+			writeContributorEntry(t, root, "ann-lark", "name: Ann Lark\n")
 			scan, fake := fakeScanner(t, root, libraryKindMovies)
 
 			batchWas := scanFlushBatch
@@ -676,20 +676,20 @@ func TestRescanRemovesAVanishedFolder(t *testing.T) {
 // space the alias marks the stale row every walk and the prune never removes
 // it, and the catalog holds the title twice for as long as the folder stands.
 func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
-	root := artTitleTree(t, "The Signal (2024)")
+	root := artTitleTree(t, "The Relay (2024)")
 	scan, fake := fakeScanner(t, root, libraryKindMovies)
 	ctx := context.Background()
 
 	scan.fullWalk(ctx)
-	pathID := "movie:path:" + slug("The Signal (2024)", 0)
+	pathID := "movie:path:" + slug("The Relay (2024)", 0)
 	if _, held := fake.held(fake.movies)[fakeKey("house/movies", pathID)]; !held {
 		t.Fatalf("movies = %v, want the title under its path-derived id", fake.held(fake.movies))
 	}
 
 	// The test writes the .nfo file, so the walk reads a provider id and the
 	// title's canonical id becomes the tmdb one.
-	writeFile(t, filepath.Join(root, "The Signal (2024)", "movie.nfo"),
-		`<movie><title>The Signal</title><year>2024</year><uniqueid type="tmdb">424242</uniqueid></movie>`)
+	writeFile(t, filepath.Join(root, "The Relay (2024)", "movie.nfo"),
+		`<movie><title>The Relay</title><year>2024</year><uniqueid type="tmdb">424242</uniqueid></movie>`)
 	scan.fullWalk(ctx)
 
 	movies := fake.held(fake.movies)
@@ -1197,10 +1197,10 @@ func TestARescanTakesTheTrailersATitleLost(t *testing.T) {
 // The three key columns a trailer sweep reads back.
 func TestTrailerKeysSplitBackIntoTheirColumns(t *testing.T) {
 	keys := trailerKeys([]string{
-		"movie:tmdb:1" + linkKeySeparator + providerBlockTMDb + linkKeySeparator + "sJ9mvBJ1aTI",
+		"movie:tmdb:1" + linkKeySeparator + providerBlockTMDb + linkKeySeparator + "Hb5nQw2kR07",
 	})
 
-	want := trailerKey{Item: "movie:tmdb:1", Provider: providerBlockTMDb, Key: "sJ9mvBJ1aTI"}
+	want := trailerKey{Item: "movie:tmdb:1", Provider: providerBlockTMDb, Key: "Hb5nQw2kR07"}
 	if len(keys) != 1 || keys[0] != want {
 		t.Errorf("trailerKeys = %+v, want %+v", keys, want)
 	}

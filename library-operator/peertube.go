@@ -96,7 +96,7 @@ func (a peertubeTrailerAnswerer) providerBlock() string { return providerBlockPe
 // Every result whose name carries this title. A name that states no year
 // still matches on the title alone, at a lower score. A name that says clip
 // or names no kind is dropped before it is scored, because a trailer song is
-// no trailer of the title. A search for `Dune` answers every Dune video the
+// no trailer of the title. A search for `Kestrel` answers every Kestrel video the
 // instance holds, so a result that scores 0 is dropped and never recorded.
 func (a peertubeTrailerAnswerer) trailers(ctx context.Context, title trailerTitle) ([]trailerEntry, error) {
 	if title.title == "" {

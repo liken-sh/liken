@@ -19,7 +19,7 @@ import (
 // The namespace, the Player, and the library key every request here
 // names, so one request differs from another only where the test differs.
 const (
-	testPlayer      = "den-tv"
+	testPlayer      = "den"
 	testLibraryKey  = testLibraryNamespace + "/movies"
 	testFilmPath    = "Some Film (1999)/Some Film (1999).mkv"
 	testPosterPath  = "Some Film (1999)/poster.jpg"
@@ -238,12 +238,12 @@ func TestAReferenceNamesTheClaimAScreenReads(t *testing.T) {
 		{
 			name:    "a franchises library",
 			library: studioFranchises(),
-			want:    "claim://franchise-art//Star Wars/poster.jpg",
+			want:    "claim://franchise-art//Long Survey/poster.jpg",
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			relative := "Star Wars/poster.jpg"
+			relative := "Long Survey/poster.jpg"
 			if testCase.library.Spec.Kind == libraryKindMovies {
 				relative = "Some Film (1999)/poster.jpg"
 			}
@@ -424,7 +424,7 @@ func TestAPlayTheAPIServerRefusesLeavesNothingBehind(t *testing.T) {
 func TestATopicThatIsNeitherAReportNorAPlayRequestHoldsNothing(t *testing.T) {
 	operator, _ := playingHouse(t)
 
-	operator.handleBusMessage("liken/media/players/house/den-tv/commands",
+	operator.handleBusMessage("liken/media/players/house/den/commands",
 		filmRequest(film(testFilmPath)))
 
 	if held := operator.plays.take(); len(held) != 0 {
@@ -591,10 +591,10 @@ func TestAPlayWithNoUsableSlugNamesThePlayerAlone(t *testing.T) {
 func audienceRequest(people ...string) []byte {
 	request := playRequest{
 		Library: testLibraryKey,
-		Slug:    "the-office-s03e05",
+		Slug:    "a-series-s03e05",
 		Items:   []playRequestItem{film(testFilmPath)},
 		People:  people,
-		Aliases: map[string]string{"tmdb": "2316", "imdb": "tt0386676"},
+		Aliases: map[string]string{"tmdb": "2101", "imdb": "tt9002101"},
 		Season:  3,
 		Episode: 5,
 	}
@@ -610,9 +610,9 @@ func audienceRequest(people ...string) []byte {
 // Play only when every owner is gone.
 func TestAPlayCarriesItsAudienceAsOwnerReferences(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	seedPerson(cluster, "chris")
-	seedPerson(cluster, "thora")
-	publishPlay(operator, audienceRequest("chris", "thora"))
+	seedPerson(cluster, "person-a")
+	seedPerson(cluster, "person-b")
+	publishPlay(operator, audienceRequest("person-a", "person-b"))
 
 	operator.pass()
 
@@ -620,13 +620,13 @@ func TestAPlayCarriesItsAudienceAsOwnerReferences(t *testing.T) {
 	if len(owners) != 2 {
 		t.Fatalf("owners = %+v, want the two people", owners)
 	}
-	if owners[0].Kind != personKind || owners[0].Name != "chris" || owners[0].UID != "chris-uid" {
+	if owners[0].Kind != personKind || owners[0].Name != "person-a" || owners[0].UID != "person-a-uid" {
 		t.Errorf("owner = %+v, want the Person with its uid", owners[0])
 	}
 	if owners[0].APIVersion != personAPIVersion || owners[0].Controller {
 		t.Errorf("owner = %+v, want people-operator's group and no controller flag", owners[0])
 	}
-	if owners[1].Name != "thora" {
+	if owners[1].Name != "person-b" {
 		t.Errorf("owners = %+v, want one Person per name the request carried", owners)
 	}
 }
@@ -642,8 +642,8 @@ func TestAPlayCarriesTheWorksIdentityAsAnnotations(t *testing.T) {
 	annotations := cluster.heldPlays()[0].Metadata.Annotations
 	want := map[string]string{
 		libraryAnnotation:              "movies",
-		aliasAnnotationPrefix + "tmdb": "2316",
-		aliasAnnotationPrefix + "imdb": "tt0386676",
+		aliasAnnotationPrefix + "tmdb": "2101",
+		aliasAnnotationPrefix + "imdb": "tt9002101",
 		seasonAnnotation:               "3",
 		episodeAnnotation:              "5",
 	}
@@ -670,8 +670,8 @@ func TestAMovieCarriesNoSeasonAndNoEpisode(t *testing.T) {
 // does not hold is dropped and the Play still plays.
 func TestANameNobodyHoldsIsDroppedAndThePlayStillPlays(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	seedPerson(cluster, "chris")
-	publishPlay(operator, audienceRequest("chris", "nobody"))
+	seedPerson(cluster, "person-a")
+	publishPlay(operator, audienceRequest("person-a", "nobody"))
 
 	operator.pass()
 
@@ -680,7 +680,7 @@ func TestANameNobodyHoldsIsDroppedAndThePlayStillPlays(t *testing.T) {
 		t.Fatalf("plays = %+v, want the one the request asked for", plays)
 	}
 	owners := plays[0].Metadata.OwnerReferences
-	if len(owners) != 1 || owners[0].Name != "chris" {
+	if len(owners) != 1 || owners[0].Name != "person-a" {
 		t.Errorf("owners = %+v, want the one person the cluster holds", owners)
 	}
 }

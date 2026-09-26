@@ -59,7 +59,7 @@ no release date is last.
 
 Each slot of the wall is the title's poster with the title and its
 year under it, and a second line for the parts, joined: "Director,
-Writer", or "Director, as Tony Stark". A series is one slot, not one
+Writer", or "Director, as Captain Rourke". A series is one slot, not one
 per episode, because the credits fact writes a series' people at the
 series and not at its episodes. The subtle mark that tells a series
 from a movie is the year: a movie shows the year it was released, and

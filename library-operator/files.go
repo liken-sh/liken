@@ -222,7 +222,7 @@ func fileRoleOf(category, name string, place filePlace) string {
 }
 
 // The marks Jellyfin appends to an extra's file name. Each one is the last
-// token of the base name, as in The Matrix (1999)-featurette.mkv, which is how
+// token of the base name, as in Some Film (1999)-featurette.mkv, which is how
 // an extra beside the feature says what it is.
 var extraMarks = map[string]bool{
 	"behindthescenes": true, "deleted": true, "deletedscene": true,
@@ -292,8 +292,8 @@ func subtitleRole(base string) string {
 
 // hearingImpairedTag is what the tools write for a hearing-impaired track,
 // and it is also the language tag for Hindi. The two are told apart by what
-// comes before: a language tag precedes the flag, so The Matrix.en.hi.srt is
-// English for the hearing impaired, and The Matrix.hi.srt is Hindi.
+// comes before: a language tag precedes the flag, so Some Film.en.hi.srt is
+// English for the hearing impaired, and Some Film.hi.srt is Hindi.
 const hearingImpairedTag = "hi"
 
 // hearingImpairedFlag reports whether a name carries hi as the flag rather
@@ -398,7 +398,7 @@ var subtitleFlags = map[string]bool{
 }
 
 // fileLanguage reads the language tag off a file name, in the form the tools
-// write it: The Matrix (1999).en.srt, or The Matrix (1999).en.forced.srt. It is
+// write it: Some Film (1999).en.srt, or Some Film (1999).en.forced.srt. It is
 // a two-letter or three-letter tag as the name gave it, with no translation
 // between the two. A name with one dotted token carries no tag, so a film named
 // Up keeps its title. It steps over the flags that follow the tag, hi among
@@ -455,7 +455,7 @@ func lastToken(tokens []string) string {
 }
 
 // stripAnyExtension drops a name's final extension, whatever it is, so
-// The Matrix (1999).en.forced.srt reads as The Matrix (1999).en.forced.
+// Some Film (1999).en.forced.srt reads as Some Film (1999).en.forced.
 func stripAnyExtension(name string) string {
 	return strings.TrimSuffix(name, filepath.Ext(name))
 }

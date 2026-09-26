@@ -85,7 +85,7 @@ type trailerAnswerer interface {
 
 // What a provider's own name for a video states: the title it belongs to,
 // the year that title came out, and the kind of video it is. A trailer
-// channel writes names like `DUNE: PART THREE (2026) - IMAX Trailer [4K]`.
+// channel writes names like `KESTREL: PART THREE (2026) - IMAX Trailer [4K]`.
 type trailerName struct {
 	title string
 	year  int
@@ -168,8 +168,8 @@ func recordedTrailerKind(kind string) bool {
 }
 
 // One title as a comparison reads it: lower case, & as and, and letters
-// and digits alone. So `Don't Move` and `DON'T MOVE` are one word, and
-// `DUNE: PART THREE` is `Dune - Part Three`.
+// and digits alone. So `Won't Stay` and `WON'T STAY` are one word, and
+// `KESTREL: PART THREE` is `Kestrel - Part Three`.
 func foldTitle(s string) string {
 	folded := strings.Builder{}
 	for _, letter := range strings.ToLower(strings.ReplaceAll(s, "&", "and")) {

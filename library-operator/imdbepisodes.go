@@ -35,7 +35,7 @@ func (e *enricher) fillEpisodeRating(ctx context.Context, id string) (string, bo
 	nfoPath := nfoBeside(absolute)
 	document, err := os.ReadFile(nfoPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		e.logf("could not read the .nfo file of %s: %v", target.path, err)
+		e.logf("could not read the .nfo file of %s: %v", opaqueID(target.id), err)
 		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 	}
 	if !hasRootElement(document) {
@@ -43,10 +43,10 @@ func (e *enricher) fillEpisodeRating(ctx context.Context, id string) (string, bo
 	}
 	group := nfoGroup(factRatingIMDb)
 	if fought, err := e.episodeGroupHeldByAnother(folder, file, group, document); err != nil {
-		e.logf("could not read the %s of %s: %v", factRatingIMDb, target.path, err)
+		e.logf("could not read the %s of %s: %v", factRatingIMDb, opaqueID(target.id), err)
 		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 	} else if fought {
-		e.logf("another writer holds the %s of %s, so this run left it", factRatingIMDb, target.path)
+		e.logf("another writer holds the %s of %s, so this run left it", factRatingIMDb, opaqueID(target.id))
 		return e.recordEpisodeRating(folder, file, target, attemptFight, ""), false
 	}
 	rating, held := e.datasets.ratings[target.imdb]
@@ -61,21 +61,20 @@ func (e *enricher) fillEpisodeRating(ctx context.Context, id string) (string, bo
 			err = e.writer.write(nfoPath, edited)
 		}
 		if err != nil {
-			e.logf("could not write the %s of %s: %v", factRatingIMDb, target.path, err)
+			e.logf("could not write the %s of %s: %v", factRatingIMDb, opaqueID(target.id), err)
 			return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 		}
 		document = edited
 	}
 	hash, err := groupHash(document, group)
 	if err != nil {
-		e.logf("could not read back the %s of %s: %v", factRatingIMDb, target.path, err)
+		e.logf("could not read back the %s of %s: %v", factRatingIMDb, opaqueID(target.id), err)
 		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 	}
-	path := relativePath(e.root, absolute)
 	if written {
-		e.logf("wrote the %s of %s from %s", factRatingIMDb, path, providerBlockIMDb)
+		e.logf("wrote the %s of %s from %s", factRatingIMDb, opaqueID(target.id), providerBlockIMDb)
 	} else {
-		e.logf("the .nfo file of %s already holds the %s from %s", path, factRatingIMDb, providerBlockIMDb)
+		e.logf("the .nfo file of %s already holds the %s from %s", opaqueID(target.id), factRatingIMDb, providerBlockIMDb)
 	}
 	return e.recordEpisodeRating(folder, file, target, attemptFound, hash), written
 }
@@ -124,7 +123,7 @@ func (e *enricher) recordEpisodeRating(folder, file string, target *imdbTarget, 
 			DatasetModified: e.datasets.modified})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", factRatingIMDb, file, err)
+		e.logf("could not record the %s attempt at %s: %v", factRatingIMDb, opaqueID(target.id), err)
 	}
 	e.writeEpisodeRatingRows(folder, file, target.id, result == attemptFound)
 	return result
@@ -141,12 +140,12 @@ func (e *enricher) writeEpisodeRatingRows(folder, file, id string, wrote bool) {
 	ctx := context.Background()
 	if wrote {
 		if err := e.writeEpisodeBody(ctx, filepath.Join(folder, file), id); err != nil {
-			e.logf("could not write the %s rows of %s: %v", factRatingIMDb, file, err)
+			e.logf("could not write the %s rows of %s: %v", factRatingIMDb, opaqueID(id), err)
 		}
 	}
 	ledger, err := readLikenLedger(folder, factRatingIMDb)
 	if err != nil {
-		e.logf("could not read the %s ledger at %s: %v", factRatingIMDb, folder, err)
+		e.logf("could not read the %s ledger at %s: %v", factRatingIMDb, e.named(folder), err)
 		return
 	}
 	var rows []attemptRow
@@ -158,7 +157,7 @@ func (e *enricher) writeEpisodeRatingRows(folder, file, id string, wrote bool) {
 		}
 	}
 	if _, err := e.catalog.UpsertAttempts(ctx, rows); err != nil {
-		e.logf("could not write the %s attempt row of %s: %v", factRatingIMDb, file, err)
+		e.logf("could not write the %s attempt row of %s: %v", factRatingIMDb, opaqueID(id), err)
 	}
 }
 

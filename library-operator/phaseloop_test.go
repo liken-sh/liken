@@ -53,7 +53,7 @@ func TestTheGapTablesAreTheTablesAGapQueryReads(t *testing.T) {
 func TestAPhaseWithNothingToWaitForFillsItsGapAndEnds(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work := phaseOf(t, catalog, factProbe)
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, work.root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	answering(t, answeringProbe(ffprobeOfOneFile))
 
 	if err := work.runFacts(t.Context(), []string{factProbe}); err != nil {
@@ -91,7 +91,7 @@ func TestAPhaseWorksOnTheWalksRowsAsTheyArrive(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- work.runFacts(t.Context(), []string{factProbe}) }()
 
-	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, work.root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	deadline := time.After(scanTestTimeout)
 	for len(probeGap(t, work)) != 0 {
 		select {

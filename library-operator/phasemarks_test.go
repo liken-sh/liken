@@ -170,17 +170,17 @@ func TestTheBoardReportsAVolumeItCannotWrite(t *testing.T) {
 // another file takes a lock of its own.
 func TestTheNFOLockHoldsOneEditAtATime(t *testing.T) {
 	locks := t.TempDir()
-	release, err := lockNFO(locks, "/library/Arrival (2016)/movie.nfo")
+	release, err := lockNFO(locks, "/library/Landfall (2016)/movie.nfo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := lockNFO(locks, "/library/Heat (1995)/movie.nfo")
+	other, err := lockNFO(locks, "/library/Dry Spell (1995)/movie.nfo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	other()
 
-	path := filepath.Join(locks, nfoLocksDir, nfoLockName("/library/Arrival (2016)/movie.nfo"))
+	path := filepath.Join(locks, nfoLocksDir, nfoLockName("/library/Landfall (2016)/movie.nfo"))
 	if !heldElsewhere(t, path) {
 		t.Error("a second holder took the lock while the first edit held it")
 	}
@@ -207,7 +207,7 @@ func heldElsewhere(t *testing.T, path string) bool {
 // A writer with no phases volume edits with no lock, which is how a test
 // and a local run edit a .nfo file.
 func TestAnEditWithNoPhasesVolumeTakesNoLock(t *testing.T) {
-	release, err := lockNFO("", "/library/Arrival (2016)/movie.nfo")
+	release, err := lockNFO("", "/library/Landfall (2016)/movie.nfo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestTheNFOLockReportsAVolumeItCannotWrite(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lockNFO(file, "/library/Arrival (2016)/movie.nfo"); err == nil {
+	if _, err := lockNFO(file, "/library/Landfall (2016)/movie.nfo"); err == nil {
 		t.Error("lockNFO = nil error under a file")
 	}
 }

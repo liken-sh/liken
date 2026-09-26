@@ -328,10 +328,10 @@ func TestListPlayersReadsEveryNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, PlayerList{
 		Metadata: ListMeta{ResourceVersion: "1200"},
 		Items: []Player{{
-			Metadata: ObjectMeta{Name: "den-tv", Namespace: "house"},
+			Metadata: ObjectMeta{Name: "den", Namespace: "house"},
 			Status: PlayerStatus{Idle: &PlayerIdleStatus{
 				Controller: screenController,
-				Claim:      "den-tv-idle-devices",
+				Claim:      "den-idle-devices",
 				Requests:   []string{"draw"},
 			}},
 		}},
@@ -350,7 +350,7 @@ func TestListPlayersReadsEveryNamespace(t *testing.T) {
 		t.Fatalf("items = %+v, want the one player the server answered", list.Items)
 	}
 	idle := list.Items[0].idle()
-	if idle.Claim != "den-tv-idle-devices" || len(idle.Requests) != 1 {
+	if idle.Claim != "den-idle-devices" || len(idle.Requests) != 1 {
 		t.Errorf("idle = %+v, want the claim and the requests", idle)
 	}
 	if !list.Items[0].delegated() {
@@ -525,18 +525,18 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 			return err
 		}},
 		{name: "DeletePersistentVolumeClaim", call: func(c *Client) error {
-			return DeletePersistentVolumeClaim(t.Context(), c, "house", "den-tv-media-browser-catalog")
+			return DeletePersistentVolumeClaim(t.Context(), c, "house", "den-media-browser-catalog")
 		}},
 		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
 		{name: "ListPlayers", call: func(c *Client) error { _, err := ListPlayers(t.Context(), c); return err }},
 		{name: "ListPlays", call: func(c *Client) error { _, err := ListPlays(t.Context(), c); return err }},
 		{name: "PatchPlayMetadata", call: func(c *Client) error {
-			_, err := PatchPlayMetadata(t.Context(), c, "house", "den-tv-b2k9x", "1", ObjectMeta{})
+			_, err := PatchPlayMetadata(t.Context(), c, "house", "den-b2k9x", "1", ObjectMeta{})
 			return err
 		}},
 		{name: "ListPeople", call: func(c *Client) error { _, err := ListPeople(t.Context(), c); return err }},
 		{name: "PatchPersonFinalizers", call: func(c *Client) error {
-			_, err := PatchPersonFinalizers(t.Context(), c, "chris", "1", nil)
+			_, err := PatchPersonFinalizers(t.Context(), c, "person-a", "1", nil)
 			return err
 		}},
 		{name: "ListCatalogMemberPods", call: func(c *Client) error { _, err := ListCatalogMemberPods(t.Context(), c); return err }},

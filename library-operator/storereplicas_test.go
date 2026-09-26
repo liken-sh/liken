@@ -23,10 +23,10 @@ func TestEveryCopyOfAStoreCarriesItsNumber(t *testing.T) {
 		index int
 		want  string
 	}{
-		{name: "the first catalog copy", store: catalogStoreOf(catalog), want: "house-catalog-catalog-0"},
-		{name: "a third catalog copy", store: catalogStoreOf(catalog), index: 2, want: "house-catalog-catalog-2"},
-		{name: "the first progress copy", store: progressStoreOf(catalog), want: "house-catalog-progress-0"},
-		{name: "a third progress copy", store: progressStoreOf(catalog), index: 2, want: "house-catalog-progress-2"},
+		{name: "the first catalog copy", store: catalogStoreOf(catalog), want: "house-catalog-0"},
+		{name: "a third catalog copy", store: catalogStoreOf(catalog), index: 2, want: "house-catalog-2"},
+		{name: "the first progress copy", store: progressStoreOf(catalog), want: "house-progress-0"},
+		{name: "a third progress copy", store: progressStoreOf(catalog), index: 2, want: "house-progress-2"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -143,15 +143,15 @@ func TestScalingDownTakesEveryCopyAboveTheCountAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-catalog-0") == nil {
+	if cluster.heldPod("house-catalog-0") == nil {
 		t.Error("the sweep took the first copy, which the Catalog still asks for")
 	}
-	for _, name := range []string{"house-catalog-catalog-1", "house-catalog-catalog-2"} {
+	for _, name := range []string{"house-catalog-1", "house-catalog-2"} {
 		if cluster.heldPod(name) != nil {
 			t.Errorf("the pod %s stands, want it taken down", name)
 		}
 	}
-	if cluster.heldClaim("house-catalog-catalog") == nil {
+	if cluster.heldClaim("house-catalog") == nil {
 		t.Error("the sweep took the claim the copies that remain mount")
 	}
 	if got := cluster.countRequests(http.MethodDelete, "persistentvolumeclaims"); got != 0 {
@@ -181,15 +181,15 @@ func TestASettledStoreTakesNothingDown(t *testing.T) {
 func TestTheSweepLeavesWhatCarriesNoStoreLabel(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
-	cluster.pods["house-catalog-catalog-1"] = &Pod{
-		Metadata: ObjectMeta{Name: "house-catalog-catalog-1", Namespace: "house"},
+	cluster.pods["house-catalog-1"] = &Pod{
+		Metadata: ObjectMeta{Name: "house-catalog-1", Namespace: "house"},
 	}
 
 	if err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-catalog-1") == nil {
+	if cluster.heldPod("house-catalog-1") == nil {
 		t.Error("the sweep took a pod that carries no store label")
 	}
 }
@@ -199,7 +199,7 @@ func TestTheSweepLeavesWhatCarriesNoStoreLabel(t *testing.T) {
 func TestTheSweepReportsAReadTheServerRefuses(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
-	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-catalog-1"] = http.StatusInternalServerError
+	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-1"] = http.StatusInternalServerError
 
 	err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1)
 
@@ -248,7 +248,7 @@ func TestTheBlockedMessageNamesTheClassAndTheCount(t *testing.T) {
 			if !strings.Contains(message, one.want) {
 				t.Errorf("message = %q, want it to name %s", message, one.want)
 			}
-			if !strings.Contains(message, "house-catalog-catalog") || !strings.Contains(message, "3") {
+			if !strings.Contains(message, "house-catalog") || !strings.Contains(message, "3") {
 				t.Errorf("message = %q, want the store and the count it asked for", message)
 			}
 		})
@@ -272,7 +272,7 @@ func TestTheProgressStoreBlocksOnItsOwnClass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if reason != catalogReasonClassNotPerNode || !strings.Contains(message, "house-catalog-progress") {
+	if reason != catalogReasonClassNotPerNode || !strings.Contains(message, "house-progress") {
 		t.Errorf("reason = %q, message = %q, want the progress store blocked", reason, message)
 	}
 }
@@ -299,7 +299,7 @@ func TestTheSweepReportsADeleteTheServerRefuses(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	standingCatalogCopies(cluster, catalog, 2)
-	cluster.broken["DELETE /api/v1/namespaces/house/pods/house-catalog-catalog-1"] =
+	cluster.broken["DELETE /api/v1/namespaces/house/pods/house-catalog-1"] =
 		http.StatusInternalServerError
 
 	err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1)

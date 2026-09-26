@@ -55,38 +55,38 @@ you type:
 ## The parts
 
 ```yaml
-name: Star Wars
+name: Example Saga
 
 sources:
-  - https://www.starwars.com/news/star-wars-movies-and-series-guide
+  - https://example.com/example-saga-timeline
 
 calendar:
   unit: years
-  zero: the Battle of Yavin
-  before: BBY
-  after: ABY
+  zero: the Founding
+  before: BF
+  after: AF
 
 universe: Prime
 
 eras:
-  - name: Age of Rebellion
+  - name: The First Age
     from: -5
     to: 4
 
 order:
-  - movie: tmdb:1893
-    title: "Star Wars: Episode I - The Phantom Menace"
-    released: 1999-05-19
+  - movie: tmdb:900001
+    title: "Example Saga: The Beginning"
+    released: 2001-03-10
     time: { from: -32, to: -32 }
-  - series: tvdb:83268
-    title: "Star Wars: The Clone Wars"
-    released: 2008-10-03
+  - series: tvdb:900002
+    title: "Example Saga: The Chronicles"
+    released: 2003-09-01
     seasons:
       - season: 1
         time: { from: -22, to: -22 }
       - season: 3
         episodes: [S03E01, S03E03-S03E22]
-        note: Lucasfilm's order plays S03E02 before S02E16.
+        note: The studio's order plays S03E02 before S02E16.
 ```
 
 `name` and `order` are required. Everything else is optional.
@@ -121,9 +121,9 @@ same season may appear again inside one show when the story order
 cuts it into runs.
 
 An episode code names the provider's numbering, and the provider
-does not always number a season the way it aired. TheTVDB numbers
-Firefly in aired order, so its pilot is `S01E11`, and a file that
-plays the pilot first lists `S01E11` first. A library whose `.nfo` files
+does not always number a season the way it aired. A provider can
+number a series in aired order, where its pilot aired last as
+`S01E11`, and a file that plays the pilot first lists `S01E11` first. A library whose `.nfo` files
 came from a provider with a different numbering needs a different
 list, so a franchise file names one provider's codes and the
 directory's `AGENTS.md` says which.
@@ -149,9 +149,9 @@ A film or a series entry may carry these:
 
 A season may carry `time` and `note` alone.
 
-`universes` follows the story, not the camera. Spider-Man: No Way
-Home never leaves the main universe, and it names three, because it
-brings two other Spider-Man stories into the main one. An entry that
+`universes` follows the story, not the camera. A film that never
+leaves the main universe names three when it brings the heroes of two
+other universes into the main one. An entry that
 names no universes is in the franchise's own universe. An entry that
 names one other universe belongs to that one.
 
@@ -159,12 +159,12 @@ names one other universe belongs to that one.
 
 A calendar needs a `unit`, either `years` or `days`. Without `zero`,
 `before`, and `after`, the times are plain calendar years, which is
-what the Marvel films count in. With `zero`, the times count from the
-named event, as Star Wars counts from the Battle of Yavin, and the
-page prints the zero once, under the franchise's name at the top of
-the page: "Years from the Battle of Yavin". `before` and `after` are short marks of at
+what a story set in our own history counts in. With `zero`, the times
+count from the named event, as the example counts from the Founding,
+and the page prints the zero once, under the franchise's name at the
+top of the page: "Years from the Founding". `before` and `after` are short marks of at
 most six characters, printed after the magnitude of a time, so -233
-with `before: BBY` reads "233 BBY". Leave them out where the franchise
+with `before: BF` reads "233 BF". Leave them out where the franchise
 has no short marks: a days calendar without them reads "Day 1141",
 and a years calendar without them keeps the minus sign on the times
 before the zero.

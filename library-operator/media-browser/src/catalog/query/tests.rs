@@ -71,8 +71,8 @@ fn a_genre_is_headed_by_its_name_and_the_counts_of_both_kinds() {
     };
     assert_eq!(query.name("ignored"), "Science Fiction");
     assert_eq!(
-        query.heading("ignored", counts(499, 429, 70)),
-        "Science Fiction · 429 movies, 70 series"
+        query.heading("ignored", counts(135, 120, 15)),
+        "Science Fiction · 120 movies, 15 series"
     );
     assert_eq!(query.all_titles(), query);
 }
@@ -85,8 +85,8 @@ fn a_genre_of_one_kind_names_that_kind_alone() {
         sort: GenreSort::default(),
     };
     let cases = [
-        (counts(429, 429, 0), "Science Fiction · 429 movies"),
-        (counts(70, 0, 70), "Science Fiction · 70 series"),
+        (counts(120, 120, 0), "Science Fiction · 120 movies"),
+        (counts(15, 0, 15), "Science Fiction · 15 series"),
         (counts(1, 1, 0), "Science Fiction · 1 movie"),
         (counts(1, 0, 1), "Science Fiction · 1 series"),
         (counts(0, 0, 0), "Science Fiction · 0"),
@@ -99,10 +99,10 @@ fn a_genre_of_one_kind_names_that_kind_alone() {
 #[test]
 fn a_search_is_headed_by_the_text_and_the_count() {
     let query = Query::Search {
-        text: "batman".into(),
+        text: "gullwing".into(),
     };
-    assert_eq!(query.name("ignored"), "batman");
-    assert_eq!(query.heading("ignored", counts(4, 4, 0)), "batman · 4");
+    assert_eq!(query.name("ignored"), "gullwing");
+    assert_eq!(query.heading("ignored", counts(4, 4, 0)), "gullwing · 4");
     assert_eq!(query.all_titles(), query);
 }
 
@@ -175,7 +175,7 @@ fn every_other_query_draws_no_button_and_never_resorts() {
         Query::Released { fold: Fold::Titles },
         Query::Added { fold: Fold::Titles },
         Query::Search {
-            text: "batman".into(),
+            text: "gullwing".into(),
         },
     ] {
         assert_eq!(query.sort_word(), None, "{query:?}");

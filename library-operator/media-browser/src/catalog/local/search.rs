@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn a_shelf_with_no_index_answers_nothing() {
         let shelf = Shelf::default();
-        assert!(shelf.find("batman").is_empty());
+        assert!(shelf.find("gullwing").is_empty());
         assert!(shelf.held().is_none());
     }
 

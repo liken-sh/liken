@@ -255,14 +255,14 @@ func TestAnEnvVarCarriesADownwardAPIReference(t *testing.T) {
 func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 	status := PlayerStatus{}
 	raw := `{"idle":{"controller":"library.liken.sh/media-browser",` +
-		`"claim":"den-tv-idle-devices","requests":["draw"],` +
+		`"claim":"den-idle-devices","requests":["draw"],` +
 		`"fadeAfterSeconds":600,"offAfterSeconds":1800,` +
 		`"bus":{"address":"bus.liken-system.svc:1883",` +
-		`"statusTopic":"liken/media/players/house/den-tv/status",` +
-		`"volumeTopic":"liken/media/players/house/den-tv/volume",` +
-		`"volumeOwnerTopic":"liken/media/players/house/den-tv/volume/owner",` +
-		`"commandsTopic":"liken/media/players/house/den-tv/commands",` +
-		`"panelTopic":"liken/media/players/house/den-tv/panel",` +
+		`"statusTopic":"liken/media/players/house/den/status",` +
+		`"volumeTopic":"liken/media/players/house/den/volume",` +
+		`"volumeOwnerTopic":"liken/media/players/house/den/volume/owner",` +
+		`"commandsTopic":"liken/media/players/house/den/commands",` +
+		`"panelTopic":"liken/media/players/house/den/panel",` +
 		`"remotes":[{"events":"liken/media/remotes/house/sofa/events",` +
 		`"focus":"liken/media/remotes/house/sofa/focus"}]}}}`
 	if err := json.Unmarshal([]byte(raw), &status); err != nil {
@@ -279,11 +279,11 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 	}
 	want := PlayerIdleBus{
 		Address:          "bus.liken-system.svc:1883",
-		StatusTopic:      "liken/media/players/house/den-tv/status",
-		VolumeTopic:      "liken/media/players/house/den-tv/volume",
-		VolumeOwnerTopic: "liken/media/players/house/den-tv/volume/owner",
-		CommandsTopic:    "liken/media/players/house/den-tv/commands",
-		PanelTopic:       "liken/media/players/house/den-tv/panel",
+		StatusTopic:      "liken/media/players/house/den/status",
+		VolumeTopic:      "liken/media/players/house/den/volume",
+		VolumeOwnerTopic: "liken/media/players/house/den/volume/owner",
+		CommandsTopic:    "liken/media/players/house/den/commands",
+		PanelTopic:       "liken/media/players/house/den/panel",
 		Remotes: []PlayerIdleRemote{{
 			Events: "liken/media/remotes/house/sofa/events",
 			Focus:  "liken/media/remotes/house/sofa/focus",
@@ -301,9 +301,9 @@ func TestPlayerIdleBusWithNoSinksAndNoRemotesReadsNeither(t *testing.T) {
 	raw := `{"idle":{"controller":"library.liken.sh/media-browser",` +
 		`"fadeAfterSeconds":0,"offAfterSeconds":0,` +
 		`"bus":{"address":"bus.liken-system.svc:1883",` +
-		`"statusTopic":"liken/media/players/house/den-tv/status",` +
-		`"commandsTopic":"liken/media/players/house/den-tv/commands",` +
-		`"panelTopic":"liken/media/players/house/den-tv/panel"}}}`
+		`"statusTopic":"liken/media/players/house/den/status",` +
+		`"commandsTopic":"liken/media/players/house/den/commands",` +
+		`"panelTopic":"liken/media/players/house/den/panel"}}}`
 	if err := json.Unmarshal([]byte(raw), &status); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestPlayerIdleBusWithNoSinksAndNoRemotesReadsNeither(t *testing.T) {
 // block is nothing rather than an empty one.
 func TestPlayerIdleStatusWithoutABusReadsNone(t *testing.T) {
 	status := PlayerStatus{}
-	raw := `{"idle":{"controller":"library.liken.sh/media-browser","claim":"den-tv-idle-devices"}}`
+	raw := `{"idle":{"controller":"library.liken.sh/media-browser","claim":"den-idle-devices"}}`
 	if err := json.Unmarshal([]byte(raw), &status); err != nil {
 		t.Fatal(err)
 	}

@@ -12,11 +12,11 @@ import (
 // call and not two.
 func TestTheTMDbArtAnswererReadsItsSettingsOnce(t *testing.T) {
 	client, fake := newArtTMDb(t, map[string]string{
-		tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+		tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
 	})
 	answerer := newTMDbArtAnswerer(client)
 	title := titleRef{kind: libraryKindMovies}
-	gap := artGap{tmdb: "603"}
+	gap := artGap{tmdb: "1001"}
 
 	for range 2 {
 		candidates, err := answerer.candidates(t.Context(), factPoster, gap, title)
@@ -38,11 +38,11 @@ func TestTheTMDbArtAnswererReadsItsSettingsOnce(t *testing.T) {
 // no image and no call.
 func TestWhatTheTMDbArtAnswererHoldsNoImageFor(t *testing.T) {
 	client, fake := newArtTMDb(t, map[string]string{
-		tmdbKey("/3/movie/603/images", "", ""): `{"posters":[{"file_path":"","vote_average":9}]}`,
+		tmdbKey("/3/movie/1001/images", "", ""): `{"posters":[{"file_path":"","vote_average":9}]}`,
 	})
 	answerer := newTMDbArtAnswerer(client)
 	title := titleRef{kind: libraryKindMovies}
-	gap := artGap{tmdb: "603"}
+	gap := artGap{tmdb: "1001"}
 
 	if candidates, err := answerer.candidates(t.Context(), factClearart, gap, title); err != nil ||
 		len(candidates) != 0 {

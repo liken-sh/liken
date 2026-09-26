@@ -46,8 +46,8 @@ func TestTopicsCarryTheLibraryLayout(t *testing.T) {
 		},
 		{
 			name: "play",
-			got:  playRequestTopic(base, "house", "den-tv"),
-			want: "liken/library/players/house/den-tv/play",
+			got:  playRequestTopic(base, "house", "den"),
+			want: "liken/library/players/house/den/play",
 		},
 		{
 			name: "play filter",
@@ -56,8 +56,8 @@ func TestTopicsCarryTheLibraryLayout(t *testing.T) {
 		},
 		{
 			name: "audience",
-			got:  audienceTopic(base, "house", "den-tv"),
-			want: "liken/library/players/house/den-tv/audience",
+			got:  audienceTopic(base, "house", "den"),
+			want: "liken/library/players/house/den/audience",
 		},
 	}
 	for _, each := range cases {
@@ -147,19 +147,19 @@ func TestParsePlayRequestTopicNamesThePlayer(t *testing.T) {
 	}{
 		{
 			name:      "a play topic",
-			topic:     playRequestTopic(base, "house", "den-tv"),
+			topic:     playRequestTopic(base, "house", "den"),
 			namespace: "house",
-			player:    "den-tv",
+			player:    "den",
 			ok:        true,
 		},
-		{name: "a topic under another base", topic: "other/players/house/den-tv/play"},
-		{name: "the media operator's own tree", topic: "liken/media/players/house/den-tv/commands"},
+		{name: "a topic under another base", topic: "other/players/house/den/play"},
+		{name: "the media operator's own tree", topic: "liken/media/players/house/den/commands"},
 		{name: "a libraries topic", topic: libraryStatusTopic(base, "house", "movies")},
-		{name: "a players topic with a kind this operator does not read", topic: base + "/players/house/den-tv/screen"},
-		{name: "the browser's own audience topic", topic: audienceTopic(base, "house", "den-tv")},
+		{name: "a players topic with a kind this operator does not read", topic: base + "/players/house/den/screen"},
+		{name: "the browser's own audience topic", topic: audienceTopic(base, "house", "den")},
 		{name: "a players topic missing its name", topic: base + "/players/house/play"},
-		{name: "a players topic with a level too many", topic: base + "/players/house/den-tv/play/extra"},
-		{name: "an empty namespace", topic: base + "/players//den-tv/play"},
+		{name: "a players topic with a level too many", topic: base + "/players/house/den/play/extra"},
+		{name: "an empty namespace", topic: base + "/players//den/play"},
 		{name: "an empty name", topic: base + "/players/house//play"},
 	}
 	for _, each := range cases {

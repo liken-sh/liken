@@ -49,7 +49,7 @@ func TestProgressServiceNamesNoSelector(t *testing.T) {
 // the namespace's one Catalog.
 func TestStandProgressServiceCreatesTheService(t *testing.T) {
 	cluster := newFakeCluster()
-	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
+	owners := []OwnerReference{catalogOwner("house", "house-uid")}
 
 	if err := testOperator(t, cluster).standProgressService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestProgressEndpointsHoldTheNamespacesProgressPods(t *testing.T) {
 // fresh namespace find each other on the pass that stood them.
 func TestStandProgressEndpointsWritesTheSlice(t *testing.T) {
 	cluster := newFakeCluster()
-	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
+	owners := []OwnerReference{catalogOwner("house", "house-uid")}
 	members := []Pod{{
 		Metadata: ObjectMeta{Name: "house-progress", Namespace: testLibraryNamespace, UID: "one"},
 		Status:   PodStatus{PodIP: "10.0.0.2", Phase: podRunning},
@@ -134,7 +134,7 @@ func TestTheTwoClustersKeepSeparateSlices(t *testing.T) {
 // agent of that name is absent.
 func TestTheProgressSliceReadsItsOwnAgentsReadiness(t *testing.T) {
 	members := []Pod{{
-		Metadata: ObjectMeta{Name: "den-tv-media-browser", Namespace: testLibraryNamespace, UID: "one"},
+		Metadata: ObjectMeta{Name: "den-media-browser", Namespace: testLibraryNamespace, UID: "one"},
 		Status: PodStatus{
 			PodIP: "10.0.0.2", Phase: podRunning,
 			InitContainerStatuses: []ContainerStatus{{Name: progressContainer, Ready: true}},

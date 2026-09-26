@@ -12,7 +12,7 @@ import (
 // the Catalog every test here starts from.
 func housekeepingCatalog() *NamespaceCatalog {
 	return &NamespaceCatalog{
-		Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", UID: "house-catalog-uid"},
+		Metadata: ObjectMeta{Name: "house", Namespace: "house", UID: "house-uid"},
 	}
 }
 
@@ -26,14 +26,14 @@ func testCatalogPod(catalog *NamespaceCatalog, index int) *Pod {
 func TestCatalogPodBelongsToItsCatalog(t *testing.T) {
 	pod := testCatalogPod(housekeepingCatalog(), 0)
 
-	if pod.Metadata.Name != "house-catalog-catalog-0" || pod.Metadata.Namespace != "house" {
+	if pod.Metadata.Name != "house-catalog-0" || pod.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own pod", pod.Metadata)
 	}
 	if len(pod.Metadata.OwnerReferences) != 1 {
 		t.Fatalf("ownerReferences = %+v, want the Catalog", pod.Metadata.OwnerReferences)
 	}
 	owner := pod.Metadata.OwnerReferences[0]
-	if owner.Kind != "Catalog" || owner.Name != "house-catalog" || !owner.Controller {
+	if owner.Kind != "Catalog" || owner.Name != "house" || !owner.Controller {
 		t.Errorf("owner = %+v, want the controlling Catalog", owner)
 	}
 	if pod.Metadata.Labels[memberLabelKey] != memberLabelValue {
@@ -133,7 +133,7 @@ func TestCatalogPodMountsTheNamespacesClaim(t *testing.T) {
 		catalog *NamespaceCatalog
 		want    string
 	}{
-		{name: "the operator's own claim", catalog: housekeepingCatalog(), want: "house-catalog-catalog"},
+		{name: "the operator's own claim", catalog: housekeepingCatalog(), want: "house-catalog"},
 		{name: "a claim the Catalog names", catalog: named, want: "catalog-of-my-own"},
 	}
 	for _, one := range cases {
@@ -156,7 +156,7 @@ func TestCatalogPodClaimIsOwnedByItsCatalog(t *testing.T) {
 
 	claim := buildCatalogPodClaim(catalog)
 
-	if claim.Metadata.Name != "house-catalog-catalog" || claim.Metadata.Namespace != "house" {
+	if claim.Metadata.Name != "house-catalog" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own claim", claim.Metadata)
 	}
 	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
@@ -194,8 +194,8 @@ func TestStandCatalogPodClaimProvisionsOnlyWhatItOwns(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			if one.standing {
-				cluster.claims["house-catalog-catalog"] = &PersistentVolumeClaim{
-					Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"},
+				cluster.claims["house-catalog"] = &PersistentVolumeClaim{
+					Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"},
 					Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 				}
 			}
@@ -221,7 +221,7 @@ func TestStandCatalogPodClaimAnswersTheServer(t *testing.T) {
 	}
 
 	broken := newFakeCluster()
-	broken.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
+	broken.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog"] =
 		http.StatusInternalServerError
 	err := testOperator(t, broken).standCatalogPodClaim(t.Context(), housekeepingCatalog())
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
@@ -232,8 +232,8 @@ func TestStandCatalogPodClaimAnswersTheServer(t *testing.T) {
 // the pass finds the namespace's catalog pod among the member pods it
 // read, and answers none for a namespace with no Catalog or no pod.
 func TestCatalogPodOfFindsTheNamespacesOwn(t *testing.T) {
-	house := readyCatalogPod("house-catalog", "house")
-	elsewhere := readyCatalogPod("house-catalog", "studio")
+	house := readyCatalogPod("house", "house")
+	elsewhere := readyCatalogPod("house", "studio")
 
 	cases := []struct {
 		name    string
@@ -265,9 +265,9 @@ func TestCatalogPodOfFindsTheNamespacesOwn(t *testing.T) {
 // deletes it and the pass after that creates the replacement. A pod
 // already on its way out is left alone.
 func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
-	stale := readyCatalogPod("house-catalog", "house")
+	stale := readyCatalogPod("house", "house")
 	stale.Metadata.Annotations[templateHashAnnotation] = "an-older-template"
-	leaving := readyCatalogPod("house-catalog", "house")
+	leaving := readyCatalogPod("house", "house")
 	leaving.Metadata.Annotations[templateHashAnnotation] = "an-older-template"
 	leaving.Metadata.DeletionTimestamp = "2026-08-29T12:00:00Z"
 
@@ -279,12 +279,12 @@ func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 	}{
 		{name: "a stale pod", live: stale, deletes: 1},
 		{name: "a pod already going", live: leaving, stands: true},
-		{name: "a pod that matches", live: readyCatalogPod("house-catalog", "house"), stands: true},
+		{name: "a pod that matches", live: readyCatalogPod("house", "house"), stands: true},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			cluster.pods["house-catalog-catalog-0"] = one.live
+			cluster.pods["house-catalog-0"] = one.live
 
 			pod, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog(), 0)
 			if err != nil {
@@ -305,7 +305,7 @@ func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 // created, because the pods would have nothing to mount.
 func TestStandCatalogPodsReportsAFailedClaim(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
+	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog"] =
 		http.StatusInternalServerError
 
 	_, err := testOperator(t, cluster).standCatalogPods(t.Context(), housekeepingCatalog())

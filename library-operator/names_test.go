@@ -17,19 +17,19 @@ func TestParseReleaseName(t *testing.T) {
 		title string
 		year  int
 	}{
-		{name: "title and parenthesized year", input: "The Matrix (1999)", title: "The Matrix", year: 1999},
-		{name: "dotted release cut at resolution", input: "The.Thing.1982.1080p.BluRay.x264-GROUP", title: "The Thing", year: 1982},
+		{name: "title and parenthesized year", input: "Some Film (1999)", title: "Some Film", year: 1999},
+		{name: "dotted release cut at resolution", input: "The.Long.Survey.1982.1080p.BluRay.x264-GROUP", title: "The Long Survey", year: 1982},
 		{name: "dotted release with no year", input: "Some.Short.WEBRip.x264-GRP", title: "Some Short", year: 0},
-		{name: "title keeps an internal dash", input: "Wall-E.2008.1080p.BluRay", title: "Wall-E", year: 2008},
-		{name: "codec-group token cuts the title", input: "Movie.Name.2015.x265-RARBG", title: "Movie Name", year: 2015},
+		{name: "title keeps an internal dash", input: "Tide-Walker.2008.1080p.BluRay", title: "Tide-Walker", year: 2008},
+		{name: "codec-group token cuts the title", input: "Movie.Name.2015.x265-GRP", title: "Movie Name", year: 2015},
 		{name: "plain title with no markers", input: "Mystery Folder", title: "Mystery Folder", year: 0},
-		{name: "video extension is stripped", input: "The.Thing.1982.1080p.mkv", title: "The Thing", year: 1982},
-		{name: "a four-digit part of a name is not a year", input: "Blade Runner 2049 (2017)", title: "Blade Runner 2049", year: 2017},
-		{name: "bracketed year", input: "Civil War [2024]", title: "Civil War", year: 2024},
-		{name: "a numeric title with a bracketed year", input: "2012 [2009]", title: "2012", year: 2009},
-		{name: "a numeric run in the title with a bracketed year", input: "Blade Runner 2049 [2017]", title: "Blade Runner 2049", year: 2017},
-		{name: "a numeric title with a parenthesized year", input: "300 (2006)", title: "300", year: 2006},
-		{name: "a bare numeric title is not a year", input: "2012", title: "2012", year: 0},
+		{name: "video extension is stripped", input: "The.Long.Survey.1982.1080p.mkv", title: "The Long Survey", year: 1982},
+		{name: "a four-digit part of a name is not a year", input: "Harbor Line 2049 (2017)", title: "Harbor Line 2049", year: 2017},
+		{name: "bracketed year", input: "Dry Season [2024]", title: "Dry Season", year: 2024},
+		{name: "a numeric title with a bracketed year", input: "2031 [2009]", title: "2031", year: 2009},
+		{name: "a numeric run in the title with a bracketed year", input: "Harbor Line 2049 [2017]", title: "Harbor Line 2049", year: 2017},
+		{name: "a numeric title with a parenthesized year", input: "412 (2006)", title: "412", year: 2006},
+		{name: "a bare numeric title is not a year", input: "2031", title: "2031", year: 0},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestParseSeasonFolder(t *testing.T) {
 		{input: "season 10", season: 10, ok: true},
 		{input: "Specials", season: 0, ok: true},
 		{input: "Extras", season: 0, ok: false},
-		{input: "Breaking Bad", season: 0, ok: false},
+		{input: "Copper Line", season: 0, ok: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.input, func(t *testing.T) {
@@ -137,52 +137,52 @@ func TestFileAttributes(t *testing.T) {
 }
 
 func TestFolderKey(t *testing.T) {
-	if got := folderKey("The Matrix (1999)"); got != "the-matrix-1999" {
-		t.Errorf("folderKey = %q, want the-matrix-1999", got)
+	if got := folderKey("Some Film (1999)"); got != "some-film-1999" {
+		t.Errorf("folderKey = %q, want some-film-1999", got)
 	}
 }
 
 func TestFolderKeyAddsAHashSuffixToALetterlessSlug(t *testing.T) {
-	if got := folderKey("2012"); got != "2012-4b9a7f50" {
-		t.Errorf("folderKey = %q, want 2012-4b9a7f50", got)
+	if got := folderKey("2031"); got != "2031-d740238f" {
+		t.Errorf("folderKey = %q, want 2031-d740238f", got)
 	}
 }
 
 func TestFolderKeyOfANameWithNoSlugIsTheHashAlone(t *testing.T) {
-	if got := folderKey("千と千尋の神隠し"); got != "3146d995" {
-		t.Errorf("folderKey = %q, want 3146d995", got)
+	if got := folderKey("静かな港"); got != "3b0d11d8" {
+		t.Errorf("folderKey = %q, want 3b0d11d8", got)
 	}
 }
 
 func TestFolderKeySeparatesTwoNonLatinNamesOfTheSameYear(t *testing.T) {
-	first := folderKey("千と千尋の神隠し (2001)")
-	second := folderKey("君の名は。 (2001)")
+	first := folderKey("静かな港 (2001)")
+	second := folderKey("北風の町 (2001)")
 	if first == second {
 		t.Errorf("two names key the same: %q", first)
 	}
-	if first != "2001-6c16d9c8" {
-		t.Errorf("folderKey = %q, want 2001-6c16d9c8", first)
+	if first != "2001-caf8459e" {
+		t.Errorf("folderKey = %q, want 2001-caf8459e", first)
 	}
-	if second != "2001-f5c54d27" {
-		t.Errorf("folderKey = %q, want 2001-f5c54d27", second)
+	if second != "2001-7935e3ff" {
+		t.Errorf("folderKey = %q, want 2001-7935e3ff", second)
 	}
 }
 
 func TestFolderKeyIsStableForOneName(t *testing.T) {
-	if first, second := folderKey("千と千尋の神隠し (2001)"), folderKey("千と千尋の神隠し (2001)"); first != second {
+	if first, second := folderKey("静かな港 (2001)"), folderKey("静かな港 (2001)"); first != second {
 		t.Errorf("two passes differ: %q and %q", first, second)
 	}
 }
 
 func TestDiscoverArtAndTrickplay(t *testing.T) {
 	root := "testdata/movies"
-	dir := filepath.Join(root, "Action", "The Matrix (1999)")
+	dir := filepath.Join(root, "Action", "Some Film (1999)")
 
 	primary, all, err := discoverArt(root, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPrimary := filepath.Join("Action", "The Matrix (1999)", "folder.jpg")
+	wantPrimary := filepath.Join("Action", "Some Film (1999)", "folder.jpg")
 	if primary != wantPrimary {
 		t.Errorf("primary art = %q, want %q", primary, wantPrimary)
 	}
@@ -190,8 +190,8 @@ func TestDiscoverArtAndTrickplay(t *testing.T) {
 		t.Errorf("art = %v, want the poster, backdrop, and logo", all)
 	}
 
-	trick := trickplayFor(root, dir, "The Matrix (1999).mkv")
-	wantTrick := filepath.Join("Action", "The Matrix (1999)", "The Matrix (1999).trickplay")
+	trick := trickplayFor(root, dir, "Some Film (1999).mkv")
+	wantTrick := filepath.Join("Action", "Some Film (1999)", "Some Film (1999).trickplay")
 	if trick != wantTrick {
 		t.Errorf("trickplay = %q, want %q", trick, wantTrick)
 	}
@@ -232,35 +232,35 @@ func TestDiscoverArtPicksByRole(t *testing.T) {
 		},
 		{
 			name:        "a name-prefixed poster",
-			files:       []string{"The Karate Kid, Part III [1989]-poster.jpg"},
-			wantPrimary: "The Karate Kid, Part III [1989]-poster.jpg",
-			wantAll:     []string{"The Karate Kid, Part III [1989]-poster.jpg"},
+			files:       []string{"The Long Survey, Part III [1989]-poster.jpg"},
+			wantPrimary: "The Long Survey, Part III [1989]-poster.jpg",
+			wantAll:     []string{"The Long Survey, Part III [1989]-poster.jpg"},
 		},
 		{
 			name: "a name-prefixed set",
 			files: []string{
-				"Solaris (1972)-poster.jpg",
-				"Solaris (1972)-fanart.jpg",
-				"Solaris (1972)-clearlogo.png",
+				"Glass Tide (1972)-poster.jpg",
+				"Glass Tide (1972)-fanart.jpg",
+				"Glass Tide (1972)-clearlogo.png",
 			},
-			wantPrimary: "Solaris (1972)-poster.jpg",
+			wantPrimary: "Glass Tide (1972)-poster.jpg",
 			wantAll: []string{
-				"Solaris (1972)-poster.jpg",
-				"Solaris (1972)-fanart.jpg",
-				"Solaris (1972)-clearlogo.png",
+				"Glass Tide (1972)-poster.jpg",
+				"Glass Tide (1972)-fanart.jpg",
+				"Glass Tide (1972)-clearlogo.png",
 			},
 		},
 		{
 			name:        "a bare poster wins over a prefixed one",
-			files:       []string{"Solaris (1972)-poster.jpg", "folder.jpg"},
+			files:       []string{"Glass Tide (1972)-poster.jpg", "folder.jpg"},
 			wantPrimary: "folder.jpg",
 			wantAll:     []string{"folder.jpg"},
 		},
 		{
 			name:        "name order parts two prefixed posters",
-			files:       []string{"Solaris (1972)-poster.jpg", "Andrei Rublev (1966)-poster.jpg"},
-			wantPrimary: "Andrei Rublev (1966)-poster.jpg",
-			wantAll:     []string{"Andrei Rublev (1966)-poster.jpg"},
+			files:       []string{"Glass Tide (1972)-poster.jpg", "Amber Road (1966)-poster.jpg"},
+			wantPrimary: "Amber Road (1966)-poster.jpg",
+			wantAll:     []string{"Amber Road (1966)-poster.jpg"},
 		},
 		{
 			name:        "poster wins over folder",
@@ -282,19 +282,19 @@ func TestDiscoverArtPicksByRole(t *testing.T) {
 		},
 		{
 			name:        "a bare folder still wins over a prefixed poster",
-			files:       []string{"folder.jpg", "Solaris (1972)-poster.jpg"},
+			files:       []string{"folder.jpg", "Glass Tide (1972)-poster.jpg"},
 			wantPrimary: "folder.jpg",
 			wantAll:     []string{"folder.jpg"},
 		},
 		{
 			name:        "a folder with no art",
-			files:       []string{"Solaris (1972).mkv", "movie.nfo"},
+			files:       []string{"Glass Tide (1972).mkv", "movie.nfo"},
 			wantPrimary: "",
 			wantAll:     nil,
 		},
 		{
 			name:        "an image the words do not name is no art",
-			files:       []string{"Solaris (1972).jpg", "Solaris (1972)-thumb.jpg"},
+			files:       []string{"Glass Tide (1972).jpg", "Glass Tide (1972)-thumb.jpg"},
 			wantPrimary: "",
 			wantAll:     nil,
 		},
@@ -342,12 +342,12 @@ func TestDiscoverArtOnAMissingFolder(t *testing.T) {
 }
 
 func TestListVideoFilesSkipsEveryFileThatIsNotAVideo(t *testing.T) {
-	dir := filepath.Join("testdata", "movies", "Action", "The Matrix (1999)")
+	dir := filepath.Join("testdata", "movies", "Action", "Some Film (1999)")
 	files, err := listVideoFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 || files[0] != "The Matrix (1999).mkv" {
+	if len(files) != 1 || files[0] != "Some Film (1999).mkv" {
 		t.Errorf("video files = %v, want only the mkv", files)
 	}
 }
@@ -380,9 +380,9 @@ func TestANameStatesAProviderIdInJellyfinsForm(t *testing.T) {
 		year  int
 	}{
 		{
-			name:  "The Matrix (1999) [tmdbid-603]",
-			want:  map[string]string{"tmdb": "603"},
-			title: "The Matrix",
+			name:  "Some Film (1999) [tmdbid-1001]",
+			want:  map[string]string{"tmdb": "1001"},
+			title: "Some Film",
 			year:  1999,
 		},
 		{
@@ -392,19 +392,19 @@ func TestANameStatesAProviderIdInJellyfinsForm(t *testing.T) {
 			year:  2030,
 		},
 		{
-			name:  "Twin Peaks [tvdbid-70533]",
-			want:  map[string]string{"tvdb": "70533"},
-			title: "Twin Peaks",
+			name:  "Pine Hollow [tvdbid-800002]",
+			want:  map[string]string{"tvdb": "800002"},
+			title: "Pine Hollow",
 		},
 		{
-			name:  "Two Ids [tmdbid-603] [imdbid-tt0133093]",
-			want:  map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+			name:  "Two Ids [tmdbid-1001] [imdbid-tt9001001]",
+			want:  map[string]string{"tmdb": "1001", "imdb": "tt9001001"},
 			title: "Two Ids",
 		},
 		{
-			name:  "The Thing (1982)",
+			name:  "The Long Survey (1982)",
 			want:  nil,
-			title: "The Thing",
+			title: "The Long Survey",
 			year:  1982,
 		},
 	}
@@ -443,14 +443,14 @@ func TestAnNFOsIdsWinOverANames(t *testing.T) {
 
 func TestAFolderNamedWithAProviderIdTakesThatIdAndIsIdentified(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "The Matrix [tmdbid-603]", "The Matrix.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Some Film [tmdbid-1001]", "Some Film.mkv"), "video")
 
 	result := walkMovies(root, "house/movies", nil)
 
 	if len(result.movies) != 1 {
 		t.Fatalf("movies = %+v, want one", result.movies)
 	}
-	if got := result.movies[0]; got.Id != "movie:tmdb:603" || got.Title != "The Matrix" {
+	if got := result.movies[0]; got.Id != "movie:tmdb:1001" || got.Title != "Some Film" {
 		t.Errorf("movie = %+v, want the provider id and the plain title", got)
 	}
 	if result.unidentified != 0 {
@@ -460,11 +460,11 @@ func TestAFolderNamedWithAProviderIdTakesThatIdAndIsIdentified(t *testing.T) {
 
 func TestASeriesFolderNamedWithAProviderIdTakesThatId(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "Twin Peaks [tvdbid-70533]", "Season 01", "S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Pine Hollow [tvdbid-800002]", "Season 01", "S01E01.mkv"), "video")
 
 	result := walkSeries(root, "house/series", nil)
 
-	if len(result.series) != 1 || result.series[0].Id != "series:tvdb:70533" {
+	if len(result.series) != 1 || result.series[0].Id != "series:tvdb:800002" {
 		t.Fatalf("series = %+v, want the provider id off the name", result.series)
 	}
 }

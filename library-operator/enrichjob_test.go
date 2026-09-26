@@ -303,7 +303,7 @@ func TestTheJobCarriesItsEnvironment(t *testing.T) {
 		name, path, list string
 	}{
 		{name: "the whole library"},
-		{name: "one folder", path: "/library/movies/Arrival (2016)", list: `["/library/movies/Arrival (2016)"]`},
+		{name: "one folder", path: "/library/movies/Harbor Lights (2016)", list: `["/library/movies/Harbor Lights (2016)"]`},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

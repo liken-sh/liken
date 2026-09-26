@@ -10,7 +10,7 @@ import (
 )
 
 // nfoUniqueID is one uniqueid element, the provider and the id it assigns, as
-// in a uniqueid of type tmdb with the value 603.
+// in a uniqueid of type tmdb with the value 1001.
 type nfoUniqueID struct {
 	Type  string `xml:"type,attr"`
 	Value string `xml:",chardata"`

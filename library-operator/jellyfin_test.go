@@ -167,7 +167,7 @@ func TestEachMessageLandsInTheJoin(t *testing.T) {
 			fake := jellyfinFixture()
 			role, _, _ := standJellyfinRole(t, fake)
 			role.onMessage(playAudienceTopic(defaultTopicBase, "house", "play-1"),
-				jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+				jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 
 			role.onMessage(test.topic, []byte(`{"phase":"Finished","item":0,"position":"1:10:10","duration":"2:16:00"}`))
 			role.out.tick(t.Context())
@@ -186,7 +186,7 @@ func TestAnAudienceOfAnotherNamespaceLandsNowhere(t *testing.T) {
 	role, _, _ := standJellyfinRole(t, fake)
 
 	role.onMessage(playAudienceTopic(defaultTopicBase, "loft", "play-1"),
-		jellyfinAudience(t, []string{"chris"}, map[string]string{"tmdb": "603"}, 0, 0))
+		jellyfinAudience(t, []string{"person-a"}, map[string]string{"tmdb": "1101"}, 0, 0))
 	role.onMessage(defaultMediaTopicBase+"/plays/house/play-1/status",
 		[]byte(`{"item":0,"position":"1:10:10","duration":"2:16:00"}`))
 	role.out.tick(t.Context())

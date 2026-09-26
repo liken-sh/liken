@@ -44,10 +44,10 @@ mod tests {
 
     #[test]
     fn a_string_folds_to_lowercase_words_split_on_everything_else() {
-        assert_eq!(words("The Matrix"), ["the", "matrix"]);
+        assert_eq!(words("The Lantern"), ["the", "lantern"]);
         assert_eq!(
-            words("Spider-Man: No Way Home"),
-            ["spider", "man", "no", "way", "home"]
+            words("Tide-Walker: No Safe Road"),
+            ["tide", "walker", "no", "safe", "road"]
         );
         assert_eq!(words("2001"), ["2001"]);
         assert_eq!(words("  "), Vec::<String>::new());
@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn a_diacritic_folds_away() {
-        assert_eq!(words("Amélie"), ["amelie"]);
+        assert_eq!(words("Brévelle"), ["brevelle"]);
         assert_eq!(words("Ñuñez"), ["nunez"]);
         assert_eq!(words("Straße"), ["straße"]);
     }

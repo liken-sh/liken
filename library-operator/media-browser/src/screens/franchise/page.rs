@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn a_thin_rows_facts_stand_a_gap_right_of_the_drawn_title_on_its_baseline() {
         let row = area(100.0, 200.0, 1500.0, wall::THIN);
-        for title in ["Inhumans", "Cloak & Dagger", "Agents of S.H.I.E.L.D."] {
+        for title in ["Tidewards", "Salt & Ember", "Wardens of S.T.O.N.E."] {
             let (at, facts) = thin_words(title, row);
             let drawn = text::measured(title, look::DETAIL);
             assert!(drawn > 0.0, "{title}");
@@ -640,7 +640,7 @@ mod tests {
                 "{title}"
             );
         }
-        let (at, _) = thin_words("Inhumans", row);
+        let (at, _) = thin_words("Tidewards", row);
         assert_eq!(at.x, row.x + INSET);
         assert_eq!(at.y + text::height(1, look::DETAIL) / 2.0, row.center_y());
     }
@@ -649,8 +649,8 @@ mod tests {
     fn a_thin_rows_note_ends_inside_the_rows_own_border() {
         let row = area(100.0, 200.0, 1500.0, wall::THIN);
         for (name, facts) in [
-            ("Inhumans", "2027"),
-            ("Agents of S.H.I.E.L.D.", "2027"),
+            ("Tidewards", "2027"),
+            ("Wardens of S.T.O.N.E.", "2027"),
             ("A Franchise Entry Whose Name Runs On", ""),
         ] {
             let title = text::cut(name, look::DETAIL, row.width / 2.0);
@@ -667,7 +667,7 @@ mod tests {
     #[test]
     fn a_note_the_room_beside_the_title_cannot_hold_is_cut_by_the_shaper() {
         let row = area(100.0, 200.0, 250.0, wall::THIN);
-        let title = text::cut("Inhumans", look::DETAIL, row.width / 2.0);
+        let title = text::cut("Tidewards", look::DETAIL, row.width / 2.0);
         let (_, at) = thin_words(&title, row);
         let (note, band) = thin_note("Coming 15 December 2027", "2027", at, row);
         assert!(note.ends_with('\u{2026}'), "{note}");

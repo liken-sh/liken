@@ -144,8 +144,8 @@ reaches the band, where enter shows the grid again.
 
 - On a local run, a letter on the home page opens the search wall with
   that letter, and each further letter changes the wall on the same
-  screen. "batman" ranks a movie titled Batman over a series, and both
-  over an episode whose plot names him.
+  screen. "kestrel" ranks a movie titled Kestrel over a series, and
+  both over an episode whose plot names it.
 - The search key on a DualSense opens the empty wall with the grid, the
   d-pad spells a word, and the results change with each pick.
 - The home key from three pages deep lands on the home page.
@@ -159,8 +159,8 @@ reaches the band, where enter shows the grid again.
 Built in the working tree over two days and drilled on this
 workstation from `local/browse` against the local catalog. A letter on
 any screen opens the search wall seeded with it, and each further
-letter changes the wall on the same screen. "batman" ranks the film
-over the series and both over an episode whose plot names him. The grid
+letter changes the wall on the same screen. "kestrel" ranks the film
+over the series and both over an episode whose plot names it. The grid
 opens from the search key and hides at the first physical letter. Home
 from three pages deep lands on the home page, and home on the home page
 hops to the banner. The index over the local catalog builds in under a

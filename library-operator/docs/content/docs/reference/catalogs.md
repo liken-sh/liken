@@ -22,7 +22,7 @@ namespace, on the `Catalog`, in place of a size on each `Library`.
     apiVersion: library.liken.sh/v1alpha1
     kind: Catalog
     metadata:
-      name: catalog
+      name: media
       namespace: media
     spec:
       storage:

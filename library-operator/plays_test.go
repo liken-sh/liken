@@ -50,7 +50,7 @@ func decodedAudience(t *testing.T, message brokerPublish) playAudience {
 // position, so the operator puts it on every Play a store records.
 func TestAPassHoldsEveryPlayInAStoresNamespace(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	cluster.plays = append(cluster.plays, testPlay("den-tv-some-film"))
+	cluster.plays = append(cluster.plays, testPlay("den-some-film"))
 
 	operator.pass()
 
@@ -64,7 +64,7 @@ func TestAPassHoldsEveryPlayInAStoresNamespace(t *testing.T) {
 // releases would hold the Play forever.
 func TestAPlayOutsideAStoresNamespaceIsLeftAlone(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	elsewhere := testPlay("den-tv-some-film")
+	elsewhere := testPlay("den-some-film")
 	elsewhere.Metadata.Namespace = "studio"
 	cluster.plays = append(cluster.plays, elsewhere)
 
@@ -82,15 +82,15 @@ func TestAPassPublishesWhoWatchedEachPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
-	play := testPlay("den-tv-the-office")
+	play := testPlay("den-a-series")
 	play.Metadata.OwnerReferences = []OwnerReference{
-		{APIVersion: personAPIVersion, Kind: personKind, Name: "thora", UID: "thora-uid"},
-		{APIVersion: personAPIVersion, Kind: personKind, Name: "chris", UID: "chris-uid"},
+		{APIVersion: personAPIVersion, Kind: personKind, Name: "person-b", UID: "person-b-uid"},
+		{APIVersion: personAPIVersion, Kind: personKind, Name: "person-a", UID: "person-a-uid"},
 	}
 	play.Metadata.Annotations = map[string]string{
 		libraryAnnotation:                "series",
-		aliasAnnotationPrefix + "tmdb":   "2316",
-		aliasAnnotationPrefix + "imdb":   "tt0386676",
+		aliasAnnotationPrefix + "tmdb":   "2101",
+		aliasAnnotationPrefix + "imdb":   "tt9002101",
 		seasonAnnotation:                 "3",
 		episodeAnnotation:                "5",
 		"kubectl.kubernetes.io/last-app": "{}",
@@ -101,7 +101,7 @@ func TestAPassPublishesWhoWatchedEachPlay(t *testing.T) {
 	operator.pass()
 
 	message := waitForPublish(t, broker.pubs)
-	want := playAudienceTopic(defaultTopicBase, testLibraryNamespace, "den-tv-the-office")
+	want := playAudienceTopic(defaultTopicBase, testLibraryNamespace, "den-a-series")
 	if message.topic != want || !message.retained {
 		t.Fatalf("published on %s (retained %v), want a retained message on %s",
 			message.topic, message.retained, want)
@@ -110,10 +110,10 @@ func TestAPassPublishesWhoWatchedEachPlay(t *testing.T) {
 	if audience.Player != testPlayer || audience.Library != "series" {
 		t.Errorf("audience = %+v, want the player and the library", audience)
 	}
-	if len(audience.People) != 2 || audience.People[0] != "chris" || audience.People[1] != "thora" {
-		t.Errorf("people = %v, want chris and thora in name order", audience.People)
+	if len(audience.People) != 2 || audience.People[0] != "person-a" || audience.People[1] != "person-b" {
+		t.Errorf("people = %v, want person-a and person-b in name order", audience.People)
 	}
-	if audience.Aliases["tmdb"] != "2316" || audience.Aliases["imdb"] != "tt0386676" {
+	if audience.Aliases["tmdb"] != "2101" || audience.Aliases["imdb"] != "tt9002101" {
 		t.Errorf("aliases = %v, want the two the annotations carry", audience.Aliases)
 	}
 	if audience.Season != 3 || audience.Episode != 5 {
@@ -127,7 +127,7 @@ func TestAnUnchangedAudienceIsNotPublishedAgain(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
-	cluster.plays = append(cluster.plays, testPlay("den-tv-some-film"))
+	cluster.plays = append(cluster.plays, testPlay("den-some-film"))
 	operator, broker := operatorOnABroker(t, cluster)
 
 	operator.pass()
@@ -146,7 +146,7 @@ func TestAPassPublishesTheLastStatusOfAnEndedPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 	play.Metadata.Finalizers = []string{progressFinalizer}
 	play.Status = PlayStatus{Phase: playPhaseFinished, Item: 1, Position: "1:38:12", Duration: "1:40:00"}
 	cluster.plays = append(cluster.plays, play)
@@ -156,7 +156,7 @@ func TestAPassPublishesTheLastStatusOfAnEndedPlay(t *testing.T) {
 
 	waitForPublish(t, broker.pubs)
 	message := waitForPublish(t, broker.pubs)
-	want := playFinalTopic(defaultTopicBase, testLibraryNamespace, "den-tv-some-film")
+	want := playFinalTopic(defaultTopicBase, testLibraryNamespace, "den-some-film")
 	if message.topic != want || !message.retained {
 		t.Fatalf("published on %s, want a retained message on %s", message.topic, want)
 	}
@@ -176,7 +176,7 @@ func TestADeletingPlayIsPublishedFinalAndHeldUntilItIsRecorded(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 	play.Metadata.Finalizers = []string{progressFinalizer}
 	play.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 	play.Status = PlayStatus{Phase: "Running", Item: 1, Position: "0:12:00"}
@@ -204,13 +204,13 @@ func TestARecordedPlayLosesItsFinalizerAndItsTopics(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 	play.Metadata.Finalizers = []string{progressFinalizer}
 	play.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 	play.Status = PlayStatus{Phase: playPhaseFinished, Item: 1, Position: "1:38:12"}
 	cluster.plays = append(cluster.plays, play)
 	operator, broker := operatorOnABroker(t, cluster)
-	publishRecorded(operator, "den-tv-some-film", playRecorded{
+	publishRecorded(operator, "den-some-film", playRecorded{
 		Item: 1, Position: "1:38:12", Ended: true, At: "2026-09-06T21:14:02Z",
 	})
 
@@ -224,7 +224,7 @@ func TestARecordedPlayLosesItsFinalizerAndItsTopics(t *testing.T) {
 	waitForPublish(t, broker.pubs)
 	waitForPublish(t, broker.pubs)
 	cleared := clearedTopics(t, broker, 3)
-	for _, topic := range playTopics(testLibraryNamespace, "den-tv-some-film") {
+	for _, topic := range playTopics(testLibraryNamespace, "den-some-film") {
 		if !cleared[topic] {
 			t.Errorf("the release cleared %v, want %s among them", cleared, topic)
 		}
@@ -237,17 +237,17 @@ func TestTheTopicsOfAPlayThatIsGoneAreCleared(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	operator, broker := operatorOnABroker(t, cluster)
-	publishRecorded(operator, "den-tv-gone", playRecorded{Item: 1, Ended: true})
+	publishRecorded(operator, "den-gone", playRecorded{Item: 1, Ended: true})
 
 	operator.pass()
 
 	cleared := clearedTopics(t, broker, 3)
-	for _, topic := range playTopics(testLibraryNamespace, "den-tv-gone") {
+	for _, topic := range playTopics(testLibraryNamespace, "den-gone") {
 		if !cleared[topic] {
 			t.Errorf("the pass cleared %v, want %s among them", cleared, topic)
 		}
 	}
-	if _, held := operator.marks.recordedFor(testLibraryNamespace, "den-tv-gone"); held {
+	if _, held := operator.marks.recordedFor(testLibraryNamespace, "den-gone"); held {
 		t.Error("the desk still holds the mark of a Play that is gone")
 	}
 }
@@ -266,16 +266,16 @@ func playTopics(namespace, name string) []string {
 // payload is how the store says it holds nothing any more.
 func TestTheDeskFoldsAndDropsWhatTheStoreRecorded(t *testing.T) {
 	operator := testOperator(t, newFakeCluster())
-	topic := playRecordedTopic(defaultTopicBase, testLibraryNamespace, "den-tv-some-film")
+	topic := playRecordedTopic(defaultTopicBase, testLibraryNamespace, "den-some-film")
 
-	publishRecorded(operator, "den-tv-some-film", playRecorded{Item: 2, Position: "0:12:00"})
-	recorded, held := operator.marks.recordedFor(testLibraryNamespace, "den-tv-some-film")
+	publishRecorded(operator, "den-some-film", playRecorded{Item: 2, Position: "0:12:00"})
+	recorded, held := operator.marks.recordedFor(testLibraryNamespace, "den-some-film")
 	if !held || recorded.Item != 2 || recorded.Position != "0:12:00" {
 		t.Errorf("recorded = %+v held %v, want the mark the store published", recorded, held)
 	}
 
 	operator.handleBusMessage(topic, nil)
-	if _, held := operator.marks.recordedFor(testLibraryNamespace, "den-tv-some-film"); held {
+	if _, held := operator.marks.recordedFor(testLibraryNamespace, "den-some-film"); held {
 		t.Error("the desk holds a mark the store cleared")
 	}
 }
@@ -284,12 +284,12 @@ func TestTheDeskFoldsAndDropsWhatTheStoreRecorded(t *testing.T) {
 // what it holds is still the last thing the store said.
 func TestAMarkThatDoesNotDecodeLeavesTheDeskAlone(t *testing.T) {
 	operator := testOperator(t, newFakeCluster())
-	topic := playRecordedTopic(defaultTopicBase, testLibraryNamespace, "den-tv-some-film")
-	publishRecorded(operator, "den-tv-some-film", playRecorded{Item: 2})
+	topic := playRecordedTopic(defaultTopicBase, testLibraryNamespace, "den-some-film")
+	publishRecorded(operator, "den-some-film", playRecorded{Item: 2})
 
 	operator.handleBusMessage(topic, []byte("{not json"))
 
-	if recorded, held := operator.marks.recordedFor(testLibraryNamespace, "den-tv-some-film"); !held || recorded.Item != 2 {
+	if recorded, held := operator.marks.recordedFor(testLibraryNamespace, "den-some-film"); !held || recorded.Item != 2 {
 		t.Errorf("recorded = %+v held %v, want the mark that decoded", recorded, held)
 	}
 }
@@ -298,7 +298,7 @@ func TestAMarkThatDoesNotDecodeLeavesTheDeskAlone(t *testing.T) {
 // Player alone, because a fresh cluster has no Person and a Play is
 // still a Play.
 func TestAPlayWithNobodyOnItCarriesThePlayerAlone(t *testing.T) {
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 
 	audience := playAudienceOf(&play)
 
@@ -340,7 +340,7 @@ func TestTheAudienceCarriesTheCreditsOfTheFirstItem(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			play := testPlay("den-tv-some-film")
+			play := testPlay("den-some-film")
 			play.Spec.Items = test.items
 
 			got, err := json.Marshal(playAudienceOf(&play).Credits)
@@ -357,7 +357,7 @@ func TestTheAudienceCarriesTheCreditsOfTheFirstItem(t *testing.T) {
 // A Play is a person's to write, so a number annotation that holds
 // anything else reads as none.
 func TestANumberAnnotationThatIsNoNumberReadsAsNone(t *testing.T) {
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 	play.Metadata.Annotations = map[string]string{seasonAnnotation: "three"}
 
 	if audience := playAudienceOf(&play); audience.Season != 0 {
@@ -371,7 +371,7 @@ func TestANumberAnnotationThatIsNoNumberReadsAsNone(t *testing.T) {
 func TestListPlaysReadsEveryNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, PlayList{
 		Metadata: ListMeta{ResourceVersion: "1200"},
-		Items:    []Play{{Metadata: ObjectMeta{Name: "den-tv-some-film", Namespace: "house"}}},
+		Items:    []Play{{Metadata: ObjectMeta{Name: "den-some-film", Namespace: "house"}}},
 	})
 
 	list, err := ListPlays(t.Context(), client)
@@ -380,7 +380,7 @@ func TestListPlaysReadsEveryNamespace(t *testing.T) {
 	}
 
 	expectRequest(t, recorded, http.MethodGet, "/apis/media.liken.sh/v1alpha1/plays")
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "den-tv-some-film" {
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "den-some-film" {
 		t.Errorf("items = %+v, want the one Play the server answered", list.Items)
 	}
 }
@@ -405,7 +405,7 @@ func TestPatchPlayMetadataSendsAConditionalMergePatch(t *testing.T) {
 			name: "the audience beside it",
 			metadata: ObjectMeta{
 				Finalizers:      []string{progressFinalizer},
-				OwnerReferences: []OwnerReference{{Kind: personKind, Name: "chris"}},
+				OwnerReferences: []OwnerReference{{Kind: personKind, Name: "person-a"}},
 				Annotations:     map[string]string{seasonAnnotation: "3"},
 			},
 			want: `"kind":"Person"`,
@@ -417,14 +417,14 @@ func TestPatchPlayMetadataSendsAConditionalMergePatch(t *testing.T) {
 				"metadata": map[string]any{"resourceVersion": "1201"},
 			})
 
-			version, err := PatchPlayMetadata(t.Context(), client, "house", "den-tv-some-film",
+			version, err := PatchPlayMetadata(t.Context(), client, "house", "den-some-film",
 				"1200", testCase.metadata)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			expectRequest(t, recorded, http.MethodPatch,
-				"/apis/media.liken.sh/v1alpha1/namespaces/house/plays/den-tv-some-film")
+				"/apis/media.liken.sh/v1alpha1/namespaces/house/plays/den-some-film")
 			expectPatchBody(t, recorded, testCase.want, testCase.absent)
 			if version != "1201" {
 				t.Errorf("resourceVersion = %q, want the one the write produced", version)
@@ -479,8 +479,8 @@ func TestPassCarriesOnWithNoProgressCollectionsToRead(t *testing.T) {
 // because one Play must not stop the record of the others.
 func TestAHoldTheAPIServerRefusesLeavesThePlayAlone(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	cluster.plays = append(cluster.plays, testPlay("den-tv-some-film"))
-	cluster.broken[http.MethodPatch+" "+playPath(testLibraryNamespace, "den-tv-some-film")] =
+	cluster.plays = append(cluster.plays, testPlay("den-some-film"))
+	cluster.broken[http.MethodPatch+" "+playPath(testLibraryNamespace, "den-some-film")] =
 		http.StatusInternalServerError
 
 	operator.pass()
@@ -506,17 +506,17 @@ func TestAReleaseThatDoesNotLandLeavesTheMarkStanding(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			operator, cluster := playingHouse(t)
-			play := testPlay("den-tv-some-film")
+			play := testPlay("den-some-film")
 			play.Metadata.Finalizers = []string{progressFinalizer}
 			play.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 			cluster.plays = append(cluster.plays, play)
-			cluster.broken[http.MethodPatch+" "+playPath(testLibraryNamespace, "den-tv-some-film")] =
+			cluster.broken[http.MethodPatch+" "+playPath(testLibraryNamespace, "den-some-film")] =
 				testCase.status
-			publishRecorded(operator, "den-tv-some-film", playRecorded{Item: 1, Ended: true})
+			publishRecorded(operator, "den-some-film", playRecorded{Item: 1, Ended: true})
 
 			operator.pass()
 
-			_, held := operator.marks.recordedFor(testLibraryNamespace, "den-tv-some-film")
+			_, held := operator.marks.recordedFor(testLibraryNamespace, "den-some-film")
 			if held != testCase.held {
 				t.Errorf("the desk holds the mark: %v, want %v", held, testCase.held)
 			}
@@ -535,7 +535,7 @@ func TestAPlayNoStoreWillRecordIsReleased(t *testing.T) {
 	}{
 		{
 			name:    "a namespace with no catalog",
-			arrange: func(cluster *fakeCluster) { delete(cluster.catalogs, "house-catalog") },
+			arrange: func(cluster *fakeCluster) { delete(cluster.catalogs, "house") },
 		},
 		{
 			name:    "a namespace with two catalogs",
@@ -545,7 +545,7 @@ func TestAPlayNoStoreWillRecordIsReleased(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			operator, cluster := playingHouse(t)
-			play := testPlay("den-tv-some-film")
+			play := testPlay("den-some-film")
 			play.Metadata.Finalizers = []string{progressFinalizer}
 			cluster.plays = append(cluster.plays, play)
 			testCase.arrange(cluster)

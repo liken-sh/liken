@@ -42,8 +42,8 @@ func franchiseScannerOn(t *testing.T, catalog *Catalog, checkout, art string) *s
 // writes the three tables.
 func TestTheFranchiseScanWritesTheCheckoutIntoTheCatalog(t *testing.T) {
 	checkout := franchiseCheckout(t, map[string]string{
-		"Star Wars/franchise.yaml": wholeFranchiseFile,
-		"Firefly/franchise.yaml":   "name: Firefly\norder:\n  - series: tvdb:78874\n",
+		"Example Saga/franchise.yaml":   wholeFranchiseFile,
+		"Quiet Frontier/franchise.yaml": "name: Quiet Frontier\norder:\n  - series: tvdb:800201\n",
 	})
 	scan, agent := franchiseScanner(t, checkout, t.TempDir())
 
@@ -65,14 +65,14 @@ func TestTheFranchiseScanWritesTheCheckoutIntoTheCatalog(t *testing.T) {
 // names the file the fetch wrote on the claim the screen mounts.
 func TestTheFranchiseScanReadsTheArtOffTheArtClaim(t *testing.T) {
 	checkout := franchiseCheckout(t, map[string]string{
-		"Star Wars/franchise.yaml": wholeFranchiseFile,
-		"Star Wars/banner.jpg":     "not the art the row names",
+		"Example Saga/franchise.yaml": wholeFranchiseFile,
+		"Example Saga/banner.jpg":     "not the art the row names",
 	})
 	art := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(art, "Star Wars"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(art, "Example Saga"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(art, "Star Wars", "poster.jpg"), []byte("art"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(art, "Example Saga", "poster.jpg"), []byte("art"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	scan, agent := franchiseScanner(t, checkout, art)
@@ -85,7 +85,7 @@ func TestTheFranchiseScanReadsTheArtOffTheArtClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0][0] != "Star Wars/poster.jpg" {
+	if len(rows) != 1 || rows[0][0] != "Example Saga/poster.jpg" {
 		t.Errorf("art = %v, want the poster on the art claim", rows)
 	}
 	if len(rows) == 1 && strings.Contains(rows[0][1].(string), "banner") {
@@ -97,7 +97,7 @@ func TestTheFranchiseScanReadsTheArtOffTheArtClaim(t *testing.T) {
 // hundred kilobytes, so a scan on a schedule reads them again the way every
 // other kind's scan does.
 func TestEveryFranchiseScanWalksTheCheckout(t *testing.T) {
-	checkout := franchiseCheckout(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	checkout := franchiseCheckout(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
 	art := t.TempDir()
 	scan, agent := franchiseScanner(t, checkout, art)
 	if err := scan.walkOnce(t.Context()); err != nil {
@@ -158,7 +158,7 @@ func refusingCatalog(t *testing.T, transactions int, queries bool) *Catalog {
 // again. It never prunes on a catalog it could not read, because a prune with
 // no marks would sweep the whole library.
 func TestTheFranchiseScanFailsOnACatalogItCannotWrite(t *testing.T) {
-	checkout := franchiseCheckout(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	checkout := franchiseCheckout(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
 	cases := []struct {
 		name         string
 		transactions int
@@ -191,7 +191,7 @@ func TestTheFranchiseScanFailsOnACatalogItCannotWrite(t *testing.T) {
 // the wall.
 func TestTheFranchiseScanPrunesNothingOnACheckoutItCouldNotRead(t *testing.T) {
 	scan, agent := franchiseScanner(t, franchiseCheckout(t,
-		map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile}), t.TempDir())
+		map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile}), t.TempDir())
 	if err := scan.walkOnce(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestTheFranchiseScanPrunesNothingOnACheckoutItCouldNotRead(t *testing.T) {
 	// A second checkout that holds neither file the first held, and whose
 	// one entry is a directory where a franchise.yaml goes, which every read
 	// of it refuses.
-	broken := franchiseCheckout(t, map[string]string{"Alien/franchise.yaml/keep": "x"})
+	broken := franchiseCheckout(t, map[string]string{"Another Saga/franchise.yaml/keep": "x"})
 	second := franchiseScannerOn(t, scan.catalog, broken, t.TempDir())
 	err := second.walkOnce(t.Context())
 
@@ -246,7 +246,7 @@ func lastRunPosted(t *testing.T, recorder *catalogRecorder) []any {
 // A Job that walked its checkout writes a finished run with no
 // failure, the run a catalog pod confirms.
 func TestTheFranchiseScanJobWritesItsRun(t *testing.T) {
-	checkout := franchiseCheckout(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	checkout := franchiseCheckout(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
 	scan, recorder, catalog := franchiseScanJob(t, checkout)
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()

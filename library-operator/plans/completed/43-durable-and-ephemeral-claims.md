@@ -47,10 +47,10 @@ catalog, wants a size of its own.
   spec:
     storage:
       size: 1Gi
-      storageClassName: synology-iscsi-storage
+      storageClassName: san-block
     progress:
       size: 256Mi
-      storageClassName: synology-iscsi-storage
+      storageClassName: san-block
     libraries:
       storageClassName: local-path
     screens:

@@ -109,11 +109,11 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	catalog := testCatalog(t, rec)
 
 	row := movieRow{
-		Id: "movie:tmdb:603", Library: "house/movies", Kind: "movies",
-		Path: "The Matrix (1999)", Title: "The Matrix", SortKey: "Matrix",
-		Slug: "the-matrix-1999", Released: "1999", Added: 1700000000, Art: "folder.jpg", Duration: 8160,
+		Id: "movie:tmdb:1001", Library: "house/movies", Kind: "movies",
+		Path: "Some Film (1999)", Title: "Some Film", SortKey: "Some Film",
+		Slug: "some-film-1999", Released: "1999", Added: 1700000000, Art: "folder.jpg", Duration: 8160,
 		Body:  movieBody{Plot: "A hacker learns the truth."},
-		SetID: "set:tmdb:2344",
+		SetID: "set:tmdb:3001",
 	}
 	applied, err := catalog.UpsertMovies(context.Background(), []movieRow{row})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	}
 	// Every value is a parameter, so the id and the title never appear
 	// in the SQL text.
-	if strings.Contains(got.sql, "603") || strings.Contains(got.sql, "Matrix") {
+	if strings.Contains(got.sql, "1001") || strings.Contains(got.sql, "Some Film") {
 		t.Errorf("sql = %q, want no values concatenated in", got.sql)
 	}
 	if len(got.params) != 15 {
@@ -152,17 +152,17 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	if got.params[0] != "house/movies" {
 		t.Errorf("params[0] = %v, want the library", got.params[0])
 	}
-	if got.params[1] != "movie:tmdb:603" {
+	if got.params[1] != "movie:tmdb:1001" {
 		t.Errorf("params[1] = %v, want the id", got.params[1])
 	}
 	body, ok := got.params[10].(string)
 	if !ok || !strings.Contains(body, "A hacker learns the truth.") {
 		t.Errorf("params[10] = %v, want the marshaled body", got.params[10])
 	}
-	if got.params[11] != "the-matrix-1999" {
+	if got.params[11] != "some-film-1999" {
 		t.Errorf("params[11] = %v, want the slug", got.params[11])
 	}
-	if got.params[12] != "set:tmdb:2344" {
+	if got.params[12] != "set:tmdb:3001" {
 		t.Errorf("params[12] = %v, want the set the movie belongs to", got.params[12])
 	}
 }
@@ -205,7 +205,7 @@ func TestUpsertSeriesTargetsTheSeriesTable(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
-	_, err := catalog.UpsertSeries(context.Background(), []seriesRow{{Id: "series:tvdb:81189", Slug: "breaking-bad-2008"}})
+	_, err := catalog.UpsertSeries(context.Background(), []seriesRow{{Id: "series:tvdb:800001", Slug: "copper-line-2008"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestUpsertEpisodesCarriesTheSeriesColumns(t *testing.T) {
 	catalog := testCatalog(t, rec)
 
 	_, err := catalog.UpsertEpisodes(context.Background(), []episodeRow{{
-		Id: "episode:tvdb:81189:s02e05", Series: "series:tvdb:81189", Season: 2, Episode: 5,
+		Id: "episode:tvdb:800001:s02e05", Series: "series:tvdb:800001", Season: 2, Episode: 5,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestUpsertEpisodesCarriesTheSeriesColumns(t *testing.T) {
 	if len(got.params) != 17 {
 		t.Fatalf("params = %d, want 17", len(got.params))
 	}
-	if got.params[12] != "series:tvdb:81189" {
+	if got.params[12] != "series:tvdb:800001" {
 		t.Errorf("params[12] = %v, want the series id", got.params[12])
 	}
 	if got.params[13].(float64) != 2 || got.params[14].(float64) != 5 {
@@ -333,7 +333,7 @@ func TestUpsertFileItemsExpandsEveryPair(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
-	rows := []fileRow{{Path: "s01e01e02.mkv", Items: []string{"episode:tvdb:81189:s01e01", "episode:tvdb:81189:s01e02"}}}
+	rows := []fileRow{{Path: "s01e01e02.mkv", Items: []string{"episode:tvdb:800001:s01e01", "episode:tvdb:800001:s01e02"}}}
 	applied, err := catalog.UpsertFileItems(context.Background(), rows)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func TestUpsertFileItemsExpandsEveryPair(t *testing.T) {
 		!strings.Contains(statements[0].sql, "ON CONFLICT (library, path, item) DO NOTHING") {
 		t.Errorf("sql = %q, want an insert on file_items that does nothing on a conflict", statements[0].sql)
 	}
-	if statements[0].params[1] != "s01e01e02.mkv" || statements[1].params[2] != "episode:tvdb:81189:s01e02" {
+	if statements[0].params[1] != "s01e01e02.mkv" || statements[1].params[2] != "episode:tvdb:800001:s01e02" {
 		t.Errorf("params = %v / %v, want the path and each item", statements[0].params, statements[1].params)
 	}
 }
@@ -361,7 +361,7 @@ func TestUpsertAliasesWritesEachName(t *testing.T) {
 	catalog := testCatalog(t, rec)
 
 	_, err := catalog.UpsertAliases(context.Background(), []aliasRow{{
-		Alias: "movie:imdb:tt0133093", Library: "house/movies", Item: "movie:tmdb:603", Source: aliasSourceProvider,
+		Alias: "movie:imdb:tt9001001", Library: "house/movies", Item: "movie:tmdb:1001", Source: aliasSourceProvider,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -370,8 +370,8 @@ func TestUpsertAliasesWritesEachName(t *testing.T) {
 	if !strings.Contains(got.sql, "INSERT INTO aliases") || !strings.Contains(got.sql, "ON CONFLICT (library, alias)") {
 		t.Errorf("sql = %q, want an upsert on aliases keyed by the library and the alias", got.sql)
 	}
-	if got.params[0] != "house/movies" || got.params[1] != "movie:imdb:tt0133093" ||
-		got.params[2] != "movie:tmdb:603" || got.params[3] != aliasSourceProvider {
+	if got.params[0] != "house/movies" || got.params[1] != "movie:imdb:tt9001001" ||
+		got.params[2] != "movie:tmdb:1001" || got.params[3] != aliasSourceProvider {
 		t.Errorf("params = %v, want the library, alias, item, and source", got.params)
 	}
 }
@@ -383,19 +383,19 @@ func TestDeleteByKeyMethods(t *testing.T) {
 		want   string
 	}{
 		{name: "movies", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteMovies(ctx, "house/movies", []string{"movie:tmdb:603"})
+			return c.DeleteMovies(ctx, "house/movies", []string{"movie:tmdb:1001"})
 		}, want: "DELETE FROM movies WHERE library = ? AND id = ?"},
 		{name: "series", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteSeries(ctx, "house/movies", []string{"series:tvdb:81189"})
+			return c.DeleteSeries(ctx, "house/movies", []string{"series:tvdb:800001"})
 		}, want: "DELETE FROM series WHERE library = ? AND id = ?"},
 		{name: "episodes", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteEpisodes(ctx, "house/movies", []string{"episode:tvdb:81189:s01e01"})
+			return c.DeleteEpisodes(ctx, "house/movies", []string{"episode:tvdb:800001:s01e01"})
 		}, want: "DELETE FROM episodes WHERE library = ? AND id = ?"},
 		{name: "files", delete: func(c *Catalog, ctx context.Context) (int, error) {
 			return c.DeleteFiles(ctx, "house/movies", []string{"a.mkv"})
 		}, want: "DELETE FROM files WHERE library = ? AND path = ?"},
 		{name: "aliases", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteAliases(ctx, "house/movies", []string{"movie:imdb:tt0133093"})
+			return c.DeleteAliases(ctx, "house/movies", []string{"movie:imdb:tt9001001"})
 		}, want: "DELETE FROM aliases WHERE library = ? AND alias = ?"},
 	}
 	for _, testCase := range cases {
@@ -428,8 +428,8 @@ func TestDeleteFileItemsNamesEveryKeyColumn(t *testing.T) {
 	catalog := testCatalog(t, rec)
 
 	links := []fileItemKey{
-		{Path: "s01e01e02.mkv", Item: "episode:tvdb:81189:s01e01"},
-		{Path: "s01e01e02.mkv", Item: "episode:tvdb:81189:s01e02"},
+		{Path: "s01e01e02.mkv", Item: "episode:tvdb:800001:s01e01"},
+		{Path: "s01e01e02.mkv", Item: "episode:tvdb:800001:s01e02"},
 	}
 	_, err := catalog.DeleteFileItems(context.Background(), "house/series", links)
 	if err != nil {
@@ -443,7 +443,7 @@ func TestDeleteFileItemsNamesEveryKeyColumn(t *testing.T) {
 		t.Errorf("sql = %q, want a delete on file_items by all three key columns", statements[0].sql)
 	}
 	if statements[0].params[0] != "house/series" || statements[0].params[1] != "s01e01e02.mkv" ||
-		statements[1].params[2] != "episode:tvdb:81189:s01e02" {
+		statements[1].params[2] != "episode:tvdb:800001:s01e02" {
 		t.Errorf("params = %v / %v, want the library, the path, and each item", statements[0].params, statements[1].params)
 	}
 }
@@ -468,7 +468,7 @@ func TestPostSurfacesANon2xxStatus(t *testing.T) {
 	rec := &catalogRecorder{status: http.StatusInternalServerError, respBody: "the agent failed"}
 	catalog := testCatalog(t, rec)
 
-	applied, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:603"}})
+	applied, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:1001"}})
 	if err == nil {
 		t.Fatal("err = nil, want the agent's status")
 	}
@@ -484,7 +484,7 @@ func TestPostSurfacesAStatementError(t *testing.T) {
 	rec := &catalogRecorder{respBody: `{"results":[{"error":"no such column"}]}`}
 	catalog := testCatalog(t, rec)
 
-	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:603"}})
+	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:1001"}})
 	if err == nil || !strings.Contains(err.Error(), "no such column") {
 		t.Fatalf("err = %v, want the statement error", err)
 	}
@@ -494,7 +494,7 @@ func TestPostSurfacesADecodeError(t *testing.T) {
 	rec := &catalogRecorder{respBody: "not json"}
 	catalog := testCatalog(t, rec)
 
-	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:603"}})
+	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:1001"}})
 	if err == nil || !strings.Contains(err.Error(), "decoding response") {
 		t.Fatalf("err = %v, want a decode error", err)
 	}
@@ -506,7 +506,7 @@ func TestPostSurfacesATransportError(t *testing.T) {
 	catalog := NewCatalog(server.URL, server.Client())
 	server.Close()
 
-	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:603"}})
+	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:1001"}})
 	if err == nil {
 		t.Fatal("err = nil, want a transport error")
 	}
@@ -515,7 +515,7 @@ func TestPostSurfacesATransportError(t *testing.T) {
 func TestPostSurfacesABadBaseURL(t *testing.T) {
 	catalog := NewCatalog("http://\x7f", http.DefaultClient)
 
-	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:603"}})
+	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:1001"}})
 	if err == nil {
 		t.Fatal("err = nil, want a request-construction error")
 	}

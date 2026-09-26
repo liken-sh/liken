@@ -39,12 +39,12 @@ func newFakeTVmaze(t *testing.T, status int, answers map[string]string) (*tvmaze
 
 // One show, with the ids, the overview fields, and the poster TVmaze carries
 // on the show itself.
-const tvmazeShowAnswer = `{"id":1371,"name":"Twin Peaks","premiered":"1990-04-08",
+const tvmazeShowAnswer = `{"id":3001,"name":"Pine Hollow","premiered":"1990-05-12",
 	"genres":["Drama","Mystery"],"runtime":60,"averageRuntime":47,
-	"summary":"<p>An FBI agent arrives in a small town.</p>",
-	"rating":{"average":8.6},"network":{"id":2,"name":"ABC"},
-	"image":{"medium":"https://static.tvmaze.com/uploads/m.jpg","original":"https://static.tvmaze.com/uploads/o.jpg"},
-	"externals":{"imdb":"tt0098936","thetvdb":70533,"tvrage":6293}}`
+	"summary":"<p>A surveyor arrives in a mountain town.</p>",
+	"rating":{"average":8.6},"network":{"id":2,"name":"Harbour Broadcasting"},
+	"image":{"medium":"https://static.example.test/uploads/m.jpg","original":"https://static.example.test/uploads/o.jpg"},
+	"externals":{"imdb":"tt9002002","thetvdb":800002,"tvrage":7001}}`
 
 // A lookup on an id another provider gave answers the show, with the ids the
 // identity fact writes and the fields the overview fact reads. TVmaze takes
@@ -53,22 +53,22 @@ func TestTheTVmazeLookupReadsOneShow(t *testing.T) {
 	client, fake := newFakeTVmaze(t, http.StatusOK,
 		map[string]string{tvmazeLookupPath: tvmazeShowAnswer})
 
-	show, err := client.lookup(t.Context(), tvmazeSchemeIMDb, "tt0098936")
+	show, err := client.lookup(t.Context(), tvmazeSchemeIMDb, "tt9002002")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if show.ID != 1371 || show.Externals.TheTVDB != 70533 || show.Externals.IMDb != "tt0098936" {
+	if show.ID != 3001 || show.Externals.TheTVDB != 800002 || show.Externals.IMDb != "tt9002002" {
 		t.Errorf("show = %+v, want the ids of every database", show)
 	}
-	if show.Premiered == "" || len(show.Genres) != 2 || show.Summary == "" || show.Network.Name != "ABC" {
+	if show.Premiered == "" || len(show.Genres) != 2 || show.Summary == "" || show.Network.Name != "Harbour Broadcasting" {
 		t.Errorf("show = %+v, want the premiere, the genres, the summary, and the network", show)
 	}
 	if show.Rating.Average != 8.6 || show.Image.Original == "" || show.AverageRuntime != 47 {
 		t.Errorf("show = %+v, want the rating, the image, and the runtime", show)
 	}
 	request := fake.requests[0]
-	if got := request.URL.Query().Get(tvmazeSchemeIMDb); got != "tt0098936" {
+	if got := request.URL.Query().Get(tvmazeSchemeIMDb); got != "tt9002002" {
 		t.Errorf("the lookup asked for %q, want the IMDb id", got)
 	}
 	if request.Header.Get("Authorization") != "" || request.URL.Query().Get("api_key") != "" {
@@ -90,33 +90,33 @@ func TestATVmazeLookupThatFindsNoShow(t *testing.T) {
 // calls the series facts make.
 func TestTheTVmazeShowCallsReadWhatTheFactsWrite(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
-		tvmazeShowsPath + "1371": tvmazeShowAnswer,
-		tvmazeShowsPath + "1371/cast": `[{"person":{"id":8,"name":"Kyle MacLachlan",
-			"image":{"medium":"https://static.tvmaze.com/uploads/p.jpg","original":"https://static.tvmaze.com/uploads/p.jpg"}},
-			"character":{"id":11,"name":"Dale Cooper"}}]`,
-		tvmazeShowsPath + "1371/images": `[{"id":1,"type":"poster","main":true,
-			"resolutions":{"original":{"url":"https://static.tvmaze.com/uploads/a.jpg","width":1000,"height":1500}}},
+		tvmazeShowsPath + "3001": tvmazeShowAnswer,
+		tvmazeShowsPath + "3001/cast": `[{"person":{"id":8,"name":"Kas Morrell",
+			"image":{"medium":"https://static.example.test/uploads/p.jpg","original":"https://static.example.test/uploads/p.jpg"}},
+			"character":{"id":11,"name":"Hal Mercer"}}]`,
+		tvmazeShowsPath + "3001/images": `[{"id":1,"type":"poster","main":true,
+			"resolutions":{"original":{"url":"https://static.example.test/uploads/a.jpg","width":1000,"height":1500}}},
 			{"id":2,"type":"background","main":false,
-			"resolutions":{"original":{"url":"https://static.tvmaze.com/uploads/b.jpg","width":1920,"height":1080}}}]`,
+			"resolutions":{"original":{"url":"https://static.example.test/uploads/b.jpg","width":1920,"height":1080}}}]`,
 	})
 
-	show, err := client.show(t.Context(), 1371)
-	if err != nil || show.Name != "Twin Peaks" {
+	show, err := client.show(t.Context(), 3001)
+	if err != nil || show.Name != "Pine Hollow" {
 		t.Fatalf("show = %+v, %v", show, err)
 	}
 
-	cast, err := client.cast(t.Context(), 1371)
+	cast, err := client.cast(t.Context(), 3001)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cast) != 1 || cast[0].Person.Name != "Kyle MacLachlan" || cast[0].Character.Name != "Dale Cooper" {
+	if len(cast) != 1 || cast[0].Person.Name != "Kas Morrell" || cast[0].Character.Name != "Hal Mercer" {
 		t.Errorf("cast = %+v, want the person and the character", cast)
 	}
 	if cast[0].Person.Image.Original == "" {
 		t.Errorf("person = %+v, want the headshot", cast[0].Person)
 	}
 
-	images, err := client.images(t.Context(), 1371)
+	images, err := client.images(t.Context(), 3001)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,16 +147,16 @@ func TestTheTVmazeShowCallsReadWhatTheFactsWrite(t *testing.T) {
 func TestATVmazeCallThatFails(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusInternalServerError, nil)
 
-	if _, err := client.lookup(t.Context(), tvmazeSchemeIMDb, "tt0098936"); err == nil {
+	if _, err := client.lookup(t.Context(), tvmazeSchemeIMDb, "tt9002002"); err == nil {
 		t.Error("the lookup read no error from a 500")
 	}
-	if _, err := client.show(t.Context(), 1371); err == nil {
+	if _, err := client.show(t.Context(), 3001); err == nil {
 		t.Error("the show call read no error from a 500")
 	}
-	if _, err := client.cast(t.Context(), 1371); err == nil {
+	if _, err := client.cast(t.Context(), 3001); err == nil {
 		t.Error("the cast call read no error from a 500")
 	}
-	if _, err := client.images(t.Context(), 1371); err == nil {
+	if _, err := client.images(t.Context(), 3001); err == nil {
 		t.Error("the images call read no error from a 500")
 	}
 }

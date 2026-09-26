@@ -16,20 +16,20 @@ func TestTheBackfillLeavesOneLinePerStep(t *testing.T) {
 	}{
 		{
 			name: "the Job the pass creates",
-			want: "catalog house/house-catalog: created the job house-catalog-jellyfin-backfill " +
+			want: "catalog house/house: created the job house-jellyfin-backfill " +
 				"to copy every person's progress from the jellyfin server spec.jellyfin names",
 		},
 		{
 			name:   "the Job that succeeded",
 			job:    &JobStatus{Succeeded: 1},
 			status: &CatalogJellyfinStatus{Server: testJellyfinURL, Backfill: backfillRunning},
-			want:   "catalog house/house-catalog: the job house-catalog-jellyfin-backfill finished the jellyfin backfill",
+			want:   "catalog house/house: the job house-jellyfin-backfill finished the jellyfin backfill",
 		},
 		{
 			name:   "the Job that gave up",
 			job:    &JobStatus{Failed: scanBackoffLimit + 1},
 			status: &CatalogJellyfinStatus{Server: testJellyfinURL, Backfill: backfillRunning},
-			want: "catalog house/house-catalog: the job house-catalog-jellyfin-backfill failed the jellyfin backfill " +
+			want: "catalog house/house: the job house-jellyfin-backfill failed the jellyfin backfill " +
 				"after 3 attempts, and a later pass creates it again",
 		},
 	}

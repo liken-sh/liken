@@ -1076,7 +1076,7 @@ func seedCatalog(cluster *fakeCluster, name, namespace string) *NamespaceCatalog
 // TestNamespaceCatalog is one Catalog a reconcile reads, so a test
 // hands reconcile the choice a namespace with one Catalog resolves to.
 func testNamespaceCatalog() *NamespaceCatalog {
-	return &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", UID: "house-catalog-uid"}}
+	return &NamespaceCatalog{Metadata: ObjectMeta{Name: "house", Namespace: "house", UID: "house-uid"}}
 }
 
 // WithCatalog is the catalog choice a namespace with one Catalog
@@ -1139,7 +1139,7 @@ func standingCatalog() catalogChoice {
 func boundHouse(cluster *fakeCluster) *Library {
 	library := studioMovies()
 	cluster.libraries["movies"] = library
-	seedCatalog(cluster, "house-catalog", "house")
+	seedCatalog(cluster, "house", "house")
 	cluster.claims["movies"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
@@ -1164,7 +1164,7 @@ func boundStudio(cluster *fakeCluster) *Library {
 		},
 	}
 	cluster.libraries["series"] = library
-	seedCatalog(cluster, "studio-catalog", "studio")
+	seedCatalog(cluster, "studio", "studio")
 	cluster.claims["shows"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "shows", Namespace: "studio"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},

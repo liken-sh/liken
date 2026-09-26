@@ -90,8 +90,8 @@ func newFakeTMDb(t *testing.T, answers map[string]string) (*tmdbClient, *fakeTMD
 
 func TestASearchReadsTheResultsTMDbAnswers(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[{"id":1091,"title":"The Thing","original_title":"The Thing","release_date":"1982-06-25"}]}`,
-		tmdbKey("/3/search/tv", "Twin Peaks", "1990"):   `{"results":[{"id":1920,"name":"Twin Peaks","original_name":"Twin Peaks","first_air_date":"1990-04-08"}]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[{"id":1002,"title":"The Long Survey","original_title":"The Long Survey","release_date":"1982-07-14"}]}`,
+		tmdbKey("/3/search/tv", "Pine Hollow", "1990"):        `{"results":[{"id":2002,"name":"Pine Hollow","original_name":"Pine Hollow","first_air_date":"1990-05-12"}]}`,
 	})
 
 	cases := []struct {
@@ -101,8 +101,8 @@ func TestASearchReadsTheResultsTMDbAnswers(t *testing.T) {
 		year  int
 		want  int
 	}{
-		{name: "a movie", kind: libraryKindMovies, title: "The Thing", year: 1982, want: 1091},
-		{name: "a series", kind: libraryKindSeries, title: "Twin Peaks", year: 1990, want: 1920},
+		{name: "a movie", kind: libraryKindMovies, title: "The Long Survey", year: 1982, want: 1002},
+		{name: "a series", kind: libraryKindSeries, title: "Pine Hollow", year: 1990, want: 2002},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -122,8 +122,8 @@ func TestASearchReadsTheResultsTMDbAnswers(t *testing.T) {
 
 func TestARuntimeReadsFromTheDetailAnswer(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/movie/1091", "", ""): `{"runtime":109}`,
-		tmdbKey("/3/tv/1920", "", ""):    `{"episode_run_time":[47]}`,
+		tmdbKey("/3/movie/1002", "", ""): `{"runtime":109}`,
+		tmdbKey("/3/tv/2002", "", ""):    `{"episode_run_time":[47]}`,
 	})
 
 	cases := []struct {
@@ -132,8 +132,8 @@ func TestARuntimeReadsFromTheDetailAnswer(t *testing.T) {
 		id   int
 		want time.Duration
 	}{
-		{name: "a movie states one runtime", kind: libraryKindMovies, id: 1091, want: 109 * time.Minute},
-		{name: "a series states its episode runtimes", kind: libraryKindSeries, id: 1920, want: 47 * time.Minute},
+		{name: "a movie states one runtime", kind: libraryKindMovies, id: 1002, want: 109 * time.Minute},
+		{name: "a series states its episode runtimes", kind: libraryKindSeries, id: 2002, want: 47 * time.Minute},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -161,11 +161,11 @@ func TestATooManyRequestsAnswerIsACooldownAndARetry(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			client, fake := newFakeTMDb(t, map[string]string{
-				tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[{"id":1091,"title":"The Thing","release_date":"1982-06-25"}]}`,
+				tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[{"id":1002,"title":"The Long Survey","release_date":"1982-07-14"}]}`,
 			})
 			fake.tooMany, fake.retryAfter = 1, test.retryAfter
 
-			results, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982)
+			results, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -183,7 +183,7 @@ func TestAProviderThatOnlyAnswersTooManyRequestsFails(t *testing.T) {
 	client, fake := newFakeTMDb(t, nil)
 	fake.tooMany = providerAttempts + 1
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err == nil {
+	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
 		t.Fatal("the search reported no error, want one")
 	}
 	if len(fake.cooldowns) != providerAttempts-1 {
@@ -193,19 +193,19 @@ func TestAProviderThatOnlyAnswersTooManyRequestsFails(t *testing.T) {
 
 func TestARefusedKeyIsAnError(t *testing.T) {
 	client, fake := newFakeTMDb(t, nil)
-	fake.statuses[tmdbKey("/3/search/movie", "The Thing", "1982")] = http.StatusUnauthorized
+	fake.statuses[tmdbKey("/3/search/movie", "The Long Survey", "1982")] = http.StatusUnauthorized
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err == nil {
+	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
 		t.Error("the search reported no error, want one")
 	}
 }
 
 func TestAnAnswerThatIsNotJSONIsAnError(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `not json`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `not json`,
 	})
 
-	if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err == nil {
+	if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err == nil {
 		t.Error("the search reported no error, want one")
 	}
 }
@@ -214,7 +214,7 @@ func TestAProviderThatDoesNotAnswerIsAnError(t *testing.T) {
 	client := newTMDbClient("http://127.0.0.1:1", "a-token")
 	client.http = &http.Client{Timeout: time.Second}
 
-	if _, err := client.runtime(t.Context(), libraryKindMovies, 1091); err == nil {
+	if _, err := client.runtime(t.Context(), libraryKindMovies, 1002); err == nil {
 		t.Error("the read reported no error, want one")
 	}
 }
@@ -287,7 +287,7 @@ func TestTheIdentityClientSendsTheKeyInTheFormItsShapeNames(t *testing.T) {
 			client, fake := newFakeTMDb(t, nil)
 			client.key = test.key
 
-			if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err != nil {
+			if _, err := client.search(t.Context(), libraryKindMovies, "The Long Survey", 1982); err != nil {
 				t.Fatal(err)
 			}
 

@@ -55,7 +55,7 @@ func walkOfOnePerson(library, item, slug string) *walkResult {
 // The trailers one title holds, so the sweep reads a row in that table too.
 func walkOfOneTrailer(library, item string) *walkResult {
 	return &walkResult{trailers: []trailerRow{{
-		Library: library, Item: item, Provider: providerBlockTMDb, Key: "sJ9mvBJ1aTI",
+		Library: library, Item: item, Provider: providerBlockTMDb, Key: "Hb5nQw2kR07",
 		Site: trailerSiteYouTube, Kind: trailerKindTrailer,
 	}}}
 }

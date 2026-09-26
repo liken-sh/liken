@@ -31,14 +31,14 @@ func testJellyfinPod(catalog *NamespaceCatalog) *Pod {
 func TestJellyfinPodBelongsToItsCatalog(t *testing.T) {
 	pod := testJellyfinPod(jellyfinCatalog())
 
-	if pod.Metadata.Name != "house-catalog-jellyfin" || pod.Metadata.Namespace != "house" {
+	if pod.Metadata.Name != "house-jellyfin" || pod.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own jellyfin pod", pod.Metadata)
 	}
 	if len(pod.Metadata.OwnerReferences) != 1 {
 		t.Fatalf("ownerReferences = %+v, want the Catalog", pod.Metadata.OwnerReferences)
 	}
 	owner := pod.Metadata.OwnerReferences[0]
-	if owner.Kind != "Catalog" || owner.Name != "house-catalog" || !owner.Controller {
+	if owner.Kind != "Catalog" || owner.Name != "house" || !owner.Controller {
 		t.Errorf("owner = %+v, want the controlling Catalog", owner)
 	}
 	if pod.Metadata.Labels[scannerLabelKey] != jellyfinLabelValue {
@@ -182,11 +182,11 @@ func TestJellyfinPodNamesItsPortAndItsHealth(t *testing.T) {
 func TestJellyfinServiceReachesThePod(t *testing.T) {
 	service := buildJellyfinService(jellyfinCatalog())
 
-	if service.Metadata.Name != "house-catalog-jellyfin" || service.Metadata.Namespace != "house" {
+	if service.Metadata.Name != "house-jellyfin" || service.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own jellyfin Service", service.Metadata)
 	}
 	if len(service.Metadata.OwnerReferences) != 1 ||
-		service.Metadata.OwnerReferences[0].Name != "house-catalog" {
+		service.Metadata.OwnerReferences[0].Name != "house" {
 		t.Errorf("owners = %+v, want the Catalog", service.Metadata.OwnerReferences)
 	}
 	if service.Spec.ClusterIP != "" {
@@ -218,15 +218,15 @@ func TestReconcileCatalogsStandsTheJellyfinPairTheCatalogAsksFor(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			catalog := seedCatalog(cluster, "house-catalog", "house")
+			catalog := seedCatalog(cluster, "house", "house")
 			catalog.Spec.Jellyfin = one.block
 
 			testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
-			if held := cluster.heldPod("house-catalog-jellyfin") != nil; held != one.stands {
+			if held := cluster.heldPod("house-jellyfin") != nil; held != one.stands {
 				t.Errorf("the jellyfin pod stands = %v, want %v", held, one.stands)
 			}
-			if held := cluster.heldService("house", "house-catalog-jellyfin") != nil; held != one.stands {
+			if held := cluster.heldService("house", "house-jellyfin") != nil; held != one.stands {
 				t.Errorf("the jellyfin Service stands = %v, want %v", held, one.stands)
 			}
 		})
@@ -247,10 +247,10 @@ func TestStandJellyfinTakesDownThePairACatalogNoLongerAsksFor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-jellyfin") != nil {
+	if cluster.heldPod("house-jellyfin") != nil {
 		t.Error("the jellyfin pod still stands")
 	}
-	if cluster.heldService("house", "house-catalog-jellyfin") != nil {
+	if cluster.heldService("house", "house-jellyfin") != nil {
 		t.Error("the jellyfin Service still stands")
 	}
 }
@@ -259,11 +259,11 @@ func TestStandJellyfinTakesDownThePairACatalogNoLongerAsksFor(t *testing.T) {
 // because the name label is what says the operator stood it.
 func TestStandJellyfinLeavesObjectsItDidNotStand(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.pods["house-catalog-jellyfin"] = &Pod{
-		Metadata: ObjectMeta{Name: "house-catalog-jellyfin", Namespace: "house"},
+	cluster.pods["house-jellyfin"] = &Pod{
+		Metadata: ObjectMeta{Name: "house-jellyfin", Namespace: "house"},
 	}
 	cluster.holdService(&Service{
-		Metadata: ObjectMeta{Name: "house-catalog-jellyfin", Namespace: "house"},
+		Metadata: ObjectMeta{Name: "house-jellyfin", Namespace: "house"},
 	})
 	catalog := housekeepingCatalog()
 
@@ -271,10 +271,10 @@ func TestStandJellyfinLeavesObjectsItDidNotStand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-jellyfin") == nil {
+	if cluster.heldPod("house-jellyfin") == nil {
 		t.Error("the pass deleted a pod it did not stand")
 	}
-	if cluster.heldService("house", "house-catalog-jellyfin") == nil {
+	if cluster.heldService("house", "house-jellyfin") == nil {
 		t.Error("the pass deleted a Service it did not stand")
 	}
 }
@@ -286,13 +286,13 @@ func TestStandJellyfinReplacesAStalePod(t *testing.T) {
 	catalog := jellyfinCatalog()
 	stale := testJellyfinPod(catalog)
 	stale.Metadata.Annotations = map[string]string{templateHashAnnotation: "an-older-template"}
-	cluster.pods["house-catalog-jellyfin"] = stale
+	cluster.pods["house-jellyfin"] = stale
 	operator := testOperator(t, cluster)
 
 	if err := operator.standJellyfin(t.Context(), catalog); err != nil {
 		t.Fatal(err)
 	}
-	if cluster.heldPod("house-catalog-jellyfin") != nil {
+	if cluster.heldPod("house-jellyfin") != nil {
 		t.Fatal("the stale pod still stands")
 	}
 
@@ -300,7 +300,7 @@ func TestStandJellyfinReplacesAStalePod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	replacement := cluster.heldPod("house-catalog-jellyfin")
+	replacement := cluster.heldPod("house-jellyfin")
 	if replacement == nil {
 		t.Fatal("no replacement pod was created")
 	}
@@ -327,12 +327,12 @@ func TestStandJellyfinServiceWritesOnDivergenceAlone(t *testing.T) {
 		t.Errorf("the pass sent %d updates for an unchanged Service", got)
 	}
 
-	cluster.heldService("house", "house-catalog-jellyfin").Spec.Selector = map[string]string{"app": "mine"}
+	cluster.heldService("house", "house-jellyfin").Spec.Selector = map[string]string{"app": "mine"}
 	if err := operator.standJellyfinService(t.Context(), catalog); err != nil {
 		t.Fatal(err)
 	}
 
-	written := cluster.heldService("house", "house-catalog-jellyfin")
+	written := cluster.heldService("house", "house-jellyfin")
 	if written.Spec.Selector[scannerLabelKey] != jellyfinLabelValue {
 		t.Errorf("selector = %v, want the jellyfin pod's labels back", written.Spec.Selector)
 	}
@@ -341,8 +341,8 @@ func TestStandJellyfinServiceWritesOnDivergenceAlone(t *testing.T) {
 // The paths of the pair, so a test breaks one of them and reads the failure
 // the pass reports.
 const (
-	jellyfinPodPath     = "/api/v1/namespaces/house/pods/house-catalog-jellyfin"
-	jellyfinServicePath = "/api/v1/namespaces/house/services/house-catalog-jellyfin"
+	jellyfinPodPath     = "/api/v1/namespaces/house/pods/house-jellyfin"
+	jellyfinServicePath = "/api/v1/namespaces/house/services/house-jellyfin"
 )
 
 // A failure standing either half ends the stand, and the pass reports it
@@ -408,7 +408,7 @@ func TestStandJellyfinServiceTakesAConflictAsSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldService("house", "house-catalog-jellyfin") != nil {
+	if cluster.heldService("house", "house-jellyfin") != nil {
 		t.Error("the pass stood a Service the API server refused")
 	}
 }

@@ -94,7 +94,7 @@ func TestALibrarySweepTakesItsAttemptsAgainstTheRealSchema(t *testing.T) {
 
 	for _, walk := range []*walkResult{
 		walkWithAttempts("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001", ledgerTime),
-		walkWithAttempts("studio/films", "movie:path:nine", "Nine (2009)", "movie:path:nine", ledgerTime),
+		walkWithAttempts("studio/films", "movie:path:nine", "Nine (2019)", "movie:path:nine", ledgerTime),
 	} {
 		if err := upsertWalk(ctx, catalog, walk); err != nil {
 			t.Fatal(err)

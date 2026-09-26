@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <episodedetails>
-  <title>Breakage</title>
+  <title>Tin Roof</title>
   <season>2</season>
   <episode>5</episode>
   <aired>2009-04-05</aired>
-  <plot>Jesse sets up his own drug operation.</plot>
-  <director>Johan Renck</director>
-  <credits>Moira Walley-Beckett</credits>
-  <actor><name>Aaron Paul</name><role>Jesse Pinkman</role></actor>
-  <uniqueid type="tvdb">340124</uniqueid>
+  <plot>Jonah sets up his own business.</plot>
+  <director>Lena Sorel</director>
+  <credits>Ada Fenwick-Lowe</credits>
+  <actor><name>Cal Brenner</name><role>Jonah Pike</role></actor>
+  <uniqueid type="tvdb">800105</uniqueid>
   <fileinfo>
     <streamdetails>
       <video><codec>h264</codec><width>1280</width><height>720</height><durationinseconds>2820</durationinseconds></video>

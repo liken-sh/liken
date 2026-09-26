@@ -84,8 +84,8 @@ func TestTheAudienceWritesItsPeopleAndAliases(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
 	audience := playAudience{
 		Player: "living-room", Library: "series",
-		People:  []string{"chris", "thora"},
-		Aliases: map[string]string{"tmdb": "2316", "imdb": "tt0386676"},
+		People:  []string{"person-a", "person-b"},
+		Aliases: map[string]string{"tmdb": "2101", "imdb": "tt9002101"},
 		Season:  3, Episode: 5,
 	}
 
@@ -103,10 +103,10 @@ func TestTheAudienceWritesItsPeopleAndAliases(t *testing.T) {
 	if row.Phase != "" {
 		t.Errorf("phase = %q, want no phase from an audience alone", row.Phase)
 	}
-	if people := heldPeople(t, db, "play-1"); len(people) != 2 || people["chris"] != 1 || people["thora"] != 1 {
-		t.Errorf("people = %v, want chris and thora", people)
+	if people := heldPeople(t, db, "play-1"); len(people) != 2 || people["person-a"] != 1 || people["person-b"] != 1 {
+		t.Errorf("people = %v, want person-a and person-b", people)
 	}
-	if aliases := heldAliases(t, db, "play-1"); aliases["tmdb"] != "2316" || aliases["imdb"] != "tt0386676" {
+	if aliases := heldAliases(t, db, "play-1"); aliases["tmdb"] != "2101" || aliases["imdb"] != "tt9002101" {
 		t.Errorf("aliases = %v, want the two provider ids", aliases)
 	}
 }
@@ -115,22 +115,22 @@ func TestTheAudienceWritesItsPeopleAndAliases(t *testing.T) {
 // and an alias the operator no longer states are gone.
 func TestASecondAudienceReplacesTheSets(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
-	first := playAudience{People: []string{"chris", "thora"}, Aliases: map[string]string{"tmdb": "2316", "imdb": "tt0386676"}}
+	first := playAudience{People: []string{"person-a", "person-b"}, Aliases: map[string]string{"tmdb": "2101", "imdb": "tt9002101"}}
 	if err := store.recordAudience(t.Context(), "play-1", first, testRecordedAt); err != nil {
 		t.Fatal(err)
 	}
 
-	second := playAudience{People: []string{"chris"}, Aliases: map[string]string{"tmdb": "2316"}}
+	second := playAudience{People: []string{"person-a"}, Aliases: map[string]string{"tmdb": "2101"}}
 	if err := store.recordAudience(t.Context(), "play-1", second, testRecordedAt); err != nil {
 		t.Fatal(err)
 	}
 
 	people := heldPeople(t, db, "play-1")
-	if len(people) != 1 || people["chris"] != 1 {
-		t.Errorf("people = %v, want chris alone", people)
+	if len(people) != 1 || people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a alone", people)
 	}
 	aliases := heldAliases(t, db, "play-1")
-	if len(aliases) != 1 || aliases["tmdb"] != "2316" {
+	if len(aliases) != 1 || aliases["tmdb"] != "2101" {
 		t.Errorf("aliases = %v, want the tmdb id alone", aliases)
 	}
 }
@@ -211,8 +211,8 @@ func TestAnOutsidePlayWritesTheWholeRow(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
 	outside := outsidePlay{
 		Player:  "jellyfin",
-		People:  []string{"chris"},
-		Aliases: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+		People:  []string{"person-a"},
+		Aliases: map[string]string{"tmdb": "1101", "imdb": "tt9001101"},
 		Season:  2, Episode: 4,
 		Position: 4210, Duration: 8160, At: testOutsideAt,
 	}
@@ -234,10 +234,10 @@ func TestAnOutsidePlayWritesTheWholeRow(t *testing.T) {
 	if row.Recorded != testOutsideAt || row.Started != testOutsideAt {
 		t.Errorf("row = %+v, want the time of the event", row)
 	}
-	if people := heldPeople(t, db, "jellyfin-7-19"); len(people) != 1 || people["chris"] != 1 {
-		t.Errorf("people = %v, want chris", people)
+	if people := heldPeople(t, db, "jellyfin-7-19"); len(people) != 1 || people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a", people)
 	}
-	if aliases := heldAliases(t, db, "jellyfin-7-19"); aliases["tmdb"] != "603" || aliases["imdb"] != "tt0133093" {
+	if aliases := heldAliases(t, db, "jellyfin-7-19"); aliases["tmdb"] != "1101" || aliases["imdb"] != "tt9001101" {
 		t.Errorf("aliases = %v, want the two provider ids", aliases)
 	}
 }
@@ -260,13 +260,13 @@ func TestTheNewerOutsidePlayWins(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			store, db := newSQLiteProgressStore(t)
-			first := outsidePlay{Player: "jellyfin", People: []string{"chris"},
+			first := outsidePlay{Player: "jellyfin", People: []string{"person-a"},
 				Position: 4210, Duration: 8160, At: testOutsideAt}
 			if err := store.recordOutside(t.Context(), "jellyfin-7-19", first); err != nil {
 				t.Fatal(err)
 			}
 
-			second := outsidePlay{Player: "jellyfin", People: []string{"thora"},
+			second := outsidePlay{Player: "jellyfin", People: []string{"person-b"},
 				Position: testCase.position, Duration: 8160, At: testCase.at}
 			if err := store.recordOutside(t.Context(), "jellyfin-7-19", second); err != nil {
 				t.Fatal(err)
@@ -285,19 +285,19 @@ func TestTheNewerOutsidePlayWins(t *testing.T) {
 // is how a reader sees that the whole apply was skipped.
 func TestAnOlderOutsidePlayLeavesThePeople(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
-	first := outsidePlay{Player: "jellyfin", People: []string{"chris"}, At: testOutsideAt}
+	first := outsidePlay{Player: "jellyfin", People: []string{"person-a"}, At: testOutsideAt}
 	if err := store.recordOutside(t.Context(), "jellyfin-7-19", first); err != nil {
 		t.Fatal(err)
 	}
 
-	older := outsidePlay{Player: "jellyfin", People: []string{"thora"}, At: testOutsideAt - 60}
+	older := outsidePlay{Player: "jellyfin", People: []string{"person-b"}, At: testOutsideAt - 60}
 	if err := store.recordOutside(t.Context(), "jellyfin-7-19", older); err != nil {
 		t.Fatal(err)
 	}
 
 	people := heldPeople(t, db, "jellyfin-7-19")
-	if len(people) != 1 || people["chris"] != 1 {
-		t.Errorf("people = %v, want chris alone", people)
+	if len(people) != 1 || people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a alone", people)
 	}
 }
 
@@ -331,17 +331,17 @@ func TestAnEndedOutsidePlayMarksTheRowEnded(t *testing.T) {
 func TestForgettingAPersonLeavesThePlaysAndTheOthers(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
 	if err := store.recordAudience(t.Context(), "play-1",
-		playAudience{People: []string{"chris", "thora"}}, testRecordedAt); err != nil {
+		playAudience{People: []string{"person-a", "person-b"}}, testRecordedAt); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := store.forgetPerson(t.Context(), "thora"); err != nil {
+	if err := store.forgetPerson(t.Context(), "person-b"); err != nil {
 		t.Fatal(err)
 	}
 
 	people := heldPeople(t, db, "play-1")
-	if len(people) != 1 || people["chris"] != 1 {
-		t.Errorf("people = %v, want chris alone", people)
+	if len(people) != 1 || people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a alone", people)
 	}
 	if heldPlay(t, db, "play-1").Play != "play-1" {
 		t.Error("forgetting a person took the Play's own row")

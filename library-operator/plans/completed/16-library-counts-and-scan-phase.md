@@ -80,8 +80,8 @@ two that answer a second question move behind `-o wide`.
 
 ```
 NAME     KIND     TITLES  ITEMS  FILES  STATUS    READY  AGE
-movies   movies      812    812   3980  Idle      True   6d
-shows    series       47   1204   6621  Scanning  True   6d
+movies   movies      250    250   1300  Idle      True   6d
+shows    series       20    600   3100  Scanning  True   6d
 ```
 
 `Claim` and `Unidentified` take `priority: 1`, which is how a

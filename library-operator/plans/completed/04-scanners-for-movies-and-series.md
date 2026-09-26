@@ -169,14 +169,14 @@ so several names resolve to one work, and the folder's own name still
 resolves the folder after its `.nfo` file is lost.
 
 An item's id is derived from the provider id in the `.nfo`, scoped by
-kind: `movie:tmdb:603`, `series:tvdb:81189`, and
-`episode:tvdb:81189:s02e05` for an episode. The scanner reads the id off
+kind: `movie:tmdb:1001`, `series:tvdb:5001`, and
+`episode:tvdb:5001:s02e05` for an episode. The scanner reads the id off
 the volume and mints nothing. A folder with no provider id takes an id
 derived from its folder name, so two folders with no `.nfo` file that name
 the same title fold to one item. This is the weak case: a move of a
 folder with no `.nfo` file breaks its id. The scanner sets the sort key,
-so "The Matrix" sorts under M in every media browser, and a display
-slug, so a URL and a screen read `the-matrix-1999` and not the id.
+so "The Long Survey" sorts under L in every media browser, and a display
+slug, so a URL and a screen read `the-long-survey-1999` and not the id.
 
 ## The local harness
 

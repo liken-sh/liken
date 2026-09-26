@@ -210,19 +210,19 @@ func TestTheArchiveFetcherReadsTheItemsVideoFiles(t *testing.T) {
 	fetcher := archiveTrailerFetcher{client: client}
 
 	files, err := fetcher.files(t.Context(),
-		trailerRow{Site: trailerSiteArchive, Key: "turner_video_47594"})
+		trailerRow{Site: trailerSiteArchive, Key: "trailer_item_47594"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	want := []trailerFile{
-		{URL: client.base + "/download/turner_video_47594/47594.mp4", Height: 1080, Size: 110550963},
-		{URL: client.base + "/download/turner_video_47594/47594.ia.mp4", Height: 360, Size: 10550963},
+		{URL: client.base + "/download/trailer_item_47594/47594.mp4", Height: 1080, Size: 110550963},
+		{URL: client.base + "/download/trailer_item_47594/47594.ia.mp4", Height: 360, Size: 10550963},
 	}
 	if !reflect.DeepEqual(files, want) {
 		t.Errorf("the item holds %+v, want %+v", files, want)
 	}
-	if paths := fake.paths(); !slices.Equal(paths, []string{archiveMetadataPath + "turner_video_47594"}) {
+	if paths := fake.paths(); !slices.Equal(paths, []string{archiveMetadataPath + "trailer_item_47594"}) {
 		t.Errorf("the fetcher asked %v, want the item's metadata", paths)
 	}
 }

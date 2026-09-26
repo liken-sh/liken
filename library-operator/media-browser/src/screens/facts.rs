@@ -302,9 +302,9 @@ mod tests {
     fn a_count_reads_its_noun_in_the_singular_where_it_is_one() {
         let cases = [
             (1, "movies", "1 movie"),
-            (1_422, "movies", "1,422 movies"),
+            (1_234, "movies", "1,234 movies"),
             (1, "series", "1 series"),
-            (165, "series", "165 series"),
+            (120, "series", "120 series"),
             (1, "titles", "1 title"),
             (42, "titles", "42 titles"),
             (1, "films", "1 film"),

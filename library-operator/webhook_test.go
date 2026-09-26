@@ -86,8 +86,8 @@ func TestExtractWebhookPath(t *testing.T) {
 
 func TestResolveWebhookPath(t *testing.T) {
 	scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
-	matrix := filepath.Join("testdata", "movies", "Action", "The Matrix (1999)")
-	matrixFile := filepath.Join(matrix, "The Matrix (1999).mkv")
+	film := filepath.Join("testdata", "movies", "Action", "Some Film (1999)")
+	filmFile := filepath.Join(film, "Some Film (1999).mkv")
 
 	cases := []struct {
 		name    string
@@ -96,13 +96,13 @@ func TestResolveWebhookPath(t *testing.T) {
 	}{
 		{
 			name:    "an absolute server path matches by its suffix",
-			payload: "/data/media/Action/The Matrix (1999)/The Matrix (1999).mkv",
-			want:    matrixFile,
+			payload: "/data/media/Action/Some Film (1999)/Some Film (1999).mkv",
+			want:    filmFile,
 		},
 		{
 			name:    "a relative path joins the root",
-			payload: "Action/The Matrix (1999)",
-			want:    matrix,
+			payload: "Action/Some Film (1999)",
+			want:    film,
 		},
 		{
 			name:    "a path that maps to nothing resolves empty",
@@ -129,7 +129,7 @@ func TestWebhookRescansTheNamedPath(t *testing.T) {
 	server := httptest.NewServer(scan.webhookHandler())
 	t.Cleanup(server.Close)
 
-	body := `{"movie":{"folderPath":"/srv/media/Action/The Matrix (1999)"}}`
+	body := `{"movie":{"folderPath":"/srv/media/Action/Some Film (1999)"}}`
 	response, err := http.Post(server.URL, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -141,8 +141,8 @@ func TestWebhookRescansTheNamedPath(t *testing.T) {
 	if !containsKind(sqlKinds(recorder), "INSERT MOVIES") {
 		t.Errorf("the webhook wrote no movie row: %v", sqlKinds(recorder))
 	}
-	if !postedWith(recorder, "movie:tmdb:603") {
-		t.Error("the rescan did not upsert The Matrix")
+	if !postedWith(recorder, "movie:tmdb:1001") {
+		t.Error("the rescan did not upsert Some Film")
 	}
 	_ = scan
 }

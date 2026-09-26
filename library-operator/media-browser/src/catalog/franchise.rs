@@ -9,8 +9,9 @@ use super::{Answer, Slot, Title};
 /// The franchise's own clock, from the file's calendar block. `unit` is years
 /// or days. `zero` names the event the times count from, and the caption over
 /// the page's time column reads it. `before` and `after` are the marks a
-/// negative and a positive time take, BBY and ABY for Star Wars, and both are
-/// empty for a calendar that counts in plain years or in days.
+/// negative and a positive time take, such as BS and AS for a calendar that
+/// counts from a survey. Both are empty for a calendar that counts in plain
+/// years or in days.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Calendar {
     pub unit: String,
@@ -21,8 +22,8 @@ pub struct Calendar {
 
 impl Calendar {
     /// The time label of one span, in the file's own marks. One time reads as
-    /// "32 BBY", and a span as "22 to 20 BBY". A span that crosses zero
-    /// carries a mark at each end, "5 BBY to 5 ABY". A calendar of years with
+    /// "32 BS", and a span as "22 to 20 BS". A span that crosses zero
+    /// carries a mark at each end, "5 BS to 5 AS". A calendar of years with
     /// no marks reads as plain years, "2024" and "-58", and one of days
     /// counts days from its zero, "Day 1141".
     pub fn label(&self, from: f64, to: f64) -> String {
@@ -42,7 +43,7 @@ impl Calendar {
         self.counted(&span)
     }
 
-    /// The caption over the times, "Years from the Battle of Yavin", and
+    /// The caption over the times, "Years from the Survey", and
     /// nothing where the file names no zero. The times on the page count from
     /// one event, and the caption is where the page says which event and in
     /// what unit.
@@ -64,7 +65,7 @@ impl Calendar {
 
     // One time as the label writes it: the magnitude where a mark follows it,
     // because the mark says which side of zero the time is on and a minus
-    // sign in front of BBY says it a second time. A time with no mark keeps
+    // sign in front of BS says it a second time. A time with no mark keeps
     // its sign, which is then all the reader has.
     fn number(&self, value: f64) -> String {
         match self.mark(value).is_empty() {
@@ -354,12 +355,12 @@ pub struct Membership {
 mod tests {
     use super::*;
 
-    fn yavin() -> Calendar {
+    fn survey() -> Calendar {
         Calendar {
             unit: "years".into(),
-            zero: "the Battle of Yavin".into(),
-            before: "BBY".into(),
-            after: "ABY".into(),
+            zero: "the Survey".into(),
+            before: "BS".into(),
+            after: "AS".into(),
         }
     }
 
@@ -370,29 +371,29 @@ mod tests {
         }
     }
 
-    fn outbreak() -> Calendar {
+    fn flood() -> Calendar {
         Calendar {
             unit: "days".into(),
-            zero: "The outbreak".into(),
+            zero: "The flood".into(),
             ..Calendar::default()
         }
     }
 
     #[test]
     fn one_time_reads_as_the_number_and_its_mark() {
-        assert_eq!(yavin().label(-32.0, -32.0), "32 BBY");
-        assert_eq!(yavin().label(5.0, 5.0), "5 ABY");
-        assert_eq!(yavin().label(0.0, 0.0), "0 ABY");
+        assert_eq!(survey().label(-32.0, -32.0), "32 BS");
+        assert_eq!(survey().label(5.0, 5.0), "5 AS");
+        assert_eq!(survey().label(0.0, 0.0), "0 AS");
         assert_eq!(plain().label(2024.0, 2024.0), "2024");
     }
 
     #[test]
     fn a_time_before_zero_drops_its_sign_where_a_mark_says_the_side() {
-        assert_eq!(yavin().label(-32.0, -32.0), "32 BBY");
+        assert_eq!(survey().label(-32.0, -32.0), "32 BS");
         assert_eq!(
             Calendar {
                 after: String::new(),
-                ..yavin()
+                ..survey()
             }
             .label(5.0, 5.0),
             "5"
@@ -402,13 +403,13 @@ mod tests {
 
     #[test]
     fn a_span_reads_as_two_numbers_and_one_mark() {
-        assert_eq!(yavin().label(-22.0, -20.0), "22 to 20 BBY");
+        assert_eq!(survey().label(-22.0, -20.0), "22 to 20 BS");
         assert_eq!(plain().label(2002.0, 2005.0), "2002 to 2005");
     }
 
     #[test]
     fn a_span_that_crosses_zero_carries_a_mark_at_each_end() {
-        assert_eq!(yavin().label(-5.0, 5.0), "5 BBY to 5 ABY");
+        assert_eq!(survey().label(-5.0, 5.0), "5 BS to 5 AS");
     }
 
     #[test]
@@ -420,7 +421,7 @@ mod tests {
             ((0.0, 0.0), "Day 0"),
         ];
         for ((from, to), label) in cases {
-            assert_eq!(outbreak().label(from, to), label, "{from} to {to}");
+            assert_eq!(flood().label(from, to), label, "{from} to {to}");
         }
     }
 
@@ -428,39 +429,39 @@ mod tests {
     fn a_calendar_of_days_that_names_marks_leads_with_the_mark_and_not_the_day() {
         let dated = Calendar {
             unit: "days".into(),
-            before: "BO".into(),
-            after: "AO".into(),
-            ..outbreak()
+            before: "BF".into(),
+            after: "AF".into(),
+            ..flood()
         };
-        assert_eq!(dated.label(-3.0, -3.0), "3 BO");
-        assert_eq!(dated.label(1141.0, 1141.0), "1141 AO");
+        assert_eq!(dated.label(-3.0, -3.0), "3 BF");
+        assert_eq!(dated.label(1141.0, 1141.0), "1141 AF");
     }
 
     #[test]
     fn a_time_between_two_years_keeps_its_point() {
         assert_eq!(plain().label(2024.5, 2024.5), "2024.5");
-        assert_eq!(yavin().label(-32.5, -32.5), "32.5 BBY");
+        assert_eq!(survey().label(-32.5, -32.5), "32.5 BS");
     }
 
     #[test]
     fn the_caption_names_the_unit_and_the_event_the_times_count_from() {
         let cases = [
-            (yavin(), "Years from the Battle of Yavin"),
-            (outbreak(), "Days from the outbreak"),
+            (survey(), "Years from the Survey"),
+            (flood(), "Days from the flood"),
             (
                 Calendar {
                     unit: "years".into(),
-                    zero: "The Fall of the Twelve Colonies".into(),
+                    zero: "The Fall of the Nine Towers".into(),
                     ..Calendar::default()
                 },
-                "Years from the Fall of the Twelve Colonies",
+                "Years from the Fall of the Nine Towers",
             ),
             (
                 Calendar {
-                    zero: "Aegon's Conquest".into(),
+                    zero: "Maren's Crossing".into(),
                     ..plain()
                 },
-                "Years from Aegon's Conquest",
+                "Years from Maren's Crossing",
             ),
         ];
         for (calendar, caption) in cases {
@@ -509,7 +510,7 @@ mod tests {
         Entry {
             position: 1,
             kind: MOVIE.into(),
-            alias: "movie:tmdb:1893".into(),
+            alias: "movie:tmdb:7005".into(),
             title: title.into(),
             ..Entry::default()
         }

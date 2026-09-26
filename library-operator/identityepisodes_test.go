@@ -19,46 +19,46 @@ func TestAnEpisodeFileNameCarriesItsEpisodeTitle(t *testing.T) {
 	}{
 		{
 			name:        "the plain form",
-			file:        "Twin Peaks - S01E02 - Traces to Nowhere.mkv",
+			file:        "Pine Hollow - S01E02 - Lanterns at Dusk.mkv",
 			wantSeason:  1,
 			wantEpisode: 2,
-			wantTitle:   "Traces to Nowhere",
+			wantTitle:   "Lanterns at Dusk",
 			wantHeld:    true,
 		},
 		{
 			name:        "a quality tag after the title",
-			file:        "Twin Peaks - S01E02 - Traces to Nowhere [1080p].mkv",
+			file:        "Pine Hollow - S01E02 - Lanterns at Dusk [1080p].mkv",
 			wantSeason:  1,
 			wantEpisode: 2,
-			wantTitle:   "Traces to Nowhere",
+			wantTitle:   "Lanterns at Dusk",
 			wantHeld:    true,
 		},
 		{
 			name:        "more segments after the title",
-			file:        "Twin Peaks - S01E02 - Traces to Nowhere - 1080p - x264.mkv",
+			file:        "Pine Hollow - S01E02 - Lanterns at Dusk - 1080p - x264.mkv",
 			wantSeason:  1,
 			wantEpisode: 2,
-			wantTitle:   "Traces to Nowhere",
+			wantTitle:   "Lanterns at Dusk",
 			wantHeld:    true,
 		},
 		{
 			name:        "a 1x02 marker",
-			file:        "Twin Peaks 1x02 Traces to Nowhere.mkv",
+			file:        "Pine Hollow 1x02 Lanterns at Dusk.mkv",
 			wantSeason:  1,
 			wantEpisode: 2,
-			wantTitle:   "Traces to Nowhere",
+			wantTitle:   "Lanterns at Dusk",
 			wantHeld:    true,
 		},
 		{
 			name:        "a double episode marker",
-			file:        "Twin Peaks - S01E01E02 - Pilot.mkv",
+			file:        "Pine Hollow - S01E01E02 - Pilot.mkv",
 			wantSeason:  1,
 			wantEpisode: 1,
 			wantTitle:   "Pilot",
 			wantHeld:    true,
 		},
-		{name: "no marker at all", file: "Twin Peaks.mkv"},
-		{name: "nothing after the marker", file: "Twin Peaks - S01E02.mkv"},
+		{name: "no marker at all", file: "Pine Hollow.mkv"},
+		{name: "nothing after the marker", file: "Pine Hollow - S01E02.mkv"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -81,9 +81,9 @@ func tmdbSeriesJSON(id int, name, date string) string {
 		`","first_air_date":"` + date + `"}`
 }
 
-var shamelessResults = `{"results":[` +
-	tmdbSeriesJSON(2749, "Shameless", "2004-01-13") + `,` +
-	tmdbSeriesJSON(34307, "Shameless", "2011-01-09") + `]}`
+var ruckusResults = `{"results":[` +
+	tmdbSeriesJSON(2101, "Ruckus", "2004-01-17") + `,` +
+	tmdbSeriesJSON(2102, "Ruckus", "2011-01-13") + `]}`
 
 func TestTheEpisodeRungPartsTwoSeriesOfOneName(t *testing.T) {
 	cases := []struct {
@@ -96,20 +96,20 @@ func TestTheEpisodeRungPartsTwoSeriesOfOneName(t *testing.T) {
 		{
 			name: "the episode names name one series",
 			seasons: map[string]string{
-				tmdbKey("/3/tv/2749/season/1", "", ""):  `{"episodes":[{"episode_number":1,"name":"Episode One"},{"episode_number":2,"name":"Episode Two"}]}`,
-				tmdbKey("/3/tv/34307/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Frank the Plank"}]}`,
+				tmdbKey("/3/tv/2101/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Episode One"},{"episode_number":2,"name":"Episode Two"}]}`,
+				tmdbKey("/3/tv/2102/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Pete at Sea"}]}`,
 			},
 			episodes: []episodeClue{
 				{season: 1, episode: 1, title: "Pilot"},
-				{season: 1, episode: 2, title: "Frank the Plank"},
+				{season: 1, episode: 2, title: "Pete at Sea"},
 			},
-			wantID: 34307,
+			wantID: 2102,
 		},
 		{
 			name: "no series carries the episode names",
 			seasons: map[string]string{
-				tmdbKey("/3/tv/2749/season/1", "", ""):  `{"episodes":[{"episode_number":1,"name":"Episode One"},{"episode_number":2,"name":"Episode Two"}]}`,
-				tmdbKey("/3/tv/34307/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Frank the Plank"}]}`,
+				tmdbKey("/3/tv/2101/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Episode One"},{"episode_number":2,"name":"Episode Two"}]}`,
+				tmdbKey("/3/tv/2102/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Pete at Sea"}]}`,
 			},
 			episodes: []episodeClue{
 				{season: 1, episode: 1, title: "A Name Nobody Wrote"},
@@ -120,20 +120,20 @@ func TestTheEpisodeRungPartsTwoSeriesOfOneName(t *testing.T) {
 		{
 			name: "both series carry the episode names",
 			seasons: map[string]string{
-				tmdbKey("/3/tv/2749/season/1", "", ""):  `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Frank the Plank"}]}`,
-				tmdbKey("/3/tv/34307/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Frank the Plank"}]}`,
+				tmdbKey("/3/tv/2101/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Pete at Sea"}]}`,
+				tmdbKey("/3/tv/2102/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Pete at Sea"}]}`,
 			},
 			episodes: []episodeClue{
 				{season: 1, episode: 1, title: "Pilot"},
-				{season: 1, episode: 2, title: "Frank the Plank"},
+				{season: 1, episode: 2, title: "Pete at Sea"},
 			},
 			wantCandidates: 2,
 		},
 		{
 			name: "one episode name of two matches",
 			seasons: map[string]string{
-				tmdbKey("/3/tv/2749/season/1", "", ""):  `{"episodes":[{"episode_number":1,"name":"Episode One"},{"episode_number":2,"name":"Episode Two"}]}`,
-				tmdbKey("/3/tv/34307/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Frank the Plank"}]}`,
+				tmdbKey("/3/tv/2101/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Episode One"},{"episode_number":2,"name":"Episode Two"}]}`,
+				tmdbKey("/3/tv/2102/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Pete at Sea"}]}`,
 			},
 			episodes: []episodeClue{
 				{season: 1, episode: 1, title: "Pilot"},
@@ -144,14 +144,14 @@ func TestTheEpisodeRungPartsTwoSeriesOfOneName(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			answers := map[string]string{tmdbKey("/3/search/tv", "Shameless", ""): shamelessResults}
+			answers := map[string]string{tmdbKey("/3/search/tv", "Ruckus", ""): ruckusResults}
 			for key, answer := range test.seasons {
 				answers[key] = answer
 			}
 			client, _ := newFakeTMDb(t, answers)
 
 			answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-				kind: libraryKindSeries, title: "Shameless", episodes: test.episodes,
+				kind: libraryKindSeries, title: "Ruckus", episodes: test.episodes,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -171,14 +171,14 @@ func TestTheEpisodeRungPartsTwoSeriesOfOneName(t *testing.T) {
 
 func TestAMovieNeverAsksForASeason(t *testing.T) {
 	client, fake := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Solaris", ""): `{"results":[` +
-			tmdbResultJSON(593, "Solaris", "1972-03-20") + `,` +
-			tmdbResultJSON(11660, "Solaris", "2002-11-27") + `]}`,
+		tmdbKey("/3/search/movie", "Quiet Moon", ""): `{"results":[` +
+			tmdbResultJSON(1121, "Quiet Moon", "1972-03-24") + `,` +
+			tmdbResultJSON(1122, "Quiet Moon", "2002-11-03") + `]}`,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
 		kind:     libraryKindMovies,
-		title:    "Solaris",
+		title:    "Quiet Moon",
 		episodes: []episodeClue{{season: 1, episode: 1, title: "Pilot"}},
 	})
 	if err != nil {
@@ -197,16 +197,16 @@ func TestAMovieNeverAsksForASeason(t *testing.T) {
 
 func TestTheEpisodeRungFailsWhereTheProviderFails(t *testing.T) {
 	client, fake := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Shameless", ""): shamelessResults,
+		tmdbKey("/3/search/tv", "Ruckus", ""): ruckusResults,
 	})
-	fake.statuses[tmdbKey("/3/tv/2749/season/1", "", "")] = 500
+	fake.statuses[tmdbKey("/3/tv/2101/season/1", "", "")] = 500
 
 	_, err := climbIdentityLadder(t.Context(), client, identitySearch{
 		kind:  libraryKindSeries,
-		title: "Shameless",
+		title: "Ruckus",
 		episodes: []episodeClue{
 			{season: 1, episode: 1, title: "Pilot"},
-			{season: 1, episode: 2, title: "Frank the Plank"},
+			{season: 1, episode: 2, title: "Pete at Sea"},
 		},
 	})
 
@@ -217,18 +217,18 @@ func TestTheEpisodeRungFailsWhereTheProviderFails(t *testing.T) {
 
 func TestTheCluesComeOffTheFirstSeasonInTheFolder(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "Twin Peaks")
-	writeFile(t, filepath.Join(folder, "Season 02", "Twin Peaks - S02E01 - May the Giant Be with You.mkv"), "video")
-	writeFile(t, filepath.Join(folder, "Season 01", "Twin Peaks - S01E02 - Traces to Nowhere.mkv"), "video")
-	writeFile(t, filepath.Join(folder, "Season 01", "Twin Peaks - S01E01 - Pilot.mkv"), "video")
-	writeFile(t, filepath.Join(folder, "Season 01", "Twin Peaks - S01E03.mkv"), "video")
+	folder := filepath.Join(root, "Pine Hollow")
+	writeFile(t, filepath.Join(folder, "Season 02", "Pine Hollow - S02E01 - The Long Night Road.mkv"), "video")
+	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E02 - Lanterns at Dusk.mkv"), "video")
+	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E01 - Pilot.mkv"), "video")
+	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E03.mkv"), "video")
 	work, _ := testEnricher(t, libraryKindSeries, root, nil)
 
 	clues := work.episodeClues(folder)
 
 	want := []episodeClue{
 		{season: 1, episode: 1, title: "Pilot"},
-		{season: 1, episode: 2, title: "Traces to Nowhere"},
+		{season: 1, episode: 2, title: "Lanterns at Dusk"},
 	}
 	if len(clues) != len(want) {
 		t.Fatalf("clues = %+v, want %+v", clues, want)
@@ -244,14 +244,14 @@ func TestTheCluesComeOffTheFirstSeasonInTheFolder(t *testing.T) {
 func writeSeasonOne(t *testing.T, folder string, count int) {
 	t.Helper()
 	for episode := 1; episode <= count; episode++ {
-		name := fmt.Sprintf("Twin Peaks - S01E%02d - Episode %d.mkv", episode, episode)
+		name := fmt.Sprintf("Pine Hollow - S01E%02d - Episode %d.mkv", episode, episode)
 		writeFile(t, filepath.Join(folder, "Season 01", name), "video")
 	}
 }
 
 func TestAFolderHandsTheRungTwelveCluesAtTheMost(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "Twin Peaks")
+	folder := filepath.Join(root, "Pine Hollow")
 	writeSeasonOne(t, folder, 15)
 	work, _ := testEnricher(t, libraryKindSeries, root, nil)
 
@@ -268,8 +268,8 @@ func TestAFolderHandsTheRungTwelveCluesAtTheMost(t *testing.T) {
 
 func TestAMovieFolderReadsNoEpisodeClues(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	writeFile(t, filepath.Join(folder, "The Thing - S01E01 - Pilot.mkv"), "video")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	writeFile(t, filepath.Join(folder, "The Long Survey - S01E01 - Pilot.mkv"), "video")
 	work, _ := testEnricher(t, libraryKindMovies, root, nil)
 
 	if clues := work.episodeClues(folder); len(clues) != 0 {
@@ -280,17 +280,17 @@ func TestAMovieFolderReadsNoEpisodeClues(t *testing.T) {
 func TestABareSeriesFolderIdentifiesByItsEpisodeNames(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "Twin Peaks"
-	writeFile(t, filepath.Join(root, folder, "Season 01", "Twin Peaks - S01E01 - Pilot.mkv"), "video")
-	writeFile(t, filepath.Join(root, folder, "Season 01", "Twin Peaks - S01E02 - Traces to Nowhere.mkv"), "video")
+	folder := "Pine Hollow"
+	writeFile(t, filepath.Join(root, folder, "Season 01", "Pine Hollow - S01E01 - Pilot.mkv"), "video")
+	writeFile(t, filepath.Join(root, folder, "Season 01", "Pine Hollow - S01E02 - Lanterns at Dusk.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindSeries, folder, "", 0)
 	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Twin Peaks", ""): `{"results":[` +
-			tmdbSeriesJSON(1920, "Twin Peaks", "1990-04-08") + `,` +
-			tmdbSeriesJSON(9999, "Twin Peaks", "2017-05-21") + `]}`,
-		tmdbKey("/3/tv/1920/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Traces to Nowhere"}]}`,
-		tmdbKey("/3/tv/9999/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"The Return, Part 1"},{"episode_number":2,"name":"The Return, Part 2"}]}`,
+		tmdbKey("/3/search/tv", "Pine Hollow", ""): `{"results":[` +
+			tmdbSeriesJSON(2103, "Pine Hollow", "1990-04-12") + `,` +
+			tmdbSeriesJSON(9999, "Pine Hollow", "2017-05-25") + `]}`,
+		tmdbKey("/3/tv/2103/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"Pilot"},{"episode_number":2,"name":"Lanterns at Dusk"}]}`,
+		tmdbKey("/3/tv/9999/season/1", "", ""): `{"episodes":[{"episode_number":1,"name":"The Revisit, Part 1"},{"episode_number":2,"name":"The Revisit, Part 2"}]}`,
 	})
 
 	if err := work.identityGap(t.Context(), client); err != nil {
@@ -298,7 +298,7 @@ func TestABareSeriesFolderIdentifiesByItsEpisodeNames(t *testing.T) {
 	}
 
 	nfo := readFileString(t, filepath.Join(root, folder, seriesNFOName))
-	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1920</uniqueid>`) {
+	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">2103</uniqueid>`) {
 		t.Errorf("the .nfo file holds no id:\n%s", nfo)
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)

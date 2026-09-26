@@ -85,8 +85,8 @@ on IntroDB's home page, `?imdb=`, answers "Invalid query params". The
 parameters above come from test calls on 2026-09-24.
 
 **The two databases give several answers for one kind.** On
-2026-09-24, TheIntroDB returned three intro spans for Game of Thrones
-S01E02: 0 to 107.0 seconds, 7.0 to 106.5 seconds, and 8.0 to
+2026-09-24, TheIntroDB returned three intro spans for the second episode
+of one series: 0 to 107.0 seconds, 7.0 to 106.5 seconds, and 8.0 to
 109.0 seconds. IntroDB returned 6.0 to 105.0 seconds for the same
 episode. The spans come from different submissions and different
 release versions, and a submitted span can be wrong. The fact stores
@@ -151,10 +151,10 @@ once with the provider's answer, and the fact asks again on a later
 run. When a provider has spent its daily allowance, the run stops
 asking it, and the files it did not answer become partial attempts. On
 `liken-1`, the allowance of 1000 ran out about five minutes into a run.
-After the first run, 509 movie files and 519 series files had answers
-from both databases, and 943 movie files and 5863 series files were
-partial. At 1000 calls a day, TheIntroDB reaches the rest in about a
-week.
+After the first run, about a third of the movie files and fewer than
+a tenth of the series files had answers from both databases, and the
+rest were partial. At 1000 calls a day, TheIntroDB reaches the rest
+in about a week.
 
 **The provider check.** The operator checks a provider on its first
 pass, when the provider or its `Secret` changes, and otherwise once an
@@ -290,12 +290,12 @@ card before the drill.
 
 ## The drill on liken-1
 
-On 2026-09-25, 12 Monkeys S01E02 played on `lab-portable`, driven by
-remote presses published on the bus and captured through `media-api`.
-The picker answer was "Nobody", so the drill wrote no progress. Both
-databases had the episode: a recap from 0 to 38 seconds, an intro from
-38 to 53.5 seconds and from 39 to 54 seconds, and credits from 42:43 and
-42:48 in a runtime of 43:33.
+On 2026-09-25, the second episode of a series played on `lab-portable`,
+driven by remote presses published on the bus and captured through
+`media-api`. The picker answer was "Nobody", so the drill wrote no
+progress. Both databases had the episode: a recap from 0 to 38 seconds,
+an intro from 38 to 53.5 seconds and from 39 to 54 seconds, and credits
+from 42:43 and 42:48 in a runtime of 43:33.
 
 - The Play held all six candidates, exactly as the catalog stored them.
 - "Skip recap" showed from the start, and its skip landed at 0:38.

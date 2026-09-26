@@ -122,7 +122,7 @@ func TestAnAudienceMessageWritesWhatTheOperatorKnows(t *testing.T) {
 	role, db := recordingProgress(t)
 	payload, _ := json.Marshal(playAudience{
 		Player: "living-room",
-		People: []string{"chris"}, Aliases: map[string]string{"tmdb": "2316"}, Season: 3, Episode: 5,
+		People: []string{"person-a"}, Aliases: map[string]string{"tmdb": "2101"}, Season: 3, Episode: 5,
 	})
 
 	role.onMessage(playAudienceTopic(defaultTopicBase, "house", "play-1"), payload)
@@ -131,10 +131,10 @@ func TestAnAudienceMessageWritesWhatTheOperatorKnows(t *testing.T) {
 	if row.Player != "living-room" || row.Season != 3 {
 		t.Errorf("row = %+v, want what the audience named", row)
 	}
-	if people := heldPeople(t, db, "play-1"); people["chris"] != 1 {
-		t.Errorf("people = %v, want chris", people)
+	if people := heldPeople(t, db, "play-1"); people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a", people)
 	}
-	if aliases := heldAliases(t, db, "play-1"); aliases["tmdb"] != "2316" {
+	if aliases := heldAliases(t, db, "play-1"); aliases["tmdb"] != "2101" {
 		t.Errorf("aliases = %v, want the tmdb id", aliases)
 	}
 }
@@ -143,7 +143,7 @@ func TestAnAudienceMessageWritesWhatTheOperatorKnows(t *testing.T) {
 // released the Play. The rows are the history, so nothing changes.
 func TestAnEmptyAudienceLeavesTheRowsAlone(t *testing.T) {
 	role, db := recordingProgress(t)
-	payload, _ := json.Marshal(playAudience{Player: "living-room", People: []string{"chris"}})
+	payload, _ := json.Marshal(playAudience{Player: "living-room", People: []string{"person-a"}})
 	topic := playAudienceTopic(defaultTopicBase, "house", "play-1")
 	role.onMessage(topic, payload)
 
@@ -152,7 +152,7 @@ func TestAnEmptyAudienceLeavesTheRowsAlone(t *testing.T) {
 	if heldPlay(t, db, "play-1").Player != "living-room" {
 		t.Error("the clear took the Play's row")
 	}
-	if people := heldPeople(t, db, "play-1"); people["chris"] != 1 {
+	if people := heldPeople(t, db, "play-1"); people["person-a"] != 1 {
 		t.Errorf("people = %v, want the row the clear left alone", people)
 	}
 }
@@ -162,8 +162,8 @@ func TestAnEmptyAudienceLeavesTheRowsAlone(t *testing.T) {
 func TestAnOutsideMessageWritesTheWholeRow(t *testing.T) {
 	role, db := recordingProgress(t)
 	payload, _ := json.Marshal(outsidePlay{
-		Player: "jellyfin", People: []string{"chris"},
-		Aliases:  map[string]string{"tmdb": "603"},
+		Player: "jellyfin", People: []string{"person-a"},
+		Aliases:  map[string]string{"tmdb": "1101"},
 		Position: 4210, Duration: 8160, At: 1_757_300_000,
 	})
 
@@ -173,10 +173,10 @@ func TestAnOutsideMessageWritesTheWholeRow(t *testing.T) {
 	if row.Player != "jellyfin" || row.Position != 4210 || row.Recorded != 1_757_300_000 {
 		t.Errorf("row = %+v, want the outside play the message named", row)
 	}
-	if people := heldPeople(t, db, "jellyfin-7-19"); people["chris"] != 1 {
-		t.Errorf("people = %v, want chris", people)
+	if people := heldPeople(t, db, "jellyfin-7-19"); people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a", people)
 	}
-	if aliases := heldAliases(t, db, "jellyfin-7-19"); aliases["tmdb"] != "603" {
+	if aliases := heldAliases(t, db, "jellyfin-7-19"); aliases["tmdb"] != "1101" {
 		t.Errorf("aliases = %v, want the tmdb id", aliases)
 	}
 }
@@ -225,14 +225,14 @@ func TestAFinalMessageMarksTheRowEnded(t *testing.T) {
 // A forget message takes the person out of every Play in the store.
 func TestAForgetMessageTakesThePersonOutOfEveryPlay(t *testing.T) {
 	role, db := recordingProgress(t)
-	payload, _ := json.Marshal(playAudience{People: []string{"chris", "thora"}})
+	payload, _ := json.Marshal(playAudience{People: []string{"person-a", "person-b"}})
 	role.onMessage(playAudienceTopic(defaultTopicBase, "house", "play-1"), payload)
 
-	role.onMessage(personForgetTopic(defaultTopicBase, "thora"), []byte(`{"at":"2026-09-06T21:00:00Z"}`))
+	role.onMessage(personForgetTopic(defaultTopicBase, "person-b"), []byte(`{"at":"2026-09-06T21:00:00Z"}`))
 
 	people := heldPeople(t, db, "play-1")
-	if len(people) != 1 || people["chris"] != 1 {
-		t.Errorf("people = %v, want chris alone", people)
+	if len(people) != 1 || people["person-a"] != 1 {
+		t.Errorf("people = %v, want person-a alone", people)
 	}
 }
 
@@ -346,10 +346,10 @@ func TestALateStatusLeavesTheEndedMarkStanding(t *testing.T) {
 
 	role.onMessage(mediaPlayStatusTopic("house", "play-1"),
 		[]byte(`{"item":1,"position":"0:07:53","duration":"2:00:00"}`))
-	role.onMessage(personForgetTopic(defaultTopicBase, "thora"), []byte(`{"at":"2026-09-08T21:00:00Z"}`))
+	role.onMessage(personForgetTopic(defaultTopicBase, "person-b"), []byte(`{"at":"2026-09-08T21:00:00Z"}`))
 
 	after := publishesBefore(t, broker, playRecordedTopic(defaultTopicBase, "house", "play-1"),
-		personForgottenTopic(defaultTopicBase, "thora", "house"))
+		personForgottenTopic(defaultTopicBase, "person-b", "house"))
 	if len(after) != 0 {
 		t.Errorf("the role published %d more recorded messages, want none", len(after))
 	}
@@ -366,9 +366,9 @@ func TestTheRoleAnswersAForgetRequest(t *testing.T) {
 	role, broker, _ := servingProgress(t)
 	waitForTopic(t, broker, role.availabilityTopic)
 
-	role.onMessage(personForgetTopic(defaultTopicBase, "thora"), []byte(`{"at":"2026-09-06T21:00:00Z"}`))
+	role.onMessage(personForgetTopic(defaultTopicBase, "person-b"), []byte(`{"at":"2026-09-06T21:00:00Z"}`))
 
-	published := waitForTopic(t, broker, personForgottenTopic(defaultTopicBase, "thora", "house"))
+	published := waitForTopic(t, broker, personForgottenTopic(defaultTopicBase, "person-b", "house"))
 	if !published.retained {
 		t.Error("the forgotten message is not retained")
 	}
@@ -389,9 +389,9 @@ func TestAnEmptyForgetClearsTheAnswer(t *testing.T) {
 	role, broker, _ := servingProgress(t)
 	waitForTopic(t, broker, role.availabilityTopic)
 
-	role.onMessage(personForgetTopic(defaultTopicBase, "thora"), nil)
+	role.onMessage(personForgetTopic(defaultTopicBase, "person-b"), nil)
 
-	published := waitForTopic(t, broker, personForgottenTopic(defaultTopicBase, "thora", "house"))
+	published := waitForTopic(t, broker, personForgottenTopic(defaultTopicBase, "person-b", "house"))
 	if len(published.payload) != 0 || !published.retained {
 		t.Errorf("message = %q retained %v, want a retained empty payload", published.payload, published.retained)
 	}

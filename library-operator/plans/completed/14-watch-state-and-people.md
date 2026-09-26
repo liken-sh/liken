@@ -41,10 +41,10 @@ controller: `Person` in `people.liken.sh/v1alpha1`.
 apiVersion: people.liken.sh/v1alpha1
 kind: Person
 metadata:
-  name: thora
+  name: person-b
 spec:
-  displayName: Thora
-  avatar: claim://portraits/thora.png
+  displayName: Person B
+  avatar: claim://portraits/person-b.png
 ```
 
 The resource holds little on its own. Other operators refer to it by
@@ -69,15 +69,15 @@ the item.
 apiVersion: library.liken.sh/v1alpha1
 kind: Watch
 metadata:
-  name: the-office-with-the-girls
+  name: a-series-together
   namespace: media
 spec:
-  people: [chris, thora, io]
+  people: [person-a, person-b, person-c]
   item:
     library: series
-    slug: the-office
+    slug: a-series
 status:
-  play: living-room-the-office-s03e04-x7k2q
+  play: living-room-a-series-s03e04-x7k2q
   item: 1
   position: "0:21:40"
   duration: "0:22:05"
@@ -112,17 +112,17 @@ metadata:
   ownerReferences:
     - apiVersion: library.liken.sh/v1alpha1
       kind: Watch
-      name: the-office-with-the-girls
+      name: a-series-together
     - apiVersion: people.liken.sh/v1alpha1
       kind: Person
-      name: chris
+      name: person-a
     - apiVersion: people.liken.sh/v1alpha1
       kind: Person
-      name: thora
+      name: person-b
   annotations:
-    library.liken.sh/alias.tmdb: "2316"
-    library.liken.sh/alias.imdb: tt0386676
-    library.liken.sh/alias.tvdb: "73244"
+    library.liken.sh/alias.tmdb: "2001"
+    library.liken.sh/alias.imdb: tt9000002
+    library.liken.sh/alias.tvdb: "5001"
     library.liken.sh/season: "3"
     library.liken.sh/episode: "5"
 ```
@@ -175,7 +175,7 @@ play_aliases play, provider, id
 
 One row per `Play`. One row per person in it. One row per alias on it.
 The audience of a `Watch` is a query over `play_people`, not a column.
-"Continue watching for chris" is every audience that contains chris,
+"Continue watching for person-a" is every audience that contains person-a,
 latest row per item. History is the same table read backward. The
 tables key on aliases and on `Person` names, never on catalog ids, so
 the store never reads the catalog. The browser joins progress to the

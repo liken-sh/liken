@@ -13,7 +13,7 @@ const candidatesLedger = `items:
     - path: .
       candidates:
         - id: {tmdb: 11}
-          title: Star Wars
+          title: Long Voyage
           year: 1977
           receipt: {title: match, year: match}
 attempts:
@@ -24,8 +24,8 @@ attempts:
 
 func TestAFolderWithAnIdentityLedgerYieldsAnAttemptsRow(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, "identity.yaml"), candidatesLedger)
 
 	result := walkMovies(root, "house/movies", nil)
@@ -34,7 +34,7 @@ func TestAFolderWithAnIdentityLedgerYieldsAnAttemptsRow(t *testing.T) {
 		t.Fatalf("attempts = %+v, want one", result.attempts)
 	}
 	got := result.attempts[0]
-	if got.Item != "movie:path:star-wars-1977" || got.Fact != factIdentity || got.Result != attemptCandidates {
+	if got.Item != "movie:path:long-voyage-1977" || got.Fact != factIdentity || got.Result != attemptCandidates {
 		t.Errorf("attempt = %+v, want the item's own id under the identity fact", got)
 	}
 	if got.Library != "house/movies" || got.At != ledgerTime.Unix() {
@@ -44,17 +44,17 @@ func TestAFolderWithAnIdentityLedgerYieldsAnAttemptsRow(t *testing.T) {
 
 func TestAProbeAttemptKeysOnTheFilePath(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, "probe.yaml"),
-		"attempts:\n    - path: Star Wars (1977).mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
+		"attempts:\n    - path: Long Voyage (1977).mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
 
 	result := walkMovies(root, "house/movies", nil)
 
 	if len(result.attempts) != 1 {
 		t.Fatalf("attempts = %+v, want one", result.attempts)
 	}
-	want := filepath.Join("Star Wars (1977)", "Star Wars (1977).mkv")
+	want := filepath.Join("Long Voyage (1977)", "Long Voyage (1977).mkv")
 	if got := result.attempts[0]; got.Item != want || got.Fact != factProbe {
 		t.Errorf("attempt = %+v, want the file path under the probe fact", got)
 	}
@@ -62,8 +62,8 @@ func TestAProbeAttemptKeysOnTheFilePath(t *testing.T) {
 
 func TestTheLikenDirectoryIsReadAsMetadataAndNeverAsATitle(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, "identity.yaml"), candidatesLedger)
 
 	result := walkMovies(root, "house/movies", nil)
@@ -72,7 +72,7 @@ func TestTheLikenDirectoryIsReadAsMetadataAndNeverAsATitle(t *testing.T) {
 		t.Errorf("titles = %d, want the one title folder", result.titles)
 	}
 	for _, movie := range result.movies {
-		if movie.Path == filepath.Join("Star Wars (1977)", likenDirectory) {
+		if movie.Path == filepath.Join("Long Voyage (1977)", likenDirectory) {
 			t.Errorf("the walk read %s as a title", movie.Path)
 		}
 	}
@@ -83,12 +83,12 @@ func TestTheLikenDirectoryIsReadAsMetadataAndNeverAsATitle(t *testing.T) {
 
 func TestASeasonFolderLedgerKeysOnTheEpisodeItem(t *testing.T) {
 	root := t.TempDir()
-	season := filepath.Join(root, "Twin Peaks (1990)", "Season 01")
-	writeFile(t, filepath.Join(season, "Twin Peaks - S01E01.mkv"), "video")
+	season := filepath.Join(root, "Pine Hollow (1990)", "Season 01")
+	writeFile(t, filepath.Join(season, "Pine Hollow - S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(season, likenDirectory, "probe.yaml"),
-		"attempts:\n    - path: Twin Peaks - S01E01.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
+		"attempts:\n    - path: Pine Hollow - S01E01.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
 	writeFile(t, filepath.Join(season, likenDirectory, "identity.yaml"),
-		"attempts:\n    - path: Twin Peaks - S01E01.mkv\n      at: 2026-09-02T14:00:00Z\n      result: nothing\n")
+		"attempts:\n    - path: Pine Hollow - S01E01.mkv\n      at: 2026-09-02T14:00:00Z\n      result: nothing\n")
 
 	result := walkSeries(root, "house/series", nil)
 
@@ -96,19 +96,19 @@ func TestASeasonFolderLedgerKeysOnTheEpisodeItem(t *testing.T) {
 	for _, attempt := range result.attempts {
 		items[attempt.Fact] = attempt.Item
 	}
-	wantFile := filepath.Join("Twin Peaks (1990)", "Season 01", "Twin Peaks - S01E01.mkv")
+	wantFile := filepath.Join("Pine Hollow (1990)", "Season 01", "Pine Hollow - S01E01.mkv")
 	if items[factProbe] != wantFile {
 		t.Errorf("the probe attempt names %q, want the file path", items[factProbe])
 	}
-	if items[factIdentity] != "episode:path:twin-peaks-1990:s01e01" {
+	if items[factIdentity] != "episode:path:pine-hollow-1990:s01e01" {
 		t.Errorf("the identity attempt names %q, want the episode item", items[factIdentity])
 	}
 }
 
 func TestASeriesFolderLedgerNamesTheSeries(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Twin Peaks (1990)")
-	writeFile(t, filepath.Join(dir, "Season 01", "Twin Peaks - S01E01.mkv"), "video")
+	dir := filepath.Join(root, "Pine Hollow (1990)")
+	writeFile(t, filepath.Join(dir, "Season 01", "Pine Hollow - S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, "identity.yaml"), candidatesLedger)
 
 	result := walkSeries(root, "house/series", nil)
@@ -116,15 +116,15 @@ func TestASeriesFolderLedgerNamesTheSeries(t *testing.T) {
 	if len(result.attempts) != 1 {
 		t.Fatalf("attempts = %+v, want one", result.attempts)
 	}
-	if got := result.attempts[0]; got.Item != "series:path:twin-peaks-1990" {
+	if got := result.attempts[0]; got.Item != "series:path:pine-hollow-1990" {
 		t.Errorf("attempt = %+v, want the series item", got)
 	}
 }
 
 func TestALedgerTheScannerCannotReadMarksThePassIncomplete(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, "identity.yaml"), "items: [oh: {: no\n")
 
 	result := walkMovies(root, "house/movies", nil)
@@ -136,8 +136,8 @@ func TestALedgerTheScannerCannotReadMarksThePassIncomplete(t *testing.T) {
 
 func TestAnAttemptWithNoResolvableItemIsLeftOut(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, "identity.yaml"),
 		"attempts:\n    - path: a-file-that-left.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n"+
 			"    - path: .\n      at: 2026-09-02T14:00:00Z\n      result: \n")
@@ -164,7 +164,7 @@ func TestAttemptKeysSplitBackIntoTheirColumns(t *testing.T) {
 // so an extras folder under a series holds a ledger of its own.
 func TestAnExtrasFolderLedgerKeysOnTheFilePath(t *testing.T) {
 	root := t.TempDir()
-	extras := filepath.Join(root, "Twin Peaks (1990)", "Extras")
+	extras := filepath.Join(root, "Pine Hollow (1990)", "Extras")
 	writeFile(t, filepath.Join(extras, "Deleted Scene.mkv"), "video")
 	writeFile(t, filepath.Join(extras, likenDirectory, "probe.yaml"),
 		"attempts:\n    - path: Deleted Scene.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
@@ -174,7 +174,7 @@ func TestAnExtrasFolderLedgerKeysOnTheFilePath(t *testing.T) {
 	if len(result.attempts) != 1 {
 		t.Fatalf("attempts = %+v, want the extras folder's own", result.attempts)
 	}
-	want := filepath.Join("Twin Peaks (1990)", "Extras", "Deleted Scene.mkv")
+	want := filepath.Join("Pine Hollow (1990)", "Extras", "Deleted Scene.mkv")
 	if got := result.attempts[0]; got.Item != want || got.Fact != factProbe {
 		t.Errorf("attempt = %+v, want the file path under the probe fact", got)
 	}
@@ -184,7 +184,7 @@ func TestAnExtrasFolderLedgerKeysOnTheFilePath(t *testing.T) {
 // container works from no longer names the file, so the probe opens it once.
 func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 	root := t.TempDir()
-	extras := filepath.Join(root, "Twin Peaks (1990)", "Extras")
+	extras := filepath.Join(root, "Pine Hollow (1990)", "Extras")
 	writeFile(t, filepath.Join(extras, "Deleted Scene.mkv"), "video")
 	writeFile(t, filepath.Join(extras, likenDirectory, "probe.yaml"),
 		"attempts:\n    - path: Deleted Scene.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
@@ -283,8 +283,8 @@ attempts:
 
 func TestAnNFOLedgerYieldsAnAttemptsRowWithItsProvider(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factOverview)), overviewLedger)
 
 	result := walkMovies(root, "house/movies", nil)
@@ -293,7 +293,7 @@ func TestAnNFOLedgerYieldsAnAttemptsRowWithItsProvider(t *testing.T) {
 		t.Fatalf("attempts = %+v, want one", result.attempts)
 	}
 	got := result.attempts[0]
-	if got.Fact != factOverview || got.Item != "movie:path:star-wars-1977" {
+	if got.Fact != factOverview || got.Item != "movie:path:long-voyage-1977" {
 		t.Errorf("attempt = %+v, want the title's own id under the overview fact", got)
 	}
 	if got.Provider != "tmdb" || got.Result != attemptFound {
@@ -304,8 +304,8 @@ func TestAnNFOLedgerYieldsAnAttemptsRowWithItsProvider(t *testing.T) {
 // A set fact records every provider that answered, and the row joins them.
 func TestALedgerOfSeveralProvidersJoinsThemInTheRow(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factCredits)),
 		"attempts:\n    - path: .\n      at: 2026-09-02T14:00:00Z\n      result: found\n      provider: [tmdb, omdb]\n")
 
@@ -356,9 +356,9 @@ func TestTheOldestAttemptPerFactAgainstTheRealSchema(t *testing.T) {
 const trailerLedger = `trailers:
     - path: .
       provider: tmdb
-      key: sJ9mvBJ1aTI
+      key: Tq7xHarb003
       site: youtube
-      url: https://www.youtube.com/watch?v=sJ9mvBJ1aTI
+      url: https://www.youtube.com/watch?v=Tq7xHarb003
       name: Official Trailer
       kind: trailer
       language: en
@@ -386,8 +386,8 @@ attempts:
 // holds, beside the attempt of the same file.
 func TestATrailerLedgerYieldsTheTrailerRowsOfItsTitle(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factTrailer)), trailerLedger)
 
 	result := walkMovies(root, "house/movies", nil)
@@ -396,9 +396,9 @@ func TestATrailerLedgerYieldsTheTrailerRowsOfItsTitle(t *testing.T) {
 		t.Fatalf("trailers = %+v, want one row per entry", result.trailers)
 	}
 	want := trailerRow{
-		Library: "house/movies", Item: "movie:path:star-wars-1977", Provider: providerBlockTMDb,
-		Key: "sJ9mvBJ1aTI", Site: trailerSiteYouTube,
-		URL:  "https://www.youtube.com/watch?v=sJ9mvBJ1aTI",
+		Library: "house/movies", Item: "movie:path:long-voyage-1977", Provider: providerBlockTMDb,
+		Key: "Tq7xHarb003", Site: trailerSiteYouTube,
+		URL:  "https://www.youtube.com/watch?v=Tq7xHarb003",
 		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en", Official: true,
 		Published: "2026-08-01", Resolution: 1080, Score: 90, Reason: "official trailer",
 	}
@@ -408,7 +408,7 @@ func TestATrailerLedgerYieldsTheTrailerRowsOfItsTitle(t *testing.T) {
 	if len(result.attempts) != 1 || result.attempts[0].Fact != factTrailer {
 		t.Fatalf("attempts = %+v, want the trailer fact's own", result.attempts)
 	}
-	if result.attempts[0].Item != "movie:path:star-wars-1977" {
+	if result.attempts[0].Item != "movie:path:long-voyage-1977" {
 		t.Errorf("attempt = %+v, want the title's own id", result.attempts[0])
 	}
 }
@@ -418,8 +418,8 @@ func TestATrailerLedgerYieldsTheTrailerRowsOfItsTitle(t *testing.T) {
 func TestTheWalkWritesTheTrailersOfATitleAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	dir := filepath.Join(root, "Star Wars (1977)")
-	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	dir := filepath.Join(root, "Long Voyage (1977)")
+	writeFile(t, filepath.Join(dir, "Long Voyage (1977).mkv"), "video")
 	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factTrailer)), trailerLedger)
 	result := walkMovies(root, "house/movies", nil)
 
@@ -434,7 +434,7 @@ func TestTheWalkWritesTheTrailersOfATitleAgainstTheRealSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "peertube|e6b1-4c2f|0|0|40,tmdb|sJ9mvBJ1aTI|1|1080|90"
+	want := "peertube|e6b1-4c2f|0|0|40,tmdb|Tq7xHarb003|1|1080|90"
 	if got := strings.Join(rows, ","); got != want {
 		t.Errorf("the table holds %q, want %q", got, want)
 	}

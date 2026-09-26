@@ -117,7 +117,7 @@ func TestTheArtLineFollowsTheSourceOrder(t *testing.T) {
 // holds an image writes the file, and the ledger names it. The same two
 // providers in the other order write the other image.
 func TestTheFirstSourceThatHoldsAnImageWritesIt(t *testing.T) {
-	folder := "The Signal (2014)"
+	folder := "Some Film (2014)"
 	cases := []struct {
 		name  string
 		order func(fanart, tmdb artAnswerer) *artLine
@@ -139,15 +139,15 @@ func TestTheFirstSourceThatHoldsAnImageWritesIt(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
+			writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
 			seedArtMovie(t, catalog, folder)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			answers := map[string]string{}
 			fanart, _ := newArtFanart(t, answers)
-			answers[fanartMoviePath+"603"] = fanartMovieArt(fanart.base)
+			answers[fanartMoviePath+"1001"] = fanartMovieArt(fanart.base)
 			tmdb, _ := newArtTMDb(t, map[string]string{
-				tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
-				tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
+				tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+				tmdbKey("/t/p/w780/quiet.jpg", "", ""):  testImage,
 			})
 			line := test.order(fanartArtAnswerer{client: fanart}, newTMDbArtAnswerer(tmdb))
 

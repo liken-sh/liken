@@ -25,13 +25,13 @@ func TestWebhookHandlerHoldsThePathThePayloadNames(t *testing.T) {
 	}{
 		{
 			name:    "a Radarr import",
-			payload: `{"movieFile":{"path":"/movies/Arrival (2016)/Arrival.mkv"}}`,
-			want:    "/movies/Arrival (2016)/Arrival.mkv",
+			payload: `{"movieFile":{"path":"/movies/Landfall (2016)/Landfall.mkv"}}`,
+			want:    "/movies/Landfall (2016)/Landfall.mkv",
 		},
 		{
 			name:    "a Jellyfin item",
-			payload: `{"Path":"/media/movies/Arrival (2016)"}`,
-			want:    "/media/movies/Arrival (2016)",
+			payload: `{"Path":"/media/movies/Landfall (2016)"}`,
+			want:    "/media/movies/Landfall (2016)",
 		},
 		{
 			name:    "a payload with no path at all",

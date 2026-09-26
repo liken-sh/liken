@@ -46,7 +46,7 @@ func newArtFanart(t *testing.T, answers map[string]string) (*fanartClient, *fake
 // The art of one movie, one image of every type this project writes, with
 // every address on the fake itself.
 func fanartMovieArt(base string) string {
-	return `{"name":"The Signal","tmdb_id":"603","imdb_id":"tt2910814",
+	return `{"name":"Some Film","tmdb_id":"1001","imdb_id":"tt9001002",
 		"movieposter":[{"id":"1","url":"` + base + `/art/movieposter.jpg","lang":"en","likes":"7"}],
 		"moviebackground":[{"id":"2","url":"` + base + `/art/moviebackground.jpg","lang":"","likes":"3"}],
 		"hdmovielogo":[{"id":"3","url":"` + base + `/art/hdmovielogo.png","lang":"en","likes":"5"}],
@@ -59,7 +59,7 @@ func fanartMovieArt(base string) string {
 // The art of one series, with the art of every season beside the art of season
 // one, so a test reads both the narrowing and the fallback.
 func fanartSeriesArt(base string) string {
-	return `{"name":"Quiet Harbor","thetvdb_id":"81189",
+	return `{"name":"Quiet Harbor","thetvdb_id":"800001",
 		"tvposter":[{"id":"1","url":"` + base + `/art/tvposter.jpg","lang":"en","likes":"4"}],
 		"showbackground":[{"id":"2","url":"` + base + `/art/showbackground.jpg","lang":"","likes":"2"}],
 		"hdtvlogo":[{"id":"3","url":"` + base + `/art/hdtvlogo.png","lang":"en","likes":"3"}],
@@ -83,7 +83,7 @@ func writeSeriesNFO(t *testing.T, root, folder, tvdb string) {
 // Every art type Fanart.tv holds for a movie lands under the name Kodi and
 // Jellyfin read, and the ledger names the provider that answered.
 func TestEachFanartMovieTypeLandsUnderItsName(t *testing.T) {
-	folder := "The Signal (2014)"
+	folder := "Some Film (2014)"
 	cases := []struct {
 		fact string
 		file string
@@ -101,12 +101,12 @@ func TestEachFanartMovieTypeLandsUnderItsName(t *testing.T) {
 		t.Run(test.fact, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
+			writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
 			seedArtMovie(t, catalog, folder)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			answers := map[string]string{}
 			client, _ := newArtFanart(t, answers)
-			answers[fanartMoviePath+"603"] = fanartMovieArt(client.base)
+			answers[fanartMoviePath+"1001"] = fanartMovieArt(client.base)
 
 			if err := work.artGap(t.Context(), test.fact, artLineOf(fanartArtAnswerer{client: client})); err != nil {
 				t.Fatal(err)
@@ -147,12 +147,12 @@ func TestEachFanartSeriesTypeLandsUnderItsName(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, folder, "Season 01", "Quiet Harbor - S01E05.mkv"), "video")
-			writeSeriesNFO(t, root, folder, "81189")
+			writeSeriesNFO(t, root, folder, "800001")
 			seedArtSeries(t, catalog, folder, []int{1})
 			work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 			answers := map[string]string{}
 			client, _ := newArtFanart(t, answers)
-			answers[fanartSeriesPath+"81189"] = fanartSeriesArt(client.base)
+			answers[fanartSeriesPath+"800001"] = fanartSeriesArt(client.base)
 
 			if err := work.artGap(t.Context(), test.fact, artLineOf(fanartArtAnswerer{client: client})); err != nil {
 				t.Fatal(err)
@@ -172,12 +172,12 @@ func TestASeasonWithoutItsOwnArtTakesTheArtOfEverySeason(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, folder, "Season 03", "Quiet Harbor - S03E05.mkv"), "video")
-	writeSeriesNFO(t, root, folder, "81189")
+	writeSeriesNFO(t, root, folder, "800001")
 	seedArtSeries(t, catalog, folder, []int{3})
 	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 	answers := map[string]string{}
 	client, _ := newArtFanart(t, answers)
-	answers[fanartSeriesPath+"81189"] = fanartSeriesArt(client.base)
+	answers[fanartSeriesPath+"800001"] = fanartSeriesArt(client.base)
 
 	if err := work.artGap(t.Context(), factSeasonPoster, artLineOf(fanartArtAnswerer{client: client})); err != nil {
 		t.Fatal(err)
@@ -197,12 +197,12 @@ func TestASeriesWithNoTheTVDBIDIsAMissWithADate(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, folder, "Season 01", "Quiet Harbor - S01E05.mkv"), "video")
 	writeFile(t, filepath.Join(root, folder, seriesNFOName),
-		`<tvshow><uniqueid type="tmdb">1396</uniqueid></tvshow>`)
+		`<tvshow><uniqueid type="tmdb">2001</uniqueid></tvshow>`)
 	seedArtSeries(t, catalog, folder, []int{1})
 	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 	answers := map[string]string{}
 	client, fake := newArtFanart(t, answers)
-	answers[fanartSeriesPath+"81189"] = fanartSeriesArt(client.base)
+	answers[fanartSeriesPath+"800001"] = fanartSeriesArt(client.base)
 
 	if err := work.artGap(t.Context(), factClearart, artLineOf(fanartArtAnswerer{client: client})); err != nil {
 		t.Fatal(err)
@@ -264,10 +264,10 @@ func TestWhichIDFanartReadsAMovieOn(t *testing.T) {
 		title titleRef
 		want  string
 	}{
-		{name: "the id the gap carries", gap: artGap{tmdb: "603"}, want: "603"},
-		{name: "the id the .nfo file holds", title: titleRef{ids: providerIDs{"tmdb": "550"}}, want: "550"},
+		{name: "the id the gap carries", gap: artGap{tmdb: "1001"}, want: "1001"},
+		{name: "the id the .nfo file holds", title: titleRef{ids: providerIDs{"tmdb": "1002"}}, want: "1002"},
 		{name: "the IMDb id where there is no other",
-			title: titleRef{ids: providerIDs{"imdb": "tt2910814"}}, want: "tt2910814"},
+			title: titleRef{ids: providerIDs{"imdb": "tt9001002"}}, want: "tt9001002"},
 		{name: "no id at all"},
 	}
 	for _, test := range cases {
@@ -287,10 +287,10 @@ func TestWhatTheFanartAnswererDoesWithAMissAndARefusal(t *testing.T) {
 	client, _ := newArtFanart(t, answers)
 	answerer := fanartArtAnswerer{client: client}
 	movie := titleRef{kind: libraryKindMovies}
-	series := titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "81189"}}
+	series := titleRef{kind: libraryKindSeries, ids: providerIDs{"tvdb": "800001"}}
 
 	for _, title := range []titleRef{movie, series} {
-		candidates, err := answerer.candidates(t.Context(), factPoster, artGap{tmdb: "603"}, title)
+		candidates, err := answerer.candidates(t.Context(), factPoster, artGap{tmdb: "1001"}, title)
 		if err != nil || len(candidates) != 0 {
 			t.Errorf("the answerer held %+v and %v, want a miss", candidates, err)
 		}
@@ -303,7 +303,7 @@ func TestWhatTheFanartAnswererDoesWithAMissAndARefusal(t *testing.T) {
 	refused, _ := newFakeFanart(t, http.StatusInternalServerError, "")
 	refuses := fanartArtAnswerer{client: refused}
 	for _, title := range []titleRef{movie, series} {
-		if _, err := refuses.candidates(t.Context(), factPoster, artGap{tmdb: "603"}, title); err == nil {
+		if _, err := refuses.candidates(t.Context(), factPoster, artGap{tmdb: "1001"}, title); err == nil {
 			t.Error("the answerer reported no error, want one")
 		}
 	}

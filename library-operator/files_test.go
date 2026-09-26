@@ -24,23 +24,23 @@ func TestClassifyFile(t *testing.T) {
 		wantRole     string
 		wantLanguage string
 	}{
-		{name: "The Matrix (1999).mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRolePrimary},
-		{name: "The Matrix (1999)-trailer.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleTrailer},
-		{name: "The Matrix (1999)-sample.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleSample},
-		{name: "The Matrix (1999)-behindthescenes.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleExtra},
-		{name: "The Matrix (1999)-theme.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleTheme},
+		{name: "Some Film (1999).mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRolePrimary},
+		{name: "Some Film (1999)-trailer.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleTrailer},
+		{name: "Some Film (1999)-sample.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleSample},
+		{name: "Some Film (1999)-behindthescenes.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleExtra},
+		{name: "Some Film (1999)-theme.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleTheme},
 		{name: "-.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRolePrimary},
 		{name: "Making Of.mkv", place: extras, wantType: fileTypeVideo, wantRole: fileRoleExtra},
 		{name: "Chase.mkv", place: trailers, wantType: fileTypeVideo, wantRole: fileRoleTrailer},
 		{name: "Making Of-trailer.mkv", place: extras, wantType: fileTypeVideo, wantRole: fileRoleTrailer},
 		{name: "theme.mp3", place: movies, wantType: fileTypeAudio, wantRole: fileRoleTheme},
-		{name: "The Matrix-theme.mp3", place: movies, wantType: fileTypeAudio, wantRole: fileRoleTheme},
+		{name: "Some Film-theme.mp3", place: movies, wantType: fileTypeAudio, wantRole: fileRoleTheme},
 		{name: "01 Opening.flac", place: movies, wantType: fileTypeAudio, wantRole: fileRoleTrack},
-		{name: "The Matrix (1999).srt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleFull},
-		{name: "The Matrix (1999).en.srt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en"},
-		{name: "The Matrix (1999).fr.forced.srt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleForced, wantLanguage: "fr"},
-		{name: "The Matrix (1999).eng.sdh.ass", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleSDH, wantLanguage: "eng"},
-		{name: "The Matrix (1999).en.cc.vtt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleSDH, wantLanguage: "en"},
+		{name: "Some Film (1999).srt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleFull},
+		{name: "Some Film (1999).en.srt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en"},
+		{name: "Some Film (1999).fr.forced.srt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleForced, wantLanguage: "fr"},
+		{name: "Some Film (1999).eng.sdh.ass", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleSDH, wantLanguage: "eng"},
+		{name: "Some Film (1999).en.cc.vtt", place: movies, wantType: fileTypeSubtitle, wantRole: fileRoleSDH, wantLanguage: "en"},
 		{name: "folder.jpg", place: movies, wantType: fileTypeImage, wantRole: fileRolePoster},
 		{name: "poster.png", place: movies, wantType: fileTypeImage, wantRole: fileRolePoster},
 		{name: "cover.jpg", place: movies, wantType: fileTypeImage, wantRole: fileRolePoster},
@@ -55,23 +55,23 @@ func TestClassifyFile(t *testing.T) {
 		{name: "cdart.png", place: movies, wantType: fileTypeImage, wantRole: fileRoleDisc},
 		{name: "landscape.jpg", place: movies, wantType: fileTypeImage, wantRole: fileRoleThumb},
 		{name: "season02-poster.jpg", place: season, wantType: fileTypeImage, wantRole: fileRolePoster},
-		{name: "Breaking Bad - S02E05-thumb.jpg", place: season, wantType: fileTypeImage, wantRole: fileRoleThumb},
-		{name: "Breaking Bad - S02E05.jpg", place: season, wantType: fileTypeImage, wantRole: fileRoleStill},
+		{name: "Copper Line - S02E05-thumb.jpg", place: season, wantType: fileTypeImage, wantRole: fileRoleThumb},
+		{name: "Copper Line - S02E05.jpg", place: season, wantType: fileTypeImage, wantRole: fileRoleStill},
 		{name: "extrafanart1.jpg", place: movies, wantType: fileTypeImage, wantRole: fileRoleBackdrop},
 		{name: "screenshot.jpg", place: movies, wantType: fileTypeImage},
 		{name: "movie.nfo", place: movies, wantType: fileTypeMetadata, wantRole: fileRoleMovie},
-		{name: "The Matrix (1999).nfo", place: movies, wantType: fileTypeMetadata, wantRole: fileRoleMovie},
+		{name: "Some Film (1999).nfo", place: movies, wantType: fileTypeMetadata, wantRole: fileRoleMovie},
 		{name: "tvshow.nfo", place: series, wantType: fileTypeMetadata, wantRole: fileRoleTVShow},
 		{name: "season02.nfo", place: series, wantType: fileTypeMetadata, wantRole: fileRoleSeason},
 		{name: "collection.nfo", place: movies, wantType: fileTypeMetadata, wantRole: fileRoleCollection},
-		{name: "Breaking Bad - S02E05.nfo", place: season, wantType: fileTypeMetadata, wantRole: fileRoleEpisode},
+		{name: "Copper Line - S02E05.nfo", place: season, wantType: fileTypeMetadata, wantRole: fileRoleEpisode},
 		// A word a role is named for, inside a title, is part of the
 		// title. The role is the last token of the name, which is where
 		// the tools write it.
 		{name: "Discovery.jpg", place: movies, wantType: fileTypeImage},
 		{name: "Coverage.jpg", place: movies, wantType: fileTypeImage},
 		{name: "Sample People (2000).mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRolePrimary},
-		{name: "The Matrix (1999)-sample.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleSample},
+		{name: "Some Film (1999)-sample.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleSample},
 		{name: "release.txt", place: movies, wantType: fileTypeOther},
 		{name: "checksums.sfv", place: movies, wantType: fileTypeOther},
 	}
@@ -99,17 +99,17 @@ func TestFileLanguage(t *testing.T) {
 		name string
 		want string
 	}{
-		{name: "The Matrix (1999).en.srt", want: "en"},
-		{name: "The Matrix (1999).eng.srt", want: "eng"},
-		{name: "The Matrix (1999).en.forced.srt", want: "en"},
-		{name: "The Matrix (1999).eng.sdh.srt", want: "eng"},
-		{name: "The Matrix (1999).EN.srt", want: "en"},
-		{name: "The Matrix (1999).srt", want: ""},
+		{name: "Some Film (1999).en.srt", want: "en"},
+		{name: "Some Film (1999).eng.srt", want: "eng"},
+		{name: "Some Film (1999).en.forced.srt", want: "en"},
+		{name: "Some Film (1999).eng.sdh.srt", want: "eng"},
+		{name: "Some Film (1999).EN.srt", want: "en"},
+		{name: "Some Film (1999).srt", want: ""},
 		{name: "Up.srt", want: ""},
-		{name: "The Matrix (1999).english.srt", want: ""},
-		{name: "The Matrix (1999).1999.srt", want: ""},
-		{name: "The Matrix (1999).e1.srt", want: ""},
-		{name: "The Matrix (1999).forced.srt", want: ""},
+		{name: "Some Film (1999).english.srt", want: ""},
+		{name: "Some Film (1999).1999.srt", want: ""},
+		{name: "Some Film (1999).e1.srt", want: ""},
+		{name: "Some Film (1999).forced.srt", want: ""},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -141,7 +141,7 @@ func TestSkipName(t *testing.T) {
 		{name: "System Volume Information", want: true},
 		{name: "system volume information", want: true},
 		{name: "folder.jpg", want: false},
-		{name: "The Matrix (1999).mkv", want: false},
+		{name: "Some Film (1999).mkv", want: false},
 		{name: "Recycle (2012)", want: false},
 	}
 	for _, testCase := range cases {
@@ -250,12 +250,12 @@ func TestHiIsAFlagAfterALanguageAndALanguageAlone(t *testing.T) {
 		wantRole     string
 		wantLanguage string
 	}{
-		{"The Signal [2024, Bluray-1080p].en.hi.srt", fileRoleSDH, "en"},
-		{"The Signal [2024].eng.hi.srt", fileRoleSDH, "eng"},
-		{"The Signal [2024].hi.srt", fileRoleFull, "hi"},
-		{"The Signal [2024].hi.forced.srt", fileRoleForced, "hi"},
-		{"The Signal [2024].en.srt", fileRoleFull, "en"},
-		{"The Signal [2024].en.sdh.srt", fileRoleSDH, "en"},
+		{"The Relay Tower [2024, Bluray-1080p].en.hi.srt", fileRoleSDH, "en"},
+		{"The Relay Tower [2024].eng.hi.srt", fileRoleSDH, "eng"},
+		{"The Relay Tower [2024].hi.srt", fileRoleFull, "hi"},
+		{"The Relay Tower [2024].hi.forced.srt", fileRoleForced, "hi"},
+		{"The Relay Tower [2024].en.srt", fileRoleFull, "en"},
+		{"The Relay Tower [2024].en.sdh.srt", fileRoleSDH, "en"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

@@ -214,7 +214,7 @@ type aliasRow struct {
 
 // itemID derives the provider-scoped canonical id. It takes the first provider
 // present in the scope's fixed order and mints none, so a re-walk of an
-// unchanged .nfo file derives the same id, movie:tmdb:603. A folder with no
+// unchanged .nfo file derives the same id, movie:tmdb:1001. A folder with no
 // provider id falls back to movie:path:<key>, which a move of that folder
 // breaks. That is the weak case the design accepts, in place of a minted id
 // the derived catalog has nowhere to keep.
@@ -228,8 +228,8 @@ func itemID(kind string, providerIDs map[string]string, folderKey string) string
 }
 
 // episodeID reuses the series' provider tail under the episode scope, with a
-// zero-padded season and episode, so series:tvdb:81189 yields
-// episode:tvdb:81189:s02e05. A path-fallback series id carries its tail
+// zero-padded season and episode, so series:tvdb:800001 yields
+// episode:tvdb:800001:s02e05. A path-fallback series id carries its tail
 // through unchanged, so a series with no .nfo file still gives its episodes a
 // stable id for as long as its folder stays in place.
 func episodeID(seriesID string, season, episode int) string {
@@ -266,7 +266,7 @@ func aliasesFor(library, kind string, providerIDs map[string]string, folderKey, 
 }
 
 // sortKey strips a leading article so a list sorts on the first word that
-// carries meaning, and "The Matrix" files under M. This is the opposite of the
+// carries meaning, and "The Long Survey" files under L. This is the opposite of the
 // slug, which keeps the article.
 func sortKey(title string) string {
 	for _, article := range []string{"The ", "A ", "An "} {
@@ -278,7 +278,7 @@ func sortKey(title string) string {
 }
 
 // slug is the legible display name for a URL and a screen, such as
-// the-matrix-1999. It lowercases the title, folds accents to ASCII, keeps
+// the-long-survey-1982. It lowercases the title, folds accents to ASCII, keeps
 // the article, hyphenates the rest, and appends the year where there is one.
 // The slug is a display name and not the item's id, so a corrected title
 // changes it freely. What does key on a name is folderKey, the slug of a

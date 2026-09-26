@@ -19,10 +19,10 @@ import (
 // delegated to this operator, with the claim and the requests it published.
 func denScreen() *Player {
 	return &Player{
-		Metadata: ObjectMeta{Name: "den-tv", Namespace: testLibraryNamespace, UID: "den-tv-uid"},
+		Metadata: ObjectMeta{Name: "den", Namespace: testLibraryNamespace, UID: "den-uid"},
 		Status: PlayerStatus{Idle: &PlayerIdleStatus{
 			Controller: screenController,
-			Claim:      "den-tv-idle-devices",
+			Claim:      "den-idle-devices",
 			Requests:   []string{"draw", "render"},
 		}},
 	}
@@ -61,8 +61,8 @@ func testScreenPod(player *Player, libraries []Library) *Pod {
 func TestScreenPodBelongsToItsPlayer(t *testing.T) {
 	pod := testScreenPod(denScreen(), houseLibraries())
 
-	if pod.Metadata.Name != "den-tv-media-browser" {
-		t.Errorf("name = %q, want den-tv-media-browser", pod.Metadata.Name)
+	if pod.Metadata.Name != "den-media-browser" {
+		t.Errorf("name = %q, want den-media-browser", pod.Metadata.Name)
 	}
 	if pod.Metadata.Namespace != testLibraryNamespace {
 		t.Errorf("namespace = %q, want %s", pod.Metadata.Namespace, testLibraryNamespace)
@@ -73,7 +73,7 @@ func TestScreenPodBelongsToItsPlayer(t *testing.T) {
 	owner := pod.Metadata.OwnerReferences[0]
 	want := OwnerReference{
 		APIVersion: playerAPIVersion, Kind: "Player",
-		Name: "den-tv", UID: "den-tv-uid", Controller: true,
+		Name: "den", UID: "den-uid", Controller: true,
 	}
 	if owner != want {
 		t.Errorf("owner = %+v, want %+v", owner, want)
@@ -81,7 +81,7 @@ func TestScreenPodBelongsToItsPlayer(t *testing.T) {
 	if pod.Metadata.Labels[scannerLabelKey] != screenLabelValue {
 		t.Errorf("labels = %v, want the screen name label", pod.Metadata.Labels)
 	}
-	if pod.Metadata.Labels[playerLabelKey] != "den-tv" {
+	if pod.Metadata.Labels[playerLabelKey] != "den" {
 		t.Errorf("labels = %v, want the player label", pod.Metadata.Labels)
 	}
 }
@@ -213,7 +213,7 @@ func TestScreenPodArtCacheIsAClaimUnderACatalog(t *testing.T) {
 		{
 			name:    "under a Catalog",
 			catalog: testNamespaceCatalog(),
-			want:    `{"name":"art-cache","persistentVolumeClaim":{"claimName":"den-tv-media-browser-art"}}`,
+			want:    `{"name":"art-cache","persistentVolumeClaim":{"claimName":"den-media-browser-art"}}`,
 		},
 		{
 			name: "with no Catalog",
@@ -372,7 +372,7 @@ func TestScreenPodMountsEveryLibraryReadOnly(t *testing.T) {
 	}
 	catalog := volumes[catalogVolumeName]
 	if catalog.EmptyDir != nil || catalog.PersistentVolumeClaim == nil ||
-		catalog.PersistentVolumeClaim.ClaimName != "den-tv-media-browser-catalog" {
+		catalog.PersistentVolumeClaim.ClaimName != "den-media-browser-catalog" {
 		t.Errorf("catalog volume = %+v, want the screen's catalog claim", catalog)
 	}
 }
@@ -382,7 +382,7 @@ func TestScreenPodMountsEveryLibraryReadOnly(t *testing.T) {
 func TestScreenPodHoldsTheDisplayClaim(t *testing.T) {
 	pod := testScreenPod(denScreen(), houseLibraries())
 
-	want := []PodResourceClaim{{Name: displayClaimName, ResourceClaimName: "den-tv-idle-devices"}}
+	want := []PodResourceClaim{{Name: displayClaimName, ResourceClaimName: "den-idle-devices"}}
 	if len(pod.Spec.ResourceClaims) != 1 || pod.Spec.ResourceClaims[0] != want[0] {
 		t.Errorf("resourceClaims = %+v, want %+v", pod.Spec.ResourceClaims, want)
 	}
@@ -500,22 +500,22 @@ func TestScreenPodRunsTheProgressSidecarOnTheCatalogClaim(t *testing.T) {
 func TestReconcileScreensWritesThePeopleFileOfTheNamespace(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
-	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	operator := testOperator(t, cluster)
 	people := []Person{
-		{Metadata: ObjectMeta{Name: "thora"}, Spec: PersonSpec{DisplayName: "Thora"}},
-		{Metadata: ObjectMeta{Name: "chris"}},
+		{Metadata: ObjectMeta{Name: "person-b"}, Spec: PersonSpec{DisplayName: "Person B"}},
+		{Metadata: ObjectMeta{Name: "person-a"}},
 		{Metadata: ObjectMeta{Name: "gone", DeletionTimestamp: "2026-09-07T00:00:00Z"}},
 	}
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
-		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
 
 	written := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
 	if written == nil {
 		t.Fatal("no people map was written")
 	}
-	want := `[{"name":"chris","displayName":"chris"},{"name":"thora","displayName":"Thora"}]`
+	want := `[{"name":"person-a","displayName":"person-a"},{"name":"person-b","displayName":"Person B"}]`
 	if got := written.Data[peopleFileName]; got != want {
 		t.Errorf("people = %s, want %s", got, want)
 	}
@@ -523,15 +523,15 @@ func TestReconcileScreensWritesThePeopleFileOfTheNamespace(t *testing.T) {
 		t.Errorf("owners = %+v, want the namespace's Catalog", written.Metadata.OwnerReferences)
 	}
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
-		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
 	if got := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName).Metadata.ResourceVersion; got != "1" {
 		t.Errorf("resourceVersion = %s after an unchanged pass, want 1", got)
 	}
 
 	people = append(people, Person{Metadata: ObjectMeta{Name: "io"}, Spec: PersonSpec{DisplayName: "Io"}})
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
-		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
 	rewritten := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
 	if rewritten.Metadata.ResourceVersion != "2" || !strings.Contains(rewritten.Data[peopleFileName], `"io"`) {
 		t.Errorf("people = %+v, want the file rewritten with io", rewritten)
@@ -542,11 +542,11 @@ func TestReconcileScreensWritesThePeopleFileOfTheNamespace(t *testing.T) {
 // an emptyDir still knows its people.
 func TestReconcileScreensWritesAnUnownedPeopleFileWithNoCatalog(t *testing.T) {
 	cluster := newFakeCluster()
-	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-	people := []Person{{Metadata: ObjectMeta{Name: "chris"}}}
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	people := []Person{{Metadata: ObjectMeta{Name: "person-a"}}}
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
-		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+		[]Player{*cluster.players["den"]}, nil, people, nil, testNow)
 
 	written := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
 	if written == nil || len(written.Metadata.OwnerReferences) != 0 {
@@ -560,13 +560,13 @@ func TestReconcileScreensWritesAnUnownedPeopleFileWithNoCatalog(t *testing.T) {
 func TestReconcileScreensStandsAPodForADelegatedPlayer(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
-	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	operator := testOperator(t, cluster)
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
-		[]Player{*cluster.players["den-tv"]}, []Library{*cluster.libraries["movies"]}, nil, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house"],
+		[]Player{*cluster.players["den"]}, []Library{*cluster.libraries["movies"]}, nil, nil, testNow)
 
-	pod := cluster.heldPod("den-tv-media-browser")
+	pod := cluster.heldPod("den-media-browser")
 	if pod == nil {
 		t.Fatal("no screen pod was created")
 	}
@@ -592,15 +592,15 @@ func TestReconcileScreensStopsThePodOfAPlayerItNoLongerServes(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			player := seedPlayer(cluster, "den-tv", testLibraryNamespace, one.controller)
-			cluster.pods["den-tv-media-browser"] = &Pod{
-				Metadata: ObjectMeta{Name: "den-tv-media-browser", Namespace: testLibraryNamespace},
+			player := seedPlayer(cluster, "den", testLibraryNamespace, one.controller)
+			cluster.pods["den-media-browser"] = &Pod{
+				Metadata: ObjectMeta{Name: "den-media-browser", Namespace: testLibraryNamespace},
 			}
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
-				[]Player{*player}, nil, nil, []Pod{*cluster.pods["den-tv-media-browser"]}, testNow)
+				[]Player{*player}, nil, nil, []Pod{*cluster.pods["den-media-browser"]}, testNow)
 
-			if cluster.heldPod("den-tv-media-browser") != nil {
+			if cluster.heldPod("den-media-browser") != nil {
 				t.Error("the screen pod still stands for a Player this operator does not serve")
 			}
 		})
@@ -612,7 +612,7 @@ func TestReconcileScreensStopsThePodOfAPlayerItNoLongerServes(t *testing.T) {
 // on every pass.
 func TestReconcileScreensSendsNoDeleteWhenNoPodStands(t *testing.T) {
 	cluster := newFakeCluster()
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, "media.liken.sh/idle-screen")
+	player := seedPlayer(cluster, "den", testLibraryNamespace, "media.liken.sh/idle-screen")
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
 		[]Player{*player}, nil, nil, nil, testNow)
@@ -626,21 +626,21 @@ func TestReconcileScreensSendsNoDeleteWhenNoPodStands(t *testing.T) {
 // it, and the pass after that creates the replacement.
 func TestReconcileScreensReplacesAStalePod(t *testing.T) {
 	cluster := newFakeCluster()
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	stale := testScreenPod(player, nil)
 	stale.Metadata.Annotations = map[string]string{templateHashAnnotation: "an-older-template"}
-	cluster.pods["den-tv-media-browser"] = stale
+	cluster.pods["den-media-browser"] = stale
 	operator := testOperator(t, cluster)
 
 	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
-	if cluster.heldPod("den-tv-media-browser") != nil {
+	if cluster.heldPod("den-media-browser") != nil {
 		t.Fatal("the stale pod still stands")
 	}
 
 	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
-	replacement := cluster.heldPod("den-tv-media-browser")
+	replacement := cluster.heldPod("den-media-browser")
 	if replacement == nil {
 		t.Fatal("no replacement pod was created")
 	}
@@ -653,7 +653,7 @@ func TestReconcileScreensReplacesAStalePod(t *testing.T) {
 // it and writes nothing.
 func TestReconcileScreensKeepsAMatchingPod(t *testing.T) {
 	cluster := newFakeCluster()
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	operator := testOperator(t, cluster)
 	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
@@ -672,8 +672,8 @@ func TestReconcileScreensKeepsAMatchingPod(t *testing.T) {
 // volumes.
 func TestReconcileScreensReadsOneNamespace(t *testing.T) {
 	cluster := newFakeCluster()
-	house := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-	studio := seedPlayer(cluster, "studio-tv", "studio", screenController)
+	house := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	studio := seedPlayer(cluster, "studio", "studio", screenController)
 	libraries := []Library{
 		{
 			Metadata: ObjectMeta{Name: "films", Namespace: testLibraryNamespace},
@@ -688,10 +688,10 @@ func TestReconcileScreensReadsOneNamespace(t *testing.T) {
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
 		[]Player{*house, *studio}, libraries, nil, nil, testNow)
 
-	if cluster.heldPod("studio-tv-media-browser") != nil {
+	if cluster.heldPod("studio-media-browser") != nil {
 		t.Error("the pass stood a pod for a Player in another namespace")
 	}
-	pod := cluster.heldPod("den-tv-media-browser")
+	pod := cluster.heldPod("den-media-browser")
 	if pod == nil {
 		t.Fatal("no screen pod was created")
 	}
@@ -711,29 +711,29 @@ func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
 	}{
 		{
 			name: "the pod cannot be read", controller: screenController,
-			path: "/api/v1/namespaces/house/pods/den-tv-media-browser",
+			path: "/api/v1/namespaces/house/pods/den-media-browser",
 		},
 		{
 			name: "the pod cannot be deleted", controller: "media.liken.sh/idle-screen",
-			path: "/api/v1/namespaces/house/pods/den-tv-media-browser",
+			path: "/api/v1/namespaces/house/pods/den-media-browser",
 		},
 		{
 			name: "the claim cannot be read", controller: screenController,
-			path:    claimPath(testLibraryNamespace, "den-tv-media-browser-catalog"),
+			path:    claimPath(testLibraryNamespace, "den-media-browser-catalog"),
 			catalog: testNamespaceCatalog(),
 		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			broken := seedPlayer(cluster, "den-tv", testLibraryNamespace, one.controller)
-			standing := seedPlayer(cluster, "kitchen-tv", testLibraryNamespace, screenController)
+			broken := seedPlayer(cluster, "den", testLibraryNamespace, one.controller)
+			standing := seedPlayer(cluster, "kitchen", testLibraryNamespace, screenController)
 			cluster.broken[one.path] = http.StatusInternalServerError
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, one.catalog,
 				[]Player{*broken, *standing}, nil, nil, nil, testNow)
 
-			if cluster.heldPod("kitchen-tv-media-browser") == nil {
+			if cluster.heldPod("kitchen-media-browser") == nil {
 				t.Error("the pass stopped at the broken Player")
 			}
 		})
@@ -745,9 +745,9 @@ func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
 // holds.
 func TestScreenNamespacesAreEveryPlayersNamespaceInOrder(t *testing.T) {
 	players := []Player{
-		{Metadata: ObjectMeta{Name: "studio-tv", Namespace: "studio"}},
-		{Metadata: ObjectMeta{Name: "den-tv", Namespace: testLibraryNamespace}},
-		{Metadata: ObjectMeta{Name: "kitchen-tv", Namespace: testLibraryNamespace}},
+		{Metadata: ObjectMeta{Name: "studio", Namespace: "studio"}},
+		{Metadata: ObjectMeta{Name: "den", Namespace: testLibraryNamespace}},
+		{Metadata: ObjectMeta{Name: "kitchen", Namespace: testLibraryNamespace}},
 	}
 
 	got := screenNamespaces(players)
@@ -769,12 +769,12 @@ func denScreenOnTheBus() *Player {
 	player.Status.Idle.OffAfterSeconds = 1800
 	player.Status.Idle.Bus = &PlayerIdleBus{
 		Address:          "bus.liken-system.svc:1883",
-		StatusTopic:      "liken/media/players/house/den-tv/status",
-		VolumeTopic:      "liken/media/players/house/den-tv/volume",
-		VolumeOwnerTopic: "liken/media/players/house/den-tv/volume/owner",
-		CommandsTopic:    "liken/media/players/house/den-tv/commands",
-		PowerTopic:       "liken/media/players/house/den-tv/power",
-		PanelTopic:       "liken/media/players/house/den-tv/panel",
+		StatusTopic:      "liken/media/players/house/den/status",
+		VolumeTopic:      "liken/media/players/house/den/volume",
+		VolumeOwnerTopic: "liken/media/players/house/den/volume/owner",
+		CommandsTopic:    "liken/media/players/house/den/commands",
+		PowerTopic:       "liken/media/players/house/den/power",
+		PanelTopic:       "liken/media/players/house/den/panel",
 		Remotes: []PlayerIdleRemote{
 			{
 				Events: "liken/media/remotes/house/sofa/events",
@@ -805,21 +805,21 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 		windowGraceVariable:           windowGraceSeconds,
 		metricsAddressVariable:        ":9200",
 		mediaBusAddressVariable:       "bus.liken-system.svc:1883",
-		mediaPlayerNameVariable:       "den-tv",
-		mediaStatusTopicVariable:      "liken/media/players/house/den-tv/status",
-		mediaVolumeTopicVariable:      "liken/media/players/house/den-tv/volume",
-		mediaVolumeOwnerTopicVariable: "liken/media/players/house/den-tv/volume/owner",
-		mediaCommandsTopicVariable:    "liken/media/players/house/den-tv/commands",
-		mediaPowerTopicVariable:       "liken/media/players/house/den-tv/power",
-		mediaPanelTopicVariable:       "liken/media/players/house/den-tv/panel",
+		mediaPlayerNameVariable:       "den",
+		mediaStatusTopicVariable:      "liken/media/players/house/den/status",
+		mediaVolumeTopicVariable:      "liken/media/players/house/den/volume",
+		mediaVolumeOwnerTopicVariable: "liken/media/players/house/den/volume/owner",
+		mediaCommandsTopicVariable:    "liken/media/players/house/den/commands",
+		mediaPowerTopicVariable:       "liken/media/players/house/den/power",
+		mediaPanelTopicVariable:       "liken/media/players/house/den/panel",
 		mediaRemoteEventsTopicsVariable: "liken/media/remotes/house/sofa/events\n" +
 			"liken/media/remotes/house/armchair/events",
 		mediaRemoteFocusTopicsVariable: "liken/media/remotes/house/sofa/focus\n" +
 			"liken/media/remotes/house/armchair/focus",
 		idleFadeAfterSecondsVariable: "600",
 		idleOffAfterSecondsVariable:  "1800",
-		libraryPlayTopicVariable:     "liken/library/players/house/den-tv/play",
-		libraryAudienceTopicVariable: "liken/library/players/house/den-tv/audience",
+		libraryPlayTopicVariable:     "liken/library/players/house/den/play",
+		libraryAudienceTopicVariable: "liken/library/players/house/den/audience",
 	}
 	for name, value := range want {
 		if environment[name] != value {
@@ -927,7 +927,7 @@ func TestScreenPodKeepsTheRemoteListsPairedByPosition(t *testing.T) {
 func TestPassStampsTheHouseholdZoneOnTheScreen(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
-	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 	cluster.preferences = &MediaPreferences{
 		Metadata: ObjectMeta{Name: mediaPreferencesName},
 		Spec:     MediaPreferencesSpec{TimeZone: "America/New_York"},
@@ -935,7 +935,7 @@ func TestPassStampsTheHouseholdZoneOnTheScreen(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	pod := cluster.heldPod("den-tv-media-browser")
+	pod := cluster.heldPod("den-media-browser")
 	if pod == nil {
 		t.Fatal("no screen pod was created")
 	}

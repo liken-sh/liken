@@ -16,69 +16,69 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 		{
 			name: "the title and the year name one result",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+				tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` + tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
 			},
-			search:     identitySearch{kind: libraryKindMovies, title: "The Thing", year: 1982},
-			wantID:     1091,
+			search:     identitySearch{kind: libraryKindMovies, title: "The Long Survey", year: 1982},
+			wantID:     1101,
 			wantReason: reasonFrom(testTitle, testYear),
 		},
 		{
 			name: "the provider spells the title another way and the original matches",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Amelie", "2001"): `{"results":[{"id":194,"title":"Am` + "é" + `lie","original_title":"Le Fabuleux Destin d'Am` + "é" + `lie Poulain","release_date":"2001-04-25"}]}`,
+				tmdbKey("/3/search/movie", "Celine", "2001"): `{"results":[{"id":1102,"title":"C` + "é" + `line","original_title":"La Longue Route de C` + "é" + `line Morel","release_date":"2001-04-01"}]}`,
 			},
-			search:     identitySearch{kind: libraryKindMovies, title: "Amelie", year: 2001},
-			wantID:     194,
+			search:     identitySearch{kind: libraryKindMovies, title: "Celine", year: 2001},
+			wantID:     1102,
 			wantReason: reasonFrom(testTitle, testYear),
 		},
 		{
 			name: "a roman numeral and an article read the same on both sides",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "The Godfather Part II", "1974"): `{"results":[` + tmdbResultJSON(240, "Godfather: Part 2", "1974-12-20") + `]}`,
+				tmdbKey("/3/search/movie", "The Harbormaster Part II", "1974"): `{"results":[` + tmdbResultJSON(1103, "Harbormaster: Part 2", "1974-12-24") + `]}`,
 			},
-			search:     identitySearch{kind: libraryKindMovies, title: "The Godfather Part II", year: 1974},
-			wantID:     240,
+			search:     identitySearch{kind: libraryKindMovies, title: "The Harbormaster Part II", year: 1974},
+			wantID:     1103,
 			wantReason: reasonFrom(testTitle, testYear),
 		},
 		{
 			name: "the year is one off, so the search runs on either side",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Brazil", "1985"): `{"results":[]}`,
-				tmdbKey("/3/search/movie", "Brazil", "1984"): `{"results":[` + tmdbResultJSON(68, "Brazil", "1984-12-18") + `]}`,
+				tmdbKey("/3/search/movie", "Lowland", "1985"): `{"results":[]}`,
+				tmdbKey("/3/search/movie", "Lowland", "1984"): `{"results":[` + tmdbResultJSON(1104, "Lowland", "1984-12-22") + `]}`,
 			},
-			search:     identitySearch{kind: libraryKindMovies, title: "Brazil", year: 1985},
-			wantID:     68,
+			search:     identitySearch{kind: libraryKindMovies, title: "Lowland", year: 1985},
+			wantID:     1104,
 			wantReason: reasonFrom(testTitle, testNearYear),
 		},
 		{
 			name: "two results on the year, and the runtime parts them",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
-					tmdbResultJSON(1091, "The Thing", "1982-06-25") + `,` +
-					tmdbResultJSON(9999, "The Thing", "1982-01-01") + `]}`,
-				tmdbKey("/3/movie/1091", "", ""): `{"runtime":109}`,
+				tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+					tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `,` +
+					tmdbResultJSON(9999, "The Long Survey", "1982-01-05") + `]}`,
+				tmdbKey("/3/movie/1101", "", ""): `{"runtime":109}`,
 				tmdbKey("/3/movie/9999", "", ""): `{"runtime":42}`,
 			},
-			search:     identitySearch{kind: libraryKindMovies, title: "The Thing", year: 1982, duration: 108 * time.Minute},
-			wantID:     1091,
+			search:     identitySearch{kind: libraryKindMovies, title: "The Long Survey", year: 1982, duration: 108 * time.Minute},
+			wantID:     1101,
 			wantReason: reasonFrom(testTitle, testYear, testRuntime),
 		},
 		{
 			name: "the name carries no year, and one title matches",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Koyaanisqatsi", ""): `{"results":[` + tmdbResultJSON(9852, "Koyaanisqatsi", "1982-09-01") + `]}`,
+				tmdbKey("/3/search/movie", "Veltrano", ""): `{"results":[` + tmdbResultJSON(1105, "Veltrano", "1982-09-05") + `]}`,
 			},
-			search:     identitySearch{kind: libraryKindMovies, title: "Koyaanisqatsi"},
-			wantID:     9852,
+			search:     identitySearch{kind: libraryKindMovies, title: "Veltrano"},
+			wantID:     1105,
 			wantReason: reasonFrom(testTitle),
 		},
 		{
 			name: "a series matches on its first air date",
 			answers: map[string]string{
-				tmdbKey("/3/search/tv", "Twin Peaks", "1990"): `{"results":[{"id":1920,"name":"Twin Peaks","original_name":"Twin Peaks","first_air_date":"1990-04-08"}]}`,
+				tmdbKey("/3/search/tv", "Pine Hollow", "1990"): `{"results":[{"id":2103,"name":"Pine Hollow","original_name":"Pine Hollow","first_air_date":"1990-04-16"}]}`,
 			},
-			search:     identitySearch{kind: libraryKindSeries, title: "Twin Peaks", year: 1990},
-			wantID:     1920,
+			search:     identitySearch{kind: libraryKindSeries, title: "Pine Hollow", year: 1990},
+			wantID:     2103,
 			wantReason: reasonFrom(testTitle, testYear),
 		},
 	}
@@ -114,34 +114,34 @@ func TestTheLadderLeavesCandidatesWhereNoRungParts(t *testing.T) {
 		{
 			name: "two results the runtime cannot part",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Star Wars", "1977"): `{"results":[` +
-					tmdbResultJSON(11, "Star Wars", "1977-05-25") + `,` +
-					tmdbResultJSON(12, "Star Wars", "1977-06-01") + `]}`,
-				tmdbKey("/3/movie/11", "", ""): `{"runtime":121}`,
-				tmdbKey("/3/movie/12", "", ""): `{"runtime":122}`,
+				tmdbKey("/3/search/movie", "Deep Orbit", "1977"): `{"results":[` +
+					tmdbResultJSON(1111, "Deep Orbit", "1977-05-01") + `,` +
+					tmdbResultJSON(1112, "Deep Orbit", "1977-06-05") + `]}`,
+				tmdbKey("/3/movie/1111", "", ""): `{"runtime":121}`,
+				tmdbKey("/3/movie/1112", "", ""): `{"runtime":122}`,
 			},
-			search:      identitySearch{kind: libraryKindMovies, title: "Star Wars", year: 1977, duration: 121 * time.Minute},
+			search:      identitySearch{kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute},
 			wantCount:   2,
 			wantReceipt: map[string]string{"title": "match", "year": "match", "runtime": "match"},
 		},
 		{
 			name: "two results and no runtime to part them",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Star Wars", "1977"): `{"results":[` +
-					tmdbResultJSON(11, "Star Wars", "1977-05-25") + `,` +
-					tmdbResultJSON(12, "Star Wars", "1977-06-01") + `]}`,
+				tmdbKey("/3/search/movie", "Deep Orbit", "1977"): `{"results":[` +
+					tmdbResultJSON(1111, "Deep Orbit", "1977-05-01") + `,` +
+					tmdbResultJSON(1112, "Deep Orbit", "1977-06-05") + `]}`,
 			},
-			search:      identitySearch{kind: libraryKindMovies, title: "Star Wars", year: 1977},
+			search:      identitySearch{kind: libraryKindMovies, title: "Deep Orbit", year: 1977},
 			wantCount:   2,
 			wantReceipt: map[string]string{"title": "match", "year": "match"},
 		},
 		{
 			name: "the title matches on a neighbouring year alone",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Star Wars", "1976"): `{"results":[` + tmdbResultJSON(11, "Star Wars", "1976-05-25") + `]}`,
-				tmdbKey("/3/search/movie", "Star Wars", "1978"): `{"results":[` + tmdbResultJSON(12, "Star Wars", "1978-05-25") + `]}`,
+				tmdbKey("/3/search/movie", "Deep Orbit", "1976"): `{"results":[` + tmdbResultJSON(1111, "Deep Orbit", "1976-05-01") + `]}`,
+				tmdbKey("/3/search/movie", "Deep Orbit", "1978"): `{"results":[` + tmdbResultJSON(1112, "Deep Orbit", "1978-05-01") + `]}`,
 			},
-			search:      identitySearch{kind: libraryKindMovies, title: "Star Wars", year: 1977},
+			search:      identitySearch{kind: libraryKindMovies, title: "Deep Orbit", year: 1977},
 			wantCount:   2,
 			wantReceipt: map[string]string{"title": "match", "year": "no match"},
 		},
@@ -190,15 +190,15 @@ func sameReceipt(got, want map[string]string) bool {
 
 func TestACandidatesReceiptStatesHowFarTheRuntimeSits(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Star Wars", "1977"): `{"results":[` +
-			tmdbResultJSON(11, "Star Wars", "1977-05-25") + `,` +
-			tmdbResultJSON(12, "Star Wars", "1977-06-01") + `]}`,
-		tmdbKey("/3/movie/11", "", ""): `{"runtime":100}`,
-		tmdbKey("/3/movie/12", "", ""): `{"runtime":140}`,
+		tmdbKey("/3/search/movie", "Deep Orbit", "1977"): `{"results":[` +
+			tmdbResultJSON(1111, "Deep Orbit", "1977-05-01") + `,` +
+			tmdbResultJSON(1112, "Deep Orbit", "1977-06-05") + `]}`,
+		tmdbKey("/3/movie/1111", "", ""): `{"runtime":100}`,
+		tmdbKey("/3/movie/1112", "", ""): `{"runtime":140}`,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind: libraryKindMovies, title: "Star Wars", year: 1977, duration: 121 * time.Minute,
+		kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -210,19 +210,19 @@ func TestACandidatesReceiptStatesHowFarTheRuntimeSits(t *testing.T) {
 	if got := answer.candidates[0].Receipt["runtime"]; got != "21 minutes off" {
 		t.Errorf("runtime receipt = %q, want the distance", got)
 	}
-	if got := answer.candidates[0].ID["tmdb"]; got != "11" {
+	if got := answer.candidates[0].ID["tmdb"]; got != "1111" {
 		t.Errorf("candidate id = %q, want the provider's", got)
 	}
 }
 
 func TestACandidateWithNoYearInTheNameSaysSo(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Solaris", ""): `{"results":[` +
-			tmdbResultJSON(593, "Solaris", "1972-03-20") + `,` +
-			tmdbResultJSON(11660, "Solaris", "2002-11-27") + `]}`,
+		tmdbKey("/3/search/movie", "Quiet Moon", ""): `{"results":[` +
+			tmdbResultJSON(1121, "Quiet Moon", "1972-03-24") + `,` +
+			tmdbResultJSON(1122, "Quiet Moon", "2002-11-03") + `]}`,
 	})
 
-	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{kind: libraryKindMovies, title: "Solaris"})
+	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{kind: libraryKindMovies, title: "Quiet Moon"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,19 +241,19 @@ func TestALadderFailsWhereTheProviderFails(t *testing.T) {
 		answers map[string]string
 		refuse  string
 	}{
-		{name: "the first search", refuse: tmdbKey("/3/search/movie", "Star Wars", "1977")},
+		{name: "the first search", refuse: tmdbKey("/3/search/movie", "Deep Orbit", "1977")},
 		{
 			name:   "a search on a neighbouring year",
-			refuse: tmdbKey("/3/search/movie", "Star Wars", "1976"),
+			refuse: tmdbKey("/3/search/movie", "Deep Orbit", "1976"),
 		},
 		{
 			name: "a runtime read",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "Star Wars", "1977"): `{"results":[` +
-					tmdbResultJSON(11, "Star Wars", "1977-05-25") + `,` +
-					tmdbResultJSON(12, "Star Wars", "1977-06-01") + `]}`,
+				tmdbKey("/3/search/movie", "Deep Orbit", "1977"): `{"results":[` +
+					tmdbResultJSON(1111, "Deep Orbit", "1977-05-01") + `,` +
+					tmdbResultJSON(1112, "Deep Orbit", "1977-06-05") + `]}`,
 			},
-			refuse: tmdbKey("/3/movie/11", "", ""),
+			refuse: tmdbKey("/3/movie/1111", "", ""),
 		},
 	}
 	for _, test := range cases {
@@ -262,7 +262,7 @@ func TestALadderFailsWhereTheProviderFails(t *testing.T) {
 			fake.statuses[test.refuse] = 500
 
 			_, err := climbIdentityLadder(t.Context(), client, identitySearch{
-				kind: libraryKindMovies, title: "Star Wars", year: 1977, duration: 121 * time.Minute,
+				kind: libraryKindMovies, title: "Deep Orbit", year: 1977, duration: 121 * time.Minute,
 			})
 			if err == nil {
 				t.Error("the ladder reported no error, want the provider's")
@@ -277,15 +277,15 @@ func TestATitleNormalizesTheSameOnBothSides(t *testing.T) {
 		title string
 		want  string
 	}{
-		{name: "case and punctuation", title: "The Godfather: Part II", want: "godfather part 2"},
-		{name: "an accent", title: "Amélie", want: "amelie"},
-		{name: "a leading article", title: "A Serious Man", want: "serious man"},
+		{name: "case and punctuation", title: "The Harbormaster: Part II", want: "harbormaster part 2"},
+		{name: "an accent", title: "Céline", want: "celine"},
+		{name: "a leading article", title: "A Patient Man", want: "patient man"},
 		{name: "an article that is the whole title", title: "The", want: "the"},
-		{name: "a roman numeral inside the title", title: "Rocky IV", want: "rocky 4"},
-		{name: "a title that is already plain", title: "Alien", want: "alien"},
+		{name: "a roman numeral inside the title", title: "Kestrel IV", want: "kestrel 4"},
+		{name: "a title that is already plain", title: "Orbit", want: "orbit"},
 		{name: "an empty title", title: "", want: ""},
-		{name: "a trailing country qualifier", title: "Shameless (US)", want: "shameless"},
-		{name: "a trailing year qualifier", title: "The Office (2011)", want: "office"},
+		{name: "a trailing country qualifier", title: "Ruckus (US)", want: "ruckus"},
+		{name: "a trailing year qualifier", title: "The Depot (2011)", want: "depot"},
 		{name: "a title that is one parenthesized group", title: "(2011)", want: "2011"},
 	}
 	for _, test := range cases {
@@ -299,63 +299,63 @@ func TestATitleNormalizesTheSameOnBothSides(t *testing.T) {
 
 func TestTheTitleTestDropsTheResultsThatDoNotMatch(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
-			tmdbResultJSON(1, "Another Film Entirely", "1982-06-25") + `,` +
-			tmdbResultJSON(2, "The Thing", "1951-04-27") + `,` +
-			tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+			tmdbResultJSON(1, "Another Film Entirely", "1982-06-01") + `,` +
+			tmdbResultJSON(2, "The Long Survey", "1951-04-03") + `,` +
+			tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind: libraryKindMovies, title: "The Thing", year: 1982,
+		kind: libraryKindMovies, title: "The Long Survey", year: 1982,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if answer.id != 1091 {
+	if answer.id != 1101 {
 		t.Errorf("id = %d, want the one result that matches on both the title and the year", answer.id)
 	}
 }
 
 func TestAResultOnBothNeighbouringYearsIsOneCandidate(t *testing.T) {
-	both := `{"results":[` + tmdbResultJSON(68, "Brazil", "1985-02-22") + `]}`
+	both := `{"results":[` + tmdbResultJSON(1104, "Lowland", "1985-02-26") + `]}`
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Brazil", "1985"): `{"results":[]}`,
-		tmdbKey("/3/search/movie", "Brazil", "1984"): `{"results":[` + tmdbResultJSON(68, "Brazil", "1984-02-22") + `]}`,
-		tmdbKey("/3/search/movie", "Brazil", "1986"): both,
+		tmdbKey("/3/search/movie", "Lowland", "1985"): `{"results":[]}`,
+		tmdbKey("/3/search/movie", "Lowland", "1984"): `{"results":[` + tmdbResultJSON(1104, "Lowland", "1984-02-26") + `]}`,
+		tmdbKey("/3/search/movie", "Lowland", "1986"): both,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client, identitySearch{
-		kind: libraryKindMovies, title: "Brazil", year: 1985,
+		kind: libraryKindMovies, title: "Lowland", year: 1985,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if answer.id != 68 || answer.reason != reasonFrom(testTitle, testNearYear) {
+	if answer.id != 1104 || answer.reason != reasonFrom(testTitle, testNearYear) {
 		t.Errorf("answer = %+v, want the one result both searches named", answer)
 	}
 }
 
-// The country a namer writes after a series title, as in Shameless (US), is a
+// The country a namer writes after a series title, as in Ruckus (US), is a
 // test of its own. TMDb states the origin in origin_country, and the two shows
 // of one name carry different ones.
 func TestACountryQualifierPartsTwoSeriesOfOneName(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Shameless", ""): `{"results":[` +
-			`{"id":2085,"name":"Shameless","original_name":"Shameless",` +
-			`"first_air_date":"2004-01-13","origin_country":["GB"]},` +
-			`{"id":34307,"name":"Shameless","original_name":"Shameless",` +
-			`"first_air_date":"2011-01-09","origin_country":["US"]}]}`,
+		tmdbKey("/3/search/tv", "Ruckus", ""): `{"results":[` +
+			`{"id":2101,"name":"Ruckus","original_name":"Ruckus",` +
+			`"first_air_date":"2004-01-21","origin_country":["GB"]},` +
+			`{"id":2102,"name":"Ruckus","original_name":"Ruckus",` +
+			`"first_air_date":"2011-01-17","origin_country":["US"]}]}`,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client,
-		identitySearch{kind: libraryKindSeries, title: "Shameless (US)"})
+		identitySearch{kind: libraryKindSeries, title: "Ruckus (US)"})
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.id != 34307 {
+	if answer.id != 2102 {
 		t.Errorf("id = %d, want the show made for the country the name states", answer.id)
 	}
 	if answer.reason != reasonFrom(testTitle, testCountry) {
@@ -367,17 +367,17 @@ func TestACountryQualifierPartsTwoSeriesOfOneName(t *testing.T) {
 // nowhere else.
 func TestAYearQualifierIsTheYearTheSearchNarrowsOn(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "Fright Night", "2011"): `{"results":[` +
-			tmdbResultJSON(52520, "Fright Night", "2011-08-19") + `]}`,
+		tmdbKey("/3/search/movie", "Night Visit", "2011"): `{"results":[` +
+			tmdbResultJSON(1131, "Night Visit", "2011-08-23") + `]}`,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client,
-		identitySearch{kind: libraryKindMovies, title: "Fright Night (2011)"})
+		identitySearch{kind: libraryKindMovies, title: "Night Visit (2011)"})
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.id != 52520 {
+	if answer.id != 1131 {
 		t.Errorf("id = %d, want the film of the year the qualifier states", answer.id)
 	}
 	if answer.reason != reasonFrom(testTitle, testYear) {
@@ -389,17 +389,17 @@ func TestAYearQualifierIsTheYearTheSearchNarrowsOn(t *testing.T) {
 // The title still reaches the provider without it.
 func TestAQualifierThatNamesNeitherAYearNorACountryIsNoTest(t *testing.T) {
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "The Bureau", ""): `{"results":[{"id":63333,"name":"The Bureau",` +
-			`"original_name":"The Bureau","first_air_date":"2015-04-27","origin_country":["FR"]}]}`,
+		tmdbKey("/3/search/tv", "The Listening Post", ""): `{"results":[{"id":2104,"name":"The Listening Post",` +
+			`"original_name":"The Listening Post","first_air_date":"2015-04-07","origin_country":["FR"]}]}`,
 	})
 
 	answer, err := climbIdentityLadder(t.Context(), client,
-		identitySearch{kind: libraryKindSeries, title: "The Bureau (4K)"})
+		identitySearch{kind: libraryKindSeries, title: "The Listening Post (4K)"})
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.id != 63333 {
+	if answer.id != 2104 {
 		t.Errorf("id = %d, want the one result the title matched", answer.id)
 	}
 	if answer.reason != reasonFrom(testTitle) {

@@ -77,7 +77,7 @@ func ffmpegSheets(ctx context.Context, input, directory string) error {
 	command := exec.CommandContext(timed, "ffmpeg", arguments...)
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ffmpeg %s: %w: %s", filepath.Base(input), err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("ffmpeg: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

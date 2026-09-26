@@ -96,9 +96,9 @@ they share, and plans 28 to 31 build them in order.
 * [33, The IMDb datasets](completed/33-the-imdb-datasets.md). Built on
   2026-09-25 and drilled on `liken-1` on 2026-09-26. An `imdb` block
   serves `rating.imdb` for movies, series, and episodes, and `credits`
-  as a fallback, from IMDb's datasets, read once per run through a
-  cache on a per-node class. The drill rated 6,277 episodes in one
-  run. Where the media browser shows IMDb's credit line is open.
+  as a fallback, from IMDb's datasets, read once per run through a cache
+  on a per-node class. The drill rated the test library's episodes in
+  one run. Where the media browser shows IMDb's credit line is open.
 * [34, Every fact writes its rows](completed/34-every-fact-writes-its-rows.md).
   Built on 2026-09-03. Each fact writes its own catalog rows as it
   writes its files, only the columns it owns, with the art list in its

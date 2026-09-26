@@ -73,7 +73,7 @@ fn vocabulary() -> Vec<String> {
 // names across many people, so two short pools give the same sharing.
 fn names() -> (Vec<String>, Vec<String>) {
     let firsts = (0..300).map(|at| format!("Ashen{at:03}")).collect();
-    let lasts = (0..300).map(|at| format!("Corran{at:03}")).collect();
+    let lasts = (0..300).map(|at| format!("Vesk{at:03}")).collect();
     (firsts, lasts)
 }
 
@@ -138,8 +138,8 @@ fn collection() -> Index {
     builder.add(title(
         LIBRARY,
         "movies",
-        "movie:tmdb:268".into(),
-        "Batman".into(),
+        "movie:tmdb:7004".into(),
+        "Kestrel".into(),
         "1989".into(),
     ));
 
@@ -197,10 +197,10 @@ fn a_large_collection_folds_under_the_ceiling_and_answers_a_keystroke() {
     let size = index.size();
 
     let started = Instant::now();
-    let hits = index.find("batman");
+    let hits = index.find("kestrel");
     let took = started.elapsed().as_millis();
 
-    assert_eq!(hits.first().map(|hit| hit.title.as_str()), Some("Batman"));
+    assert_eq!(hits.first().map(|hit| hit.title.as_str()), Some("Kestrel"));
     assert!(
         size.bytes < CEILING,
         "the index holds {} bytes over {} items, {} words and {} entries",

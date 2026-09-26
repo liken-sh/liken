@@ -64,7 +64,7 @@ func TestParsePlayTopicNamesThePlayAndTheKind(t *testing.T) {
 			ok:        true,
 		},
 		{name: "a topic under another base", topic: "other/plays/house/play-1/outside"},
-		{name: "a topic of another branch", topic: base + "/people/chris/forget"},
+		{name: "a topic of another branch", topic: base + "/people/person-a/forget"},
 		{name: "a plays topic missing its kind", topic: base + "/plays/house/play-1"},
 		{name: "a plays topic with a level too many", topic: base + "/plays/house/play-1/outside/extra"},
 		{name: "an empty namespace", topic: base + "/plays//play-1/outside"},
@@ -88,8 +88,8 @@ func TestParsePlayTopicNamesThePlayAndTheKind(t *testing.T) {
 // The payload is the contract between the jellyfin role and the progress
 // role, so the field names are read here off the JSON both of them speak.
 func TestAnOutsidePlayReadsItsFields(t *testing.T) {
-	payload := []byte(`{"player":"jellyfin","people":["chris"],` +
-		`"aliases":{"tmdb":"603","imdb":"tt0133093"},"season":0,"episode":0,` +
+	payload := []byte(`{"player":"jellyfin","people":["person-a"],` +
+		`"aliases":{"tmdb":"1101","imdb":"tt9001101"},"season":0,"episode":0,` +
 		`"position":4210,"duration":8160,"ended":false,"at":1757300000}`)
 
 	outside := outsidePlay{}
@@ -97,10 +97,10 @@ func TestAnOutsidePlayReadsItsFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if outside.Player != "jellyfin" || len(outside.People) != 1 || outside.People[0] != "chris" {
+	if outside.Player != "jellyfin" || len(outside.People) != 1 || outside.People[0] != "person-a" {
 		t.Errorf("outside = %+v, want the player and the person", outside)
 	}
-	if outside.Aliases["tmdb"] != "603" || outside.Aliases["imdb"] != "tt0133093" {
+	if outside.Aliases["tmdb"] != "1101" || outside.Aliases["imdb"] != "tt9001101" {
 		t.Errorf("aliases = %v, want the two provider ids", outside.Aliases)
 	}
 	if outside.Position != 4210 || outside.Duration != 8160 || outside.At != 1757300000 {
@@ -125,23 +125,23 @@ func TestParsePersonTopicNamesThePersonAndTheKind(t *testing.T) {
 	}{
 		{
 			name:   "a forget request",
-			topic:  personForgetTopic(base, "thora"),
-			person: "thora",
+			topic:  personForgetTopic(base, "person-b"),
+			person: "person-b",
 			kind:   personForgetKind,
 			ok:     true,
 		},
 		{
 			name:      "one namespace's answer",
-			topic:     personForgottenTopic(base, "thora", "house"),
-			person:    "thora",
+			topic:     personForgottenTopic(base, "person-b", "house"),
+			person:    "person-b",
 			kind:      personForgottenKind,
 			namespace: "house",
 			ok:        true,
 		},
-		{name: "a topic under another base", topic: "other/people/thora/forget"},
+		{name: "a topic under another base", topic: "other/people/person-b/forget"},
 		{name: "a plays topic", topic: playOutsideTopic(base, "house", "play-1")},
-		{name: "a people topic with a kind this operator does not read", topic: base + "/people/thora/watched"},
-		{name: "an answer with no namespace", topic: base + "/people/thora/forgotten"},
+		{name: "a people topic with a kind this operator does not read", topic: base + "/people/person-b/watched"},
+		{name: "an answer with no namespace", topic: base + "/people/person-b/forgotten"},
 		{name: "an empty person", topic: base + "/people//forget"},
 	}
 	for _, each := range cases {

@@ -154,9 +154,10 @@ land. The headless mode captures each new screen with `--script` and
 
 ## What was set aside
 
-Franchises. A franchise, the whole MCU as one item in one order, has no
-source in any `.nfo` file, and its order is an opinion and not a fact
-of the files. It is a screen kind of its own and a later plan.
+Franchises. A franchise, a whole shared film universe as one item in one
+order, has no source in any `.nfo` file, and its order is an opinion and
+not a fact of the files. It is a screen kind of its own and a later
+plan.
 
 A set as one poster on the wall. Jellyfin offers it as an option. It
 hides the film a person scans for, and it needs set art the volume does

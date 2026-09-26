@@ -189,7 +189,7 @@ stays `Pending` for five minutes, the phase is `Blocked`, and the
 
     $ kubectl -n media get libraries
     NAME         KIND         TITLES   ITEMS   FILES   WAITING   SOURCES   STATUS    READY   AGE
-    franchises   franchises   35       35      0       0                   Blocked   False   19d
+    franchises   franchises   12       12      0       0                   Blocked   False   19d
 
     $ kubectl -n media get library franchises -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}{"\n"}'
     the pod franchises-walk-dlov5hvq2ryn-gklk6 of the Job franchises-walk-dlov5hvq2ryn has not started: GitVolumeRefused: readOnly: a claim on this driver has to be mounted read-only; set readOnly: true on the pod's persistentVolumeClaim volume

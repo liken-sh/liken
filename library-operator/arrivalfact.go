@@ -98,7 +98,7 @@ func (e *enricher) stampArrivals(ctx context.Context, work arrivalWork) int {
 			if !held[entry] {
 				at, err := changeTime(filepath.Join(work.folder, entry))
 				if err != nil {
-					e.logf("could not read the change time of %s: %v", entry, err)
+					e.logf("could not read the change time of %s: %v", e.named(filepath.Join(work.folder, entry)), err)
 					result = attemptError
 					failed++
 				} else {
@@ -114,7 +114,7 @@ func (e *enricher) stampArrivals(ctx context.Context, work arrivalWork) int {
 		}
 	})
 	if err != nil {
-		e.logf("could not write the arrival ledger at %s: %v", relativePath(e.root, work.folder), err)
+		e.logf("could not write the arrival ledger at %s: %v", e.named(work.folder), err)
 		e.writeArrivalErrors(ctx, work, now)
 		return 0
 	}
@@ -146,6 +146,6 @@ func (e *enricher) writeArrivalErrors(ctx context.Context, work arrivalWork, at 
 		})
 	}
 	if _, err := e.catalog.UpsertAttempts(ctx, rows); err != nil {
-		e.logf("could not write the %s attempt rows of %s: %v", factArrival, relativePath(e.root, work.folder), err)
+		e.logf("could not write the %s attempt rows of %s: %v", factArrival, e.named(work.folder), err)
 	}
 }

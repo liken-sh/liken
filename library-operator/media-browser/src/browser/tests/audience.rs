@@ -37,7 +37,7 @@ fn a_request_names_the_audience_and_the_work() {
     let (mut browser, bus) = watching(&["first", "second"], &["first"]);
     browser.source.identity = Identity {
         aliases: BTreeMap::from([
-            ("tmdb".to_string(), "603".to_string()),
+            ("tmdb".to_string(), "7001".to_string()),
             ("path".to_string(), "some-film-1999".to_string()),
         ]),
         season: 2,
@@ -51,7 +51,7 @@ fn a_request_names_the_audience_and_the_work() {
     assert_eq!(request["people"], serde_json::json!(["first"]));
     assert_eq!(
         request["aliases"],
-        serde_json::json!({"tmdb": "603", "path": "some-film-1999"})
+        serde_json::json!({"tmdb": "7001", "path": "some-film-1999"})
     );
     assert_eq!(request["season"], 2);
     assert_eq!(request["episode"], 5);

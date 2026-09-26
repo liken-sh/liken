@@ -201,11 +201,11 @@ fn insert_alias(path: &Path, library: &str, alias: &str, item: &str) {
 
 // The series every episode test hangs under, and the two choices those
 // tests resolve.
-const SERIES: &str = "series:tvdb:73739";
+const SERIES: &str = "series:tvdb:8001";
 
 fn movie_chosen() -> Selection {
     Selection::Movie {
-        id: "movie:tmdb:603".into(),
+        id: "movie:tmdb:7001".into(),
     }
 }
 
@@ -220,14 +220,14 @@ fn episode_chosen(episode: i64) -> Selection {
 // A season of three episodes, each with its main file, under a series row
 // that carries the title an episode's presentation names.
 fn a_season(path: &Path) {
-    insert_series(path, "default/shows", SERIES, "Lost", "lost");
+    insert_series(path, "default/shows", SERIES, "Harrow", "harrow");
     for episode in 1..=3 {
         let id = format!("episode:tvdb:{episode}");
         insert_episode(path, "default/shows", &id, SERIES, 1, episode);
         insert_main_file(
             path,
             "default/shows",
-            &format!("Lost/S01E{episode}.mkv"),
+            &format!("Harrow/S01E{episode}.mkv"),
             &id,
         );
     }

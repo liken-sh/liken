@@ -19,12 +19,12 @@ func seedArtMovie(t *testing.T, catalog *Catalog, path string, files ...fileRow)
 	t.Helper()
 	seed := &walkResult{
 		movies: []movieRow{{
-			Id: "movie:tmdb:603", Library: artLibrary, Kind: libraryKindMovies,
-			Path: path, Title: "The Signal",
+			Id: "movie:tmdb:1001", Library: artLibrary, Kind: libraryKindMovies,
+			Path: path, Title: "Some Film",
 		}},
 		aliases: []aliasRow{
-			{Alias: "movie:tmdb:603", Library: artLibrary, Item: "movie:tmdb:603", Source: aliasSourceProvider},
-			{Alias: "movie:path:the-signal", Library: artLibrary, Item: "movie:tmdb:603", Source: aliasSourceFolder},
+			{Alias: "movie:tmdb:1001", Library: artLibrary, Item: "movie:tmdb:1001", Source: aliasSourceProvider},
+			{Alias: "movie:path:some-film", Library: artLibrary, Item: "movie:tmdb:1001", Source: aliasSourceFolder},
 		},
 		files: files,
 	}
@@ -39,22 +39,22 @@ func seedArtSeries(t *testing.T, catalog *Catalog, path string, seasons []int, f
 	t.Helper()
 	seed := &walkResult{
 		series: []seriesRow{{
-			Id: "series:tvdb:81189", Library: artLibrary, Kind: libraryKindSeries,
+			Id: "series:tvdb:800001", Library: artLibrary, Kind: libraryKindSeries,
 			Path: path, Title: "Quiet Harbor",
 		}},
 		aliases: []aliasRow{
-			{Alias: "series:tvdb:81189", Library: artLibrary, Item: "series:tvdb:81189", Source: aliasSourceProvider},
-			{Alias: "series:tmdb:1396", Library: artLibrary, Item: "series:tvdb:81189", Source: aliasSourceProvider},
+			{Alias: "series:tvdb:800001", Library: artLibrary, Item: "series:tvdb:800001", Source: aliasSourceProvider},
+			{Alias: "series:tmdb:2001", Library: artLibrary, Item: "series:tvdb:800001", Source: aliasSourceProvider},
 		},
 		files: files,
 	}
 	for _, season := range seasons {
 		seed.episodes = append(seed.episodes, episodeRow{
-			Id:      episodeID("series:tvdb:81189", season, 5),
+			Id:      episodeID("series:tvdb:800001", season, 5),
 			Library: artLibrary, Kind: libraryKindSeries,
 			Path: filepath.Join(path, fmt.Sprintf("Season %02d", season),
 				fmt.Sprintf("Quiet Harbor - S%02dE05.mkv", season)),
-			Title: "One More", Series: "series:tvdb:81189", Season: season, Episode: 5,
+			Title: "One More", Series: "series:tvdb:800001", Season: season, Episode: 5,
 		})
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -82,19 +82,19 @@ func artGapsRefreshed(t *testing.T, catalog *Catalog, fact string, refresh time.
 // file the fact writes.
 func TestTheTitleArtGapNamesTheFileTheLibraryHasNone(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	seedArtMovie(t, catalog, "The Signal (2014)")
+	seedArtMovie(t, catalog, "Some Film (2014)")
 
 	cases := []struct {
 		fact string
 		want string
 	}{
-		{fact: factPoster, want: "The Signal (2014)/poster.jpg"},
-		{fact: factBackdrop, want: "The Signal (2014)/fanart.jpg"},
-		{fact: factLogo, want: "The Signal (2014)/clearlogo.png"},
-		{fact: factClearart, want: "The Signal (2014)/clearart.png"},
-		{fact: factBanner, want: "The Signal (2014)/banner.jpg"},
-		{fact: factLandscape, want: "The Signal (2014)/landscape.jpg"},
-		{fact: factDiscart, want: "The Signal (2014)/disc.png"},
+		{fact: factPoster, want: "Some Film (2014)/poster.jpg"},
+		{fact: factBackdrop, want: "Some Film (2014)/fanart.jpg"},
+		{fact: factLogo, want: "Some Film (2014)/clearlogo.png"},
+		{fact: factClearart, want: "Some Film (2014)/clearart.png"},
+		{fact: factBanner, want: "Some Film (2014)/banner.jpg"},
+		{fact: factLandscape, want: "Some Film (2014)/landscape.jpg"},
+		{fact: factDiscart, want: "Some Film (2014)/disc.png"},
 	}
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
@@ -102,8 +102,8 @@ func TestTheTitleArtGapNamesTheFileTheLibraryHasNone(t *testing.T) {
 			if len(gaps) != 1 {
 				t.Fatalf("gaps = %+v, want the one file the title has none of", gaps)
 			}
-			if gaps[0].key != test.want || gaps[0].tmdb != "603" {
-				t.Errorf("gap = %+v, want %q from tmdb 603", gaps[0], test.want)
+			if gaps[0].key != test.want || gaps[0].tmdb != "1001" {
+				t.Errorf("gap = %+v, want %q from tmdb 1001", gaps[0], test.want)
 			}
 		})
 	}
@@ -112,9 +112,9 @@ func TestTheTitleArtGapNamesTheFileTheLibraryHasNone(t *testing.T) {
 // The file the fact would write is already a row, so the title is no gap.
 func TestATitleWithTheArtFileHasNoGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	seedArtMovie(t, catalog, "The Signal (2014)", fileRow{
-		Path: "The Signal (2014)/poster.jpg", Library: artLibrary, Present: true,
-		Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:603"},
+	seedArtMovie(t, catalog, "Some Film (2014)", fileRow{
+		Path: "Some Film (2014)/poster.jpg", Library: artLibrary, Present: true,
+		Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:1001"},
 	})
 
 	if gaps := artGapsOf(t, catalog, factPoster); len(gaps) != 0 {
@@ -131,12 +131,12 @@ func TestATitleWithNoProviderIdHasNoArtGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
 		movies: []movieRow{{
-			Id: "movie:path:the-signal", Library: artLibrary, Kind: libraryKindMovies,
-			Path: "The Signal (2014)", Title: "The Signal",
+			Id: "movie:path:some-film", Library: artLibrary, Kind: libraryKindMovies,
+			Path: "Some Film (2014)", Title: "Some Film",
 		}},
 		aliases: []aliasRow{{
-			Alias: "movie:path:the-signal", Library: artLibrary,
-			Item: "movie:path:the-signal", Source: aliasSourceFolder,
+			Alias: "movie:path:some-film", Library: artLibrary,
+			Item: "movie:path:some-film", Source: aliasSourceFolder,
 		}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -154,9 +154,9 @@ func TestEveryAttemptKindGatesTheArtGap(t *testing.T) {
 	for _, test := range attemptWindowCases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
-			seedArtMovie(t, catalog, "The Signal (2014)")
+			seedArtMovie(t, catalog, "Some Film (2014)")
 			attempts := []attemptRow{{
-				Library: artLibrary, Item: "The Signal (2014)/poster.jpg", Fact: factPoster,
+				Library: artLibrary, Item: "Some Film (2014)/poster.jpg", Fact: factPoster,
 				At: time.Now().UTC().Add(-test.age).Unix(), Result: test.result,
 			}}
 			if _, err := catalog.UpsertAttempts(t.Context(), attempts); err != nil {
@@ -197,7 +197,7 @@ func TestTheSeasonArtGapNamesOneFilePerSeason(t *testing.T) {
 			keys := []string{}
 			for _, gap := range gaps {
 				keys = append(keys, gap.key)
-				if gap.tmdb != "1396" {
+				if gap.tmdb != "2001" {
 					t.Errorf("gap = %+v, want the TMDb id the alias holds", gap)
 				}
 			}
@@ -230,7 +230,7 @@ func TestAnEpisodeWithAnImageOfItsOwnHasNoThumbGap(t *testing.T) {
 	thumb := filepath.Join("Quiet Harbor (2008)", "Season 01", "Quiet Harbor - S01E05-thumb.jpg")
 	seedArtSeries(t, catalog, "Quiet Harbor (2008)", []int{1}, fileRow{
 		Path: thumb, Library: artLibrary, Present: true, Type: fileTypeImage,
-		Role: fileRoleThumb, Items: []string{episodeID("series:tvdb:81189", 1, 5)},
+		Role: fileRoleThumb, Items: []string{episodeID("series:tvdb:800001", 1, 5)},
 	})
 
 	if gaps := artGapsOf(t, catalog, factEpisodeThumb); len(gaps) != 0 {
@@ -242,7 +242,7 @@ func TestAnEpisodeWithAnImageOfItsOwnHasNoThumbGap(t *testing.T) {
 // every art fact reaches the counts the operator schedules on.
 func TestTheGapCountsHoldEveryArtFact(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	seedArtMovie(t, catalog, "The Signal (2014)")
+	seedArtMovie(t, catalog, "Some Film (2014)")
 
 	counts, err := catalog.gapCounts(t.Context(), artLibrary, time.Now().UTC())
 	if err != nil {
@@ -324,10 +324,10 @@ func TestEachArtFactNamesItsFile(t *testing.T) {
 // probe attempt, so the gap query reads what the container wrote.
 func TestTheScannerKeysAnArtAttemptOnTheFile(t *testing.T) {
 	liken := likenDir{
-		root: "/media", dir: "/media/The Signal (2014)", library: artLibrary,
-		item: "movie:tmdb:603",
+		root: "/media", dir: "/media/Some Film (2014)", library: artLibrary,
+		item: "movie:tmdb:1001",
 	}
-	if got := liken.itemOf(factPoster, "poster.jpg"); got != "The Signal (2014)/poster.jpg" {
+	if got := liken.itemOf(factPoster, "poster.jpg"); got != "Some Film (2014)/poster.jpg" {
 		t.Errorf("item = %q, want the file the fact writes", got)
 	}
 }
@@ -337,10 +337,10 @@ func TestTheScannerKeysAnArtAttemptOnTheFile(t *testing.T) {
 func TestASeriesIsNeverADiscartGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedArtSeries(t, catalog, "Quiet Harbor (2008)", []int{1})
-	seedArtMovie(t, catalog, "The Signal (2014)")
+	seedArtMovie(t, catalog, "Some Film (2014)")
 
 	gaps := artGapsOf(t, catalog, factDiscart)
-	if len(gaps) != 1 || gaps[0].key != "The Signal (2014)/disc.png" {
+	if len(gaps) != 1 || gaps[0].key != "Some Film (2014)/disc.png" {
 		t.Errorf("gaps = %+v, want the movie alone", gaps)
 	}
 
@@ -388,12 +388,12 @@ func TestARefreshOpensTheArtGap(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
-			seedArtMovie(t, catalog, "The Signal (2014)", fileRow{
-				Path: "The Signal (2014)/poster.jpg", Library: artLibrary, Present: true,
-				Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:603"},
+			seedArtMovie(t, catalog, "Some Film (2014)", fileRow{
+				Path: "Some Film (2014)/poster.jpg", Library: artLibrary, Present: true,
+				Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:1001"},
 			})
 			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
-				Library: artLibrary, Item: "The Signal (2014)/poster.jpg", Fact: factPoster,
+				Library: artLibrary, Item: "Some Film (2014)/poster.jpg", Fact: factPoster,
 				At: attempted.Unix(), Result: attemptFound,
 			}}); err != nil {
 				t.Fatal(err)
@@ -430,17 +430,17 @@ func seedAiringEpisode(t *testing.T, catalog *Catalog, released string) {
 	t.Helper()
 	seed := &walkResult{
 		series: []seriesRow{{
-			Id: "series:tvdb:81189", Library: artLibrary, Kind: libraryKindSeries,
+			Id: "series:tvdb:800001", Library: artLibrary, Kind: libraryKindSeries,
 			Path: "Quiet Harbor (2008)", Title: "Quiet Harbor", Released: "2008-01-06",
 		}},
 		aliases: []aliasRow{
-			{Alias: "series:tvdb:81189", Library: artLibrary, Item: "series:tvdb:81189", Source: aliasSourceProvider},
-			{Alias: "series:tmdb:1396", Library: artLibrary, Item: "series:tvdb:81189", Source: aliasSourceProvider},
+			{Alias: "series:tvdb:800001", Library: artLibrary, Item: "series:tvdb:800001", Source: aliasSourceProvider},
+			{Alias: "series:tmdb:2001", Library: artLibrary, Item: "series:tvdb:800001", Source: aliasSourceProvider},
 		},
 		episodes: []episodeRow{{
-			Id: episodeID("series:tvdb:81189", 11, 9), Library: artLibrary,
+			Id: episodeID("series:tvdb:800001", 11, 9), Library: artLibrary,
 			Kind: libraryKindSeries, Path: airingEpisodeFile, Title: "One More",
-			Series: "series:tvdb:81189", Season: 11, Episode: 9, Released: released,
+			Series: "series:tvdb:800001", Season: 11, Episode: 9, Released: released,
 		}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -515,19 +515,19 @@ func TestATitleArtAttemptBeforeTheReleaseStandsOnlyUntilIt(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			seed := &walkResult{
 				movies: []movieRow{{
-					Id: "movie:tmdb:603", Library: artLibrary, Kind: libraryKindMovies,
-					Path: "The Signal (2026)", Title: "The Signal", Released: "2026-09-21",
+					Id: "movie:tmdb:1001", Library: artLibrary, Kind: libraryKindMovies,
+					Path: "Some Film (2026)", Title: "Some Film", Released: "2026-09-21",
 				}},
 				aliases: []aliasRow{{
-					Alias: "movie:tmdb:603", Library: artLibrary,
-					Item: "movie:tmdb:603", Source: aliasSourceProvider,
+					Alias: "movie:tmdb:1001", Library: artLibrary,
+					Item: "movie:tmdb:1001", Source: aliasSourceProvider,
 				}},
 			}
 			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
-				Library: artLibrary, Item: "The Signal (2026)/poster.jpg", Fact: factPoster,
+				Library: artLibrary, Item: "Some Film (2026)/poster.jpg", Fact: factPoster,
 				At: dayOf(t, "2026-09-04").Unix(), Result: attemptNothing,
 			}}); err != nil {
 				t.Fatal(err)
@@ -562,10 +562,10 @@ func TestASeasonArtAttemptBeforeTheFirstEpisodeStandsOnlyUntilIt(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			seedAiringEpisode(t, catalog, "2026-09-28")
 			if err := upsertWalk(t.Context(), catalog, &walkResult{episodes: []episodeRow{{
-				Id: episodeID("series:tvdb:81189", 11, 1), Library: artLibrary,
+				Id: episodeID("series:tvdb:800001", 11, 1), Library: artLibrary,
 				Kind: libraryKindSeries, Title: "The First",
 				Path:   "Quiet Harbor (2008)/Season 11/Quiet Harbor - S11E01.mkv",
-				Series: "series:tvdb:81189", Season: 11, Episode: 1, Released: "2026-09-21",
+				Series: "series:tvdb:800001", Season: 11, Episode: 1, Released: "2026-09-21",
 			}}}); err != nil {
 				t.Fatal(err)
 			}

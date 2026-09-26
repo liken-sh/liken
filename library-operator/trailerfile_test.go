@@ -12,7 +12,7 @@ import (
 // One trailers row as the catalog holds it.
 func trailerRowOf(site, key string, score, resolution int, published string) trailerRow {
 	return trailerRow{
-		Library: "house/movies", Item: "movie:tmdb:603", Provider: site, Key: key,
+		Library: "house/movies", Item: "movie:tmdb:1001", Provider: site, Key: key,
 		Site: site, URL: "https://" + site + ".example/" + key, Name: "Official Trailer",
 		Kind: trailerKindTrailer, Score: score, Resolution: resolution, Published: published,
 	}
@@ -138,7 +138,7 @@ func TestTheNameATrailerLandsUnder(t *testing.T) {
 		want string
 	}{
 		{name: "Official Trailer", want: "Official Trailer"},
-		{name: "DUNE: PART THREE (2026) - Trailer [4K]", want: "DUNE PART THREE (2026) - Trailer [4K]"},
+		{name: "KESTREL: PART THREE (2026) - Trailer [4K]", want: "KESTREL PART THREE (2026) - Trailer [4K]"},
 		{name: "a/b\\c", want: "a b c"},
 		{name: "  spaced   out  ", want: "spaced out"},
 		{name: "...hidden", want: "hidden"},
@@ -161,8 +161,8 @@ func TestTheNameATrailerLandsUnder(t *testing.T) {
 // The library, the title, and the folder every gap case works on.
 const (
 	trailerFileLibrary = "house/movies"
-	trailerFileItem    = "movie:tmdb:603"
-	trailerFileFolder  = "The Signal (2014)"
+	trailerFileItem    = "movie:tmdb:1001"
+	trailerFileFolder  = "The Relay (2014)"
 )
 
 // One identified movie with its feature and one trailers row per site.
@@ -171,7 +171,7 @@ func seedTrailerFileGap(t *testing.T, catalog *Catalog, sites []string, files []
 	seed := &walkResult{
 		movies: []movieRow{{
 			Id: trailerFileItem, Library: trailerFileLibrary, Kind: libraryKindMovies,
-			Path: trailerFileFolder, Title: "The Signal", Released: "2014-06-13",
+			Path: trailerFileFolder, Title: "The Relay", Released: "2014-06-13",
 		}},
 		files: files,
 	}
@@ -312,7 +312,7 @@ func TestTheTrailerFileGapLeavesOutATitleAtTheLibraryRoot(t *testing.T) {
 			seed := &walkResult{
 				movies: []movieRow{{
 					Id: trailerFileItem, Library: trailerFileLibrary, Kind: libraryKindMovies,
-					Path: test.path, Title: "The Signal", Released: "2014-06-13",
+					Path: test.path, Title: "The Relay", Released: "2014-06-13",
 				}},
 				trailers: []trailerRow{{
 					Library: trailerFileLibrary, Item: trailerFileItem, Provider: trailerSiteArchive,
@@ -425,11 +425,11 @@ func TestTheTrailerFileGapLeavesOutAnUnidentifiedTitle(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
 		movies: []movieRow{{
-			Id: "movie:path:signal", Library: trailerFileLibrary, Kind: libraryKindMovies,
-			Path: trailerFileFolder, Title: "The Signal",
+			Id: "movie:path:relay", Library: trailerFileLibrary, Kind: libraryKindMovies,
+			Path: trailerFileFolder, Title: "The Relay",
 		}},
 		trailers: []trailerRow{{
-			Library: trailerFileLibrary, Item: "movie:path:signal", Provider: trailerSiteArchive,
+			Library: trailerFileLibrary, Item: "movie:path:relay", Provider: trailerSiteArchive,
 			Key: "k", Site: trailerSiteArchive, Score: 90,
 		}},
 	}

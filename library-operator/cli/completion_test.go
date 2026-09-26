@@ -69,9 +69,9 @@ func TestCompleteArgs(t *testing.T) {
 
 func TestCompleteArgsPassesTheContextAndNamespaceToTheLister(t *testing.T) {
 	lister, seen := stubLister("movies")
-	completeArgs([]string{"reenrich", "--context", "liken-1", "-n", "default", ""}, lister)
-	if seen.context != "liken-1" {
-		t.Fatalf("context = %q, want liken-1", seen.context)
+	completeArgs([]string{"reenrich", "--context", "lab", "-n", "default", ""}, lister)
+	if seen.context != "lab" {
+		t.Fatalf("context = %q, want lab", seen.context)
 	}
 	if seen.namespace != "default" {
 		t.Fatalf("namespace = %q, want default", seen.namespace)
@@ -91,8 +91,8 @@ func TestParseCompletionArgs(t *testing.T) {
 		},
 		{
 			"a flag and its value are not positionals",
-			[]string{"reenrich", "--context", "liken-1"},
-			completionParse{positionals: []string{"reenrich"}, context: "liken-1"},
+			[]string{"reenrich", "--context", "lab"},
+			completionParse{positionals: []string{"reenrich"}, context: "lab"},
 		},
 		{
 			"an equals form binds the value",
@@ -147,7 +147,7 @@ func TestSplitFlag(t *testing.T) {
 		value    string
 		hasEqual bool
 	}{
-		{"--context=liken-1", "--context", "liken-1", true},
+		{"--context=lab", "--context", "lab", true},
 		{"--force", "--force", "", false},
 		{"-n", "-n", "", false},
 		{"--label=a=b", "--label", "a=b", true},

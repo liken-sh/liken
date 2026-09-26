@@ -147,7 +147,7 @@ exactly one `Catalog` in the namespace before the first `Library`. A
     apiVersion: library.liken.sh/v1alpha1
     kind: Catalog
     metadata:
-      name: catalog
+      name: media
       namespace: media
     spec:
       storage: {}
@@ -210,7 +210,7 @@ removes its rows from the namespace's catalog. If the operator's
 `Terminating` until a person patches the finalizer off.
 
     kubectl -n media delete library movies
-    kubectl -n media delete catalog catalog
+    kubectl -n media delete catalog media
     kubectl delete -k https://github.com/liken-sh/library-operator//deploy?ref=<tag>
 
 Deleting the `Catalog` deletes the catalog pod and the claim the

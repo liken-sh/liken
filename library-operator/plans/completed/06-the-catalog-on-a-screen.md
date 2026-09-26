@@ -26,7 +26,7 @@ needs on the `Player` status:
     status:
       idle:
         controller: library.liken.sh/media-browser
-        claim: studio-lg-idle-devices
+        claim: studio-idle-devices
         requests: [draw, render]
 
 This operator is the first delegate. Its name is

@@ -55,8 +55,8 @@ the harness knows nothing of it. Nothing on the bus changes.
 Built in 2186c97 and cfe2477, drilled from development builds
 2026.09.10-001-dev-002 and -dev-003, and released in 2026.09.10-002,
 after display-operator and media-operator 2026.09.10-001.
-Frames captured on vega on a colored test backdrop read on-screen
-levels of 0.77, 0.56, 0.35, and 0.18 at 0.2 s steps, and then the
+Frames captured on the workstation on a colored test backdrop read
+on-screen levels of 0.77, 0.56, 0.35, and 0.18 at 0.2 s steps, and then the
 0.127 floor, with the mark and the header at full brightness through
 all of them. Lights down runs 1.2 s and lights up runs 0.3 s.
 
@@ -79,8 +79,8 @@ The plan as written:
 
 1. `make test` in the operator and the browser, with the scrim's
    levels proved at the ends and the midpoint of both moves.
-2. Frames captured on vega with the headless harness through a
+2. Frames captured on the workstation with the headless harness through a
    scripted select, a `Starting`, a `Playing`, and an `Idle`, showing
-   the dim and the lift, for Chris to look at before it rolls.
+   the dim and the lift, for the maintainer to look at before it rolls.
 3. On `liken-1` with the `theater` `Layout`, a film started from the
    browser and ended with the remote, seen by eye.

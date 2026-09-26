@@ -19,7 +19,7 @@ screen when nothing plays. Set it to this operator's name:
     apiVersion: media.liken.sh/v1alpha1
     kind: Player
     metadata:
-      name: living-room-player
+      name: living-room
       namespace: media
     spec:
       idle:
@@ -44,9 +44,9 @@ claim, where the browser keeps every piece of art it scaled. It uses
 the existing `ResourceClaim` that `media-operator` holds for the
 `Player`, so no second claim on the display is created.
 
-    kubectl -n media get player living-room-player
-    kubectl -n media get pod living-room-player-media-browser
-    kubectl -n media logs living-room-player-media-browser -c browser
+    kubectl -n media get player living-room
+    kubectl -n media get pod living-room-media-browser
+    kubectl -n media logs living-room-media-browser -c browser
 
 The browser's first log line reports the home page's open time:
 
@@ -58,7 +58,7 @@ its catalog id and never by its name, and it names a typed character
 only as "a character":
 
     media-browser: press enter (KEY_OK): opened the movie page of movie:tmdb:1001 in media/films
-    media-browser: play movie:tmdb:1001 in media/films from the start for person-a: sent a request for 1 file on liken/library/players/media/living-room-player/play
+    media-browser: play movie:tmdb:1001 in media/films from the start for person-a: sent a request for 1 file on liken/library/players/media/living-room/play
     media-browser: press enter (KEY_OK): asked to play movie:tmdb:1001
     media-browser: the player went from idle to starting
 

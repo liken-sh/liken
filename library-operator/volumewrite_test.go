@@ -65,7 +65,7 @@ func TestOnlyANameWithTheTemporaryMarkIsRemoved(t *testing.T) {
 	}{
 		{name: "a temporary this package made", file: "movie.nfo" + likenTempMark + "movies-enrich", removed: true},
 		{name: "the .nfo file itself", file: "movie.nfo", removed: false},
-		{name: "a video file", file: "The Thing (1982).mkv", removed: false},
+		{name: "a video file", file: "The Long Survey (1982).mkv", removed: false},
 		{name: "a name that only looks like a temporary", file: "liken-tmp-movies-enrich", removed: false},
 	}
 	for _, test := range cases {
@@ -90,10 +90,10 @@ func TestOnlyANameWithTheTemporaryMarkIsRemoved(t *testing.T) {
 // repository knows, because those are the bytes an edit must not move.
 const nfoWithUnknownElements = `<?xml version="1.0" encoding="utf-8"?>
 <movie>
-  <title>The Thing</title>
+  <title>The Long Survey</title>
   <lockdata>false</lockdata>
   <criticrating>84</criticrating>
-  <uniqueid type="imdb">tt0084787</uniqueid>
+  <uniqueid type="imdb">tt9001002</uniqueid>
   <art>
     <poster>/volume/poster.jpg</poster>
   </art>
@@ -101,7 +101,7 @@ const nfoWithUnknownElements = `<?xml version="1.0" encoding="utf-8"?>
 `
 
 func TestAnEditLeavesEveryOtherByteAsItWas(t *testing.T) {
-	inserted := `<uniqueid type="tmdb" default="true">1091</uniqueid>`
+	inserted := `<uniqueid type="tmdb" default="true">1002</uniqueid>`
 
 	edited, err := editElement([]byte(nfoWithUnknownElements), xmlElement{name: "uniqueid", attribute: "type", value: "tmdb"}, []byte(inserted))
 	if err != nil {
@@ -263,7 +263,7 @@ func namesIn(t *testing.T, dir string) []string {
 // The block the probe marshals already carries the indentation of its own
 // first line, so the edit indents it once and never twice.
 func TestAnInsertedBlockTakesTheSiblingIndentationOnce(t *testing.T) {
-	document := "<episodedetails>\n  <title>Breakage</title>\n</episodedetails>\n"
+	document := "<episodedetails>\n  <title>Tin Roof</title>\n</episodedetails>\n"
 	replacement := "  <fileinfo>\n    <streamdetails></streamdetails>\n  </fileinfo>"
 
 	edited, err := editElement([]byte(document), xmlElement{name: "fileinfo"}, []byte(replacement))
@@ -271,7 +271,7 @@ func TestAnInsertedBlockTakesTheSiblingIndentationOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "<episodedetails>\n  <title>Breakage</title>\n" +
+	want := "<episodedetails>\n  <title>Tin Roof</title>\n" +
 		"  <fileinfo>\n    <streamdetails></streamdetails>\n  </fileinfo>\n</episodedetails>\n"
 	if string(edited) != want {
 		t.Errorf("edited to\n%q\nwant\n%q", edited, want)
@@ -279,14 +279,14 @@ func TestAnInsertedBlockTakesTheSiblingIndentationOnce(t *testing.T) {
 }
 
 func TestAnEditKeepsTheByteOrderMarkTheDocumentOpensWith(t *testing.T) {
-	document := byteOrderMark + "<movie>\n  <title>Solaris</title>\n</movie>\n"
+	document := byteOrderMark + "<movie>\n  <title>Glass Tide</title>\n</movie>\n"
 
 	edited, err := editElement([]byte(document), xmlElement{name: "fileinfo"}, []byte("<NEW/>"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := byteOrderMark + "<movie>\n  <title>Solaris</title>\n  <NEW/>\n</movie>\n"
+	want := byteOrderMark + "<movie>\n  <title>Glass Tide</title>\n  <NEW/>\n</movie>\n"
 	if string(edited) != want {
 		t.Errorf("edited to\n%q\nwant\n%q", edited, want)
 	}
@@ -479,12 +479,12 @@ func TestTheTrickplayDoorRemovesTheMapAndLeavesTheSheet(t *testing.T) {
 func TestTheMergeDoorsRefuseEveryOtherPath(t *testing.T) {
 	root := t.TempDir()
 	writer := newVolumeWriter("test")
-	person := filepath.Join(root, contributorDirectory("tom-hanks"))
-	record := filepath.Join(root, contributorDirectory("thomas-hanks"))
-	title := filepath.Join(root, "The Signal (2014)")
-	writeFile(t, filepath.Join(person, contributorFileName), "name: Tom Hanks\n")
-	writeFile(t, filepath.Join(record, contributorFileName), "mergedInto: .contributors/to/tom-hanks\n")
-	writeFile(t, filepath.Join(title, contributorFileName), "mergedInto: .contributors/to/tom-hanks\n")
+	person := filepath.Join(root, contributorDirectory("tam-harlow"))
+	record := filepath.Join(root, contributorDirectory("tamas-harlow"))
+	title := filepath.Join(root, "The Relay (2014)")
+	writeFile(t, filepath.Join(person, contributorFileName), "name: Tam Harlow\n")
+	writeFile(t, filepath.Join(record, contributorFileName), "mergedInto: .contributors/to/tam-harlow\n")
+	writeFile(t, filepath.Join(title, contributorFileName), "mergedInto: .contributors/to/tam-harlow\n")
 	writeFile(t, filepath.Join(title, contributorBiographyName), "a file of a title")
 	writeFile(t, filepath.Join(record, "notes.txt"), "a note")
 

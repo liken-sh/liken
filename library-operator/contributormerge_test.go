@@ -18,18 +18,18 @@ import (
 // A library with two entries of one person: the entry at the plain slug with
 // the TMDb id, and an entry at the slug with the IMDb id suffix with the TMDb
 // id, the IMDb id, a biography, and a headshot.
-const otherSlug = "tom-hanks-imdb-nm0000158"
+const otherSlug = "oren-tally-imdb-nm9000031"
 
 func twoEntriesOfOnePerson(t *testing.T) (*enricher, *Catalog, string) {
 	t.Helper()
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedWalkedEntry(t, catalog, root, "tom-hanks", "name: Tom Hanks\nids: {tmdb: 31}\n")
+	seedWalkedEntry(t, catalog, root, "oren-tally", "name: Oren Tally\nids: {tmdb: 9031}\n")
 	other := filepath.Join(root, contributorDirectory(otherSlug))
 	writeFile(t, filepath.Join(other, contributorBiographyName), "An actor.\n")
 	writeFile(t, filepath.Join(other, contributorHeadshotName), testImage)
 	seedWalkedEntry(t, catalog, root, otherSlug,
-		"name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\nborn: \"1956-07-09\"\n")
+		"name: Oren Tally\nids: {imdb: nm9000031, tmdb: 9031}\nborn: \"1961-03-14\"\n")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	return work, catalog, root
 }
@@ -41,9 +41,9 @@ func TestTwoEntriesThatHoldOneIDMergeIntoOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stays := filepath.Join(root, ".contributors/to/tom-hanks")
+	stays := filepath.Join(root, ".contributors/or/oren-tally")
 	entry := readFileString(t, filepath.Join(stays, contributorFileName))
-	if entry != "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\nborn: \"1956-07-09\"\n" {
+	if entry != "name: Oren Tally\nids: {imdb: nm9000031, tmdb: 9031}\nborn: \"1961-03-14\"\n" {
 		t.Errorf("contributor.yaml = %q, want both ids and the birth date", entry)
 	}
 	if got := readFileString(t, filepath.Join(stays, contributorBiographyName)); got != "An actor.\n" {
@@ -52,15 +52,15 @@ func TestTwoEntriesThatHoldOneIDMergeIntoOne(t *testing.T) {
 	if got := readFileString(t, filepath.Join(stays, contributorHeadshotName)); got != testImage {
 		t.Errorf("headshot.jpg = %q, want the one the removed entry held", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".contributors/to/tom-hanks-imdb-nm0000158")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".contributors/or/oren-tally-imdb-nm9000031")); !os.IsNotExist(err) {
 		t.Errorf("the removed entry is on the volume (%v), want it deleted, because no credit names it", err)
 	}
 	people := catalogLines(t, catalog, `SELECT path || '|' || born || '|' || biography FROM contributors WHERE library = ?`)
-	if len(people) != 1 || people[0] != ".contributors/to/tom-hanks|1956-07-09|1" {
+	if len(people) != 1 || people[0] != ".contributors/or/oren-tally|1961-03-14|1" {
 		t.Errorf("contributors = %v, want the entry that stays", people)
 	}
 	ids := catalogLines(t, catalog, `SELECT path || '|' || scheme FROM contributor_ids WHERE library = ? ORDER BY scheme`)
-	if strings.Join(ids, ",") != ".contributors/to/tom-hanks|imdb,.contributors/to/tom-hanks|tmdb" {
+	if strings.Join(ids, ",") != ".contributors/or/oren-tally|imdb,.contributors/or/oren-tally|tmdb" {
 		t.Errorf("contributor_ids = %v, want the ids of the entry that stays", ids)
 	}
 }
@@ -73,7 +73,7 @@ func TestTheMergeKeepsTheIDsFactsFightCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stays := filepath.Join(root, ".contributors/to/tom-hanks")
+	stays := filepath.Join(root, ".contributors/or/oren-tally")
 	fought, err := work.contributorHeldByAnother(stays, []byte(readFileString(t, filepath.Join(stays, contributorFileName))))
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +88,8 @@ func TestTheMergeKeepsTheIDsFactsFightCheck(t *testing.T) {
 func TestARemovedEntryACreditNamesKeepsTheRecord(t *testing.T) {
 	work, catalog, root := twoEntriesOfOnePerson(t)
 	if _, err := catalog.UpsertCredits(t.Context(), []creditRow{{
-		Library: contributorLibrary, Item: "movie:tmdb:603", Name: "Tom Hanks",
-		Contributor: ".contributors/to/tom-hanks-imdb-nm0000158",
+		Library: contributorLibrary, Item: "movie:tmdb:1001", Name: "Oren Tally",
+		Contributor: ".contributors/or/oren-tally-imdb-nm9000031",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +98,9 @@ func TestARemovedEntryACreditNamesKeepsTheRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed := filepath.Join(root, ".contributors/to/tom-hanks-imdb-nm0000158")
+	removed := filepath.Join(root, ".contributors/or/oren-tally-imdb-nm9000031")
 	record := readFileString(t, filepath.Join(removed, contributorFileName))
-	if record != "mergedInto: .contributors/to/tom-hanks\n" {
+	if record != "mergedInto: .contributors/or/oren-tally\n" {
 		t.Errorf("contributor.yaml = %q, want the one field that names the entry that stays", record)
 	}
 	if ledger := artLedger(t, removed, factContributorIDs); len(ledger.Items) != 1 ||
@@ -108,7 +108,7 @@ func TestARemovedEntryACreditNamesKeepsTheRecord(t *testing.T) {
 		t.Errorf("ledger items = %+v, want the hash of the record", ledger.Items)
 	}
 	merges := catalogLines(t, catalog, `SELECT path || '|' || merged_into FROM contributor_merges WHERE library = ?`)
-	if len(merges) != 1 || merges[0] != ".contributors/to/tom-hanks-imdb-nm0000158|.contributors/to/tom-hanks" {
+	if len(merges) != 1 || merges[0] != ".contributors/or/oren-tally-imdb-nm9000031|.contributors/or/oren-tally" {
 		t.Errorf("contributor_merges = %v, want the record", merges)
 	}
 	if people := catalogLines(t, catalog, `SELECT path FROM contributors WHERE library = ?`); len(people) != 1 {
@@ -120,21 +120,21 @@ func TestARemovedEntryACreditNamesKeepsTheRecord(t *testing.T) {
 func TestARecordNoCreditNamesIsDeleted(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedWalkedEntry(t, catalog, root, "tom-hanks", "name: Tom Hanks\nids: {tmdb: 31}\n")
-	seedWalkedEntry(t, catalog, root, "thomas-hanks", "mergedInto: .contributors/to/tom-hanks\n")
+	seedWalkedEntry(t, catalog, root, "oren-tally", "name: Oren Tally\nids: {tmdb: 9031}\n")
+	seedWalkedEntry(t, catalog, root, "oren-talley", "mergedInto: .contributors/or/oren-tally\n")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.mergeContributors(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(root, ".contributors/th/thomas-hanks")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".contributors/or/oren-talley")); !os.IsNotExist(err) {
 		t.Errorf("the record is on the volume (%v), want it deleted", err)
 	}
 	if merges := catalogLines(t, catalog, `SELECT path FROM contributor_merges WHERE library = ?`); len(merges) != 0 {
 		t.Errorf("contributor_merges = %v, want none", merges)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".contributors/to/tom-hanks", contributorFileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".contributors/or/oren-tally", contributorFileName)); err != nil {
 		t.Errorf("the entry that stays is gone: %v", err)
 	}
 }
@@ -144,8 +144,8 @@ func TestARecordNoCreditNamesIsDeleted(t *testing.T) {
 func TestTheEntryWithTheMostIDsStaysWhereNoneIsAtThePlainSlug(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedWalkedEntry(t, catalog, root, "tom-hanks-tmdb-31", "name: Tom Hanks\nids: {tmdb: 31}\n")
-	seedWalkedEntry(t, catalog, root, "tom-hanks-imdb-nm0000158", "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\n")
+	seedWalkedEntry(t, catalog, root, "oren-tally-tmdb-9031", "name: Oren Tally\nids: {tmdb: 9031}\n")
+	seedWalkedEntry(t, catalog, root, "oren-tally-imdb-nm9000031", "name: Oren Tally\nids: {imdb: nm9000031, tmdb: 9031}\n")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.mergeContributors(t.Context()); err != nil {
@@ -153,7 +153,7 @@ func TestTheEntryWithTheMostIDsStaysWhereNoneIsAtThePlainSlug(t *testing.T) {
 	}
 
 	people := catalogLines(t, catalog, `SELECT path FROM contributors WHERE library = ?`)
-	if len(people) != 1 || people[0] != ".contributors/to/tom-hanks-imdb-nm0000158" {
+	if len(people) != 1 || people[0] != ".contributors/or/oren-tally-imdb-nm9000031" {
 		t.Errorf("contributors = %v, want the entry with the most ids", people)
 	}
 }
@@ -171,23 +171,23 @@ func TestTheMergeLeavesAGroupItMustNotJoin(t *testing.T) {
 		wantFights int
 	}{
 		{
-			name: "an entry a person edited", other: "name: Thomas Hanks\nids: {tmdb: 31}\n", edit: true,
-			want: attemptHeld, wantReason: "a person edited .contributors/to/tom-hanks/contributor.yaml", wantFights: 2,
+			name: "an entry a person edited", other: "name: Oren Talley\nids: {tmdb: 9031}\n", edit: true,
+			want: attemptHeld, wantReason: "a person edited .contributors/or/oren-tally/contributor.yaml", wantFights: 2,
 		},
 		{
-			name: "two ids in one scheme", other: "name: Thomas Hanks\nids: {imdb: nm0000158, tmdb: 992}\n",
+			name: "two ids in one scheme", other: "name: Oren Talley\nids: {imdb: nm9000031, tmdb: 992}\n",
 			want:       attemptConflict,
-			wantReason: ".contributors/th/thomas-hanks holds tmdb 992 and .contributors/to/tom-hanks holds tmdb 31",
+			wantReason: ".contributors/or/oren-talley holds tmdb 992 and .contributors/or/oren-tally holds tmdb 9031",
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			entry := "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\n"
-			seedWalkedEntry(t, catalog, root, "tom-hanks", entry)
-			seedWalkedEntry(t, catalog, root, "thomas-hanks", test.other)
-			stays := filepath.Join(root, ".contributors/to/tom-hanks")
+			entry := "name: Oren Tally\nids: {imdb: nm9000031, tmdb: 9031}\n"
+			seedWalkedEntry(t, catalog, root, "oren-tally", entry)
+			seedWalkedEntry(t, catalog, root, "oren-talley", test.other)
+			stays := filepath.Join(root, ".contributors/or/oren-tally")
 			if test.edit {
 				writeFile(t, filepath.Join(stays, likenDirectory, likenLedgerName(factContributorIDs)),
 					"items:\n  - path: .\n    wrote: not-the-hash-of-the-file\n")
@@ -201,7 +201,7 @@ func TestTheMergeLeavesAGroupItMustNotJoin(t *testing.T) {
 			if got := readFileString(t, filepath.Join(stays, contributorFileName)); got != entry {
 				t.Errorf("contributor.yaml = %q, want the entry as it was", got)
 			}
-			for _, slug := range []string{"tom-hanks", "thomas-hanks"} {
+			for _, slug := range []string{"oren-tally", "oren-talley"} {
 				ledger := artLedger(t, filepath.Join(root, contributorDirectory(slug)), factContributorMerge)
 				if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != test.want {
 					t.Errorf("%s attempts = %+v, want %s", slug, ledger.Attempts, test.want)
@@ -233,19 +233,19 @@ func TestTheMergeGap(t *testing.T) {
 	}{
 		{
 			name: "a group and a record",
-			want: []string{".contributors/on/one-record", ".contributors/th/thomas-hanks", ".contributors/to/tom-hanks"},
+			want: []string{".contributors/on/one-record", ".contributors/or/oren-talley", ".contributors/or/oren-tally"},
 		},
 		{
 			name: "a record a credit names",
 			credits: []creditRow{{Library: contributorLibrary, Item: "movie:tmdb:1", Name: "One",
 				Contributor: ".contributors/on/one-record"}},
-			want: []string{".contributors/th/thomas-hanks", ".contributors/to/tom-hanks"},
+			want: []string{".contributors/or/oren-talley", ".contributors/or/oren-tally"},
 		},
 		{
 			name: "an entry the merge left inside its window",
-			attempts: []attemptRow{{Library: contributorLibrary, Item: ".contributors/to/tom-hanks",
+			attempts: []attemptRow{{Library: contributorLibrary, Item: ".contributors/or/oren-tally",
 				Fact: factContributorMerge, At: now.Unix(), Result: attemptHeld}},
-			want: []string{".contributors/on/one-record", ".contributors/th/thomas-hanks"},
+			want: []string{".contributors/on/one-record", ".contributors/or/oren-talley"},
 		},
 	}
 	for _, test := range cases {
@@ -253,8 +253,8 @@ func TestTheMergeGap(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			if err := upsertWalk(t.Context(), catalog, &walkResult{
 				contributorAliases: []contributorAliasRow{
-					{Library: contributorLibrary, Scheme: "tmdb", ID: "31", Path: ".contributors/to/tom-hanks"},
-					{Library: contributorLibrary, Scheme: "tmdb", ID: "31", Path: ".contributors/th/thomas-hanks"},
+					{Library: contributorLibrary, Scheme: "tmdb", ID: "9031", Path: ".contributors/or/oren-tally"},
+					{Library: contributorLibrary, Scheme: "tmdb", ID: "9031", Path: ".contributors/or/oren-talley"},
 					{Library: contributorLibrary, Scheme: "tmdb", ID: "7", Path: ".contributors/al/alone"},
 				},
 				contributorMerges: []contributorMergeRow{{Library: contributorLibrary,
@@ -326,10 +326,10 @@ func TestTheMergeAndTheMoveEndWhenTheCatalogFails(t *testing.T) {
 func TestARecordTheDeleteRefusesIsAnErrorAttempt(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	record := "elsewhere/thomas-hanks"
-	writeFile(t, filepath.Join(root, record, contributorFileName), "mergedInto: .contributors/to/tom-hanks\n")
+	record := "elsewhere/oren-talley"
+	writeFile(t, filepath.Join(root, record, contributorFileName), "mergedInto: .contributors/or/oren-tally\n")
 	if _, err := catalog.UpsertContributorMerges(t.Context(), []contributorMergeRow{{
-		Library: contributorLibrary, Path: record, MergedInto: ".contributors/to/tom-hanks",
+		Library: contributorLibrary, Path: record, MergedInto: ".contributors/or/oren-tally",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -363,9 +363,9 @@ func TestWhatTheMergeRecordsWhenItCannotReadOrWriteAGroup(t *testing.T) {
 		{
 			name: "an entry that does not parse",
 			setup: func(t *testing.T, other string) {
-				writeFile(t, filepath.Join(other, contributorFileName), "name: [Tom Hanks\n")
+				writeFile(t, filepath.Join(other, contributorFileName), "name: [Oren Tally\n")
 			},
-			want: "could not read the entry",
+			want: "could not read entry",
 		},
 		{
 			name: "a ledger that does not parse",

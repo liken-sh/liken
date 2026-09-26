@@ -41,7 +41,7 @@ func TestTheCatalogHoldsTheTrailersOfATitle(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 
 	written, err := catalog.UpsertTrailers(t.Context(),
-		[]trailerRow{trailerOf(providerBlockTMDb, "sJ9mvBJ1aTI", 90)})
+		[]trailerRow{trailerOf(providerBlockTMDb, "Hb5nQw2kR07", 90)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestTheCatalogHoldsTheTrailersOfATitle(t *testing.T) {
 	if written != 1 {
 		t.Errorf("the write reported %d rows, want 1", written)
 	}
-	want := "tmdb|sJ9mvBJ1aTI|youtube|https://www.youtube.com/watch?v=sJ9mvBJ1aTI|" +
+	want := "tmdb|Hb5nQw2kR07|youtube|https://www.youtube.com/watch?v=Hb5nQw2kR07|" +
 		"Official Trailer|trailer|en|1|2026-08-01|1080|90|official trailer"
 	if got := strings.Join(trailerLines(t, catalog), ","); got != want {
 		t.Errorf("the table holds\n%s\nwant\n%s", got, want)
@@ -62,13 +62,13 @@ func TestATrailerIsKeyedByItsProviderAndKey(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 
 	if _, err := catalog.UpsertTrailers(t.Context(), []trailerRow{
-		trailerOf(providerBlockTMDb, "sJ9mvBJ1aTI", 90),
+		trailerOf(providerBlockTMDb, "Hb5nQw2kR07", 90),
 		trailerOf(providerBlockPeerTube, "e6b1-4c2f", 40),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := catalog.UpsertTrailers(t.Context(), []trailerRow{
-		trailerOf(providerBlockTMDb, "sJ9mvBJ1aTI", 75),
+		trailerOf(providerBlockTMDb, "Hb5nQw2kR07", 75),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,30 +101,30 @@ func TestWhatATrailerNameStates(t *testing.T) {
 		name string
 		want trailerName
 	}{
-		{name: "DUNE: PART THREE (2026) - IMAX Trailer [4K Ultra HD]",
-			want: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindTrailer}},
-		{name: "DUNE - PART TWO (2024) - Trailer #3 [4K Ultra HD]",
-			want: trailerName{title: "DUNE - PART TWO", year: 2024, kind: trailerKindTrailer}},
-		{name: `DON'T MOVE (2026) - "Horror" TV Spot [Original 4K Ultra HD]`,
-			want: trailerName{title: "DON'T MOVE", year: 2026, kind: trailerKindSpot}},
-		{name: "LOVE HURTS (2025) Trailer Song",
-			want: trailerName{title: "LOVE HURTS", year: 2025, kind: trailerKindOther}},
-		{name: "WONKA (2023) - Trailer #2 [4K Ultra HD]",
-			want: trailerName{title: "WONKA", year: 2023, kind: trailerKindTrailer}},
-		{name: "DUNE: PART THREE (2026) - Teaser Trailer [4K Ultra HD]",
-			want: trailerName{title: "DUNE: PART THREE", year: 2026, kind: trailerKindTeaser}},
-		{name: "THE MATRIX (1999) - Lobby Clip [4K Ultra HD]",
-			want: trailerName{title: "THE MATRIX", year: 1999, kind: trailerKindClip}},
-		{name: "THE MATRIX (1999) - Behind The Scenes",
-			want: trailerName{title: "THE MATRIX", year: 1999, kind: trailerKindOther}},
-		{name: "THE THING (1982) (2011) - Trailer",
-			want: trailerName{title: "THE THING (1982)", year: 2011, kind: trailerKindTrailer}},
+		{name: "KESTREL: PART THREE (2026) - IMAX Trailer [4K Ultra HD]",
+			want: trailerName{title: "KESTREL: PART THREE", year: 2026, kind: trailerKindTrailer}},
+		{name: "KESTREL - PART TWO (2024) - Trailer #3 [4K Ultra HD]",
+			want: trailerName{title: "KESTREL - PART TWO", year: 2024, kind: trailerKindTrailer}},
+		{name: `DON'T WAIT (2026) - "Horror" TV Spot [Original 4K Ultra HD]`,
+			want: trailerName{title: "DON'T WAIT", year: 2026, kind: trailerKindSpot}},
+		{name: "COLD HANDS (2025) Trailer Song",
+			want: trailerName{title: "COLD HANDS", year: 2025, kind: trailerKindOther}},
+		{name: "TALLOW (2023) - Trailer #2 [4K Ultra HD]",
+			want: trailerName{title: "TALLOW", year: 2023, kind: trailerKindTrailer}},
+		{name: "KESTREL: PART THREE (2026) - Teaser Trailer [4K Ultra HD]",
+			want: trailerName{title: "KESTREL: PART THREE", year: 2026, kind: trailerKindTeaser}},
+		{name: "SOME FILM (1999) - Harbor Clip [4K Ultra HD]",
+			want: trailerName{title: "SOME FILM", year: 1999, kind: trailerKindClip}},
+		{name: "SOME FILM (1999) - Behind The Scenes",
+			want: trailerName{title: "SOME FILM", year: 1999, kind: trailerKindOther}},
+		{name: "THE LONG SURVEY (1982) (2011) - Trailer",
+			want: trailerName{title: "THE LONG SURVEY (1982)", year: 2011, kind: trailerKindTrailer}},
 		{name: "An Interview With The Director",
 			want: trailerName{title: "An Interview With The Director", year: 0, kind: trailerKindOther}},
-		{name: "KUNG FU PANDA 4 (2024) Trailer Music [Music Only Trailer]",
-			want: trailerName{title: "KUNG FU PANDA 4", year: 2024, kind: trailerKindOther}},
-		{name: "NOBODY 2 (2025) - Music From The Trailer [4K Ultra HD]",
-			want: trailerName{title: "NOBODY 2", year: 2025, kind: trailerKindOther}},
+		{name: "TIN KITE 4 (2024) Trailer Music [Music Only Trailer]",
+			want: trailerName{title: "TIN KITE 4", year: 2024, kind: trailerKindOther}},
+		{name: "HOLLOW 2 (2025) - Music From The Trailer [4K Ultra HD]",
+			want: trailerName{title: "HOLLOW 2", year: 2025, kind: trailerKindOther}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -142,20 +142,20 @@ func TestWhatResolutionATrailerNameStates(t *testing.T) {
 		name string
 		want int
 	}{
-		{name: "DUNE: PART THREE (2026) - IMAX Trailer [4K Ultra HD]", want: 2160},
-		{name: `DON'T MOVE (2026) - "Horror" TV Spot [Original 4K Ultra HD]`, want: 2160},
-		{name: "WONKA (2023) - Trailer #2 [2160p]", want: 2160},
-		{name: "WONKA (2023) - Trailer #2 [1080p]", want: 1080},
-		{name: "WONKA (2023) - Trailer #2 [Full HD]", want: 1080},
-		{name: "WONKA (2023) - Trailer #2 [HD 1080p]", want: 1080},
-		{name: "WONKA (2023) - Trailer #2 [720p]", want: 720},
-		{name: "WONKA (2023) - Trailer #2 [HD]", want: 720},
-		{name: "WONKA (2023) - Trailer #2 [480p]", want: 480},
-		{name: "WONKA (2023) - Trailer #2 [SD]", want: 480},
-		{name: "WONKA (2023) - Trailer #2", want: 0},
-		{name: "WONKA (2023) - Trailer #2 [Music Only Trailer]", want: 0},
-		{name: "THE MATRIX (1999) 1080p - Lobby Clip", want: 0},
-		{name: "THE MATRIX (1999) - Lobby Clip [Extended] [720p]", want: 720},
+		{name: "KESTREL: PART THREE (2026) - IMAX Trailer [4K Ultra HD]", want: 2160},
+		{name: `DON'T WAIT (2026) - "Horror" TV Spot [Original 4K Ultra HD]`, want: 2160},
+		{name: "TALLOW (2023) - Trailer #2 [2160p]", want: 2160},
+		{name: "TALLOW (2023) - Trailer #2 [1080p]", want: 1080},
+		{name: "TALLOW (2023) - Trailer #2 [Full HD]", want: 1080},
+		{name: "TALLOW (2023) - Trailer #2 [HD 1080p]", want: 1080},
+		{name: "TALLOW (2023) - Trailer #2 [720p]", want: 720},
+		{name: "TALLOW (2023) - Trailer #2 [HD]", want: 720},
+		{name: "TALLOW (2023) - Trailer #2 [480p]", want: 480},
+		{name: "TALLOW (2023) - Trailer #2 [SD]", want: 480},
+		{name: "TALLOW (2023) - Trailer #2", want: 0},
+		{name: "TALLOW (2023) - Trailer #2 [Music Only Trailer]", want: 0},
+		{name: "SOME FILM (1999) 1080p - Harbor Clip", want: 0},
+		{name: "SOME FILM (1999) - Harbor Clip [Extended] [720p]", want: 720},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -172,14 +172,14 @@ func TestHowATrailerTitleFolds(t *testing.T) {
 		name string
 		want string
 	}{
-		{name: "DON'T MOVE", want: "dontmove"},
-		{name: "Don't Move", want: "dontmove"},
-		{name: "DUNE: PART THREE", want: "dunepartthree"},
-		{name: "Dune - Part Three", want: "dunepartthree"},
-		{name: "Dune: Part Three", want: "dunepartthree"},
-		{name: "Fast & Furious 6", want: "fastandfurious6"},
-		{name: "Fast and Furious 6", want: "fastandfurious6"},
-		{name: "WALL·E", want: "walle"},
+		{name: "DON'T WAIT", want: "dontwait"},
+		{name: "Don't Wait", want: "dontwait"},
+		{name: "KESTREL: PART THREE", want: "kestrelpartthree"},
+		{name: "Kestrel - Part Three", want: "kestrelpartthree"},
+		{name: "Kestrel: Part Three", want: "kestrelpartthree"},
+		{name: "Salt & Pepper 6", want: "saltandpepper6"},
+		{name: "Salt and Pepper 6", want: "saltandpepper6"},
+		{name: "TIDE·W", want: "tidew"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

@@ -30,8 +30,8 @@ func TestScreenClaimsAreNamedSizedLabeledAndOwned(t *testing.T) {
 	claims := screenClaims(denScreen(), catalog)
 
 	cases := []struct{ name, size string }{
-		{"den-tv-media-browser-catalog", "2Gi"},
-		{"den-tv-media-browser-art", "4Gi"},
+		{"den-media-browser-catalog", "2Gi"},
+		{"den-media-browser-art", "4Gi"},
 	}
 	if len(claims) != len(cases) {
 		t.Fatalf("claims = %d, want the catalog claim and the art claim", len(claims))
@@ -56,7 +56,7 @@ func TestScreenClaimsAreNamedSizedLabeledAndOwned(t *testing.T) {
 		if claim.Metadata.Labels[scannerLabelKey] != screenLabelValue {
 			t.Errorf("labels = %v, want the screen name label", claim.Metadata.Labels)
 		}
-		if claim.Metadata.Labels[playerLabelKey] != "den-tv" {
+		if claim.Metadata.Labels[playerLabelKey] != "den" {
 			t.Errorf("labels = %v, want the player label", claim.Metadata.Labels)
 		}
 		want := playerOwner(denScreen())
@@ -86,17 +86,17 @@ func TestScreenClaimsOmitAnAbsentClassAndDefaultTheSizes(t *testing.T) {
 // two volumes names the claim it was made for.
 func TestReconcileScreensStandsBothClaimsBeforeThePod(t *testing.T) {
 	cluster := newFakeCluster()
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 		[]Player{*player}, nil, nil, nil, testNow)
 
 	cases := []struct{ claim, volume, size string }{
-		{"den-tv-media-browser-catalog", catalogVolumeName, defaultCatalogSize},
-		{"den-tv-media-browser-art", artCacheVolumeName, defaultArtCacheSize},
+		{"den-media-browser-catalog", catalogVolumeName, defaultCatalogSize},
+		{"den-media-browser-art", artCacheVolumeName, defaultArtCacheSize},
 	}
-	pod := cluster.heldPod("den-tv-media-browser")
+	pod := cluster.heldPod("den-media-browser")
 	if pod == nil {
 		t.Fatal("the pass stood no screen pod")
 	}
@@ -124,8 +124,8 @@ func TestReconcileScreensStandsBothClaimsBeforeThePod(t *testing.T) {
 // the catalog and the art it holds.
 func TestReconcileScreensLeavesAnExistingScreenClaim(t *testing.T) {
 	cluster := newFakeCluster()
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 	for _, claim := range boundScreenClaims(player) {
 		cluster.claims[claim.Metadata.Name] = claim
 	}
@@ -142,7 +142,7 @@ func TestReconcileScreensLeavesAnExistingScreenClaim(t *testing.T) {
 // keeps its emptyDirs and the pass provisions nothing.
 func TestReconcileScreensWithNoCatalogKeepsTheEmptyDir(t *testing.T) {
 	cluster := newFakeCluster()
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
 		[]Player{*player}, nil, nil, nil, testNow)
@@ -150,7 +150,7 @@ func TestReconcileScreensWithNoCatalogKeepsTheEmptyDir(t *testing.T) {
 	if got := cluster.countRequests(http.MethodPost, "persistentvolumeclaims"); got != 0 {
 		t.Errorf("creates = %d, want none in a namespace with no Catalog", got)
 	}
-	pod := cluster.heldPod("den-tv-media-browser")
+	pod := cluster.heldPod("den-media-browser")
 	if pod == nil {
 		t.Fatal("the pass stood no screen pod")
 	}
@@ -177,7 +177,7 @@ func TestStandScreenClaimAcceptsAConflict(t *testing.T) {
 // A read that fails for any other reason is reported, because the pass
 // cannot tell whether the claim exists.
 func TestStandScreenClaimReportsAFailedRead(t *testing.T) {
-	cases := []string{"den-tv-media-browser-catalog", "den-tv-media-browser-art"}
+	cases := []string{"den-media-browser-catalog", "den-media-browser-art"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			cluster := newFakeCluster()
@@ -199,8 +199,8 @@ func TestReconcileScreensKeepsAnUnschedulableScreenOnAPerNodeClass(t *testing.T)
 	shortUnschedulableGrace(t)
 	cluster := newFakeCluster()
 	seedStorageClass(cluster, "per-node", perNodeProvisioner)
-	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+	player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+	catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 	catalog.Spec.Screens.StorageClassName = "per-node"
 	pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
 	cluster.pods[pod.Metadata.Name] = pod
@@ -212,10 +212,10 @@ func TestReconcileScreensKeepsAnUnschedulableScreenOnAPerNodeClass(t *testing.T)
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 		[]Player{*player}, nil, nil, []Pod{*pod}, testNow)
 
-	if cluster.heldPod("den-tv-media-browser") == nil {
+	if cluster.heldPod("den-media-browser") == nil {
 		t.Error("the pass took a screen pod whose claims pin it to no node")
 	}
-	for _, name := range []string{"den-tv-media-browser-catalog", "den-tv-media-browser-art"} {
+	for _, name := range []string{"den-media-browser-catalog", "den-media-browser-art"} {
 		if cluster.heldClaim(name) == nil {
 			t.Errorf("the pass took the claim %s, which pins the pod to no node", name)
 		}
@@ -294,19 +294,19 @@ func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 		},
 		{
 			name: "the claim names another Player", age: time.Minute,
-			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.Labels[playerLabelKey] = "kitchen-tv" },
+			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.Labels[playerLabelKey] = "kitchen" },
 		},
 		{
 			name: "the owner holds another UID", age: time.Minute,
-			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.OwnerReferences[0].UID = "an-older-den-tv" },
+			claim: func(claim *PersistentVolumeClaim) { claim.Metadata.OwnerReferences[0].UID = "an-older-den" },
 		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			shortUnschedulableGrace(t)
 			cluster := newFakeCluster()
-			player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-			catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+			player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+			catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 			pod := unschedulableScreenPod(player, catalog, testNow.Add(-one.age))
 			if one.pod != nil {
 				one.pod(pod)
@@ -323,7 +323,7 @@ func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 				[]Player{*player}, nil, nil, []Pod{*pod}, testNow)
 
-			if gone := cluster.heldPod("den-tv-media-browser") == nil; gone != one.wantOut {
+			if gone := cluster.heldPod("den-media-browser") == nil; gone != one.wantOut {
 				t.Errorf("the pod is gone = %v, want %v", gone, one.wantOut)
 			}
 			for _, claim := range claims {
@@ -359,12 +359,12 @@ func TestReconcileScreensGuardsTheArtClaimDelete(t *testing.T) {
 		},
 		{
 			name: "the claim names another Player",
-			art:  func(claim *PersistentVolumeClaim) { claim.Metadata.Labels[playerLabelKey] = "kitchen-tv" },
+			art:  func(claim *PersistentVolumeClaim) { claim.Metadata.Labels[playerLabelKey] = "kitchen" },
 		},
 		{
 			name: "the owner holds another UID",
 			art: func(claim *PersistentVolumeClaim) {
-				claim.Metadata.OwnerReferences[0].UID = "an-older-den-tv"
+				claim.Metadata.OwnerReferences[0].UID = "an-older-den"
 			},
 		},
 	}
@@ -372,27 +372,27 @@ func TestReconcileScreensGuardsTheArtClaimDelete(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			shortUnschedulableGrace(t)
 			cluster := newFakeCluster()
-			player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-			catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+			player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+			catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 			pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
 			cluster.pods[pod.Metadata.Name] = pod
 			claims := boundScreenClaims(player)
 			if one.art != nil {
 				one.art(claims[1])
 			}
-			cluster.claims["den-tv-media-browser-catalog"] = claims[0]
-			cluster.claims["den-tv-media-browser-art"] = claims[1]
+			cluster.claims["den-media-browser-catalog"] = claims[0]
+			cluster.claims["den-media-browser-art"] = claims[1]
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 				[]Player{*player}, nil, nil, []Pod{*pod}, testNow)
 
-			if cluster.heldPod("den-tv-media-browser") != nil {
+			if cluster.heldPod("den-media-browser") != nil {
 				t.Error("the pod stands, want the recovery to have taken it")
 			}
-			if cluster.heldClaim("den-tv-media-browser-catalog") != nil {
+			if cluster.heldClaim("den-media-browser-catalog") != nil {
 				t.Error("the catalog claim stands, want the recovery to have taken it")
 			}
-			if gone := cluster.heldClaim("den-tv-media-browser-art") == nil; gone != one.wantOut {
+			if gone := cluster.heldClaim("den-media-browser-art") == nil; gone != one.wantOut {
 				t.Errorf("the art claim is gone = %v, want %v", gone, one.wantOut)
 			}
 		})
@@ -409,30 +409,30 @@ func TestReconcileScreensCarriesOnPastAFailedRecovery(t *testing.T) {
 	}{
 		{
 			name:      "the claim cannot be read",
-			broken:    http.MethodGet + " " + claimPath(testLibraryNamespace, "den-tv-media-browser-catalog"),
+			broken:    http.MethodGet + " " + claimPath(testLibraryNamespace, "den-media-browser-catalog"),
 			wantPodIn: true,
 		},
 		{
 			name:      "the pod cannot be deleted",
-			broken:    http.MethodDelete + " " + podsPath(testLibraryNamespace) + "/den-tv-media-browser",
+			broken:    http.MethodDelete + " " + podsPath(testLibraryNamespace) + "/den-media-browser",
 			wantPodIn: true,
 		},
 		{
 			name:   "the claim cannot be deleted",
-			broken: http.MethodDelete + " " + claimPath(testLibraryNamespace, "den-tv-media-browser-catalog"),
+			broken: http.MethodDelete + " " + claimPath(testLibraryNamespace, "den-media-browser-catalog"),
 		},
 		{
 			name:   "the art claim cannot be deleted",
-			broken: http.MethodDelete + " " + claimPath(testLibraryNamespace, "den-tv-media-browser-art"),
+			broken: http.MethodDelete + " " + claimPath(testLibraryNamespace, "den-media-browser-art"),
 		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			shortUnschedulableGrace(t)
 			cluster := newFakeCluster()
-			player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
-			standing := seedPlayer(cluster, "kitchen-tv", testLibraryNamespace, screenController)
-			catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+			player := seedPlayer(cluster, "den", testLibraryNamespace, screenController)
+			standing := seedPlayer(cluster, "kitchen", testLibraryNamespace, screenController)
+			catalog := seedCatalog(cluster, "house", testLibraryNamespace)
 			pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
 			cluster.pods[pod.Metadata.Name] = pod
 			for _, claim := range boundScreenClaims(player) {
@@ -443,10 +443,10 @@ func TestReconcileScreensCarriesOnPastAFailedRecovery(t *testing.T) {
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 				[]Player{*player, *standing}, nil, nil, []Pod{*pod}, testNow)
 
-			if held := cluster.heldPod("den-tv-media-browser") != nil; held != one.wantPodIn {
+			if held := cluster.heldPod("den-media-browser") != nil; held != one.wantPodIn {
 				t.Errorf("the pod stands = %v, want %v", held, one.wantPodIn)
 			}
-			if cluster.heldPod("kitchen-tv-media-browser") == nil {
+			if cluster.heldPod("kitchen-media-browser") == nil {
 				t.Error("the pass stopped at the broken screen")
 			}
 		})
@@ -460,7 +460,7 @@ func TestDeletePersistentVolumeClaimReadsAnAbsentClaimAsSuccess(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 
-	if err := DeletePersistentVolumeClaim(t.Context(), client, "house", "den-tv-media-browser-catalog"); err != nil {
+	if err := DeletePersistentVolumeClaim(t.Context(), client, "house", "den-media-browser-catalog"); err != nil {
 		t.Fatalf("err = %v, want an absent claim to read as success", err)
 	}
 }
@@ -469,10 +469,10 @@ func TestDeletePersistentVolumeClaimReadsAnAbsentClaimAsSuccess(t *testing.T) {
 func TestDeletePersistentVolumeClaimDeletesByName(t *testing.T) {
 	client, recorded := recordingAPI(t, PersistentVolumeClaim{})
 
-	if err := DeletePersistentVolumeClaim(t.Context(), client, "house", "den-tv-media-browser-catalog"); err != nil {
+	if err := DeletePersistentVolumeClaim(t.Context(), client, "house", "den-media-browser-catalog"); err != nil {
 		t.Fatal(err)
 	}
 
 	expectRequest(t, recorded, http.MethodDelete,
-		"/api/v1/namespaces/house/persistentvolumeclaims/den-tv-media-browser-catalog")
+		"/api/v1/namespaces/house/persistentvolumeclaims/den-media-browser-catalog")
 }

@@ -51,7 +51,7 @@ func artLedger(t *testing.T, folder, fact string) likenLedger {
 // Each fact writes its own file, under the name Kodi and Jellyfin read, from
 // the endpoint and the size that fact asks for.
 func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
-	movieFolder := "The Signal (2014)"
+	movieFolder := "Some Film (2014)"
 	seriesFolder := "Quiet Harbor (2008)"
 	season := filepath.Join(seriesFolder, "Season 01")
 
@@ -67,31 +67,31 @@ func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
 		{
 			fact: factPoster, kind: libraryKindMovies,
 			seed:     func(t *testing.T, c *Catalog) { seedArtMovie(t, c, movieFolder) },
-			endpoint: "/3/movie/603/images", list: tmdbPosters, size: "w780",
+			endpoint: "/3/movie/1001/images", list: tmdbPosters, size: "w780",
 			want: filepath.Join(movieFolder, "poster.jpg"),
 		},
 		{
 			fact: factBackdrop, kind: libraryKindMovies,
 			seed:     func(t *testing.T, c *Catalog) { seedArtMovie(t, c, movieFolder) },
-			endpoint: "/3/movie/603/images", list: tmdbBackdrops, size: "w1280",
+			endpoint: "/3/movie/1001/images", list: tmdbBackdrops, size: "w1280",
 			want: filepath.Join(movieFolder, "fanart.jpg"),
 		},
 		{
 			fact: factLogo, kind: libraryKindSeries,
 			seed:     func(t *testing.T, c *Catalog) { seedArtSeries(t, c, seriesFolder, []int{1}) },
-			endpoint: "/3/tv/1396/images", list: tmdbLogos, size: "w500",
+			endpoint: "/3/tv/2001/images", list: tmdbLogos, size: "w500",
 			want: filepath.Join(seriesFolder, "clearlogo.png"),
 		},
 		{
 			fact: factSeasonPoster, kind: libraryKindSeries,
 			seed:     func(t *testing.T, c *Catalog) { seedArtSeries(t, c, seriesFolder, []int{1}) },
-			endpoint: "/3/tv/1396/season/1/images", list: tmdbPosters, size: "w780",
+			endpoint: "/3/tv/2001/season/1/images", list: tmdbPosters, size: "w780",
 			want: filepath.Join(seriesFolder, "season01-poster.jpg"),
 		},
 		{
 			fact: factEpisodeThumb, kind: libraryKindSeries,
 			seed:     func(t *testing.T, c *Catalog) { seedArtSeries(t, c, seriesFolder, []int{1}) },
-			endpoint: "/3/tv/1396/season/1/episode/5/images", list: tmdbStills, size: "w300",
+			endpoint: "/3/tv/2001/season/1/episode/5/images", list: tmdbStills, size: "w300",
 			want: filepath.Join(season, "Quiet Harbor - S01E05-thumb.jpg"),
 		},
 	}
@@ -100,7 +100,7 @@ func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, season, "Quiet Harbor - S01E05.mkv"), "video")
-			writeFile(t, filepath.Join(root, movieFolder, "The Signal (2014).mkv"), "video")
+			writeFile(t, filepath.Join(root, movieFolder, "Some Film (2014).mkv"), "video")
 			test.seed(t, catalog)
 			work, log := testEnricher(t, test.kind, root, catalog)
 			client, _ := newArtTMDb(t, map[string]string{
@@ -134,13 +134,13 @@ func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
 func TestAnArtFileThatExistsIsLeftAsItIs(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
+	folder := "Some Film (2014)"
 	poster := filepath.Join(root, folder, "poster.jpg")
 	writeFile(t, poster, "the poster a person kept")
 	seedArtMovie(t, catalog, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, fake := newArtTMDb(t, map[string]string{
-		tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+		tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
 	})
 
 	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
@@ -150,7 +150,7 @@ func TestAnArtFileThatExistsIsLeftAsItIs(t *testing.T) {
 	if got := readFileString(t, poster); got != "the poster a person kept" {
 		t.Errorf("poster = %q, want the bytes the other tool wrote", got)
 	}
-	if fake.served[tmdbKey("/3/movie/603/images", "", "")] != 0 {
+	if fake.served[tmdbKey("/3/movie/1001/images", "", "")] != 0 {
 		t.Error("the fact asked the provider about a title whose file is already there")
 	}
 	ledger := artLedger(t, filepath.Join(root, folder), factPoster)
@@ -173,25 +173,25 @@ func TestWhatAnArtFactRecordsWhenItWritesNothing(t *testing.T) {
 	}{
 		{
 			name:       "the provider has no image",
-			answers:    map[string]string{tmdbKey("/3/movie/603/images", "", ""): `{"posters":[]}`},
+			answers:    map[string]string{tmdbKey("/3/movie/1001/images", "", ""): `{"posters":[]}`},
 			wantResult: attemptNothing,
 		},
 		{
 			name:       "the provider refuses the list",
 			answers:    map[string]string{},
-			statuses:   map[string]int{tmdbKey("/3/movie/603/images", "", ""): http.StatusUnauthorized},
+			statuses:   map[string]int{tmdbKey("/3/movie/1001/images", "", ""): http.StatusUnauthorized},
 			wantResult: attemptError,
 		},
 		{
 			name:       "the provider refuses its settings",
-			answers:    map[string]string{tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage)},
+			answers:    map[string]string{tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage)},
 			statuses:   map[string]int{tmdbKey(tmdbConfigurationPath, "", ""): http.StatusUnauthorized},
 			wantResult: attemptError,
 		},
 		{
 			name: "the download fails",
 			answers: map[string]string{
-				tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+				tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
 			},
 			statuses:   map[string]int{tmdbKey("/t/p/w780/quiet.jpg", "", ""): http.StatusInternalServerError},
 			wantResult: attemptError,
@@ -201,8 +201,8 @@ func TestWhatAnArtFactRecordsWhenItWritesNothing(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			folder := "The Signal (2014)"
-			writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
+			folder := "Some Film (2014)"
+			writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
 			seedArtMovie(t, catalog, folder)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			client, fake := newArtTMDb(t, test.answers)
@@ -271,14 +271,14 @@ func TestTheArtFactNeedsAProviderKey(t *testing.T) {
 func TestAnArtFactOutsideTheScopeIsLeftAlone(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
-	writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
+	folder := "Some Film (2014)"
+	writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
 	seedArtMovie(t, catalog, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	work.scopes = []string{"Another Film (2001)"}
 	client, _ := newArtTMDb(t, map[string]string{
-		tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
-		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
+		tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+		tmdbKey("/t/p/w780/quiet.jpg", "", ""):  testImage,
 	})
 
 	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
@@ -370,7 +370,7 @@ func TestTheFactMapRunsTheArtFact(t *testing.T) {
 func TestAnArtFactKeepsAFileThatArrivedBeforeTheWrite(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Signal (2014)")
+	folder := filepath.Join(root, "Some Film (2014)")
 	target := filepath.Join(folder, "poster.jpg")
 	writeFile(t, target, "the poster a person kept")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
@@ -378,7 +378,7 @@ func TestAnArtFactKeepsAFileThatArrivedBeforeTheWrite(t *testing.T) {
 		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
 	})
 
-	gap := artGap{key: "The Signal (2014)/poster.jpg", tmdb: "603"}
+	gap := artGap{key: "Some Film (2014)/poster.jpg", tmdb: "1001"}
 	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
 	if work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
 		gap, folder, target, image) {
@@ -399,13 +399,13 @@ func TestAnArtFactKeepsAFileThatArrivedBeforeTheWrite(t *testing.T) {
 func TestAWriteTheVolumeRefusesIsAnErrorAttempt(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Signal (2014)")
+	folder := filepath.Join(root, "Some Film (2014)")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newArtTMDb(t, map[string]string{
 		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
 	})
 
-	gap := artGap{key: "The Signal (2014)/poster.jpg", tmdb: "603"}
+	gap := artGap{key: "Some Film (2014)/poster.jpg", tmdb: "1001"}
 	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
 	if work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
 		gap, folder, filepath.Join(folder, "poster.jpg"), image) {
@@ -423,8 +423,8 @@ func TestAWriteTheVolumeRefusesIsAnErrorAttempt(t *testing.T) {
 func TestAPathTheVolumeCannotAnswerForIsAnErrorAttempt(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "The Signal (2014)"), "a file where the folder should be")
-	seedArtMovie(t, catalog, "The Signal (2014)")
+	writeFile(t, filepath.Join(root, "Some Film (2014)"), "a file where the folder should be")
+	seedArtMovie(t, catalog, "Some Film (2014)")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newArtTMDb(t, map[string]string{})
 
@@ -432,7 +432,7 @@ func TestAPathTheVolumeCannotAnswerForIsAnErrorAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if fileExistsInTest(t, filepath.Join(root, "The Signal (2014)", "poster.jpg")) {
+	if fileExistsInTest(t, filepath.Join(root, "Some Film (2014)", "poster.jpg")) {
 		t.Error("the fact wrote a file, want none")
 	}
 }

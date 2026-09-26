@@ -87,7 +87,7 @@ func newFakeArchive(t *testing.T, body string) (*archiveClient, *fakeArchive) {
 func TestAnArchiveSearchAsksTheCollectionForOneTitle(t *testing.T) {
 	client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
 
-	docs, err := client.search(t.Context(), `Don't Look Now`)
+	docs, err := client.search(t.Context(), `Don't Ask Twice`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestAnArchiveSearchAsksTheCollectionForOneTitle(t *testing.T) {
 		t.Errorf("the search asked %q, want %q", asked.Path, archiveSearchPath)
 	}
 	query := asked.Query()
-	if got := query.Get("q"); got != `collection:movie_trailers AND title:("Don't Look Now")` {
+	if got := query.Get("q"); got != `collection:movie_trailers AND title:("Don't Ask Twice")` {
 		t.Errorf("the search asked for %q, want the collection and the quoted title", got)
 	}
 	if query.Get("rows") != "20" || query.Get("output") != "json" {
@@ -116,23 +116,23 @@ func TestAnArchiveSearchAsksTheCollectionForOneTitle(t *testing.T) {
 func TestAnArchiveItemReadsTheShapesItsFieldsArriveIn(t *testing.T) {
 	client, _ := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
 
-	docs, err := client.search(t.Context(), "His Girl Friday")
+	docs, err := client.search(t.Context(), "Late Harbor Call")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	want := []archiveDoc{
-		{Identifier: "turner_video_71", Title: "His Girl Friday", Year: "1940",
+		{Identifier: "trailer_item_71", Title: "Late Harbor Call", Year: "1940",
 			MediaType: "movies"},
-		{Identifier: "His_Girl_Friday_trailer", Title: "His Girl Friday trailer",
+		{Identifier: "Late_Harbor_Call_trailer", Title: "Late Harbor Call trailer",
 			Year: "1940", Date: "1940-01-11T00:00:00Z",
 			LicenseURL: "http://creativecommons.org/licenses/publicdomain/",
 			MediaType:  "movies"},
-		{Identifier: "HowardHawkshisGirlFridayMovieTrailer1940",
-			Title: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`,
+		{Identifier: "TomWeeksLateHarborCallMovieTrailer1940",
+			Title: `Tom Weeks' "LATE HARBOR CALL" movie trailer (1940)`,
 			Date:  "2013-07-22T16:39:55Z", MediaType: "movies"},
-		{Identifier: "TheOthers2001TheatricalTrailer",
-			Title: "The Others (2001) theatrical trailer", Year: "2001",
+		{Identifier: "TheQuietHouse2001TheatricalTrailer",
+			Title: "The Quiet House (2001) theatrical trailer", Year: "2001",
 			Date:       "2001-06-29T00:00:00Z",
 			LicenseURL: "http://creativecommons.org/licenses/publicdomain/",
 			MediaType:  "movies"},
@@ -163,8 +163,8 @@ func TestAnArchiveClientHoldsToItsOwnPace(t *testing.T) {
 			client.interval = one.interval
 			started := time.Now()
 
-			_, first := client.search(t.Context(), "His Girl Friday")
-			_, second := client.search(t.Context(), "His Girl Friday")
+			_, first := client.search(t.Context(), "Late Harbor Call")
+			_, second := client.search(t.Context(), "Late Harbor Call")
 
 			took := time.Since(started)
 			if first != nil || second != nil {
@@ -198,10 +198,10 @@ func TestTheYearAnArchiveItemStates(t *testing.T) {
 	}{
 		{name: "the year field", doc: archiveDoc{Year: "1940"}, want: 1940},
 		{name: "a year in parentheses", want: 1940,
-			doc: archiveDoc{Title: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`}},
+			doc: archiveDoc{Title: `Tom Weeks' "LATE HARBOR CALL" movie trailer (1940)`}},
 		{name: "a year between bars", want: 1940,
-			doc: archiveDoc{Title: "His Girl Friday |1940| theatrical trailer"}},
-		{name: "no year at all", doc: archiveDoc{Title: "His Girl Friday trailer"}},
+			doc: archiveDoc{Title: "Late Harbor Call |1940| theatrical trailer"}},
+		{name: "no year at all", doc: archiveDoc{Title: "Late Harbor Call trailer"}},
 		{name: "a year field of no year", doc: archiveDoc{Year: "n/a"}},
 	}
 	for _, one := range cases {
@@ -220,14 +220,14 @@ func TestTheTitleAnArchiveItemStates(t *testing.T) {
 		name string
 		want string
 	}{
-		{name: "His Girl Friday", want: "hisgirlfriday"},
-		{name: "His Girl Friday trailer", want: "hisgirlfriday"},
-		{name: "HIS GIRL FRIDAY (1940) - Official Trailer", want: "hisgirlfriday"},
-		{name: "His Girl Friday [HD 1080p restoration]", want: "hisgirlfriday"},
-		{name: "His Girl Friday | Columbia Pictures", want: "hisgirlfriday"},
-		{name: "His Girl Friday theatrical movie trailer 4k webrip", want: "hisgirlfriday"},
-		{name: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`,
-			want: "hisgirlfriday"},
+		{name: "Late Harbor Call", want: "lateharborcall"},
+		{name: "Late Harbor Call trailer", want: "lateharborcall"},
+		{name: "LATE HARBOR CALL (1940) - Official Trailer", want: "lateharborcall"},
+		{name: "Late Harbor Call [HD 1080p restoration]", want: "lateharborcall"},
+		{name: "Late Harbor Call | Harbor Light Pictures", want: "lateharborcall"},
+		{name: "Late Harbor Call theatrical movie trailer 4k webrip", want: "lateharborcall"},
+		{name: `Tom Weeks' "LATE HARBOR CALL" movie trailer (1940)`,
+			want: "lateharborcall"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -248,12 +248,12 @@ func TestTheKindAnArchiveItemStates(t *testing.T) {
 		want       string
 		wantStated bool
 	}{
-		{name: "His Girl Friday", want: trailerKindTrailer, wantStated: false},
-		{name: "His Girl Friday trailer", want: trailerKindTrailer, wantStated: true},
-		{name: "HIS GIRL FRIDAY (1940) teaser", want: trailerKindTeaser, wantStated: true},
-		{name: "HIS GIRL FRIDAY (1940) TV spot", want: trailerKindSpot, wantStated: true},
-		{name: "HIS GIRL FRIDAY opening clip", want: trailerKindClip, wantStated: true},
-		{name: "HIS GIRL FRIDAY trailer song", want: trailerKindOther, wantStated: true},
+		{name: "Late Harbor Call", want: trailerKindTrailer, wantStated: false},
+		{name: "Late Harbor Call trailer", want: trailerKindTrailer, wantStated: true},
+		{name: "LATE HARBOR CALL (1940) teaser", want: trailerKindTeaser, wantStated: true},
+		{name: "LATE HARBOR CALL (1940) TV spot", want: trailerKindSpot, wantStated: true},
+		{name: "LATE HARBOR CALL opening clip", want: trailerKindClip, wantStated: true},
+		{name: "LATE HARBOR CALL trailer song", want: trailerKindOther, wantStated: true},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -278,20 +278,20 @@ func TestWhatAnArchiveItemSaysAboutOneTitle(t *testing.T) {
 		want trailerMatch
 	}{
 		{name: "the title and the year", want: trailerMatch{title: true, year: true, yearKnown: true},
-			doc: archiveDoc{Title: "His Girl Friday trailer", Year: "1940"}},
+			doc: archiveDoc{Title: "Late Harbor Call trailer", Year: "1940"}},
 		{name: "the title and no year at all", want: trailerMatch{title: true},
-			doc: archiveDoc{Title: "His Girl Friday trailer"}},
+			doc: archiveDoc{Title: "Late Harbor Call trailer"}},
 		{name: "the title and another year", want: trailerMatch{title: true, yearKnown: true},
-			doc: archiveDoc{Title: "His Girl Friday trailer", Year: "1939"}},
+			doc: archiveDoc{Title: "Late Harbor Call trailer", Year: "1939"}},
 		{name: "another title", want: trailerMatch{year: true, yearKnown: true},
-			doc: archiveDoc{Title: "The Others theatrical trailer", Year: "1940"}},
+			doc: archiveDoc{Title: "The Quiet House theatrical trailer", Year: "1940"}},
 		{name: "a quoted title beside the name of the director",
 			want: trailerMatch{title: true, year: true, yearKnown: true},
-			doc:  archiveDoc{Title: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`}},
+			doc:  archiveDoc{Title: `Tom Weeks' "LATE HARBOR CALL" movie trailer (1940)`}},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			title := trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940}
+			title := trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940}
 
 			if got := archiveDocMatch(one.doc, title); got != one.want {
 				t.Errorf("the match is %+v, want %+v", got, one.want)
@@ -310,26 +310,26 @@ func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 	answerer := newArchiveTrailerAnswerer(client)
 
 	entries, err := answerer.trailers(t.Context(),
-		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+		trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	want := []trailerEntry{
-		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "turner_video_71",
-			Site: trailerSiteArchive, URL: "https://archive.org/details/turner_video_71",
-			Name: "His Girl Friday", Kind: trailerKindTrailer, Published: "1940-01-01",
+		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "trailer_item_71",
+			Site: trailerSiteArchive, URL: "https://archive.org/details/trailer_item_71",
+			Name: "Late Harbor Call", Kind: trailerKindTrailer, Published: "1940-01-01",
 			Resolution: 1080,
 			Score:      85, Reason: "title and year match; trailer; no language"},
-		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "His_Girl_Friday_trailer",
-			Site: trailerSiteArchive, URL: "https://archive.org/details/His_Girl_Friday_trailer",
-			Name: "His Girl Friday trailer", Kind: trailerKindTrailer, Published: "1940-01-11",
+		{Path: likenSelfPath, Provider: providerBlockArchive, Key: "Late_Harbor_Call_trailer",
+			Site: trailerSiteArchive, URL: "https://archive.org/details/Late_Harbor_Call_trailer",
+			Name: "Late Harbor Call trailer", Kind: trailerKindTrailer, Published: "1940-01-11",
 			Score: 85, Reason: "title and year match; trailer; no language"},
 		{Path: likenSelfPath, Provider: providerBlockArchive,
-			Key:  "HowardHawkshisGirlFridayMovieTrailer1940",
+			Key:  "TomWeeksLateHarborCallMovieTrailer1940",
 			Site: trailerSiteArchive,
-			URL:  "https://archive.org/details/HowardHawkshisGirlFridayMovieTrailer1940",
-			Name: `Howard Hawks' "HIS GIRL FRIDAY" movie trailer (1940)`,
+			URL:  "https://archive.org/details/TomWeeksLateHarborCallMovieTrailer1940",
+			Name: `Tom Weeks' "LATE HARBOR CALL" movie trailer (1940)`,
 			Kind: trailerKindTrailer, Published: "2013-07-22",
 			Score: 85, Reason: "title and year match; trailer; no language"},
 	}
@@ -343,13 +343,13 @@ func TestTheArchiveTrailerAnswererKeepsWhatTheTitleMatches(t *testing.T) {
 
 // The search this table drives: one item that matches the title.
 const archiveSearchOfOneItem = `{"response":{"numFound":1,"docs":[` +
-	`{"identifier":"one","title":"His Girl Friday","year":"1940"}]}}`
+	`{"identifier":"one","title":"Late Harbor Call","year":"1940"}]}}`
 
 // Two items whose names state no kind, which are the two the answerer reads
 // the metadata of.
 const archiveSearchOfTwoAmbiguousItems = `{"response":{"numFound":2,"docs":[` +
-	`{"identifier":"one","title":"His Girl Friday","year":"1940"},` +
-	`{"identifier":"two","title":"His Girl Friday [1080p]","year":"1940"}]}}`
+	`{"identifier":"one","title":"Late Harbor Call","year":"1940"},` +
+	`{"identifier":"two","title":"Late Harbor Call [1080p]","year":"1940"}]}}`
 
 // The item's own duration is the shortest of its video files, and the
 // collection holds whole films, so an item longer than eight minutes is
@@ -393,7 +393,7 @@ func TestWhatTheFilesOfAnArchiveItemDecide(t *testing.T) {
 			fake.items["one"] = fakeArchiveItem{body: one.item}
 
 			entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
-				trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+				trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -416,7 +416,7 @@ func TestAnArchiveItemWhoseMetadataTheArchiveRefuses(t *testing.T) {
 		status: http.StatusInternalServerError, body: "the item is down"}
 
 	entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
-		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+		trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,12 +446,12 @@ func TestAnArchiveSearchWhoseEveryItemCannotBeRead(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
-			fake.items["turner_video_71"] = one.item
-			fake.items["His_Girl_Friday_trailer"] = one.item
-			fake.items["HowardHawkshisGirlFridayMovieTrailer1940"] = one.item
+			fake.items["trailer_item_71"] = one.item
+			fake.items["Late_Harbor_Call_trailer"] = one.item
+			fake.items["TomWeeksLateHarborCallMovieTrailer1940"] = one.item
 
 			entries, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
-				trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+				trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 
 			if err == nil || len(entries) != 0 {
 				t.Errorf("the answerer held %+v and %v, want the error the archive gave",
@@ -467,14 +467,14 @@ func TestTheArchiveAnswererReadsTheMetadataOfNamesThatStateNoKind(t *testing.T) 
 	client, fake := newFakeArchive(t, trailerFixture(t, "archive-search.json"))
 
 	_, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
-		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+		trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	want := []string{
 		archiveSearchPath,
-		archiveMetadataPath + "turner_video_71",
+		archiveMetadataPath + "trailer_item_71",
 	}
 	if got := fake.paths(); !reflect.DeepEqual(got, want) {
 		t.Errorf("the answerer asked %v, want %v", got, want)
@@ -524,7 +524,7 @@ func TestTheArchiveAnswererReadsTwoAmbiguousItemsAtOnce(t *testing.T) {
 	client.interval = 0
 
 	entries, err := newArchiveTrailerAnswerer(client).trailers(ctx,
-		trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+		trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 
 	if err != nil {
 		t.Fatalf("err = %v, want the metadata of the two items read at once", err)
@@ -585,7 +585,7 @@ func TestAnArchiveSearchThatCannotBeRead(t *testing.T) {
 			client.interval = 0
 
 			_, err := newArchiveTrailerAnswerer(client).trailers(t.Context(),
-				trailerTitle{kind: libraryKindMovies, title: "His Girl Friday", year: 1940})
+				trailerTitle{kind: libraryKindMovies, title: "Late Harbor Call", year: 1940})
 
 			if err == nil {
 				t.Error("the answerer read the search, want the error the archive gave")
@@ -601,11 +601,11 @@ func TestAnArchiveSearchWaitsNoLongerThanItsContext(t *testing.T) {
 	client.interval = time.Minute
 	ctx, stop := context.WithCancel(t.Context())
 
-	if _, err := client.search(ctx, "His Girl Friday"); err != nil {
+	if _, err := client.search(ctx, "Late Harbor Call"); err != nil {
 		t.Fatal(err)
 	}
 	stop()
-	_, err := client.search(ctx, "His Girl Friday")
+	_, err := client.search(ctx, "Late Harbor Call")
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("the second search read %v, want the context's own error", err)

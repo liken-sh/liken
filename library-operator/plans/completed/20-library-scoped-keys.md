@@ -31,8 +31,8 @@ Every replicated table keys on the library first:
 - `file_items`: gains a `library` column; `PRIMARY KEY (library, path, item)`
 - `aliases`: gains a `library` column; `PRIMARY KEY (library, alias)`
 
-The id strings themselves do not change: `movie:tmdb:603` and
-`movie:path:the-matrix-1999` read the same as before. The scope lives
+The id strings themselves do not change: `movie:tmdb:1001` and
+`movie:path:the-long-survey-1999` read the same as before. The scope lives
 in the key, not in the string. The reverse-lookup indexes follow the
 same rule and lead with the library, as every index in the schema
 already does. Any future join from `episodes.series`, `aliases.item`,

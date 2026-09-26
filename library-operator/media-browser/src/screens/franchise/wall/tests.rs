@@ -524,9 +524,9 @@ fn a_column_of_short_times_keeps_the_floor_and_a_wall_of_none_takes_no_column() 
 #[test]
 fn a_span_stacks_the_second_time_on_a_line_of_its_own() {
     let cases = [
-        ("32 BBY", ("32 BBY", "")),
-        ("22 to 20 BBY", ("22", "to 20 BBY")),
-        ("5 BBY to 5 ABY", ("5 BBY", "to 5 ABY")),
+        ("32 BS", ("32 BS", "")),
+        ("22 to 20 BS", ("22", "to 20 BS")),
+        ("5 BS to 5 AS", ("5 BS", "to 5 AS")),
         ("Day 1141 to 1142", ("Day 1141", "to 1142")),
         ("2002 to 2005", ("2002", "to 2005")),
         ("", ("", "")),
@@ -749,7 +749,7 @@ fn a_heading_counts_how_long_its_era_runs() {
         unit: "days".into(),
         ..calendar()
     });
-    assert_eq!(counted(&era("The Siege", 10.0, 12.0), &days), "3 days");
+    assert_eq!(counted(&era("The Long Watch", 10.0, 12.0), &days), "3 days");
     assert_eq!(counted(&era("Bare", 0.0, 9.0), &None), "");
     let bare = Heading {
         name: "Bare".into(),
@@ -760,8 +760,8 @@ fn a_heading_counts_how_long_its_era_runs() {
     };
     assert_eq!(bare.label(), "Bare");
     assert_eq!(
-        bright("The Infinity Saga › Phase Two · 3 years"),
-        "The Infinity Saga › Phase Two"
+        bright("The Specimen Saga › Phase Two · 3 years"),
+        "The Specimen Saga › Phase Two"
     );
     assert_eq!(bright("Bare"), "Bare");
 }
@@ -844,7 +844,7 @@ fn a_title_takes_two_lines_and_the_second_ends_in_an_ellipsis() {
         ("A Film".to_string(), String::new())
     );
 
-    let two = "Star Wars: Episode I The Phantom Menace";
+    let two = "The Specimen Saga: Part I The Marsh Awakens";
     let (first, second) = titled(two, width);
     assert!(first.chars().count() <= room);
     assert!(!second.is_empty());

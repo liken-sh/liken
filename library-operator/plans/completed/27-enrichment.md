@@ -62,7 +62,7 @@ names bunch up and one letter would hold thousands:
 
 ```
 .contributors/
-  ke/keanu-reeves/
+  no/nora-vance/
     contributor.yaml     name, ids under every scheme, born, died, biography
     headshot.jpg
 ```

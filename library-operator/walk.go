@@ -95,7 +95,7 @@ func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 		// folder at the root is never read as a title. A folder with an
 		// extras name that holds only subfolders is a grouping folder, and
 		// the walk descends into it, so the walk still reads a genre folder
-		// named Shorts. A person with the 2016 film Trailers names its folder
+		// named Shorts. A person with a film named Trailers names its folder
 		// Trailers (2016), which is not the bare word.
 		if !entry.IsDir() || skipName(entry.Name()) || r.ignore.skips(entry.Name()) ||
 			isExtrasFolder(filepath.Join(dir.path, entry.Name())) {

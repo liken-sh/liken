@@ -128,18 +128,18 @@ fn a_browser_wired_to_a_broker_that_is_down_still_draws() {
             // A port on loopback that nothing listens on, so every
             // session the reader opens fails and it waits to try again.
             ("MEDIA_BUS_ADDRESS", "127.0.0.1:1"),
-            ("MEDIA_PLAYER_NAME", "den-tv"),
+            ("MEDIA_PLAYER_NAME", "den"),
             (
                 "MEDIA_PLAYER_STATUS_TOPIC",
-                "liken/media/players/house/den-tv/status",
+                "liken/media/players/house/den/status",
             ),
             (
                 "MEDIA_PLAYER_COMMANDS_TOPIC",
-                "liken/media/players/house/den-tv/commands",
+                "liken/media/players/house/den/commands",
             ),
             (
                 "MEDIA_PLAYER_PANEL_TOPIC",
-                "liken/media/players/house/den-tv/panel",
+                "liken/media/players/house/den/panel",
             ),
             (
                 "MEDIA_REMOTE_EVENTS_TOPICS",
@@ -151,10 +151,7 @@ fn a_browser_wired_to_a_broker_that_is_down_still_draws() {
             ),
             ("IDLE_FADE_AFTER_SECONDS", "600"),
             ("IDLE_OFF_AFTER_SECONDS", "1800"),
-            (
-                "LIBRARY_PLAY_TOPIC",
-                "liken/library/players/house/den-tv/play",
-            ),
+            ("LIBRARY_PLAY_TOPIC", "liken/library/players/house/den/play"),
         ],
         &[
             "--script",

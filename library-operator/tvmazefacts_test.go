@@ -16,7 +16,7 @@ const tvmazeHarbour = `{"id":4242,"name":"Winter Harbour","premiered":"2009-09-0
 	"genres":["Drama","Mystery"],"runtime":47,"averageRuntime":45,
 	"summary":"<p>A keeper watches the ice.</p><p>A town of nine &amp; one road.</p>",
 	"rating":{"average":8.6},"network":{"id":2,"name":"Harbour Broadcasting"},
-	"externals":{"imdb":"tt4242424","thetvdb":70533}}`
+	"externals":{"imdb":"tt4242424","thetvdb":800002}}`
 
 // The cast of that show, in the order TVmaze holds it.
 const tvmazeHarbourCast = `[{"person":{"id":8,"name":"Nora Vance",
@@ -123,11 +123,11 @@ func TestTheTVmazeAnswererAsksWithTheIDItHas(t *testing.T) {
 	}{
 		{
 			name: "a title with both ids", scheme: tvmazeSchemeIMDb, id: "tt4242424",
-			ids: providerIDs{"imdb": "tt4242424", "tvdb": "70533"},
+			ids: providerIDs{"imdb": "tt4242424", "tvdb": "800002"},
 		},
 		{
-			name: "a title with the TheTVDB id alone", scheme: tvmazeSchemeTheTVDB, id: "70533",
-			ids: providerIDs{"tvdb": "70533"},
+			name: "a title with the TheTVDB id alone", scheme: tvmazeSchemeTheTVDB, id: "800002",
+			ids: providerIDs{"tvdb": "800002"},
 		},
 	}
 	for _, test := range cases {

@@ -52,10 +52,10 @@ use crate::views::wall;
 
 // The topic the operator names on a screen pod, so a test reads what the
 // browser published on the topic a cluster would give it.
-const PLAY_TOPIC: &str = "liken/library/players/house/den-tv/play";
+const PLAY_TOPIC: &str = "liken/library/players/house/den/play";
 
 // The topic the browser keeps who is watching on, named the same way.
-const AUDIENCE_TOPIC: &str = "liken/library/players/house/den-tv/audience";
+const AUDIENCE_TOPIC: &str = "liken/library/players/house/den/audience";
 
 // The second the clock's own frame falls on. The minute turns on the
 // wall clock, and no test may depend on it, so a case that measures a

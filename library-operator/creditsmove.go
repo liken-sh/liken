@@ -41,7 +41,7 @@ func (e *enricher) moveCredits(ctx context.Context) error {
 		if !held || !e.inScope(item.path) {
 			continue
 		}
-		if e.moveTitleCredits(filepath.Join(e.root, item.path)) {
+		if e.moveTitleCredits(item.id, filepath.Join(e.root, item.path)) {
 			moved++
 		}
 	}
@@ -49,14 +49,14 @@ func (e *enricher) moveCredits(ctx context.Context) error {
 	return nil
 }
 
-// One title's move: each credit that names a removed entry names the entry
+// One title's move, of the title with this catalog id: each credit that names a removed entry names the entry
 // that stays. A credit whose record names no entry on the volume keeps the path
 // it has, and the attempt records that nothing moved.
-func (e *enricher) moveTitleCredits(folder string) bool {
+func (e *enricher) moveTitleCredits(id, folder string) bool {
 	now := time.Now().UTC()
 	ledger, err := readLikenLedger(folder, factCredits)
 	if err != nil {
-		e.logf("could not read the credits of %s: %v", relativePath(e.root, folder), err)
+		e.logf("could not read the credits of %s: %v", opaqueID(id), err)
 		e.recordAttempt(folder, factCreditsMove, likenSelfPath, attemptError, now)
 		return false
 	}
@@ -79,7 +79,7 @@ func (e *enricher) moveTitleCredits(folder string) bool {
 		ledger.Credits = credits
 	})
 	if err != nil {
-		e.logf("could not write the credits of %s: %v", relativePath(e.root, folder), err)
+		e.logf("could not write the credits of %s: %v", opaqueID(id), err)
 		e.recordAttempt(folder, factCreditsMove, likenSelfPath, attemptError, now)
 		return false
 	}

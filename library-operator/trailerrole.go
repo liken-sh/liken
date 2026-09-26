@@ -234,7 +234,7 @@ func (e *enricher) trailerOne(ctx context.Context, line *trailerLine, item ident
 	folder := filepath.Join(e.root, item.path)
 	entries, blocks, err := line.ask(ctx, e.trailerTitle(item, folder))
 	if err != nil {
-		e.logf("could not read the trailers of %s: %v", item.id, err)
+		e.logf("could not read the trailers of %s: %v", opaqueID(item.id), err)
 		e.recordTrailers(folder, nil, nil, attemptError)
 		return false
 	}
@@ -358,7 +358,7 @@ func (e *enricher) recordTrailers(folder string, entries []trailerEntry, blocks 
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v",
-			factTrailer, relativePath(e.root, folder), err)
+			factTrailer, e.named(folder), err)
 	}
 	e.writeRows(factTrailer, folder, result == attemptFound)
 }

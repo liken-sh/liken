@@ -48,14 +48,14 @@ func catalogLines(t *testing.T, catalog *Catalog, sql string) []string {
 func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	writeContributorEntry(t, root, "tom-hanks",
-		"name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\nborn: \"1956-07-09\"\n",
+	writeContributorEntry(t, root, "tod-harker",
+		"name: Tod Harker\nids: {imdb: nm9000158, tmdb: 4031}\nborn: \"1961-03-14\"\n",
 		contributorBiographyName, contributorHeadshotName)
 	writeContributorEntry(t, root, "iris-kell", "name: Iris Kell\nids: {tmdb: 11}\n")
-	writeCreditsLedger(t, root, "The Signal (2014)", []creditEntry{
-		{Name: "Tom Hanks", Part: creditPartActor, Role: "The Captain", Order: 0,
-			Contributor: ".contributors/to/tom-hanks"},
-		{Name: "宮崎 駿", Part: creditPartActor, Role: "Himself", Order: 1},
+	writeCreditsLedger(t, root, "Quiet Station (2014)", []creditEntry{
+		{Name: "Tod Harker", Part: creditPartActor, Role: "The Captain", Order: 0,
+			Contributor: ".contributors/to/tod-harker"},
+		{Name: "山田 花子", Part: creditPartActor, Role: "Himself", Order: 1},
 		{Name: "Iris Kell", Part: creditPartDirector, Order: 2,
 			Contributor: ".contributors/ir/iris-kell"},
 		{Name: "Iris Kell", Part: creditPartWriter, Order: 3,
@@ -63,7 +63,7 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 	})
 
 	result := collectFolders(walkContributors(root, contributorLibrary))
-	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies}, filepath.Join(root, "The Signal (2014)"), result)
+	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies}, filepath.Join(root, "Quiet Station (2014)"), result)
 	if result.readError {
 		t.Fatal("the walk reported a read error, want none")
 	}
@@ -75,23 +75,23 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 		`'|' || biography || '|' || headshot FROM contributors WHERE library = ? ORDER BY path`)
 	wantPeople := []string{
 		".contributors/ir/iris-kell|Iris Kell|||0|0",
-		".contributors/to/tom-hanks|Tom Hanks|1956-07-09||1|1",
+		".contributors/to/tod-harker|Tod Harker|1961-03-14||1|1",
 	}
 	if strings.Join(people, ",") != strings.Join(wantPeople, ",") {
 		t.Errorf("contributors = %v, want %v", people, wantPeople)
 	}
 	ids := catalogLines(t, catalog, `SELECT scheme || '|' || id || '|' || path FROM contributor_aliases `+
 		`WHERE library = ? ORDER BY scheme, id`)
-	want := []string{"imdb|nm0000158|.contributors/to/tom-hanks", "tmdb|11|.contributors/ir/iris-kell",
-		"tmdb|31|.contributors/to/tom-hanks"}
+	want := []string{"imdb|nm9000158|.contributors/to/tod-harker", "tmdb|11|.contributors/ir/iris-kell",
+		"tmdb|4031|.contributors/to/tod-harker"}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("contributor_aliases = %v, want %v", ids, want)
 	}
 	credits := catalogLines(t, catalog, `SELECT billing || '|' || contributor || '|' || name || '|' || `+
 		`part || '|' || role FROM credits WHERE library = ? ORDER BY billing`)
 	wantCredits := []string{
-		"0|.contributors/to/tom-hanks|Tom Hanks|actor|The Captain",
-		"1||宮崎 駿|actor|Himself",
+		"0|.contributors/to/tod-harker|Tod Harker|actor|The Captain",
+		"1||山田 花子|actor|Himself",
 		"2|.contributors/ir/iris-kell|Iris Kell|director|",
 		"3|.contributors/ir/iris-kell|Iris Kell|writer|",
 	}
@@ -104,11 +104,11 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 // the titles that credit them.
 func TestACreditNamesItsTitle(t *testing.T) {
 	root := t.TempDir()
-	writeCreditsLedger(t, root, "The Signal (2014)",
-		[]creditEntry{{Name: "Tom Hanks", Contributor: ".contributors/to/tom-hanks"}})
+	writeCreditsLedger(t, root, "Quiet Station (2014)",
+		[]creditEntry{{Name: "Tod Harker", Contributor: ".contributors/to/tod-harker"}})
 
 	result := &walkResult{}
-	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies}, filepath.Join(root, "The Signal (2014)"), result)
+	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies}, filepath.Join(root, "Quiet Station (2014)"), result)
 
 	if len(result.movies) != 1 {
 		t.Fatalf("movies = %+v, want the one title", result.movies)
@@ -122,8 +122,8 @@ func TestACreditNamesItsTitle(t *testing.T) {
 // a gap query excludes a person the enricher already tried.
 func TestTheWalkOfTheStoreReadsTheAttempts(t *testing.T) {
 	root := t.TempDir()
-	writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\n")
-	folder := filepath.Join(root, contributorDirectory("tom-hanks"))
+	writeContributorEntry(t, root, "tod-harker", "name: Tod Harker\n")
+	folder := filepath.Join(root, contributorDirectory("tod-harker"))
 	data, err := yaml.Marshal(likenLedger{Attempts: []likenAttempt{{Path: likenSelfPath, Result: attemptNothing}}})
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestTheWalkOfTheStoreReadsTheAttempts(t *testing.T) {
 		t.Fatalf("attempts = %+v, want the one the ledger holds", result.attempts)
 	}
 	got := result.attempts[0]
-	if got.Item != ".contributors/to/tom-hanks" || got.Fact != factContributorHeadshot {
+	if got.Item != ".contributors/to/tod-harker" || got.Fact != factContributorHeadshot {
 		t.Errorf("attempt = %+v, want the person and the fact", got)
 	}
 }
@@ -146,10 +146,10 @@ func TestTheWalkOfTheStoreReadsTheAttempts(t *testing.T) {
 func TestTheWalkOfTheStoreReadsOnlyTheEntries(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, contributorsDirectory, "t", "a-stray", "notes.txt"), "a stray")
-	writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\n")
+	writeContributorEntry(t, root, "tod-harker", "name: Tod Harker\n")
 
 	result := collectFolders(walkContributors(root, contributorLibrary))
-	if len(result.contributors) != 1 || result.contributors[0].Path != ".contributors/to/tom-hanks" {
+	if len(result.contributors) != 1 || result.contributors[0].Path != ".contributors/to/tod-harker" {
 		t.Errorf("contributors = %+v, want the one entry", result.contributors)
 	}
 	if result.readError {
@@ -184,17 +184,17 @@ func TestPruningThePeopleTheWalkDidNotMark(t *testing.T) {
 	}
 	held := &walkResult{
 		contributors: []contributorRow{
-			{Library: contributorLibrary, Path: ".contributors/to/tom-hanks", Name: "Tom Hanks"},
+			{Library: contributorLibrary, Path: ".contributors/to/tod-harker", Name: "Tod Harker"},
 			{Library: contributorLibrary, Path: ".contributors/on/one-who-left", Name: "One Who Left"},
 		},
 		contributorAliases: []contributorAliasRow{
-			{Library: contributorLibrary, Scheme: "tmdb", ID: "31", Path: ".contributors/to/tom-hanks"},
+			{Library: contributorLibrary, Scheme: "tmdb", ID: "4031", Path: ".contributors/to/tod-harker"},
 			{Library: contributorLibrary, Scheme: "tmdb", ID: "99", Path: ".contributors/on/one-who-left"},
 		},
 		credits: []creditRow{
-			{Library: contributorLibrary, Item: "movie:tmdb:603", Billing: 0, Name: "Tom Hanks",
-				Contributor: ".contributors/to/tom-hanks"},
-			{Library: contributorLibrary, Item: "movie:tmdb:603", Billing: 1, Name: "One Who Left",
+			{Library: contributorLibrary, Item: "movie:tmdb:1001", Billing: 0, Name: "Tod Harker",
+				Contributor: ".contributors/to/tod-harker"},
+			{Library: contributorLibrary, Item: "movie:tmdb:1001", Billing: 1, Name: "One Who Left",
 				Contributor: ".contributors/on/one-who-left"},
 		},
 	}
@@ -218,15 +218,15 @@ func TestPruningThePeopleTheWalkDidNotMark(t *testing.T) {
 	}
 
 	people := catalogLines(t, catalog, `SELECT path FROM contributors WHERE library = ?`)
-	if len(people) != 1 || people[0] != ".contributors/to/tom-hanks" {
+	if len(people) != 1 || people[0] != ".contributors/to/tod-harker" {
 		t.Errorf("contributors = %v, want the person the walk read", people)
 	}
 	ids := catalogLines(t, catalog, `SELECT id FROM contributor_aliases WHERE library = ?`)
-	if len(ids) != 1 || ids[0] != "31" {
+	if len(ids) != 1 || ids[0] != "4031" {
 		t.Errorf("contributor_aliases = %v, want the id of the person the walk read", ids)
 	}
 	credits := catalogLines(t, catalog, `SELECT name FROM credits WHERE library = ?`)
-	if len(credits) != 1 || credits[0] != "Tom Hanks" {
+	if len(credits) != 1 || credits[0] != "Tod Harker" {
 		t.Errorf("credits = %v, want the credit the walk read", credits)
 	}
 }
@@ -234,10 +234,10 @@ func TestPruningThePeopleTheWalkDidNotMark(t *testing.T) {
 // A credit with no name is no row, because a name is the one thing a person's
 // page has to draw.
 func TestACreditWithNoNameIsNoRow(t *testing.T) {
-	rows := creditRows(contributorLibrary, "movie:tmdb:603", []creditEntry{
-		{Name: " ", Order: 0}, {Name: "Tom Hanks", Order: 1},
+	rows := creditRows(contributorLibrary, "movie:tmdb:1001", []creditEntry{
+		{Name: " ", Order: 0}, {Name: "Tod Harker", Order: 1},
 	})
-	if len(rows) != 1 || rows[0].Name != "Tom Hanks" {
+	if len(rows) != 1 || rows[0].Name != "Tod Harker" {
 		t.Errorf("credits = %+v, want the one named person", rows)
 	}
 }

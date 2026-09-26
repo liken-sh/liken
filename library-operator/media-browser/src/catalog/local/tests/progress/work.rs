@@ -143,16 +143,16 @@ fn an_episode_the_audience_finished_reads_as_finished() {
 }
 
 // A second film of the same library, with the alias a play names it by.
-const OTHER_FILM: &str = "movie:tmdb:604";
-const OTHER_ALIAS: (&str, &str) = ("tmdb", "604");
+const OTHER_FILM: &str = "movie:tmdb:7002";
+const OTHER_ALIAS: (&str, &str) = ("tmdb", "7002");
 
 // A third film of the same library, which no play in these tests names.
-const SPARE_FILM: &str = "movie:tmdb:605";
+const SPARE_FILM: &str = "movie:tmdb:7003";
 
 // A series in the film library, so the wall read proves it drops series
 // ids by kind and not by library.
-const FILMS_SHOW: &str = "series:tvdb:73740";
-const FILMS_SHOW_ALIAS: (&str, &str) = ("tvdb", "73740");
+const FILMS_SHOW: &str = "series:tvdb:8002";
+const FILMS_SHOW_ALIAS: (&str, &str) = ("tvdb", "8002");
 
 // The three films and the one show one library holds, each with the alias
 // a play names it by.

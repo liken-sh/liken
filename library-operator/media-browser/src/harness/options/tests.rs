@@ -201,20 +201,14 @@ fn an_empty_environment_names_neither_topic() {
 #[test]
 fn this_operator_names_both_of_its_topics() {
     let options = environment(&[
-        (PLAY_TOPIC, "liken/library/players/house/den-tv/play"),
-        (
-            AUDIENCE_TOPIC,
-            "liken/library/players/house/den-tv/audience",
-        ),
+        (PLAY_TOPIC, "liken/library/players/house/den/play"),
+        (AUDIENCE_TOPIC, "liken/library/players/house/den/audience"),
     ]);
 
-    assert_eq!(
-        options.play_topic,
-        "liken/library/players/house/den-tv/play"
-    );
+    assert_eq!(options.play_topic, "liken/library/players/house/den/play");
     assert_eq!(
         options.audience_topic,
-        "liken/library/players/house/den-tv/audience"
+        "liken/library/players/house/den/audience"
     );
 }
 

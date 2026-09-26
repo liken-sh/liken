@@ -109,23 +109,23 @@ func (e *enricher) fillContributorIDs(ctx context.Context, client *tmdbClient,
 	folder string, gap contributorGap) bool {
 	held, data, err := readContributorFile(filepath.Join(folder, contributorFileName))
 	if err != nil {
-		e.logf("could not read the entry of %s: %v", gap.path, err)
+		e.logf("could not read %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
 	if data == nil {
-		e.logf("the entry of %s is not on the volume", gap.path)
+		e.logf("%s is not on the volume", entryNamed(gap.path))
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
 	fought, err := e.contributorHeldByAnother(folder, data)
 	if err != nil {
-		e.logf("could not read the ledger of %s: %v", gap.path, err)
+		e.logf("could not read the ledger of %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
 	if fought {
-		e.logf("another writer holds the entry of %s, so this run left it", gap.path)
+		e.logf("another writer holds %s, so this run left it", entryNamed(gap.path))
 		e.recordContributor(folder, factContributorIDs, "", attemptFight, "")
 		return false
 	}
@@ -139,13 +139,13 @@ func (e *enricher) fillContributorIDs(ctx context.Context, client *tmdbClient,
 	}
 	person, err := client.person(ctx, gap.tmdb)
 	if err != nil {
-		e.logf("could not read the person of %s: %v", gap.path, err)
+		e.logf("could not read the person of %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
 	ids, err := client.personIDs(ctx, gap.tmdb)
 	if err != nil {
-		e.logf("could not read the ids of %s: %v", gap.path, err)
+		e.logf("could not read the ids of %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
@@ -160,12 +160,12 @@ func (e *enricher) findContributorTMDb(ctx context.Context, client *tmdbClient,
 	folder string, gap contributorGap) (string, bool) {
 	found, err := client.personByIMDb(ctx, gap.imdb)
 	if err != nil {
-		e.logf("could not find the TMDb id of %s: %v", gap.path, err)
+		e.logf("could not find the TMDb id of %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return "", false
 	}
 	if found == "" {
-		e.logf("the provider names no person for the IMDb id %s of %s", gap.imdb, gap.path)
+		e.logf("the provider names no person for the IMDb id %s of %s", gap.imdb, entryNamed(gap.path))
 		e.recordContributor(folder, factContributorIDs, "", attemptNothing, "")
 		return "", false
 	}
@@ -179,7 +179,7 @@ func (e *enricher) findContributorTMDb(ctx context.Context, client *tmdbClient,
 func (e *enricher) writeContributorIDs(folder string, gap contributorGap,
 	held contributorFile, data []byte, person tmdbPerson, ids providerIDs) bool {
 	if len(ids) == 0 && person.Birthday == "" && person.Deathday == "" {
-		e.logf("the provider holds no ids or dates for %s", gap.path)
+		e.logf("the provider holds no ids or dates for %s", entryNamed(gap.path))
 		e.recordContributor(folder, factContributorIDs, "", attemptNothing, "")
 		return false
 	}
@@ -189,11 +189,11 @@ func (e *enricher) writeContributorIDs(folder string, gap contributorGap,
 		return false
 	}
 	if err := e.writer.write(filepath.Join(folder, contributorFileName), written); err != nil {
-		e.logf("could not write the entry of %s: %v", gap.path, err)
+		e.logf("could not write %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorIDs, "", attemptError, "")
 		return false
 	}
-	e.logf("wrote the ids of %s from %s", gap.path, providerBlockTMDb)
+	e.logf("wrote the ids of %s from %s", entryNamed(gap.path), providerBlockTMDb)
 	e.recordContributor(folder, factContributorIDs, providerBlockTMDb, attemptFound, contentHash(written))
 	return true
 }
@@ -245,13 +245,13 @@ func (e *enricher) fillContributorBiography(ctx context.Context, client *tmdbCli
 	}
 	person, err := client.person(ctx, gap.tmdb)
 	if err != nil {
-		e.logf("could not read the person of %s: %v", gap.path, err)
+		e.logf("could not read the person of %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorBiography, "", attemptError, "")
 		return false
 	}
 	text := strings.TrimSpace(person.Biography)
 	if text == "" {
-		e.logf("the provider holds no biography of %s", gap.path)
+		e.logf("the provider holds no biography of %s", entryNamed(gap.path))
 		e.recordContributor(folder, factContributorBiography, "", attemptNothing, "")
 		return false
 	}
@@ -268,19 +268,19 @@ func (e *enricher) fillContributorHeadshot(ctx context.Context, client *tmdbClie
 	}
 	person, err := client.person(ctx, gap.tmdb)
 	if err != nil {
-		e.logf("could not read the person of %s: %v", gap.path, err)
+		e.logf("could not read the person of %s: %v", entryNamed(gap.path), err)
 		e.recordContributor(folder, factContributorHeadshot, "", attemptError, "")
 		return false
 	}
 	address := tmdbImageURL(tmdbHeadshotSize, person.ProfilePath)
 	if address == "" {
-		e.logf("the provider holds no headshot of %s", gap.path)
+		e.logf("the provider holds no headshot of %s", entryNamed(gap.path))
 		e.recordContributor(folder, factContributorHeadshot, "", attemptNothing, "")
 		return false
 	}
 	data, err := client.fetchFile(ctx, address)
 	if err != nil {
-		e.logf("could not read %s: %v", address, err)
+		e.logf("could not read the headshot of %s from %s: %v", entryNamed(gap.path), opaqueText(address), err)
 		e.recordContributor(folder, factContributorHeadshot, "", attemptError, "")
 		return false
 	}
@@ -293,7 +293,7 @@ func (e *enricher) fillContributorHeadshot(ctx context.Context, client *tmdbClie
 func (e *enricher) contributorFileHeld(folder, name, fact string, gap contributorGap) bool {
 	held, err := fileExists(filepath.Join(folder, name))
 	if err != nil {
-		e.logf("could not read the %s of %s: %v", name, gap.path, err)
+		e.logf("could not read the %s of %s: %v", name, entryNamed(gap.path), err)
 		e.recordContributor(folder, fact, "", attemptError, "")
 		return true
 	}
@@ -308,7 +308,7 @@ func (e *enricher) contributorFileHeld(folder, name, fact string, gap contributo
 func (e *enricher) createContributorFile(folder, name, fact string, gap contributorGap, data []byte) bool {
 	written, err := e.writer.createInto(folder, name, data)
 	if err != nil {
-		e.logf("could not write the %s of %s: %v", name, gap.path, err)
+		e.logf("could not write the %s of %s: %v", name, entryNamed(gap.path), err)
 		e.recordContributor(folder, fact, "", attemptError, "")
 		return false
 	}
@@ -316,7 +316,7 @@ func (e *enricher) createContributorFile(folder, name, fact string, gap contribu
 		e.recordContributor(folder, fact, artProviderExisting, attemptFound, "")
 		return false
 	}
-	e.logf("wrote the %s of %s from %s", name, gap.path, providerBlockTMDb)
+	e.logf("wrote the %s of %s from %s", name, entryNamed(gap.path), providerBlockTMDb)
 	e.recordContributor(folder, fact, providerBlockTMDb, attemptFound, "")
 	return true
 }
@@ -339,7 +339,7 @@ func (e *enricher) recordContributor(folder, fact, provider, result, wrote strin
 		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: now, Result: result})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", fact, folder, err)
+		e.logf("could not record the %s attempt at %s: %v", fact, e.named(folder), err)
 	}
 	e.writeRows(fact, folder, result == attemptFound)
 }

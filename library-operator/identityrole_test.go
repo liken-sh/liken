@@ -17,12 +17,12 @@ func seedIdentityGap(t *testing.T, catalog *Catalog, kind, folder, released stri
 	if kind == libraryKindSeries {
 		seed.series = []seriesRow{{
 			Id: "series:path:x", Library: "house/movies", Kind: kind,
-			Path: folder, Title: "Twin Peaks", Released: released,
+			Path: folder, Title: "Pine Hollow", Released: released,
 		}}
 	} else {
 		seed.movies = []movieRow{{
 			Id: "movie:path:x", Library: "house/movies", Kind: kind,
-			Path: folder, Title: "The Thing", Released: released, Duration: duration,
+			Path: folder, Title: "The Long Survey", Released: released, Duration: duration,
 		}}
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -33,12 +33,12 @@ func seedIdentityGap(t *testing.T, catalog *Catalog, kind, folder, released stri
 func TestTheIdentityFactWritesTheIdIntoTheNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+	folder := "The Long Survey (1982)"
+	writeFile(t, filepath.Join(root, folder, "survey.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` + tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `]}`,
 	})
 
 	if err := work.identityGap(t.Context(), client); err != nil {
@@ -46,14 +46,14 @@ func TestTheIdentityFactWritesTheIdIntoTheNFO(t *testing.T) {
 	}
 
 	nfo := readFileString(t, filepath.Join(root, folder, movieNFOName))
-	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
+	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1101</uniqueid>`) {
 		t.Errorf("the .nfo file holds no id:\n%s", nfo)
 	}
 	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" || ledger.Items[0].Reason != reasonFrom(testTitle, testYear) {
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1101" || ledger.Items[0].Reason != reasonFrom(testTitle, testYear) {
 		t.Errorf("ledger items = %+v, want the id and the reason", ledger.Items)
 	}
 	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
@@ -70,13 +70,13 @@ func TestTheIdentityFactWritesTheIdIntoTheNFO(t *testing.T) {
 func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+	folder := "The Long Survey (1982)"
+	writeFile(t, filepath.Join(root, folder, "survey.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
-		tmdbKey("/3/movie/1091/external_ids", "", ""):   `{"imdb_id":"tt0084787","tvdb_id":12345}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` + tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `]}`,
+		tmdbKey("/3/movie/1101/external_ids", "", ""):         `{"imdb_id":"tt9000011","tvdb_id":12345}`,
 	})
 
 	if err := work.identityGap(t.Context(), client); err != nil {
@@ -85,8 +85,8 @@ func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
 
 	nfo := readFileString(t, filepath.Join(root, folder, movieNFOName))
 	for _, want := range []string{
-		`<uniqueid type="tmdb" default="true">1091</uniqueid>`,
-		`<uniqueid type="imdb">tt0084787</uniqueid>`,
+		`<uniqueid type="tmdb" default="true">1101</uniqueid>`,
+		`<uniqueid type="imdb">tt9000011</uniqueid>`,
 		`<uniqueid type="tvdb">12345</uniqueid>`,
 	} {
 		if !strings.Contains(nfo, want) {
@@ -97,7 +97,7 @@ func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Items) != 1 || ledger.Items[0].ID["imdb"] != "tt0084787" || ledger.Items[0].ID["tvdb"] != "12345" {
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["imdb"] != "tt9000011" || ledger.Items[0].ID["tvdb"] != "12345" {
 		t.Errorf("ledger items = %+v, want every id under one key", ledger.Items)
 	}
 
@@ -106,7 +106,7 @@ func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
 	for _, alias := range walk.aliases {
 		aliases[alias.Alias] = alias.Item
 	}
-	for _, want := range []string{"movie:tmdb:1091", "movie:imdb:tt0084787", "movie:tvdb:12345"} {
+	for _, want := range []string{"movie:tmdb:1101", "movie:imdb:tt9000011", "movie:tvdb:12345"} {
 		if aliases[want] == "" {
 			t.Errorf("aliases = %v, want one for %s", aliases, want)
 		}
@@ -124,9 +124,9 @@ func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 		{
 			name: "two results no rung parts",
 			answers: map[string]string{
-				tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
-					tmdbResultJSON(1091, "The Thing", "1982-06-25") + `,` +
-					tmdbResultJSON(9999, "The Thing", "1982-01-01") + `]}`,
+				tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+					tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `,` +
+					tmdbResultJSON(9999, "The Long Survey", "1982-01-01") + `]}`,
 			},
 			wantResult: attemptCandidates,
 			wantItems:  1,
@@ -139,7 +139,7 @@ func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 		},
 		{
 			name:       "a provider that refuses",
-			refuse:     tmdbKey("/3/search/movie", "The Thing", "1982"),
+			refuse:     tmdbKey("/3/search/movie", "The Long Survey", "1982"),
 			wantResult: attemptError,
 			wantItems:  0,
 		},
@@ -148,8 +148,8 @@ func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			root := t.TempDir()
-			folder := "The Thing (1982)"
-			writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+			folder := "The Long Survey (1982)"
+			writeFile(t, filepath.Join(root, folder, "survey.mkv"), "video")
 			seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 			client, fake := newFakeTMDb(t, test.answers)
@@ -181,12 +181,12 @@ func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 func TestASeriesTakesItsIdFromTheSeriesNFO(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "Twin Peaks (1990)"
+	folder := "Pine Hollow (1990)"
 	writeFile(t, filepath.Join(root, folder, "Season 01", "s01e01.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindSeries, folder, "1990", 0)
 	work, _ := testEnricher(t, libraryKindSeries, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/tv", "Twin Peaks", "1990"): `{"results":[{"id":1920,"name":"Twin Peaks","first_air_date":"1990-04-08"}]}`,
+		tmdbKey("/3/search/tv", "Pine Hollow", "1990"): `{"results":[{"id":2103,"name":"Pine Hollow","first_air_date":"1990-03-02"}]}`,
 	})
 
 	if err := work.identityGap(t.Context(), client); err != nil {
@@ -194,7 +194,7 @@ func TestASeriesTakesItsIdFromTheSeriesNFO(t *testing.T) {
 	}
 
 	nfo := readFileString(t, filepath.Join(root, folder, seriesNFOName))
-	if !strings.Contains(nfo, "<tvshow>") || !strings.Contains(nfo, ">1920<") {
+	if !strings.Contains(nfo, "<tvshow>") || !strings.Contains(nfo, ">2103<") {
 		t.Errorf("the series .nfo file reads:\n%s", nfo)
 	}
 }
@@ -202,18 +202,18 @@ func TestASeriesTakesItsIdFromTheSeriesNFO(t *testing.T) {
 func TestTheRuntimeRungReadsTheNFOTheProbeJustWrote(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+	folder := "The Long Survey (1982)"
+	writeFile(t, filepath.Join(root, folder, "survey.mkv"), "video")
 	writeFile(t, filepath.Join(root, folder, movieNFOName),
-		"<movie>\n  <title>The Thing</title>\n  <fileinfo><streamdetails><video>"+
+		"<movie>\n  <title>The Long Survey</title>\n  <fileinfo><streamdetails><video>"+
 			"<durationinseconds>6540</durationinseconds></video></streamdetails></fileinfo>\n</movie>\n")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
-			tmdbResultJSON(1091, "The Thing", "1982-06-25") + `,` +
-			tmdbResultJSON(9999, "The Thing", "1982-01-01") + `]}`,
-		tmdbKey("/3/movie/1091", "", ""): `{"runtime":109}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+			tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `,` +
+			tmdbResultJSON(9999, "The Long Survey", "1982-01-01") + `]}`,
+		tmdbKey("/3/movie/1101", "", ""): `{"runtime":109}`,
 		tmdbKey("/3/movie/9999", "", ""): `{"runtime":42}`,
 	})
 
@@ -225,7 +225,7 @@ func TestTheRuntimeRungReadsTheNFOTheProbeJustWrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" {
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1101" {
 		t.Fatalf("items = %+v, want the runtime rung's answer", ledger.Items)
 	}
 	if ledger.Items[0].Reason != reasonFrom(testTitle, testYear, testRuntime) {
@@ -266,17 +266,17 @@ func TestTheRuntimeComesOffTheCatalogWhereItHoldsOne(t *testing.T) {
 func TestTheIdentityFactWorksOverTheFolderItsJobNames(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "The Thing (1982)", "thing.mkv"), "video")
-	writeFile(t, filepath.Join(root, "Alien (1979)", "alien.mkv"), "video")
-	seedIdentityGap(t, catalog, libraryKindMovies, "The Thing (1982)", "1982", 0)
+	writeFile(t, filepath.Join(root, "The Long Survey (1982)", "survey.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Another Film (1979)", "another.mkv"), "video")
+	seedIdentityGap(t, catalog, libraryKindMovies, "The Long Survey (1982)", "1982", 0)
 	if err := upsertWalk(t.Context(), catalog, &walkResult{movies: []movieRow{{
-		Id: "movie:path:alien", Library: "house/movies", Kind: libraryKindMovies,
-		Path: "Alien (1979)", Title: "Alien", Released: "1979",
+		Id: "movie:path:another-film", Library: "house/movies", Kind: libraryKindMovies,
+		Path: "Another Film (1979)", Title: "Another Film", Released: "1979",
 	}}}); err != nil {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	work.scanPaths = []string{"The Thing (1982)"}
+	work.scanPaths = []string{"The Long Survey (1982)"}
 	work.scopes = work.narrowedScopes()
 	client, fake := newFakeTMDb(t, nil)
 
@@ -284,10 +284,10 @@ func TestTheIdentityFactWorksOverTheFolderItsJobNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if fake.served[tmdbKey("/3/search/movie", "Alien", "1979")] != 0 {
+	if fake.served[tmdbKey("/3/search/movie", "Another Film", "1979")] != 0 {
 		t.Error("the fact asked about a title outside the folder its Job named")
 	}
-	if fake.served[tmdbKey("/3/search/movie", "The Thing", "1982")] == 0 {
+	if fake.served[tmdbKey("/3/search/movie", "The Long Survey", "1982")] == 0 {
 		t.Error("the fact asked nothing about the folder its Job named")
 	}
 }
@@ -309,7 +309,7 @@ func TestAnIdentityItemReadsTheTableItsScopeNames(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	ctx := t.Context()
 	seed := &walkResult{
-		movies: []movieRow{{Id: "movie:path:x", Library: "house/movies", Path: "M", Title: "M", Released: "1982-06-25", Duration: 99}},
+		movies: []movieRow{{Id: "movie:path:x", Library: "house/movies", Path: "M", Title: "M", Released: "1982-05-14", Duration: 99}},
 		series: []seriesRow{{Id: "series:path:y", Library: "house/movies", Path: "S", Title: "S", Released: "1990"}},
 	}
 	if err := upsertWalk(ctx, catalog, seed); err != nil {
@@ -350,12 +350,12 @@ func TestTheIdentityFactFailsWhereItCannotReadItsGap(t *testing.T) {
 func TestAnNFOThatWillNotTakeTheIdRecordsAnError(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Thing (1982)"
+	folder := "The Long Survey (1982)"
 	writeFile(t, filepath.Join(root, folder, movieNFOName), "this is not xml <<<")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` + tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `]}`,
 	})
 
 	if err := work.identityGap(t.Context(), client); err != nil {
@@ -376,14 +376,14 @@ func TestAnNFOThatWillNotTakeTheIdRecordsAnError(t *testing.T) {
 func TestATitleKeepsItsIDWhereTheOtherIDsFail(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+	folder := "The Long Survey (1982)"
+	writeFile(t, filepath.Join(root, folder, "survey.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, fake := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` + tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `]}`,
 	})
-	fake.statuses[tmdbKey("/3/movie/1091/external_ids", "", "")] = http.StatusUnauthorized
+	fake.statuses[tmdbKey("/3/movie/1101/external_ids", "", "")] = http.StatusUnauthorized
 
 	if err := work.identityGap(t.Context(), client); err != nil {
 		t.Fatal(err)
@@ -393,7 +393,7 @@ func TestATitleKeepsItsIDWhereTheOtherIDsFail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" || len(ledger.Items[0].ID) != 1 {
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1101" || len(ledger.Items[0].ID) != 1 {
 		t.Errorf("ledger items = %+v, want the provider's own id alone", ledger.Items)
 	}
 }

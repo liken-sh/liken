@@ -116,7 +116,7 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 	target := trickplayDirectory(absolute)
 	if dirExists(target) {
 		if e.dropTrickplayMap(filepath.Join(target, trickplayTilesFolder())) {
-			e.logf("removed the trickplay map beside the sheets of %s", filepath.Base(absolute))
+			e.logf("removed the trickplay map beside the sheets of %s", e.named(absolute))
 		}
 		e.recordArt(folder, factTrickplay, entry, artProviderExisting, attemptFound)
 		return false
@@ -124,7 +124,7 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 	// The line goes out before the decode, because a decode of a feature
 	// runs for minutes with nothing else to say, and it names the decoder,
 	// because nothing else in the log says whether the GPU took the work.
-	e.logf("tiling %s, %s long, %s", filepath.Base(absolute), gap.duration.Round(time.Second), decoderName())
+	e.logf("tiling %s, %s long, %s", e.named(absolute), gap.duration.Round(time.Second), decoderName())
 	result := e.buildTrickplay(ctx, absolute, target)
 	e.recordArt(folder, factTrickplay, entry, "", result)
 	return result == attemptFound
@@ -138,12 +138,12 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 func (e *enricher) buildTrickplay(ctx context.Context, input, target string) string {
 	staging, err := e.writer.stageTree(target)
 	if err != nil {
-		e.logf("could not stage the trickplay of %s: %v", filepath.Base(input), err)
+		e.logf("could not stage the trickplay of %s: %v", e.named(input), err)
 		return attemptError
 	}
 	defer func() {
 		if err := e.writer.removeTemporaryTree(staging); err != nil {
-			e.logf("could not clear %s: %v", staging, err)
+			e.logf("could not clear %s: %v", e.named(staging), err)
 		}
 	}()
 
@@ -153,11 +153,11 @@ func (e *enricher) buildTrickplay(ctx context.Context, input, target string) str
 	}
 	landed, err := e.writer.createTree(target)
 	if err != nil {
-		e.logf("could not write %s: %v", target, err)
+		e.logf("could not write %s: %v", e.named(target), err)
 		return attemptError
 	}
 	if landed {
-		e.logf("wrote %d trickplay sheets under %s", sheets, target)
+		e.logf("wrote %d trickplay sheets under %s", sheets, e.named(target))
 	}
 	return attemptFound
 }
@@ -169,7 +169,7 @@ func (e *enricher) buildTrickplay(ctx context.Context, input, target string) str
 func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (int, string) {
 	tiles := filepath.Join(staging, trickplayTilesFolder())
 	if err := os.MkdirAll(tiles, volumeDirectoryPerm); err != nil {
-		e.logf("could not stage the trickplay of %s: %v", filepath.Base(input), err)
+		e.logf("could not stage the trickplay of %s: %v", e.named(input), err)
 		return 0, attemptError
 	}
 	// A decode ffmpeg refuses is the file's own state, and not a fault of
@@ -177,7 +177,7 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (i
 	// that will not decode today will not decode tomorrow. A run a signal
 	// ended is an error, and the error window applies.
 	if err := ffmpegSheets(ctx, input, tiles); err != nil {
-		e.logf("could not tile %s: %v", filepath.Base(input), err)
+		e.logf("could not tile %s: %v", e.named(input), err)
 		if ffmpegRefused(err) {
 			return 0, attemptNothing
 		}
@@ -185,11 +185,11 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string) (i
 	}
 	sheets, err := sheetsIn(tiles)
 	if err != nil {
-		e.logf("could not read the sheets of %s: %v", filepath.Base(input), err)
+		e.logf("could not read the sheets of %s: %v", e.named(input), err)
 		return 0, attemptError
 	}
 	if len(sheets) == 0 {
-		e.logf("ffmpeg read no frame of %s", filepath.Base(input))
+		e.logf("ffmpeg read no frame of %s", e.named(input))
 		return 0, attemptNothing
 	}
 	return len(sheets), attemptFound
@@ -246,7 +246,7 @@ func (e *enricher) dropTrickplayMap(layout string) bool {
 		return false
 	}
 	if err := e.writer.removeTrickplayMap(path); err != nil {
-		e.logf("could not remove %s: %v", path, err)
+		e.logf("could not remove %s: %v", e.named(path), err)
 		return false
 	}
 	return true

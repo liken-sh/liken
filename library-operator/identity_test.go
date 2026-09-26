@@ -10,13 +10,13 @@ import (
 )
 
 func TestAliasRowsForItemAddsEveryProvider(t *testing.T) {
-	providers := map[string]string{"tmdb": "603", "imdb": "tt0133093", "tvdb": "12345"}
-	got := aliasRowsForItem("movies", scopeMovie, providers, "the-matrix", "movie:tmdb:603")
+	providers := map[string]string{"tmdb": "1001", "imdb": "tt9001001", "tvdb": "12345"}
+	got := aliasRowsForItem("movies", scopeMovie, providers, "some-film", "movie:tmdb:1001")
 	want := []aliasRow{
-		{Library: "movies", Alias: "movie:tmdb:603", Item: "movie:tmdb:603", Source: aliasSourceProvider},
-		{Library: "movies", Alias: "movie:imdb:tt0133093", Item: "movie:tmdb:603", Source: aliasSourceProvider},
-		{Library: "movies", Alias: "movie:path:the-matrix", Item: "movie:tmdb:603", Source: aliasSourceFolder},
-		{Library: "movies", Alias: "movie:tvdb:12345", Item: "movie:tmdb:603", Source: aliasSourceProvider},
+		{Library: "movies", Alias: "movie:tmdb:1001", Item: "movie:tmdb:1001", Source: aliasSourceProvider},
+		{Library: "movies", Alias: "movie:imdb:tt9001001", Item: "movie:tmdb:1001", Source: aliasSourceProvider},
+		{Library: "movies", Alias: "movie:path:some-film", Item: "movie:tmdb:1001", Source: aliasSourceFolder},
+		{Library: "movies", Alias: "movie:tvdb:12345", Item: "movie:tmdb:1001", Source: aliasSourceProvider},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("aliasRowsForItem = %+v, want %+v", got, want)

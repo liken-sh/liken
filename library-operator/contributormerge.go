@@ -9,6 +9,7 @@ package main
 // creditsmove.go, because it is the one writer of credits.yaml.
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path"
@@ -106,7 +107,7 @@ func (e *enricher) contributorGroup(ctx context.Context, first string) ([]groupE
 		folder := filepath.Join(e.root, entry)
 		held, data, err := readContributorFile(filepath.Join(folder, contributorFileName))
 		if err != nil {
-			e.logf("could not read the entry of %s: %v", entry, err)
+			e.logf("could not read %s: %v", entryNamed(entry), err)
 			e.recordMerge(folder, attemptError, "")
 			continue
 		}
@@ -147,13 +148,13 @@ func (e *enricher) mergeGroup(ctx context.Context, group []groupEntry, counts *m
 	for _, member := range group {
 		fought, err := e.contributorHeldByAnother(member.folder, member.data)
 		if err != nil {
-			e.logf("could not read the ledger of %s: %v", member.path, err)
+			e.logf("could not read the ledger of %s: %v", entryNamed(member.path), err)
 			e.recordGroup(group, attemptError, "")
 			return
 		}
 		if fought {
 			reason := "a person edited " + path.Join(member.path, contributorFileName)
-			e.logf("left the entries %s, because %s", groupPaths(group), reason)
+			e.logf("left the entries %s, because %s", groupNamed(group), entriesNamed(reason, group))
 			e.recordGroup(group, attemptHeld, reason)
 			counts.held += len(group)
 			return
@@ -161,23 +162,23 @@ func (e *enricher) mergeGroup(ctx context.Context, group []groupEntry, counts *m
 	}
 	ids, conflict := joinedIDs(group)
 	if conflict != "" {
-		e.logf("left the entries %s, because %s", groupPaths(group), conflict)
+		e.logf("left the entries %s, because %s", groupNamed(group), entriesNamed(conflict, group))
 		e.recordGroup(group, attemptConflict, conflict)
 		counts.conflicts++
 		return
 	}
 	stays := entryToKeep(group)
 	if err := e.writeMergedEntries(group, stays, ids); err != nil {
-		e.logf("could not merge %s into %s: %v", groupPaths(group), stays.path, err)
+		e.logf("could not merge %s into %s: %v", groupNamed(group), entryNamed(stays.path), err)
 		e.recordGroup(group, attemptError, "")
 		return
 	}
 	// The files are the truth, and the next walk writes the same rows, so a
 	// catalog that refuses them leaves the merge as it is.
 	if err := e.writeMergeRows(ctx, group, stays); err != nil {
-		e.logf("could not write the rows of the merge into %s: %v", stays.path, err)
+		e.logf("could not write the rows of the merge into %s: %v", entryNamed(stays.path), err)
 	}
-	e.logf("merged %s into %s", groupPaths(group), stays.path)
+	e.logf("merged %s into %s", groupNamed(group), entryNamed(stays.path))
 	e.recordMerge(stays.folder, attemptFound, "")
 	counts.merged++
 	for _, member := range group {
@@ -236,12 +237,29 @@ func (g groupEntry) atPlainSlug() bool {
 	return path.Base(g.path) == contributorSlug(g.file.Name, g.file.IDs)
 }
 
-func groupPaths(group []groupEntry) string {
+// The entries of a group as a log line names them, each by the hash of its
+// path, because the path is the person's name.
+func groupNamed(group []groupEntry) string {
+	named := make([]string, len(group))
+	for i, member := range group {
+		named[i] = entryNamed(member.path)
+	}
+	return strings.Join(named, ", ")
+}
+
+// A reason the ledger keeps, as a log line may carry it: every path of the
+// group in it named by its hash. The longest path goes first, so a path that
+// starts another one does not cut into it.
+func entriesNamed(reason string, group []groupEntry) string {
 	paths := make([]string, len(group))
 	for i, member := range group {
 		paths[i] = member.path
 	}
-	return strings.Join(paths, ", ")
+	slices.SortFunc(paths, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
+	for _, path := range paths {
+		reason = strings.ReplaceAll(reason, path, entryNamed(path))
+	}
+	return reason
 }
 
 // The writes of one merge. The entry that stays gets every id, and a date it
@@ -343,19 +361,19 @@ func (e *enricher) deleteMergedEntry(ctx context.Context, entry string) bool {
 	folder := filepath.Join(e.root, entry)
 	named, err := e.catalog.creditsNaming(ctx, e.library, entry)
 	if err != nil {
-		e.logf("could not read the credits of %s: %v", entry, err)
+		e.logf("could not read the credits of %s: %v", entryNamed(entry), err)
 		return false
 	}
 	if named > 0 {
 		return false
 	}
 	if err := e.writer.removeMergedEntry(folder); err != nil {
-		e.logf("could not delete the merged entry %s: %v", entry, err)
+		e.logf("could not delete the merged %s: %v", entryNamed(entry), err)
 		e.recordMerge(folder, attemptError, "")
 		return false
 	}
 	if _, err := e.catalog.DeleteContributorMerges(ctx, e.library, []string{entry}); err != nil {
-		e.logf("could not delete the merge record of %s: %v", entry, err)
+		e.logf("could not delete the merge record of %s: %v", entryNamed(entry), err)
 	}
 	return true
 }
@@ -380,7 +398,7 @@ func (e *enricher) recordMerge(folder, result, reason string) {
 		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: time.Now().UTC(), Result: result})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", factContributorMerge, folder, err)
+		e.logf("could not record the %s attempt at %s: %v", factContributorMerge, e.named(folder), err)
 	}
 	e.writeRows(factContributorMerge, folder, false)
 }

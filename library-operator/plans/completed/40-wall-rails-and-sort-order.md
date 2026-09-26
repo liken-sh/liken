@@ -60,7 +60,7 @@ rail's bars. There are four orders and no others:
   wall's first order. The code calls it `Leads`.
 - **Newest**: release date descending.
 - **Oldest**: release date ascending.
-- **Title**: alphabetical by sort key, "The Matrix" under M.
+- **Title**: alphabetical by sort key, "The Long Survey" under L.
 
 A library wall cycles Title, Newest, Oldest. A genre wall cycles
 Leads, Newest, Oldest, Title. The recency walls are newest first by
@@ -84,7 +84,7 @@ the way a movie's page has them.
 The clock's layer becomes a strip the browser draws over every screen:
 a magnifying glass at the clock's left, and the clock. On a search
 wall the glass expands into the text field, and the wall's own band
-keeps its heading, "adam sc · 18", at the left.
+keeps its heading, "nora va · 18", at the left.
 
 An up press that moves nothing on any screen puts focus on the glass.
 Enter on it opens the search wall with the keyboard grid shown. This is
@@ -96,7 +96,7 @@ The band's controls are gone. The band draws the heading alone.
 ### The head
 
 The head over a genre wall is gone. The band carries what the head
-did: "Science Fiction · 429 movies, 70 series", counted by kind off the
+did: "Science Fiction · 120 movies, 15 series", counted by kind off the
 answered items.
 
 ### The index
@@ -140,20 +140,20 @@ a headshot if any of the rows has one.
 - Up from the top of a movie's page focuses the glass, and enter opens
   search with the grid.
 - A person who is in two libraries appears once in search.
-- The genre band reads "Science Fiction · 429 movies, 70 series" and no
+- The genre band reads "Science Fiction · 120 movies, 15 series" and no
   head draws over the first row.
 
 ## The drill, 2026-09-06
 
 Built and drilled the same day on this workstation from `local/browse`.
 The library wall draws 14 letter bars and its button cycles to Newest,
-where the bars are decades. A genre wall opens in its "Genre" order
-with two bars, and enter on "other Science Fiction" lands on the first
-title that does not lead with it, mid-row. A 28-season series draws
-seven merged bars and a 12-season one draws twelve, numbered, on dark
-pills that read over the art. Up from the top of a movie's page focuses
-the glass, and enter opens search with the grid. The genre band reads
-"Science Fiction · 429 movies, 70 series".
+where the bars are decades. A genre wall opens in its "Genre" order with
+two bars, and enter on "other Science Fiction" lands on the first title
+that does not lead with it, mid-row. A series of more than twenty
+seasons draws seven merged bars and a 12-season one draws twelve,
+numbered, on dark pills that read over the art. Up from the top of a
+movie's page focuses the glass, and enter opens search with the grid.
+The genre band reads "Science Fiction · 120 movies, 15 series".
 
 Five things the drill changed. Bars are sized by their longest label,
 not a fixed slot, and fitted against nine tenths of the height so a

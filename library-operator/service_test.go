@@ -51,7 +51,7 @@ func TestCatalogServiceNamesNoSelector(t *testing.T) {
 // The Service is owned by its namespace's one Catalog, so the garbage
 // collector removes it when the Catalog goes.
 func TestCatalogServiceIsOwnedByItsCatalog(t *testing.T) {
-	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
+	owners := []OwnerReference{catalogOwner("house", "house-uid")}
 
 	service := buildCatalogService(testLibraryNamespace, owners)
 

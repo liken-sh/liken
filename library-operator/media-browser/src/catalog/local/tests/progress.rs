@@ -16,13 +16,13 @@ const PROGRESS_SCHEMA: &str = concat!(
 
 const FILMS: &str = "default/films";
 const SHOWS: &str = "default/shows";
-const FILM: &str = "movie:tmdb:603";
-const SHOW: &str = "series:tvdb:73739";
+const FILM: &str = "movie:tmdb:7001";
+const SHOW: &str = "series:tvdb:8001";
 
 // The provider ids a play carries for each of the two works. The reads
 // resolve them against the catalog's aliases.
-const FILM_ALIAS: (&str, &str) = ("tmdb", "603");
-const SHOW_ALIAS: (&str, &str) = ("tvdb", "73739");
+const FILM_ALIAS: (&str, &str) = ("tmdb", "7001");
+const SHOW_ALIAS: (&str, &str) = ("tvdb", "8001");
 
 fn progress_fixture(dir: &TempDir) -> PathBuf {
     let path = dir.path().join("progress.db");
@@ -215,8 +215,8 @@ fn a_play_carrying_two_aliases_of_one_work_answers_once() {
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
     a_film(&catalog);
-    insert_alias(&catalog, FILMS, "movie:imdb:tt0133093", FILM);
-    let aliases = [FILM_ALIAS, ("imdb", "tt0133093")];
+    insert_alias(&catalog, FILMS, "movie:imdb:tt9000001", FILM);
+    let aliases = [FILM_ALIAS, ("imdb", "tt9000001")];
     insert_play(&store, "one", &aliases, &["first"], (600, 6000, 10), (0, 0));
     let mut source = source_over(&catalog, store);
 

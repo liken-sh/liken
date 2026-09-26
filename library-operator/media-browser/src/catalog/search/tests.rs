@@ -53,38 +53,44 @@ fn titles(hits: &[Slot]) -> Vec<&str> {
 // The five items plan 39's proof names: a movie titled with the word, a
 // movie that starts with it, a movie with it as a later word, a series
 // with it as an alias, and a series whose episode's plot names it.
-fn caped() -> Index {
+fn gullwing() -> Index {
     let mut builder = Builder::new();
-    movie(&mut builder, "movie:1", "Batman", "1989", &["batman-1989"]);
-    movie(&mut builder, "movie:2", "Batman Begins", "2005", &[]);
-    movie(&mut builder, "movie:3", "The Batman", "2022", &[]);
+    movie(
+        &mut builder,
+        "movie:1",
+        "Gullwing",
+        "1989",
+        &["gullwing-1989"],
+    );
+    movie(&mut builder, "movie:2", "Gullwing Rising", "2005", &[]);
+    movie(&mut builder, "movie:3", "The Gullwing", "2022", &[]);
     series(
         &mut builder,
         "series:1",
-        "The Caped Crusader",
+        "The Grey Coast",
         "1992",
-        &["Batman"],
+        &["Gullwing"],
     );
     let nightly = series(&mut builder, "series:2", "Nightly", "1996", &[]);
     builder.fold(nightly, Where::EpisodeTitle, "The Long Fall");
     builder.fold(
         nightly,
         Where::EpisodePlot,
-        "A reporter follows Batman across the rooftops and files nothing.",
+        "A reporter follows Gullwing across the rooftops and files nothing.",
     );
     builder.finish()
 }
 
 #[test]
 fn a_word_ranks_a_title_over_an_alias_over_a_plot() {
-    let hits = caped().find("batman");
+    let hits = gullwing().find("gullwing");
     assert_eq!(
         titles(&hits),
         [
-            "Batman",
-            "Batman Begins",
-            "The Batman",
-            "The Caped Crusader",
+            "Gullwing",
+            "Gullwing Rising",
+            "The Gullwing",
+            "The Grey Coast",
             "Nightly",
         ]
     );
@@ -92,13 +98,13 @@ fn a_word_ranks_a_title_over_an_alias_over_a_plot() {
 
 #[test]
 fn every_word_of_a_query_must_match_the_same_item() {
-    let hits = caped().find("batman 1989");
-    assert_eq!(titles(&hits), ["Batman"]);
+    let hits = gullwing().find("gullwing 1989");
+    assert_eq!(titles(&hits), ["Gullwing"]);
 }
 
 #[test]
 fn a_query_of_nothing_answers_nothing() {
-    let index = caped();
+    let index = gullwing();
     assert!(index.find("").is_empty());
     assert!(index.find("   ").is_empty());
     assert!(index.find("zzz").is_empty());
@@ -107,19 +113,19 @@ fn a_query_of_nothing_answers_nothing() {
 #[test]
 fn a_diacritic_folds_away_on_both_sides() {
     let mut builder = Builder::new();
-    movie(&mut builder, "movie:4", "Amélie", "2001", &[]);
+    movie(&mut builder, "movie:4", "Brévelle", "2001", &[]);
     let index = builder.finish();
-    assert_eq!(titles(&index.find("amelie")), ["Amélie"]);
-    assert_eq!(titles(&index.find("AMÉLIE")), ["Amélie"]);
+    assert_eq!(titles(&index.find("brevelle")), ["Brévelle"]);
+    assert_eq!(titles(&index.find("BRÉVELLE")), ["Brévelle"]);
 }
 
 #[test]
 fn a_substring_inside_a_word_is_the_last_kind_of_match() {
     let mut builder = Builder::new();
-    movie(&mut builder, "movie:5", "Man of Steel", "2013", &[]);
-    movie(&mut builder, "movie:6", "Batman", "1989", &[]);
+    movie(&mut builder, "movie:5", "Wing of Salt", "2013", &[]);
+    movie(&mut builder, "movie:6", "Gullwing", "1989", &[]);
     let index = builder.finish();
-    assert_eq!(titles(&index.find("man")), ["Man of Steel", "Batman"]);
+    assert_eq!(titles(&index.find("wing")), ["Wing of Salt", "Gullwing"]);
 }
 
 #[test]
@@ -189,7 +195,7 @@ fn a_tie_breaks_by_kind_then_by_the_newest_release_then_by_the_sort_key() {
 
 #[test]
 fn an_index_reports_what_it_holds() {
-    let size = caped().size();
+    let size = gullwing().size();
     assert_eq!(size.items, 5);
     assert_eq!(size.entries, 9);
     assert!(size.words >= 12, "the vocabulary holds every folded word");

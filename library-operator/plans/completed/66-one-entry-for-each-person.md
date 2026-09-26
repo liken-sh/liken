@@ -24,7 +24,7 @@ person by the IMDb id alone.
 The credits fact finds a person's entry by the slug of the name
 (`contributorFor`, `contributors.go:160`). It reads the entry at the
 plain slug, then the entry at the slug with the id suffix, such as
-`tom-hanks-tmdb-31`. `isPerson` (`contributors.go:142`) decides whether
+`nora-vance-tmdb-4001`. `isPerson` (`contributors.go:142`) decides whether
 an entry is the credited person:
 
 - When the entry and the credit hold an id in the same scheme, the ids

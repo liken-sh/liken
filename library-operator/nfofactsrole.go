@@ -197,7 +197,7 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 	nfoPath, rootElement := identityNFO(e.kind, folder)
 	document, err := os.ReadFile(nfoPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		e.logf("could not read the .nfo file of %s: %v", item.path, err)
+		e.logf("could not read the .nfo file of %s: %v", opaqueID(item.id), err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
 		return attemptError, false
 	}
@@ -207,18 +207,18 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 
 	group := nfoGroup(fact)
 	if fought, err := e.groupHeldByAnother(folder, fact, group, document); err != nil {
-		e.logf("could not read the %s of %s: %v", fact, item.path, err)
+		e.logf("could not read the %s of %s: %v", fact, opaqueID(item.id), err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
 		return attemptError, false
 	} else if fought {
-		e.logf("another writer holds the %s of %s, so this run left it", fact, item.path)
+		e.logf("another writer holds the %s of %s, so this run left it", fact, opaqueID(item.id))
 		e.recordNFO(folder, fact, nil, attemptFight, nil)
 		return attemptFight, false
 	}
 
 	answers, spent, err := line.ask(ctx, fact, titleRef{kind: e.kind, ids: nfoIDs(document)})
 	if err != nil {
-		e.logf("could not ask for the %s of %s: %v", fact, item.path, err)
+		e.logf("could not ask for the %s of %s: %v", fact, opaqueID(item.id), err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
 		return attemptError, false
 	}
@@ -226,7 +226,7 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 		if spent {
 			return "", false
 		}
-		e.logf("no provider holds the %s of %s", fact, item.path)
+		e.logf("no provider holds the %s of %s", fact, opaqueID(item.id))
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
 		return attemptNothing, false
 	}
@@ -270,7 +270,7 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 	document []byte, merged factAnswer, names providerNames) (string, bool) {
 	release, err := lockNFO(e.writer.locks, nfoPath)
 	if err != nil {
-		e.logf("could not write the %s of %s: %v", fact, item.path, err)
+		e.logf("could not write the %s of %s: %v", fact, opaqueID(item.id), err)
 		e.recordNFO(folder, fact, nil, attemptError, names)
 		return attemptError, false
 	}
@@ -283,12 +283,12 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 	if written {
 		changed, err := editElementGroup(document, group, nfoElements(fact, merged))
 		if err != nil {
-			e.logf("could not write the %s of %s: %v", fact, item.path, err)
+			e.logf("could not write the %s of %s: %v", fact, opaqueID(item.id), err)
 			e.recordNFO(folder, fact, nil, attemptError, names)
 			return attemptError, false
 		}
 		if err := e.writer.write(nfoPath, changed); err != nil {
-			e.logf("could not write the %s of %s: %v", fact, item.path, err)
+			e.logf("could not write the %s of %s: %v", fact, opaqueID(item.id), err)
 			e.recordNFO(folder, fact, nil, attemptError, names)
 			return attemptError, false
 		}
@@ -296,7 +296,7 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 	}
 	hash, err := groupHash(edited, group)
 	if err != nil {
-		e.logf("could not read back the %s of %s: %v", fact, item.path, err)
+		e.logf("could not read back the %s of %s: %v", fact, opaqueID(item.id), err)
 		e.recordNFO(folder, fact, nil, attemptError, names)
 		return attemptError, false
 	}
@@ -307,9 +307,9 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 		e.writeCredits(folder, merged)
 	}
 	if written {
-		e.logf("wrote the %s of %s from %s", fact, item.path, strings.Join(names, ", "))
+		e.logf("wrote the %s of %s from %s", fact, opaqueID(item.id), strings.Join(names, ", "))
 	} else {
-		e.logf("the .nfo file of %s already holds the %s from %s", item.path, fact, strings.Join(names, ", "))
+		e.logf("the .nfo file of %s already holds the %s from %s", opaqueID(item.id), fact, strings.Join(names, ", "))
 	}
 	e.recordNFO(folder, fact, &likenItem{
 		Path: likenSelfPath, Provider: names, Wrote: hash, Written: time.Now().UTC(),
@@ -369,7 +369,7 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 		})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", fact, folder, err)
+		e.logf("could not record the %s attempt at %s: %v", fact, e.named(folder), err)
 	}
 	e.writeRows(fact, folder, result == attemptFound)
 }

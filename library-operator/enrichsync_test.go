@@ -194,8 +194,8 @@ func answering(t *testing.T, probe mediaProbe) {
 func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
-	folder := "The Thing (1982)"
-	seedProbeGap(t, catalog, work.root, folder, "The Thing (1982).mkv")
+	folder := "The Long Survey (1982)"
+	seedProbeGap(t, catalog, work.root, folder, "The Long Survey (1982).mkv")
 	agent.holdVersion(t, otherAgent, 1)
 	answering(t, answeringProbe(ffprobeOfOneFile))
 
@@ -222,13 +222,13 @@ func answeringTMDb(t *testing.T, client *tmdbClient) {
 func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	work := syncingEnricher(t, catalog)
-	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(work.root, folder, "thing.mkv"), "video")
+	folder := "The Long Survey (1982)"
+	writeFile(t, filepath.Join(work.root, folder, "survey.mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	agent.holdVersion(t, otherAgent, 1)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
-			tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` +
+			tmdbResultJSON(1101, "The Long Survey", "1982-06-01") + `]}`,
 	})
 	answeringTMDb(t, client)
 
@@ -237,7 +237,7 @@ func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	}
 
 	nfo := readFileString(t, filepath.Join(work.root, folder, movieNFOName))
-	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
+	if !strings.Contains(nfo, `<uniqueid type="tmdb" default="true">1101</uniqueid>`) {
 		t.Errorf("the .nfo file holds no id:\n%s", nfo)
 	}
 }

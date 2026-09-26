@@ -383,11 +383,8 @@ type archiveCandidate struct {
 	ambiguous bool
 }
 
-// Every item whose own title carries this title. A search for `Dune` answers
-// every Dune item the collection holds, so an item that scores 0 is dropped
-// and never recorded.
-// Every item whose own title carries this title. A search for `Dune` answers
-// every Dune item the collection holds, so an item that scores 0 is dropped
+// Every item whose own title carries this title. A search for `Kestrel` answers
+// every Kestrel item the collection holds, so an item that scores 0 is dropped
 // and never recorded. The metadata of each ambiguous item is read, and an
 // item with no video or with one longer than eight minutes is dropped as a
 // whole film.

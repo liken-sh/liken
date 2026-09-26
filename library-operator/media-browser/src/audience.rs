@@ -17,7 +17,7 @@ pub struct Person {
 }
 
 /// The `Person` list as a file holds it:
-/// `[{"name":"chris","displayName":"Chris"}]`.
+/// `[{"name":"person-a","displayName":"Person A"}]`.
 pub fn people_from_json(bytes: &[u8]) -> Result<Vec<Person>, String> {
     let document: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
     people_from_value(&document)

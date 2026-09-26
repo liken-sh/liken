@@ -7,20 +7,26 @@ use super::*;
 fn libraries_come_back_counted_and_ordered_by_name() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    insert_series(&path, "default/shows", "series:tvdb:73739", "Lost", "lost");
-    insert_movie(
+    insert_series(
         &path,
-        "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "default/shows",
+        "series:tvdb:8001",
+        "Harrow",
+        "harrow",
     );
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:604",
-        "The Matrix Reloaded",
-        "matrix reloaded",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
+    );
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:7002",
+        "The Lantern Returns",
+        "lantern returns",
     );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
@@ -31,13 +37,13 @@ fn libraries_come_back_counted_and_ordered_by_name() {
                 library: "default/films".into(),
                 kind: "movies".into(),
                 items: 2,
-                art: vec!["movie:tmdb:603.jpg".into(), "movie:tmdb:604.jpg".into()],
+                art: vec!["movie:tmdb:7001.jpg".into(), "movie:tmdb:7002.jpg".into()],
             },
             LibraryEntry {
                 library: "default/shows".into(),
                 kind: "series".into(),
                 items: 1,
-                art: vec!["series:tvdb:73739.jpg".into()],
+                art: vec!["series:tvdb:8001.jpg".into()],
             },
         ]
     );
@@ -103,16 +109,16 @@ fn a_library_wall_comes_back_in_sort_key_order() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:604",
-        "The Matrix Reloaded",
-        "matrix reloaded",
+        "movie:tmdb:7002",
+        "The Lantern Returns",
+        "lantern returns",
     );
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
     insert_movie(
         &path,
@@ -126,16 +132,16 @@ fn a_library_wall_comes_back_in_sort_key_order() {
     let answer = source.wall(&library("default/films"));
     assert_eq!(answer.name, "films");
     let ids: Vec<&str> = answer.slots.iter().map(|slot| slot.id.as_str()).collect();
-    assert_eq!(ids, ["movie:tmdb:603", "movie:tmdb:604"]);
+    assert_eq!(ids, ["movie:tmdb:7001", "movie:tmdb:7002"]);
     assert_eq!(
         answer.slots[0],
         Slot {
             library: "default/films".into(),
             kind: "movies".into(),
-            id: "movie:tmdb:603".into(),
-            title: "The Matrix".into(),
+            id: "movie:tmdb:7001".into(),
+            title: "The Lantern".into(),
             released: "1999".into(),
-            art: "movie:tmdb:603.jpg".into(),
+            art: "movie:tmdb:7001.jpg".into(),
             ..Slot::default()
         }
     );
@@ -161,16 +167,22 @@ fn a_series_library_wall_stamps_every_slot_with_its_kind() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
-    insert_series(&path, "default/shows", "series:tvdb:73739", "Lost", "lost");
+    insert_series(
+        &path,
+        "default/shows",
+        "series:tvdb:8001",
+        "Harrow",
+        "harrow",
+    );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let slots = source.wall(&library("default/shows")).slots;
     assert_eq!(slots.len(), 1);
-    assert_eq!(slots[0].id, "series:tvdb:73739");
+    assert_eq!(slots[0].id, "series:tvdb:8001");
     assert_eq!(slots[0].kind, "series");
     assert_eq!(slots[0].library, "default/shows");
     assert!(source.wall(&library("default/empty")).slots.is_empty());
@@ -180,16 +192,16 @@ fn a_series_library_wall_stamps_every_slot_with_its_kind() {
 fn a_series_slot_counts_the_seasons_its_episodes_fall_into_and_a_movie_counts_none() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    let series = "series:tvdb:73739";
+    let series = "series:tvdb:8001";
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
-    insert_series(&path, "default/shows", series, "Lost", "lost");
-    insert_series(&path, "default/shows", "series:tvdb:1", "Alias", "alias");
+    insert_series(&path, "default/shows", series, "Harrow", "harrow");
+    insert_series(&path, "default/shows", "series:tvdb:1", "Aster", "aster");
     for (season, episode) in [(1, 1), (1, 2), (2, 1), (4, 7)] {
         insert_episode(
             &path,
@@ -216,7 +228,7 @@ fn a_series_slot_counts_the_seasons_its_episodes_fall_into_and_a_movie_counts_no
 fn episodes_come_back_by_season_and_then_by_episode() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    let series = "series:tvdb:73739";
+    let series = "series:tvdb:8001";
     insert_episode(&path, "default/shows", "episode:tvdb:2", series, 2, 1);
     insert_episode(&path, "default/shows", "episode:tvdb:1b", series, 1, 2);
     insert_episode(&path, "default/shows", "episode:tvdb:1a", series, 1, 1);
@@ -251,27 +263,23 @@ fn a_missing_file_reads_as_empty_until_the_agent_writes_it() {
     assert!(source.wall(&library("default/films")).slots.is_empty());
     assert!(
         source
-            .episodes("default/shows", "series:tvdb:73739")
+            .episodes("default/shows", "series:tvdb:8001")
             .is_empty()
     );
-    assert!(
-        source
-            .series("default/shows", "series:tvdb:73739")
-            .is_none()
-    );
+    assert!(source.series("default/shows", "series:tvdb:8001").is_none());
 
     assert!(source.play("default/films", &movie_chosen()).is_empty());
     assert!(source.play("default/shows", &episode_chosen(1)).is_empty());
-    assert!(source.movie("default/films", "movie:tmdb:603").is_none());
+    assert!(source.movie("default/films", "movie:tmdb:7001").is_none());
     assert!(source.set("default/films", "set:one").is_none());
 
     fixture(&dir);
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
     assert_eq!(source.libraries().len(), 1);
 }
@@ -303,9 +311,9 @@ fn a_reader_reads_the_same_file_and_leaves_the_streams_running() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);

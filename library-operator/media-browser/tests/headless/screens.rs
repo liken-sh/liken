@@ -410,7 +410,7 @@ fn a_status_off_idle_dims_the_page_under_it() {
 }
 
 // The topic the operator names for the `Player`'s retained status.
-const STATUS_TOPIC: &str = "liken/media/players/house/den-tv/status";
+const STATUS_TOPIC: &str = "liken/media/players/house/den/status";
 
 // The band of rows under the strip, which the page draws in whole. The
 // strip keeps its own brightness over the dim, so a reading that started
@@ -431,7 +431,7 @@ fn page_brightness(name: &str, status: Option<&str>) -> u8 {
         None => Vec::new(),
         Some(broker) => vec![
             ("MEDIA_BUS_ADDRESS", broker.address.as_str()),
-            ("MEDIA_PLAYER_NAME", "den-tv"),
+            ("MEDIA_PLAYER_NAME", "den"),
             ("MEDIA_PLAYER_STATUS_TOPIC", STATUS_TOPIC),
         ],
     };
@@ -495,7 +495,7 @@ fn a_muted_level_draws_the_slash_on_the_glyph() {
 }
 
 // The topic the operator names for a unit with sinks.
-const VOLUME_TOPIC: &str = "liken/media/players/house/den-tv/volume";
+const VOLUME_TOPIC: &str = "liken/media/players/house/den/volume";
 
 // Two points of the row in a 1920 by 1080 frame, which the frames below
 // are read at. The row is in the top right corner: the number's box ends
@@ -520,7 +520,7 @@ fn a_level_of(name: &str, payload: &str) -> Frame {
         &dir,
         &[
             ("MEDIA_BUS_ADDRESS", &broker.address),
-            ("MEDIA_PLAYER_NAME", "den-tv"),
+            ("MEDIA_PLAYER_NAME", "den"),
             ("MEDIA_PLAYER_VOLUME_TOPIC", VOLUME_TOPIC),
         ],
         &[

@@ -232,12 +232,12 @@ in this report with a finish is also the proof that a catalog pod holds
 every row the `Job` wrote.
 
     {
-      "titles": 412,
+      "titles": 128,
       "unidentified": 9,
       "lastWalk": "2026-08-29T21:04:11Z",
       "lastChange": "2026-08-29T21:04:11Z",
-      "items": 412,
-      "files": 2189,
+      "items": 128,
+      "files": 560,
       "walking": false,
       "removedLastSweep": 3,
       "runs": [

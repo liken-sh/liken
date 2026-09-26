@@ -336,7 +336,7 @@ func TestReconcileReportsAFailedFolderScan(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 	operator := testOperator(t, cluster)
-	operator.paths.hold("house", "movies", "/library/movies/Arrival (2016)")
+	operator.paths.hold("house", "movies", "/library/movies/Landfall (2016)")
 	cluster.broken["/apis/batch/v1/namespaces/house/jobs"] = http.StatusInternalServerError
 
 	err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow)
@@ -451,7 +451,7 @@ func TestReconcileBindsTheStorageClaimOfAFranchisesLibrary(t *testing.T) {
 	cluster := newFakeCluster()
 	library := studioFranchises()
 	cluster.libraries["franchises"] = library
-	seedCatalog(cluster, "house-catalog", "house")
+	seedCatalog(cluster, "house", "house")
 	cluster.claims["franchises"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "franchises", Namespace: "house"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-franchises"},

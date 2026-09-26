@@ -15,22 +15,22 @@ func titleCreditingAMergedEntry(t *testing.T, credits []creditEntry) (*enricher,
 	t.Helper()
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedWalkedEntry(t, catalog, root, "tom-hanks", "name: Tom Hanks\nids: {tmdb: 31}\n")
-	seedWalkedEntry(t, catalog, root, "thomas-hanks", "mergedInto: .contributors/to/tom-hanks\n")
-	writeCreditsLedger(t, root, "The Signal (2014)", credits)
+	seedWalkedEntry(t, catalog, root, "oren-tally", "name: Oren Tally\nids: {tmdb: 9031}\n")
+	seedWalkedEntry(t, catalog, root, "oren-talley", "mergedInto: .contributors/or/oren-tally\n")
+	writeCreditsLedger(t, root, "Some Film (2014)", credits)
 	result := &walkResult{}
 	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies},
-		filepath.Join(root, "The Signal (2014)"), result)
+		filepath.Join(root, "Some Film (2014)"), result)
 	if err := upsertWalk(t.Context(), catalog, result); err != nil {
 		t.Fatal(err)
 	}
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	return work, catalog, filepath.Join(root, "The Signal (2014)")
+	return work, catalog, filepath.Join(root, "Some Film (2014)")
 }
 
 func TestTheCreditsFactMovesACreditToTheEntryThatStays(t *testing.T) {
 	work, catalog, folder := titleCreditingAMergedEntry(t, []creditEntry{
-		{Name: "Thomas Hanks", Part: creditPartActor, Order: 0, Contributor: ".contributors/th/thomas-hanks"},
+		{Name: "Oren Talley", Part: creditPartActor, Order: 0, Contributor: ".contributors/or/oren-talley"},
 		{Name: "Iris Kell", Part: creditPartDirector, Order: 1},
 	})
 
@@ -39,11 +39,11 @@ func TestTheCreditsFactMovesACreditToTheEntryThatStays(t *testing.T) {
 	}
 
 	credits := artLedger(t, folder, factCredits).Credits
-	if len(credits) != 2 || credits[0].Contributor != ".contributors/to/tom-hanks" || credits[1].Contributor != "" {
+	if len(credits) != 2 || credits[0].Contributor != ".contributors/or/oren-tally" || credits[1].Contributor != "" {
 		t.Errorf("credits = %+v, want the credit moved to the entry that stays", credits)
 	}
 	rows := catalogLines(t, catalog, `SELECT contributor FROM credits WHERE library = ? AND billing = 0`)
-	if len(rows) != 1 || rows[0] != ".contributors/to/tom-hanks" {
+	if len(rows) != 1 || rows[0] != ".contributors/or/oren-tally" {
 		t.Errorf("credits rows = %v, want the entry that stays", rows)
 	}
 	ledger := artLedger(t, folder, factCreditsMove)
@@ -63,16 +63,16 @@ func TestTheCreditsFactMovesACreditToTheEntryThatStays(t *testing.T) {
 // attempt says so.
 func TestARecordThatNamesNoEntryMovesNothing(t *testing.T) {
 	work, _, folder := titleCreditingAMergedEntry(t, []creditEntry{
-		{Name: "Thomas Hanks", Part: creditPartActor, Order: 0, Contributor: ".contributors/th/thomas-hanks"},
+		{Name: "Oren Talley", Part: creditPartActor, Order: 0, Contributor: ".contributors/or/oren-talley"},
 	})
-	writeContributorEntry(t, work.root, "thomas-hanks", "mergedInto: .contributors/go/gone\n")
+	writeContributorEntry(t, work.root, "oren-talley", "mergedInto: .contributors/go/gone\n")
 
 	if err := work.moveCredits(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
 	credits := artLedger(t, folder, factCredits).Credits
-	if len(credits) != 1 || credits[0].Contributor != ".contributors/th/thomas-hanks" {
+	if len(credits) != 1 || credits[0].Contributor != ".contributors/or/oren-talley" {
 		t.Errorf("credits = %+v, want the credit as it was", credits)
 	}
 	ledger := artLedger(t, folder, factCreditsMove)
@@ -85,7 +85,7 @@ func TestARecordThatNamesNoEntryMovesNothing(t *testing.T) {
 // stay as they are.
 func TestACreditsLedgerThatCannotBeReadIsAnErrorAttempt(t *testing.T) {
 	work, _, folder := titleCreditingAMergedEntry(t, []creditEntry{
-		{Name: "Thomas Hanks", Part: creditPartActor, Order: 0, Contributor: ".contributors/th/thomas-hanks"},
+		{Name: "Oren Talley", Part: creditPartActor, Order: 0, Contributor: ".contributors/or/oren-talley"},
 	})
 	writeFile(t, filepath.Join(folder, likenDirectory, likenLedgerName(factCredits)), "credits: [")
 
@@ -103,7 +103,7 @@ func TestACreditsLedgerThatCannotBeReadIsAnErrorAttempt(t *testing.T) {
 // the nfo container.
 func TestTheCreditsFactRunsTheMove(t *testing.T) {
 	work, _, folder := titleCreditingAMergedEntry(t, []creditEntry{
-		{Name: "Thomas Hanks", Part: creditPartActor, Order: 0, Contributor: ".contributors/th/thomas-hanks"},
+		{Name: "Oren Talley", Part: creditPartActor, Order: 0, Contributor: ".contributors/or/oren-talley"},
 	})
 	t.Setenv(librarySourcesVariable, providerBlockTMDb)
 	t.Setenv(tmdbTokenVariable, "the-key")
@@ -113,7 +113,7 @@ func TestTheCreditsFactRunsTheMove(t *testing.T) {
 	}
 
 	credits := artLedger(t, folder, factCredits).Credits
-	if len(credits) != 1 || credits[0].Contributor != ".contributors/to/tom-hanks" {
+	if len(credits) != 1 || credits[0].Contributor != ".contributors/or/oren-tally" {
 		t.Errorf("credits = %+v, want the credit moved", credits)
 	}
 	if work.personFinder == nil {

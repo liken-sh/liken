@@ -455,13 +455,13 @@ mod tests {
     #[test]
     fn a_heading_splits_into_its_name_and_the_scope_after_the_dot() {
         assert_eq!(
-            split("Wizarding World · a 4-film set"),
-            ("Wizarding World", " · a 4-film set")
+            split("Ember Realm · a 4-film set"),
+            ("Ember Realm", " · a 4-film set")
         );
         assert_eq!(
-            split("Marvel Cinematic Universe · a franchise of 124 films and series"),
+            split("Northwind Shared Universe · a franchise of 124 films and series"),
             (
-                "Marvel Cinematic Universe",
+                "Northwind Shared Universe",
                 " · a franchise of 124 films and series"
             )
         );

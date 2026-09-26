@@ -27,6 +27,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -277,7 +278,7 @@ func (s *scanner) runJob(ctx context.Context) error {
 
 	run.Finished = time.Now().UTC()
 	if walked != nil {
-		run.Failure = walked.Error()
+		run.Failure = opaqueError(walked, s.root)
 	}
 	s.mutex.Lock()
 	run.Unidentified = s.report.Unidentified
@@ -325,7 +326,7 @@ func (s *scanner) walkOnce(ctx context.Context) error {
 	for _, scanPath := range s.scanPaths {
 		absolute := s.resolveWebhookPath(scanPath)
 		if absolute == "" {
-			s.logf("could not map %s onto the volume, walking the whole root", scanPath)
+			s.logf("could not map %s onto the volume, walking the whole root", s.named(scanPath))
 			return s.fullWalk(ctx)
 		}
 		folders = append(folders, absolute)
@@ -419,7 +420,7 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		// and names the path. The summary line below reports only that the
 		// pass was incomplete.
 		for _, failure := range folder.readFailures {
-			s.logf("could not read %s: %v", failure.path, failure.err)
+			s.logf("could not read %s: %v", s.named(failure.path), failure.err)
 		}
 		appendFolder(buffer, folder)
 		sets.add(folder.movies)
@@ -621,6 +622,10 @@ func (s *scanner) logWalkComplete(titles, folders, unidentified, removed int, na
 	if unidentified == 0 {
 		return
 	}
+	names = slices.Clone(names)
+	for index, name := range names {
+		names[index] = s.named(name)
+	}
 	if more := unidentified - len(names); more > 0 {
 		s.logf("unidentified folders: %s, and %d more", strings.Join(names, ", "), more)
 		return
@@ -629,12 +634,20 @@ func (s *scanner) logWalkComplete(titles, folders, unidentified, removed int, na
 }
 
 // logf writes one scanner log line under the shared prefix, or nothing
-// when the scanner was built without a log.
+// when the scanner was built without a log. An error in the line keeps its
+// cause and loses every path through opaqueError, because a read the volume
+// refused names the whole path.
 func (s *scanner) logf(format string, args ...any) {
 	if s.log == nil {
 		return
 	}
-	fmt.Fprintf(s.log, "library.liken.sh: "+format+"\n", args...)
+	fmt.Fprintf(s.log, "library.liken.sh: "+format+"\n", opaqueErrors(args, s.root)...)
+}
+
+// named is a path on the volume, absolute or relative to the root, as a
+// scanner line names it.
+func (s *scanner) named(path string) string {
+	return opaquePath(s.root, path)
 }
 
 // Rescan reads one title or series folder and reconciles the
@@ -654,17 +667,17 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
 
-	relative := relativePath(s.root, folder)
+	named := s.named(folder)
 	written, removed, err := rescanFolder(ctx, s.catalog, s.folderScan(), folder)
 	if err != nil {
-		return s.walkFailed("rescan "+relative, err)
+		return s.walkFailed("rescan "+named, err)
 	}
 
 	if written == 0 && removed == 0 {
-		s.logf("rescanned %s: no change", relative)
+		s.logf("rescanned %s: no change", named)
 		return nil
 	}
-	s.logf("rescanned %s: wrote %d, removed %d", relative, written, removed)
+	s.logf("rescanned %s: wrote %d, removed %d", named, written, removed)
 	s.mutex.Lock()
 	s.report.LastChange = time.Now().UTC()
 	s.report.RemovedLastSweep = removed
@@ -702,7 +715,7 @@ func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder
 	// follows, and it is what keeps a share that refuses one directory
 	// from emptying a title's rows.
 	if result.readError {
-		return 0, 0, fmt.Errorf("could not read %s in full", relative)
+		return 0, 0, fmt.Errorf("could not read %s in full", opaquePath(scan.root, folder))
 	}
 
 	// The sets this folder's movies named are read before the upsert, so a

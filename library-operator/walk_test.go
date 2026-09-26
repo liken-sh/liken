@@ -56,7 +56,7 @@ func moviesTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	titles := []string{
-		"The Signal (2024)",
+		"The Relay (2024)",
 		filepath.Join("Genre", "The Beacon (2019)"),
 		filepath.Join("Genre", "The Crossing (2021)"),
 		filepath.Join("Genre", "Studio A", "The Lantern (2016)"),
@@ -82,7 +82,7 @@ func moviesTree(t *testing.T) string {
 func seriesTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	for i, show := range []string{"Breaking Bad (2008)", "The Wire (2002)", "Nameless"} {
+	for i, show := range []string{"Copper Line (2008)", "The Low Road (2002)", "Nameless"} {
 		dir := filepath.Join(root, show)
 		writeFile(t, filepath.Join(dir, "tvshow.nfo"), fmt.Sprintf(
 			`<tvshow><title>%s</title><uniqueid type="tvdb">%d</uniqueid></tvshow>`, show, i))
@@ -367,9 +367,10 @@ func unreadableFolder(t *testing.T, root, name string) string {
 }
 
 // A Synology share root holds #recycle, which is root-owned and unreadable.
-// The walk names every directory it could not read, so the pod log says which
-// path held the pass back, and a service directory is skipped rather than
-// read, so the pass completes and the prune runs.
+// The walk names every directory it could not read by the hash of its path,
+// so the pod log says which path held the pass back without the name of a
+// title. A service directory is skipped rather than read, so the pass
+// completes and the prune runs.
 func TestTheWalkNamesADirectoryItCannotRead(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a directory of mode 000")
@@ -397,7 +398,7 @@ func TestTheWalkNamesADirectoryItCannotRead(t *testing.T) {
 				if !strings.Contains(log, "walk complete") {
 					t.Errorf("log = %q, want a walk that completed past the service folder", log)
 				}
-				if strings.Contains(log, blocked) {
+				if strings.Contains(log, opaquePath(root, blocked)) {
 					t.Errorf("log = %q, want no read of the service folder %q", log, blocked)
 				}
 				return
@@ -405,8 +406,11 @@ func TestTheWalkNamesADirectoryItCannotRead(t *testing.T) {
 			if !strings.Contains(log, "incomplete walk") {
 				t.Errorf("log = %q, want the pass marked incomplete", log)
 			}
-			if !strings.Contains(log, "could not read "+blocked) {
-				t.Errorf("log = %q, want the path %q named", log, blocked)
+			if !strings.Contains(log, "could not read "+opaquePath(root, blocked)) {
+				t.Errorf("log = %q, want the path %q named by its hash", log, blocked)
+			}
+			if strings.Contains(log, blocked) {
+				t.Errorf("log = %q, want no raw path %q", log, blocked)
 			}
 		})
 	}

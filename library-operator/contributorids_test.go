@@ -25,8 +25,8 @@ func catalogCount(t *testing.T, catalog *Catalog, sql string) int {
 func TestTheWalkRecordsEveryIDOfEveryEntry(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\n")
-	writeContributorEntry(t, root, "thomas-hanks", "name: Thomas Hanks\nids: {imdb: nm0000158}\n")
+	writeContributorEntry(t, root, "tod-harker", "name: Tod Harker\nids: {imdb: nm9000158, tmdb: 4031}\n")
+	writeContributorEntry(t, root, "theodore-harker", "name: Theodore Harker\nids: {imdb: nm9000158}\n")
 
 	if err := upsertWalk(t.Context(), catalog, collectFolders(walkContributors(root, contributorLibrary))); err != nil {
 		t.Fatal(err)
@@ -35,9 +35,9 @@ func TestTheWalkRecordsEveryIDOfEveryEntry(t *testing.T) {
 	ids := catalogLines(t, catalog, `SELECT path || '|' || scheme || '|' || id FROM contributor_ids `+
 		`WHERE library = ? ORDER BY path, scheme`)
 	want := []string{
-		".contributors/th/thomas-hanks|imdb|nm0000158",
-		".contributors/to/tom-hanks|imdb|nm0000158",
-		".contributors/to/tom-hanks|tmdb|31",
+		".contributors/th/theodore-harker|imdb|nm9000158",
+		".contributors/to/tod-harker|imdb|nm9000158",
+		".contributors/to/tod-harker|tmdb|4031",
 	}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("contributor_ids = %v, want %v", ids, want)
@@ -53,8 +53,8 @@ func TestTheWalkRecordsEveryIDOfEveryEntry(t *testing.T) {
 func TestTheWalkReadsAMergedEntryAsARecordOfTheMerge(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	writeContributorEntry(t, root, "thomas-hanks", "mergedInto: .contributors/to/tom-hanks\n")
-	writeFile(t, filepath.Join(root, contributorDirectory("thomas-hanks"), likenDirectory,
+	writeContributorEntry(t, root, "theodore-harker", "mergedInto: .contributors/to/tod-harker\n")
+	writeFile(t, filepath.Join(root, contributorDirectory("theodore-harker"), likenDirectory,
 		likenLedgerName(factContributorMerge)), "attempts:\n  - path: .\n    at: 2026-09-25T00:00:00Z\n    result: error\n")
 
 	result := collectFolders(walkContributors(root, contributorLibrary))
@@ -68,7 +68,7 @@ func TestTheWalkReadsAMergedEntryAsARecordOfTheMerge(t *testing.T) {
 		}
 	}
 	merges := catalogLines(t, catalog, `SELECT path || '|' || merged_into FROM contributor_merges WHERE library = ?`)
-	if len(merges) != 1 || merges[0] != ".contributors/th/thomas-hanks|.contributors/to/tom-hanks" {
+	if len(merges) != 1 || merges[0] != ".contributors/th/theodore-harker|.contributors/to/tod-harker" {
 		t.Errorf("contributor_merges = %v, want the record of the merge", merges)
 	}
 	if len(result.attempts) != 1 || result.attempts[0].Fact != factContributorMerge {
@@ -86,11 +86,11 @@ func TestPruningTheIDsAndTheMergesTheWalkDidNotMark(t *testing.T) {
 	}
 	held := &walkResult{
 		contributorAliases: []contributorAliasRow{
-			{Library: contributorLibrary, Scheme: "tmdb", ID: "31", Path: ".contributors/to/tom-hanks"},
-			{Library: contributorLibrary, Scheme: "imdb", ID: "nm0000158", Path: ".contributors/to/tom-hanks"},
+			{Library: contributorLibrary, Scheme: "tmdb", ID: "4031", Path: ".contributors/to/tod-harker"},
+			{Library: contributorLibrary, Scheme: "imdb", ID: "nm9000158", Path: ".contributors/to/tod-harker"},
 		},
 		contributorMerges: []contributorMergeRow{
-			{Library: contributorLibrary, Path: ".contributors/th/thomas-hanks", MergedInto: ".contributors/to/tom-hanks"},
+			{Library: contributorLibrary, Path: ".contributors/th/theodore-harker", MergedInto: ".contributors/to/tod-harker"},
 		},
 	}
 	if err := upsertWalk(ctx, catalog, held); err != nil {

@@ -343,15 +343,15 @@ mod tests {
         assert_eq!(
             recorded(
                 &[],
-                &named(&[("tmdb", "603"), ("path", "some-film-1999")], (0, 0))
+                &named(&[("tmdb", "7001"), ("path", "some-film-1999")], (0, 0))
             )["aliases"],
-            serde_json::json!({"tmdb": "603", "path": "some-film-1999"})
+            serde_json::json!({"tmdb": "7001", "path": "some-film-1999"})
         );
     }
 
     #[test]
     fn an_episode_request_names_the_two_aired_numbers() {
-        let request = recorded(&[], &named(&[("tvdb", "73739")], (2, 5)));
+        let request = recorded(&[], &named(&[("tvdb", "8001")], (2, 5)));
 
         assert_eq!(request["season"], 2);
         assert_eq!(request["episode"], 5);

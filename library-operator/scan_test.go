@@ -101,7 +101,7 @@ func waitForTopic(t *testing.T, broker *fakeBroker, topic string) brokerPublish 
 func TestNewScannerReadsTheJobItRuns(t *testing.T) {
 	scanEnvironment(t)
 	t.Setenv(jobNameVariable, "movies-scan-29128191")
-	t.Setenv(scanPathVariable, "/movies/The Thing (1982)")
+	t.Setenv(scanPathVariable, "/movies/The Long Survey (1982)")
 	t.Setenv(handoffTimeoutVariable, "90s")
 
 	scan := mustScanner(t, io.Discard)
@@ -109,7 +109,7 @@ func TestNewScannerReadsTheJobItRuns(t *testing.T) {
 	if scan.job != "movies-scan-29128191" {
 		t.Errorf("job = %q, want the Job the environment names", scan.job)
 	}
-	if len(scan.scanPaths) != 1 || scan.scanPaths[0] != "/movies/The Thing (1982)" {
+	if len(scan.scanPaths) != 1 || scan.scanPaths[0] != "/movies/The Long Survey (1982)" {
 		t.Errorf("scanPaths = %q, want the folder the environment names", scan.scanPaths)
 	}
 	if scan.handoffTimeout != 90*time.Second {
@@ -201,14 +201,14 @@ func TestParseIgnore(t *testing.T) {
 // webhook drives for a series library.
 func TestScannerRescanReadsOneSeriesFolder(t *testing.T) {
 	scan, recorder := testScanner(t, "testdata/series", libraryKindSeries)
-	episode := filepath.Join("testdata", "series", "Breaking Bad", "Season 02", "Breaking Bad - S02E05.mkv")
+	episode := filepath.Join("testdata", "series", "Copper Line", "Season 02", "Copper Line - S02E05.mkv")
 
 	scan.rescan(context.Background(), episode)
 
-	if !postedWith(recorder, "series:tvdb:81189") {
+	if !postedWith(recorder, "series:tvdb:800001") {
 		t.Error("the rescan did not upsert the series")
 	}
-	if !postedWith(recorder, "episode:tvdb:81189:s02e05") {
+	if !postedWith(recorder, "episode:tvdb:800001:s02e05") {
 		t.Error("the rescan did not upsert the episode")
 	}
 }
@@ -217,12 +217,12 @@ func TestScannerRescanReadsOneSeriesFolder(t *testing.T) {
 // title-folder path is taken and not the grouping one.
 func TestScannerRescanReadsARootTitle(t *testing.T) {
 	scan, recorder := testScanner(t, "testdata/movies", libraryKindMovies)
-	title := filepath.Join("testdata", "movies", "The.Thing.1982.1080p.BluRay.x264-GROUP")
+	title := filepath.Join("testdata", "movies", "The.Long.Survey.1982.1080p.BluRay.x264-GROUP")
 
 	scan.rescan(context.Background(), title)
 
-	if !postedWith(recorder, "movie:path:the-thing-1982-1080p-bluray-x264-group") {
-		t.Error("the rescan did not upsert The Thing")
+	if !postedWith(recorder, "movie:path:the-long-survey-1982-1080p-bluray-x264-group") {
+		t.Error("the rescan did not upsert The Long Survey")
 	}
 }
 
@@ -238,12 +238,12 @@ func TestRescanLogsWhetherItChanged(t *testing.T) {
 	}{
 		{
 			name: "a folder with content writes",
-			path: filepath.Join("testdata", "movies", "The.Thing.1982.1080p.BluRay.x264-GROUP"),
+			path: filepath.Join("testdata", "movies", "The.Long.Survey.1982.1080p.BluRay.x264-GROUP"),
 			want: "wrote",
 		},
 		{
 			name: "a resolved path with nothing to do is a no-change line",
-			path: filepath.Join("testdata", "movies", "Ghost (1990)", "ghost.mkv"),
+			path: filepath.Join("testdata", "movies", "Pale Hour (1990)", "pale.mkv"),
 			want: "no change",
 		},
 	}
@@ -365,8 +365,8 @@ func TestTitleFolderOfFollowsTheWalksOwnRule(t *testing.T) {
 		},
 		{
 			name: "a title folder that left the volume",
-			path: filepath.Join(root, "Genre", "Studio", "Departed (1999)", "movie.mkv"),
-			want: filepath.Join(root, "Genre", "Studio", "Departed (1999)"),
+			path: filepath.Join(root, "Genre", "Studio", "Gone South (1999)", "movie.mkv"),
+			want: filepath.Join(root, "Genre", "Studio", "Gone South (1999)"),
 		},
 		{
 			name: "a grouping folder names no title",
@@ -392,9 +392,9 @@ func TestTitleFolderOfFollowsTheWalksOwnRule(t *testing.T) {
 // under it.
 func TestTitleFolderOfASeriesIsTheChildOfTheRoot(t *testing.T) {
 	scan, _ := testScanner(t, "testdata/series", libraryKindSeries)
-	episode := filepath.Join("testdata", "series", "Breaking Bad", "Season 02", "Breaking Bad - S02E05.mkv")
+	episode := filepath.Join("testdata", "series", "Copper Line", "Season 02", "Copper Line - S02E05.mkv")
 
-	if got := scan.titleFolderOf(episode); got != filepath.Join("testdata", "series", "Breaking Bad") {
+	if got := scan.titleFolderOf(episode); got != filepath.Join("testdata", "series", "Copper Line") {
 		t.Errorf("titleFolderOf = %q, want the series folder", got)
 	}
 }
@@ -424,8 +424,8 @@ func scanJob(t *testing.T, root, kind, scanPath string) (*scanner, *catalogRecor
 
 // The path a webhook reports for one title folder, in the form
 // the scanner maps onto the volume.
-const webhookFolderPath = "/media/movies/The.Thing.1982.1080p.BluRay.x264-GROUP/" +
-	"The.Thing.1982.1080p.BluRay.x264-GROUP.mkv"
+const webhookFolderPath = "/media/movies/The.Long.Survey.1982.1080p.BluRay.x264-GROUP/" +
+	"The.Long.Survey.1982.1080p.BluRay.x264-GROUP.mkv"
 
 // Reads the runs the Job posted, in the order it posted them.
 func runsPosted(recorder *catalogRecorder) []capturedStatement {
@@ -548,7 +548,7 @@ func TestTheScanJobRescansTheFolderItIsGiven(t *testing.T) {
 		t.Fatalf("the job failed: %v", err)
 	}
 
-	if !postedWith(recorder, "movie:path:the-thing-1982-1080p-bluray-x264-group") {
+	if !postedWith(recorder, "movie:path:the-long-survey-1982-1080p-bluray-x264-group") {
 		t.Error("the job did not upsert the folder it was given")
 	}
 	if scan.report.Titles != 0 {
@@ -660,7 +660,7 @@ func TestTheScanJobFailsWhenItCannotWriteItsFinishedRun(t *testing.T) {
 // holds.
 func TestTitleFolderOfATitleWhoseNameOpensWithDots(t *testing.T) {
 	root := t.TempDir()
-	title := "...And Justice for All (1979)"
+	title := "...And Then the Tide (1979)"
 	writeFile(t, filepath.Join(root, title, "movie.mkv"), "x")
 
 	folder, held := titleFolderOf(root, libraryKindMovies,

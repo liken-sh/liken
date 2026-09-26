@@ -81,7 +81,7 @@ func (e *enricher) marksOne(ctx context.Context, line *markLine, path string, fi
 	}
 	answer := line.ask(ctx, file)
 	if answer.failure != nil {
-		e.logf("could not read the marks of %s: %v", path, answer.failure)
+		e.logf("could not read the marks of %s: %v", e.named(path), answer.failure)
 	}
 	e.recordMarks(folder, entry, answer, answer.result())
 	return len(answer.entries) > 0
@@ -102,7 +102,7 @@ func (e *enricher) recordMarks(folder, entry string, answer markAnswer, result s
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v",
-			factMarks, relativePath(e.root, filepath.Join(folder, entry)), err)
+			factMarks, e.named(filepath.Join(folder, entry)), err)
 	}
 	e.writeRows(factMarks, folder, result != attemptError)
 }
@@ -187,7 +187,7 @@ func (c *Catalog) markFile(ctx context.Context, library, path string) (markFile,
 }
 
 // The provider ids a work's aliases carry. An alias is the scope, the
-// provider, and the id, as movie:tmdb:603, and the folder key is no provider
+// provider, and the id, as movie:tmdb:1001, and the folder key is no provider
 // id, so it is left out.
 func aliasIDs(aliases []string) providerIDs {
 	ids := providerIDs{}

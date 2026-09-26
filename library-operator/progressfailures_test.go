@@ -67,9 +67,9 @@ func TestARefusedWriteIsLoggedAndDropped(t *testing.T) {
 		},
 		{
 			name:    "a forget request",
-			topic:   personForgetTopic(defaultTopicBase, "thora"),
+			topic:   personForgetTopic(defaultTopicBase, "person-b"),
 			payload: `{"at":"2026-09-06T21:00:00Z"}`,
-			says:    "could not forget thora",
+			says:    "could not forget person-b",
 		},
 	}
 	for _, testCase := range cases {
@@ -129,7 +129,7 @@ func TestAMessageOnAnotherTopicWritesNothing(t *testing.T) {
 		{name: "another namespace's audience", topic: playAudienceTopic(defaultTopicBase, "loft", "play-1")},
 		{name: "another operator's tree", topic: "liken/somewhere/plays/house/play-1/audience"},
 		{name: "a play recorded message", topic: playRecordedTopic(defaultTopicBase, "house", "play-1")},
-		{name: "a person forgotten message", topic: personForgottenTopic(defaultTopicBase, "thora", "house")},
+		{name: "a person forgotten message", topic: personForgottenTopic(defaultTopicBase, "person-b", "house")},
 		{name: "a media availability report", topic: defaultMediaTopicBase + "/plays/house/play-1/availability"},
 	}
 	for _, testCase := range cases {
@@ -197,7 +197,7 @@ func TestTheStoreRefusesAShortAnswer(t *testing.T) {
 func TestTheStoreAnswersAnAddressItCannotReach(t *testing.T) {
 	store := newProgressStore("http://127.0.0.1:1", &http.Client{Timeout: time.Second})
 
-	if err := store.forgetPerson(t.Context(), "thora"); err == nil {
+	if err := store.forgetPerson(t.Context(), "person-b"); err == nil {
 		t.Error("the store hid a write it could not send")
 	}
 	if err := store.recordOutside(t.Context(), "play-1", outsidePlay{}); err == nil {
@@ -209,7 +209,7 @@ func TestTheStoreAnswersAnAddressItCannotReach(t *testing.T) {
 func TestTheStoreAnswersABaseItCannotBuildARequestFrom(t *testing.T) {
 	store := newProgressStore("://nowhere", &http.Client{})
 
-	if err := store.forgetPerson(t.Context(), "thora"); err == nil {
+	if err := store.forgetPerson(t.Context(), "person-b"); err == nil {
 		t.Error("the store hid a request it could not build")
 	}
 }
@@ -218,8 +218,8 @@ func TestTheStoreAnswersABaseItCannotBuildARequestFrom(t *testing.T) {
 // so a pass reports it and the next pass tries again.
 func TestStandProgressStopsOnTheFailureTheAPIGives(t *testing.T) {
 	cluster := newFakeCluster()
-	catalog := seedCatalog(cluster, "house-catalog", "house")
-	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-progress"] =
+	catalog := seedCatalog(cluster, "house", "house")
+	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-progress"] =
 		http.StatusInternalServerError
 
 	if _, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog); err == nil {

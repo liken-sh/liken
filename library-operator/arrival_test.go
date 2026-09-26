@@ -54,17 +54,17 @@ func fileRowAt(t *testing.T, result *walkResult, path string) fileRow {
 
 func TestAMovieWithNoLedgerIsAddedAtItsChangeTime(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Matrix (1999)")
-	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
+	folder := filepath.Join(root, "Some Film (1999)")
+	writeFile(t, filepath.Join(folder, "Some Film (1999).mkv"), "video")
 
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	changed := changeTimeOf(t, filepath.Join(folder, "The Matrix (1999).mkv"))
+	changed := changeTimeOf(t, filepath.Join(folder, "Some Film (1999).mkv"))
 	if result.movies[0].Added != changed {
 		t.Errorf("added = %d, want the change time %d", result.movies[0].Added, changed)
 	}
-	if got := fileRowAt(t, result, "The Matrix (1999)/The Matrix (1999).mkv").Arrived; got != 0 {
+	if got := fileRowAt(t, result, "Some Film (1999)/Some Film (1999).mkv").Arrived; got != 0 {
 		t.Errorf("arrived = %d, want 0 where the ledger holds no entry", got)
 	}
 	if arrivalFile(t, folder) != nil {
@@ -74,9 +74,9 @@ func TestAMovieWithNoLedgerIsAddedAtItsChangeTime(t *testing.T) {
 
 func TestAnArrivalEntryKeepsItsTimeWhenTheChangeTimeMoves(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Matrix (1999)")
-	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
-	held := "files:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n"
+	folder := filepath.Join(root, "Some Film (1999)")
+	writeFile(t, filepath.Join(folder, "Some Film (1999).mkv"), "video")
+	held := "files:\n  - path: Some Film (1999).mkv\n    at: 2001-02-03T04:05:06Z\n"
 	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName), held)
 
 	result := &walkResult{}
@@ -86,7 +86,7 @@ func TestAnArrivalEntryKeepsItsTimeWhenTheChangeTimeMoves(t *testing.T) {
 	if result.movies[0].Added != want {
 		t.Errorf("added = %d, want the ledger's %d", result.movies[0].Added, want)
 	}
-	if got := fileRowAt(t, result, "The Matrix (1999)/The Matrix (1999).mkv").Arrived; got != want {
+	if got := fileRowAt(t, result, "Some Film (1999)/Some Film (1999).mkv").Arrived; got != want {
 		t.Errorf("arrived = %d, want the ledger's %d", got, want)
 	}
 	if got := string(arrivalFile(t, folder)); got != held {
@@ -182,8 +182,8 @@ func TestASeriesWithNoEpisodesHasNoArrival(t *testing.T) {
 
 func TestAnUnreadableArrivalLedgerMarksThePassIncomplete(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Matrix (1999)")
-	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
+	folder := filepath.Join(root, "Some Film (1999)")
+	writeFile(t, filepath.Join(folder, "Some Film (1999).mkv"), "video")
 	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName), "files: [not: valid")
 
 	result := &walkResult{}
@@ -192,7 +192,7 @@ func TestAnUnreadableArrivalLedgerMarksThePassIncomplete(t *testing.T) {
 	if !result.readError {
 		t.Error("a ledger the walk cannot read left the pass complete, want the incomplete mark")
 	}
-	changed := changeTimeOf(t, filepath.Join(folder, "The Matrix (1999).mkv"))
+	changed := changeTimeOf(t, filepath.Join(folder, "Some Film (1999).mkv"))
 	if result.movies[0].Added != changed {
 		t.Errorf("added = %d, want the change time %d", result.movies[0].Added, changed)
 	}
@@ -203,10 +203,10 @@ func TestAnUnreadableArrivalLedgerMarksThePassIncomplete(t *testing.T) {
 
 func TestAnArrivalEntryAloneIsNoAttempt(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Matrix (1999)")
-	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
+	folder := filepath.Join(root, "Some Film (1999)")
+	writeFile(t, filepath.Join(folder, "Some Film (1999).mkv"), "video")
 	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName),
-		"files:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n")
+		"files:\n  - path: Some Film (1999).mkv\n    at: 2001-02-03T04:05:06Z\n")
 
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
@@ -221,16 +221,16 @@ func TestAnArrivalEntryAloneIsNoAttempt(t *testing.T) {
 
 func TestTheWalkLiftsTheArrivalFactsAttempts(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Matrix (1999)")
-	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
+	folder := filepath.Join(root, "Some Film (1999)")
+	writeFile(t, filepath.Join(folder, "Some Film (1999).mkv"), "video")
 	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName),
-		"files:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n"+
-			"attempts:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n    result: found\n")
+		"files:\n  - path: Some Film (1999).mkv\n    at: 2001-02-03T04:05:06Z\n"+
+			"attempts:\n  - path: Some Film (1999).mkv\n    at: 2001-02-03T04:05:06Z\n    result: found\n")
 
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	want := attemptRow{Library: "house/movies", Item: "The Matrix (1999)/The Matrix (1999).mkv",
+	want := attemptRow{Library: "house/movies", Item: "Some Film (1999)/Some Film (1999).mkv",
 		Fact: factArrival, At: time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC).Unix(), Result: attemptFound}
 	if len(result.attempts) != 1 || result.attempts[0] != want {
 		t.Errorf("attempts = %+v, want %+v", result.attempts, want)

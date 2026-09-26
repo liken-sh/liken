@@ -49,12 +49,12 @@ func newFakeOMDb(t *testing.T, answer func(url.Values) (int, string)) (*omdbClie
 }
 
 // One answer of the whole shape the nfo facts read.
-const omdbAnswer = `{"Title":"The Godfather","Year":"1972","Rated":"R",` +
-	`"Released":"24 Mar 1972","Runtime":"175 min","Genre":"Crime, Drama",` +
-	`"Plot":"The aging patriarch of an organized crime dynasty.",` +
+const omdbAnswer = `{"Title":"The Long Ledger","Year":"1972","Rated":"R",` +
+	`"Released":"12 Apr 1972","Runtime":"118 min","Genre":"Crime, Drama",` +
+	`"Plot":"An old clerk keeps the accounts of a harbor town.",` +
 	`"Ratings":[{"Source":"Internet Movie Database","Value":"9.2/10"},` +
 	`{"Source":"Rotten Tomatoes","Value":"97%"},{"Source":"Metacritic","Value":"100/100"}],` +
-	`"Metascore":"100","imdbRating":"9.2","imdbVotes":"2,000,000","imdbID":"tt0068646",` +
+	`"Metascore":"100","imdbRating":"9.2","imdbVotes":"2,000,000","imdbID":"tt9003003",` +
 	`"Type":"movie","Response":"True"}`
 
 // The lookup asks for one IMDb id with the full plot, carries the key as a
@@ -64,7 +64,7 @@ func TestTheOMDbLookupReadsOneTitle(t *testing.T) {
 		return http.StatusOK, omdbAnswer
 	})
 
-	title, err := client.title(t.Context(), "tt0068646")
+	title, err := client.title(t.Context(), "tt9003003")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestTheOMDbLookupReadsOneTitle(t *testing.T) {
 		t.Errorf("an unnamed source scored %q, want nothing", got)
 	}
 	query := fake.requests[0]
-	if query.Get("apikey") != "a-key" || query.Get("i") != "tt0068646" || query.Get("plot") != omdbFullPlot {
+	if query.Get("apikey") != "a-key" || query.Get("i") != "tt9003003" || query.Get("plot") != omdbFullPlot {
 		t.Errorf("the lookup asked %v, want the key, the id, and the full plot", query)
 	}
 }
@@ -141,7 +141,7 @@ func TestTheOMDbDailyLimitSignal(t *testing.T) {
 			})
 
 			for range one.answers {
-				_, _ = client.title(t.Context(), "tt0068646")
+				_, _ = client.title(t.Context(), "tt9003003")
 			}
 
 			if got := client.dailyLimitReached(); got != one.want {
@@ -163,7 +163,7 @@ func TestAnOMDbRequestWaitsOutA429(t *testing.T) {
 		return http.StatusOK, omdbAnswer
 	})
 
-	title, err := client.title(t.Context(), "tt0068646")
+	title, err := client.title(t.Context(), "tt9003003")
 	if err != nil {
 		t.Fatal(err)
 	}

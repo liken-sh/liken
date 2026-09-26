@@ -103,12 +103,12 @@ run has them. `failure` is one sentence on why the run failed, and it
 is empty for a run that finished its work.
 
     {
-      "titles": 412,
+      "titles": 128,
       "unidentified": 9,
       "lastWalk": "2026-08-29T21:04:11Z",
       "lastChange": "2026-08-29T21:04:11Z",
-      "items": 412,
-      "files": 2189,
+      "items": 128,
+      "files": 560,
       "walking": false,
       "removedLastSweep": 3,
       "runs": [
@@ -228,7 +228,7 @@ as `LIBRARY_AUDIENCE_TOPIC`, and reads none of it.
 | `people` | list of objects | Who is watching, in the order the answer named them. Each entry carries `name`, the `Person` every record keys on, and `displayName`, the name the screen draws. An empty list is the answer "nobody", which is an answer and not the absence of one. |
 | `at` | integer | The Unix time of the last press, in whole seconds. |
 
-    {"people": [{"name": "chris", "displayName": "Chris"}], "at": 1757350000}
+    {"people": [{"name": "person-a", "displayName": "Person A"}], "at": 1757350000}
 
 The browser writes the message when a person answers the picker, and
 at most once a minute while a person presses keys. The stamp is what
@@ -271,7 +271,7 @@ audience.
 | `credits` | list of objects | Every `credits` mark of the `Play`'s first item, from its presentation: `start` and `end` in seconds, each absent where the mark runs from the start or to the end of the file. Absent where the item has none. The jellyfin role reads it for the watched rule. |
 
     {
-      "player": "den-tv",
+      "player": "den",
       "library": "movies",
       "people": ["ada", "grace"],
       "aliases": {"tmdb": "1000001", "imdb": "tt0000001"},

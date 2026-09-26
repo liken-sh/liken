@@ -479,9 +479,9 @@ mod tests {
                 ("The Show", "Film · 1987"),
             ),
             (
-                &["as Samara Morgan"],
-                "as Samara Morgan",
-                ("Samara Morgan", "The Show · 1987"),
+                &["as Ilse Marrow"],
+                "as Ilse Marrow",
+                ("Ilse Marrow", "The Show · 1987"),
             ),
             (
                 &["Director", "Writer"],
@@ -744,7 +744,7 @@ mod tests {
         let item = library_item(LibraryEntry {
             library: "screening/features".into(),
             kind: "movies".into(),
-            items: 1_422,
+            items: 1_234,
             art: vec!["posters/one.jpg".into(), "posters/two.jpg".into()],
         });
         assert_eq!(item.kind, LIBRARY);
@@ -754,7 +754,7 @@ mod tests {
         assert_eq!(item.caption, "features");
         assert_eq!(item.fitted, "features");
         assert_eq!(item.line.words(), "features");
-        assert_eq!(item.under, "1,422 movies");
+        assert_eq!(item.under, "1,234 movies");
         assert_eq!(item.art, "");
         assert_eq!(
             item.tiles,
@@ -786,7 +786,7 @@ mod tests {
         assert_eq!(under(1, "movies"), "1 movie");
         assert_eq!(under(1, "series"), "1 series");
         assert_eq!(under(2, "movies"), "2 movies");
-        assert_eq!(under(165, "series"), "165 series");
+        assert_eq!(under(120, "series"), "120 series");
     }
 
     #[test]

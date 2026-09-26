@@ -81,7 +81,7 @@ func (o *operator) reconcilePlay(ctx context.Context, play *Play) {
 		if _, err := PatchPlayMetadata(ctx, o.client, namespace, name,
 			play.Metadata.ResourceVersion,
 			ObjectMeta{Finalizers: play.Metadata.with(progressFinalizer)}); err != nil {
-			fmt.Fprintf(os.Stderr, "holding play %s/%s: %v\n", namespace, name, err)
+			fmt.Fprintf(os.Stderr, "holding the Play with uid %s: %s\n", play.Metadata.UID, playError(err, name))
 		}
 	}
 
@@ -190,7 +190,7 @@ func (o *operator) releasePlay(ctx context.Context, play *Play, why string) {
 	}
 	// An object that is already gone is the state this release was for.
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		fmt.Fprintf(os.Stderr, "releasing play %s/%s: %v\n", namespace, name, err)
+		fmt.Fprintf(os.Stderr, "releasing the Play with uid %s: %s\n", play.Metadata.UID, playError(err, name))
 		return
 	}
 	o.clearPlayTopics(namespace, name)
@@ -206,4 +206,11 @@ func (o *operator) clearPlayTopics(namespace, name string) {
 	o.clearTopic(playAudienceTopic(o.topicBase, namespace, name))
 	o.clearTopic(playFinalTopic(o.topicBase, namespace, name))
 	o.clearTopic(playRecordedTopic(o.topicBase, namespace, name))
+}
+
+// playError is an API error about one Play as a line may carry it. The
+// request in the error names the Play, and the API server minted that name
+// from the title, so the name turns into its hash.
+func playError(err error, name string) string {
+	return strings.ReplaceAll(err.Error(), name, hashed(name))
 }

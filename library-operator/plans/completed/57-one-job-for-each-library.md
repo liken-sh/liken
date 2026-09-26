@@ -367,8 +367,8 @@ fewer copies for each `Library`.
 
 ## The drill on `liken-1`
 
-The testbed has three Libraries: 1,439 movies with 18,068 files, 165
-series with 6,566 items, and 35 franchises.
+The testbed has three Libraries: one of movies, one of series, and one
+of franchises.
 
 - **The roll.** The operator deleted the three scan `CronJob`s and the
   five claims of the old layout on its first pass. It did not touch the

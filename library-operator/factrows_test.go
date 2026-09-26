@@ -62,7 +62,7 @@ func TestTheCreditsFactMakesItsPeopleVisibleToTheContributorGap(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	work.writeCredits(titleFolder(t, root, "One Film (1999)"), factAnswer{Cast: []creditedActor{
-		{Name: "Tom Hanks", Role: "The Captain", IDs: providerIDs{"tmdb": "31"}},
+		{Name: "Iris Kell", Role: "The Captain", IDs: providerIDs{"tmdb": "9031"}},
 	}})
 
 	gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, factContributorIDs,
@@ -70,7 +70,7 @@ func TestTheCreditsFactMakesItsPeopleVisibleToTheContributorGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gaps) != 1 || gaps[0].path != ".contributors/to/tom-hanks" || gaps[0].tmdb != "31" {
+	if len(gaps) != 1 || gaps[0].path != ".contributors/ir/iris-kell" || gaps[0].tmdb != "9031" {
 		t.Errorf("gaps = %+v, want the person the credits fact just created", gaps)
 	}
 }
@@ -107,7 +107,7 @@ func TestAnNFOFactWritesOnlyTheColumnsItOwns(t *testing.T) {
 func TestTheProbeWritesTheStreamColumnsOfTheFile(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
@@ -123,17 +123,17 @@ func TestTheProbeWritesTheStreamColumnsOfTheFile(t *testing.T) {
 func TestAnArtFactWritesTheImagesRowAndTheItemsArt(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Signal (2014)"
-	writeFile(t, filepath.Join(root, folder, "The Signal (2014).mkv"), "video")
+	folder := "Some Film (2014)"
+	writeFile(t, filepath.Join(root, folder, "Some Film (2014).mkv"), "video")
 	// The identity fact has written the id into the .nfo file by the time art
 	// runs, and that id is what keys the title's row.
 	writeFile(t, filepath.Join(root, folder, movieNFOName),
-		"<movie><title>The Signal</title><uniqueid type=\"tmdb\" default=\"true\">603</uniqueid></movie>\n")
+		"<movie><title>Some Film</title><uniqueid type=\"tmdb\" default=\"true\">1001</uniqueid></movie>\n")
 	seedArtMovie(t, catalog, folder)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newArtTMDb(t, map[string]string{
-		tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
-		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
+		tmdbKey("/3/movie/1001/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
+		tmdbKey("/t/p/w780/quiet.jpg", "", ""):  testImage,
 	})
 
 	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
@@ -154,12 +154,12 @@ func TestAnArtFactWritesTheImagesRowAndTheItemsArt(t *testing.T) {
 func TestTheIdentityFactRekeysTheTitle(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := "The Thing (1982)"
-	writeFile(t, filepath.Join(root, folder, "The Thing (1982).mkv"), "video")
+	folder := "The Long Survey (1982)"
+	writeFile(t, filepath.Join(root, folder, "The Long Survey (1982).mkv"), "video")
 	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newFakeTMDb(t, map[string]string{
-		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/search/movie", "The Long Survey", "1982"): `{"results":[` + tmdbResultJSON(1101, "The Long Survey", "1982-05-14") + `]}`,
 	})
 
 	if err := work.identityGap(t.Context(), client); err != nil {
@@ -167,7 +167,7 @@ func TestTheIdentityFactRekeysTheTitle(t *testing.T) {
 	}
 
 	ids := catalogLines(t, catalog, `SELECT id FROM movies WHERE library = ?`)
-	if strings.Join(ids, ",") != "movie:tmdb:1091" {
+	if strings.Join(ids, ",") != "movie:tmdb:1101" {
 		t.Errorf("movies = %v, want the title under its provider id and no longer under its path", ids)
 	}
 }
@@ -175,13 +175,13 @@ func TestTheIdentityFactRekeysTheTitle(t *testing.T) {
 func TestTheTrickplayFactWritesTheTrickplayColumn(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-	if err := os.MkdirAll(filepath.Join(root, "The Thing (1982)", "The Thing (1982).trickplay"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "The Long Survey (1982)", "The Long Survey (1982).trickplay"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	work.recordArt(filepath.Join(root, "The Thing (1982)"), factTrickplay, "The Thing (1982).mkv", artProviderExisting, attemptFound)
+	work.recordArt(filepath.Join(root, "The Long Survey (1982)"), factTrickplay, "The Long Survey (1982).mkv", artProviderExisting, attemptFound)
 
 	rows := catalogLines(t, catalog, `SELECT trickplay FROM files WHERE library = ? AND type = 'video'`)
 	if len(rows) != 1 || rows[0] == "" {
@@ -192,9 +192,9 @@ func TestTheTrickplayFactWritesTheTrickplayColumn(t *testing.T) {
 func TestAContributorFactWritesTheColumnsItOwns(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
-	person := ".contributors/to/tom-hanks"
-	writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\nids: {tmdb: 31}\nborn: \"1956-07-09\"\n")
-	seed := &walkResult{contributors: []contributorRow{{Library: contributorLibrary, Path: person, Name: "Tom Hanks"}}}
+	person := ".contributors/ir/iris-kell"
+	writeContributorEntry(t, root, "iris-kell", "name: Iris Kell\nids: {tmdb: 9031}\nborn: \"1961-03-14\"\n")
+	seed := &walkResult{contributors: []contributorRow{{Library: contributorLibrary, Path: person, Name: "Iris Kell"}}}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)
 	}
@@ -203,11 +203,11 @@ func TestAContributorFactWritesTheColumnsItOwns(t *testing.T) {
 	work.recordContributor(filepath.Join(root, person), factContributorIDs, providerBlockTMDb, attemptFound, "")
 
 	rows := catalogLines(t, catalog, `SELECT born || '|' || headshot FROM contributors WHERE library = ?`)
-	if strings.Join(rows, ",") != "1956-07-09|0" {
+	if strings.Join(rows, ",") != "1961-03-14|0" {
 		t.Errorf("contributors = %v, want the born date the fact wrote", rows)
 	}
 	ids := catalogLines(t, catalog, `SELECT scheme || '|' || id FROM contributor_aliases WHERE library = ?`)
-	if strings.Join(ids, ",") != "tmdb|31" {
+	if strings.Join(ids, ",") != "tmdb|9031" {
 		t.Errorf("contributor_aliases = %v, want the id the entry carries", ids)
 	}
 }
@@ -263,7 +263,7 @@ func TestAFactReportsTheRowsItsCatalogRefused(t *testing.T) {
 			movies: title,
 			trailers: []trailerRow{{
 				Library: contributorLibrary, Item: "movie:tmdb:1", Provider: providerBlockTMDb,
-				Key: "sJ9mvBJ1aTI", Site: trailerSiteYouTube, Kind: trailerKindTrailer,
+				Key: "Tq7xHarb003", Site: trailerSiteYouTube, Kind: trailerKindTrailer,
 			}},
 		}},
 		{"an art fact's images and art column", factPoster, &walkResult{

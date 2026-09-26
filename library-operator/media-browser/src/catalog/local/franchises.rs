@@ -401,18 +401,18 @@ mod tests {
         assert_eq!(calendar(""), None);
         assert_eq!(calendar("null"), None);
         assert_eq!(calendar("{}"), None);
-        assert_eq!(calendar(r#"{"zero":"Yavin"}"#), None);
+        assert_eq!(calendar(r#"{"zero":"Survey"}"#), None);
     }
 
     #[test]
     fn a_calendar_carries_its_unit_and_its_two_words() {
         assert_eq!(
-            calendar(r#"{"unit":"years","zero":"Yavin","before":"BBY","after":"ABY"}"#),
+            calendar(r#"{"unit":"years","zero":"Survey","before":"BS","after":"AS"}"#),
             Some(Calendar {
                 unit: "years".into(),
-                zero: "Yavin".into(),
-                before: "BBY".into(),
-                after: "ABY".into(),
+                zero: "Survey".into(),
+                before: "BS".into(),
+                after: "AS".into(),
             })
         );
     }

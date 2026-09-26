@@ -66,7 +66,7 @@ type playAudience struct {
 	// references. Empty for a Play nobody claimed.
 	People []string `json:"people,omitempty"`
 	// The work's ids by provider, from the Play's alias annotations:
-	// {"tmdb": "2316", "imdb": "tt0386676"}.
+	// {"tmdb": "2101", "imdb": "tt9002101"}.
 	Aliases map[string]string `json:"aliases,omitempty"`
 	// The season and episode numbers for an episode, and 0 for a work
 	// that has none.

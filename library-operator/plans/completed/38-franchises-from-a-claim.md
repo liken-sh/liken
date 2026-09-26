@@ -131,14 +131,14 @@ operator at its development build:
 1. Delete the franchises `Library` and its volume manifests. The
    cleanup Job takes the library's rows out of the catalog.
 2. Apply a `ReadOnlyMany` `PersistentVolume` and claim on
-   `https://tangled.org/guid.foo/fiction-franchises` through
-   `git.liken.sh`, an NFS `PersistentVolume` and claim for the art, and
+   the public franchises repository through `git.liken.sh`, an NFS
+   `PersistentVolume` and claim for the art, and
    the `Library` under the new shape.
 3. The `Library` reports `Bound` with a `csi` volume and `Ready`. A
    scan Job runs to completion, and `status.titles` reads the number of
    franchise directories the repository holds.
 4. The art ledger on the NFS export is what the last scan under the
    old shape wrote, so the scan downloads no art it already holds.
-5. The franchises screen on the LG draws the wall from the new rows.
+5. The franchises screen draws the wall from the new rows.
 
 `make test` holds its floor, and the image carries no `git` binary.

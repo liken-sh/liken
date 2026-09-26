@@ -23,7 +23,7 @@ cluster's members use to find one another:
     apiVersion: library.liken.sh/v1alpha1
     kind: Catalog
     metadata:
-      name: catalog
+      name: media
       namespace: media
     spec:
       storage:
@@ -45,8 +45,8 @@ The listing shows the storage size, requested replica count, and
 readiness:
 
     $ kubectl -n media get catalogs
-    NAME      SIZE   COPIES   READY   AGE
-    catalog   1Gi    1        True    3d
+    NAME    SIZE   COPIES   READY   AGE
+    media   1Gi    1        True    3d
 
 `Ready` follows the catalog replica pods and the storage configuration.
 A replica that cannot run keeps the catalog from becoming ready;
@@ -221,10 +221,10 @@ claims do not pin the pod to one node.
 
 The catalog pod's images have no shell. The agent's own binary answers
 queries and lists the cluster's members. For a `Catalog` named
-`catalog`, query replica zero:
+`media`, query replica zero:
 
-    kubectl -n media exec catalog-catalog-0 -c catalog -- /corrosion query "SELECT COUNT(*) FROM movies"
-    kubectl -n media exec catalog-catalog-0 -c catalog -- /corrosion cluster members
+    kubectl -n media exec media-catalog-0 -c catalog -- /corrosion query "SELECT COUNT(*) FROM movies"
+    kubectl -n media exec media-catalog-0 -c catalog -- /corrosion cluster members
 
 The tables are in the repository at `corrosion/schema/catalog.sql`,
 with a comment on each. Every table is keyed by its library first, so

@@ -38,7 +38,7 @@ impl Reason {
         }
     }
 
-    // The words one reason reads as: "Resume", "Resume · The Office", or
+    // The words one reason reads as: "Resume", "Resume · The Night Desk", or
     // "Next in" and the container's title.
     fn spelled(&self) -> String {
         match self {
@@ -67,12 +67,12 @@ pub fn line(reasons: &[Reason]) -> String {
 mod tests {
     use super::*;
 
-    fn mcu() -> Reason {
+    fn northwind() -> Reason {
         Reason::Franchise {
             library: "screening/orders".into(),
-            id: "franchise:name:mcu".into(),
+            id: "franchise:name:northwind".into(),
             position: 4,
-            title: "the MCU".into(),
+            title: "the Northwind Saga".into(),
             runs: Vec::new(),
         }
     }
@@ -81,9 +81,9 @@ mod tests {
     fn a_series_thread_that_resumes_names_the_show_and_a_film_does_not() {
         assert_eq!(
             line(&[Reason::Resume {
-                series: "The Office".into()
+                series: "The Night Desk".into()
             }]),
-            "Resume · The Office"
+            "Resume · The Night Desk"
         );
         assert_eq!(
             line(&[Reason::Resume {
@@ -96,18 +96,18 @@ mod tests {
     #[test]
     fn the_reasons_stack_in_their_order_whatever_order_they_came_in() {
         let mut reasons = vec![
-            mcu(),
-            Reason::Set("Iron Man Collection".into()),
-            Reason::Series("WandaVision".into()),
+            northwind(),
+            Reason::Set("Quiet Harbor Collection".into()),
+            Reason::Series("Harborlight".into()),
             Reason::Resume {
-                series: "WandaVision".into(),
+                series: "Harborlight".into(),
             },
         ];
         stacked(&mut reasons);
         assert_eq!(
             line(&reasons),
-            "Resume · WandaVision · Next in WandaVision · Next in Iron Man Collection · \
-             Next in the MCU"
+            "Resume · Harborlight · Next in Harborlight · Next in Quiet Harbor Collection · \
+             Next in the Northwind Saga"
         );
     }
 
@@ -115,31 +115,37 @@ mod tests {
     fn two_threads_that_give_one_reason_spell_it_once() {
         let mut reasons = vec![
             Reason::Resume {
-                series: "WandaVision".into(),
+                series: "Harborlight".into(),
             },
-            mcu(),
+            northwind(),
             Reason::Resume {
-                series: "WandaVision".into(),
+                series: "Harborlight".into(),
             },
-            mcu(),
+            northwind(),
         ];
         stacked(&mut reasons);
-        assert_eq!(line(&reasons), "Resume · WandaVision · Next in the MCU");
+        assert_eq!(
+            line(&reasons),
+            "Resume · Harborlight · Next in the Northwind Saga"
+        );
     }
 
     #[test]
     fn two_franchises_are_two_reasons() {
         let mut reasons = vec![
-            mcu(),
+            northwind(),
             Reason::Franchise {
                 library: "screening/orders".into(),
-                id: "franchise:name:multiverse".into(),
+                id: "franchise:name:far-shore".into(),
                 position: 1,
-                title: "the Multiverse".into(),
+                title: "the Far Shore".into(),
                 runs: Vec::new(),
             },
         ];
         stacked(&mut reasons);
-        assert_eq!(line(&reasons), "Next in the MCU · Next in the Multiverse");
+        assert_eq!(
+            line(&reasons),
+            "Next in the Northwind Saga · Next in the Far Shore"
+        );
     }
 }

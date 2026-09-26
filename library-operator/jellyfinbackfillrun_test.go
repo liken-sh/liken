@@ -26,12 +26,12 @@ func TestOneUserWhoseItemsCannotBeReadDoesNotStopTheRun(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			backfill, messages, logged := standBackfill(t, &fakeBackfillJellyfin{
-				users: []jellyfinUser{{Name: "Chris", ID: "user-chris"},
-					{Name: "kelly", ID: "user-kelly"}},
-				refuse:    "user-chris",
+				users: []jellyfinUser{{Name: "Person-A", ID: "user-a"},
+					{Name: "person-c", ID: "user-c"}},
+				refuse:    "user-a",
 				refuseOne: test.one,
-				resumable: map[string][]jellyfinItem{"user-kelly": {{ID: "item-matrix", Type: "Movie",
-					ProviderIds: map[string]string{"Tmdb": "603"}}}},
+				resumable: map[string][]jellyfinItem{"user-c": {{ID: "item-film", Type: "Movie",
+					ProviderIds: map[string]string{"Tmdb": "1101"}}}},
 			})
 
 			counts, err := backfill.run(t.Context())
@@ -46,7 +46,7 @@ func TestOneUserWhoseItemsCannotBeReadDoesNotStopTheRun(t *testing.T) {
 			if len(messages.held) != 1 {
 				t.Errorf("messages = %d, want the one user it could read", len(messages.held))
 			}
-			if !strings.Contains(logged.String(), "could not read the items of the user Chris") {
+			if !strings.Contains(logged.String(), "could not read the items of the user Person-A") {
 				t.Errorf("log = %q, want the user it could not read", logged.String())
 			}
 		})
@@ -153,9 +153,9 @@ func standBackfillBus(t *testing.T, backfill *jellyfinBackfill, answering bool) 
 func TestTheBackfillPublishesOverTheBroker(t *testing.T) {
 	shorterBackfillWaits(t, busTestTimeout)
 	backfill, _, _ := standBackfill(t, &fakeBackfillJellyfin{
-		users: []jellyfinUser{{Name: "Chris", ID: "user-chris"}},
-		resumable: map[string][]jellyfinItem{"user-chris": {{ID: "item-matrix", Type: "Movie",
-			ProviderIds:  map[string]string{"Tmdb": "603"},
+		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+		resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+			ProviderIds:  map[string]string{"Tmdb": "1101"},
 			RunTimeTicks: 81600000000,
 			UserData:     jellyfinUserData{PlaybackPositionTicks: 42100000000}}}},
 	})
@@ -170,7 +170,7 @@ func TestTheBackfillPublishesOverTheBroker(t *testing.T) {
 		t.Errorf("counts = %+v, want one user and one play", counts)
 	}
 	published := waitForPublish(t, broker.pubs)
-	want := playOutsideTopic(defaultTopicBase, "house", "jellyfin-user-chris-item-matrix")
+	want := playOutsideTopic(defaultTopicBase, "house", "jellyfin-user-a-item-film")
 	if published.topic != want {
 		t.Errorf("topic = %q, want %q", published.topic, want)
 	}
@@ -185,9 +185,9 @@ func TestTheBackfillPublishesOverTheBroker(t *testing.T) {
 func TestTheBackfillEndsWhenTheBrokerDoesNotAnswer(t *testing.T) {
 	shorterBackfillWaits(t, 50*time.Millisecond)
 	backfill, messages, _ := standBackfill(t, &fakeBackfillJellyfin{
-		users: []jellyfinUser{{Name: "Chris", ID: "user-chris"}},
-		resumable: map[string][]jellyfinItem{"user-chris": {{ID: "item-matrix", Type: "Movie",
-			ProviderIds: map[string]string{"Tmdb": "603"}}}},
+		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}},
+		resumable: map[string][]jellyfinItem{"user-a": {{ID: "item-film", Type: "Movie",
+			ProviderIds: map[string]string{"Tmdb": "1101"}}}},
 	})
 	standBackfillBus(t, backfill, false)
 

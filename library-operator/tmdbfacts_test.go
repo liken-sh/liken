@@ -129,7 +129,7 @@ func TestTheTMDbAnswererHoldsNothingForATitleWithNoTMDbID(t *testing.T) {
 	client, fake := newFakeTMDb(t, nil)
 
 	_, held, err := tmdbAnswerer{client: client}.answer(t.Context(), factOverview,
-		titleRef{kind: libraryKindMovies, ids: providerIDs{"imdb": "tt0084787"}})
+		titleRef{kind: libraryKindMovies, ids: providerIDs{"imdb": "tt9001002"}})
 
 	if err != nil || held {
 		t.Fatalf("answered %v with %v, want nothing and no error", held, err)

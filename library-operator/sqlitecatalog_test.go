@@ -403,7 +403,7 @@ func TestPruneLibraryAgainstTheRealSchema(t *testing.T) {
 	for _, walk := range []*walkResult{
 		walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001"),
 		walkOfOneTitle("house/movies", "movie:tmdb:2", "Two (2002)", "movie:path:two-2002"),
-		walkOfOneTitle("studio/films", "movie:tmdb:9", "Nine (2009)", "movie:path:nine-2009"),
+		walkOfOneTitle("studio/films", "movie:tmdb:9", "Ninefold (2009)", "movie:path:ninefold-2009"),
 	} {
 		if err := flushWalk(ctx, catalog, walk, first); err != nil {
 			t.Fatal(err)
@@ -482,8 +482,8 @@ func TestPruneScopeAgainstTheRealSchema(t *testing.T) {
 
 	first := time.Now().Add(-time.Hour).UnixNano()
 	for _, walk := range []*walkResult{
-		walkOfOneTitle("house/movies", "movie:tmdb:1", "100% Wolf (2020)", "movie:path:100-wolf-2020"),
-		walkOfOneTitle("house/movies", "movie:tmdb:2", "100 Bullets (2019)", "movie:path:100-bullets-2019"),
+		walkOfOneTitle("house/movies", "movie:tmdb:1", "100% Harbor (2020)", "movie:path:100-harbor-2020"),
+		walkOfOneTitle("house/movies", "movie:tmdb:2", "100 Lanterns (2019)", "movie:path:100-lanterns-2019"),
 	} {
 		if err := flushWalk(ctx, catalog, walk, first); err != nil {
 			t.Fatal(err)
@@ -492,7 +492,7 @@ func TestPruneScopeAgainstTheRealSchema(t *testing.T) {
 
 	// The folder left the volume, so the rescan marks nothing and every
 	// row under it is unmarked.
-	removed, err := pruneScope(ctx, catalog, "house/movies", "100% Wolf (2020)", time.Now().UnixNano())
+	removed, err := pruneScope(ctx, catalog, "house/movies", "100% Harbor (2020)", time.Now().UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -779,7 +779,7 @@ func TestTheFullWalkFailsAndPrunesNothingOnARefusedWrite(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := flushWalk(t.Context(), scan.catalog,
-				walkOfOneTitle("house/movies", "movie:tmdb:9", "Nine (2009)", "movie:path:nine-2009"),
+				walkOfOneTitle("house/movies", "movie:tmdb:9", "Ninefold (2009)", "movie:path:ninefold-2009"),
 				seeded); err != nil {
 				t.Fatal(err)
 			}
@@ -823,11 +823,11 @@ func TestTheRescanReportsTheStepItsCatalogRefused(t *testing.T) {
 // number the Library's status carries.
 func TestTheWalkReportsTheTitlesTheCatalogHoldsAndTheFoldersItRead(t *testing.T) {
 	root := t.TempDir()
-	for _, folder := range []string{"The Thing (1982)", "The Thing (1982) [4K]"} {
+	for _, folder := range []string{"The Long Survey (1982)", "The Long Survey (1982) [4K]"} {
 		writeFile(t, filepath.Join(root, folder, "movie.mkv"), "x")
 		writeFile(t, filepath.Join(root, folder, "movie.nfo"),
-			"<movie><title>The Thing</title><year>1982</year>"+
-				"<uniqueid type=\"tmdb\">1091</uniqueid></movie>")
+			"<movie><title>The Long Survey</title><year>1982</year>"+
+				"<uniqueid type=\"tmdb\">1002</uniqueid></movie>")
 	}
 	scan, agent := sqliteScanner(t, root)
 	log := &bytes.Buffer{}

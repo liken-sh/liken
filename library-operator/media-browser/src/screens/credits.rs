@@ -109,12 +109,12 @@ mod tests {
     #[test]
     fn a_persons_roles_read_most_frequent_first_in_lower_case() {
         let works = [
-            work("as Ripley"),
+            work("as Mara"),
             work("Writer"),
-            work("as Dallas"),
-            work("as Kane"),
-            work("as Ash"),
-            work("as Parker"),
+            work("as Holt"),
+            work("as Venn"),
+            work("as Orla"),
+            work("as Brisk"),
         ];
         assert_eq!(roles(&works), "actor, writer");
     }

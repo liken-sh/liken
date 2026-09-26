@@ -114,9 +114,9 @@ func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identit
 }
 
 // The qualifier a namer writes after a title to part it from another show of
-// the same name: a country, as in Shameless (US), or a year, as in The Office
-// (2011). The title reaches the provider without it, because the provider
-// names the show Shameless. A country is a test only for a series, where TMDb
+// the same name: a country, as in Harbor Lights (US), or a year, as in Pale
+// Current (2011). The title reaches the provider without it, because the
+// provider names the show Harbor Lights. A country is a test only for a series, where TMDb
 // states origin_country.
 func readQualifier(search identitySearch) (identitySearch, string) {
 	base, qualifier := partTitle(search.title)

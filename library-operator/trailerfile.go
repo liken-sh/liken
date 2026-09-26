@@ -209,7 +209,7 @@ func (c *Catalog) featureHeight(ctx context.Context, library, path string) (int,
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("reading the feature of %s: %w", path, err)
+		return 0, fmt.Errorf("reading the feature of %s: %w", opaquePath("", path), err)
 	}
 	if tallest <= 0 {
 		return trailerFeatureHeight, nil

@@ -37,7 +37,7 @@ func (s *scanner) franchiseScan(ctx context.Context) error {
 
 	result := walkFranchises(s.root, s.art, s.library)
 	for _, failure := range result.readFailures {
-		s.logf("could not read %s: %v", failure.path, failure.err)
+		s.logf("could not read %s: %v", s.named(failure.path), failure.err)
 	}
 	if err := flushWalk(ctx, s.catalog, result, epoch); err != nil {
 		return s.walkFailed("write the franchises", err)

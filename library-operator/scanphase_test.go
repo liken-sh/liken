@@ -88,8 +88,8 @@ func TestAWalkOfSeveralFoldersRescansEach(t *testing.T) {
 		titles int
 		wrote  []string
 	}{
-		{name: "two folders", paths: []string{webhookFolderPath, "Action/The Matrix (1999)"},
-			wrote: []string{"movie:path:the-thing-1982-1080p-bluray-x264-group", "movie:path:the-matrix-1999"}},
+		{name: "two folders", paths: []string{webhookFolderPath, "Action/Some Film (1999)"},
+			wrote: []string{"movie:path:the-long-survey-1982-1080p-bluray-x264-group", "movie:path:some-film-1999"}},
 		{name: "a folder the volume does not hold", paths: []string{webhookFolderPath, "/nothing/here"}, titles: 3},
 	}
 	for _, one := range cases {

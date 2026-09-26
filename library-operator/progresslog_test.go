@@ -59,14 +59,14 @@ func TestAPersonLeavesOneLinePerStepAcrossPasses(t *testing.T) {
 // it by its uid and its work, never by its name, which carries the title.
 func TestARecordedPlayLeavesOneLine(t *testing.T) {
 	operator, cluster, logged := loggingHouse(t)
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 	play.Metadata.UID = "play-uid-1"
 	play.Metadata.Finalizers = []string{progressFinalizer}
 	play.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 	play.Metadata.Annotations = map[string]string{aliasAnnotationPrefix + "tmdb": "1001"}
 	play.Status = PlayStatus{Phase: playPhaseFinished, Item: 1, Position: "1:38:12"}
 	cluster.plays = append(cluster.plays, play)
-	publishRecorded(operator, "den-tv-some-film", playRecorded{
+	publishRecorded(operator, "den-some-film", playRecorded{
 		Item: 1, Position: "1:38:12", Ended: true, At: "2026-09-06T21:14:02Z",
 	})
 
@@ -83,11 +83,11 @@ func TestARecordedPlayLeavesOneLine(t *testing.T) {
 // A Play in a namespace with no progress store is released with that reason.
 func TestAPlayNoStoreRecordsLeavesOneLine(t *testing.T) {
 	operator, cluster, logged := loggingHouse(t)
-	play := testPlay("den-tv-some-film")
+	play := testPlay("den-some-film")
 	play.Metadata.UID = "play-uid-1"
 	play.Metadata.Finalizers = []string{progressFinalizer}
 	cluster.plays = append(cluster.plays, play)
-	delete(cluster.catalogs, "house-catalog")
+	delete(cluster.catalogs, "house")
 
 	operator.pass()
 

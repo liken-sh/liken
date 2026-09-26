@@ -38,7 +38,7 @@ pub enum Order {
 
 /// The three orders a library wall can be read in, which the rail's
 /// button cycles. `Newest` and `Oldest` order by the release date and
-/// `Title` by the sort key, "The Matrix" under M. Title is a library
+/// `Title` by the sort key, "The Lantern" under L. Title is a library
 /// wall's default, because a whole library is what a person walks by
 /// name.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -173,7 +173,7 @@ impl Query {
     /// heading and a recency query's carry the count. A person's, a set's,
     /// and a franchise's carry the name alone.
     /// A genre's heading carries the counts by kind, "Science Fiction ·
-    /// 429 movies, 70 series", which is what the head over the wall
+    /// 120 movies, 15 series", which is what the head over the wall
     /// carried before the band took it.
     pub fn heading(&self, name: &str, counts: Counts) -> String {
         match self {

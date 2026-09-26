@@ -423,7 +423,7 @@ func TestTheReporterRepublishesWhileTheCountsMove(t *testing.T) {
 	waitForReport(t, broker, topic, func(held libraryReport) bool { return held.Items == 3 })
 
 	if err := upsertWalk(t.Context(), catalog,
-		walkOfOneTitle("house/movies", "movie:tmdb:9", "Nine (2009)", "movie:path:nine-2009")); err != nil {
+		walkOfOneTitle("house/movies", "movie:tmdb:9", "Ninefold (2009)", "movie:path:ninefold-2009")); err != nil {
 		t.Fatal(err)
 	}
 

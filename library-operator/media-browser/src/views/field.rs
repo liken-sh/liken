@@ -152,17 +152,17 @@ mod tests {
     // text changed, and the text after.
     const PRESSES: [(&str, &str, bool, &str); 12] = [
         ("", "a", true, "a"),
-        ("bat", "m", true, "batm"),
-        ("bat", "7", true, "bat7"),
-        ("bat", " ", true, "bat "),
-        ("bat", "backspace", true, "ba"),
+        ("gul", "l", true, "gull"),
+        ("gul", "7", true, "gul7"),
+        ("gul", " ", true, "gul "),
+        ("gul", "backspace", true, "gu"),
         ("b", "backspace", true, ""),
         ("", "backspace", false, ""),
-        ("bat", "up", false, "bat"),
-        ("bat", "enter", false, "bat"),
-        ("bat", "A", false, "bat"),
-        ("bat", "·", false, "bat"),
-        ("bat", "", false, "bat"),
+        ("gul", "up", false, "gul"),
+        ("gul", "enter", false, "gul"),
+        ("gul", "A", false, "gul"),
+        ("gul", "·", false, "gul"),
+        ("gul", "", false, "gul"),
     ];
 
     #[test]
@@ -226,7 +226,7 @@ mod tests {
         assert!(empty.y > bounds.y);
         assert!(empty.y + empty.height < bounds.y + bounds.height);
 
-        let typed = cursor(bounds, "batman");
+        let typed = cursor(bounds, "gullwing");
         assert!(typed.x > empty.x);
 
         let long = cursor(bounds, &"w".repeat(200));

@@ -51,10 +51,10 @@ mod tests {
     #[test]
     fn an_alias_is_the_providers_id_for_the_work() {
         assert_eq!(
-            identity(&["movie:tmdb:603", "movie:imdb:tt0133093"]).aliases,
+            identity(&["movie:tmdb:7001", "movie:imdb:tt9000001"]).aliases,
             BTreeMap::from([
-                ("tmdb".to_string(), "603".to_string()),
-                ("imdb".to_string(), "tt0133093".to_string()),
+                ("tmdb".to_string(), "7001".to_string()),
+                ("imdb".to_string(), "tt9000001".to_string()),
             ])
         );
     }
@@ -70,16 +70,16 @@ mod tests {
     #[test]
     fn an_id_keeps_every_colon_after_the_provider() {
         assert_eq!(
-            identity(&["series:tvdb:81189:2"]).aliases,
-            BTreeMap::from([("tvdb".to_string(), "81189:2".to_string())])
+            identity(&["series:tvdb:8003:2"]).aliases,
+            BTreeMap::from([("tvdb".to_string(), "8003:2".to_string())])
         );
     }
 
     #[test]
     fn the_first_id_a_provider_named_stands() {
         assert_eq!(
-            identity(&["movie:tmdb:603", "movie:tmdb:604"]).aliases,
-            BTreeMap::from([("tmdb".to_string(), "603".to_string())])
+            identity(&["movie:tmdb:7001", "movie:tmdb:7002"]).aliases,
+            BTreeMap::from([("tmdb".to_string(), "7001".to_string())])
         );
     }
 
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn a_work_that_is_no_episode_carries_no_numbers() {
-        let identity = identity(&["movie:tmdb:603"]);
+        let identity = identity(&["movie:tmdb:7001"]);
 
         assert_eq!((identity.season, identity.episode), (0, 0));
     }

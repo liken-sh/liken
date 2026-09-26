@@ -150,7 +150,7 @@ same day, against the movies and series libraries.
 - A departure released 27 s after the delete.
 
 The drill found four gaps, each fixed in the release named. The `runs`
-row alone did not prove the rows arrived: 266 of 1415 titles were
+row alone did not prove the rows arrived: about a fifth of the titles were
 still in flight when the echo came, so the echo now carries the
 counts (-005). RBAC granted no `update` on `CronJob`s, so every pass
 failed on the image bump (-006). A new `Library` got no walk until its

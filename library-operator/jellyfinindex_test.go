@@ -33,16 +33,16 @@ func TestTheIndexAnswersTheItemOfOneWork(t *testing.T) {
 		episode int
 		item    string
 	}{
-		{name: "a film by its tmdb id", aliases: map[string]string{"tmdb": "603"}, item: "item-matrix"},
-		{name: "a film by its imdb id", aliases: map[string]string{"imdb": "tt0133093"}, item: "item-matrix"},
-		{name: "a film by two ids", aliases: map[string]string{"imdb": "tt0133093", "tmdb": "603"}, item: "item-matrix"},
-		{name: "the other film", aliases: map[string]string{"tmdb": "329865"}, item: "item-arrival"},
-		{name: "an episode by the series' tmdb id", aliases: map[string]string{"tmdb": "2316"},
-			season: 3, episode: 5, item: "item-office-3-5"},
-		{name: "an episode by the series' tvdb id", aliases: map[string]string{"tvdb": "73244"},
-			season: 3, episode: 5, item: "item-office-3-5"},
+		{name: "a film by its tmdb id", aliases: map[string]string{"tmdb": "1101"}, item: "item-film"},
+		{name: "a film by its imdb id", aliases: map[string]string{"imdb": "tt9001101"}, item: "item-film"},
+		{name: "a film by two ids", aliases: map[string]string{"imdb": "tt9001101", "tmdb": "1101"}, item: "item-film"},
+		{name: "the other film", aliases: map[string]string{"tmdb": "1102"}, item: "item-other-film"},
+		{name: "an episode by the series' tmdb id", aliases: map[string]string{"tmdb": "2101"},
+			season: 3, episode: 5, item: "item-series-3-5"},
+		{name: "an episode by the series' tvdb id", aliases: map[string]string{"tvdb": "3101"},
+			season: 3, episode: 5, item: "item-series-3-5"},
 		{name: "a film nothing holds", aliases: map[string]string{"tmdb": "1"}, item: ""},
-		{name: "an episode of a season nothing holds", aliases: map[string]string{"tmdb": "2316"},
+		{name: "an episode of a season nothing holds", aliases: map[string]string{"tmdb": "2101"},
 			season: 4, episode: 5, item: ""},
 		{name: "an episode by its own id", aliases: map[string]string{"tmdb": "999"},
 			season: 3, episode: 5, item: ""},
@@ -68,9 +68,9 @@ func TestTheIndexHoldsTheSeriesTheListingCarried(t *testing.T) {
 	index, _, _ := standJellyfinIndex(t, fake)
 	index.prime(t.Context())
 
-	aliases := index.seriesAliases(t.Context(), "item-office")
+	aliases := index.seriesAliases(t.Context(), "item-series")
 
-	if aliases["tmdb"] != "2316" || aliases["tvdb"] != "73244" {
+	if aliases["tmdb"] != "2101" || aliases["tvdb"] != "3101" {
 		t.Errorf("aliases = %v, want the series' two ids", aliases)
 	}
 	if fake.seriesReads != 0 {
@@ -84,10 +84,10 @@ func TestASeriesTheIndexDoesNotHoldIsReadOnce(t *testing.T) {
 	fake := jellyfinFixture()
 	index, _, _ := standJellyfinIndex(t, fake)
 
-	first := index.seriesAliases(t.Context(), "item-office")
-	second := index.seriesAliases(t.Context(), "item-office")
+	first := index.seriesAliases(t.Context(), "item-series")
+	second := index.seriesAliases(t.Context(), "item-series")
 
-	if first["tmdb"] != "2316" || second["tmdb"] != "2316" {
+	if first["tmdb"] != "2101" || second["tmdb"] != "2101" {
 		t.Errorf("aliases = %v and %v, want the series' ids both times", first, second)
 	}
 	if fake.seriesReads != 1 {
@@ -119,10 +119,10 @@ func TestAMissRebuildsTheIndexAtMostOnceAMinute(t *testing.T) {
 	index, clock, _ := standJellyfinIndex(t, fake)
 	index.prime(t.Context())
 	fake.items = append(fake.items,
-		jellyfinItem{ID: "item-dune", Type: "Movie", ProviderIds: map[string]string{"Tmdb": "438631"}})
-	dune := map[string]string{"tmdb": "438631"}
+		jellyfinItem{ID: "item-late-film", Type: "Movie", ProviderIds: map[string]string{"Tmdb": "1103"}})
+	lateFilm := map[string]string{"tmdb": "1103"}
 
-	if _, found := index.itemFor(t.Context(), dune, 0, 0); found {
+	if _, found := index.itemFor(t.Context(), lateFilm, 0, 0); found {
 		t.Error("the index answered a film it had not read")
 	}
 	if fake.listings != jellyfinFixtureBuild {
@@ -130,10 +130,10 @@ func TestAMissRebuildsTheIndexAtMostOnceAMinute(t *testing.T) {
 	}
 
 	clock.advance(jellyfinIndexFloor)
-	item, found := index.itemFor(t.Context(), dune, 0, 0)
+	item, found := index.itemFor(t.Context(), lateFilm, 0, 0)
 
-	if item != "item-dune" || !found {
-		t.Errorf("item = %q, %v, want item-dune", item, found)
+	if item != "item-late-film" || !found {
+		t.Errorf("item = %q, %v, want item-late-film", item, found)
 	}
 	if fake.listings != 2*jellyfinFixtureBuild {
 		t.Errorf("the index made %d listing requests, want two builds", fake.listings)
@@ -148,7 +148,7 @@ func TestAnIndexOlderThanAnHourIsRebuilt(t *testing.T) {
 	index.prime(t.Context())
 	clock.advance(jellyfinIndexLifetime)
 
-	if _, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0); !found {
+	if _, found := index.itemFor(t.Context(), map[string]string{"tmdb": "1101"}, 0, 0); !found {
 		t.Error("the index lost the film it held")
 	}
 	if fake.listings != 2*jellyfinFixtureBuild {
@@ -167,9 +167,9 @@ func TestABuildThatFailsHalfwayLeavesTheIndexAsItWas(t *testing.T) {
 	fake.refuse = "Movie,Episode"
 	clock.advance(jellyfinIndexLifetime)
 
-	item, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0)
+	item, found := index.itemFor(t.Context(), map[string]string{"tmdb": "1101"}, 0, 0)
 
-	if item != "item-matrix" || !found {
+	if item != "item-film" || !found {
 		t.Errorf("item = %q, %v, want the film the first build held", item, found)
 	}
 	if !strings.Contains(logged.String(), "could not read the items") {
@@ -189,9 +189,9 @@ func TestABuildRunsOnItsOwnBudgetAndNotTheCallers(t *testing.T) {
 	if !built {
 		t.Fatalf("the build did not run on a budget of its own; log = %q", logged.String())
 	}
-	item, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0)
-	if item != "item-matrix" || !found {
-		t.Errorf("item = %q, %v, want item-matrix", item, found)
+	item, found := index.itemFor(t.Context(), map[string]string{"tmdb": "1101"}, 0, 0)
+	if item != "item-film" || !found {
+		t.Errorf("item = %q, %v, want item-film", item, found)
 	}
 }
 
@@ -233,9 +233,9 @@ func TestTheUsersMapReadsAPersonNameWithoutCase(t *testing.T) {
 		person string
 		user   string
 	}{
-		{name: "the name as jellyfin holds it", person: "Chris", user: "user-chris"},
-		{name: "the name in lower case", person: "chris", user: "user-chris"},
-		{name: "the name in upper case", person: "KELLY", user: "user-kelly"},
+		{name: "the name as jellyfin holds it", person: "Person-A", user: "user-a"},
+		{name: "the name in lower case", person: "person-a", user: "user-a"},
+		{name: "the name in upper case", person: "PERSON-C", user: "user-c"},
 		{name: "a person jellyfin does not hold", person: "nobody", user: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -258,9 +258,9 @@ func TestAPersonTheMapDoesNotHoldReadsTheUsersAgain(t *testing.T) {
 	fake := jellyfinFixture()
 	index, clock, _ := standJellyfinIndex(t, fake)
 	index.prime(t.Context())
-	fake.users = append(fake.users, jellyfinUser{Name: "sam", ID: "user-sam"})
+	fake.users = append(fake.users, jellyfinUser{Name: "person-d", ID: "user-d"})
 
-	if _, known := index.userFor(t.Context(), "sam"); known {
+	if _, known := index.userFor(t.Context(), "person-d"); known {
 		t.Error("the index answered a user it had not read")
 	}
 	if fake.userReads != 1 {
@@ -268,9 +268,9 @@ func TestAPersonTheMapDoesNotHoldReadsTheUsersAgain(t *testing.T) {
 	}
 
 	clock.advance(jellyfinIndexFloor)
-	user, known := index.userFor(t.Context(), "sam")
+	user, known := index.userFor(t.Context(), "person-d")
 
-	if user != "user-sam" || !known {
+	if user != "user-d" || !known {
 		t.Errorf("user = %q, %v, want user-sam", user, known)
 	}
 	if fake.userReads != 2 {
@@ -287,10 +287,10 @@ func TestAJellyfinThatRefusesLeavesTheIndexEmpty(t *testing.T) {
 
 	index.prime(t.Context())
 
-	if _, found := index.itemFor(t.Context(), map[string]string{"tmdb": "603"}, 0, 0); found {
+	if _, found := index.itemFor(t.Context(), map[string]string{"tmdb": "1101"}, 0, 0); found {
 		t.Error("the index answered from a server that refused it")
 	}
-	if _, known := index.userFor(t.Context(), "chris"); known {
+	if _, known := index.userFor(t.Context(), "person-a"); known {
 		t.Error("the index answered a user from a server that refused it")
 	}
 	if !strings.Contains(logged.String(), "could not read the items") ||

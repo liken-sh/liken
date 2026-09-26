@@ -187,7 +187,7 @@ var episodeCode = regexp.MustCompile(`^S([0-9]{2,})E([0-9]{2,})(?:-S([0-9]{2,})E
 var releasedDate = regexp.MustCompile(`^([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?$`)
 
 // providerReference is the shape of a provider id, scheme:id, such as
-// tmdb:1893.
+// tmdb:1001.
 var providerReference = regexp.MustCompile(`^[a-z0-9]+:[A-Za-z0-9_-]+$`)
 
 // parseFranchiseFile reads one franchise.yaml and returns the file or the

@@ -86,8 +86,8 @@ again. The payload, `outsidePlay` in `progressbus.go`:
 ```json
 {
   "player": "jellyfin",
-  "people": ["chris"],
-  "aliases": {"tmdb": "603", "imdb": "tt0133093"},
+  "people": ["person-a"],
+  "aliases": {"tmdb": "1001", "imdb": "tt9000001"},
   "season": 0,
   "episode": 0,
   "position": 4210,

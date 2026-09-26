@@ -137,19 +137,19 @@ const jellyfinFixtureBuild = 2
 // and one episode of it.
 func jellyfinFixture() *fakeJellyfin {
 	return &fakeJellyfin{
-		users: []jellyfinUser{{Name: "Chris", ID: "user-chris"}, {Name: "kelly", ID: "user-kelly"}},
+		users: []jellyfinUser{{Name: "Person-A", ID: "user-a"}, {Name: "person-c", ID: "user-c"}},
 		items: []jellyfinItem{
-			{ID: "item-matrix", Type: "Movie",
-				ProviderIds: map[string]string{"Tmdb": "603", "Imdb": "tt0133093", "Tvdb": ""}},
-			{ID: "item-arrival", Type: "Movie", ProviderIds: map[string]string{"Tmdb": "329865"}},
-			{ID: "item-office", Type: "Series",
-				ProviderIds: map[string]string{"Tmdb": "2316", "Tvdb": "73244"}},
-			{ID: "item-office-3-5", Type: "Episode", SeriesID: "item-office",
+			{ID: "item-film", Type: "Movie",
+				ProviderIds: map[string]string{"Tmdb": "1101", "Imdb": "tt9001101", "Tvdb": ""}},
+			{ID: "item-other-film", Type: "Movie", ProviderIds: map[string]string{"Tmdb": "1102"}},
+			{ID: "item-series", Type: "Series",
+				ProviderIds: map[string]string{"Tmdb": "2101", "Tvdb": "3101"}},
+			{ID: "item-series-3-5", Type: "Episode", SeriesID: "item-series",
 				ParentIndexNumber: 3, IndexNumber: 5, ProviderIds: map[string]string{"Tmdb": "999"}},
 		},
 		byID: map[string]jellyfinItem{
-			"item-office": {ID: "item-office", Type: "Series",
-				ProviderIds: map[string]string{"Tmdb": "2316"}},
+			"item-series": {ID: "item-series", Type: "Series",
+				ProviderIds: map[string]string{"Tmdb": "2101"}},
 		},
 	}
 }
@@ -210,7 +210,7 @@ func TestTheClientReadsTheUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the users: %v", err)
 	}
-	if len(users) != 2 || users[0].Name != "Chris" || users[0].ID != "user-chris" {
+	if len(users) != 2 || users[0].Name != "Person-A" || users[0].ID != "user-a" {
 		t.Errorf("users = %+v, want the two the server holds", users)
 	}
 }
@@ -227,7 +227,7 @@ func TestTheClientReadsTheWorksListing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the items: %v", err)
 	}
-	if len(held) != 3 || held[2].SeriesID != "item-office" || held[2].IndexNumber != 5 {
+	if len(held) != 3 || held[2].SeriesID != "item-series" || held[2].IndexNumber != 5 {
 		t.Errorf("items = %+v, want the two films and the episode", held)
 	}
 	want := "/Items?recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds" +
@@ -247,7 +247,7 @@ func TestTheClientReadsTheSeriesListing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the series: %v", err)
 	}
-	if len(held) != 1 || held[0].ID != "item-office" {
+	if len(held) != 1 || held[0].ID != "item-series" {
 		t.Errorf("items = %+v, want the one series", held)
 	}
 }
@@ -475,15 +475,15 @@ func TestTheClientReadsOneItemByID(t *testing.T) {
 	fake := jellyfinFixture()
 	api := standJellyfinServer(t, fake)
 
-	item, err := api.item(t.Context(), "item-office")
+	item, err := api.item(t.Context(), "item-series")
 
 	if err != nil {
 		t.Fatalf("reading the series: %v", err)
 	}
-	if item.ProviderIds["Tmdb"] != "2316" {
+	if item.ProviderIds["Tmdb"] != "2101" {
 		t.Errorf("item = %+v, want the series' provider ids", item)
 	}
-	if want := "/Items?fields=ProviderIds&enableImages=false&ids=item-office"; fake.queries[0] != want {
+	if want := "/Items?fields=ProviderIds&enableImages=false&ids=item-series"; fake.queries[0] != want {
 		t.Errorf("query = %q, want %q", fake.queries[0], want)
 	}
 }
@@ -495,13 +495,13 @@ func TestTheClientWritesOnePersonsUserData(t *testing.T) {
 	api := standJellyfinServer(t, fake)
 	data := jellyfinUserData{PlaybackPositionTicks: 42100000000, Played: true, LastPlayedDate: "2026-09-08T20:04:05Z"}
 
-	err := api.writeUserData(t.Context(), "item-matrix", "user-chris", data)
+	err := api.writeUserData(t.Context(), "item-film", "user-a", data)
 
 	if err != nil {
 		t.Fatalf("writing the user data: %v", err)
 	}
-	if len(fake.writes) != 1 || fake.writes[0].item != "item-matrix" || fake.writes[0].user != "user-chris" {
-		t.Fatalf("writes = %+v, want one write of the film for chris", fake.writes)
+	if len(fake.writes) != 1 || fake.writes[0].item != "item-film" || fake.writes[0].user != "user-a" {
+		t.Fatalf("writes = %+v, want one write of the film for person-a", fake.writes)
 	}
 	if fake.writes[0].data != data {
 		t.Errorf("data = %+v, want %+v", fake.writes[0].data, data)
@@ -542,7 +542,7 @@ func TestAWriteTheServerRefusedIsAnError(t *testing.T) {
 	fake.status = http.StatusForbidden
 	api := standJellyfinServer(t, fake)
 
-	err := api.writeUserData(t.Context(), "item-matrix", "user-chris", jellyfinUserData{})
+	err := api.writeUserData(t.Context(), "item-film", "user-a", jellyfinUserData{})
 
 	if err == nil {
 		t.Fatal("the client wrote to a server that refused it")

@@ -67,11 +67,11 @@ func streamRowsAt(result *walkResult, path string) []streamRow {
 
 func TestAFreshProbeFillsAVideosColumns(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	video := filepath.Join(folder, "The Thing (1982) 720p.mkv")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	video := filepath.Join(folder, "The Long Survey (1982) 720p.mkv")
 	writeFile(t, video, "video")
 	writeProbeLedger(t, folder, probedFile{
-		Path: "The Thing (1982) 720p.mkv", Modified: modifiedOf(t, video),
+		Path: "The Long Survey (1982) 720p.mkv", Modified: modifiedOf(t, video),
 		Container: "mkv", Duration: 6540.4567, Bitrate: 8000000,
 		Streams: []probedStream{
 			{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080},
@@ -82,7 +82,7 @@ func TestAFreshProbeFillsAVideosColumns(t *testing.T) {
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	row := fileRowAt(t, result, "The Thing (1982)/The Thing (1982) 720p.mkv")
+	row := fileRowAt(t, result, "The Long Survey (1982)/The Long Survey (1982) 720p.mkv")
 	want := probedColumns{
 		Container: "mkv", VideoCodec: "h264", AudioCodec: "ac3", Width: 1920, Height: 1080,
 		DurationMs: 6540457, Bitrate: 8000000, Probed: modifiedOf(t, video),
@@ -95,11 +95,11 @@ func TestAFreshProbeFillsAVideosColumns(t *testing.T) {
 
 func TestAFreshProbeWritesOneStreamRowPerStream(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	video := filepath.Join(folder, "The Thing (1982).mkv")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	video := filepath.Join(folder, "The Long Survey (1982).mkv")
 	writeFile(t, video, "video")
 	writeProbeLedger(t, folder, probedFile{
-		Path: "The Thing (1982).mkv", Modified: modifiedOf(t, video), Duration: 100,
+		Path: "The Long Survey (1982).mkv", Modified: modifiedOf(t, video), Duration: 100,
 		Streams: []probedStream{
 			{
 				Kind: fileTypeVideo, Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
@@ -120,7 +120,7 @@ func TestAFreshProbeWritesOneStreamRowPerStream(t *testing.T) {
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	path := "The Thing (1982)/The Thing (1982).mkv"
+	path := "The Long Survey (1982)/The Long Survey (1982).mkv"
 	want := []streamRow{
 		{
 			Library: "house/movies", Path: path, Ordinal: 0, Present: true,
@@ -153,11 +153,11 @@ func TestAFreshProbeWritesOneStreamRowPerStream(t *testing.T) {
 
 func TestAStaleProbeLeavesTheColumnsToTheNameAndTheNFO(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	video := filepath.Join(folder, "The Thing (1982) 720p.mkv")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	video := filepath.Join(folder, "The Long Survey (1982) 720p.mkv")
 	writeFile(t, video, "video")
 	writeProbeLedger(t, folder, probedFile{
-		Path: "The Thing (1982) 720p.mkv", Modified: modifiedOf(t, video) - 1,
+		Path: "The Long Survey (1982) 720p.mkv", Modified: modifiedOf(t, video) - 1,
 		Duration: 6540, Bitrate: 8000000,
 		Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080}},
 	})
@@ -165,7 +165,7 @@ func TestAStaleProbeLeavesTheColumnsToTheNameAndTheNFO(t *testing.T) {
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	path := "The Thing (1982)/The Thing (1982) 720p.mkv"
+	path := "The Long Survey (1982)/The Long Survey (1982) 720p.mkv"
 	row := fileRowAt(t, result, path)
 	want := probedColumns{Container: "mkv", Width: 1280, Height: 720, Probed: modifiedOf(t, video) - 1}
 	got := probedColumnsOf(row)
@@ -179,13 +179,13 @@ func TestAStaleProbeLeavesTheColumnsToTheNameAndTheNFO(t *testing.T) {
 
 func TestAVideoWithNoProbeRecordKeepsTodaysColumns(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	writeFile(t, filepath.Join(folder, "The Thing (1982) 720p.mkv"), "video")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	writeFile(t, filepath.Join(folder, "The Long Survey (1982) 720p.mkv"), "video")
 
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	path := "The Thing (1982)/The Thing (1982) 720p.mkv"
+	path := "The Long Survey (1982)/The Long Survey (1982) 720p.mkv"
 	row := fileRowAt(t, result, path)
 	want := probedColumns{Container: "mkv", Width: 1280, Height: 720}
 	got := probedColumnsOf(row)
@@ -199,12 +199,12 @@ func TestAVideoWithNoProbeRecordKeepsTodaysColumns(t *testing.T) {
 
 func TestAnAudioFileTakesItsColumnsFromTheRecordAndNoneFromItsName(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	writeFile(t, filepath.Join(folder, "The Thing (1982).mkv"), "video")
-	track := filepath.Join(folder, "The Thing (1982) 1080p-theme.mp3")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	writeFile(t, filepath.Join(folder, "The Long Survey (1982).mkv"), "video")
+	track := filepath.Join(folder, "The Long Survey (1982) 1080p-theme.mp3")
 	writeFile(t, track, "audio")
 	writeProbeLedger(t, folder, probedFile{
-		Path: "The Thing (1982) 1080p-theme.mp3", Modified: modifiedOf(t, track),
+		Path: "The Long Survey (1982) 1080p-theme.mp3", Modified: modifiedOf(t, track),
 		Duration: 212.5, Bitrate: 320000,
 		Streams: []probedStream{{Kind: fileTypeAudio, Codec: "mp3", Channels: 2, SampleRate: 44100}},
 	})
@@ -212,7 +212,7 @@ func TestAnAudioFileTakesItsColumnsFromTheRecordAndNoneFromItsName(t *testing.T)
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	path := "The Thing (1982)/The Thing (1982) 1080p-theme.mp3"
+	path := "The Long Survey (1982)/The Long Survey (1982) 1080p-theme.mp3"
 	row := fileRowAt(t, result, path)
 	want := probedColumns{
 		Container: "mp3", AudioCodec: "mp3", DurationMs: 212500,
@@ -229,8 +229,8 @@ func TestAnAudioFileTakesItsColumnsFromTheRecordAndNoneFromItsName(t *testing.T)
 
 func TestAnExtrasVideoReadsTheTitleFoldersProbeLedger(t *testing.T) {
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	writeFile(t, filepath.Join(folder, "The Thing (1982).mkv"), "video")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	writeFile(t, filepath.Join(folder, "The Long Survey (1982).mkv"), "video")
 	extra := filepath.Join(folder, "Extras", "Deleted Scene.mkv")
 	writeFile(t, extra, "video")
 	writeProbeLedger(t, folder, probedFile{
@@ -242,7 +242,7 @@ func TestAnExtrasVideoReadsTheTitleFoldersProbeLedger(t *testing.T) {
 	result := &walkResult{}
 	scanMovieFolder(movieScan(root), folder, result)
 
-	path := "The Thing (1982)/Extras/Deleted Scene.mkv"
+	path := "The Long Survey (1982)/Extras/Deleted Scene.mkv"
 	row := fileRowAt(t, result, path)
 	if row.VideoCodec != "h264" || row.DurationMs != 61000 || row.Probed != modifiedOf(t, extra) {
 		t.Errorf("row = %+v, want the record the title folder holds for the extra", row)
@@ -254,11 +254,11 @@ func TestAnExtrasVideoReadsTheTitleFoldersProbeLedger(t *testing.T) {
 
 func TestAnEpisodeReadsTheSeasonFoldersProbeLedger(t *testing.T) {
 	root := t.TempDir()
-	season := filepath.Join(root, "Twin Peaks (1990)", "Season 01")
-	episode := filepath.Join(season, "Twin Peaks - S01E01.mkv")
+	season := filepath.Join(root, "Pine Hollow (1990)", "Season 01")
+	episode := filepath.Join(season, "Pine Hollow - S01E01.mkv")
 	writeFile(t, episode, "video")
 	writeProbeLedger(t, season, probedFile{
-		Path: "Twin Peaks - S01E01.mkv", Modified: modifiedOf(t, episode),
+		Path: "Pine Hollow - S01E01.mkv", Modified: modifiedOf(t, episode),
 		Duration: 2760.25, Bitrate: 6000000,
 		Streams: []probedStream{
 			{Kind: fileTypeVideo, Codec: "mpeg2video", Width: 720, Height: 480},
@@ -268,9 +268,9 @@ func TestAnEpisodeReadsTheSeasonFoldersProbeLedger(t *testing.T) {
 
 	result := &walkResult{}
 	scanSeriesFolder(folderScan{root: root, library: "house/series", kind: libraryKindSeries},
-		filepath.Join(root, "Twin Peaks (1990)"), result)
+		filepath.Join(root, "Pine Hollow (1990)"), result)
 
-	path := "Twin Peaks (1990)/Season 01/Twin Peaks - S01E01.mkv"
+	path := "Pine Hollow (1990)/Season 01/Pine Hollow - S01E01.mkv"
 	row := fileRowAt(t, result, path)
 	if row.VideoCodec != "mpeg2video" || row.AudioCodec != "ac3" || row.DurationMs != 2760250 {
 		t.Errorf("row = %+v, want the record the season folder holds", row)
@@ -288,11 +288,11 @@ func TestAnEpisodeReadsTheSeasonFoldersProbeLedger(t *testing.T) {
 func TestAProbedLibraryLandsItsFilesAndStreamsInTheCatalog(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	root := t.TempDir()
-	folder := filepath.Join(root, "The Thing (1982)")
-	video := filepath.Join(folder, "The Thing (1982).mkv")
+	folder := filepath.Join(root, "The Long Survey (1982)")
+	video := filepath.Join(folder, "The Long Survey (1982).mkv")
 	writeFile(t, video, "video")
 	writeProbeLedger(t, folder, probedFile{
-		Path: "The Thing (1982).mkv", Modified: modifiedOf(t, video),
+		Path: "The Long Survey (1982).mkv", Modified: modifiedOf(t, video),
 		Container: "mkv", Duration: 6540.5, Bitrate: 8000000,
 		Streams: []probedStream{
 			{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080, Depth: 8},

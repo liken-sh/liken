@@ -14,12 +14,12 @@ import (
 func genreVolume(t *testing.T) (string, string) {
 	t.Helper()
 	movies := t.TempDir()
-	writeFile(t, filepath.Join(movies, "Unforgiven (1992)", "Unforgiven (1992).mkv"), "video")
-	writeFile(t, filepath.Join(movies, "Unforgiven (1992)", "movie.nfo"),
-		`<movie><title>Unforgiven</title><year>1992</year><genre>Western</genre><genre> Drama </genre></movie>`)
+	writeFile(t, filepath.Join(movies, "Dry Creek (1992)", "Dry Creek (1992).mkv"), "video")
+	writeFile(t, filepath.Join(movies, "Dry Creek (1992)", "movie.nfo"),
+		`<movie><title>Dry Creek</title><year>1992</year><genre>Western</genre><genre> Drama </genre></movie>`)
 	series := t.TempDir()
-	writeFile(t, filepath.Join(series, "Deadwood (2004)", "tvshow.nfo"),
-		`<tvshow><title>Deadwood</title><year>2004</year><genre>Drama</genre><genre>Western</genre></tvshow>`)
+	writeFile(t, filepath.Join(series, "Gold Camp (2004)", "tvshow.nfo"),
+		`<tvshow><title>Gold Camp</title><year>2004</year><genre>Drama</genre><genre>Western</genre></tvshow>`)
 	return movies, series
 }
 
@@ -28,10 +28,10 @@ func TestTheWalkLiftsAGenreRowPerGenreInTheNFOsOrder(t *testing.T) {
 
 	movieResult := &walkResult{}
 	scanMovieFolder(folderScan{root: movies, library: "house/movies", kind: libraryKindMovies},
-		filepath.Join(movies, "Unforgiven (1992)"), movieResult)
+		filepath.Join(movies, "Dry Creek (1992)"), movieResult)
 	seriesResult := &walkResult{}
 	scanSeriesFolder(folderScan{root: series, library: "house/series", kind: libraryKindSeries},
-		filepath.Join(series, "Deadwood (2004)"), seriesResult)
+		filepath.Join(series, "Gold Camp (2004)"), seriesResult)
 
 	cases := []struct {
 		name string

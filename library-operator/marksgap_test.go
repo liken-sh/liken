@@ -12,17 +12,17 @@ import (
 )
 
 // The file every case seeds, an episode of an identified series.
-const marksGapPath = "Severance (2022)/Season 01/Severance - S01E02.mkv"
+const marksGapPath = "Glass Floor (2022)/Season 01/Glass Floor - S01E02.mkv"
 
 // One identified series with one episode per release date the test names,
 // every episode on the one file, and the file's last marks attempt. An
 // empty release date is an episode the catalog holds no date for.
 func seedMarksAttempt(t *testing.T, catalog *Catalog, releases []string, result string, at time.Time) {
 	t.Helper()
-	series := "series:tvdb:371980"
+	series := "series:tvdb:700001"
 	seed := &walkResult{
 		series: []seriesRow{{Id: series, Library: marksLibrary, Kind: libraryKindSeries,
-			Path: "Severance (2022)", Title: "Severance"}},
+			Path: "Glass Floor (2022)", Title: "Glass Floor"}},
 		attempts: []attemptRow{{Library: marksLibrary, Item: marksGapPath, Fact: factMarks,
 			Result: result, At: at.Unix()}},
 	}

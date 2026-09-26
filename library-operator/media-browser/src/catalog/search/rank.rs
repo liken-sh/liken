@@ -86,8 +86,8 @@ pub fn from_episode(stored: u8) -> bool {
 
 /// The rank a read compares hits by: the rung, then how the query word
 /// met the indexed word. A prefix of a one-word string ranks as a
-/// first-word match, because "bat" against "Batman" is the same kind
-/// of hit as "bat" against "Batman Begins". The how depends on the
+/// first-word match, because "gull" against "Gullwing" is the same
+/// kind of hit as "gull" against "Gullwing Rising". The how depends on the
 /// query, so it is computed here and never stored.
 pub fn found(stored: u8, relation: Relation) -> u8 {
     let position = (stored >> 1) & 3;
@@ -119,10 +119,10 @@ mod tests {
 
     #[test]
     fn a_query_word_meets_an_indexed_word_four_ways() {
-        assert_eq!(relate("batman", "batman"), Some(Relation::Equal));
-        assert_eq!(relate("batman", "bat"), Some(Relation::Prefix));
-        assert_eq!(relate("batman", "atma"), Some(Relation::Inner));
-        assert_eq!(relate("batman", "robin"), None);
+        assert_eq!(relate("gullwing", "gullwing"), Some(Relation::Equal));
+        assert_eq!(relate("gullwing", "gull"), Some(Relation::Prefix));
+        assert_eq!(relate("gullwing", "ullw"), Some(Relation::Inner));
+        assert_eq!(relate("gullwing", "robin"), None);
     }
 
     // The rank of one match, as a read compares it.

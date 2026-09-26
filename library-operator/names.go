@@ -60,8 +60,8 @@ var (
 	resolutionToken = regexp.MustCompile(`^\d{3,4}[pi]$`)
 	// seasonFolder reads the number off a Season 02 folder.
 	seasonFolder = regexp.MustCompile(`(?i)^season\s*0*(\d+)$`)
-	// A provider id in a name, in Jellyfin's form, as in [tmdbid-603] or
-	// [imdbid-tt0133093]. It is how a person confirms a candidate without
+	// A provider id in a name, in Jellyfin's form, as in [tmdbid-1001] or
+	// [imdbid-tt9001001]. It is how a person confirms a candidate without
 	// opening the .nfo file.
 	providerIDToken = regexp.MustCompile(`(?i)\[(tmdb|imdb|tvdb)id-([^]\s]+)]`)
 	// episodeMarker reads the season and episode off an s02e05 or 2x05 name,
@@ -109,7 +109,7 @@ func parseReleaseName(name string) (string, int) {
 
 // splitTokens splits a name on the separators a release name uses, so a dotted,
 // spaced, or underscored name reads the same. A dash stays inside a token,
-// because a title like Wall-E keeps it.
+// because a title like Half-Light keeps it.
 func splitTokens(name string) []string {
 	return strings.FieldsFunc(name, func(r rune) bool {
 		return r == '.' || r == '_' || r == ' '

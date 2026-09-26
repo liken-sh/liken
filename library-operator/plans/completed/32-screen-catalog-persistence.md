@@ -82,8 +82,8 @@ comes back to the same node and the same volume.
   by the `Catalog` would outlive every `Player` it was made for, and
   nothing would collect it.
 - **The claim's name is derived.** It is the screen pod's name and
-  `-catalog`, so `studio-lg-media-browser-catalog` for the `Player`
-  `studio-lg`. Every pass names the same claim and the operator keeps
+  `-catalog`, so `studio-media-browser-catalog` for the `Player`
+  `studio`. Every pass names the same claim and the operator keeps
   no record of what it created, which is the rule
   `scannerCatalogClaimName` and `catalogPodClaimName` already follow.
   The node is not in the name, because the operator cannot know the
@@ -256,10 +256,11 @@ new claim bound on the new node.
 ### The drill, 2026-09-02
 
 Built in release 2026.09.02-009 and drilled on `liken-1` the same
-day, on the `lab-portable` `Player`, with 53,614 rows in the
-namespace's catalog. The drill measured the time to the full row
+day, on the `lab-portable` `Player`, with the namespace's full
+catalog. The drill measured the time to the full row
 count on the screen's agent against the catalog pod's, rather than
-the first draw, because nothing reads the screen from `vega`.
+the first draw, because nothing reads the screen from the
+workstation.
 
 | Screen restart | Before, on `emptyDir` | After, on the claim |
 |---|---|---|
@@ -267,7 +268,7 @@ the first draw, because nothing reads the screen from `vega`.
 | Sidecar memory after | 211 MiB | 11 MiB |
 | First start on a fresh claim | every start | once: 152 s, 209 MiB |
 
-The claim bound on `local-path` on `stick-1`, and the pod came back
+The claim bound on `local-path` on the screen's node, and the pod came back
 to that node on every restart. `Catalog.status.screens` listed the
 screen with its claim, node, and phase. The move drill did not run,
 because the testbed has one display, and the bytes used on the claim

@@ -8,7 +8,7 @@ use iced_winit::core::Color;
 use super::*;
 
 // The topic the operator names for the `Player`'s retained status.
-const STATUS_TOPIC: &str = "liken/media/players/house/den-tv/status";
+const STATUS_TOPIC: &str = "liken/media/players/house/den/status";
 
 // A unit with one controller at a full charge, which has the focus. The
 // bar of a full charge is the line's own colour from end to end.
@@ -36,7 +36,7 @@ fn the_picker_draws_the_unit_the_status_names() {
         &dir,
         &[
             ("MEDIA_BUS_ADDRESS", &broker.address),
-            ("MEDIA_PLAYER_NAME", "den-tv"),
+            ("MEDIA_PLAYER_NAME", "den"),
             ("MEDIA_PLAYER_STATUS_TOPIC", STATUS_TOPIC),
         ],
         &[

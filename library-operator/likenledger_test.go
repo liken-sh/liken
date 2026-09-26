@@ -35,13 +35,13 @@ func TestAProbeAttemptIsWrittenInThePlansShape(t *testing.T) {
 	folder := t.TempDir()
 
 	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
-		ledger.noteAttempt(likenAttempt{Path: "The Thing (1982).mkv", At: ledgerTime, Result: attemptFound})
+		ledger.noteAttempt(likenAttempt{Path: "The Long Survey (1982).mkv", At: ledgerTime, Result: attemptFound})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := "attempts:\n    - path: The Thing (1982).mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n"
+	want := "attempts:\n    - path: The Long Survey (1982).mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n"
 	if got := readFileString(t, filepath.Join(folder, likenDirectory, "probe.yaml")); got != want {
 		t.Errorf("wrote\n%q\nwant\n%q", got, want)
 	}
@@ -51,7 +51,7 @@ func TestAnIdentityLedgerHoldsAnIdAndItsReason(t *testing.T) {
 	folder := t.TempDir()
 
 	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
-		ledger.noteItem(likenItem{Path: likenSelfPath, ID: providerIDs{"tmdb": "603"}, Reason: reasonFrom(testTitle, testYear), Written: ledgerTime})
+		ledger.noteItem(likenItem{Path: likenSelfPath, ID: providerIDs{"tmdb": "1001"}, Reason: reasonFrom(testTitle, testYear), Written: ledgerTime})
 		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: ledgerTime, Result: attemptFound})
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestAnIdentityLedgerHoldsAnIdAndItsReason(t *testing.T) {
 	}
 
 	got := readFileString(t, filepath.Join(folder, likenDirectory, "identity.yaml"))
-	want := "items:\n    - path: .\n      id: {tmdb: 603}\n      reason: title and year\n" +
+	want := "items:\n    - path: .\n      id: {tmdb: 1001}\n      reason: title and year\n" +
 		"      written: 2026-09-02T14:00:00Z\nattempts:\n    - path: .\n      at: 2026-09-02T14:00:00Z\n      result: found\n"
 	if got != want {
 		t.Errorf("wrote\n%q\nwant\n%q", got, want)
@@ -71,7 +71,7 @@ func TestAnIdentityLedgerHoldsCandidatesWithTheirReceipts(t *testing.T) {
 
 	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
 		ledger.noteItem(likenItem{Path: likenSelfPath, Candidates: []likenCandidate{
-			{ID: providerIDs{"tmdb": "11"}, Title: "Star Wars", Year: 1977, Receipt: map[string]string{"title": "match"}},
+			{ID: providerIDs{"tmdb": "1111"}, Title: "Deep Orbit", Year: 1977, Receipt: map[string]string{"title": "match"}},
 		}})
 	})
 	if err != nil {
@@ -85,7 +85,7 @@ func TestAnIdentityLedgerHoldsCandidatesWithTheirReceipts(t *testing.T) {
 	if len(ledger.Items) != 1 || len(ledger.Items[0].Candidates) != 1 {
 		t.Fatalf("read %+v, want one item with one candidate", ledger)
 	}
-	if got := ledger.Items[0].Candidates[0]; got.ID["tmdb"] != "11" || got.Receipt["title"] != "match" {
+	if got := ledger.Items[0].Candidates[0]; got.ID["tmdb"] != "1111" || got.Receipt["title"] != "match" {
 		t.Errorf("candidate = %+v, want the id and the receipt", got)
 	}
 }
@@ -144,8 +144,8 @@ func TestAnIdReadsBackFromANumberOrAString(t *testing.T) {
 		document string
 		want     string
 	}{
-		{name: "a number, as the ledger writes it", document: "items:\n  - path: .\n    id: {tmdb: 603}\n", want: "603"},
-		{name: "a string, as a person may write it", document: "items:\n  - path: .\n    id: {tmdb: \"603\"}\n", want: "603"},
+		{name: "a number, as the ledger writes it", document: "items:\n  - path: .\n    id: {tmdb: 1001}\n", want: "1001"},
+		{name: "a string, as a person may write it", document: "items:\n  - path: .\n    id: {tmdb: \"1001\"}\n", want: "1001"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -204,8 +204,8 @@ func TestALedgerReadsBackTheProvidersThatAnswered(t *testing.T) {
 func TestATrailerLedgerReadsBackWhatItHolds(t *testing.T) {
 	folder := t.TempDir()
 	want := trailerEntry{
-		Path: likenSelfPath, Provider: providerBlockTMDb, Key: "sJ9mvBJ1aTI",
-		Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=sJ9mvBJ1aTI",
+		Path: likenSelfPath, Provider: providerBlockTMDb, Key: "Tq7xHarb003",
+		Site: trailerSiteYouTube, URL: "https://www.youtube.com/watch?v=Tq7xHarb003",
 		Name: "Official Trailer", Kind: trailerKindTrailer, Language: "en",
 		Official: true, Published: "2026-08-01", Score: 90, Reason: "official trailer",
 	}

@@ -66,7 +66,7 @@ func TestAnNFOEditWaitsForTheLock(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- writer.editNFO(nfoPath, nfoRootMovie, "Arrival", xmlElement{name: "fileinfo"},
+		done <- writer.editNFO(nfoPath, nfoRootMovie, "Landfall", xmlElement{name: "fileinfo"},
 			[]byte("<fileinfo></fileinfo>"))
 	}()
 

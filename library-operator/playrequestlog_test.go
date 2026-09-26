@@ -46,7 +46,7 @@ func TestACreatedPlayLeavesOneLine(t *testing.T) {
 
 	operator.pass()
 
-	wantOneLine(t, logged, "play request from player house/den-tv", "tvdb:2002 s02e05",
+	wantOneLine(t, logged, "play request from player house/den", "tvdb:2002 s02e05",
 		"library house/movies", "1 item", "people person-a", "start 0:48:32",
 		"created the Play with uid "+mintedSuffix+"-uid")
 	assertNoTitle(t, logged)
@@ -58,7 +58,7 @@ func TestAPlayFromTheStartSaysSo(t *testing.T) {
 
 	operator.pass()
 
-	wantOneLine(t, logged, "play request from player house/den-tv", "start at the beginning", "created the Play")
+	wantOneLine(t, logged, "play request from player house/den", "start at the beginning", "created the Play")
 }
 
 // A refusal and a failed create each leave one line with the reason, and
@@ -88,7 +88,7 @@ func TestARequestThatMakesNoPlayLeavesOneLineWithTheReason(t *testing.T) {
 
 			operator.pass()
 
-			wantOneLine(t, logged, "play request from player house/den-tv", c.reason)
+			wantOneLine(t, logged, "play request from player house/den", c.reason)
 			assertNoTitle(t, logged)
 		})
 	}

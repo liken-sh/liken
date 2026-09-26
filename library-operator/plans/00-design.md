@@ -125,7 +125,7 @@ the several ids that name one item, so a movie's `tmdb` id and its
 
 An item's id is derived from the strongest durable fact the volume
 already holds: the provider id in the `.nfo`, scoped by kind, such as
-`movie:tmdb:603`. The project trusts the public databases' ids over an
+`movie:tmdb:1001`. The project trusts the public databases' ids over an
 id of its own. The scanner reads the id off the volume on every walk and
 mints nothing, so a lost catalog rebuilds with the same ids by a rescan,
 and watch state keyed on them re-links. A folder with no provider id,

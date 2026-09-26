@@ -17,7 +17,7 @@
 -- This file defines the item tables movies, sets, series, and episodes,
 -- the runs table at the end,
 -- and the shared files, file_items, and aliases tables. An item's id is
--- provider-scoped and derived from the .nfo file, movie:tmdb:603, so a
+-- provider-scoped and derived from the .nfo file, movie:tmdb:1001, so a
 -- re-walk of an unchanged .nfo file reads the same id. A folder with no
 -- provider id falls back to movie:path:<key>.
 --
@@ -30,14 +30,14 @@
 --   kind      the kind that wrote the row
 --   path      the item's path on the volume, relative to the library root
 --   title     the name a person reads
---   sort_key  the key a list sorts by; "The Matrix" sorts under M
+--   sort_key  the key a list sorts by; "The Long Survey" sorts under L
 --   released  a year (1999) or an ISO date (2004-09-22); both sort as text
 --   added     the time the item was added, in Unix seconds
 --   art       the path of the primary art, relative to the library root
 --   arts      every art file beside the item, as a JSON list of paths
 --   duration  seconds, or 0 where none exists
 --   body      the kind's own shape, as JSON
---   slug      the legible display name, the-matrix-1999, for a URL or a screen
+--   slug      the legible display name, the-long-survey-1999, for a URL or a screen
 --
 -- The seen table the scanner marks and sweeps against is not in this file.
 -- Every table this file names becomes a replicated table that gossips, and
@@ -583,7 +583,7 @@ CREATE INDEX franchises_library_sort_key ON franchises (library, sort_key);
 --
 --   kind       movie or series
 --   alias      the member as the provider alias the member's own
---              library writes: movie:tmdb:1893 or series:tvdb:83268.
+--              library writes: movie:tmdb:1002 or series:tvdb:2001.
 --              The join to the catalog is this column against
 --              aliases.alias, across every library of the namespace.
 --   title      the name from the file, drawn only when no library

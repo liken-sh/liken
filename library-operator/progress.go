@@ -198,7 +198,7 @@ func (p *progress) recordStatus(ctx context.Context, play string, payload []byte
 	}
 	status := mediaPlayStatus{}
 	if err := json.Unmarshal(payload, &status); err != nil {
-		p.logf("the status of %s reads as no report: %v", play, err)
+		p.logf("the status of %s reads as no report: %v", playNamed(p.namespace, play), err)
 		return
 	}
 	position := p.seconds(play, status.Position)
@@ -206,7 +206,7 @@ func (p *progress) recordStatus(ctx context.Context, play string, payload []byte
 
 	wrote, err := p.store.recordPosition(ctx, play, status.Item, position, duration, time.Now().UTC())
 	if err != nil {
-		p.logf("could not record the position of %s: %v", play, err)
+		p.logf("could not record the position of %s: %v", playNamed(p.namespace, play), err)
 		return
 	}
 	if !wrote {
@@ -224,12 +224,12 @@ func (p *progress) recordAudience(ctx context.Context, play string, payload []by
 	}
 	audience := playAudience{}
 	if err := json.Unmarshal(payload, &audience); err != nil {
-		p.logf("the audience of %s reads as no audience: %v", play, err)
+		p.logf("the audience of %s reads as no audience: %v", playNamed(p.namespace, play), err)
 		return
 	}
 
 	if err := p.store.recordAudience(ctx, play, audience, time.Now().UTC()); err != nil {
-		p.logf("could not record the audience of %s: %v", play, err)
+		p.logf("could not record the audience of %s: %v", playNamed(p.namespace, play), err)
 		return
 	}
 }
@@ -243,12 +243,12 @@ func (p *progress) recordOutside(ctx context.Context, play string, payload []byt
 	}
 	outside := outsidePlay{}
 	if err := json.Unmarshal(payload, &outside); err != nil {
-		p.logf("the outside play %s reads as no play: %v", play, err)
+		p.logf("the outside play of %s reads as no play: %v", playNamed(p.namespace, play), err)
 		return
 	}
 
 	if err := p.store.recordOutside(ctx, play, outside); err != nil {
-		p.logf("could not record the outside play %s: %v", play, err)
+		p.logf("could not record the outside play of %s: %v", playNamed(p.namespace, play), err)
 	}
 }
 
@@ -261,14 +261,14 @@ func (p *progress) recordFinal(ctx context.Context, play string, payload []byte)
 	}
 	final := playFinal{}
 	if err := json.Unmarshal(payload, &final); err != nil {
-		p.logf("the final status of %s reads as no status: %v", play, err)
+		p.logf("the final status of %s reads as no status: %v", playNamed(p.namespace, play), err)
 		return
 	}
 	position := p.seconds(play, final.Position)
 	duration := p.seconds(play, final.Duration)
 
 	if err := p.store.recordFinal(ctx, play, final, position, duration, time.Now().UTC()); err != nil {
-		p.logf("could not record the final status of %s: %v", play, err)
+		p.logf("could not record the final status of %s: %v", playNamed(p.namespace, play), err)
 		return
 	}
 	p.publishRecorded(play, final.Item, position, true)
@@ -311,7 +311,7 @@ func (p *progress) publishRecorded(play string, item, position int, ended bool) 
 func (p *progress) seconds(play, value string) int {
 	seconds, ok := parsePosition(value)
 	if !ok {
-		p.logf("the position %q of %s reads as no time", value, play)
+		p.logf("the position %q of %s reads as no time", value, playNamed(p.namespace, play))
 	}
 	return seconds
 }

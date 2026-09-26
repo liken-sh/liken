@@ -309,7 +309,7 @@ fn empty_art_answers_none_without_a_decode() {
 
 #[test]
 fn an_unknown_library_answers_none_without_a_decode() {
-    let volume = Volume::new("unknown-library");
+    let volume = Volume::new("unknown");
     volume.write_jpeg("poster.jpg", 8, 8);
     let (wakes, waker) = wakes();
     let mut store = volume.store(1 << 20, waker);

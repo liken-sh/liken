@@ -611,7 +611,7 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	// desk holds.
 	if namespace, name, kind, ok := parsePlayTopic(o.topicBase, topic); ok {
 		if kind == playRecordedKind {
-			foldMark(topic, payload, func(recorded *playRecorded) {
+			foldMark("the recorded mark of "+playNamed(namespace, name), payload, func(recorded *playRecorded) {
 				o.marks.markRecorded(namespace, name, recorded)
 			})
 		}
@@ -660,7 +660,7 @@ func (o *operator) logRun(namespace, name string, run libraryRun) {
 	switch {
 	case run.Failure != "":
 		o.logf("library %s/%s: the job %s ended its %s run with a failure: %s",
-			namespace, name, run.Job, run.Worker, run.Failure)
+			namespace, name, run.Job, run.Worker, opaqueText(run.Failure))
 	case run.Worker == workerScan || run.Worker == workerRescan:
 		o.logf("library %s/%s: the job %s finished its %s run: %d unidentified, %d removed",
 			namespace, name, run.Job, run.Worker, run.Unidentified, run.Removed)

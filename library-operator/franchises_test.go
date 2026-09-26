@@ -52,9 +52,9 @@ func memberAt(t *testing.T, result *walkResult, position int) franchiseMemberRow
 // sources under the file's own names.
 func TestTheWalkReadsAFranchiseDirectoryIntoItsRow(t *testing.T) {
 	root := franchiseCheckout(t, map[string]string{
-		"Star Wars/franchise.yaml": wholeFranchiseFile,
-		"Star Wars/poster.jpg":     "art",
-		"Star Wars/AGENTS.md":      "the method",
+		"Example Saga/franchise.yaml": wholeFranchiseFile,
+		"Example Saga/poster.jpg":     "art",
+		"Example Saga/AGENTS.md":      "the method",
 	})
 
 	result := walkFranchises(root, root, "house/franchises")
@@ -63,21 +63,21 @@ func TestTheWalkReadsAFranchiseDirectoryIntoItsRow(t *testing.T) {
 		t.Fatalf("the walk wrote %d rows, want the one directory", len(result.franchises))
 	}
 	row := result.franchises[0]
-	if row.Id != "franchise:name:star-wars" || row.Path != "Star Wars" {
+	if row.Id != "franchise:name:example-saga" || row.Path != "Example Saga" {
 		t.Errorf("the row is %+v, want the id and path of the directory", row)
 	}
-	if row.Title != "Star Wars" || row.Slug != "star-wars" || row.Kind != libraryKindFranchises {
+	if row.Title != "Example Saga" || row.Slug != "example-saga" || row.Kind != libraryKindFranchises {
 		t.Errorf("the row is %+v, want the file's own name", row)
 	}
-	if row.Art != "Star Wars/poster.jpg" {
+	if row.Art != "Example Saga/poster.jpg" {
 		t.Errorf("art = %q, want the poster beside the yaml", row.Art)
 	}
 	body, err := json.Marshal(row.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"universe":"Prime"`, `"unit":"years"`, `"before":"BBY"`,
-		`"name":"Age of Rebellion"`, `"from":-5`, "starwars.com"} {
+	for _, want := range []string{`"universe":"Prime"`, `"unit":"years"`, `"before":"BF"`,
+		`"name":"The First Age"`, `"from":-5`, "example-saga-timeline"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("body = %s, want %s in it", body, want)
 		}
@@ -93,7 +93,7 @@ func TestTheWalkReadsAFranchiseDirectoryIntoItsRow(t *testing.T) {
 // writes. An entry with no time is untimed, and its universes are the file's
 // own list.
 func TestTheWalkWritesOneMemberRowPerEntry(t *testing.T) {
-	root := franchiseCheckout(t, map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	root := franchiseCheckout(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
 
 	result := walkFranchises(root, root, "house/franchises")
 
@@ -111,9 +111,9 @@ func TestTheWalkWritesOneMemberRowPerEntry(t *testing.T) {
 		from      float64
 		universes string
 	}{
-		{1, scopeMovie, "movie:tmdb:1893", "Star Wars: Episode I", "1999-05-19", 1999, 1, -32, "[]"},
-		{2, scopeSeries, "series:tvdb:83268", "Star Wars: The Clone Wars", "2008-10", 2008, 1, -22, "[]"},
-		{3, scopeMovie, "movie:tmdb:11", "", "", 0, 0, 0, `["Prime","Earth-616"]`},
+		{1, scopeMovie, "movie:tmdb:1201", "Example Saga: Part I", "1999-06-18", 1999, 1, -32, "[]"},
+		{2, scopeSeries, "series:tvdb:810001", "Example Saga: The Long Watch", "2008-10", 2008, 1, -22, "[]"},
+		{3, scopeMovie, "movie:tmdb:1202", "", "", 0, 0, 0, `["Prime","Mirror-7"]`},
 	}
 	for _, want := range cases {
 		member := memberAt(t, result, want.position)
@@ -130,7 +130,7 @@ func TestTheWalkWritesOneMemberRowPerEntry(t *testing.T) {
 		if member.Universes != want.universes {
 			t.Errorf("member %d holds universes %s, want %s", want.position, member.Universes, want.universes)
 		}
-		if member.Franchise != "franchise:name:star-wars" {
+		if member.Franchise != "franchise:name:example-saga" {
 			t.Errorf("member %d names the franchise %q", want.position, member.Franchise)
 		}
 	}
@@ -141,8 +141,8 @@ func TestTheWalkWritesOneMemberRowPerEntry(t *testing.T) {
 // and a range writes one run row per episode inside it.
 func TestTheWalkWritesARunRowPerSeasonAndEpisode(t *testing.T) {
 	root := franchiseCheckout(t, map[string]string{
-		"Star Wars/franchise.yaml": wholeFranchiseFile,
-		"Firefly/franchise.yaml":   "name: Firefly\norder:\n  - series: tvdb:78874\n",
+		"Example Saga/franchise.yaml": wholeFranchiseFile,
+		"Copper Line/franchise.yaml":  "name: Copper Line\norder:\n  - series: tvdb:800001\n",
 	})
 
 	result := walkFranchises(root, root, "house/franchises")
@@ -152,11 +152,11 @@ func TestTheWalkWritesARunRowPerSeasonAndEpisode(t *testing.T) {
 		held[run] = true
 	}
 	want := []franchiseRunRow{
-		{Library: "house/franchises", Franchise: "franchise:name:star-wars", Position: 2, Season: 1, Episode: 0},
-		{Library: "house/franchises", Franchise: "franchise:name:star-wars", Position: 2, Season: 3, Episode: 1},
-		{Library: "house/franchises", Franchise: "franchise:name:star-wars", Position: 2, Season: 3, Episode: 3},
-		{Library: "house/franchises", Franchise: "franchise:name:star-wars", Position: 2, Season: 3, Episode: 4},
-		{Library: "house/franchises", Franchise: "franchise:name:star-wars", Position: 2, Season: 3, Episode: 5},
+		{Library: "house/franchises", Franchise: "franchise:name:example-saga", Position: 2, Season: 1, Episode: 0},
+		{Library: "house/franchises", Franchise: "franchise:name:example-saga", Position: 2, Season: 3, Episode: 1},
+		{Library: "house/franchises", Franchise: "franchise:name:example-saga", Position: 2, Season: 3, Episode: 3},
+		{Library: "house/franchises", Franchise: "franchise:name:example-saga", Position: 2, Season: 3, Episode: 4},
+		{Library: "house/franchises", Franchise: "franchise:name:example-saga", Position: 2, Season: 3, Episode: 5},
 	}
 	if len(held) != len(want) {
 		t.Fatalf("the walk wrote %v, want the five runs of the one series with seasons", result.franchiseRuns)
@@ -173,21 +173,21 @@ func TestTheWalkWritesARunRowPerSeasonAndEpisode(t *testing.T) {
 // still write their rows.
 func TestTheWalkSkipsAFileThatBreaksTheSchema(t *testing.T) {
 	root := franchiseCheckout(t, map[string]string{
-		"Alien/franchise.yaml":   "name: Alien\norder: []\n",
-		"Firefly/franchise.yaml": "name: Firefly\norder:\n  - series: tvdb:78874\n",
-		"README.md":              "the repository's own",
+		"Kestrel/franchise.yaml":     "name: Kestrel\norder: []\n",
+		"Copper Line/franchise.yaml": "name: Copper Line\norder:\n  - series: tvdb:800001\n",
+		"README.md":                  "the repository's own",
 	})
 
 	result := walkFranchises(root, root, "house/franchises")
 
-	if len(result.franchises) != 1 || result.franchises[0].Title != "Firefly" {
+	if len(result.franchises) != 1 || result.franchises[0].Title != "Copper Line" {
 		t.Fatalf("the walk wrote %+v, want the one file that validates", result.franchises)
 	}
 	if result.unidentified != 1 || len(result.unidentifiedNames) != 1 {
 		t.Fatalf("unidentified = %d and names = %v, want the one file it refused",
 			result.unidentified, result.unidentifiedNames)
 	}
-	if result.unidentifiedNames[0] != "Alien" {
+	if result.unidentifiedNames[0] != "Kestrel" {
 		t.Errorf("the walk named %q, want the directory it refused", result.unidentifiedNames[0])
 	}
 	if result.readError {
@@ -199,9 +199,9 @@ func TestTheWalkSkipsAFileThatBreaksTheSchema(t *testing.T) {
 // because the repository's own files sit beside the franchise directories.
 func TestTheWalkReadsOnlyADirectoryThatHoldsTheFile(t *testing.T) {
 	root := franchiseCheckout(t, map[string]string{
-		"Firefly/franchise.yaml": "name: Firefly\norder:\n  - series: tvdb:78874\n",
-		".git/config":            "the checkout's own",
-		"docs/README.md":         "not a franchise",
+		"Copper Line/franchise.yaml": "name: Copper Line\norder:\n  - series: tvdb:800001\n",
+		".git/config":                "the checkout's own",
+		"docs/README.md":             "not a franchise",
 	})
 
 	result := walkFranchises(root, root, "house/franchises")
@@ -227,9 +227,9 @@ func TestTheWalkMarksThePassIncompleteForACheckoutItCannotRead(t *testing.T) {
 // not the same as a file the schema refuses, which is counted unidentified
 // and swept past.
 func TestTheWalkTellsAFileItCannotReadFromOneItRefuses(t *testing.T) {
-	root := franchiseCheckout(t, map[string]string{"Firefly/franchise.yaml": "name: Firefly\norder:\n  - series: tvdb:78874\n"})
+	root := franchiseCheckout(t, map[string]string{"Copper Line/franchise.yaml": "name: Copper Line\norder:\n  - series: tvdb:800001\n"})
 	// A directory where the file goes, which every read of it refuses.
-	if err := os.MkdirAll(filepath.Join(root, "Alien", franchiseFileName), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "Kestrel", franchiseFileName), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

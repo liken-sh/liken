@@ -14,7 +14,7 @@ import (
 // test reads both onto the claim the operator builds.
 func testCatalogWithSize(size, class string) *NamespaceCatalog {
 	return &NamespaceCatalog{
-		Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", UID: "house-catalog-uid"},
+		Metadata: ObjectMeta{Name: "house", Namespace: "house", UID: "house-uid"},
 		Spec:     CatalogSpec{Storage: CatalogStorage{Size: size, StorageClassName: class}},
 	}
 }
@@ -50,7 +50,7 @@ func TestBuildCatalogClaimIsOwnedByItsLibraryAndSizedByTheCatalog(t *testing.T) 
 // the Catalog names one, so the working copies leave the class the
 // catalog of record is on.
 func TestBuildCatalogClaimTakesTheLibrariesClass(t *testing.T) {
-	catalog := testCatalogWithSize("2Gi", "synology-iscsi")
+	catalog := testCatalogWithSize("2Gi", "iscsi")
 	catalog.Spec.Libraries.StorageClassName = "local-path"
 
 	claim := buildCatalogClaim(studioMovies(), catalog)

@@ -80,7 +80,7 @@ the walk read, so nothing a person sees moves between the two.
 ```yaml
 # .liken/arrival.yaml
 files:
-  - path: The Matrix (1999).mkv
+  - path: Some Film (1999).mkv
     at: 2025-03-14T02:11:09Z
 ```
 

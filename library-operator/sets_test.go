@@ -23,7 +23,7 @@ func TestSetID(t *testing.T) {
 		{name: "the collection id scopes the set", collectionID: "1570", set: "Quiet Harbor Collection", want: "set:tmdb:1570"},
 		{name: "the collection id wins over the name", collectionID: "1570", set: "Renamed Collection", want: "set:tmdb:1570"},
 		{name: "a named set falls back to its slug", set: "Quiet Harbor Collection", want: "set:name:quiet-harbor-collection"},
-		{name: "an accented name folds to ascii", set: "Amélie Collection", want: "set:name:amelie-collection"},
+		{name: "an accented name folds to ascii", set: "Élodie Collection", want: "set:name:elodie-collection"},
 		{name: "no set at all is no id", want: ""},
 		{name: "a name of punctuation alone is no id", set: "***", want: ""},
 	}
@@ -148,8 +148,8 @@ func TestARescanDerivesASetsArrivalFromEveryMember(t *testing.T) {
 func TestASetWithTwoMembersOfOneDateResolvesOnTheMemberID(t *testing.T) {
 	fold := setFold{}
 	fold.add([]movieRow{
-		memberOf("movie:tmdb:9", "set:name:twins", "Twins", "1994", "Nine/folder.jpg", 900),
-		memberOf("movie:tmdb:4", "set:name:twins", "Twins", "1994", "Four/folder.jpg", 400),
+		memberOf("movie:tmdb:9", "set:name:pairs", "Pairs", "1994", "Nine/folder.jpg", 900),
+		memberOf("movie:tmdb:4", "set:name:pairs", "Pairs", "1994", "Four/folder.jpg", 400),
 	})
 
 	rows := fold.rows()
@@ -197,7 +197,7 @@ func TestAWalkCarriesTheSetOfEveryTitle(t *testing.T) {
 			}
 		})
 	}
-	if got := moviesByTitle(walkMovies("testdata/movies", "house/movies", nil))["The Matrix"].SetID; got != "set:name:the-matrix-collection" {
+	if got := moviesByTitle(walkMovies("testdata/movies", "house/movies", nil))["Some Film"].SetID; got != "set:name:some-film-collection" {
 		t.Errorf("setID = %q, want the named set of an .nfo file with no collection id", got)
 	}
 }
@@ -405,7 +405,7 @@ func TestARescanDeletesASetWithNoMemberLeft(t *testing.T) {
 func TestARescanOfASeriesLibraryReadsNoSets(t *testing.T) {
 	scan, recorder := testScanner(t, "testdata/series", libraryKindSeries)
 
-	scan.rescan(context.Background(), filepath.Join("testdata", "series", "Breaking Bad"))
+	scan.rescan(context.Background(), filepath.Join("testdata", "series", "Copper Line"))
 
 	if containsKind(sqlKinds(recorder), "INSERT SETS") {
 		t.Error("a series rescan wrote a set row")

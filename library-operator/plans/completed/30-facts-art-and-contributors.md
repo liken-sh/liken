@@ -214,15 +214,16 @@ row.
 
 **A bare ampersand.** Jellyfin writes a source URL after the root
 element of an `.nfo` file, in Kodi's scraper form, and a TVDB URL carries
-`&id=`. The strict XML reader stopped there, so 67 series recorded an
-error for every nfo fact. Release -006 reads every `.nfo` file leniently,
-and the group edit keeps the URL where it was.
+`&id=`. The strict XML reader stopped there, so dozens of series
+recorded an error for every nfo fact. Release -006 reads every `.nfo`
+file leniently, and the group edit keeps the URL where it was.
 
 **What the facts wrote.** On the movies library: the overview of
-1,407 titles, 10 certifications, 10 credits, 10 TMDb ratings, and
-1,373 logos, with 558 banners and 35 logos found nowhere at TMDb. On
-the series library: 154 TMDb ratings, 2 certifications, 2 credits, 9
-logos, and 3 episode thumbnails. After a rescan both libraries report
+every title, 10 certifications, 10 credits, 10 TMDb ratings, and a
+logo for almost every title, with many banners and a few logos found
+nowhere at TMDb. On the series library: a TMDb rating for every
+series, 2 certifications, 2 credits, 9 logos, and 3 episode
+thumbnails. After a rescan both libraries report
 no gap under any fact TMDb serves, and no fight. The ratings of the
 other three sites and the five Fanart.tv art types stay open until
 the keys exist, and 29 people wait for the next run of the
@@ -230,13 +231,13 @@ contributors container.
 
 **The overview took over.** Every movie `.nfo` file Jellyfin wrote counted
 as an overview gap on the first run, so the fact replaced the plot,
-tagline, genres, studios, premiere, and runtime of 1,407 titles with
+tagline, genres, studios, premiere, and runtime of every title with
 TMDb's, and left every other element. The next walk read the `.nfo` files
 as answering, so it was one pass. The cause is not settled: the first
 walk under -001 may have left `nfo_facts` empty. It is an open item.
 
-**With the keys.** Once the Fanart.tv key existed, one run wrote 363
-clearart, 392 disc, and 423 landscape files for the movies library,
+**With the keys.** Once the Fanart.tv key existed, one run wrote
+hundreds of clearart, disc, and landscape files for the movies library,
 with the rest found nowhere at Fanart.tv. OMDb's key activated a few
 minutes after its provider read `Refused`, and the operator's next
 check turned it `Ready` with no other change. Trickplay turned on for

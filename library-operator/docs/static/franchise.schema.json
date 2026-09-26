@@ -115,12 +115,12 @@
         "before": {
           "type": "string",
           "minLength": 1,
-          "description": "The label after a negative time, such as BBY."
+          "description": "The label after a negative time, such as BF."
         },
         "after": {
           "type": "string",
           "minLength": 1,
-          "description": "The label after a positive time, such as ABY."
+          "description": "The label after a positive time, such as AF."
         }
       }
     },

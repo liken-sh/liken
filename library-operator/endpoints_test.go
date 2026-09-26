@@ -46,9 +46,9 @@ func screenPodAt(name, namespace, address, node string) Pod {
 // is a peer in the same slice. One member label selects every kind.
 func TestCatalogEndpointsCarryTheScreenPodsBesideTheScanners(t *testing.T) {
 	slice := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{
-		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1"),
-		screenPodAt("den-tv-media-browser", testLibraryNamespace, "10.42.2.4", "nuc-2"),
-		screenPodAt("studio-tv-media-browser", "studio", "10.42.3.9", "nuc-3"),
+		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1"),
+		screenPodAt("den-media-browser", testLibraryNamespace, "10.42.2.4", "node-2"),
+		screenPodAt("studio-media-browser", "studio", "10.42.3.9", "node-3"),
 	})
 
 	if len(slice.Endpoints) != 2 {
@@ -58,7 +58,7 @@ func TestCatalogEndpointsCarryTheScreenPodsBesideTheScanners(t *testing.T) {
 	if screen.Addresses[0] != "10.42.2.4" || !screen.Conditions.Ready {
 		t.Errorf("endpoint = %+v, want the ready screen pod", screen)
 	}
-	if screen.TargetRef == nil || screen.TargetRef.Name != "den-tv-media-browser" {
+	if screen.TargetRef == nil || screen.TargetRef.Name != "den-media-browser" {
 		t.Errorf("targetRef = %+v, want the screen pod", screen.TargetRef)
 	}
 }
@@ -68,7 +68,7 @@ func TestCatalogEndpointsCarryTheScreenPodsBesideTheScanners(t *testing.T) {
 // cluster has no ready agents. The condition carries the kubelet's own
 // verdict.
 func TestCatalogEndpointsReportAStartingAgentAsNotReady(t *testing.T) {
-	starting := scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")
+	starting := scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1")
 	starting.Status.InitContainerStatuses = []ContainerStatus{{Name: catalogContainer, Ready: false}}
 
 	slice := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{starting})
@@ -85,15 +85,15 @@ func TestCatalogEndpointsReportAStartingAgentAsNotReady(t *testing.T) {
 // in another namespace, a pod with no address, a pod with a deletion
 // timestamp, and a pod that has finished are not.
 func TestCatalogEndpointsCarryTheAddressedScannerPodsOfOneNamespace(t *testing.T) {
-	pending := scannerPodAt("shows-scanner", testLibraryNamespace, "", "nuc-2")
-	leaving := scannerPodAt("music-scanner", testLibraryNamespace, "10.42.2.9", "nuc-3")
+	pending := scannerPodAt("shows-scanner", testLibraryNamespace, "", "node-2")
+	leaving := scannerPodAt("music-scanner", testLibraryNamespace, "10.42.2.9", "node-3")
 	leaving.Metadata.DeletionTimestamp = "2026-08-30T12:00:00Z"
-	finished := scannerPodAt("kids-scanner", testLibraryNamespace, "10.42.2.11", "nuc-5")
+	finished := scannerPodAt("kids-scanner", testLibraryNamespace, "10.42.2.11", "node-5")
 	finished.Status.Phase = podSucceeded
 
 	slice := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{
-		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1"),
-		scannerPodAt("series-scanner", "studio", "10.42.3.2", "nuc-4"),
+		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1"),
+		scannerPodAt("series-scanner", "studio", "10.42.3.2", "node-4"),
 		pending,
 		leaving,
 		finished,
@@ -109,8 +109,8 @@ func TestCatalogEndpointsCarryTheAddressedScannerPodsOfOneNamespace(t *testing.T
 	if !endpoint.Conditions.Ready {
 		t.Error("the endpoint is not ready, so no peer would gossip with it")
 	}
-	if endpoint.NodeName != "nuc-1" {
-		t.Errorf("nodeName = %q, want nuc-1", endpoint.NodeName)
+	if endpoint.NodeName != "node-1" {
+		t.Errorf("nodeName = %q, want node-1", endpoint.NodeName)
 	}
 	want := ObjectReference{
 		Kind: "Pod", Namespace: testLibraryNamespace,
@@ -148,7 +148,7 @@ func TestCatalogEndpointsCarryTheServiceMarks(t *testing.T) {
 // The slice is owned by its namespace's one Catalog, so the garbage
 // collector removes it when the Catalog goes.
 func TestCatalogEndpointsAreOwnedByItsCatalog(t *testing.T) {
-	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
+	owners := []OwnerReference{catalogOwner("house", "house-uid")}
 
 	slice := buildCatalogEndpoints(testLibraryNamespace, owners, nil)
 
@@ -181,12 +181,12 @@ func TestCatalogEndpointsWithNoMemberPodsAreEmptyAndNotNull(t *testing.T) {
 // write-on-divergence comparison work.
 func TestCatalogEndpointsSortByAddress(t *testing.T) {
 	first := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{
-		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1"),
-		scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.0.3", "nuc-2"),
+		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1"),
+		scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.0.3", "node-2"),
 	})
 	second := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{
-		scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.0.3", "nuc-2"),
-		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1"),
+		scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.0.3", "node-2"),
+		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1"),
 	})
 
 	if first.Endpoints[0].Addresses[0] != "10.42.0.3" {
@@ -208,7 +208,7 @@ func TestCatalogEndpointsSortByAddress(t *testing.T) {
 
 func TestStandCatalogEndpointsCreatesTheSliceWhenThereIsNone(t *testing.T) {
 	cluster := newFakeCluster()
-	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
+	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1")}
 
 	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, pods); err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	operator := testOperator(t, cluster)
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
-	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
+	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1")}
 	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 		t.Errorf("puts = %d, want none over an unchanged namespace", writes)
 	}
 
-	pods = append(pods, scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.2.4", "nuc-2"))
+	pods = append(pods, scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.2.4", "node-2"))
 	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestUpdateEndpointSliceWritesTheVersionItRead(t *testing.T) {
 // endpoints, and the ports.
 func TestSameEndpointsComparesWhatTheOperatorStates(t *testing.T) {
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
-	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
+	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "node-1")}
 	cases := []struct {
 		name   string
 		change func(*EndpointSlice)

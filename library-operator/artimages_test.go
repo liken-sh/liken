@@ -44,13 +44,13 @@ func TestEachArtFactReadsItsOwnEndpoint(t *testing.T) {
 		want string
 	}{
 		{name: "a movie", kind: libraryKindMovies, fact: factPoster,
-			gap: artGap{tmdb: "603"}, want: "/3/movie/603/images"},
+			gap: artGap{tmdb: "1001"}, want: "/3/movie/1001/images"},
 		{name: "a series", kind: libraryKindSeries, fact: factBackdrop,
-			gap: artGap{tmdb: "1396"}, want: "/3/tv/1396/images"},
+			gap: artGap{tmdb: "2001"}, want: "/3/tv/2001/images"},
 		{name: "a season", kind: libraryKindSeries, fact: factSeasonPoster,
-			gap: artGap{tmdb: "1396", season: 2}, want: "/3/tv/1396/season/2/images"},
+			gap: artGap{tmdb: "2001", season: 2}, want: "/3/tv/2001/season/2/images"},
 		{name: "an episode", kind: libraryKindSeries, fact: factEpisodeThumb,
-			gap: artGap{tmdb: "1396", season: 2, episode: 5}, want: "/3/tv/1396/season/2/episode/5/images"},
+			gap: artGap{tmdb: "2001", season: 2, episode: 5}, want: "/3/tv/2001/season/2/episode/5/images"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

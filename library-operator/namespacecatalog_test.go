@@ -13,7 +13,7 @@ import (
 // resolve to their own choice, and only exactly one carries a Catalog
 // for a Library to proceed against.
 func TestSingleCatalogNamesTheChoiceForANamespace(t *testing.T) {
-	one := &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}
+	one := &NamespaceCatalog{Metadata: ObjectMeta{Name: "house", Namespace: "house"}}
 	other := &NamespaceCatalog{Metadata: ObjectMeta{Name: "extra", Namespace: "house"}}
 	cases := []struct {
 		name       string
@@ -80,7 +80,7 @@ func TestCatalogStorageSizeFallsBackToTheDefault(t *testing.T) {
 func TestCatalogsByNamespaceGroupAndSort(t *testing.T) {
 	byNamespace := catalogsByNamespace([]NamespaceCatalog{
 		{Metadata: ObjectMeta{Name: "second", Namespace: "house"}},
-		{Metadata: ObjectMeta{Name: "studio-catalog", Namespace: "studio"}},
+		{Metadata: ObjectMeta{Name: "studio", Namespace: "studio"}},
 		{Metadata: ObjectMeta{Name: "first", Namespace: "house"}},
 	})
 
@@ -101,7 +101,7 @@ func TestCatalogsByNamespaceGroupAndSort(t *testing.T) {
 func TestListCatalogsReadsEveryNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, CatalogList{
 		Metadata: ListMeta{ResourceVersion: "77"},
-		Items:    []NamespaceCatalog{{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}},
+		Items:    []NamespaceCatalog{{Metadata: ObjectMeta{Name: "house", Namespace: "house"}}},
 	})
 
 	list, err := ListCatalogs(t.Context(), client)
@@ -113,7 +113,7 @@ func TestListCatalogsReadsEveryNamespace(t *testing.T) {
 	if list.Metadata.ResourceVersion != "77" {
 		t.Errorf("resourceVersion = %q, want 77", list.Metadata.ResourceVersion)
 	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog" {
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house" {
 		t.Errorf("items = %+v, want the one Catalog", list.Items)
 	}
 }
@@ -122,10 +122,10 @@ func TestListCatalogsReadsEveryNamespace(t *testing.T) {
 // in its own namespace, and it carries the resourceVersion it read.
 func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {
 	client, recorded := recordingAPI(t, NamespaceCatalog{
-		Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", ResourceVersion: "5"},
+		Metadata: ObjectMeta{Name: "house", Namespace: "house", ResourceVersion: "5"},
 	})
 	catalog := &NamespaceCatalog{
-		Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", ResourceVersion: "4"},
+		Metadata: ObjectMeta{Name: "house", Namespace: "house", ResourceVersion: "4"},
 		Status:   CatalogStatus{StorageSize: "1Gi"},
 	}
 
@@ -135,7 +135,7 @@ func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 
 	expectRequest(t, recorded, http.MethodPut,
-		"/apis/library.liken.sh/v1alpha1/namespaces/house/catalogs/house-catalog/status")
+		"/apis/library.liken.sh/v1alpha1/namespaces/house/catalogs/house/status")
 	if !strings.Contains(recorded.body, `"resourceVersion":"4"`) {
 		t.Errorf("body = %s, want the version the read answered", recorded.body)
 	}

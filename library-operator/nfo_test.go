@@ -14,25 +14,25 @@ import (
 func TestParseMovieNFO(t *testing.T) {
 	data := []byte(`<?xml version="1.0"?>
 <movie>
-  <title>The Matrix</title>
+  <title>Some Film</title>
   <year>1999</year>
   <premiered>1999-03-31</premiered>
-  <plot>A hacker learns the truth.</plot>
-  <tagline>Free your mind.</tagline>
+  <plot>A courier learns the truth about her city.</plot>
+  <tagline>Look again.</tagline>
   <runtime>136</runtime>
   <genre>Action</genre>
   <genre>Science Fiction</genre>
-  <studio>Warner Bros.</studio>
+  <studio>Harbor Light Pictures</studio>
   <country>United States</country>
   <mpaa>R</mpaa>
-  <set><name>The Matrix Collection</name></set>
-  <director>Lana Wachowski</director>
-  <writer>Lilly Wachowski</writer>
-  <credits>Lilly Wachowski</credits>
-  <actor><name>Keanu Reeves</name><role>Neo</role></actor>
+  <set><name>Some Film Collection</name></set>
+  <director>Tess Quill</director>
+  <writer>Mara Quill</writer>
+  <credits>Mara Quill</credits>
+  <actor><name>Owen Hale</name><role>Pilot</role></actor>
   <actor><name></name></actor>
-  <uniqueid type="tmdb">603</uniqueid>
-  <uniqueid type="imdb">tt0133093</uniqueid>
+  <uniqueid type="tmdb">1001</uniqueid>
+  <uniqueid type="imdb">tt9001001</uniqueid>
   <fileinfo><streamdetails>
     <video><codec>H264</codec><width>1920</width><height>1080</height><durationinseconds>8160</durationinseconds></video>
     <audio><codec>DTS</codec></audio>
@@ -43,22 +43,22 @@ func TestParseMovieNFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Title != "The Matrix" || meta.Year != 1999 || meta.Released != "1999-03-31" {
+	if meta.Title != "Some Film" || meta.Year != 1999 || meta.Released != "1999-03-31" {
 		t.Errorf("identity = %q %d %q", meta.Title, meta.Year, meta.Released)
 	}
-	if meta.ProviderIDs["tmdb"] != "603" || meta.ProviderIDs["imdb"] != "tt0133093" {
+	if meta.ProviderIDs["tmdb"] != "1001" || meta.ProviderIDs["imdb"] != "tt9001001" {
 		t.Errorf("providers = %v", meta.ProviderIDs)
 	}
-	if meta.Body.Collection != "The Matrix Collection" {
+	if meta.Body.Collection != "Some Film Collection" {
 		t.Errorf("collection = %q", meta.Body.Collection)
 	}
 	if meta.Body.ContentRating != "R" || meta.Body.Country != "United States" {
 		t.Errorf("rating/country = %q %q", meta.Body.ContentRating, meta.Body.Country)
 	}
-	if !reflect.DeepEqual(meta.Body.Writers, []string{"Lilly Wachowski"}) {
+	if !reflect.DeepEqual(meta.Body.Writers, []string{"Mara Quill"}) {
 		t.Errorf("writers = %v, want one deduplicated name", meta.Body.Writers)
 	}
-	if !reflect.DeepEqual(meta.Body.Cast, []castMember{{Name: "Keanu Reeves", Role: "Neo"}}) {
+	if !reflect.DeepEqual(meta.Body.Cast, []castMember{{Name: "Owen Hale", Role: "Pilot"}}) {
 		t.Errorf("cast = %v, want the one named actor", meta.Body.Cast)
 	}
 	if meta.Duration != 8160 {
@@ -93,23 +93,23 @@ func TestParseMovieNFOFallsBackToRuntimeAndYear(t *testing.T) {
 }
 
 func TestParseSeriesNFO(t *testing.T) {
-	meta, err := parseSeriesNFO([]byte(`<tvshow><title>Breaking Bad</title><year>2008</year><creator>Vince Gilligan</creator><genre>Drama</genre><uniqueid type="tvdb">81189</uniqueid><uniqueid type="tmdb">1396</uniqueid></tvshow>`))
+	meta, err := parseSeriesNFO([]byte(`<tvshow><title>Copper Line</title><year>2008</year><creator>Dale Morrow</creator><genre>Drama</genre><uniqueid type="tvdb">800001</uniqueid><uniqueid type="tmdb">2001</uniqueid></tvshow>`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Title != "Breaking Bad" || meta.Year != 2008 {
+	if meta.Title != "Copper Line" || meta.Year != 2008 {
 		t.Errorf("identity = %q %d", meta.Title, meta.Year)
 	}
-	if !reflect.DeepEqual(meta.Body.Creators, []string{"Vince Gilligan"}) {
+	if !reflect.DeepEqual(meta.Body.Creators, []string{"Dale Morrow"}) {
 		t.Errorf("creators = %v", meta.Body.Creators)
 	}
-	if meta.ProviderIDs["tvdb"] != "81189" || meta.ProviderIDs["tmdb"] != "1396" {
+	if meta.ProviderIDs["tvdb"] != "800001" || meta.ProviderIDs["tmdb"] != "2001" {
 		t.Errorf("providers = %v", meta.ProviderIDs)
 	}
 }
 
 func TestParseEpisodeNFO(t *testing.T) {
-	metas, err := parseEpisodeNFOs([]byte(`<episodedetails><title>Breakage</title><season>2</season><episode>5</episode><aired>2009-04-05</aired><credits>Moira Walley-Beckett</credits><uniqueid type="tvdb">340124</uniqueid><fileinfo><streamdetails><video><codec>h264</codec><width>1280</width><height>720</height></video></streamdetails></fileinfo></episodedetails>`))
+	metas, err := parseEpisodeNFOs([]byte(`<episodedetails><title>Tin Roof</title><season>2</season><episode>5</episode><aired>2009-04-05</aired><credits>Ada Fenwick-Lowe</credits><uniqueid type="tvdb">800105</uniqueid><fileinfo><streamdetails><video><codec>h264</codec><width>1280</width><height>720</height></video></streamdetails></fileinfo></episodedetails>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,16 +117,16 @@ func TestParseEpisodeNFO(t *testing.T) {
 		t.Fatalf("blocks = %d, want the one the .nfo file holds", len(metas))
 	}
 	meta := metas[0]
-	if meta.Season != 2 || meta.Episode != 5 || meta.Title != "Breakage" {
+	if meta.Season != 2 || meta.Episode != 5 || meta.Title != "Tin Roof" {
 		t.Errorf("placement = s%02de%02d %q", meta.Season, meta.Episode, meta.Title)
 	}
 	if meta.Released != "2009-04-05" {
 		t.Errorf("released = %q, want the aired date", meta.Released)
 	}
-	if !reflect.DeepEqual(meta.Body.Writers, []string{"Moira Walley-Beckett"}) {
+	if !reflect.DeepEqual(meta.Body.Writers, []string{"Ada Fenwick-Lowe"}) {
 		t.Errorf("writers = %v, want the credits fallback", meta.Body.Writers)
 	}
-	if meta.ProviderIDs["tvdb"] != "340124" {
+	if meta.ProviderIDs["tvdb"] != "800105" {
 		t.Errorf("providers = %v", meta.ProviderIDs)
 	}
 	if meta.Stream.Width != 1280 || meta.Stream.Height != 720 {
@@ -203,9 +203,9 @@ func TestCollectProviders(t *testing.T) {
 	}{
 		{
 			name: "uniqueid wins over convenience tag",
-			uids: []nfoUniqueID{{Type: "TMDB", Value: "603"}},
+			uids: []nfoUniqueID{{Type: "TMDB", Value: "1001"}},
 			tmdb: "999",
-			want: map[string]string{"tmdb": "603"},
+			want: map[string]string{"tmdb": "1001"},
 		},
 		{
 			name: "convenience tags fill missing providers",
@@ -214,8 +214,8 @@ func TestCollectProviders(t *testing.T) {
 		},
 		{
 			name: "a bare tt id fills imdb",
-			id:   "tt0133093",
-			want: map[string]string{"imdb": "tt0133093"},
+			id:   "tt9001001",
+			want: map[string]string{"imdb": "tt9001001"},
 		},
 		{
 			name: "no ids is nil",
@@ -303,21 +303,21 @@ func TestParseMovieNFOReadsTheSet(t *testing.T) {
 const byteOrderMark = "\ufeff"
 
 func TestAMovieNFOThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
-	data := []byte(byteOrderMark + streamNFO(nfoRootMovie, "Solaris", "h264", "dts", 1920, 1080, 8000))
+	data := []byte(byteOrderMark + streamNFO(nfoRootMovie, "Glass Tide", "h264", "dts", 1920, 1080, 8000))
 
 	meta, err := parseMovieNFO(data)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Title != "Solaris" || meta.Stream.Width != 1920 {
+	if meta.Title != "Glass Tide" || meta.Stream.Width != 1920 {
 		t.Errorf("meta = %q %dx%d, want the title and the stream the .nfo file holds",
 			meta.Title, meta.Stream.Width, meta.Stream.Height)
 	}
 }
 
 func TestAnEpisodeNFOThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
-	data := []byte(byteOrderMark + streamNFO(nfoRootEpisode, "Breakage", "h264", "ac3", 1280, 720, 2700))
+	data := []byte(byteOrderMark + streamNFO(nfoRootEpisode, "Tin Roof", "h264", "ac3", 1280, 720, 2700))
 
 	metas, err := parseEpisodeNFOs(data)
 
@@ -327,7 +327,7 @@ func TestAnEpisodeNFOThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
 	if len(metas) != 1 {
 		t.Fatalf("metas = %+v, want the one block", metas)
 	}
-	if metas[0].Title != "Breakage" || metas[0].Stream.Width != 1280 {
+	if metas[0].Title != "Tin Roof" || metas[0].Stream.Width != 1280 {
 		t.Errorf("meta = %q %dx%d, want the title and the stream the .nfo file holds",
 			metas[0].Title, metas[0].Stream.Width, metas[0].Stream.Height)
 	}

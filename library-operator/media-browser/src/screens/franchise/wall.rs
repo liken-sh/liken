@@ -83,7 +83,7 @@ pub fn label_at(rows: &[Row], row: usize) -> &str {
 }
 
 /// The caption the band writes under the page's title: "Years from the
-/// Battle of Yavin". The times in the column count from one event, and
+/// Survey". The times in the column count from one event, and
 /// the caption is where the page says which event and in what unit. It
 /// is one line in the band and not a stack over the column, because the
 /// column is as wide as one time and its mark, and a caption wrapped
@@ -261,7 +261,7 @@ pub fn story(franchise: &Franchise, columns: &[String], today: &str) -> Vec<Row>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Heading {
     pub name: String,
-    /// How long the era runs in the calendar's own unit, "3441 years",
+    /// How long the era runs in the calendar's own unit, "81 years",
     /// and nothing where the file names no calendar.
     pub count: String,
     pub first: usize,
@@ -273,7 +273,7 @@ pub struct Heading {
 }
 
 impl Heading {
-    /// The words the heading reads as, "The Second Age · 3441 years".
+    /// The words the heading reads as, "The Long Survey · 81 years".
     pub fn label(&self) -> String {
         match self.count.is_empty() {
             true => self.name.clone(),
@@ -283,7 +283,7 @@ impl Heading {
 }
 
 /// The run of a heading's words that reads bright: everything before the
-/// count, so "The Infinity Saga › Phase Two" of "The Infinity Saga › Phase
+/// count, so "The Specimen Saga › Phase Two" of "The Specimen Saga › Phase
 /// Two · 3 years", and the whole of words with no count.
 pub fn bright(words: &str) -> &str {
     match words.find(SPAN_MARK) {
@@ -292,9 +292,9 @@ pub fn bright(words: &str) -> &str {
     }
 }
 
-/// How long an era runs, in the calendar's own unit: "3441 years". The
+/// How long an era runs, in the calendar's own unit: "81 years". The
 /// count is inclusive of both ends, the way a person says "from 1 to
-/// 3441"; an era of one year says "1 year". A file with no calendar
+/// 81"; an era of one year says "1 year". A file with no calendar
 /// counts nothing.
 pub fn counted(era: &Era, calendar: &Option<Calendar>) -> String {
     let Some(calendar) = calendar else {
@@ -600,7 +600,7 @@ pub fn heading_boxes(
 
 /// The one line held at the top of the lane while the wall is inside an
 /// era: every era whose heading has scrolled past the top and whose rows
-/// still reach under it, outer to inner, "The Infinity Saga › Phase
+/// still reach under it, outer to inner, "The Specimen Saga › Phase
 /// Three · 3 years", the innermost with its count. One line, and never
 /// a stack, because two headings of one weight at the top read as two
 /// things at once and not as one inside another. Nothing while the wall

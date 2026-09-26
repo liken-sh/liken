@@ -192,29 +192,29 @@ func TestSpanKeysSplitThePathFromTheOrdinal(t *testing.T) {
 // the marks without asking a provider again.
 func TestTheWalkReadsTheMarksLedgerOfASeasonFolder(t *testing.T) {
 	root := t.TempDir()
-	season := filepath.Join(root, "Game of Thrones (2011)", "Season 01")
-	writeFile(t, filepath.Join(root, "Game of Thrones (2011)", "tvshow.nfo"),
-		`<tvshow><title>Game of Thrones</title><uniqueid type="tmdb">1399</uniqueid></tvshow>`)
-	for _, name := range []string{"Game of Thrones - S01E01.mkv", "Game of Thrones - S01E02.mkv"} {
+	season := filepath.Join(root, "Iron Crown (2011)", "Season 01")
+	writeFile(t, filepath.Join(root, "Iron Crown (2011)", "tvshow.nfo"),
+		`<tvshow><title>Iron Crown</title><uniqueid type="tmdb">2002</uniqueid></tvshow>`)
+	for _, name := range []string{"Iron Crown - S01E01.mkv", "Iron Crown - S01E02.mkv"} {
 		writeFile(t, filepath.Join(season, name), "video")
 	}
 	writeFile(t, filepath.Join(season, likenDirectory, likenLedgerName(factMarks)), `marks:
-  - {path: Game of Thrones - S01E02.mkv, kind: intro, end: 107000, source: theintrodb}
-  - {path: Game of Thrones - S01E01.mkv, kind: credits, start: 3631500, end: 3699500, source: introdb}
-  - {path: Game of Thrones - S01E02.mkv, kind: intro, start: 7007, end: 106482, source: theintrodb}
+  - {path: Iron Crown - S01E02.mkv, kind: intro, end: 107000, source: theintrodb}
+  - {path: Iron Crown - S01E01.mkv, kind: credits, start: 3631500, end: 3699500, source: introdb}
+  - {path: Iron Crown - S01E02.mkv, kind: intro, start: 7007, end: 106482, source: theintrodb}
 `)
 
 	result := readFolder(folderScan{root: root, library: "house/series", kind: libraryKindSeries},
-		filepath.Join(root, "Game of Thrones (2011)"))
+		filepath.Join(root, "Iron Crown (2011)"))
 
 	got := []string{}
 	for _, row := range result.marks {
 		got = append(got, row.Path+" "+strconv.Itoa(row.Ordinal)+" "+row.Kind)
 	}
 	want := []string{
-		"Game of Thrones (2011)/Season 01/Game of Thrones - S01E02.mkv 0 intro",
-		"Game of Thrones (2011)/Season 01/Game of Thrones - S01E01.mkv 0 credits",
-		"Game of Thrones (2011)/Season 01/Game of Thrones - S01E02.mkv 1 intro",
+		"Iron Crown (2011)/Season 01/Iron Crown - S01E02.mkv 0 intro",
+		"Iron Crown (2011)/Season 01/Iron Crown - S01E01.mkv 0 credits",
+		"Iron Crown (2011)/Season 01/Iron Crown - S01E02.mkv 1 intro",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("rows = %v, want %v", got, want)

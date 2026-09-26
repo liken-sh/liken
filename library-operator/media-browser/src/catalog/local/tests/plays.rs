@@ -10,30 +10,30 @@ fn a_movie_plays_its_primary_video_file() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
     insert_main_file(
         &path,
         "default/films",
-        "The Matrix/The Matrix.mkv",
-        "movie:tmdb:603",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
     );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert_eq!(
         source.play("default/films", &movie_chosen()),
         vec![PlayItem {
-            path: "The Matrix/The Matrix.mkv".into(),
-            slug: "matrix-1999".into(),
+            path: "The Lantern/The Lantern.mkv".into(),
+            slug: "lantern-1999".into(),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
-                title: "The Matrix".into(),
+                title: "The Lantern".into(),
                 year: 1999,
-                art: "movie:tmdb:603.jpg".into(),
-                trickplay: "The Matrix/The Matrix.mkv.trickplay".into(),
+                art: "movie:tmdb:7001.jpg".into(),
+                trickplay: "The Lantern/The Lantern.mkv.trickplay".into(),
                 ..Presentation::default()
             },
         }]
@@ -47,23 +47,23 @@ fn a_movie_plays_neither_its_art_nor_its_extras() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
     insert_file(
         &path,
         "default/films",
-        "The Matrix/poster.jpg",
-        "movie:tmdb:603",
+        "The Lantern/poster.jpg",
+        "movie:tmdb:7001",
         "image",
         "primary",
     );
     insert_file(
         &path,
         "default/films",
-        "The Matrix/behind.mkv",
-        "movie:tmdb:603",
+        "The Lantern/behind.mkv",
+        "movie:tmdb:7001",
         "video",
         "extra",
     );
@@ -79,20 +79,30 @@ fn a_movie_with_two_encodings_plays_one_of_them() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
-    insert_main_file(&path, "default/films", "The Matrix/b.mkv", "movie:tmdb:603");
-    insert_main_file(&path, "default/films", "The Matrix/a.mkv", "movie:tmdb:603");
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/b.mkv",
+        "movie:tmdb:7001",
+    );
+    insert_main_file(
+        &path,
+        "default/films",
+        "The Lantern/a.mkv",
+        "movie:tmdb:7001",
+    );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/films", &movie_chosen());
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].path, "The Matrix/a.mkv");
+    assert_eq!(items[0].path, "The Lantern/a.mkv");
     assert_eq!(
         items[0].presentation.trickplay,
-        "The Matrix/a.mkv.trickplay"
+        "The Lantern/a.mkv.trickplay"
     );
 }
 
@@ -125,19 +135,19 @@ fn a_movie_carries_the_marks_of_its_main_file() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
     insert_main_file(
         &path,
         "default/films",
-        "The Matrix/The Matrix.mkv",
-        "movie:tmdb:603",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
     );
     insert_mark(
         &path,
-        "The Matrix/The Matrix.mkv",
+        "The Lantern/The Lantern.mkv",
         1,
         "credits",
         Some(7_800_000),
@@ -145,7 +155,7 @@ fn a_movie_carries_the_marks_of_its_main_file() {
     );
     insert_mark(
         &path,
-        "The Matrix/The Matrix.mkv",
+        "The Lantern/The Lantern.mkv",
         0,
         "intro",
         None,
@@ -184,7 +194,7 @@ fn an_episode_carries_the_marks_of_its_file() {
     connection
         .execute(
             "INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source) \
-             VALUES ('default/shows', 'Lost/S01E2.mkv', 0, 'recap', 0, 45000, 'introdb')",
+             VALUES ('default/shows', 'Harrow/S01E2.mkv', 0, 'recap', 0, 45000, 'introdb')",
             (),
         )
         .unwrap();
@@ -214,14 +224,14 @@ fn an_episode_plays_itself_alone() {
     insert_main_file(
         &path,
         "default/shows",
-        "Lost/S02E1.mkv",
+        "Harrow/S02E1.mkv",
         "episode:tvdb:next",
     );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(2));
     let paths: Vec<&str> = items.iter().map(|item| item.path.as_str()).collect();
-    assert_eq!(paths, ["Lost/S01E2.mkv"]);
+    assert_eq!(paths, ["Harrow/S01E2.mkv"]);
 }
 
 // The operator names a Play after the chosen item, so the item
@@ -251,12 +261,12 @@ fn an_episodes_presentation_names_its_series_and_its_numbers() {
         Presentation {
             kind: "video".into(),
             hint: "series".into(),
-            series: "Lost".into(),
+            series: "Harrow".into(),
             season: 1,
             episode: 3,
             episode_title: "Episode 3".into(),
             art: "episode:tvdb:3.jpg".into(),
-            trickplay: "Lost/S01E3.mkv.trickplay".into(),
+            trickplay: "Harrow/S01E3.mkv.trickplay".into(),
             ..Presentation::default()
         }
     );
@@ -267,9 +277,9 @@ fn an_episode_the_catalog_dates_carries_the_date_and_not_the_year() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_released_episode(&path, "default/shows", "e1", SERIES, 1, 1, "2004-09-22");
-    insert_main_file(&path, "default/shows", "Lost/S01E1.mkv", "e1");
+    insert_main_file(&path, "default/shows", "Harrow/S01E1.mkv", "e1");
     insert_released_episode(&path, "default/shows", "e2", SERIES, 1, 2, "2004");
-    insert_main_file(&path, "default/shows", "Lost/S01E2.mkv", "e2");
+    insert_main_file(&path, "default/shows", "Harrow/S01E2.mkv", "e2");
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let dated = source.play("default/shows", &episode_chosen(1));
@@ -289,14 +299,14 @@ fn an_episode_with_no_still_presents_the_art_of_its_series() {
         &path,
         "default/shows",
         SERIES,
-        "Lost/poster.jpg",
-        &["Lost/poster.jpg", "Lost/fanart.jpg"],
+        "Harrow/poster.jpg",
+        &["Harrow/poster.jpg", "Harrow/fanart.jpg"],
     );
     clear_episode_art(&path, "default/shows", "episode:tvdb:1");
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let cleared = source.play("default/shows", &episode_chosen(1));
-    assert_eq!(cleared[0].presentation.art, "Lost/fanart.jpg");
+    assert_eq!(cleared[0].presentation.art, "Harrow/fanart.jpg");
     let held = source.play("default/shows", &episode_chosen(2));
     assert_eq!(held[0].presentation.art, "episode:tvdb:2.jpg");
 }
@@ -306,7 +316,7 @@ fn an_episode_under_no_series_row_names_no_series() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_episode(&path, "default/shows", "e1", SERIES, 1, 1);
-    insert_main_file(&path, "default/shows", "Lost/S01E1.mkv", "e1");
+    insert_main_file(&path, "default/shows", "Harrow/S01E1.mkv", "e1");
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(1));
@@ -318,10 +328,10 @@ fn an_episode_under_no_series_row_names_no_series() {
 fn an_episode_with_no_file_of_its_own_plays_nothing() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
-    insert_series(&path, "default/shows", SERIES, "Lost", "lost");
+    insert_series(&path, "default/shows", SERIES, "Harrow", "harrow");
     insert_episode(&path, "default/shows", "e1", SERIES, 1, 1);
     insert_episode(&path, "default/shows", "e2", SERIES, 1, 2);
-    insert_main_file(&path, "default/shows", "Lost/S01E2.mkv", "e2");
+    insert_main_file(&path, "default/shows", "Harrow/S01E2.mkv", "e2");
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     assert!(source.play("default/shows", &episode_chosen(1)).is_empty());
@@ -335,15 +345,15 @@ fn a_choice_in_another_library_plays_nothing() {
     insert_movie(
         &path,
         "default/films",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+        "movie:tmdb:7001",
+        "The Lantern",
+        "lantern",
     );
     insert_main_file(
         &path,
         "default/films",
-        "The Matrix/The Matrix.mkv",
-        "movie:tmdb:603",
+        "The Lantern/The Lantern.mkv",
+        "movie:tmdb:7001",
     );
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
