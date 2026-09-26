@@ -32,6 +32,14 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: audio-operator
+  labels:
+    # liken's plugins commands select on this label, and the CLI selects
+    # on it to read the operator's version. Both take the image of the
+    # first container and pull its -cli image at the same tag, so the
+    # label goes on the operator's own workload. The audio-api
+    # Deployment runs the same image now, but the label must not depend
+    # on that.
+    cli.liken.sh/plugin: audio
 spec:
   selector:
     matchLabels:
