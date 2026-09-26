@@ -31,6 +31,12 @@ becomes a new plan or an open problem.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built.
 
+* [35, Remotes from any driver](35-remotes-from-any-driver.md). A
+  `Remote`'s reader exits when its last input node is gone, so the
+  restarted container receives the node a replugged USB CEC adapter
+  brings, and a TV remote is an ordinary `Remote` with a `Keymap`. It
+  follows `liken` plan 70 and equipment-operator plan 09.
+
 ## Completed
 
 * [34, The player over HTTP](completed/34-the-player-over-http.md).
