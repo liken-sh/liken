@@ -28,8 +28,18 @@ the install needs no clone:
 
     kubectl apply -n liken-system \
       -f https://equipment.liken.sh/deploy/receivers-crd.yaml \
+      -f https://equipment.liken.sh/deploy/cecbuses-crd.yaml \
+      -f https://equipment.liken.sh/deploy/deviceclasses.yaml \
       -f https://equipment.liken.sh/deploy/rbac.yaml \
-      -f https://equipment.liken.sh/deploy/operator.yaml
+      -f https://equipment.liken.sh/deploy/operator.yaml \
+      -f https://equipment.liken.sh/deploy/cec.yaml
+
+`cec.yaml` runs the CEC node workload, the `equipment-operator-cec`
+`DaemonSet`. Its pod claims a USB CEC adapter through the
+`cec-adapter` `DeviceClass`, so on a node with no adapter the pod
+stays `Pending`, and the `DaemonSet` never reports all its pods
+ready. The [`CECBus`](/docs/reference/cecbuses/)
+reference describes what the pod reports.
 
 For GitOps, point a `Kustomization` at the base and pin `<ref>` to a
 release tag:

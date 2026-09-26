@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
 	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -798,7 +800,10 @@ func operate() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	// The kubelet stops a pod with SIGTERM. The context ends on it, so
+	// the loop stops every receiver's unit before the process exits.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
 	readings := newMetrics(version)
 	if _, err := readings.Serve(ctx, config.metricsAddress); err != nil {
 		fmt.Fprintf(os.Stderr, "metrics listener: %v\n", err)
@@ -821,6 +826,7 @@ func serve(ctx context.Context, client *Client, busAddress string, readings *met
 
 	operator := newController(client, busAddress, readings)
 	go watchReceivers(ctx, client, list.Metadata.ResourceVersion, operator.wake, readings)
+	go newCECBusController(client).run(ctx, readings)
 	operator.run(ctx)
 	return nil
 }

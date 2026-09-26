@@ -212,8 +212,12 @@ func GetReceiver(c *Client, name string) (*Receiver, error) {
 // so no change is missed between reconnects. Bookmarks cost one line
 // each and keep the resume point current while nothing changes.
 func WatchReceivers(ctx context.Context, c *Client, resourceVersion string) (*http.Response, error) {
-	path := receiversPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-	return c.Do(ctx, http.MethodGet, path, nil)
+	return WatchCollection(ctx, c, receiversPath, resourceVersion)
+}
+
+// WatchCollection opens the same stream on any collection path.
+func WatchCollection(ctx context.Context, c *Client, path, resourceVersion string) (*http.Response, error) {
+	return c.Do(ctx, http.MethodGet, path+"?watch=true&allowWatchBookmarks=true&resourceVersion="+resourceVersion, nil)
 }
 
 // receiverStatusApply is the partial object an apply sends: the

@@ -1,6 +1,7 @@
 # The TV and the receiver over HDMI-CEC
 
-Plan 09. Designed, not built. It depends on `liken` plan 70, which
+Plan 09. Phase 1 built 2026-09-26 and tested against `vivid`; its
+hardware drills and phases 2 to 5 are open. It depends on `liken` plan 70, which
 attaches a USB CEC adapter and publishes it as a device, and on
 display-operator plan 23, which publishes each `Display`'s CEC
 physical address.
@@ -135,10 +136,12 @@ decoders for the operands this plan uses. The kernel's `cec.h` and
 
 The kernel does part of the protocol by itself. When the adapter has
 a logical address, the kernel answers polls, Give Physical Address,
-Give OSD Name, Give Device Vendor ID, and Get CEC Version. The pod
-opens the device as the exclusive initiator and as a follower, and it
-answers the messages the kernel passes up. Give Device Power Status is
-one of them: the kernel does not answer it.
+Give OSD Name, and Get CEC Version. It answers Give Device Vendor ID
+only when the claim states a vendor. The pod states none, so that
+request reaches the pod, which answers it with a Feature Abort. The
+pod opens the device as the exclusive initiator and as a follower,
+and it answers the messages the kernel passes up. Give Device Power
+Status is one of them: the kernel does not answer it.
 
 `cec/` follows the repository's driver rule. Its `AGENTS.md` holds the
 protocol references, the message families, and the vendor notes, as
@@ -187,6 +190,7 @@ status:
   - type: AddressKnown
   - type: Joined
   - type: Coherent
+  - type: Scanned
 ```
 
 The bus has no name of its own in CEC, so a person names it.
@@ -222,7 +226,10 @@ is easy to imagine here: one that polls the bus and sends no command.
   broadcasts it hears, such as Active Source and Report Physical
   Address. A list of devices needs polls, and a poll is a
   transmission, so the device list in `Listen` is partial, and a
-  condition says so. `Listen` needs no physical address.
+  condition says so. `Listen` needs no physical address. The kernel
+  lets a monitor only in the no-initiator mode, and clearing a logical
+  address needs an initiator, so the pod takes the initiator mode,
+  clears the adapter's logical addresses, and then becomes a monitor.
 * `Control` claims a logical address as a playback device, sets the
   OSD name, scans the bus, answers the TV, and sends commands. It needs
   the physical address from the `Display`. A CEL rule on the CRD
@@ -245,9 +252,24 @@ adapters' reports, and it merges the devices by physical address.
 * `AddressKnown`: every adapter in `Control` has a physical address
   from its `Display`.
 * `Joined`: every adapter in `Control` holds a logical address.
-* `Coherent`: the adapters of one bus see each other's OSD names. An
-  adapter that never sees the others is on a different wire than the
-  spec states.
+* `Coherent`: the adapters of one bus that finished a scan see each
+  other's OSD names. An adapter that never sees the others is on a
+  different wire than the spec states. The logical address is not
+  compared, because an adapter that joins again can take another one.
+* `Scanned`: the device list is complete. Only `Control` completes
+  it: every adapter finished a scan and found at least one device. A
+  bus in `Listen` reports `False` with the reason `Listening`. An
+  adapter that finds no device reports that the cable between the
+  adapter and the receiver may not carry the CEC wire.
+
+Each entry carries the time of its last report, and the node pod
+writes the entry every 30 seconds even when nothing changed. A pod
+that dies writes nothing more, so the `Deployment` treats an entry
+older than 90 seconds as stale: each condition is `Unknown` with the
+reason `Stale`, and the entry's devices leave the merged list. A pod
+that stops on `SIGTERM` or loses its adapter clears the adapter's
+logical addresses, leaves the bus, and writes the state `Stopped`, and
+each condition is then `False` with the reason `Stopped`.
 
 **Discovery.** A node pod that holds an adapter that no `CECBus`
 names creates a `CECBus` in `Listen`, named after the machine, with
@@ -468,6 +490,35 @@ bus as Playback Device 1, scanned the tree, and read the TV's and the
 receiver's power status. The kernel refused monitor-all mode to that
 pod, because monitor modes need `CAP_NET_ADMIN`. So the node pod adds
 that one capability for `Listen`, and `Control` needs none.
+
+## What phase 1 found in the kernel's API
+
+Phase 1 ran against the kernel's `vivid` driver and the kernel's CEC
+documentation on 2026-09-26. Four findings correct or add to the text
+above:
+
+* **Give Device Vendor ID.** The kernel answers it only for a claim
+  that states a vendor. The node pod states none, so the request
+  reaches the pod, and the pod answers it with a Feature Abort.
+  `cec-compliance` reports the feature as "OK (Not Supported)".
+* **No acknowledge bit in `Listen`.** A received message carries no
+  acknowledge bit for a message between two other devices: the
+  receive status holds only OK, timeout, Feature Abort, and aborted.
+  So a monitor that hears the TV poll every logical address does not
+  learn which polls found a device, which the first drill's note on
+  `Listen` assumed. A device is present in `Listen` when it sends a
+  message. The hardware drill 2 below checks this on a Pulse-Eight.
+* **The order of the `Listen` calls.** A monitor must be in the
+  no-initiator mode, and clearing the logical addresses needs an
+  initiator. The pod takes the initiator mode, clears the addresses,
+  and then becomes a monitor.
+* **`vivid` refuses a physical address.** An adapter on a video port
+  takes its address from its own port, and `vivid`'s output adapters
+  refuse `CEC_ADAP_S_PHYS_ADDR` with `ENOTTY`. An output has an
+  address only after `v4l2-ctl` connects it to one of the TV's inputs.
+  So the path that announces the `Display`'s address runs only on a
+  USB adapter and in the bus in memory the tests use, and on `vivid`
+  the pod announces the port's own address and says so in its entry.
 
 ## Failure and recovery
 

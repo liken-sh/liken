@@ -23,15 +23,26 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// The two definitions this repository ships.
+const (
+	receiversCRD = "deploy/receivers-crd.yaml"
+	cecBusesCRD  = "deploy/cecbuses-crd.yaml"
+)
+
 func loadCRD(t *testing.T) *apiextensionsv1.CustomResourceDefinition {
 	t.Helper()
-	raw, err := os.ReadFile("deploy/receivers-crd.yaml")
+	return loadCRDFrom(t, receiversCRD)
+}
+
+func loadCRDFrom(t *testing.T, path string) *apiextensionsv1.CustomResourceDefinition {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reading deploy/receivers-crd.yaml: %v", err)
+		t.Fatalf("reading %s: %v", path, err)
 	}
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	if err := yaml.UnmarshalStrict(raw, crd); err != nil {
-		t.Fatalf("decoding deploy/receivers-crd.yaml: %v", err)
+		t.Fatalf("decoding %s: %v", path, err)
 	}
 	return crd
 }
@@ -183,26 +194,30 @@ func TestCRDPrinterColumns(t *testing.T) {
 // cluster refuses whole, and no amount of validating objects against
 // the schema would find it.
 func TestTheAPIServerWouldAcceptTheCRD(t *testing.T) {
-	scheme := runtime.NewScheme()
-	install.Install(scheme)
+	for _, path := range []string{receiversCRD, cecBusesCRD} {
+		t.Run(path, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			install.Install(scheme)
 
-	internal := &apiextensions.CustomResourceDefinition{}
-	mustSucceed(t, scheme.Convert(loadCRD(t), internal, nil))
-	// The API server fills the stored versions in when it creates the
-	// definition; a manifest states none.
-	internal.Status.StoredVersions = []string{internal.Spec.Versions[0].Name}
+			internal := &apiextensions.CustomResourceDefinition{}
+			mustSucceed(t, scheme.Convert(loadCRDFrom(t, path), internal, nil))
+			// The API server fills the stored versions in when it creates
+			// the definition; a manifest states none.
+			internal.Status.StoredVersions = []string{internal.Spec.Versions[0].Name}
 
-	if errs := crdvalidation.ValidateCustomResourceDefinition(t.Context(), internal); len(errs) > 0 {
-		t.Errorf("the API server would refuse the definition: %v", errs)
+			if errs := crdvalidation.ValidateCustomResourceDefinition(t.Context(), internal); len(errs) > 0 {
+				t.Errorf("the API server would refuse the definition: %v", errs)
+			}
+		})
 	}
 }
 
 // internalSchema converts the CRD's v1 schema into the internal type
 // both validators work against, which is the same conversion the API
 // server does before it serves the resource.
-func internalSchema(t *testing.T) *apiextensions.JSONSchemaProps {
+func internalSchemaFrom(t *testing.T, path string) *apiextensions.JSONSchemaProps {
 	t.Helper()
-	crd := loadCRD(t)
+	crd := loadCRDFrom(t, path)
 
 	scheme := runtime.NewScheme()
 	install.Install(scheme)
@@ -216,9 +231,9 @@ func internalSchema(t *testing.T) *apiextensions.JSONSchemaProps {
 
 // schemaValidator builds the validator the API server itself would
 // run a Receiver through.
-func schemaValidator(t *testing.T) validation.SchemaValidator {
+func schemaValidator(t *testing.T, path string) validation.SchemaValidator {
 	t.Helper()
-	validator, _, err := validation.NewSchemaValidator(internalSchema(t))
+	validator, _, err := validation.NewSchemaValidator(internalSchemaFrom(t, path))
 	if err != nil {
 		t.Fatalf("building the schema validator: %v", err)
 	}
@@ -229,9 +244,9 @@ func schemaValidator(t *testing.T) validation.SchemaValidator {
 // x-kubernetes-validations rules. It is a separate pass from the
 // structural one, the way the API server runs it, so a rule is proved
 // only by calling this.
-func celValidator(t *testing.T) (*celschema.Validator, *structuralschema.Structural) {
+func celValidator(t *testing.T, path string) (*celschema.Validator, *structuralschema.Structural) {
 	t.Helper()
-	structural, err := structuralschema.NewStructural(internalSchema(t))
+	structural, err := structuralschema.NewStructural(internalSchemaFrom(t, path))
 	if err != nil {
 		t.Fatalf("building the structural schema: %v", err)
 	}
@@ -246,10 +261,15 @@ func celValidator(t *testing.T) (*celschema.Validator, *structuralschema.Structu
 // the whole object the way the API server answers one.
 func validateReceiver(t *testing.T, receiver map[string]any) field.ErrorList {
 	t.Helper()
-	errs := validation.ValidateCustomResource(field.NewPath(""), receiver, schemaValidator(t))
-	validator, structural := celValidator(t)
+	return validateObject(t, receiversCRD, receiver)
+}
+
+func validateObject(t *testing.T, path string, object map[string]any) field.ErrorList {
+	t.Helper()
+	errs := validation.ValidateCustomResource(field.NewPath(""), object, schemaValidator(t, path))
+	validator, structural := celValidator(t, path)
 	celErrs, _ := validator.Validate(
-		t.Context(), field.NewPath(""), structural, receiver, nil, celconfig.RuntimeCELCostBudget)
+		t.Context(), field.NewPath(""), structural, object, nil, celconfig.RuntimeCELCostBudget)
 	return append(errs, celErrs...)
 }
 

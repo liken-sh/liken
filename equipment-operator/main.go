@@ -48,6 +48,13 @@ func readSettings() settings {
 	}
 }
 
+// main runs the Deployment's operator, or with the argument cec, the
+// node workload that holds one CEC adapter. One binary in one image
+// keeps the two halves at one version.
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "cec" {
+		runCEC()
+		return
+	}
 	operate()
 }

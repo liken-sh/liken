@@ -17,23 +17,34 @@ import (
 // How long a watch waits before it re-lists after a dropped stream.
 var watchRetryPause = 2 * time.Second
 
-// watchReceivers wakes the loop on every change and resumes each stream
-// from a resourceVersion, so no change is missed between reconnects. A
-// dropped stream and a 410 Gone recover the same way: list the
-// collection, wake the loop, and watch again from the list's own
-// version. Every time but the first, opening that new watch is what
-// equipment_watch_restarts_total counts.
+// watchReceivers wakes the loop on every change to a Receiver.
 func watchReceivers(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, readings *metrics) {
+	watchCollection(ctx, client, receiversPath, resourceVersion, wake, readings.watchRestarted, func() (string, error) {
+		list, err := ListReceivers(client)
+		if err != nil {
+			return "", err
+		}
+		return list.Metadata.ResourceVersion, nil
+	})
+}
+
+// watchCollection wakes the loop on every change in one collection and
+// resumes each stream from a resourceVersion, so no change is missed
+// between reconnects. A dropped stream and a 410 Gone recover the same
+// way: list the collection, wake the loop, and watch again from the
+// list's own version. Every time but the first, opening that new watch
+// calls restarted, which counts it in equipment_watch_restarts_total.
+func watchCollection(ctx context.Context, client *Client, path, resourceVersion string, wake chan<- struct{}, restarted func(), list func() (string, error)) {
 	first := true
 	for ctx.Err() == nil {
 		if !first {
-			readings.watchRestarted()
+			restarted()
 		}
 		first = false
 		// The request carries the context, because a read of a stream that
 		// never ends blocks until the far end writes, and closing the body
 		// from elsewhere waits on that same read.
-		resp, err := WatchReceivers(ctx, client, resourceVersion)
+		resp, err := WatchCollection(ctx, client, path, resourceVersion)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resourceVersion = readWatchStream(resp, resourceVersion, wake)
 		}
@@ -46,12 +57,12 @@ func watchReceivers(ctx context.Context, client *Client, resourceVersion string,
 			return
 		case <-time.After(watchRetryPause):
 		}
-		list, err := ListReceivers(client)
+		listed, err := list()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing receivers to resume the watch: %v\n", err)
+			fmt.Fprintf(os.Stderr, "listing %s to resume the watch: %v\n", path, err)
 			continue
 		}
-		resourceVersion = list.Metadata.ResourceVersion
+		resourceVersion = listed
 		poke(wake)
 	}
 }

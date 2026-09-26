@@ -1,0 +1,104 @@
+# The CEC node workload: one pod on each machine that carries a USB
+# CEC adapter, from the operator's own image, with the argument cec.
+# The pod holds the adapter, runs it in the mode its CECBus states,
+# and writes its own entry under that CECBus's status. The Deployment
+# in operator.yaml derives the rest of the status. plans/09-cec.md
+# gives the design.
+---
+# The adapter claim. A template rather than a plain claim, so each
+# node's pod allocates that node's own adapter. On a node with an
+# adapter the claim matches one device and the pod runs. On a node
+# with none the claim matches zero devices and the pod stays Pending,
+# which is how a DaemonSet runs a pod only where an adapter is. Nobody
+# writes down which machine has the adapter.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: cec-adapter
+spec:
+  spec:
+    devices:
+      requests:
+        - name: adapter
+          exactly:
+            deviceClassName: cec-adapter
+---
+# A DaemonSet, one pod per node. The pod needs no host network, no
+# broker, and no receiver credentials: it speaks to the adapter through
+# its device node and to the API server through its ServiceAccount.
+#
+# RollingUpdate with maxSurge 0, because the adapter allocates to one
+# claim at a time. A new pod that claimed the same adapter would stay
+# Pending until the old pod released it, and an update that started
+# the new pod first would never finish.
+#
+# maxUnavailable 100%, because each node holds its own adapter and no
+# node's pod stands in for another's. A pod on a node with no adapter
+# stays Pending for good, and the DaemonSet counts it as unavailable
+# for good. With a smaller budget those Pending pods use all of it, and
+# the controller never replaces the running pod on the adapter's node.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: equipment-operator-cec
+spec:
+  selector:
+    matchLabels:
+      app: equipment-operator-cec
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 100%
+  template:
+    metadata:
+      labels:
+        app: equipment-operator-cec
+    spec:
+      serviceAccountName: equipment-operator-cec
+      # A machine that drives a screen carries a NoSchedule taint, such
+      # as media.liken.sh/player, and a TV is connected to exactly such
+      # a machine. The pod tolerates every taint, as liken's other
+      # hardware DaemonSets do, and its claim alone decides where it
+      # runs.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: cec
+          image: ghcr.io/liken-sh/equipment-operator:latest
+          args: ["cec"]
+          env:
+            # liken names each node after its Machine, and a CECBus
+            # names the Machine that carries an adapter, so the node
+            # name is how the pod finds its own entries.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # One capability. The kernel lets a process open a CEC
+            # adapter as a monitor only with CAP_NET_ADMIN, and Listen is
+            # a monitor. Control needs no capability: a pod with none
+            # claimed the adapter, joined the bus, and scanned it in a
+            # drill. A cluster owner who never runs a bus in Listen can
+            # patch the capability out, and the adapter's entry then
+            # reports the kernel's refusal.
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_ADMIN"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+            # The adapter, claimed from liken. The claim delivers
+            # /dev/cecN and no other node.
+            claims:
+              - name: adapter
+      resourceClaims:
+        - name: adapter
+          resourceClaimTemplateName: cec-adapter

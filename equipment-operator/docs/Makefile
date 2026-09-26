@@ -1,15 +1,15 @@
 # The docs domain builds the manual for equipment.liken.sh. The
-# reference page is generated, never edited: crdref, the generator
-# the brand repository publishes, renders it from deploy/receivers-crd.yaml,
-# so a schema edit is a manual edit. GENERATED lists that page, and
-# the rule names go.mod as an input, so a generator bump regenerates
-# it.
+# reference pages for the two resources are generated, never edited:
+# crdref, the generator the brand repository publishes, renders each
+# one from its CRD in deploy/, so a schema edit is a manual edit.
+# GENERATED lists those pages, and each rule names go.mod as an input,
+# so a generator bump regenerates them.
 HUGO := go tool hugo
 CRDREF := go tool crdref
 
 REFERENCE := content/docs/reference
 
-GENERATED := $(REFERENCE)/receivers.md
+GENERATED := $(REFERENCE)/receivers.md $(REFERENCE)/cecbuses.md
 
 SKILLS := go tool skills
 BASE := https://equipment.liken.sh
@@ -26,6 +26,9 @@ test: $(GENERATED)
 
 $(REFERENCE)/receivers.md: ../deploy/receivers-crd.yaml go.mod
 	$(CRDREF) -title Receiver -weight 10 $< $@
+
+$(REFERENCE)/cecbuses.md: ../deploy/cecbuses-crd.yaml go.mod
+	$(CRDREF) -title CECBus -weight 15 $< $@
 
 # The skills target emits every guide as an Agent Skill into ../skills,
 # one SKILL.md per guide, with the generator the brand repository

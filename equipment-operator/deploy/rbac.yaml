@@ -1,9 +1,11 @@
-# The operator's identity in the cluster. It reads every Receiver,
-# writes each one's status, owns one spec field (power), and creates
-# and deletes the Receivers discovery makes for amps no person has
-# claimed. It never creates a Receiver for a wired protocol or one a
-# person declared: discovery defers to a claimed identity and prunes
-# only the objects that carry its own marker label.
+# The identities of the operator's two workloads. The Deployment reads
+# every Receiver, writes each one's status, owns one spec field
+# (power), and creates and deletes the Receivers discovery makes for
+# amps no person has claimed. It never creates a Receiver for a wired
+# protocol or one a person declared: discovery defers to a claimed
+# identity and prunes only the objects that carry its own marker label.
+# It also derives each CECBus's status. The CEC node workload has its
+# own identity, at the end of this file.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -34,6 +36,15 @@ rules:
   - apiGroups: [equipment.liken.sh]
     resources: [receivers/status]
     verbs: [get, patch, update]
+  # The CEC buses. The Deployment reads every CECBus and writes each
+  # one's status.devices and conditions, which it derives from the
+  # adapters' entries. It never writes a CECBus spec.
+  - apiGroups: [equipment.liken.sh]
+    resources: [cecbuses]
+    verbs: [get, list, watch]
+  - apiGroups: [equipment.liken.sh]
+    resources: [cecbuses/status]
+    verbs: [get, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -46,4 +57,49 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: equipment-operator
+    namespace: liken-system
+---
+# The CEC node workload's identity, apart from the Deployment's, so the
+# pod on an adapter's machine can reach only the CECBus objects and the
+# Displays it reads.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: equipment-operator-cec
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: equipment-operator-cec
+rules:
+  # The watch wakes the pod when a person edits a CECBus. patch and
+  # create are for the CECBus the pod makes in Listen for an adapter no
+  # CECBus names, and delete removes that CECBus when a person's
+  # CECBus names the same machine. The pod deletes only a CECBus that
+  # carries the discovered label and names its own machine.
+  - apiGroups: [equipment.liken.sh]
+    resources: [cecbuses]
+    verbs: [get, list, watch, patch, create, delete]
+  # The pod writes its own machine's entry under status.adapters, under
+  # a field manager named after the machine.
+  - apiGroups: [equipment.liken.sh]
+    resources: [cecbuses/status]
+    verbs: [get, patch]
+  # In Control the adapter announces the physical address that
+  # display-operator publishes on the named Display.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: equipment-operator-cec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: equipment-operator-cec
+subjects:
+  - kind: ServiceAccount
+    name: equipment-operator-cec
     namespace: liken-system

@@ -5,7 +5,9 @@ go 1.26.5
 toolchain go1.27.0
 
 require (
+	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.53.0
+	golang.org/x/sys v0.43.0
 	k8s.io/apiextensions-apiserver v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/apiserver v0.36.3
@@ -58,7 +60,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/narqo/go-badge v0.0.0-20230821190521-c9a75c019a59 // indirect
-	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
@@ -83,7 +84,6 @@ require (
 	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/term v0.42.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.14.0 // indirect

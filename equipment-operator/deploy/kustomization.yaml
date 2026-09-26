@@ -8,10 +8,17 @@ kind: Kustomization
 
 namespace: liken-system
 
+# kustomize stamps the namespace below onto the DeviceClass too,
+# because resource.k8s.io/v1 is not in its compiled OpenAPI schema and
+# an unknown kind is treated as namespaced. The stamp is harmless: the
+# API server ignores a namespace on a cluster-scoped object.
 resources:
   - receivers-crd.yaml
+  - cecbuses-crd.yaml
+  - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml
+  - cec.yaml
 
 labels:
   - includeSelectors: false

@@ -29,6 +29,25 @@ The volume topic belongs to the `Player` and is on the media bus run by
 retained owner mark on the topic plus `/owner`. Playback pods then leave
 volume changes to the receiver operator.
 
+A `CECBus` is one HDMI tree's CEC wire, reached through a USB CEC
+adapter on one of the cluster's machines. In `Listen` the adapter
+sends nothing and reports the devices it hears. In `Control` it joins
+the bus as a playback device that announces the machine's place in
+the tree, scans the bus, and reports each device's address, name,
+vendor, and power:
+
+```yaml
+apiVersion: equipment.liken.sh/v1alpha1
+kind: CECBus
+metadata:
+  name: den
+spec:
+  mode: Control
+  adapters:
+    - machine: node-1
+      display: acm-0001-receiver
+```
+
 The manual is at [equipment.liken.sh](https://equipment.liken.sh/).
 `plans/README.md` indexes the plans. `make test` runs every check CI
 runs.
