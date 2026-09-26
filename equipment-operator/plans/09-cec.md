@@ -408,10 +408,12 @@ sends no keys, because the adapter holds no logical address.
 ## What the first drill measured
 
 A drill on 2026-09-26 ran the design by hand with `cec-ctl`. The
-machine had a Pulse-Eight adapter on a receiver's spare input, and a
-second HDMI cable from the machine's unused port into the adapter,
-as in Pulse-Eight's two-cable setup. The TV was on the receiver's
-output, and a streaming player was on another receiver input.
+machine had a Pulse-Eight adapter on a receiver's spare input, with
+nothing in the adapter's own HDMI socket. The TV was on the
+receiver's output, and a streaming player was on another receiver
+input. The adapter needs no source cable: the scan found the whole
+tree with the socket empty, and with a second cable from the
+machine into the socket.
 
 * **The tree is what the design expects.** With the adapter set to
   the physical address from the machine's `Display` EDID, a scan
