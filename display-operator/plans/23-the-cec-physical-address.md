@@ -99,6 +99,19 @@ EDID states, and equipment-operator owns everything that speaks CEC
 The adapter on the machine comes from `liken`'s
 [milestone 70](https://github.com/liken-sh/liken/blob/main/plans/70-init-attaches-serio-devices.md).
 
+**Two connectors to one receiver.** Pulse-Eight's two-cable setup
+connects one machine to one receiver with two cables: one carries
+the picture, and one passes through the CEC adapter. A drill on
+2026-09-26 found that both connectors then read the receiver's EDID,
+with a different physical address on each: `1.2.0.0` and `1.1.0.0`.
+The operator names a `Display` from the EDID's manufacturer, product,
+and model, so both connectors map to one `Display` name, and the
+cluster showed one `Display` for the two. The address this plan
+publishes is per connector, so the plan must give each connector its
+own `Display` in that case, or publish the address per connector
+under one `Display`. The build decides which, and it states the rule
+in the reference.
+
 ## What was considered and set aside
 
 **equipment-operator reads the EDID itself.** The CEC pod could read
