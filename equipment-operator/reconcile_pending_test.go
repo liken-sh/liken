@@ -115,21 +115,71 @@ func TestAChangeAtTheReceiverIsDrivenBack(t *testing.T) {
 	fake.waitForCommands(t, "Z2MV40")
 }
 
-// A field the receiver never reports cannot be compared, so it is not
-// sent after a restart, it is sent once when the spec changes it, and
-// it is not sent again while the spec stands.
-func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
-	fake := startFakeDenon(t)
+// unreportedReceiver declares a setting and a zone control the fake
+// receiver never reports, with the settings generation the status
+// recorded before the operator started.
+func unreportedReceiver(fake *fakeDenon, recorded int64) Receiver {
 	receiver := testReceiver("theater", fake.address())
 	eco, sleep := "on", 30
 	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
 	receiver.Spec.Zones = map[string]ZoneSpec{"zone3": {Sleep: &sleep}}
+	receiver.Status.SettingsGeneration = recorded
+	return receiver
+}
+
+// A field the receiver never reports cannot be compared, so the
+// operator sends it once for each spec generation it has not recorded
+// in status.settingsGeneration: a new Receiver and a spec edited while
+// the operator was down send it once, and a restart at the recorded
+// generation sends nothing.
+func TestAnUnreportedFieldIsSentOncePerRecordedGeneration(t *testing.T) {
+	cases := []struct {
+		name     string
+		recorded int64
+		sends    bool
+	}{
+		{"a new Receiver", 0, true},
+		{"a spec edited while the operator was down", 3, true},
+		{"a restart at the recorded generation", 4, false},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			fake := startFakeDenon(t)
+			api, operator := settledOperator(t, fake, unreportedReceiver(fake, one.recorded), nil, func(*controller) bool { return true })
+
+			mustSucceed(t, operator.pass(t.Context()))
+			if one.sends {
+				fake.waitForCommands(t, "ECOON")
+				fake.waitForCommands(t, "Z3SLP030")
+				api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettingsGeneration == 4 })
+			}
+			mustMatch(t, operator.units["theater"].settingsGeneration.Load(), int64(4))
+
+			mustSucceed(t, operator.pass(t.Context()))
+			fake.refuseAnySet(t, quietPeriod)
+		})
+	}
+}
+
+// While the operator runs, a spec change that changes an unreported
+// field sends that field once, and a spec change that leaves it alone
+// does not send it.
+func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
+	fake := startFakeDenon(t)
+	receiver := unreportedReceiver(fake, 4)
 	api, operator := settledOperator(t, fake, receiver, nil, func(*controller) bool { return true })
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.refuseAnySet(t, quietPeriod)
 
-	eco, sleep = "off", 60
+	receiver.Metadata.Generation = 5
+	receiver.Spec.Volume = &ReceiverVolume{Max: 60}
+	api.setReceivers(receiver)
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.refuseAnySet(t, quietPeriod)
+
+	eco, sleep := "off", 60
+	receiver.Metadata.Generation = 6
 	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
 	receiver.Spec.Zones = map[string]ZoneSpec{"zone3": {Sleep: &sleep}}
 	api.setReceivers(receiver)
@@ -139,20 +189,6 @@ func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.refuseAnySet(t, quietPeriod)
-}
-
-// waitFor polls the check until it passes, and fails the test instead
-// of hanging when it never does.
-func waitFor(t *testing.T, check func() bool) {
-	t.Helper()
-	deadline := time.After(testTimeout)
-	for !check() {
-		select {
-		case <-deadline:
-			t.Fatal("the condition never held")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
 }
 
 // A field the receiver takes but never reports at the declared value is
@@ -214,4 +250,18 @@ func TestAZoneControlTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) 
 
 	status := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 2 })
 	mustMatch(t, status.Conditions[1].Message, "the receiver did not report the declared value after 3 sends: spec.zones.zone2.volume")
+}
+
+// waitFor polls the check until it passes, and fails the test instead
+// of hanging when it never does.
+func waitFor(t *testing.T, check func() bool) {
+	t.Helper()
+	deadline := time.After(testTimeout)
+	for !check() {
+		select {
+		case <-deadline:
+			t.Fatal("the condition never held")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }

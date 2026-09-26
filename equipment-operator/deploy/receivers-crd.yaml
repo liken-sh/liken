@@ -82,7 +82,7 @@ spec:
                       description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
                     settings:
                       type: object
-                      description: "The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times in one spec generation; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a spec change starts the count again. A field the receiver does not report cannot be compared, so the operator sends it once when the spec changes it, and not after an operator restart. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
+                      description: "The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times in one spec generation; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a spec change starts the count again. A field the receiver does not report cannot be compared, so the operator sends it once for each spec generation: once when the spec changes it, and after an operator restart only when metadata.generation differs from status.settingsGeneration. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
                       properties:
                         system:
                           type: object
@@ -251,7 +251,7 @@ spec:
                       description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable."
                     settings:
                       type: object
-                      description: "The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times in one spec generation; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a spec change starts the count again. A field the device does not report cannot be compared, so the operator sends it once when the spec changes it, and not after an operator restart. An omitted key leaves the device unchanged. An empty block sends nothing."
+                      description: "The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times in one spec generation; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a spec change starts the count again. A field the device does not report cannot be compared, so the operator sends it once for each spec generation: once when the spec changes it, and after an operator restart only when metadata.generation differs from status.settingsGeneration. An omitted key leaves the device unchanged. An empty block sends nothing."
                       properties:
                         audio:
                           type: object
@@ -379,7 +379,7 @@ spec:
                   description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {\"command\":\"quick.3\"}, an action that is not a setting. An absent topic subscribes to nothing."
                 zones:
                   type: object
-                  description: "The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control in one spec generation, and a control the zone does not report is sent once when the spec changes it."
+                  description: "The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control in one spec generation, and a control the zone does not report is sent once for each spec generation, the same way."
                   properties:
                     zone2:
                       type: object
@@ -477,6 +477,10 @@ spec:
                 service:
                   type: string
                   description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."
+                settingsGeneration:
+                  type: integer
+                  format: int64
+                  description: "The metadata.generation whose declared settings and zone controls the operator has sent, including the fields the receiver does not report. After an operator restart, the operator sends those unreported fields again only when metadata.generation differs from this value, so a restart at the same generation sends nothing, and a new Receiver or a spec edited while the operator was down sends them once."
                 conditions:
                   type: array
                   description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends in this spec generation and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise."

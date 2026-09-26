@@ -75,6 +75,10 @@ type receiverUnit struct {
 	// How many times the operator sent each declared field in this spec
 	// generation, so a field the receiver never confirms stops.
 	budget *sendBudget
+	// The generation whose declared fields the operator has sent, read
+	// from status.settingsGeneration when the unit starts and written
+	// back with the status.
+	settingsGeneration atomic.Int64
 
 	mutex   sync.Mutex
 	session *session
@@ -133,6 +137,7 @@ func (u *receiverUnit) write() {
 
 	settings := u.denonSettings()
 	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.Address(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
+	status.SettingsGeneration = u.settingsGeneration.Load()
 	if condition, held := settingsConfirmed(u.budget.unconfirmed(), u.generation.Load(), u.applied.Conditions, now); held {
 		status.Conditions = append(status.Conditions, condition)
 	}
@@ -311,32 +316,57 @@ func (u *receiverUnit) wiimStatus() *wiim.Status {
 // and logs nothing, and a change made at the receiver is sent back on
 // the next pass. A field the receiver reports is sent on each pass
 // until the receiver reports the declared value. A field it does not
-// report is sent once per spec change, and not after a restart,
-// because the operator starts with no record of what it applied. The
-// apply waits for the survey, because before it the receiver has
-// reported nothing to compare with. An apply error is logged and the
-// spec is not recorded as applied, so the next pass tries again.
-func (u *receiverUnit) setSettings(want denon.Settings) {
+// report is sent once per spec change. After a restart it is sent only
+// when the spec's generation differs from status.settingsGeneration,
+// which unrecordedGeneration explains. The apply waits for the survey,
+// because before it the receiver has reported nothing to compare with.
+// An apply error is logged and the spec is not recorded as applied, so
+// the next pass tries again. It answers whether the pass settled the
+// block, which is what lets the caller record the generation.
+func (u *receiverUnit) setSettings(want denon.Settings) bool {
 	if u.denonClient == nil {
-		return
+		return false
 	}
 	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
-		return
+		return false
 	}
 	previous, known := u.settingsApplied()
+	known = known || u.unrecordedGeneration()
 	pending := budgeted(u, "spec.denon.settings", want.Pending(u.denonClient.Settings(), previous, known))
 	if !reflect.DeepEqual(pending, denon.Settings{}) {
 		line := fmt.Sprintf("generation %d declares spec.denon.settings %s; sent it", u.generation.Load(), declared(pending))
 		began := time.Now()
 		if err := u.denonClient.ApplySettings(pending); err != nil {
 			u.log.refused(line, err)
-			return
+			return false
 		}
 		if u.log.fresh("spec.denon.settings", pending) {
 			u.log.confirm(line, began, settingsCheck(func() bool { return pending.ConfirmedBy(u.denonClient.Settings()) }))
 		}
 	}
 	u.settings.Store(&want)
+	return true
+}
+
+// unrecordedGeneration answers whether the spec's generation differs
+// from status.settingsGeneration. The operator starts with no record of
+// the fields it applied, so after a restart it compares an unreported
+// field with nothing. When the generation is the recorded one, the
+// operator sent those fields before it restarted, and it sends nothing.
+// When it differs, the Receiver is new or its spec changed while the
+// operator was down, and the operator sends every unreported field
+// once.
+func (u *receiverUnit) unrecordedGeneration() bool {
+	return u.settingsGeneration.Load() != u.generation.Load()
+}
+
+// recordSettingsGeneration records that the operator has sent the
+// declared fields of the current generation, and asks for a status
+// write so status.settingsGeneration follows.
+func (u *receiverUnit) recordSettingsGeneration() {
+	if generation := u.generation.Load(); u.settingsGeneration.Swap(generation) != generation {
+		poke(u.dirty)
+	}
 }
 
 // budgeted spends the unit's send budget on one block's pending fields
@@ -366,24 +396,26 @@ func (u *receiverUnit) settingsApplied() (denon.Settings, bool) {
 // fields that Pending keeps, so a restart against a device that already
 // holds them sends nothing, and a change made at the device is sent
 // back. The two settings types never meet.
-func (u *receiverUnit) setWiimSettings(want wiim.Settings) {
+func (u *receiverUnit) setWiimSettings(want wiim.Settings) bool {
 	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
-		return
+		return false
 	}
 	previous, known := u.wiimSettingsApplied()
+	known = known || u.unrecordedGeneration()
 	pending := budgeted(u, "spec.wiim.settings", want.Pending(u.wiimClient.Settings(), previous, known))
 	if !reflect.DeepEqual(pending, wiim.Settings{}) {
 		line := fmt.Sprintf("generation %d declares spec.wiim.settings %s; sent it", u.generation.Load(), declared(pending))
 		began := time.Now()
 		if err := u.wiimClient.ApplySettings(pending); err != nil {
 			u.log.refused(line, err)
-			return
+			return false
 		}
 		if u.log.fresh("spec.wiim.settings", pending) {
 			u.log.confirm(line, began, settingsCheck(func() bool { return pending.ConfirmedBy(u.wiimClient.Settings()) }))
 		}
 	}
 	u.wiimSettings.Store(&want)
+	return true
 }
 
 // wiimSettingsApplied answers the last WiiM settings the operator
@@ -402,20 +434,22 @@ func (u *receiverUnit) wiimSettingsApplied() (wiim.Settings, bool) {
 // the last apply. A restart against a receiver whose zones already
 // hold the declared controls sends nothing and logs nothing, and a
 // change made at the receiver is sent back on the next pass. A control
-// the zone does not report is sent once per spec change, and not after
-// a restart, because the operator starts with no record of what it
-// applied. The main zone is spec.power and spec.session, so a zones map
+// the zone does not report is sent once per spec change, and after a
+// restart only when the spec's generation differs from
+// status.settingsGeneration. The main zone is spec.power and spec.session, so a zones map
 // that names main is a misconfiguration and is rejected rather than
 // fought. An apply error is logged and the zone is not recorded as
 // applied, so the next pass tries again.
-func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
+func (u *receiverUnit) setZones(want map[string]ZoneSpec) bool {
 	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
-		return
+		return false
 	}
 	// zonesApplied returns a copy, so this loop writes a fresh map that
 	// never shares its backing with the snapshot the last pass stored; a
 	// later setZones cannot reach back into an earlier one.
 	applied, known := u.zonesApplied()
+	known = known || u.unrecordedGeneration()
+	settled := true
 	state := u.driver.State()
 	resolution := u.driver.VolumeResolution()
 	for name, spec := range want {
@@ -430,6 +464,7 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 			began := time.Now()
 			if err := u.applyZone(name, pending); err != nil {
 				u.log.refused(line, err)
+				settled = false
 				continue
 			}
 			if u.log.fresh("spec.zones."+name, pending) {
@@ -442,6 +477,7 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 		applied[name] = spec
 	}
 	u.zones.Store(&applied)
+	return settled
 }
 
 // zonesApplied answers the last zone controls the operator settled on,
@@ -773,13 +809,17 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.setPower(receiver.Spec.Power)
+	settled := true
 	if receiver.Spec.Denon != nil {
-		unit.setSettings(receiver.Spec.Denon.Settings)
+		settled = unit.setSettings(receiver.Spec.Denon.Settings) && settled
 	}
 	if receiver.Spec.Wiim != nil {
-		unit.setWiimSettings(receiver.Spec.Wiim.Settings)
+		settled = unit.setWiimSettings(receiver.Spec.Wiim.Settings) && settled
 	}
-	unit.setZones(receiver.Spec.Zones)
+	settled = unit.setZones(receiver.Spec.Zones) && settled
+	if settled {
+		unit.recordSettingsGeneration()
+	}
 	unit.setSession(ctx, receiver.Spec.Session)
 }
 
@@ -823,6 +863,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
+	unit.settingsGeneration.Store(receiver.Status.SettingsGeneration)
 	go unit.driver.Run(ctx)
 	go unit.report(ctx)
 	unit.startBus(ctx)

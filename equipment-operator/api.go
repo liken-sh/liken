@@ -257,13 +257,19 @@ type ReceiverStatus struct {
 	// Address is the address the operator reached the receiver on. A
 	// receiver declared by name reports its resolved address, and a WiiM
 	// reports the address discovery found.
-	Address    string                `json:"address,omitempty"`
-	Zones      map[string]ZoneStatus `json:"zones,omitempty"`
-	Driver     string                `json:"driver,omitempty"`
-	Denon      *denon.Settings       `json:"denon,omitempty"`
-	Wiim       *wiim.Status          `json:"wiim,omitempty"`
-	Service    string                `json:"service,omitempty"`
-	Conditions []Condition           `json:"conditions,omitempty"`
+	Address string                `json:"address,omitempty"`
+	Zones   map[string]ZoneStatus `json:"zones,omitempty"`
+	Driver  string                `json:"driver,omitempty"`
+	Denon   *denon.Settings       `json:"denon,omitempty"`
+	Wiim    *wiim.Status          `json:"wiim,omitempty"`
+	Service string                `json:"service,omitempty"`
+	// SettingsGeneration is the metadata.generation whose declared
+	// settings and zone controls the operator has sent, including the
+	// ones the receiver does not report. After a restart the operator
+	// sends those unreported fields again only when the spec's
+	// generation differs from this one.
+	SettingsGeneration int64       `json:"settingsGeneration,omitempty"`
+	Conditions         []Condition `json:"conditions,omitempty"`
 }
 
 // ZoneStatus is one zone in the receiver's own units. Volume and
