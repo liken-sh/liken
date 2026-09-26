@@ -216,7 +216,7 @@ func (e *enricher) principalNames(ctx context.Context, fetcher *datasetFetcher,
 	return names, nil
 }
 
-// The name in the entry that plan 65's join finds for one IMDb id, or an
+// The name in the entry that plan 66's join finds for one IMDb id, or an
 // empty string where the store holds no entry for it.
 func (e *enricher) entryName(person string) string {
 	directory := e.contributorByID(providerIDs{contributorIMDbScheme: person})

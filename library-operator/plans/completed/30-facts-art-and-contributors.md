@@ -80,7 +80,7 @@ first one answer.
 
   TVmaze's columns are from memory and the build checks them. The
   IMDb datasets are not here: they are bulk files with a store, and
-  [plan 33](../33-the-imdb-datasets.md) has them.
+  [plan 33](33-the-imdb-datasets.md) has them.
 - **Identity writes every id.** After the ladder finds a TMDb id, one
   call to TMDb's external ids gives the IMDb id, and for a series the
   TheTVDB id. Every one goes into the `.nfo` as its own `<uniqueid>`,

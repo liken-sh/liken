@@ -1,4 +1,4 @@
-# The IMDb datasets
+# 33, The IMDb datasets
 
 Plan 33. A new `imdb` provider block serves `rating.imdb` for movies,
 series, and episodes, and `credits` for movies and series, from IMDb's
@@ -8,8 +8,16 @@ reads each file once per run and keeps only the rows of the titles in
 its gap list. The provider's status reports when IMDb last published
 each file.
 
+Built on 2026-09-25 in e86afd9 (the rating) and ae23b02 (the
+credits), and drilled on `liken-1` on 2026-09-26 with library-operator
+2026.09.19-002-dev-020-ae23b024 and later. The drill found that a
+rating another tool wrote was never read from the datasets, and
+e0cccae fixed it. "What the build changed", "The drill on `liken-1`",
+and "What is still open" at the end record the results. The
+attribution the media browser shows is still open.
+
 The stub of this plan came from the 2026-09-03 design discussion of
-[plan 30](completed/30-facts-art-and-contributors.md). This version
+[plan 30](30-facts-art-and-contributors.md). This version
 replaces that stub's design, and the reasons are under "What was set
 aside".
 
@@ -312,12 +320,12 @@ whether a rating is old enough to read again.
   `archive_sound` are not credits.
 - **A person is one `.contributors/` entry, whichever provider named
   them.** A credit from the datasets names the person by `nconst`
-  alone. [Plan 65](65-one-entry-for-each-person.md) finds the entry by
+  alone. [Plan 66](66-one-entry-for-each-person.md) finds the entry by
   that IMDb id first, and it asks TMDb's find endpoint for the TMDb id
   of a person that no entry holds. `contributor.ids` fills an entry that
   has only an IMDb id the same way, so a person that IMDb named gets a
   biography and a headshot. When two entries turn out to be one person,
-  plan 65 merges them. This plan's credits depend on plan 65, and the
+  plan 66 merges them. This plan's credits depend on plan 66, and the
   rating does not.
 - **Credits are not refreshed on a timer.** A title's principal
   credits change rarely after its release, and a credits run costs 32
@@ -405,34 +413,79 @@ built and drilled.
 
 ## Attribution
 
-IMDb's terms for the datasets may require a credit where the data is
-shown, in the form "Information courtesy of IMDb
-(https://www.imdb.com). Used with permission." The builder confirms
-the current terms before the drill. If the credit is required, the
-media browser shows it on every page that shows an IMDb rating or an
-IMDb credit, and the manual's guide to enrichment states it.
+IMDb's terms (IMDb Help, "Can I use IMDb data in my software?", read
+on 2026-09-25) allow limited non-commercial use of the datasets. The
+data "must not be altered/republished/resold/repurposed to create any
+kind of online/offline database of movie information (except for
+individual personal use)". Each cluster downloads the files for the
+people who own it, and no `liken` repository or image carries them.
+Every use must include the statement "Information courtesy of IMDb
+(https://www.imdb.com). Used with permission." The terms do not say
+where.
 
-## The drill
+The manual's enrichment guide shows the statement. The media browser
+does not show it yet. Where it shows it is open: on an about screen,
+or beside each IMDb rating and IMDb credit.
 
-To be run on `liken-1` when the plan is built.
+## What the build changed
 
-- Apply an `imdb` provider. Read its status: `Ready`, the four
-  `status.imdb.datasets` entries, and `UPDATED` within the last day.
-- Put `imdb` first in a movie library's sources and run the enricher.
-  Record the download time, the read time of each file, and the
-  ratings and credits written. Run a webhook enrich for one folder
-  and confirm from the container's log that it got `304` for every
-  file and read the cached copies.
-- Run two libraries' enrichers at the same time on one node, and
-  confirm that one container downloaded and the other waited for the
-  lock and read the copy.
-- Enrich a series library and record how many episodes got a rating
-  and how many IMDb ids came from `title.episode`.
-- Compare the credits of ten movies from the datasets with TMDb's, and
-  confirm that a person TMDb already named links to the same
-  `.contributors/` entry.
-- Fill the cache claim, run the enricher, and confirm that the fact
-  still wrote ratings and logged the filesystem's error text.
-- Set a rating's attempt back 31 days and run the enricher. Confirm
-  that the title was read again, and that its `.nfo` was not rewritten
-  when the rating had not changed.
+- **The reporter counts only the ratings that are missing.** It reads
+  no `MetadataProvider`, so it binds no dataset time. The operator
+  finds the ratings to read again from the oldest `rating.imdb`
+  attempt, 30 days after it, and not while `Stale` is `True`. A
+  missing rating still starts a `Job` while `Stale` is `True`.
+- **A rating that another tool wrote is read once.** Such a title has
+  the rating in its `.nfo` file and no `rating.imdb` attempt, so
+  neither the 30 days nor `spec.refresh` opened it. The drill found
+  this. The `Job`'s gap now includes it when an `imdb` provider
+  answers the rating, and the reporter does not count it.
+- **Episodes are in the gap only where `imdb` answers the rating.**
+  The report carries the episode count apart, and the operator takes
+  it out of the gap of a Library whose rating another block answers.
+  A file that holds two episodes is not in the gap, because the season
+  ledger keys an attempt on the file.
+- **The nfo container mounts the cache whenever a `Ready`, cached
+  `imdb` provider is in the sources.** The builder of the `Job` reads
+  no report, so it cannot test for gaps. A run with no gaps still
+  sends no request.
+- **A title with no IMDb id records a miss,** as OMDb does, and stays
+  out of the next runs for the attempt's window.
+- **`UPDATED` reads `status.imdb.updated`,** a field with the oldest
+  `lastModified`, because a printer column cannot compute a minimum.
+- **Credits are a fallback fact of the block.** The provider table
+  marks `credits` as `fallback` for `imdb`, so the datasets add nothing
+  to a title that an earlier source in the Library's order credited.
+- **The credits hold the cast, the directors, and the writers.** The
+  credit model has only those parts, which is all that TMDb's credits
+  carry, so the other crew categories are dropped.
+- **A pass that finds new titles reads the two credits files again.**
+  Identity can name titles over several passes of one `Job`, and each
+  of those passes costs about 32 seconds of reading.
+
+## The drill on `liken-1`
+
+- **The provider.** A new `imdb` provider was `Ready` in under a
+  minute, with four entries in `status.imdb.datasets`, `Stale` of
+  `False`, `Cached` of `True`, and the claim `imdb-datasets` bound
+  `ReadWriteMany` on the per-node class.
+- **Episodes.** With `imdb` after `tmdb` and before `omdb` in the
+  sources of both Libraries, one gap `Job` of the series wrote
+  `rating.imdb` for 6,277 of the 6,343 episodes that had none, in
+  2 min 45 s. It read `title.episode` in 5.3 s, which gave the IMDb id
+  of 6,288 episodes, and `title.ratings` in 0.8 s. The writes of the
+  `.nfo` files took most of the time.
+- **The cache.** A later run of the movies got `304` for
+  `title.ratings` and read the cached copy in 0.58 s.
+- **The movies.** After the fix, a `spec.refresh` of `rating.imdb`
+  answered 1,436 movies from the cached file. Only 29 `movie.nfo`
+  files changed, because the rest already had the same rating at one
+  decimal.
+
+## What is still open
+
+- **The attribution in the media browser.**
+- **Credits from the datasets are not drilled** on a title that TMDb
+  does not have.
+- **The credits files can be read more than once in one `Job`.**
+- **`status.gaps` of a Library whose rating OMDb answers still counts
+  episodes.** Only the operator's scheduling takes them out.

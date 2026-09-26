@@ -89,30 +89,31 @@ they share, and plans 28 to 31 build them in order.
 * [31, Franchises](completed/31-franchises.md). Built. A library kind whose files hold
   one story in story order, with a calendar and universes, resolved
   across the namespace by provider id.
-* [33, The IMDb datasets](33-the-imdb-datasets.md). An `imdb` block
-  that serves `rating.imdb` for movies, series, and episodes, and
-  `credits` for movies and series. A run reads each dataset file once
-  and keeps the rows in its gap list. A claim on a per-node class
-  caches the files, and `status.imdb` reports when IMDb last published
-  each one. The credits depend on plan 65. OMDb serves `rating.imdb`
-  until then.
+* [33, The IMDb datasets](completed/33-the-imdb-datasets.md). Built on
+  2026-09-25 and drilled on `liken-1` on 2026-09-26. An `imdb` block
+  serves `rating.imdb` for movies, series, and episodes, and `credits`
+  as a fallback, from IMDb's datasets, read once per run through a
+  cache on a per-node class. The drill rated 6,277 episodes in one
+  run. Where the media browser shows IMDb's credit line is open.
 * [34, Every fact writes its rows](completed/34-every-fact-writes-its-rows.md).
   Built on 2026-09-03. Each fact writes its own catalog rows as it
   writes its files, only the columns it owns, with the art list in its
   own `arts` column and a prune that spares a row newer than the
   walk's start.
-* [57, One Job for each Library](57-one-job-for-each-library.md). The walk,
+* [57, One Job for each Library](completed/57-one-job-for-each-library.md).
+  Built on 2026-09-25 and drilled on `liken-1` on 2026-09-26. The walk,
   every enricher fact, trickplay, and the trailer files run as regular
-  containers of one `Job`, on one catalog claim, one `Job` at a time.
-  Each phase works on a title as soon as the phases before it finish
-  that title. A webhook starts one `Job` in place of a chain.
+  containers of one `Job`, on one `ReadWriteOncePod` catalog claim, one
+  `Job` at a time. Three webhooks during a walk started one `Job`. The
+  time limit of the long phases is not drilled.
 * [60, A fact that fetches subtitles](60-the-subtitle-fact.md). For later. The
   enricher fetches the subtitles a video lacks in the household's
   languages from OpenSubtitles, named the way Jellyfin and Kodi read
   them, under the account's daily cap.
-* [65, One entry for each person](65-one-entry-for-each-person.md). A
-  credit finds its `.contributors/` entry by id before it looks by
-  name, and the enricher merges two entries that share an id.
+* [66, One entry for each person](completed/66-one-entry-for-each-person.md).
+  Built on 2026-09-25. A credit finds its `.contributors/` entry by id
+  before it looks by name, and the enricher merges two entries that
+  share an id. A merge of real duplicates is not drilled.
 
 Plan 32 covers a separate part of the system from the enrichment work.
 

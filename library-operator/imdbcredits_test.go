@@ -3,7 +3,7 @@ package main
 // what these tests read: the credits fact reads title.principals and then
 // name.basics once for its whole gap, turns the rows into credits as TMDb's
 // credits give them, skips name.basics when every person has an entry, links
-// each person to the one entry plan 65's join finds, and answers only where
+// each person to the one entry plan 66's join finds, and answers only where
 // no source before it in the Library's order answered.
 
 import (

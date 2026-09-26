@@ -1,12 +1,18 @@
-# One entry for each person
+# 66, One entry for each person
 
-Plan 65. Each person has one `.contributors/` entry in a library,
+Plan 66. Each person has one `.contributors/` entry in a library,
 whichever provider named them. When two entries hold the same id in one
 scheme, the enricher merges them into one entry. The walk finds the
 entries that must merge, and the enricher merges them in the same run.
 A fact that adds an id to an entry can open a merge too.
 A credit also finds its entry by id before it looks by name, so fewer
 duplicates occur.
+
+Built on 2026-09-25 in 7ac9ae3, and run on `liken-1` on 2026-09-26
+with library-operator 2026.09.19-002-dev-020-ae23b024 and later. The
+build stored the ids in a new table and not in a new key; "What the
+build changed" at the end records that and the other changes. A merge
+of real duplicates is not drilled yet.
 
 The need came from the 2026-09-25 review of [plan
 33](33-the-imdb-datasets.md). Plan 33 adds IMDb's datasets as a
@@ -150,19 +156,45 @@ report counts it.
 - **A merge by name alone.** Two people can have the same name. Only
   a shared id decides that two entries are one person.
 
-## The proof
+## What the build changed
 
-On `liken-1`, against a copy of a lab library with a
-`.contributors/` store:
+- **The ids are in a new table, `contributor_ids`,** keyed by
+  `(library, path, scheme)`, with an index on `(library, scheme, id)`.
+  `contributor_aliases` keeps its key. Corrosion adds a new table to a
+  database it already holds, and it refuses a new primary key, so no
+  catalog copy had to start again.
+- **A second new table, `contributor_merges`,** holds each removed
+  entry and the entry that stays. Without it, the move of the credits
+  and the delete of a removed entry have no catalog row to read.
+- **`contributor.merge` and `credits.move` are gaps, not facts.** They
+  are not in the fact vocabulary, so `spec.refresh` and the CLI's fact
+  list do not change. `gapFact` names the fact whose container runs
+  each gap, and `phaseGapNames` makes a phase and the operator's check
+  read those gaps as well as the gaps of their own facts.
+- **A merge writes its attempts into its own ledger,**
+  `.liken/contributor.merge.yaml`, so they do not replace the attempts
+  of `contributor.ids`.
+- **The move of the credits waits for the next `Job`.** The nfo phase
+  moves the credits, and it can end before the contributors phase
+  merges. The contributors phase of that next `Job` deletes each
+  removed entry that no credit names.
+- **When two entries are both at a plain slug,** because a provider
+  spelled the name another way, the entry with more ids stays.
 
-- Create two entries for one person by hand, one with the TMDb id and
-  one with the IMDb id under a different spelling. Run the enricher.
-  Confirm one entry remains, with both ids, the biography, and the
-  headshot, and every title's credit names it.
-- Credit a person of the same name as an existing entry, with only an
-  IMDb id. Confirm that the find call gives the TMDb id and that the
-  credit gets its own entry.
-- Edit one of two duplicate entries by hand. Confirm that the merge
-  leaves both and that the report counts the group.
-- Record the number of groups that the first walk finds in the lab
-  library, and the time the merge takes.
+## The drill on `liken-1`
+
+A full walk of the movies and the series filled `contributor_ids` from
+the entries on disk. The `contributor.merge` gap then read 0 in both
+Libraries, so the testbed has no two entries that hold one id. No
+merge ran.
+
+## What is still open
+
+- **A merge of real duplicates is not drilled.** The testbed's
+  libraries are on a volume that other people use, so the drill needs
+  a copy of a library with two entries for one person: one with the
+  TMDb id, and one with the IMDb id under another spelling.
+- **An existing catalog has an empty `contributor_ids` until the next
+  full walk.** Until then a credit falls back to the join by slug.
+- **The check before a delete counts catalog rows.** A `credits.yaml`
+  that no walk has read yet does not count.

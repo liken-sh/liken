@@ -175,7 +175,7 @@ library may want a different art source.
 
 What each provider serves is plan 30's table, checked as it is built.
 The IMDb datasets are bulk files with a store and have
-[plan 33](../33-the-imdb-datasets.md) of their own. Music providers wait
+[plan 33](33-the-imdb-datasets.md) of their own. Music providers wait
 for a music library.
 
 ## Execution
