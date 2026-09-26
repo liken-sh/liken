@@ -37,6 +37,15 @@ impl Default for Volume {
 /// whether or not a film plays.
 pub const STEP: i64 = 5;
 
+/// A level the way every line names one: the level, and whether it is
+/// muted.
+impl std::fmt::Display for Volume {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let muted = if self.muted { "muted" } else { "not muted" };
+        write!(f, "level {}, {muted}", self.level)
+    }
+}
+
 impl Volume {
     /// The level held inside 0 to 100. A level outside the range is clamped
     /// rather than refused, so another program's message cannot draw a row past

@@ -77,8 +77,11 @@ const (
 
 // mpvCommand is the shape mpv accepts: an array of the command name
 // followed by its arguments.
+// A command that carries a request id comes back with that id on
+// mpv's answer; mpvrequests.go says which commands carry one.
 type mpvCommand struct {
-	Command []any `json:"command"`
+	Command   []any `json:"command"`
+	RequestID int   `json:"request_id,omitempty"`
 }
 
 // mpvMessage is the shape of one line mpv writes. Command replies
@@ -90,6 +93,11 @@ type mpvMessage struct {
 	Name  string          `json:"name"`
 	Data  json.RawMessage `json:"data"`
 	Args  []string        `json:"args"`
+
+	// An answer to a command carries no event, the command's request
+	// id, and mpv's error word.
+	RequestID int    `json:"request_id"`
+	Error     string `json:"error"`
 }
 
 // clientMessage is one script-message the display broadcast, as its arguments
@@ -153,12 +161,14 @@ func observeProperties(writer io.Writer, names []string) error {
 // the four observed properties produce.
 const maxEventLine = 1 << 20
 
-// readEvents delivers the observed property changes and the client messages,
-// and drops everything else: replies, other events, and any line that does not
+// readEvents delivers the observed property changes, the client messages, and
+// the answers to commands that carried a request id, and drops everything
+// else: the answers with no id, other events, and any line that does not
 // decode. mpv's protocol grows new events, and one the supervisor cannot read
 // is no reason to stop reporting the ones it can. It ends when the socket
-// closes, which is how mpv says the run is over.
-func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyChange, messages chan<- clientMessage) error {
+// closes, which is how mpv says the run is over. A nil replies channel drops
+// the answers too.
+func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyChange, messages chan<- clientMessage, replies chan<- mpvReply) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxEventLine)
 	for scanner.Scan() {
@@ -167,6 +177,15 @@ func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyCh
 			continue
 		}
 		switch message.Event {
+		case "":
+			if message.RequestID == 0 || replies == nil {
+				continue
+			}
+			select {
+			case replies <- mpvReply{ID: message.RequestID, Error: message.Error}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		case propertyChangeEvent:
 			if !slices.Contains(observedProperties, message.Name) {
 				continue

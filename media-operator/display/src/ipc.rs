@@ -15,6 +15,8 @@ use tokio::net::UnixStream;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
 
+use crate::record::{self, Notes};
+
 /// mpv serves its JSON IPC socket on an emptyDir the playback pod always
 /// carries, rather than in the player container's private `/tmp`, because
 /// the command sidecar drives the same socket and a volume is the only thing
@@ -254,11 +256,21 @@ impl Ipc {
     /// process ends. A socket that closes reports `Detached` and the loop
     /// dials again, because mpv restarting is the pod's own business and the
     /// display outlives it.
-    pub async fn serve(&self, events: Sender<Event>, commands: &broadcast::Sender<String>) {
+    pub async fn serve(
+        &self,
+        events: Sender<Event>,
+        commands: &broadcast::Sender<String>,
+        notes: &Notes,
+    ) {
         loop {
             match tokio::time::timeout(DIAL_TIMEOUT, UnixStream::connect(&self.path)).await {
                 Ok(Ok(stream)) => {
-                    let _ = session(stream, &events, &mut commands.subscribe()).await;
+                    let _ = session(stream, &events, &mut commands.subscribe(), notes).await;
+                    // mpv answers nothing on a closed socket, so every press
+                    // line still waiting is written now, with that reason.
+                    for line in record::abandoned(notes) {
+                        eprintln!("{line}");
+                    }
                     if events.send(Event::Detached).await.is_err() {
                         return;
                     }
@@ -285,6 +297,7 @@ pub async fn session<S>(
     stream: S,
     events: &Sender<Event>,
     commands: &mut broadcast::Receiver<String>,
+    notes: &Notes,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -299,10 +312,11 @@ where
         .write_all(line(&vec![json!("script-message"), json!(PRESENTATION_REQUEST)]).as_bytes())
         .await?;
 
-    // Every command the display sends carries one request id, so a refusal
-    // cannot be traced back to the press that made it. The kind of refusal
-    // can, and one line per kind says what mpv would not do without a line
-    // per frame of a held press.
+    // A command a press made carries a request id of its own, and its answer
+    // completes the line the frame loop left in the notes. Every other
+    // command carries id 0, so its refusal cannot be traced back to what sent
+    // it. The kind of refusal can, and one line per kind says what mpv would
+    // not do without a line per frame.
     let mut refused: HashSet<String> = HashSet::new();
     let mut lines = BufReader::new(reader).lines();
     loop {
@@ -313,6 +327,11 @@ where
                     Some(Incoming::Event(event)) => {
                         if events.send(event).await.is_err() {
                             return Ok(());
+                        }
+                    }
+                    Some(Incoming::Reply { id, error, .. }) if id >= record::FIRST_ID => {
+                        if let Some(line) = record::answered(notes, id, &error) {
+                            eprintln!("{line}");
                         }
                     }
                     Some(Incoming::Reply { error, .. })
@@ -463,7 +482,7 @@ mod tests {
         let (sender, _events) = mpsc::channel(64);
         let (commands, mut receiver) = broadcast::channel(64);
         let session = tokio::spawn(async move {
-            let _ = session(display, &sender, &mut receiver).await;
+            let _ = session(display, &sender, &mut receiver, &Notes::default()).await;
         });
 
         let sent = read_lines(&mut mpv, OBSERVED.len() + 1).await;
@@ -489,7 +508,7 @@ mod tests {
         let (sender, _events) = mpsc::channel(64);
         let (commands, mut receiver) = broadcast::channel(64);
         let session = tokio::spawn(async move {
-            let _ = session(display, &sender, &mut receiver).await;
+            let _ = session(display, &sender, &mut receiver, &Notes::default()).await;
         });
 
         let _ = read_lines(&mut mpv, OBSERVED.len() + 1).await;
@@ -507,6 +526,45 @@ mod tests {
 
         drop(commands);
         session.await.expect("the session ends with the channel");
+    }
+
+    /// mpv's answer to a press's command takes that press's line out of the
+    /// notes, and an answer to the display's own command leaves it.
+    #[tokio::test]
+    async fn an_answer_completes_the_line_its_press_left() {
+        let (display, mut mpv) = tokio::io::duplex(8192);
+        let (sender, _events) = mpsc::channel(64);
+        let (_commands, mut receiver) = broadcast::channel(64);
+        let notes = Notes::default();
+        for id in [record::FIRST_ID, record::FIRST_ID + 1] {
+            notes
+                .lock()
+                .expect("the notes")
+                .insert(id, format!("line {id}"));
+        }
+        let held = notes.clone();
+        let session = tokio::spawn(async move {
+            let _ = session(display, &sender, &mut receiver, &held).await;
+        });
+
+        let _ = read_lines(&mut mpv, OBSERVED.len() + 1).await;
+        mpv.write_all(
+            b"{\"request_id\":1000,\"error\":\"success\"}\n{\"request_id\":0,\"error\":\"success\"}\n",
+        )
+        .await
+        .expect("mpv answers");
+        drop(mpv);
+        session.await.expect("the session ends with the socket");
+
+        assert_eq!(
+            notes
+                .lock()
+                .expect("the notes")
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![record::FIRST_ID + 1]
+        );
     }
 
     /// Read whole lines off mpv's half of the pipe until it has as many as the
@@ -535,7 +593,7 @@ mod tests {
         let (sender, mut events) = mpsc::channel(64);
         let (_commands, mut receiver) = broadcast::channel(64);
         let session = tokio::spawn(async move {
-            let _ = session(display, &sender, &mut receiver).await;
+            let _ = session(display, &sender, &mut receiver, &Notes::default()).await;
         });
 
         mpv.write_all(
@@ -625,7 +683,8 @@ mod tests {
         let ipc = Ipc::at(&path);
         let (sender, mut events) = mpsc::channel(64);
         let (commands, _receiver) = broadcast::channel(64);
-        let serving = tokio::spawn(async move { ipc.serve(sender, &commands).await });
+        let serving =
+            tokio::spawn(async move { ipc.serve(sender, &commands, &Notes::default()).await });
 
         let (mut mpv, _) = listener.accept().await.expect("the display dials");
         let mut read = vec![0u8; 4096];
@@ -663,9 +722,12 @@ mod tests {
         drop(events);
 
         let (commands, _receiver) = broadcast::channel(64);
-        tokio::time::timeout(Duration::from_secs(5), ipc.serve(sender, &commands))
-            .await
-            .expect("the loop ends");
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            ipc.serve(sender, &commands, &Notes::default()),
+        )
+        .await
+        .expect("the loop ends");
     }
 
     #[test]

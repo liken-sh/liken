@@ -212,3 +212,109 @@ func TestARepeatOffTheBusIsHeldUnderTheCeiling(t *testing.T) {
 	mustMatch(t, held[0].RepeatDelay, maxRepeatMillis)
 	mustMatch(t, held[0].RepeatInterval, maxRepeatMillis)
 }
+
+// A press earns one line: the control, and the key the pod published
+// or the reason it published none. The release and every repeat earn
+// none, so a held control is one line.
+func TestAPressEarnsOneLineAndItsRepeatAndReleaseNone(t *testing.T) {
+	events := remoteEventsTopic(defaultTopicBase, "house", "sofa")
+	cases := []struct {
+		name  string
+		table []compiledBinding
+		event inputEvent
+		want  string
+	}{
+		{
+			name:  "a key the table maps",
+			event: inputEvent{Type: evKey, Code: buttonCodes["BTN_SOUTH"], Value: 1},
+			want:  "BTN_SOUTH (304) pressed, published KEY_ENTER to " + events,
+		},
+		{
+			name:  "a key that passes as itself",
+			event: inputEvent{Type: evKey, Code: buttonCodes["KEY_PLAYPAUSE"], Value: 1},
+			want:  "KEY_PLAYPAUSE (164) pressed, published KEY_PLAYPAUSE to " + events,
+		},
+		{
+			name:  "a key the table maps to none",
+			table: []compiledBinding{{EventType: evKey, Code: buttonCodes["BTN_TL"], Value: 1, Key: keyNone}},
+			event: inputEvent{Type: evKey, Code: buttonCodes["BTN_TL"], Value: 1},
+			want:  "BTN_TL (310) pressed, published nothing, because the key table maps it to none",
+		},
+		{
+			name:  "a code the kernel gives no name",
+			event: inputEvent{Type: evKey, Code: 0x2ff, Value: 1},
+			want:  "767 pressed, published nothing, because the kernel gives the code no name and the key table has no row for it",
+		},
+		{
+			name:  "a hat direction the table maps",
+			event: inputEvent{Type: evAbs, Code: axisCodes["ABS_HAT0Y"], Value: -1},
+			want:  "ABS_HAT0Y (17) -1 pressed, published KEY_UP to " + events,
+		},
+		{
+			name:  "a hat direction with no row",
+			table: []compiledBinding{},
+			event: inputEvent{Type: evAbs, Code: axisCodes["ABS_HAT0Y"], Value: -1},
+			want:  "ABS_HAT0Y (17) -1 pressed, published nothing, because the key table has no row for it",
+		},
+		{
+			name:  "a hat direction the table maps to none",
+			table: []compiledBinding{{EventType: evAbs, Code: axisCodes["ABS_HAT0X"], Value: 1, Key: keyNone}},
+			event: inputEvent{Type: evAbs, Code: axisCodes["ABS_HAT0X"], Value: 1},
+			want:  "ABS_HAT0X (16) 1 pressed, published nothing, because the key table maps it to none",
+		},
+		{
+			name:  "a kernel repeat",
+			event: inputEvent{Type: evKey, Code: buttonCodes["KEY_UP"], Value: 2},
+		},
+		{
+			name:  "a release",
+			event: inputEvent{Type: evKey, Code: buttonCodes["KEY_UP"], Value: 0},
+		},
+		{
+			name:  "the repeat of a key the table maps to none",
+			table: []compiledBinding{{EventType: evKey, Code: buttonCodes["BTN_TL"], Value: 1, Key: keyNone}},
+			event: inputEvent{Type: evKey, Code: buttonCodes["BTN_TL"], Value: 2},
+		},
+		{
+			name:  "a hat return to center",
+			event: inputEvent{Type: evAbs, Code: axisCodes["ABS_HAT0Y"], Value: 0},
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			r, _ := testReader(t)
+			if each.table != nil {
+				r.keys.table = each.table
+			}
+
+			mustMatch(t, r.fold(each.event), each.want)
+		})
+	}
+}
+
+// A new table is a person's edit reaching the pod, so it gets a line.
+// The same table again, as a reconnect delivers it, gets none, and a
+// table that does not decode says why in the decoder's own words.
+func TestTheReaderLogsANewTableOnce(t *testing.T) {
+	r, _ := testReader(t)
+	var log logBuffer
+	r.log = &log
+	table := []compiledBinding{{EventType: evKey, Code: buttonCodes["BTN_TL"], Value: 1, Key: keyNone}}
+	payload, err := json.Marshal(table)
+	mustSucceed(t, err)
+
+	r.handle(r.keysTopic, payload)
+	r.handle(r.keysTopic, payload)
+
+	mustLogOnce(t, &log, "remote: key table on "+r.keysTopic+" applied: 1 row")
+}
+
+func TestTheReaderLogsATableItCannotRead(t *testing.T) {
+	r, _ := testReader(t)
+	var log logBuffer
+	r.log = &log
+
+	r.handle(r.keysTopic, []byte("not json"))
+
+	mustLogOnce(t, &log, "remote: key table on "+r.keysTopic+" ignored, the last good table stays: invalid character 'o' in literal null")
+}

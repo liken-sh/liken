@@ -357,6 +357,8 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 			return panelFromDisplay(display.Status.Observed)
 		}
 		o.panelOverrides[key] = panelOverride{desire: desire, monitor: monitor}
+		logLine(o.log, "player %s: the idle screen asked for panel %s, applied %s to display %s",
+			key, desire, describeOverride(overrideFor(desire, mode)), monitor)
 	}
 	delete(o.panelFaults, key)
 	return panelFromDisplay(display.Status.Observed)
@@ -465,6 +467,7 @@ func (o *operator) retainPanels(live map[string]bool) {
 					override.monitor, err))
 				continue
 			}
+			logLine(o.log, "player %s: lifted the override on display %s, because the player is gone", key, override.monitor)
 		}
 		delete(o.panelOverrides, key)
 		delete(o.panelFaults, key)
@@ -488,6 +491,17 @@ func (o *operator) panelFault(key, message string) {
 	}
 	o.panelFaults[key] = message
 	fmt.Fprintln(os.Stderr, message)
+}
+
+// describeOverride names an override block the way a line reads it.
+func describeOverride(override *DisplayOverride) string {
+	switch {
+	case override == nil:
+		return "no override"
+	case override.Power != "":
+		return "power " + override.Power
+	}
+	return "backlight " + override.Backlight
 }
 
 // overrideFor turns one desire and the resolved off mode into

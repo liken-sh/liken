@@ -123,7 +123,8 @@ func controllerKey(namespace, remote string) string {
 func (o *operator) stealFocus(play *Play, remotes []boundRemote) {
 	namespace := play.Metadata.Namespace
 	for _, remote := range remotes {
-		o.publishFocus(controllerKey(namespace, remote.Name), playerName(play))
+		o.publishFocus(controllerKey(namespace, remote.Name), playerName(play),
+			"play "+namespace+"/"+play.Metadata.Name+" started there")
 	}
 }
 
@@ -156,10 +157,15 @@ func (o *operator) reconcileFocus(players []Player) {
 	for _, key := range o.focus.takeCycles() {
 		names := sets[key]
 		if len(names) == 0 {
+			logLine(o.log, "remote %s: asked to cycle focus, ignored, because no player lists the remote", key)
 			continue
 		}
 		index := slices.Index(names, o.focus.markFor(key))
-		o.publishFocus(key, names[(index+1)%len(names)])
+		next := names[(index+1)%len(names)]
+		if len(names) == 1 {
+			logLine(o.log, "remote %s: asked to cycle focus, focus stays on player %s, the one player that lists the remote", key, next)
+		}
+		o.publishFocus(key, next, "the remote asked to cycle focus")
 	}
 
 	// Recovery moves a mark that is empty or names a Player outside the
@@ -169,7 +175,7 @@ func (o *operator) reconcileFocus(players []Player) {
 	for key, names := range sets {
 		current := o.focus.markFor(key)
 		if current == "" || !slices.Contains(names, current) {
-			o.publishFocus(key, names[0])
+			o.publishFocus(key, names[0], "the mark named no player that lists the remote")
 		}
 	}
 
@@ -178,7 +184,7 @@ func (o *operator) reconcileFocus(players []Player) {
 	// leaves no stale mark on the bus for a later reader to gate open on.
 	for key := range o.focus.snapshot() {
 		if len(sets[key]) == 0 {
-			o.publishFocus(key, "")
+			o.publishFocus(key, "", "no player lists the remote")
 		}
 	}
 }
@@ -188,8 +194,23 @@ func (o *operator) reconcileFocus(players []Player) {
 // the same pass reads the value it just wrote. It publishes every time it
 // is called, an unchanged value included, because the repeat of a current
 // mark is the feedback a cycle press earns.
-func (o *operator) publishFocus(key, player string) {
+//
+// A mark that moves is a person's controller changing rooms, so it earns
+// a line with the reason. An unchanged mark writes none; the cycle that
+// wraps onto itself says so where it is arbitrated.
+func (o *operator) publishFocus(key, player, reason string) {
 	namespace, remote, _ := strings.Cut(key, "/")
-	o.bus.Publish(remoteFocusTopic(o.topicBase, namespace, remote), []byte(player), true)
+	topic := remoteFocusTopic(o.topicBase, namespace, remote)
+	was := o.focus.markFor(key)
+	o.bus.Publish(topic, []byte(player), true)
 	o.focus.setMark(key, player)
+	switch {
+	case was == player:
+	case player == "":
+		logLine(o.log, "remote %s: focus cleared from player %s, because %s, published the empty mark to %s", key, was, reason, topic)
+	case was == "":
+		logLine(o.log, "remote %s: focus set on player %s, because %s, published to %s", key, player, reason, topic)
+	default:
+		logLine(o.log, "remote %s: focus moved from player %s to player %s, because %s, published to %s", key, was, player, reason, topic)
+	}
 }

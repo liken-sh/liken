@@ -270,6 +270,8 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 			return
 		}
 		delete(o.receiverSessions, key)
+		logLine(o.log, "player %s: lifted the session on receiver %s, because the unit moved to receiver %s",
+			key, held.receiver, receiver.Metadata.Name)
 	}
 	if err := ApplyReceiverSession(o.client, receiver.Metadata.Name, &session); err != nil {
 		fmt.Fprintf(os.Stderr, "applying the session on receiver %s: %v\n",
@@ -277,6 +279,8 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 		return
 	}
 	o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
+	logLine(o.log, "player %s: applied the session on receiver %s: input %s, active %t, awake %t",
+		key, receiver.Metadata.Name, input, active, awake)
 }
 
 // retainSessions lifts the session of every unit that no longer matches
@@ -294,6 +298,8 @@ func (o *operator) retainSessions(matched map[string]bool) {
 			continue
 		}
 		delete(o.receiverSessions, key)
+		logLine(o.log, "player %s: lifted the session on receiver %s, because the unit matches no receiver input now",
+			key, held.receiver)
 	}
 }
 

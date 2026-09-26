@@ -124,7 +124,7 @@ func TestReadEventsDeliversClientMessages(t *testing.T) {
 		`{"event":"client-message","args":["someone-elses-broadcast"]}`,
 	}
 	stream := strings.NewReader(strings.Join(lines, "\n") + "\n")
-	mustSucceed(t, readEvents(context.Background(), stream, changes, messages))
+	mustSucceed(t, readEvents(context.Background(), stream, changes, messages, nil))
 	close(changes)
 	close(messages)
 
@@ -136,6 +136,30 @@ func TestReadEventsDeliversClientMessages(t *testing.T) {
 	mustMatch(t, len(changes), 1)
 }
 
+// An answer to a command that carried a request id reaches the replies
+// channel with mpv's error word. An answer under id 0 is to a command the
+// sidecar sent for itself, and it is dropped.
+func TestReadEventsDeliversTheAnswersToCommandsThatCarriedAnID(t *testing.T) {
+	stream := strings.NewReader(strings.Join([]string{
+		`{"request_id":0,"error":"success"}`,
+		`{"request_id":3,"error":"property unavailable","data":null}`,
+		`{"event":"property-change","name":"pause","data":true}`,
+	}, "\n") + "\n")
+	changes := make(chan propertyChange, 4)
+	messages := make(chan clientMessage, 4)
+	replies := make(chan mpvReply, 4)
+
+	mustSucceed(t, readEvents(context.Background(), stream, changes, messages, replies))
+	close(replies)
+
+	var got []mpvReply
+	for reply := range replies {
+		got = append(got, reply)
+	}
+	mustMatchAll(t, got, []mpvReply{{ID: 3, Error: "property unavailable"}})
+	mustMatch(t, len(changes), 1)
+}
+
 // collectChanges runs readEvents over a scripted stream and renders
 // each delivered change as name=data. The rendering makes a failure
 // message readable, where raw JSON diffs are not.
@@ -143,7 +167,7 @@ func collectChanges(t *testing.T, lines []string) []string {
 	t.Helper()
 	changes := make(chan propertyChange, 64)
 	messages := make(chan clientMessage, 64)
-	mustSucceed(t, readEvents(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), changes, messages))
+	mustSucceed(t, readEvents(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), changes, messages, nil))
 	close(changes)
 
 	var rendered []string

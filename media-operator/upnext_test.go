@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"syscall"
@@ -56,7 +57,7 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 
 	changes := make(chan propertyChange, 8)
 	go feedChanges(changes, changeOf("playlist-pos", "0"), changeOf("playlist-pos", "1"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
 
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{\"title\":\"First\"}"]}`)
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)

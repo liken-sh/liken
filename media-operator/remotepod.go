@@ -141,5 +141,5 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 func (o *operator) reconcileRemote(remote *Remote, known claimRead) error {
 	claim := buildRemoteClaim(remote)
 	pod := buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase)
-	return o.reconcileStanding(standingPair(claim, pod), known)
+	return o.reconcileStanding(standingPair("remote "+remote.Metadata.Namespace+"/"+remote.Metadata.Name, claim, pod), known)
 }

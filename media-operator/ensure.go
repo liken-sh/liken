@@ -55,23 +55,26 @@ func (e *ensureDesk) commandsFor(player string) (string, bool) {
 	return commands, held
 }
 
-// isPress reports whether one events payload begins a press. The press
-// is value 1; a repeat is 2 and a release is 0, and neither is a new
-// ask.
-func isPress(payload []byte) bool {
+// pressOf reads one events payload as the start of a press, and names
+// the key. The press is value 1; a repeat is 2 and a release is 0, and
+// neither is a new ask.
+func pressOf(payload []byte) (string, bool) {
 	var event keyEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		return false
+		return "", false
 	}
-	return event.Value == 1
+	return event.Key, event.Value == 1
 }
 
 // ensureInput translates one controller press into the receiver's
 // generic ask. The press asks only while its controller's mark names a
 // unit wired to a receiver, so a controller pointed at another room, or
-// at a unit with no equipment, asks nothing.
+// at a unit with no equipment, asks nothing. An ask the operator sends
+// earns a line, and a press that asks nothing writes none, because the
+// pod the press reached writes its own.
 func (o *operator) ensureInput(namespace, controller string, payload []byte) {
-	if !isPress(payload) {
+	key, pressed := pressOf(payload)
+	if !pressed {
 		return
 	}
 	player := o.focus.markFor(controllerKey(namespace, controller))
@@ -87,6 +90,8 @@ func (o *operator) ensureInput(namespace, controller string, payload []byte) {
 		return
 	}
 	o.bus.Publish(commands, ask, false)
+	logLine(o.log, "remote %s: %s pressed with focus on player %s, published %s to %s",
+		controllerKey(namespace, controller), key, player, theEnsureCommand, commands)
 }
 
 // ensureAsk is the payload a receiver's commands topic carries.

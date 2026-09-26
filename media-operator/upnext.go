@@ -48,8 +48,16 @@ func (c *commander) sendNext() {
 // Player's commands topic. It is not retained, because the ask is an
 // event. A sidecar with no block, or one that read no Player, publishes
 // nothing.
+//
+// The select is a person's press on the display, so it earns a line.
 func (c *commander) publishNext() {
-	if len(c.next) == 0 || c.playerCommandsTopic == "" || c.bus == nil {
+	const trigger = "command: the display took the up-next offer"
+	if len(c.next) == 0 {
+		logLine(c.log, "%s, ignored, because the Play has no next block", trigger)
+		return
+	}
+	if c.playerCommandsTopic == "" || c.bus == nil {
+		logLine(c.log, "%s, ignored, because the pod has no player commands topic to ask on", trigger)
 		return
 	}
 	payload, err := json.Marshal(playNextCommand{Action: actionPlayNext, Request: nextOf(c.next).Request})
@@ -58,6 +66,7 @@ func (c *commander) publishNext() {
 		return
 	}
 	c.bus.Publish(c.playerCommandsTopic, payload, false)
+	logLine(c.log, "%s, published %s to %s", trigger, actionPlayNext, c.playerCommandsTopic)
 }
 
 // nextOf reads the block's fields. An absent block, or one that does not

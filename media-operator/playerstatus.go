@@ -30,6 +30,25 @@ import (
 type publishedStatuses struct {
 	mutex    sync.Mutex
 	payloads map[string]string
+
+	// The activity each unit last published, kept apart from the payloads
+	// because a fresh broker session resets those and a unit's activity
+	// does not change with the broker.
+	activities map[string]string
+}
+
+// noteActivity records one unit's activity and answers the one it
+// replaces, and whether it moved. A unit this operator has not
+// published before did not move, so a restart reports no unit.
+func (p *publishedStatuses) noteActivity(topic, activity string) (string, bool) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	was, known := p.activities[topic]
+	if p.activities == nil {
+		p.activities = map[string]string{}
+	}
+	p.activities[topic] = activity
+	return was, known && was != activity
 }
 
 // publish writes one payload to its topic, retained, unless the last

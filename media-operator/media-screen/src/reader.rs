@@ -167,11 +167,7 @@ impl Bus for Reader {
     /// The shade comes back through [`Bus::drain`] the way every other moment
     /// does, so the client folds one stream.
     fn sleep(&self) {
-        let effects = self
-            .screen
-            .lock()
-            .expect("no thread panics with the lock")
-            .sleep(Instant::now());
+        let effects = fold(&self.screen, |screen| screen.sleep(Instant::now()));
         perform(&self.threads, effects);
     }
 
@@ -240,27 +236,27 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
         let effects = match event {
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                 crate::metrics::bus_connected(true);
-                let mut screen = screen.lock().expect("no thread panics with the lock");
-                let effects = screen.connected();
-                let filters = screen.filters().into_iter().map(|path| SubscribeFilter {
-                    path,
-                    qos: QoS::AtMostOnce,
-                });
-                // The subscribe is queued rather than sent, because this
-                // thread is the one that drives the connection. A blocking
-                // send would wait for a reader that is this loop.
-                let _ = threads.client.try_subscribe_many(filters);
-                effects
+                fold(&screen, |screen| {
+                    let effects = screen.connected();
+                    let filters = screen.filters().into_iter().map(|path| SubscribeFilter {
+                        path,
+                        qos: QoS::AtMostOnce,
+                    });
+                    // The subscribe is queued rather than sent, because this
+                    // thread is the one that drives the connection. A blocking
+                    // send would wait for a reader that is this loop.
+                    let _ = threads.client.try_subscribe_many(filters);
+                    effects
+                })
             }
-            Ok(Event::Incoming(Packet::Publish(message))) => screen
-                .lock()
-                .expect("no thread panics with the lock")
-                .deliver(
+            Ok(Event::Incoming(Packet::Publish(message))) => fold(&screen, |screen| {
+                screen.deliver(
                     &message.topic,
                     &message.payload,
                     message.retain,
                     Instant::now(),
-                ),
+                )
+            }),
             Err(error) => {
                 crate::metrics::bus_connected(false);
                 // The client reconnects on its own, so the line is the record
@@ -299,10 +295,7 @@ fn clock(threads: &Threads) {
         let Some(screen) = threads.screen() else {
             return;
         };
-        let effects = screen
-            .lock()
-            .expect("no thread panics with the lock")
-            .tick(Instant::now());
+        let effects = fold(&screen, |screen| screen.tick(Instant::now()));
         if !perform(threads, effects) {
             return;
         }
@@ -316,6 +309,18 @@ fn wait(deadline: Option<Instant>, now: Instant) -> Duration {
         Some(at) => at.saturating_duration_since(now).min(TICK),
         None => TICK,
     }
+}
+
+/// Run one fold under the lock and print the lines it wrote, one per
+/// operation a person caused, before the lock is released, so two threads'
+/// lines never interleave out of the order the rules ran them in.
+fn fold(screen: &Mutex<Screen>, rule: impl FnOnce(&mut Screen) -> Vec<Effect>) -> Vec<Effect> {
+    let mut screen = screen.lock().expect("no thread panics with the lock");
+    let effects = rule(&mut screen);
+    for line in screen.take_lines() {
+        eprintln!("media-screen: {line}");
+    }
+    effects
 }
 
 /// Perform one fold's effects: send each moment to the client, publish each

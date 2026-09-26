@@ -189,6 +189,11 @@ pub struct Screen {
     desire: &'static str,
     /// The armed window and the moment it runs out.
     deadline: Option<(Instant, Window)>,
+    /// The lines the folds since the last [`Screen::take_lines`] wrote, one
+    /// per operation a person caused: a press and what it did or why it did
+    /// nothing, a window that brought the shade down, a panel desire. A
+    /// repeat, a catch-up, and a status that moves nothing write none.
+    lines: Vec<String>,
 }
 
 /// The two fields of the commands topic this crate reads. The request is
@@ -226,7 +231,15 @@ impl Screen {
             // dark lights it again.
             desire: panel::ON,
             deadline: None,
+            lines: Vec::new(),
         }
+    }
+
+    /// The lines the folds wrote since the last call, oldest first.
+    /// [`crate::Reader`] prints them, so a client that holds a reader logs
+    /// them with no code of its own.
+    pub fn take_lines(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.lines)
     }
 
     /// The same screen, plus the topics the client owns. A client that keeps
@@ -344,10 +357,18 @@ impl Screen {
                 // The shade coming down starts the second window.
                 self.rearm(now);
                 self.shade(Some(Moment::Sleep), &mut effects);
+                self.lines.push(format!(
+                    "the quiet window of {} s ran out, so the shade is down",
+                    self.fade_after.as_secs()
+                ));
             }
             Window::Off => {
                 self.deadline = None;
-                self.desire(panel::OFF, &mut effects);
+                let desire = self.desire(panel::OFF, &mut effects);
+                self.lines.push(format!(
+                    "the off window of {} s ran out{desire}",
+                    self.off_after.as_secs()
+                ));
             }
         }
         effects
@@ -368,6 +389,8 @@ impl Screen {
         self.rearm(now);
         let mut effects = Vec::new();
         self.shade(Some(Moment::Sleep), &mut effects);
+        self.lines
+            .push("the client asked for the shade, so the shade is down".into());
         effects
     }
 
@@ -457,15 +480,44 @@ impl Screen {
         let Some(press) = press::parse(payload) else {
             return Vec::new();
         };
-        if !self.holds_focus(index) || !press.edge() {
+        // A press is one line, and only the press: a repeat and a release
+        // are the same act of a person, and the line already says what the
+        // press did.
+        let trigger = format!(
+            "{} from remote {}",
+            press.key,
+            remote_name(&self.remotes[index].events)
+        );
+        if !self.holds_focus(index) {
+            if press.down() {
+                let mark = &self.marks[index].player;
+                self.lines.push(if mark.is_empty() {
+                    format!(
+                        "{trigger} ignored, because no focus mark names a player for this remote"
+                    )
+                } else {
+                    format!("{trigger} ignored, because focus is on player {mark}")
+                });
+            }
+            return Vec::new();
+        }
+        if !press.edge() {
             return Vec::new();
         }
 
         let mut moment = None;
         let mut forwarded = None;
         let mut publish = None;
+        let mut line = None;
         if self.idle && press.down() && press.key == keys::CYCLE {
             publish = self.cycle(index);
+            line = Some(match &publish {
+                Some(cycle) => format!(
+                    "{trigger}: cycle focus, published the cycle request to {}",
+                    cycle.topic
+                ),
+                None => format!("{trigger} ignored, because the remote has no focus topic"),
+            });
         } else if self.idle && keys::power(&press.key) && !self.power_topic.is_empty() {
             // A room with a receiver answers the power key itself, so the
             // key never reaches the client and the shade never operates:
@@ -486,19 +538,41 @@ impl Screen {
                     payload: POWER_TOGGLE.to_vec(),
                     retained: false,
                 });
+                line = Some(format!(
+                    "{trigger}: power, published the toggle to {}",
+                    self.power_topic
+                ));
             }
         } else if self.asleep {
             self.asleep = false;
             moment = Some(Moment::Wake);
+            line = Some(format!("{trigger} woke the screen and did nothing else"));
         } else if self.idle && keys::owned(&press.key) {
-            publish = self.level(&press);
+            let level = self.level(&press);
+            if press.down() {
+                line = Some(match &level {
+                    Some((next, volume)) => format!(
+                        "{trigger}: {}, published {volume} to {}",
+                        level_word(&press.key),
+                        next.topic
+                    ),
+                    None => format!("{trigger} ignored, because the player has no sinks"),
+                });
+            }
+            publish = level.map(|(next, _)| next);
         } else if self.idle {
+            if press.down() {
+                line = Some(format!("{trigger} passed to the client"));
+            }
             forwarded = Some(press.key);
         }
 
         self.rearm(now);
         let mut effects = Vec::new();
-        self.shade(moment, &mut effects);
+        let desire = self.shade(moment, &mut effects);
+        if let Some(line) = line {
+            self.lines.push(line + &desire);
+        }
         if let Some(key) = forwarded {
             effects.push(Effect::Moment(Moment::Press(key)));
         }
@@ -554,10 +628,23 @@ impl Screen {
             return Vec::new();
         };
         match command.action.as_str() {
-            PLAY_NEXT => vec![Effect::Moment(Moment::PlayNext(request_bytes(
-                command.request,
-            )))],
-            HOME => vec![Effect::Moment(Moment::Press(keys::HOME.into()))],
+            PLAY_NEXT => {
+                self.lines.push(format!(
+                    "{} asked for {PLAY_NEXT}, passed to the client",
+                    self.commands_topic
+                ));
+                vec![Effect::Moment(Moment::PlayNext(request_bytes(
+                    command.request,
+                )))]
+            }
+            HOME => {
+                self.lines.push(format!(
+                    "{} asked for {HOME}, passed to the client as {}",
+                    self.commands_topic,
+                    keys::HOME
+                ));
+                vec![Effect::Moment(Moment::Press(keys::HOME.into()))]
+            }
             _ => Vec::new(),
         }
     }
@@ -581,40 +668,54 @@ impl Screen {
     /// What a level press publishes, retained. A key that names no level, and
     /// a unit with no sinks, publish nothing. The level steps from the last
     /// message the topic delivered, or from unity before any message arrives.
-    fn level(&self, press: &press::Press) -> Option<Publish> {
+    fn level(&self, press: &press::Press) -> Option<(Publish, Volume)> {
         if self.volume_topic.is_empty() {
             return None;
         }
         let next = keys::level(press, self.volume.unwrap_or_default())?;
-        Some(Publish {
-            topic: self.volume_topic.clone(),
-            payload: next.payload(),
-            retained: true,
-        })
+        Some((
+            Publish {
+                topic: self.volume_topic.clone(),
+                payload: next.payload(),
+                retained: true,
+            },
+            next,
+        ))
     }
 
     /// Add one fold's shade moment. A wake also states the on desire, which
     /// is what lifts the override. No moment is the ordinary case of a fold
     /// that changed no state, and it adds nothing.
-    fn shade(&mut self, moment: Option<Moment>, effects: &mut Vec<Effect>) {
+    ///
+    /// The answer is the end of a line that says the desire went out, or
+    /// nothing when no desire moved.
+    fn shade(&mut self, moment: Option<Moment>, effects: &mut Vec<Effect>) -> String {
         let Some(moment) = moment else {
-            return;
+            return String::new();
         };
         let wake = moment == Moment::Wake;
         effects.push(Effect::Moment(moment));
         if wake {
-            self.desire(panel::ON, effects);
+            return self.desire(panel::ON, effects);
         }
+        String::new()
     }
 
     /// Hold the new desire and publish it. An unchanged desire publishes
     /// nothing, because the broker holds the last one.
-    fn desire(&mut self, desire: &'static str, effects: &mut Vec<Effect>) {
+    ///
+    /// The answer is the end of a line that says where the desire went, or
+    /// nothing when it did not move.
+    fn desire(&mut self, desire: &'static str, effects: &mut Vec<Effect>) -> String {
         if self.desire == desire {
-            return;
+            return String::new();
         }
         self.desire = desire;
         self.publish_desire(effects);
+        if self.panel_topic.is_empty() {
+            return format!(", and the player has no panel topic for the {desire} desire");
+        }
+        format!(", published panel desire {desire} to {}", self.panel_topic)
     }
 
     /// The desire this client holds now, retained, so the operator reads the
@@ -677,6 +778,32 @@ impl Screen {
         }
         self.remotes.iter().position(|remote| of(remote) == topic)
     }
+}
+
+/// What a level key does, in the words every line uses.
+fn level_word(key: &str) -> String {
+    match key {
+        keys::VOLUME_UP => format!("volume +{}", crate::volume::STEP),
+        keys::VOLUME_DOWN => format!("volume -{}", crate::volume::STEP),
+        _ => "mute or unmute".into(),
+    }
+}
+
+/// The `Remote` a controller topic belongs to, as `namespace/name`. Every
+/// controller topic is `<base>/remotes/<namespace>/<name>/<kind>`, and the
+/// base can hold slashes of its own, so the name is found from the remotes
+/// segment and not from the start. A topic of another shape names itself,
+/// so a line never loses its trigger.
+fn remote_name(topic: &str) -> String {
+    let parts: Vec<&str> = topic.split('/').collect();
+    parts
+        .iter()
+        .rposition(|part| *part == "remotes")
+        .filter(|index| index + 2 < parts.len())
+        .map_or_else(
+            || topic.to_string(),
+            |index| format!("{}/{}", parts[index + 1], parts[index + 2]),
+        )
 }
 
 #[cfg(test)]

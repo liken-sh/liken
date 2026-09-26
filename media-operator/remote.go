@@ -32,6 +32,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -211,10 +212,37 @@ func (r *reader) publishEvents(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		r.publishCodes(declaredCodes(nodes))
-		r.readAndPublish(ctx, nodes)
-		r.clearCodes()
+		r.serve(ctx, nodes)
 	}
+}
+
+// serve runs one batch of nodes from open to close: it publishes what
+// they declare, publishes every event until they vanish, and clears the
+// codes again. The controller connecting and leaving are both things a
+// person did, so each gets a line.
+func (r *reader) serve(ctx context.Context, nodes []openNode) {
+	codes := declaredCodes(nodes)
+	logLine(r.log, "remote: controller connected on %s: %s, %s",
+		nodeLabels(nodes), countOf(len(codes.Keys), "key code", "key codes"),
+		countOf(len(codes.Axes), "hat axis", "hat axes"))
+	r.publishCodes(codes)
+	r.readAndPublish(ctx, nodes)
+	r.clearCodes()
+	// The kubelet's signal also ends the read, and that is the pod
+	// stopping, not the controller leaving.
+	if ctx.Err() == nil {
+		logLine(r.log, "remote: controller disconnected from %s: its input nodes closed", nodeLabels(nodes))
+	}
+}
+
+// nodeLabels names a batch of nodes the way the verdict lines name
+// each one.
+func nodeLabels(nodes []openNode) string {
+	labels := make([]string, len(nodes))
+	for index, node := range nodes {
+		labels[index] = node.label()
+	}
+	return strings.Join(labels, ", ")
 }
 
 // awaitNodes polls for a node the mode keeps. The nodes appear when the
@@ -366,7 +394,11 @@ func (r *reader) readAndPublish(ctx context.Context, nodes []openNode) {
 					fmt.Fprintf(r.log, "remote: %s\n", line)
 				}
 			}
-			r.fold(event.event)
+			// A press gets one line, and a release or a repeat gets none,
+			// so a held control is one line and not one per tick.
+			if line := r.fold(event.event); line != "" {
+				logLine(r.log, "remote: %s: %s", event.node, line)
+			}
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"testing"
@@ -55,7 +56,7 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	// A seek writes two commands: the no-osd seek, then the summon that
 	// makes the display draw the new position.
 	want := []string{
-		`{"command":["no-osd","seek",30]}`,
+		`{"command":["no-osd","seek",30],"request_id":1}`,
 		`{"command":["script-message","summon"]}`,
 	}
 	for _, expected := range want {
@@ -129,7 +130,7 @@ func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
 		changeOf("time-pos", "1.0"),
 		changeOf("playlist-pos", "1"),
 	)
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
 
 	want := []string{
 		`{"command":["script-message","presentation","{\"title\":\"First\"}"]}`,
@@ -165,7 +166,7 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 
 	changes := make(chan propertyChange, 8)
 	go feedChanges(changes, changeOf("playlist-pos", "0"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
 
 	want := `{"command":["script-message","presentation","{}"]}`
 	select {
@@ -457,8 +458,8 @@ func TestTheFirstLevelOfASessionAppliesSilently(t *testing.T) {
 	mustNoLine(t, lines, 100*time.Millisecond)
 
 	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"],"request_id":1}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"],"request_id":2}`)
 	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed"]}`)
 
 	c.onConnect(bus)
@@ -740,7 +741,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("playlist-pos", "1"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
 		mustMatchAll(t, itemsAndPauses(sent()), []string{"1 playing", "1 paused", "2 paused"})
 	})
@@ -757,7 +758,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changes <- changeOf("time-pos", "2.0")
 			close(changes)
 		}()
-		runReporter(t.Context(), changes, send, func(int) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
 		mustMatchAll(t, positions(sent()), []string{"", "0:00:02"})
 	})
@@ -772,7 +773,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("duration", "60.0"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
 		mustMatch(t, len(sent()), 0)
 	})
@@ -791,7 +792,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("time-pos", "2.0"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {}, nil)
+		runReporter(t.Context(), changes, send, func(int) {}, nil, io.Discard)
 
 		mustMatch(t, attempts, 3)
 	})
@@ -1018,8 +1019,8 @@ func TestTheClearedMarkGivesTheLevelBackToMpv(t *testing.T) {
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
 	c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"],"request_id":1}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"],"request_id":2}`)
 }
 
 // A mark cleared before any level arrived writes nothing, because there

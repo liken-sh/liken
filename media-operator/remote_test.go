@@ -188,11 +188,11 @@ func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
 	}
 }
 
-// Out of discovery the reader logs no event, because a healthy run's
-// log is empty.
-func TestAnOrdinaryReaderLogsNoEvent(t *testing.T) {
+// Out of discovery the reader logs the press alone: one line that names
+// the node, the control, and the key it published.
+func TestAnOrdinaryReaderLogsThePressItPublished(t *testing.T) {
 	r, broker := testReader(t)
-	var log bytes.Buffer
+	var log logBuffer
 	r.log = &log
 
 	read, write, err := os.Pipe()
@@ -206,31 +206,47 @@ func TestAnOrdinaryReaderLogsNoEvent(t *testing.T) {
 	})
 
 	waitForPublish(t, broker.pubs)
-	mustMatch(t, log.String(), "")
+	mustLogOnce(t, &log, `remote: event3 "Wireless Controller": BTN_SOUTH (304) pressed, published KEY_ENTER to `+
+		remoteEventsTopic(defaultTopicBase, "house", "sofa"))
 }
 
-// Outside discovery the reader narrows every node it keeps, and in
-// discovery it narrows nothing. The nodes here are regular files, so a
-// reader that asked the kernel logs the refusal, and a reader that
-// never asked logs nothing.
-func TestOnlyAnOrdinaryReaderNarrowsWhatItsNodesDeliver(t *testing.T) {
-	cases := []struct {
-		name      string
-		discovery bool
-		asked     bool
-	}{
-		{name: "an ordinary reader", discovery: false, asked: true},
-		{name: "a reader in discovery", discovery: true, asked: false},
-	}
+// A controller that connects and then leaves is two lines: the nodes it
+// arrived on with what they declare, and the same nodes as they close.
+func TestTheReaderLogsAControllerConnectingAndLeaving(t *testing.T) {
+	r, broker := testReader(t)
+	var log logBuffer
+	r.log = &log
 
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			file, err := os.CreateTemp(t.TempDir(), "node")
-			mustSucceed(t, err)
-			defer file.Close()
+	read, write, err := os.Pipe()
+	mustSucceed(t, err)
+	mustSucceed(t, write.Close())
 
-			r := &reader{discovery: each.discovery}
-			mustMatch(t, r.restrictNode(int(file.Fd())) != nil, each.asked)
-		})
-	}
+	r.serve(context.Background(), []openNode{{
+		file: read, path: "/dev/input/event3", name: "Wireless Controller",
+		keys: bitmapOf(keyBitmapBytes, 0x130, 0x131),
+	}})
+
+	waitForPublish(t, broker.pubs)
+	mustMatchAll(t, log.lines(), []string{
+		`remote: controller connected on event3 "Wireless Controller": 2 key codes, no hat axes`,
+		`remote: controller disconnected from event3 "Wireless Controller": its input nodes closed`,
+	})
+}
+
+// A pod the kubelet stops is not a controller that left, so the end of
+// the run writes no disconnect line.
+func TestAStoppingPodLogsNoDisconnect(t *testing.T) {
+	r, _ := testReader(t)
+	var log logBuffer
+	r.log = &log
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	read, write, err := os.Pipe()
+	mustSucceed(t, err)
+	defer write.Close()
+
+	r.serve(ctx, []openNode{{file: read, path: "/dev/input/event3", name: "pad"}})
+
+	mustLogOnce(t, &log, "remote: controller connected on event3")
 }

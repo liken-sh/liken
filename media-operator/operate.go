@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync/atomic"
 	"time"
@@ -227,6 +228,11 @@ type operator struct {
 	// retained value. Only the pass goroutine touches it.
 	keysPublished map[string]string
 
+	// The table last logged for each keys topic. keysPublished resets on a
+	// fresh broker session and this does not, so a republish writes no
+	// line and a person's edit does.
+	keyTables map[string]string
+
 	// playerStatuses records the payload the operator last published on
 	// each Player's status topic. It is the keymap pattern applied to the
 	// unit's presentable state: the topic is retained, so the operator
@@ -261,6 +267,10 @@ type operator struct {
 	// through it is guarded. operate builds one always: production
 	// metrics are never optional, only a test's need for them is.
 	metrics *mediaMetrics
+
+	// Where the operator writes one line per operation a person caused.
+	// It is a field so a test reads what the operator would print.
+	log io.Writer
 }
 
 func operate() {
@@ -340,6 +350,7 @@ func operate() {
 		recreateBackoff:  map[string]backoffState{},
 		wake:             wake,
 		metrics:          metrics,
+		log:              os.Stdout,
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
@@ -509,6 +520,9 @@ func (o *operator) pass() {
 		if superseded[runKey(namespace, name)] {
 			if err := DeletePlay(o.client, namespace, name); err != nil {
 				fmt.Fprintf(os.Stderr, "deleting superseded play %s/%s: %v\n", namespace, name, err)
+			} else {
+				logLine(o.log, "play %s/%s: deleted, because a newer play on player %s replaces it",
+					namespace, name, playerName(play))
 			}
 			continue
 		}
@@ -733,7 +747,7 @@ func (o *operator) reestablishRetained() {
 	// answered for.
 	o.volumeSeedAfter = time.Now().Add(volumeSeedGrace)
 	for key, player := range o.focus.snapshot() {
-		o.publishFocus(key, player)
+		o.publishFocus(key, player, "the broker session is new")
 	}
 }
 
@@ -765,13 +779,19 @@ func (o *operator) retire(play *Play) error {
 		if err := DeleteResourceClaim(o.client, namespace, claimName(name)); err != nil {
 			return err
 		}
+		logLine(o.log, "play %s/%s: finished at item %d, %s, deleted its playback pod and its claim",
+			namespace, name, play.Status.Item, play.Status.Position)
 	}
 	// Deleting the Play is the whole teardown, and the ownerReferences
 	// collect anything the two deletes above did not. The retained topics go
 	// on the same terms as a Play a person deleted: the operator's finalizer
 	// holds the Play until the pod is gone and the topics are cleared.
 	if now.Sub(finished) >= playTTL(play) {
-		return DeletePlay(o.client, namespace, name)
+		if err := DeletePlay(o.client, namespace, name); err != nil {
+			return err
+		}
+		logLine(o.log, "play %s/%s: deleted, because %s passed after it finished", namespace, name, playTTL(play))
+		return nil
 	}
 	if stamped {
 		return nil
@@ -899,8 +919,17 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 	present[topic] = true
 	table, err := compileTable(keymaps[remote.Spec.Keymap])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "compiling the key table for remote %s/%s: %v\n",
-			remote.Metadata.Namespace, remote.Metadata.Name, err)
+		// A pass runs every few seconds, and the broken edit stands until a
+		// person fixes it, so the refusal is logged once per error.
+		refusal := "refused: " + err.Error()
+		if o.keyTables[topic] != refusal {
+			if o.keyTables == nil {
+				o.keyTables = map[string]string{}
+			}
+			o.keyTables[topic] = refusal
+			logLine(o.log, "remote %s/%s: key table not published, the last good table stays: compiling %s: %v",
+				remote.Metadata.Namespace, remote.Metadata.Name, keymapSource(remote), err)
+		}
 		return nil
 	}
 	payload, err := json.Marshal(table)
@@ -912,8 +941,27 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 	if o.keysPublished[topic] != string(payload) {
 		o.bus.Publish(topic, payload, true)
 		o.keysPublished[topic] = string(payload)
+		// A fresh broker session republishes every table, and that is no
+		// edit, so the line compares against the last table logged.
+		if o.keyTables[topic] != string(payload) {
+			if o.keyTables == nil {
+				o.keyTables = map[string]string{}
+			}
+			o.keyTables[topic] = string(payload)
+			logLine(o.log, "remote %s/%s: published a key table of %s, %s, to %s",
+				remote.Metadata.Namespace, remote.Metadata.Name,
+				countOf(len(table), "row", "rows"), keymapSource(remote), topic)
+		}
 	}
 	return table
+}
+
+// keymapSource names where a Remote's table came from, for a line.
+func keymapSource(remote *Remote) string {
+	if remote.Spec.Keymap == "" {
+		return "the base with no Keymap"
+	}
+	return "the base with Keymap " + remote.Spec.Keymap
 }
 
 // reconcilePlayers writes every Player's status, publishes the same state
@@ -1058,14 +1106,29 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 // own beyond the memo, which carries its own mutex.
 func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, plays []Play) string {
 	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
-	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus))
+	status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus)
+	payload, err := json.Marshal(status)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshaling player %s/%s bus status: %v\n",
 			player.Metadata.Namespace, player.Metadata.Name, err)
 		return topic
 	}
 	o.playerStatuses.publish(o.bus, topic, payload)
+	// A unit that starts or ends a run is the moment the idle screen gives
+	// the screen to a film or takes it back, so the move gets a line.
+	if was, moved := o.playerStatuses.noteActivity(topic, status.Activity); moved {
+		logLine(o.log, "player %s/%s: activity %s, was %s%s, published to %s",
+			player.Metadata.Namespace, player.Metadata.Name, status.Activity, was, playOf(desired), topic)
+	}
 	return topic
+}
+
+// playOf names the Play a status carries, for a line.
+func playOf(status PlayerStatus) string {
+	if status.Play == "" {
+		return ""
+	}
+	return ", play " + status.Play
 }
 
 // seedVolume writes unity to a unit whose level the broker holds
@@ -1101,7 +1164,10 @@ func (o *operator) writeThroughVolume(play *Play) {
 	if !held {
 		current = defaultVolumeState()
 	}
-	o.publishVolume(namespace, name, current.mergedWith(play.Spec.Volume))
+	state := current.mergedWith(play.Spec.Volume)
+	o.publishVolume(namespace, name, state)
+	logLine(o.log, "play %s/%s: spec.volume set player %s to %s, published to %s",
+		namespace, play.Metadata.Name, name, describeVolume(state), playerVolumeTopic(o.topicBase, namespace, name))
 }
 
 // publishVolume writes one unit's level to its topic, retained, and
@@ -1245,7 +1311,7 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 		defaultSpec = &defaults.Spec
 	}
 	if playerName(play) == "" {
-		return writePlayStatus(o.client, play, PlayStatus{
+		return o.writePlay(play, PlayStatus{
 			Phase:   phaseFailed,
 			Message: "the Play names no Player",
 		})
@@ -1254,7 +1320,7 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	player, err := GetPlayer(o.client, namespace, playerName(play))
 	if errors.Is(err, ErrNotFound) {
 		prefs := resolvePreferences(&play.Spec, nil, defaultSpec)
-		return writePlayStatus(o.client, play, derivePlayStatus(play, nil, nil, nil, nil, prefs))
+		return o.writePlay(play, derivePlayStatus(play, nil, nil, nil, nil, prefs))
 	}
 	if err != nil {
 		return err
@@ -1263,7 +1329,7 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 
 	resolved, resolveErr := resolvePlay(play.Spec.Items, play.Spec.Next)
 	if resolveErr != nil {
-		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
+		return o.writePlay(play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
 	}
 
 	// A missing Remote fails the Play only while there is still no pod.
@@ -1277,7 +1343,7 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	if remoteErr != nil {
 		_, err := GetPod(o.client, namespace, podName(name))
 		if errors.Is(err, ErrNotFound) {
-			return writePlayStatus(o.client, play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
+			return o.writePlay(play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
 		}
 		if err != nil {
 			return err
@@ -1321,17 +1387,42 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 // is only a position advance waits positionWriteInterval, so the resource
 // keeps a coarse clock while the bus carries the live one, and a position
 // write does not wake the operator's own watch a second later.
+//
+// A phase that moves is the answer to a person's play request, so the
+// write that moves it gets a line, with the message a failed phase
+// carries.
 func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	if onlyPositionChanged(play.Status, desired) &&
 		time.Since(o.positionWrites[key]) < positionWriteInterval {
 		return nil
 	}
+	was := play.Status.Phase
 	if err := writePlayStatus(o.client, play, desired); err != nil {
 		return err
 	}
 	o.positionWrites[key] = time.Now()
+	if desired.Phase != was {
+		logLine(o.log, "play %s: phase %s, was %s%s", key, desired.Phase, phaseName(was), messageOf(desired))
+	}
 	return nil
+}
+
+// phaseName names a phase for a line, and the phase a new Play carries
+// before its first write.
+func phaseName(phase string) string {
+	if phase == "" {
+		return "none"
+	}
+	return phase
+}
+
+// messageOf adds a status message to a line when the status carries one.
+func messageOf(status PlayStatus) string {
+	if status.Message == "" {
+		return ""
+	}
+	return ": " + status.Message
 }
 
 // ensurePlayback brings the running pod into line with the pod the
@@ -1376,6 +1467,14 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		// its first frame.
 		o.applyReceiverSession(player)
 		pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
+		if err == nil {
+			reason := "the play is new"
+			if resuming {
+				reason = "the run had no pod"
+			}
+			logLine(o.log, "play %s: created playback pod %s on player %s at %s, because %s",
+				key, pod.Metadata.Name, player.Metadata.Name, startName(o.stashedPosition(play)), reason)
+		}
 		return pod, !resuming, err
 	}
 	if err != nil {
@@ -1392,6 +1491,10 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 			return running, false, nil
 		}
 		pod, err := o.recreateForResume(play, claim, resolved, prefs, remotes)
+		if err == nil {
+			logLine(o.log, "play %s: recreated playback pod %s at %s, because the pod failed%s",
+				key, pod.Metadata.Name, startName(o.stashedPosition(play)), podMessage(running))
+		}
 		return pod, false, err
 	}
 
@@ -1403,7 +1506,32 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		return running, false, nil
 	}
 	pod, err := o.recreate(play, claim, resolved, prefs, remotes, claimChanged)
+	if err == nil {
+		changed := "its remotes"
+		if claimChanged {
+			changed = "its devices"
+		}
+		logLine(o.log, "play %s: recreated playback pod %s at %s, because a spec edit changed %s on player %s",
+			key, pod.Metadata.Name, startName(o.stashedPosition(play)), changed, player.Metadata.Name)
+	}
 	return pod, false, err
+}
+
+// startName names the place a pod starts at, for a line.
+func startName(position string) string {
+	if position == "" {
+		return "the start"
+	}
+	return position
+}
+
+// podMessage adds the kubelet's message for a failed pod to a line, word
+// for word, when the pod carries one.
+func podMessage(pod *Pod) string {
+	if pod.Status.Message == "" {
+		return ""
+	}
+	return ": " + pod.Status.Message
 }
 
 // recreate replaces a running pod its Player reshaped and keeps the

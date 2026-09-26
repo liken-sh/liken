@@ -15,6 +15,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 )
 
@@ -177,8 +178,52 @@ func (o *operator) observePeripherals(remotes []Remote) map[string]claimRead {
 		fmt.Fprintf(os.Stderr, "listing peripherals: %v\n", err)
 		return claims
 	}
+	before := o.peripherals.links()
 	o.peripherals.hold(list.Items, named)
+	o.logLinks(before, o.peripherals.links())
 	return claims
+}
+
+// links reads the link of every controller whose Peripheral carries a
+// Connected condition, by controller key.
+func (p *peripheralDesk) links() map[string]bool {
+	p.mutex.Lock()
+	named := make(map[string]string, len(p.named))
+	for key, name := range p.named {
+		named[key] = name
+	}
+	p.mutex.Unlock()
+	links := make(map[string]bool, len(named))
+	for key, name := range named {
+		if connected, held := p.connectedFor(name); held {
+			links[key] = connected
+		}
+	}
+	return links
+}
+
+// logLinks writes one line for each controller whose link changed
+// between two passes. A link the last pass did not know is the first
+// read of it, and writes no line, so a restarted operator does not
+// report every controller at once.
+func (o *operator) logLinks(before, after map[string]bool) {
+	keys := make([]string, 0, len(after))
+	for key := range after {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		was, known := before[key]
+		if !known || was == after[key] {
+			continue
+		}
+		state, condition := "disconnected", "False"
+		if after[key] {
+			state, condition = "connected", conditionTrue
+		}
+		logLine(o.log, "remote %s: controller %s, Peripheral %s reports %s %s",
+			key, state, o.peripherals.peripheralFor(key), peripheralConnected, condition)
+	}
 }
 
 // peripheralOf names the Peripheral a standing claim's allocation

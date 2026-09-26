@@ -68,23 +68,75 @@ func (c *commander) handleRemote(topic string, payload []byte) bool {
 // this Play's Player does not hold the mark for does nothing. A key
 // with no row does nothing. The cycle key asks the operator to move
 // the mark and never reaches mpv.
+//
+// The press is what a person did, so the press earns one line: the
+// key, the Remote, and what the press did or why it did nothing. A
+// repeat acts the same and writes no line, and the release of a held
+// key writes one line with the count of repeats it acted on.
 func (c *commander) key(topic string, remote playRemote, payload []byte) {
 	var event keyEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return
 	}
-	if !c.holdsFocus(topic) {
+	trigger := event.Key + " from remote " + remoteOfTopic(topic)
+	if event.Value == 0 {
+		c.release(topic, trigger, event.Key)
+		return
+	}
+	if mark, holds := c.focusMark(topic); !holds {
+		if event.Value == 1 {
+			logLine(c.log, "command: %s ignored, because %s", trigger, focusElsewhere(mark))
+		}
 		return
 	}
 	command, bound := commandForKey(event)
 	if !bound {
+		if event.Value == 1 {
+			logLine(c.log, "command: %s ignored, because the playback table has no row for it", trigger)
+		}
 		return
 	}
 	if command.Action == actionCycleFocus {
-		c.publishCycle(remote)
+		c.publishCycle(trigger, remote)
 		return
 	}
-	c.apply(command)
+	repeat := event.Value == 2
+	if repeat {
+		c.hold(topic, event.Key)
+	}
+	c.apply(trigger, command, repeat)
+}
+
+// focusElsewhere says why a press did nothing when the mark does not
+// name this pod's Player.
+func focusElsewhere(mark string) string {
+	if mark == "" {
+		return "no focus mark names a player for this remote"
+	}
+	return "focus is on player " + mark
+}
+
+// hold counts one repeat a held control acted on.
+func (c *commander) hold(topic, key string) {
+	c.focusMu.Lock()
+	defer c.focusMu.Unlock()
+	if c.holds == nil {
+		c.holds = map[string]int{}
+	}
+	c.holds[topic+" "+key]++
+}
+
+// release ends one hold, and logs the count when the hold repeated. A
+// release with no repeats before it is the ordinary tap, and its press
+// already has its line.
+func (c *commander) release(topic, trigger, key string) {
+	c.focusMu.Lock()
+	repeats := c.holds[topic+" "+key]
+	delete(c.holds, topic+" "+key)
+	c.focusMu.Unlock()
+	if repeats > 0 {
+		logLine(c.log, "command: %s released after %s", trigger, countOf(repeats, "repeat", "repeats"))
+	}
 }
 
 // focusCycleSuffix turns a remote's focus topic into its cycle topic, the
@@ -96,11 +148,13 @@ const focusCycleSuffix = "/cycle"
 // the remote's own cycle topic, not retained, because a cycle is an
 // event and not a state. It is the same message the idle screen client
 // publishes between films.
-func (c *commander) publishCycle(remote playRemote) {
+func (c *commander) publishCycle(trigger string, remote playRemote) {
 	if remote.focus == "" {
+		logLine(c.log, "command: %s ignored, because the remote has no focus topic", trigger)
 		return
 	}
 	c.bus.Publish(remote.focus+focusCycleSuffix, nil, false)
+	logLine(c.log, "command: %s: cycle focus, published the cycle request to %s", trigger, remote.focus+focusCycleSuffix)
 }
 
 // setFocus records one controller's mark. The gate is set on every
@@ -115,13 +169,14 @@ func (c *commander) setFocus(events, mark string) {
 	c.marks[events] = mark
 }
 
-// holdsFocus reports whether this controller's mark names the Player
-// this Play runs on. A sidecar that read no Player name matches no
-// mark and answers no press.
-func (c *commander) holdsFocus(events string) bool {
+// focusMark reads this controller's mark, and reports whether it names
+// the Player this Play runs on. A sidecar that read no Player name
+// matches no mark and answers no press.
+func (c *commander) focusMark(events string) (string, bool) {
 	c.focusMu.Lock()
 	defer c.focusMu.Unlock()
-	return c.playerName != "" && c.marks[events] == c.playerName
+	mark := c.marks[events]
+	return mark, c.playerName != "" && mark == c.playerName
 }
 
 // remoteForFocus reports which controller a focus topic marks. The

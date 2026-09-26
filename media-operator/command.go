@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -118,6 +119,22 @@ type commander struct {
 	mpvMutex sync.Mutex
 	mpv      net.Conn
 
+	// The request ids the sidecar gave the commands a person caused, and
+	// the line each one waits to log on mpv's answer. They sit under
+	// mpvMutex, because the id is given as the command is written.
+	requestSeq int
+	requests   map[int]*mpvRequest
+
+	// Where the sidecar writes one line per operation a person caused. It
+	// is a field so a test reads what the pod would print.
+	log io.Writer
+
+	// The repeats each held control has acted on, keyed by its events topic
+	// and its key name. A repeat writes no line of its own, so the release
+	// writes one line for the whole hold. It sits under focusMu, which the
+	// press path already takes.
+	holds map[string]int
+
 	reportMutex sync.Mutex
 	lastReport  playReport
 	haveReport  bool
@@ -132,8 +149,10 @@ type commander struct {
 	haveVolume  bool
 
 	// volumeOwned is the owner mark: equipment controls the level, so a state
-	// the topic delivers is recorded and never written to mpv.
+	// the topic delivers is recorded and never written to mpv. volumeOwner is
+	// the owner the mark names, for the lines that say where a level went.
 	volumeOwned bool
+	volumeOwner string
 
 	// volumeCaughtUp marks that this bus session has already
 	// delivered a level. The first message of a session is the
@@ -219,6 +238,7 @@ func runCommand() {
 			os.Getenv(remoteEventsTopicsVariable),
 			os.Getenv(remoteFocusTopicsVariable)),
 		marks: map[string]string{},
+		log:   os.Stdout,
 	}
 	// The ask goes on the Player's own topic. The sidecar builds it from
 	// the base, the namespace, and the unit it plays on, the way it builds
@@ -327,11 +347,13 @@ func (c *commander) handle(topic string, payload []byte) {
 	if c.handleRemote(topic, payload) {
 		return
 	}
+	trigger := "a message on " + topic
 	var command mediaCommand
 	if err := json.Unmarshal(payload, &command); err != nil {
+		logLine(c.log, "command: %s ignored, because it does not decode: %v", trigger, err)
 		return
 	}
-	c.apply(command)
+	c.apply(trigger, command, false)
 }
 
 // apply is the one path from a command to mpv, for a press this pod
@@ -342,25 +364,58 @@ func (c *commander) handle(topic string, payload []byte) {
 // path. A seek and a chapter jump send a second command, because they
 // carry no-osd and the sidecar summons the display to draw the new
 // position.
-func (c *commander) apply(command mediaCommand) {
+//
+// trigger names what asked, for the line the command earns. A quiet
+// command is a repeat of a held control: it acts the same and writes no
+// line, because the press already wrote one and the release writes the
+// count.
+func (c *commander) apply(trigger string, command mediaCommand, quiet bool) {
 	if isVolumeAction(command.Action) {
-		c.pressVolume(command)
+		c.pressVolume(trigger, command, quiet)
 		return
 	}
 	// A home command publishes the ask on the Player's commands topic
 	// and then runs the ending path.
 	if command.Action == actionHome {
-		c.home()
+		c.home(trigger)
 		return
 	}
 	mpv := commandFor(command)
 	if mpv == nil {
+		logLine(c.log, "command: %s ignored, because this build has no command for the action %q", trigger, command.Action)
 		return
 	}
-	c.command(mpv)
+	if quiet {
+		c.command(repeatOf(command, mpv))
+	} else {
+		c.request(fmt.Sprintf("command: %s: %s", trigger, describeCommand(command)), mpv)
+	}
 	if feedback := feedbackFor(command); feedback != nil {
 		c.command(feedback)
 	}
+}
+
+// repeatWord marks a navigation word that a held key repeated. The
+// display acts on it the same as on the press, and it logs the press
+// alone, so a held arrow is one line on each side of the socket.
+const repeatWord = "repeat"
+
+// repeatOf marks the repeat of a navigation word for the display. Every
+// other command mpv runs itself, and mpv takes no extra word.
+func repeatOf(command mediaCommand, mpv []any) []any {
+	if isNavigation(command.Action) {
+		return append(mpv, repeatWord)
+	}
+	return mpv
+}
+
+// isNavigation names the six words the display answers.
+func isNavigation(action string) bool {
+	switch action {
+	case actionUp, actionDown, actionLeft, actionRight, actionSelect, actionBack:
+		return true
+	}
+	return false
 }
 
 // report is the reporting side of the run. It dials mpv, observes the
@@ -380,6 +435,11 @@ func (c *commander) report(ctx context.Context) {
 	defer context.AfterFunc(ctx, func() { conn.Close() })()
 
 	c.drive(ctx, conn, c.send)
+	// An exit this sidecar sent closes the socket too, and that run has
+	// its line already.
+	if ctx.Err() == nil && !c.runEnded() {
+		logLine(c.log, "command: mpv closed its socket, so the run ends")
+	}
 
 	// drive returns for one of two reasons, and each is an ending: mpv
 	// reached the end of the last item and closed its socket, or the
@@ -407,6 +467,7 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 		fmt.Fprintf(os.Stderr, "command: no reports for this run: %v\n", err)
 		return
 	}
+	logLine(c.log, "command: connected to mpv's socket")
 	defer c.detach()
 	// The decode series describe this connection's mpv alone, so they
 	// clear the moment it drops, the same instant runCommand marks the
@@ -423,12 +484,14 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 
 	changes := make(chan propertyChange, 16)
 	messages := make(chan clientMessage, 16)
+	replies := make(chan mpvReply, 16)
 	reading := make(chan struct{})
 	go func() {
 		defer close(reading)
 		defer close(changes)
 		defer close(messages)
-		if err := readEvents(ctx, conn, changes, messages); err != nil && ctx.Err() == nil {
+		defer close(replies)
+		if err := readEvents(ctx, conn, changes, messages, replies); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "command: mpv's socket: %v\n", err)
 		}
 	}()
@@ -437,8 +500,9 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 	// requests off the same socket the reporter reads. It ends when the
 	// socket closes and the reader closes the messages channel.
 	go c.serveMessages(messages)
+	go c.serveReplies(replies)
 
-	runReporter(ctx, changes, send, c.present, c.metrics)
+	runReporter(ctx, changes, send, c.present, c.metrics, c.log)
 	<-reading
 }
 
@@ -454,6 +518,7 @@ func (c *commander) serveMessages(messages <-chan clientMessage) {
 // serveMessage answers one broadcast.
 func (c *commander) serveMessage(args []string) {
 	if isExitMessage(args) {
+		logLine(c.log, "command: the display asked to end the run, because back was pressed at the bare film")
 		c.exit()
 		return
 	}
@@ -494,10 +559,12 @@ func (c *commander) attach(conn net.Conn) error {
 }
 
 // detach forgets the connection when the run ends, so a late command
-// writes nothing rather than a closed socket.
+// writes nothing rather than a closed socket. A line that still waits
+// for mpv's answer is logged now, because the answer will not come.
 func (c *commander) detach() {
 	c.mpvMutex.Lock()
 	c.mpv = nil
+	c.abandonRequests()
 	c.mpvMutex.Unlock()
 }
 
@@ -620,12 +687,24 @@ func (c *commander) endRun() bool {
 	first := !c.ended
 	c.ended = true
 	c.lastReport.Ended = true
+	last := c.lastReport
 	payload, have := c.marshalLastReport()
 	c.reportMutex.Unlock()
 	if have {
 		c.bus.Publish(c.statusTopic, payload, true)
+		if first {
+			logLine(c.log, "command: run ended at item %d, %s, published the ending to %s",
+				last.Item, last.Position, c.statusTopic)
+		}
 	}
 	return first
+}
+
+// runEnded reports whether an ending has marked this run over.
+func (c *commander) runEnded() bool {
+	c.reportMutex.Lock()
+	defer c.reportMutex.Unlock()
+	return c.ended
 }
 
 // exit ends one run: it publishes the ending, waits out the grace, and
@@ -663,6 +742,7 @@ func (c *commander) exitOnSignal(ctx context.Context, signals <-chan os.Signal, 
 	select {
 	case <-ctx.Done():
 	case <-signals:
+		logLine(c.log, "command: the kubelet asked the pod to stop, so the run ends")
 		c.exit()
 		stop()
 	}
@@ -795,9 +875,15 @@ type itemPresenter func(item int)
 // properties that play no part in the report at all, alongside the
 // ones that do, because mpv delivers every property change on the
 // one channel.
+//
+// log takes one line for each change a person sees on the screen: the
+// film paused or resumed, a new item, a new audio or subtitle language.
+// Those are the answers to a person's press, whoever sent it: this
+// sidecar, the display, or mpv reaching the next item on its own. The
+// position and the decode properties write none.
 func runReporter(
 	ctx context.Context, changes <-chan propertyChange, send reportSender,
-	present itemPresenter, metrics *commandMetrics,
+	present itemPresenter, metrics *commandMetrics, log io.Writer,
 ) {
 	var state playbackState
 	var sent time.Time
@@ -813,9 +899,13 @@ func runReporter(
 			if metrics != nil {
 				metrics.observe(change)
 			}
+			before := state
 			atOnce := state.apply(change)
 			if !state.reportable() {
 				continue
+			}
+			if line := describeChange(before, state); line != "" {
+				logLine(log, "command: mpv reports %s", line)
 			}
 			// Forward the block on the first item and on every advance,
 			// keyed on the item and not the throttled position, so the

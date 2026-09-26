@@ -424,7 +424,13 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 	idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 
-	screen := standing{namespace: namespace, claimName: claim.Metadata.Name, podName: idlePodName(name)}
+	screen := standing{
+		subject:   "player " + namespace + "/" + name,
+		absent:    "the idle screen went to controller " + idle.Controller,
+		namespace: namespace,
+		claimName: claim.Metadata.Name,
+		podName:   idlePodName(name),
+	}
 	if idle.Controller != idleControllerNone {
 		screen.claim = claim
 		if idle.Controller == idleControllerOwn {
@@ -447,6 +453,8 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 	// name, so a live one is deleted and an absent one costs the one
 	// GET the standing rule makes. See retiredIdleCommandPodSuffix.
 	return o.reconcileStanding(standing{
+		subject:   "player " + namespace + "/" + name,
+		absent:    "the idle screen runs in one pod now, and an older release made this one",
 		namespace: namespace,
 		podName:   idlePodName(name) + retiredIdleCommandPodSuffix,
 	}, claimRead{})

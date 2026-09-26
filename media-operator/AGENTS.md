@@ -24,6 +24,11 @@ response body, or its error string. The wrapped error and the status
 field or record that the failure writes both include it, so a person
 reads the cause from the log or the status without opening a shell.
 
+Every operation a person causes, such as a press, a playback request, a
+volume change, a focus move, or an edit the operator acts on, writes one
+log line that says what triggered it, what was sent, and what came back,
+and a loop a person does not see, such as a poll or a repeat, writes none.
+
 ## Releases and development builds
 
 A pushed tag is a release. The tag names a version in `liken`'s calendar

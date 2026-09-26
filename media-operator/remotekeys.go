@@ -11,6 +11,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -52,9 +54,15 @@ type keyState struct {
 // does not stop a controller mid-film. The repeat milliseconds are
 // clamped, because a table off the bus is not necessarily the
 // operator's own compile.
+//
+// A table is the operator's answer to a person's Keymap or Remote edit,
+// so a new one gets a line. The operator publishes it retained and a
+// reconnect delivers it again, so a table equal to the one held writes
+// none.
 func (r *reader) setTable(payload []byte) {
 	var table []compiledBinding
 	if err := json.Unmarshal(payload, &table); err != nil {
+		logLine(r.log, "remote: key table on %s ignored, the last good table stays: %v", r.keysTopic, err)
 		return
 	}
 	for index := range table {
@@ -62,8 +70,12 @@ func (r *reader) setTable(payload []byte) {
 		table[index].RepeatInterval = clampMillis(table[index].RepeatInterval)
 	}
 	r.keys.mu.Lock()
+	changed := !slices.Equal(r.keys.table, table)
 	r.keys.table = table
 	r.keys.mu.Unlock()
+	if changed {
+		logLine(r.log, "remote: key table on %s applied: %s", r.keysTopic, countOf(len(table), "row", "rows"))
+	}
 }
 
 // clampMillis holds one value under the ceiling. A value at or below
@@ -82,18 +94,29 @@ func clampMillis(millis int) int {
 // none, or the kernel does not name, publishes nothing. The value is
 // the kernel's, and a row with a repeat block makes the press start
 // the synthesised stream the release ends.
-func (r *reader) fold(event inputEvent) {
+//
+// The answer is the line a press earns: the control, and what the pod
+// published for it or why it published nothing. Only the press earns
+// one. The release and every repeat, the kernel's or the pod's own,
+// return no line, because one press is one thing a person did.
+func (r *reader) fold(event inputEvent) string {
 	if event.Type == evAbs {
-		r.foldAxis(event)
-		return
+		return r.foldAxis(event)
 	}
 	row, mapped := lookupKey(r.table(), event)
 	name := keyCodeNames[event.Code]
+	pressed := codeField(name, event.Code) + " pressed"
 	if mapped {
 		name = row.Key
 	}
 	if name == "" || name == keyNone {
-		return
+		if event.Value != 1 {
+			return ""
+		}
+		if mapped {
+			return pressed + ", published nothing, because the key table maps it to none"
+		}
+		return pressed + ", published nothing, because the kernel gives the code no name and the key table has no row for it"
 	}
 	switch {
 	case event.Value == 0:
@@ -102,34 +125,41 @@ func (r *reader) fold(event inputEvent) {
 	case event.Value == 1:
 		r.publishKey(name, 1)
 		r.startRepeat(control{eventType: evKey, code: event.Code}, name, row)
+		return pressed + ", published " + name + " to " + r.eventsTopic
 	default:
 		// The kernel's own autorepeat on a keyboard key. It passes as it
 		// arrived, and the pod synthesises nothing beside it.
 		r.publishKey(name, event.Value)
 	}
+	return ""
 }
 
 // foldAxis is the hat's half. It is separate because a hat reports its
 // direction in the value: the press names the key and the release
 // carries no direction at all, so the pod holds the key the press
 // published to name the release.
-func (r *reader) foldAxis(event inputEvent) {
+func (r *reader) foldAxis(event inputEvent) string {
 	if event.Value == 0 {
 		name := r.releaseAxis(event.Code)
 		if name == "" {
-			return
+			return ""
 		}
 		r.stopRepeat(control{eventType: evAbs, code: event.Code})
 		r.publishKey(name, 0)
-		return
+		return ""
 	}
+	pressed := fmt.Sprintf("%s %d pressed", codeField(axisCodeNames[event.Code], event.Code), event.Value)
 	row, mapped := lookupKey(r.table(), event)
-	if !mapped || row.Key == keyNone {
-		return
+	if !mapped {
+		return pressed + ", published nothing, because the key table has no row for it"
+	}
+	if row.Key == keyNone {
+		return pressed + ", published nothing, because the key table maps it to none"
 	}
 	r.holdAxis(event.Code, row.Key)
 	r.publishKey(row.Key, 1)
 	r.startRepeat(control{eventType: evAbs, code: event.Code}, row.Key, row)
+	return pressed + ", published " + row.Key + " to " + r.eventsTopic
 }
 
 func (r *reader) table() []compiledBinding {

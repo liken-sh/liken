@@ -69,6 +69,12 @@ func stampTemplateHash(metadata *ObjectMeta, spec any) error {
 // what the pass deletes. An empty claim name is a standing pod that
 // holds no claim.
 type standing struct {
+	// subject names the object the pair stands for, such as
+	// "player den/tv", for the lines a create or a delete writes. absent
+	// says why the pass wants no pod, for a pair that builds none.
+	subject string
+	absent  string
+
 	namespace string
 	claimName string
 	claim     *ResourceClaim
@@ -79,8 +85,9 @@ type standing struct {
 // standingPair is the standing of a Remote or of the idle screen
 // this operator draws itself: one claim and one pod, both built by this
 // pass and both wanted.
-func standingPair(claim *ResourceClaim, pod *Pod) standing {
+func standingPair(subject string, claim *ResourceClaim, pod *Pod) standing {
 	return standing{
+		subject:   subject,
 		namespace: claim.Metadata.Namespace,
 		claimName: claim.Metadata.Name,
 		claim:     claim,
@@ -190,6 +197,10 @@ func (o *operator) reconcileStanding(want standing, known claimRead) error {
 	// So the first release that carries the stamp rolls every standing
 	// pod once, and the pass after that reads matching hashes and deletes
 	// nothing.
+	//
+	// Each create and each delete is the operator acting on a person's
+	// edit, a release, or a device that moved, so each gets a line. A pass
+	// that finds the pair as it wants it writes none.
 	if claimStands && (want.claim == nil || !sameTemplate(&liveClaim.Metadata, &want.claim.Metadata)) {
 		own := ""
 		if podStands {
@@ -198,23 +209,44 @@ func (o *operator) reconcileStanding(want standing, known claimRead) error {
 		if err := o.deleteClaimHolders(liveClaim, own); err != nil {
 			return err
 		}
-		return DeleteResourceClaim(o.client, namespace, want.claimName)
+		if err := DeleteResourceClaim(o.client, namespace, want.claimName); err != nil {
+			return err
+		}
+		o.logStanding(want, "deleted claim "+want.claimName+" and the pods that hold it", want.claim == nil)
+		return nil
 	}
 	if podStands && (want.pod == nil || !sameTemplate(&livePod.Metadata, &want.pod.Metadata)) {
-		return DeletePod(o.client, namespace, want.podName)
+		if err := DeletePod(o.client, namespace, want.podName); err != nil {
+			return err
+		}
+		o.logStanding(want, "deleted pod "+want.podName, want.pod == nil)
+		return nil
 	}
 
 	if want.claim != nil && !claimStands {
 		if _, err := CreateResourceClaim(o.client, want.claim); err != nil && !errors.Is(err, ErrConflict) {
 			return err
 		}
+		logLine(o.log, "%s: created claim %s", want.subject, want.claimName)
 	}
 	if want.pod != nil && !podStands {
 		if _, err := CreatePod(o.client, want.pod); err != nil && !errors.Is(err, ErrConflict) {
 			return err
 		}
+		logLine(o.log, "%s: created pod %s", want.subject, want.podName)
 	}
 	return nil
+}
+
+// logStanding writes the line for one delete, with why the pass made it:
+// the pass wants no such object now, or the object's template no longer
+// matches the spec and the release.
+func (o *operator) logStanding(want standing, deleted string, unwanted bool) {
+	reason := "its template changed with a spec edit or a new release"
+	if unwanted {
+		reason = want.absent
+	}
+	logLine(o.log, "%s: %s, because %s", want.subject, deleted, reason)
 }
 
 // deleteClaimHolders deletes every pod that holds one claim,

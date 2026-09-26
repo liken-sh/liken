@@ -81,11 +81,12 @@ func TestAFocusedKeyPressReachesMpv(t *testing.T) {
 
 	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["no-osd","cycle","pause"]}`)
+	mustMatch(t, nextLine(t, lines), `{"command":["no-osd","cycle","pause"],"request_id":1}`)
 }
 
 // A held arrow reaches the display on every repeat, because an arrow
-// is one of the four kinds a person holds.
+// is one of the four kinds a person holds. The repeat carries a third
+// word, so the display logs the press alone.
 func TestAHeldArrowReachesTheDisplayOnTheRepeat(t *testing.T) {
 	c, _, lines := keyTestCommander(t)
 	events, _ := keyTestTopics()
@@ -93,7 +94,7 @@ func TestAHeldArrowReachesTheDisplayOnTheRepeat(t *testing.T) {
 
 	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_RIGHT", Value: 2}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["script-message","right"]}`)
+	mustMatch(t, nextLine(t, lines), `{"command":["script-message","right","repeat"]}`)
 }
 
 // A press whose mark names another Player reaches mpv not at all, so a
@@ -106,7 +107,7 @@ func TestAPressFromAnUnfocusedControllerReachesMpvNotAtAll(t *testing.T) {
 	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
 	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSubtitles}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"]}`)
+	mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"],"request_id":1}`)
 }
 
 // A press that arrives before any mark reaches mpv not at all, because
@@ -118,7 +119,7 @@ func TestAPressBeforeAnyMarkReachesMpvNotAtAll(t *testing.T) {
 	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
 	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSubtitles}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"]}`)
+	mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"],"request_id":1}`)
 }
 
 // The cycle key asks the operator to move the mark, on the remote's own

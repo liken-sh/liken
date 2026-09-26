@@ -6,6 +6,7 @@ package main
 // through commandMetrics and through runReporter's own loop.
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -172,7 +173,7 @@ func TestRunReporterFeedsTheDecodePropertiesToMetricsAndClearsOnEachItem(t *test
 		changeOf("playlist-pos", "1"),
 	)
 	runReporter(t.Context(), changes, func(playReport) error { return nil },
-		func(int) {}, metrics)
+		func(int) {}, metrics, io.Discard)
 
 	// The second item's own observe has not reported a codec yet, so the
 	// series the first item published is gone and nothing has replaced

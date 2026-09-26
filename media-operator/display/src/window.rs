@@ -19,8 +19,9 @@ use crate::canvas::{Brush, Canvas, Scrims};
 use crate::fade::Hide;
 use crate::film::Film;
 use crate::focus::{Focus, Parts, Stop};
-use crate::ipc::{self, Command, Ipc};
+use crate::ipc::{self, Ipc};
 use crate::presentation::Presentation;
+use crate::record::{self, Notes, Record};
 use crate::scrubber::Scrubber;
 use crate::skip::Skip;
 use crate::strip::Strip;
@@ -105,6 +106,11 @@ impl Idle {
 /// where the focus stands, and how far the fade has moved.
 pub struct Display {
     wire: Wire,
+    /// The request ids and the hold behind the lines a press earns.
+    record: Record,
+    /// The lines this display wrote, which a test reads back.
+    #[cfg(test)]
+    said: Vec<String>,
     focus: Focus,
     film: Film,
     presentation: Presentation,
@@ -159,8 +165,12 @@ impl Display {
             wire: Wire {
                 path: Arc::from(ipc.path()),
                 commands,
+                notes: Notes::default(),
                 watching: watched,
             },
+            record: Record::default(),
+            #[cfg(test)]
+            said: Vec::new(),
             focus: Focus::new(),
             film: Film::default(),
             presentation: Presentation::default(),
@@ -215,6 +225,9 @@ impl Display {
             Message::Minute => self.redraw_below(),
             Message::Resized(size) => self.on_resize(size),
             Message::Hide(at) if self.idle.expired(at) => {
+                // A held key whose display hid is a hold that ended.
+                let ended = self.record.settle();
+                self.say(ended);
                 let mut focus = self.focus;
                 focus.dismiss(&mut self.parts());
                 self.focus = focus;
@@ -298,11 +311,19 @@ impl Display {
             return Task::none();
         };
         let mut focus = self.focus;
-        if word == ipc::SUMMON {
-            focus.summon(&self.parts());
-        } else if let Some(action) = crate::focus::Action::from_word(word) {
+        if let Some(action) = crate::focus::Action::from_word(word) {
+            let repeat = words.get(1).is_some_and(|second| second == record::REPEAT);
             let commands = focus.nav(action, &mut self.parts());
-            self.send(commands);
+            let pressed = self.record.press(word, repeat, commands, &self.wire.notes);
+            self.say(pressed.ended);
+            for line in pressed.lines {
+                let _ = self.wire.commands.send(line);
+            }
+        } else if word == ipc::SUMMON {
+            // Every message but a repeat ends the hold before it.
+            let ended = self.record.settle();
+            self.say(ended);
+            focus.summon(&self.parts());
         } else if word == ipc::PRESENTATION {
             self.presentation
                 .receive(words.get(1).map_or("", String::as_str));
@@ -482,12 +503,14 @@ impl Display {
         Task::batch([idle, card, row])
     }
 
-    /// Write every command one press asked for to the socket the display
-    /// already reads.
-    fn send(&self, commands: Vec<Command>) {
-        for command in commands {
-            let _ = self.wire.commands.send(ipc::line(&command));
-        }
+    /// Write one line of the display's record.
+    fn say(&mut self, line: Option<String>) {
+        let Some(line) = line else {
+            return;
+        };
+        eprintln!("{line}");
+        #[cfg(test)]
+        self.said.push(line);
     }
 
     /// Draw the header and the clock, then the scrubber, then the strip. The
@@ -629,12 +652,13 @@ impl Display {
         let mpv = Subscription::run_with(self.wire.clone(), |wire| {
             let ipc = Ipc::at(&wire.path);
             let commands = wire.commands.clone();
+            let notes = wire.notes.clone();
             let mut pace = Pace::new(wire.watching.clone());
             iced::stream::channel(EVENT_QUEUE, async move |mut output| {
                 use iced::futures::SinkExt;
 
                 let (sender, mut events) = tokio::sync::mpsc::channel(EVENT_QUEUE);
-                tokio::spawn(async move { ipc.serve(sender, &commands).await });
+                tokio::spawn(async move { ipc.serve(sender, &commands, &notes).await });
                 while let Some(event) = events.recv().await {
                     if !pace.forwards(&event) {
                         continue;
@@ -700,6 +724,7 @@ fn decode(jobs: Vec<Job>) -> Task<Message> {
 pub struct Wire {
     path: Arc<Path>,
     commands: broadcast::Sender<String>,
+    notes: Notes,
     watching: watch::Receiver<Watching>,
 }
 
@@ -1166,6 +1191,69 @@ mod tests {
         );
     }
 
+    fn words(words: &[&str]) -> Message {
+        Message::Mpv(ipc::Event::Message(
+            words.iter().map(|word| word.to_string()).collect(),
+        ))
+    }
+
+    /// A press that sends mpv a command leaves one line waiting for mpv's
+    /// answer, and the answer completes it.
+    #[tokio::test]
+    async fn a_press_leaves_its_line_for_mpvs_answer() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(message("summon"));
+        let _ = display.update(message("right"));
+        let _ = display.update(message("select"));
+        sent(&mut commands);
+
+        assert_eq!(
+            record::answered(&display.wire.notes, 1000, "success").as_deref(),
+            Some(
+                "media-display: select pressed: seek to 0:20:05, sent [\"seek\",1205.0,\"absolute+exact\"] to mpv, mpv answered success"
+            )
+        );
+        assert!(display.said.is_empty());
+    }
+
+    /// A held arrow on the chapter axis steps on every repeat, writes one
+    /// line for the hold when the idle window hides the display, and leaves
+    /// no note for any repeat.
+    #[tokio::test]
+    async fn a_held_arrow_writes_one_line_when_the_display_hides() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(message("summon"));
+        let _ = display.update(message("down"));
+        let _ = display.update(message("right"));
+        for _ in 0..3 {
+            let _ = display.update(words(&["right", "repeat"]));
+        }
+        assert_eq!(sent(&mut commands).len(), 4);
+        assert_eq!(display.wire.notes.lock().expect("the notes").len(), 1);
+        assert!(display.said.is_empty());
+
+        let armed = display.idle.armed.expect("the press armed the idle window");
+        let _ = display.update(Message::Hide(armed));
+
+        assert_eq!(display.said.len(), 1);
+        assert!(
+            display.said[0].starts_with("media-display: right held for 3 repeats, last sent [")
+        );
+    }
+
+    /// A summon from the sidecar ends the hold before it too.
+    #[tokio::test]
+    async fn a_summon_ends_the_hold_before_it() {
+        let (mut display, _commands) = display();
+        let _ = display.update(message("summon"));
+        let _ = display.update(message("down"));
+        let _ = display.update(words(&["right", "repeat"]));
+
+        let _ = display.update(message("summon"));
+
+        assert_eq!(display.said.len(), 1);
+    }
+
     /// Every press the router answers reaches mpv on the display's own socket.
     #[tokio::test]
     async fn a_press_the_router_answers_reaches_mpv() {
@@ -1178,13 +1266,13 @@ mod tests {
         let _ = display.update(message("select"));
         assert_eq!(
             sent(&mut commands),
-            vec!["{\"command\":[\"seek\",1205.0,\"absolute+exact\"],\"request_id\":0}"]
+            vec!["{\"command\":[\"seek\",1205.0,\"absolute+exact\"],\"request_id\":1000}"]
         );
 
         let _ = display.update(message("select"));
         assert_eq!(
             sent(&mut commands),
-            vec!["{\"command\":[\"no-osd\",\"cycle\",\"pause\"],\"request_id\":0}"]
+            vec!["{\"command\":[\"no-osd\",\"cycle\",\"pause\"],\"request_id\":1001}"]
         );
     }
 
@@ -1496,7 +1584,7 @@ mod tests {
         let _ = display.update(message("select"));
         assert_eq!(
             sent(&mut commands),
-            vec!["{\"command\":[\"seek\",1250.0,\"absolute+exact\"],\"request_id\":0}"]
+            vec!["{\"command\":[\"seek\",1250.0,\"absolute+exact\"],\"request_id\":1000}"]
         );
         let _ = display.update(property("time-pos", json!(1250.0)));
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
@@ -1541,7 +1629,7 @@ mod tests {
         let _ = display.update(message("select"));
         assert_eq!(
             sent(&mut commands),
-            vec!["{\"command\":[\"seek\",5600.0,\"absolute+exact\"],\"request_id\":0}"]
+            vec!["{\"command\":[\"seek\",5600.0,\"absolute+exact\"],\"request_id\":1000}"]
         );
 
         let _ = display.update(property("time-pos", json!(5699.0)));

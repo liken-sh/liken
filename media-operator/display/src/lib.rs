@@ -14,6 +14,7 @@ pub mod ipc;
 pub mod marks;
 pub mod offset;
 pub mod presentation;
+pub mod record;
 pub mod scrubber;
 pub mod skip;
 pub mod strip;

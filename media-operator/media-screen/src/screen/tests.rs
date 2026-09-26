@@ -1471,3 +1471,5 @@ fn a_tick_before_the_deadline_and_a_tick_with_no_deadline_state_nothing() {
     screen.deliver(STATUS, &status("Idle"), true, now);
     assert!(screen.tick(now + Duration::from_secs(1)).is_empty());
 }
+
+mod lines;

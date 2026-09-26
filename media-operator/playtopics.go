@@ -93,7 +93,10 @@ func (o *operator) releasePlay(play *Play) {
 		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "releasing play %s/%s: %v\n", namespace, name, err)
 		}
+		return
 	}
+	// The finalizer comes off once, so this is the one line a stop earns.
+	logLine(o.log, "play %s/%s: deleted, so its playback pod is gone and its topics are cleared", namespace, name)
 }
 
 // clearPlayTopics empties the two retained topics one run stood on the
