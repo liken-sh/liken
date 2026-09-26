@@ -159,10 +159,20 @@ func (n *cecNode) applyPower(ctx context.Context, job *powerJob, own cec.Logical
 	if job.television.Spec.Power == TelevisionStandby {
 		target = cec.PowerStandby
 	}
+	sentBefore := n.sendsFor(job.key)
+	began := time.Now()
 	result := n.confirmPower(ctx, job.key, own, target)
+	asks := fmt.Sprintf("Television %s: generation %d asks %s", job.television.Metadata.Name, job.key.generation, job.television.Spec.Power)
 	if result.stopped {
+		// An application that sent nothing and stopped leaves no trace on
+		// the TV, so only one that sent a command is a line.
+		if n.sendsFor(job.key) > sentBefore {
+			fmt.Fprintf(n.log, "%s; the adapter on %s sent %s to the TV, and the application stopped after %s, before the TV reported %s\n",
+				asks, n.machine, commandNames[target], elapsed(time.Since(began)), target)
+		}
 		return
 	}
+	fmt.Fprintf(n.log, "%s; %s\n", asks, result.log)
 	condition := stampCondition(conditionPowerApplied, result.verdict, job.key.generation, job.television.Status.Conditions, n.now())
 	n.mutex.Lock()
 	n.powered.done = job.key
@@ -200,6 +210,8 @@ func (n *cecNode) writePower() {
 type powerResult struct {
 	verdict verdict
 	stopped bool
+	// log is the outcome as the node workload's log states it.
+	log string
 }
 
 // commandNames are the words a message states for each command, in
@@ -213,7 +225,8 @@ var towards = map[cec.PowerStatus]cec.PowerStatus{cec.PowerOn: cec.PowerToOn, ce
 // was cancelled or the generation already had cecPowerSends commands.
 // It answers the transmit's result, whether it sent, and the result
 // that ends the application when the adapter left or refused the call.
-func (n *cecNode) send(ctx context.Context, key powerKey, command cec.Message) (cec.Result, bool, *powerResult) {
+// name is the command's name, for the line of a refused call.
+func (n *cecNode) send(ctx context.Context, key powerKey, command cec.Message, name string) (cec.Result, bool, *powerResult) {
 	if ctx.Err() != nil {
 		return cec.Result{}, false, &powerResult{stopped: true}
 	}
@@ -234,7 +247,10 @@ func (n *cecNode) send(ctx context.Context, key powerKey, command cec.Message) (
 		n.fail(err)
 		return sent, true, &powerResult{stopped: true}
 	case err != nil:
-		return sent, true, &powerResult{verdict: verdict{ConditionFalse, reasonRefused, fmt.Sprintf("the adapter on %s: %v", n.machine, err)}}
+		return sent, true, &powerResult{
+			verdict: verdict{ConditionFalse, reasonRefused, fmt.Sprintf("the adapter on %s: %v", n.machine, err)},
+			log:     fmt.Sprintf("the adapter on %s could not send %s: %v", n.machine, name, err),
+		}
 	}
 	return sent, true, nil
 }
@@ -257,6 +273,7 @@ func (n *cecNode) sendsFor(key powerKey) int {
 // reports the state. At the end of each window in which no read showed
 // the state or the transition toward it, it sends the command again.
 func (n *cecNode) confirmPower(ctx context.Context, key powerKey, own cec.LogicalAddress, target cec.PowerStatus) powerResult {
+	began := time.Now()
 	n.mutex.Lock()
 	settled := time.Since(n.powered.lastCommand) >= cecPowerSettle
 	n.mutex.Unlock()
@@ -267,8 +284,8 @@ func (n *cecNode) confirmPower(ctx context.Context, key powerKey, own cec.Logica
 			return powerResult{stopped: true}
 		}
 		if power == target {
-			return powerResult{verdict: verdict{ConditionTrue, reasonConfirmed, fmt.Sprintf(
-				"the TV already reported %s, so the adapter on %s sent no command", target, n.machine)}}
+			message := fmt.Sprintf("the TV already reported %s, so the adapter on %s sent no command", target, n.machine)
+			return powerResult{verdict: verdict{ConditionTrue, reasonConfirmed, message}, log: message}
 		}
 	}
 	command := cec.PowerCommand(own, target == cec.PowerOn)
@@ -276,7 +293,7 @@ func (n *cecNode) confirmPower(ctx context.Context, key powerKey, own cec.Logica
 	// last is this application's last transmit, and nil when the
 	// generation had its cecPowerSends commands before it started.
 	var last *cec.Result
-	sent, did, ended := n.send(ctx, key, command)
+	sent, did, ended := n.send(ctx, key, command, name)
 	if ended != nil {
 		return *ended
 	}
@@ -297,8 +314,13 @@ func (n *cecNode) confirmPower(ctx context.Context, key powerKey, own cec.Logica
 			return powerResult{stopped: true}
 		}
 		if power == target {
-			return powerResult{verdict: verdict{ConditionTrue, reasonConfirmed, fmt.Sprintf(
-				"the TV reported %s after the adapter on %s sent %s %s", target, n.machine, name, times(n.sendsFor(key)))}}
+			sends := times(n.sendsFor(key))
+			return powerResult{
+				verdict: verdict{ConditionTrue, reasonConfirmed, fmt.Sprintf(
+					"the TV reported %s after the adapter on %s sent %s %s", target, n.machine, name, sends)},
+				log: fmt.Sprintf("the adapter on %s sent %s to the TV %s; the TV reported %s after %s",
+					n.machine, name, sends, target, elapsed(time.Since(began))),
+			}
 		}
 		progressed = progressed || power == towards[target]
 		if time.Now().Before(windowEnd) {
@@ -306,7 +328,7 @@ func (n *cecNode) confirmPower(ctx context.Context, key powerKey, own cec.Logica
 		}
 		windowEnd = time.Now().Add(cecPowerWindow)
 		if !progressed {
-			sent, did, ended := n.send(ctx, key, command)
+			sent, did, ended := n.send(ctx, key, command, name)
 			if ended != nil {
 				return *ended
 			}
@@ -324,7 +346,7 @@ func (n *cecNode) confirmPower(ctx context.Context, key powerKey, own cec.Logica
 	if last != nil && !last.Acked {
 		message += "; the TV did not acknowledge the last command: " + last.Status
 	}
-	return powerResult{verdict: verdict{ConditionFalse, reasonUnconfirmed, message}}
+	return powerResult{verdict: verdict{ConditionFalse, reasonUnconfirmed, message}, log: fmt.Sprintf("%s; the application ended after %s", message, elapsed(time.Since(began)))}
 }
 
 // times writes a count of sends the way a sentence reads it.

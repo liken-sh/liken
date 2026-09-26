@@ -200,12 +200,16 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 	receiver := startFakeDenon(t)
 	receiver.ignorePowerOn()
 	readings := testMetrics(t)
+	log := &logBuffer{}
+	lines := newReceiverLog(log, "theater")
 	h := &sessionHarness{
 		rule:      ReceiverVolume{Max: 69.5},
 		equipment: receiver,
 		brokers:   startFakeBrokerServer(t),
-		holder:    &sessionHolder{},
+		holder:    &sessionHolder{lines: lines},
 		readings:  readings,
+		log:       log,
+		lines:     lines,
 	}
 	h.denon = denon.NewClient(receiver.address(), h.holder.observe)
 	h.denon.Reporter = readings.reportCommand
@@ -219,6 +223,9 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 
 	h.equipment.waitForCommands(t, "SIGAME")
 	requireSeries(t, scrape(t, readings), `equipment_commands_total{status="timeout"} 1`)
+	mustDeepEqual(t, linesWith(log, "sent power on"), []string{
+		"Receiver theater: a Play started on Player theater; sent power on; the receiver did not report power on in 50 ms, so the input goes out anyway",
+	})
 }
 
 // An input may name the sound mode it wants, and the session selects it

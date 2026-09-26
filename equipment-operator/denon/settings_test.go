@@ -700,3 +700,16 @@ func TestApplySettingsRoundTripsEveryRemainingField(t *testing.T) {
 		})
 	}
 }
+
+// SettingsFor holds one bus value and nothing else, so ConfirmedBy
+// reads only that value.
+func TestSettingsForHoldsOneValue(t *testing.T) {
+	one, err := SettingsFor("tone.bass", equipment.NumberSettingValue(3))
+	mustSucceed(t, err)
+	three, four := 3, 4
+
+	mustMatch(t, one.ConfirmedBy(Settings{Tone: ToneSettings{Bass: &three, Treble: &four}}), true)
+	mustMatch(t, one.ConfirmedBy(Settings{Tone: ToneSettings{Bass: &four}}), false)
+	_, err = SettingsFor("tone.bogus", equipment.NumberSettingValue(3))
+	mustMatch(t, err.Error(), `unknown setting "tone.bogus"`)
+}

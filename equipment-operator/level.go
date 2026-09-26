@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 )
@@ -23,6 +24,11 @@ const (
 type volumeState struct {
 	Level int  `json:"level"`
 	Muted bool `json:"muted"`
+}
+
+// String writes a volume state as a line states it.
+func (v volumeState) String() string {
+	return fmt.Sprintf("level %d, mute %s", v.Level, onOff(v.Muted))
 }
 
 // clamped holds the level inside the bus scale, so no arithmetic

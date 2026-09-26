@@ -62,7 +62,7 @@ func TestAnEnsureInStandbySendsNothing(t *testing.T) {
 // the receiver resolves the input from the session it already holds.
 func TestTheEnsureCommandReachesTheStandingSession(t *testing.T) {
 	h, held := driftedWhileListening(t)
-	unit := &receiverUnit{session: held}
+	unit := &receiverUnit{session: held, log: h.lines}
 
 	unit.handleCommand([]byte(`{"command":"input.ensure"}`))
 
@@ -73,7 +73,7 @@ func TestTheEnsureCommandReachesTheStandingSession(t *testing.T) {
 // dropped rather than sent to a room nobody asked for.
 func TestTheEnsureCommandWithNoSessionSendsNothing(t *testing.T) {
 	h := newSessionHarness(t)
-	unit := &receiverUnit{}
+	unit := &receiverUnit{log: h.lines}
 
 	unit.handleCommand([]byte(`{"command":"input.ensure"}`))
 

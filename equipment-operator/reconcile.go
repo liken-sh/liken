@@ -11,11 +11,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/signal"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -47,6 +49,7 @@ type receiverUnit struct {
 	denonClient   *denon.Client
 	wiimClient    *wiim.Client
 	readings      *metrics
+	log           *receiverLog
 	cancel        context.CancelFunc
 	dirty         chan struct{}
 	generation    atomic.Int64
@@ -82,6 +85,7 @@ type receiverUnit struct {
 // level.
 func (u *receiverUnit) observe(event equipment.Event) {
 	poke(u.dirty)
+	u.log.observe()
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
@@ -150,6 +154,9 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 	u.mutex.Unlock()
 
 	if held != nil && spec != nil && held.spec == spec.withoutFlags() {
+		if flips := flagFlips(held, spec); flips != "" {
+			u.log.printf("the session for Player %s: %s", spec.Player, flips)
+		}
 		held.setFlags(spec.Active, spec.Awake)
 		return
 	}
@@ -158,16 +165,40 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		u.session = nil
 		u.mutex.Unlock()
 		held.stop()
+		u.log.printf("the session for Player %s ended", held.spec.Player)
 	}
 	if spec == nil {
 		u.readings.setClaimed(u.name, false)
 		return
 	}
-	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower)
+	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t",
+		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake)
+	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower)
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
 	u.readings.setClaimed(u.name, true)
+}
+
+// flagFlips names each flag of a standing session that the new spec
+// changes, and answers an empty string when it changes none.
+func flagFlips(held *session, spec *ReceiverSession) string {
+	var flips []string
+	if was := held.active.Load(); was != spec.Active {
+		flips = append(flips, fmt.Sprintf("active went from %t to %t", was, spec.Active))
+	}
+	if was := held.awake.Load(); was != spec.Awake {
+		flips = append(flips, fmt.Sprintf("awake went from %t to %t", was, spec.Awake))
+	}
+	return strings.Join(flips, ", ")
+}
+
+// powerTopicWords names a session's power topic, or says it has none.
+func powerTopicWords(topic string) string {
+	if topic == "" {
+		return "no power topic"
+	}
+	return "power topic " + topic
 }
 
 // setVolume records the ceiling and the step a person declared, which
@@ -227,10 +258,23 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 	if u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	if err := u.driver.SetPower(equipment.MainZone, power != equipment.PowerStandby && power != equipment.PowerOff); err != nil {
-		fmt.Fprintf(os.Stderr, "setting the power of receiver %s: %v\n", u.name, err)
+	on := power != equipment.PowerStandby && power != equipment.PowerOff
+	asks := fmt.Sprintf("generation %d asks power %s", u.generation.Load(), power)
+	// A WiiM has no power command, and its driver answers power on with
+	// no error and nothing on the wire, so the line says that.
+	if on && u.wiimClient != nil {
+		u.log.printf("%s; sent nothing, because a WiiM has no power-on command", asks)
+		u.applyPower(power)
 		return
 	}
+	sent := powerWords(equipment.ZoneState{Power: commandedPower(on)}, 0)
+	line := fmt.Sprintf("%s; sent %s", asks, sent)
+	began := time.Now()
+	if err := u.driver.SetPower(equipment.MainZone, on); err != nil {
+		u.log.refused(line, err)
+		return
+	}
+	u.log.confirm(line, began, mainZoneCheck(u.driver, sent, powerWords))
 	u.applyPower(power)
 }
 
@@ -281,9 +325,14 @@ func (u *receiverUnit) setSettings(want denon.Settings) {
 	if reflect.DeepEqual(u.settingsApplied(), want) && want.ConfirmedBy(observed) {
 		return
 	}
+	line := fmt.Sprintf("generation %d declares spec.denon.settings %s; sent it", u.generation.Load(), declared(want))
+	began := time.Now()
 	if err := u.denonClient.ApplySettings(want); err != nil {
-		fmt.Fprintf(os.Stderr, "applying the settings of receiver %s: %v\n", u.name, err)
+		u.log.refused(line, err)
 		return
+	}
+	if u.log.fresh("spec.denon.settings", want) {
+		u.log.confirm(line, began, settingsCheck(func() bool { return want.ConfirmedBy(u.denonClient.Settings()) }))
 	}
 	u.settings.Store(&want)
 }
@@ -309,9 +358,14 @@ func (u *receiverUnit) setWiimSettings(want wiim.Settings) {
 	if reflect.DeepEqual(u.wiimSettingsApplied(), want) && want.ConfirmedBy(observed) {
 		return
 	}
+	line := fmt.Sprintf("generation %d declares spec.wiim.settings %s; sent it", u.generation.Load(), declared(want))
+	began := time.Now()
 	if err := u.wiimClient.ApplySettings(want); err != nil {
-		fmt.Fprintf(os.Stderr, "applying the settings of receiver %s: %v\n", u.name, err)
+		u.log.refused(line, err)
 		return
+	}
+	if u.log.fresh("spec.wiim.settings", want) {
+		u.log.confirm(line, began, settingsCheck(func() bool { return want.ConfirmedBy(u.wiimClient.Settings()) }))
 	}
 	u.wiimSettings.Store(&want)
 }
@@ -357,9 +411,17 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 		if reflect.DeepEqual(applied[name], spec) && confirmed {
 			continue
 		}
+		line := fmt.Sprintf("generation %d declares zone %s %s; sent it", u.generation.Load(), name, declared(spec))
+		began := time.Now()
 		if err := u.applyZone(name, spec); err != nil {
-			fmt.Fprintf(os.Stderr, "setting zone %s on receiver %s: %v\n", name, u.name, err)
+			u.log.refused(line, err)
 			continue
+		}
+		if u.log.fresh("spec.zones."+name, spec) {
+			u.log.confirm(line, began, settingsCheck(func() bool {
+				observed, reported := u.driver.State().Zone(name)
+				return !reported || spec.ConfirmedBy(observed, u.driver.VolumeResolution())
+			}))
 		}
 		applied[name] = spec
 	}
@@ -470,23 +532,43 @@ func (u *receiverUnit) handleSettings(payload []byte) {
 		return
 	}
 	leaf := settingsPath(message.Setting)
+	line := fmt.Sprintf("the settings topic asks %s %s; sent it", message.Setting, declared(message.Value))
+	began := time.Now()
 	switch {
 	case u.denonClient != nil:
 		if err := u.denonClient.Set(message.Setting, message.Value); err != nil {
-			fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
+			u.log.refused(line, err)
 			return
 		}
 		if _, err := ApplyReceiverSettings(u.client, u.name, leaf, message.Value); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
 		}
+		// Set checked the id and the value, so SettingsFor cannot fail here.
+		one, _ := denon.SettingsFor(message.Setting, message.Value)
+		u.log.confirm(line, began, settingsCheck(func() bool { return one.ConfirmedBy(u.denonClient.Settings()) }))
 	case u.wiimClient != nil:
 		if err := u.wiimClient.Set(message.Setting, message.Value); err != nil {
-			fmt.Fprintf(os.Stderr, "setting %s on receiver %s: %v\n", message.Setting, u.name, err)
+			u.log.refused(line, err)
 			return
 		}
+		// A WiiM answers each command over HTTP, and Set returns once
+		// the device answered OK, so that answer is the report.
+		u.log.printf("%s; the receiver answered OK after %s", line, elapsed(time.Since(began)))
 		if _, err := ApplyReceiverWiimSettings(u.client, u.name, leaf, message.Value); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the setting %s of receiver %s: %v\n", message.Setting, u.name, err)
 		}
+	}
+}
+
+// settingsCheck answers a check for a declared block, which confirmed
+// reads the way ConfirmedBy does: no value the receiver reports differs
+// from the block.
+func settingsCheck(confirmed func() bool) func() (string, bool) {
+	return func() (string, bool) {
+		if confirmed() {
+			return "no value that differs", true
+		}
+		return "a value that differs", false
 	}
 }
 
@@ -506,16 +588,26 @@ func (u *receiverUnit) handleCommand(payload []byte) {
 		u.ensureInput()
 		return
 	}
+	asks := message.Command
+	if len(message.Args) > 0 {
+		asks += " " + declared(message.Args)
+	}
+	line := fmt.Sprintf("the commands topic asks %s; sent it", asks)
+	began := time.Now()
+	var err error
 	switch {
 	case u.denonClient != nil:
-		if err := u.denonClient.Do(message.Command, message.Args); err != nil {
-			fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
-		}
+		err = u.denonClient.Do(message.Command, message.Args)
 	case u.wiimClient != nil:
-		if err := u.wiimClient.Do(message.Command, message.Args); err != nil {
-			fmt.Fprintf(os.Stderr, "command %s on receiver %s: %v\n", message.Command, u.name, err)
-		}
+		err = u.wiimClient.Do(message.Command, message.Args)
 	}
+	if err != nil {
+		u.log.refused(line, err)
+		return
+	}
+	// A WiiM is the only driver with actions, and Do returns once the
+	// device answered OK.
+	u.log.printf("%s; the receiver answered OK after %s", line, elapsed(time.Since(began)))
 }
 
 // commandEnsureInput is the receiver's one generic player action: make
@@ -531,9 +623,11 @@ func (u *receiverUnit) ensureInput() {
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
-	if held != nil {
-		held.ensureInput()
+	if held == nil {
+		u.log.printf("the commands topic asks %s; sent nothing, because no session stands", commandEnsureInput)
+		return
 	}
+	held.ensureInput()
 }
 
 // powerApplied answers the last power the operator settled on.
@@ -580,6 +674,9 @@ type controller struct {
 	readings   *metrics
 	discovery  *discovery
 	units      map[string]*receiverUnit
+	// log takes the lines a person reads to follow the receivers, the
+	// way the node workload's log does for its adapter.
+	log io.Writer
 }
 
 func newController(client *Client, busAddress string, readings *metrics) *controller {
@@ -590,6 +687,7 @@ func newController(client *Client, busAddress string, readings *metrics) *contro
 		now:        time.Now,
 		readings:   readings,
 		units:      map[string]*receiverUnit{},
+		log:        os.Stderr,
 	}
 	// Discovery wakes the same loop a watch event does, so a Receiver it
 	// creates or an address it finds reaches a reconcile pass at once.
@@ -698,6 +796,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		busAddress:    c.busAddress,
 		now:           c.now,
 		readings:      c.readings,
+		log:           newReceiverLog(c.log, receiver.Metadata.Name),
 		cancel:        cancel,
 		dirty:         make(chan struct{}, 1),
 	}

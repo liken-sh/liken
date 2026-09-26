@@ -199,9 +199,9 @@ func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
 	api := startCECAPI(t)
 	adapter, device := usbAdapter(cecRoom())
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putBus(controlBus("living-room-cec", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	api.putBus(controlBus("lounge", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 	startNode(t, api, "node-1", device)
-	api.waitForEntry(t, "living-room-cec", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	api.waitForEntry(t, "lounge", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 	claims := adapter.Claims()
 
 	api.putBus(controlBus("living-room", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))

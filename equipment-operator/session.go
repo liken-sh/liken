@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,9 @@ type session struct {
 	bus      *Bus
 	// readings counts a timeout this session's own power wait produced.
 	readings *metrics
+	// log is the receiver's log, which the unit shares with the session,
+	// so a command's line waits for the same reports either way.
+	log *receiverLog
 	// The session's own context, held because a flip of either flag starts
 	// the one-shots long after the session started, and they stop when it
 	// does.
@@ -103,7 +107,7 @@ type session struct {
 // Power and input go out once for a session that starts with either
 // flag on, and once only when both are on at the start. A session that
 // starts with both off owns the level and sends the equipment nothing.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power)) *session {
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power)) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	if inputSoundMode == nil {
 		inputSoundMode = func(string) string { return "" }
@@ -113,6 +117,7 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 		spec:           spec.withoutFlags(),
 		driver:         driver,
 		readings:       readings,
+		log:            log,
 		ctx:            ctx,
 		cancel:         cancel,
 		scale:          scale,
@@ -152,8 +157,20 @@ func (s *session) setFlags(active, awake bool) {
 	played := s.raise(&s.active, active)
 	woke := s.raise(&s.awake, awake)
 	if played || woke {
-		go s.selectInput(s.ctx)
+		go s.selectInput(s.ctx, s.flagWords(played, woke))
 	}
+}
+
+// flagWords names what raised a flag, for the lines of the one-shots
+// it runs.
+func (s *session) flagWords(played, woke bool) string {
+	switch {
+	case played && woke:
+		return fmt.Sprintf("a Play started on Player %s and its screen woke", s.spec.Player)
+	case played:
+		return fmt.Sprintf("a Play started on Player %s", s.spec.Player)
+	}
+	return fmt.Sprintf("the screen of Player %s woke", s.spec.Player)
 }
 
 // raise stores one flag and answers whether this is the false to true
@@ -172,6 +189,7 @@ func (s *session) raise(flag *atomic.Bool, on bool) bool {
 // room may still be listening to something else.
 func (s *session) stop() {
 	s.publishOwner(nil)
+	s.log.printf("cleared the owner mark on %s", ownerTopic(s.spec.VolumeTopic))
 	time.Sleep(sessionStopGrace)
 	s.cancel()
 }
@@ -185,6 +203,7 @@ func (s *session) claim(*Bus) {
 		return
 	}
 	s.publishOwner(mark)
+	s.log.printf("published the owner mark %s on %s", mark, ownerTopic(s.spec.VolumeTopic))
 	s.connectedOnce.Do(func() { close(s.connected) })
 }
 
@@ -240,32 +259,52 @@ func (s *session) receive(topic string, payload []byte) {
 
 // press reads the message as a direction and moves the receiver one
 // step from where it actually stands, never to a level mapped through
-// two scales. Mute is absolute.
+// two scales. Mute is absolute. A press is a person's command, so each
+// one is a line, and a press that moves nothing says why.
 func (s *session) press(previous, state volumeState) {
 	reading, _ := s.driver.State().Zone(equipment.MainZone)
-	sent := false
+	trigger := fmt.Sprintf("the volume topic went from %s to %s", previous, state)
+	var sent []string
+	var words []func(equipment.ZoneState, int) string
+	began := time.Now()
 	if state.Muted != reading.Mute {
 		if err := s.driver.SetMute(equipment.MainZone, state.Muted); err != nil {
-			fmt.Fprintf(os.Stderr, "muting %s: %v\n", s.receiver, err)
+			s.log.refused(fmt.Sprintf("%s; sent mute %s", trigger, onOff(state.Muted)), err)
 		} else {
-			sent = true
+			sent = append(sent, "mute "+onOff(state.Muted))
+			words = append(words, muteWords)
 		}
 	}
 	if state.Level != previous.Level {
 		if target, moves := s.nextPosition(reading, state.Level > previous.Level); moves {
+			volume := volumeWords(equipment.ZoneState{Volume: target}, s.driver.VolumeResolution())
 			if err := s.driver.SetVolume(equipment.MainZone, target); err != nil {
-				fmt.Fprintf(os.Stderr, "setting the volume of %s: %v\n", s.receiver, err)
+				s.log.refused(fmt.Sprintf("%s; sent %s", trigger, volume), err)
 			} else {
-				sent = true
+				sent = append(sent, volume)
+				words = append(words, volumeWords)
 			}
 		}
 	}
 	// A press the receiver answers is reported when its answer arrives.
 	// One that moves nothing has no answer coming, so the position goes
 	// back to the topic now.
-	if !sent {
+	if len(sent) == 0 {
+		s.log.printf("%s; sent nothing, because the receiver reports %s and %s, and the ceiling is %s",
+			trigger, volumeWords(reading, s.driver.VolumeResolution()), muteWords(reading, 0), s.ceilingWords())
 		s.report(reading)
+		return
 	}
+	s.log.confirm(fmt.Sprintf("%s; sent %s", trigger, strings.Join(sent, " and ")), began, mainZoneCheck(s.driver, strings.Join(sent, " and "), words...))
+}
+
+// ceilingWords names the ceiling a press is measured against.
+func (s *session) ceilingWords() string {
+	ceiling := s.ceiling()
+	if ceiling <= 0 {
+		return "not known"
+	}
+	return volumeWords(equipment.ZoneState{Volume: ceiling}, s.driver.VolumeResolution())
 }
 
 // nextPosition answers where one press puts the receiver, and whether
@@ -471,17 +510,21 @@ func (s *session) togglePower(payload []byte) {
 	// The power is read again under the lock, so the decision is made
 	// against the receiver as it stands after any in-flight one-shot
 	// settles, not a snapshot taken a moment earlier.
+	trigger := "the power topic asks toggle"
 	if mainZone(s.driver.State()).Power == equipment.PowerOn {
+		line := trigger + "; the receiver reports power on, so sent power standby"
+		began := time.Now()
 		if err := s.driver.SetPower(equipment.MainZone, false); err != nil {
-			fmt.Fprintf(os.Stderr, "setting the power of %s: %v\n", s.receiver, err)
+			s.log.refused(line, err)
 			return
 		}
+		s.log.confirm(line, began, mainZoneCheck(s.driver, "power standby", powerWords))
 		if s.applyPower != nil {
 			s.applyPower(equipment.PowerStandby)
 		}
 		return
 	}
-	s.selectInputLocked(s.ctx)
+	s.selectInputLocked(s.ctx, trigger)
 	if s.applyPower != nil {
 		s.applyPower(equipment.PowerOn)
 	}
@@ -491,15 +534,16 @@ func (s *session) togglePower(payload []byte) {
 // selects the input once for whoever asked. The power one-shot is
 // serialized against a toggle, so the two never drive the receiver at
 // the same moment.
-func (s *session) selectInput(ctx context.Context) {
+func (s *session) selectInput(ctx context.Context, trigger string) {
 	s.oneShot.Lock()
 	defer s.oneShot.Unlock()
-	s.selectInputLocked(ctx)
+	s.selectInputLocked(ctx, trigger)
 }
 
 // selectInputLocked is the power-and-input one-shot, called with oneShot
-// held by either a flag flip or a toggle.
-func (s *session) selectInputLocked(ctx context.Context) {
+// held by either a flag flip or a toggle. trigger names what asked for
+// it, for the lines it writes.
+func (s *session) selectInputLocked(ctx context.Context, trigger string) {
 	// A command sent before the connection is open is dropped, and a one-
 	// shot is never re-asserted, so the wait for the connection is what
 	// makes the one-shot land. The session's own lifetime is the bound: a
@@ -511,37 +555,47 @@ func (s *session) selectInputLocked(ctx context.Context) {
 	}
 	powered := s.armPower()
 	if mainZone(s.driver.State()).Power != equipment.PowerOn {
+		line := trigger + "; sent power on"
+		began := time.Now()
 		if err := s.driver.SetPower(equipment.MainZone, true); err != nil {
-			fmt.Fprintf(os.Stderr, "setting the power of %s: %v\n", s.receiver, err)
+			s.log.refused(line, err)
 			return
 		}
 		select {
 		case <-ctx.Done():
+			s.log.printf("%s; the session ended before the receiver reported power on", line)
 			return
 		case <-powered:
+			s.log.printf("%s; the receiver reported power on after %s", line, elapsed(time.Since(began)))
 		case <-time.After(sessionPowerWait):
 			s.readings.reportCommand(denon.CommandTimeout)
+			s.log.printf("%s; the receiver did not report power on in %s, so the input goes out anyway", line, elapsed(sessionPowerWait))
 		}
 	}
 	if ctx.Err() != nil {
 		return
 	}
-	s.selectTheInput()
+	s.selectTheInput(trigger)
 }
 
 // selectTheInput sends the session's input and the sound mode that
 // travels with it. The power one-shot and the ensure both reach it, so
 // the mode and the input can never drift apart.
-func (s *session) selectTheInput() {
+func (s *session) selectTheInput(trigger string) {
+	line := fmt.Sprintf("%s; sent input %s", trigger, s.spec.Input)
+	began := time.Now()
 	if err := s.driver.SetInput(equipment.MainZone, s.spec.Input); err != nil {
-		fmt.Fprintf(os.Stderr, "selecting the input of %s: %v\n", s.receiver, err)
+		s.log.refused(line, err)
 		return
 	}
 	if mode := s.inputSoundMode(s.spec.Input); mode != "" {
+		line += " and sound mode " + mode
 		if err := s.driver.SetSoundMode(equipment.MainZone, mode); err != nil {
-			fmt.Fprintf(os.Stderr, "setting the sound mode of %s: %v\n", s.receiver, err)
+			s.log.refused(line, err)
+			return
 		}
 	}
+	s.log.confirm(line, began, mainZoneCheck(s.driver, "input "+s.spec.Input, inputWords))
 }
 
 // ensureInput asks the receiver for the session's input without
@@ -551,6 +605,7 @@ func (s *session) selectTheInput() {
 // the one that wakes the equipment.
 func (s *session) ensureInput() {
 	if s.spec.Input == "" {
+		s.log.printf("the commands topic asks %s; sent nothing, because Player %s's session names no input", commandEnsureInput, s.spec.Player)
 		return
 	}
 	go s.ensureInputOnce()
@@ -567,9 +622,15 @@ func (s *session) ensureInputOnce() {
 		return
 	case <-s.reached:
 	}
+	trigger := "the commands topic asks " + commandEnsureInput
 	state := mainZone(s.driver.State())
-	if state.Power != equipment.PowerOn || state.Input == s.spec.Input {
+	if state.Power != equipment.PowerOn {
+		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, powerWords(state, 0))
 		return
 	}
-	s.selectTheInput()
+	if state.Input == s.spec.Input {
+		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, inputWords(state, 0))
+		return
+	}
+	s.selectTheInput(trigger)
 }

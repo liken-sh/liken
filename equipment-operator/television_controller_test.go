@@ -240,3 +240,34 @@ func TestDeleteTelevisionSettlesOnGoneAndReportsARefusal(t *testing.T) {
 		})
 	}
 }
+
+// loggedPasses runs the Deployment's pass as many times as asked, with
+// its log in a buffer.
+func loggedPasses(t *testing.T, api *cecAPI, count int) *logBuffer {
+	t.Helper()
+	controller := newCECBusController(api.client)
+	log := &logBuffer{}
+	controller.log = log
+	for range count {
+		mustSucceed(t, controller.pass())
+	}
+	return log
+}
+
+// Discovery writes one line when it creates a Television and one when
+// it deletes it, and later passes write none.
+func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
+	api := startCECAPI(t)
+	api.putBus(scannedBus("den", tvDevice))
+	created := loggedPasses(t, api, 3)
+
+	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+	deleted := loggedPasses(t, api, 3)
+
+	mustDeepEqual(t, created.lines(), []string{
+		`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
+	})
+	mustDeepEqual(t, deleted.lines(), []string{
+		"deleted the discovered Television den: Television lounge names CECBus den",
+	})
+}

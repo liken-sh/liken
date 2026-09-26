@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"github.com/liken-sh/equipment-operator/denon"
 	"github.com/liken-sh/equipment-operator/equipment"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -27,12 +28,14 @@ const (
 // sessionHolder is the receiverUnit's half of the wiring. It replays
 // what arrived while the session was being started.
 type sessionHolder struct {
+	lines  *receiverLog
 	mutex  sync.Mutex
 	held   *session
 	missed []equipment.Event
 }
 
 func (h *sessionHolder) observe(event equipment.Event) {
+	h.lines.observe()
 	h.mutex.Lock()
 	held := h.held
 	if held == nil {
@@ -63,11 +66,15 @@ func (h *sessionHolder) set(started *session) {
 // sessionHarness is a running connection to a fake receiver and a fake
 // broker, ready for a session.
 type sessionHarness struct {
-	equipment  *fakeDenon
-	brokers    *fakeBrokerServer
-	denon      *denon.Client
-	holder     *sessionHolder
-	readings   *metrics
+	equipment *fakeDenon
+	brokers   *fakeBrokerServer
+	denon     *denon.Client
+	holder    *sessionHolder
+	readings  *metrics
+	// log holds the receiver's lines, and lines is the log the session
+	// writes them to.
+	log        *logBuffer
+	lines      *receiverLog
 	soundModes map[string]string
 	// powerTopic is the topic a test's session subscribes to for the
 	// remote's power toggle. Empty means the session subscribes to none.
@@ -112,8 +119,10 @@ func newSessionHarnessWith(t *testing.T, rule ReceiverVolume) *sessionHarness {
 		rule:      rule,
 		equipment: startFakeDenon(t),
 		brokers:   startFakeBrokerServer(t),
-		holder:    &sessionHolder{},
+		log:       &logBuffer{},
 	}
+	h.lines = newReceiverLog(h.log, "theater")
+	h.holder = &sessionHolder{lines: h.lines}
 	h.denon = denon.NewClient(h.equipment.address(), h.holder.observe)
 	go h.denon.Run(t.Context())
 	h.waitUntil(t, func(state equipment.State) bool {
@@ -167,7 +176,7 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, PowerTopic: h.powerTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.brokers.address(), h.volumeRule, h.inputSoundMode, h.applyPower)
+	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.brokers.address(), h.volumeRule, h.inputSoundMode, h.applyPower)
 	h.holder.set(started)
 	return started
 }
@@ -301,7 +310,7 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 	}()
 
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, listener.Addr().String(),
+	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(io.Discard, "theater"), listener.Addr().String(),
 		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil)
 
 	will := connectWill(t, waitForFrame(t, frames))

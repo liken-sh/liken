@@ -94,7 +94,7 @@ func discoveredReceiver(name, uuid string) Receiver {
 
 func TestDiscoveryCreatesUnclaimedAndDefersToAPerson(t *testing.T) {
 	api, client := startDiscoveryAPI(t)
-	api.list = receiversWith(wiimReceiver("studio-wiim", firstUUID))
+	api.list = receiversWith(wiimReceiver("studio", firstUUID))
 
 	found := []wiim.Device{
 		{UUID: firstUUID, Address: "192.0.2.1"},
@@ -116,7 +116,7 @@ func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
 	api, client := startDiscoveryAPI(t)
 	api.list = receiversWith(
 		discoveredReceiver(strings.ToLower(firstUUID), firstUUID),
-		wiimReceiver("studio-wiim", firstSpellOf(firstUUID)),
+		wiimReceiver("studio", firstSpellOf(firstUUID)),
 	)
 
 	held := newDiscovery(client, func() {})
@@ -238,4 +238,56 @@ func firstSpellOf(uuid string) string {
 	return strings.ToLower(uuid[:8]) + "-" + strings.ToLower(uuid[8:12]) + "-" +
 		strings.ToLower(uuid[12:16]) + "-" + strings.ToLower(uuid[16:20]) + "-" +
 		strings.ToLower(uuid[20:]) + "ff98f2f7"
+}
+
+// Discovery writes one line for each Receiver it creates or deletes,
+// and none for an amp whose Receiver stands.
+func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
+	cases := []struct {
+		name  string
+		list  []Receiver
+		found []wiim.Device
+		want  []string
+	}{
+		{
+			"an amp no Receiver names",
+			nil,
+			[]wiim.Device{{UUID: secondUUID, Address: "192.0.2.2"}},
+			[]string{"discovery found the WiiM " + secondUUID + " at 192.0.2.2, which no Receiver names; created Receiver " + strings.ToLower(secondUUID)},
+		},
+		{
+			"a person's Receiver that takes over",
+			[]Receiver{discoveredReceiver(strings.ToLower(firstUUID), firstUUID), wiimReceiver("studio", firstUUID)},
+			[]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}},
+			[]string{"deleted the discovered Receiver " + strings.ToLower(firstUUID) + ": Receiver studio names the WiiM " + firstUUID},
+		},
+		{
+			"an amp that is gone",
+			[]Receiver{discoveredReceiver(strings.ToLower(secondUUID), secondUUID)},
+			nil,
+			[]string{"deleted the discovered Receiver " + strings.ToLower(secondUUID) + ": discovery holds no address for the WiiM " + secondUUID},
+		},
+		{
+			"an amp whose Receiver stands",
+			[]Receiver{discoveredReceiver(strings.ToLower(firstUUID), firstUUID)},
+			[]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}},
+			[]string{""},
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api, client := startDiscoveryAPI(t)
+			api.list = receiversWith(one.list...)
+			held := newDiscovery(client, func() {})
+			log := &logBuffer{}
+			held.log = log
+			for range discoveryMisses {
+				held.store(one.found)
+			}
+
+			mustSucceed(t, held.reconcile())
+
+			mustDeepEqual(t, log.lines(), one.want)
+		})
+	}
 }

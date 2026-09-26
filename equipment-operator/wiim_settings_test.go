@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -123,7 +124,7 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client}
+	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio")}
 }
 
 // A declared block is enforced once even when the device already

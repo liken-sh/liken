@@ -403,3 +403,12 @@ func boolSetting(id string, build func(bool) (string, error), set func(*Settings
 		},
 	}
 }
+
+// SettingsFor answers the settings that hold one bus value and nothing
+// else, so a caller asks ConfirmedBy whether the receiver reports that
+// one value. An unknown id or a value of the wrong kind is Set's error.
+func SettingsFor(id string, value equipment.SettingValue) (Settings, error) {
+	var one Settings
+	_, err := applySetting(&one, id, value)
+	return one, err
+}

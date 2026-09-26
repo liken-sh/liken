@@ -9,7 +9,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +40,8 @@ var (
 type discovery struct {
 	client *Client
 	wake   func()
+	// log takes a line for each Receiver discovery creates or deletes.
+	log io.Writer
 
 	mutex   sync.Mutex
 	devices map[string]wiim.Device
@@ -53,6 +57,7 @@ func newDiscovery(client *Client, wake func()) *discovery {
 	return &discovery{
 		client:  client,
 		wake:    wake,
+		log:     os.Stderr,
 		devices: map[string]wiim.Device{},
 		misses:  map[string]int{},
 	}
@@ -169,16 +174,26 @@ func (d *discovery) reconcile() error {
 		}
 		if _, err := ApplyDiscoveredReceiver(d.client, discoveredName(device.UUID), device.UUID); err != nil {
 			fmt.Fprintf(os.Stderr, "creating receiver %s: %v\n", discoveredName(device.UUID), err)
+			continue
 		}
+		fmt.Fprintf(d.log, "discovery found the WiiM %s at %s, which no Receiver names; created Receiver %s\n",
+			device.UUID, device.Address, discoveredName(device.UUID))
 	}
 
 	for uuid, receiver := range owned {
-		if heldSet[uuid] && !claimedByOther(claimants[uuid], receiver.Metadata.Name) {
+		name := receiver.Metadata.Name
+		if heldSet[uuid] && !claimedByOther(claimants[uuid], name) {
 			continue
 		}
-		if err := DeleteReceiver(d.client, receiver.Metadata.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "pruning receiver %s: %v\n", receiver.Metadata.Name, err)
+		if err := DeleteReceiver(d.client, name); err != nil {
+			fmt.Fprintf(os.Stderr, "pruning receiver %s: %v\n", name, err)
+			continue
 		}
+		reason := fmt.Sprintf("discovery holds no address for the WiiM %s", uuid)
+		if others := slices.DeleteFunc(slices.Clone(claimants[uuid]), func(other string) bool { return other == name }); len(others) > 0 {
+			reason = fmt.Sprintf("Receiver %s names the WiiM %s", strings.Join(others, ", "), uuid)
+		}
+		fmt.Fprintf(d.log, "deleted the discovered Receiver %s: %s\n", name, reason)
 	}
 	return nil
 }

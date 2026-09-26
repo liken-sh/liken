@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"sync"
@@ -26,10 +27,13 @@ type cecBusController struct {
 	client *Client
 	now    func() time.Time
 	wake   chan struct{}
+	// log takes a line for each Television discovery creates or
+	// deletes.
+	log io.Writer
 }
 
 func newCECBusController(client *Client) *cecBusController {
-	return &cecBusController{client: client, now: time.Now, wake: make(chan struct{}, 1)}
+	return &cecBusController{client: client, now: time.Now, wake: make(chan struct{}, 1), log: os.Stderr}
 }
 
 // pass derives and writes every bus, and then every Television. A

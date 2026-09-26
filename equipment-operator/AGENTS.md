@@ -56,3 +56,7 @@ includes that source's own text word for word: its `stderr`, its
 response body, or its error string. The wrapped error and the status
 field or record that the failure writes both include it, so a person
 reads the cause from the log or the status without opening a shell.
+
+Each operation at human scale writes one log line that states its
+trigger, the command, and the device's report, and a scan, a poll, or
+a steady status write writes none.

@@ -80,7 +80,9 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 		for _, own := range discovered {
 			if err := DeleteCECBus(n.client, own.Metadata.Name); err != nil {
 				fmt.Fprintf(os.Stderr, "pruning CECBus %s: %v\n", own.Metadata.Name, err)
+				continue
 			}
+			fmt.Fprintf(n.log, "deleted the discovered CECBus %s: CECBus %s names machine %s\n", own.Metadata.Name, declared[0].Metadata.Name, n.machine)
 		}
 		n.logDeclared(declared)
 		return declared[0]
@@ -95,7 +97,9 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 	}
 	if err := ApplyDiscoveredCECBus(n.client, n.machine, n.machine); err != nil {
 		fmt.Fprintf(os.Stderr, "creating CECBus %s: %v\n", n.machine, err)
+		return nil
 	}
+	fmt.Fprintf(n.log, "no CECBus names machine %s; created CECBus %s in %s, which sends nothing on the wire\n", n.machine, n.machine, CECListen)
 	return nil
 }
 

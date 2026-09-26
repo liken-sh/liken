@@ -34,20 +34,25 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 		fmt.Fprintf(os.Stderr, "listing Receivers: %v\n", err)
 		return
 	}
+	byName := map[string]*CECBus{}
+	for index := range buses {
+		byName[buses[index].Metadata.Name] = &buses[index]
+	}
 	create, prune := discoverTelevisions(buses, televisions.Items)
 	for _, bus := range create {
 		if err := CreateDiscoveredTelevision(c.client, bus); err != nil {
 			fmt.Fprintf(os.Stderr, "creating Television %s: %v\n", discoveredTelevisionName(bus), err)
+			continue
 		}
+		fmt.Fprintf(c.log, "CECBus %s reports a TV at %s named %q, and no Television names the bus; created Television %s\n",
+			bus, tvOf(byName[bus]).PhysicalAddress, tvOf(byName[bus]).OSDName, discoveredTelevisionName(bus))
 	}
 	for _, name := range prune {
 		if err := DeleteTelevision(c.client, name); err != nil {
 			fmt.Fprintf(os.Stderr, "pruning Television %s: %v\n", name, err)
+			continue
 		}
-	}
-	byName := map[string]*CECBus{}
-	for index := range buses {
-		byName[buses[index].Metadata.Name] = &buses[index]
+		fmt.Fprintf(c.log, "deleted the discovered Television %s: %s\n", name, replacedBy(televisions.Items, name))
 	}
 	for index := range televisions.Items {
 		television := &televisions.Items[index]
@@ -66,6 +71,16 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 			fmt.Fprintf(os.Stderr, "writing the status of Television %s: %v\n", television.Metadata.Name, err)
 		}
 	}
+}
+
+// replacedBy says which Television took over the bus of a discovered
+// Television that discovery deletes. discoverTelevisions deletes one
+// only from this list and only when another Television is in charge of
+// its bus, so both lookups find what they look for.
+func replacedBy(televisions []Television, name string) string {
+	index := slices.IndexFunc(televisions, func(television Television) bool { return television.Metadata.Name == name })
+	bus := televisions[index].bus()
+	return fmt.Sprintf("Television %s names CECBus %s", televisionFor(televisions, bus).Metadata.Name, bus)
 }
 
 // televisionUnchanged answers whether the status already holds what
