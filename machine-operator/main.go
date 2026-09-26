@@ -109,6 +109,13 @@ func main() {
 	// the pod steward is waiting on to refresh this same pod. The
 	// machine must keep operating without device claims. The
 	// refreshed pod brings the plugin up.
+	// The plugin can prepare a claim before the first reconcile pass
+	// reads the live spec, so the boot manifest's serio entries, and
+	// the entries a live load added since the boot, seed the list of
+	// serial lines it withholds (dra.go). Facts that do not read leave
+	// the boot manifest's entries alone.
+	bootFacts, _ := factsTree.Read()
+	setDeclaredSerio(serioInEffect(m.Spec.Serio, bootFacts))
 	go func() {
 		if err := serveDRAPlugin(context.Background(), client); err != nil {
 			fmt.Fprintf(os.Stderr, "the DRA plugin is not serving: %v\n", err)

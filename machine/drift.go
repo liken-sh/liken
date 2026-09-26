@@ -367,3 +367,39 @@ func orNone(value string) string {
 	}
 	return value
 }
+
+// SerioSetDiff compares two spec.serio lists as sets of whole entries.
+// Order carries no meaning in the list. The two directions converge
+// differently, the same way modules do: init attaches an added entry
+// while the machine runs, and a retracted entry's holder keeps the
+// port until the next boot, because a pod may hold the devices the
+// port created.
+func SerioSetDiff(desired, actuated []SerioAttachment) (added, retracted []SerioAttachment) {
+	for _, a := range desired {
+		if !slices.Contains(actuated, a) && !slices.Contains(added, a) {
+			added = append(added, a)
+		}
+	}
+	for _, a := range actuated {
+		if !slices.Contains(desired, a) && !slices.Contains(retracted, a) {
+			retracted = append(retracted, a)
+		}
+	}
+	return added, retracted
+}
+
+// SerioDrift writes SerioSetDiff for people to read, one line per
+// entry. The line count is part of the live-load rule
+// (machine-operator/converge.go): a spec applies live only when added
+// modules and added serio entries are the whole of the drift.
+func SerioDrift(desired, actuated []SerioAttachment) []string {
+	added, retracted := SerioSetDiff(desired, actuated)
+	var diffs []string
+	for _, a := range added {
+		diffs = append(diffs, fmt.Sprintf("serio: %s declared but this boot ran without it", a))
+	}
+	for _, a := range retracted {
+		diffs = append(diffs, fmt.Sprintf("serio: %s no longer declared but this boot ran with it", a))
+	}
+	return diffs
+}

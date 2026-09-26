@@ -1,6 +1,6 @@
 # 70. Init attaches serio devices to their serial lines
 
-Milestone 70. Proposed 2026-09-26. Some USB devices present a serial
+Milestone 70. Built 2026-09-26. The hardware drills run with the release that carries it. Some USB devices present a serial
 line, and their kernel driver binds only after a program attaches the
 serial line to the kernel's serio layer and keeps it attached. The
 first of these is the Pulse-Eight USB-CEC adapter, which the

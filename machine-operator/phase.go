@@ -48,8 +48,13 @@ var phasePrecedence = []api.Phase{
 // RebootPending and RejectedLastBoot are both "not converged," but
 // one resolves with a reboot and the other never will without a
 // different edit.
+//
+// SerioAttached indicates nothing either. An adapter that is unplugged
+// or refused leaves the machine working, and its workloads that do not
+// use the adapter run as before, so the condition reports the adapter
+// and leaves the machine's health to the others.
 func conditionPhase(c api.Condition) api.Phase {
-	if c.Type == "Ready" || c.Status == api.ConditionTrue {
+	if c.Type == "Ready" || c.Type == serioAttachedCondition || c.Status == api.ConditionTrue {
 		return ""
 	}
 	switch c.Reason {
@@ -129,7 +134,8 @@ func conditionPhase(c api.Condition) api.Phase {
 // condition is True. The scan skips any prior Ready, so the previous
 // pass's value cannot affect this one. It also skips the conductor's
 // grant, because the grant is a permission, not an observation about
-// this machine's health.
+// this machine's health, and SerioAttached, for the reason
+// conditionPhase gives.
 //
 // When something is False, the reason is the phase word the
 // conditions argue for (decidePhase), so the roll-up and the phase
@@ -141,7 +147,8 @@ func conditionPhase(c api.Condition) api.Phase {
 func readyCondition(conditions []api.Condition) api.Condition {
 	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
 	for _, condition := range conditions {
-		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition {
+		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition ||
+			condition.Type == serioAttachedCondition {
 			continue
 		}
 		if condition.Status != api.ConditionTrue {

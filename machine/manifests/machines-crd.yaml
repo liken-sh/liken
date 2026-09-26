@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "4"
+    liken.sh/schema-revision: "5"
 spec:
   group: liken.sh
   names:
@@ -620,6 +620,100 @@ spec:
                         a key is at most 129 characters: 64 for the
                         module name, one dot, and 64 for the parameter
                         name
+                serio:
+                  type: array
+                  description: >-
+                    The serial-line devices whose kernel driver binds
+                    only after a program attaches the line to the
+                    kernel's serio layer and keeps it attached, such
+                    as a USB-CEC adapter. Each entry names a protocol
+                    and the USB device whose serial line carries it.
+                    The machine attaches every serial line whose USB
+                    device matches the entry, and holds the
+                    attachment for the life of the boot, so the
+                    protocol's driver binds and creates its devices.
+                    An entry loads no module for itself: the line
+                    driver (cdc_acm), serport, and the protocol's
+                    driver (for example pulse8_cec) must be in
+                    spec.modules. status.serio reports each
+                    attachment and the device nodes it created, and
+                    the SerioAttached condition names the first entry
+                    that is not attached. The device inventory never
+                    publishes a matched serial line, and it publishes
+                    what the attached driver creates. Adding an entry
+                    takes effect without a reboot, the same as adding
+                    a module. Removing one takes effect at the next
+                    boot.
+                  # An exact duplicate would start two holders on one
+                  # line. The list is not a set for admission, because
+                  # the API server takes list-type set for scalar
+                  # items only, so a rule refuses the duplicate
+                  # instead.
+                  x-kubernetes-list-type: atomic
+                  maxItems: 8
+                  x-kubernetes-validations:
+                    - rule: self.all(a, self.exists_one(b, b == a))
+                      message: declare each serio entry once
+                  items:
+                    type: object
+                    required: [protocol, usb]
+                    properties:
+                      protocol:
+                        type: string
+                        # The enum is the protocol table in
+                        # machine/serio.go, and a test keeps the two
+                        # equal. A protocol joins the table only when
+                        # somebody examines that device on a liken
+                        # machine.
+                        enum: [pulse8-cec, rainshadow-cec]
+                        description: >-
+                          The protocol the device speaks. pulse8-cec
+                          is the Pulse-Eight USB-CEC adapter:
+                          9600 baud, serio type 0x40, and the
+                          pulse8_cec driver. rainshadow-cec is the
+                          RainShadow Tech HDMI-CEC adapter: 9600
+                          baud, serio type 0x41, and the
+                          rainshadow_cec driver. The values are the
+                          ones inputattach uses for the same device.
+                      usb:
+                        type: object
+                        description: >-
+                          The identity of the USB device that
+                          carries the serial line. The match uses
+                          the identity of the hardware, not the tty
+                          name, because the kernel numbers ttyACM0
+                          and ttyACM1 in the order the devices were
+                          plugged in.
+                        required: [vendor, product]
+                        properties:
+                          vendor:
+                            type: string
+                            pattern: ^[0-9a-f]{4}$
+                            description: >-
+                              The USB vendor ID, four lowercase hex
+                              digits with no prefix: the same
+                              spelling as the vendor attribute that
+                              the device inventory publishes, for
+                              example "2548".
+                          product:
+                            type: string
+                            pattern: ^[0-9a-f]{4}$
+                            description: >-
+                              The USB product ID, four lowercase hex
+                              digits with no prefix, for example
+                              "1002".
+                          serial:
+                            type: string
+                            pattern: ^[!-~]{1,126}$
+                            description: >-
+                              The USB serial number of one unit.
+                              With it, the entry attaches only the
+                              device that reports this serial number.
+                              Without it, the entry attaches every
+                              device of this vendor and product that
+                              no entry with a serial attaches. An
+                              entry with a serial takes its device
+                              first, whatever the order of the list.
                 nodeLabels:
                   type: object
                   maxProperties: 64
@@ -2750,6 +2844,30 @@ spec:
                       additionalProperties:
                         type: string
                         maxLength: 256
+                    serio:
+                      type: array
+                      description: >-
+                        The spec.serio list that the manifest of this
+                        boot declared, recorded whatever each
+                        attachment did. It is the drift reference
+                        beside modules above, and a live load adds
+                        the entries it attached. status.serio gives
+                        what each attachment did.
+                      x-kubernetes-list-type: atomic
+                      items:
+                        type: object
+                        properties:
+                          protocol:
+                            type: string
+                          usb:
+                            type: object
+                            properties:
+                              vendor:
+                                type: string
+                              product:
+                                type: string
+                              serial:
+                                type: string
                     rejection:
                       type: object
                       description: >-
@@ -3019,6 +3137,79 @@ spec:
                           any parameter declared for this module did
                           not reach the kernel, and the
                           ModuleParametersApplied condition says so.
+                serio:
+                  type: array
+                  description: >-
+                    One entry for each attachment that the machine
+                    holds or tried to hold for spec.serio. An entry
+                    that matches no serial line reports once, as
+                    Missing. An entry that matches two lines reports
+                    once for each line. This field changes while the
+                    machine runs: an adapter that is unplugged goes
+                    Missing, and it goes Attached again when it is
+                    plugged back in.
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [protocol, usb, state]
+                    properties:
+                      protocol:
+                        type: string
+                        description: >-
+                          The protocol of the spec.serio entry this
+                          attachment serves.
+                      usb:
+                        type: object
+                        description: >-
+                          The USB identity of the spec.serio entry
+                          this attachment serves.
+                        properties:
+                          vendor:
+                            type: string
+                          product:
+                            type: string
+                          serial:
+                            type: string
+                      tty:
+                        type: string
+                        description: >-
+                          The serial line that matched, for example
+                          ttyACM0. It is absent when no line matches.
+                      port:
+                        type: string
+                        description: >-
+                          The serio port that the kernel registered
+                          on the line, for example serio0.
+                      state:
+                        type: string
+                        enum: [Attached, Missing, Refused]
+                        description: >-
+                          Attached means that the machine holds the
+                          attachment, and port names the serio port
+                          once the kernel registers it. Missing
+                          means that no serial line matches the
+                          entry: the adapter is unplugged, or its
+                          line driver is not in spec.modules.
+                          Refused means that a line matches and the
+                          attachment did not complete. The message
+                          gives the call that failed and the kernel's
+                          error text, or the module to declare.
+                      message:
+                        type: string
+                        maxLength: 1024
+                        description: >-
+                          The cause of a Missing or a Refused state,
+                          named as a correction where one exists, for
+                          example "declare serport in spec.modules".
+                      nodes:
+                        type: array
+                        description: >-
+                          The device nodes the attached driver
+                          created under the port: the CEC adapter
+                          node, such as /dev/cec0, and the event node
+                          of the remote-control input device.
+                        items:
+                          type: string
                 features:
                   type: array
                   description: >-

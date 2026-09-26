@@ -383,3 +383,36 @@ func TestDeliveryRecordsEachNodesSubsystem(t *testing.T) {
 		}
 	}
 }
+
+// A serio port hangs off a tty, and the nodes its driver creates are
+// under the port: the CEC adapter's node, and the event node of the
+// remote-control input device the CEC core registers. Init reads them
+// for status.serio from the port's own directory.
+func TestSubtreeNodesReadsTheNodesUnderOneDirectory(t *testing.T) {
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "1-4:1.0", "cdc_acm", map[string]string{
+		"modalias": "usb:v2548p1002d0200dc02dsc00dp00ic02isc02ip01in00",
+	})
+	sysfs.child("usb", "1-4:1.0", "tty/ttyACM0", "tty", "ttyACM0")
+	sysfs.child("usb", "1-4:1.0", "tty/ttyACM0/serio0", "serio", "")
+	sysfs.child("usb", "1-4:1.0", "tty/ttyACM0/serio0/cec/cec0", "cec", "cec0")
+	sysfs.child("usb", "1-4:1.0", "tty/ttyACM0/serio0/rc/rc0/input83", "input", "")
+	sysfs.child("usb", "1-4:1.0", "tty/ttyACM0/serio0/rc/rc0/input83/event13", "input", "input/event13")
+
+	port := filepath.Join(sysfs.root, "bus", "usb", "devices", "1-4:1.0", "tty", "ttyACM0", "serio0")
+	got := SubtreeNodes(port)
+
+	want := []DeliveredNode{
+		{Path: "/dev/cec0", Subsystem: "cec"},
+		{Path: "/dev/input/event13", Subsystem: "input"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("SubtreeNodes = %+v", got)
+	}
+}
+
+func TestSubtreeNodesIsEmptyForAMissingDirectory(t *testing.T) {
+	if got := SubtreeNodes(filepath.Join(t.TempDir(), "gone")); got != nil {
+		t.Errorf("SubtreeNodes = %+v", got)
+	}
+}

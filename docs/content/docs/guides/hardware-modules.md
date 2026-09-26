@@ -1,7 +1,7 @@
 ---
 title: Load the drivers for a machine's hardware
 weight: 75
-description: "Make a machine's hardware appear as devices by naming its drivers in spec.modules in load order, with the parameters they need, and by rebooting when a driver bound the wrong device. Use when a GPU, sound card, radio, sensor, or USB controller is missing from what a machine publishes, or when status.hardware.unclaimed lists a device."
+description: "Make a machine's hardware appear as devices by naming its drivers in spec.modules in load order, with the parameters they need, by declaring in spec.serio the serial-line attachment a USB-CEC adapter needs, and by rebooting when a driver bound the wrong device. Use when a GPU, sound card, radio, sensor, USB controller, or USB-CEC adapter is missing from what a machine publishes, or when status.hardware.unclaimed lists a device."
 ---
 
 # Load the drivers for a machine's hardware
@@ -67,6 +67,12 @@ expects. The cases that come up:
 * **Bluetooth.** A machine whose adapter serves a remote or a
   keyboard needs `uhid` beside the adapter's driver, and
   [Give a workload a device](/docs/guides/devices/) says why.
+* **USB-CEC adapters.** A Pulse-Eight or RainShadow adapter needs
+  three modules: `cdc_acm`, which creates its serial line, `serport`,
+  and the adapter's own driver, `pulse8_cec` or `rainshadow_cec`. The
+  adapter's driver binds only after the machine attaches the serial
+  line, which a `spec.serio` entry declares. See
+  [Attach a USB-CEC adapter](#attach-a-usb-cec-adapter).
 
 Write the set down with the sub-drivers first and the controller
 last.
@@ -93,6 +99,43 @@ time. An addition loads live, without a reboot. Removing a module
 needs a reboot, and a change in the order alone stages for the next
 boot with no reboot request, because the machine asks for nothing it
 can apply live.
+
+### Attach a USB-CEC adapter
+
+A USB-CEC adapter's driver is a serio driver. It binds to a serio
+port, and the kernel creates that port only while a program holds
+the `serport` line discipline on the adapter's serial line. On a
+general-purpose distribution, `udev` starts
+[`inputattach`](https://sourceforge.net/p/linuxconsole/code/ci/master/tree/utils/inputattach.c)
+to hold it, as the kernel's
+[CEC admin guide](https://docs.kernel.org/admin-guide/media/cec.html)
+describes. On `liken`, the machine holds the attachment for the life
+of the boot. A
+[`spec.serio`](/docs/reference/machine/#spec--serio) entry names the
+protocol and the adapter's USB identity, and the modules go in
+`spec.modules` as usual:
+
+    spec:
+      modules:
+        - cdc_acm
+        - serport
+        - pulse8_cec
+      serio:
+        - protocol: pulse8-cec
+          usb:
+            vendor: "2548"
+            product: "1002"
+
+The entry matches by the adapter's vendor and product, not by the
+tty name, because the kernel numbers `ttyACM0` and `ttyACM1` in the
+order the adapters were plugged in. Add `usb.serial` to match one
+unit when a machine has two adapters of one model. An entry with a
+serial takes its adapter first, and an entry without one attaches
+the adapters of that model that no entry with a serial names. An
+added entry attaches without a reboot, and a removed entry stays
+attached until the next boot. `status.hardware.unclaimed` lists an
+adapter that `cdc_acm` drives and no entry attaches, with the message
+`declare serport and pulse8_cec in spec.modules and a pulse8-cec entry in spec.serio`.
 
 ## 4. Set the parameters a driver needs
 
@@ -139,6 +182,20 @@ means the kernel refused a module it has, and the message names the
 correction. `status.modules[].parameters` shows what the kernel
 reports the value for each declared parameter, in the kernel's own rendering.
 
+Read the result of every `spec.serio` entry:
+
+    kubectl get machine <name> -o jsonpath='{.status.serio}' | jq
+
+`Attached` is the good state, and `nodes` lists the devices the
+adapter's driver created, such as `/dev/cec0` and the remote's event
+node. `Missing` means no serial line matches the entry: the adapter
+is unplugged, or `cdc_acm` is not loaded. `Refused` means a line
+matches and the attachment did not complete, and the message names
+the module to declare or gives the kernel's error. The
+`SerioAttached` condition names the first entry that is not
+attached. It does not change the machine's `Ready` condition,
+because a machine with an unplugged adapter still works.
+
 Then read the operator that owns the device. A screen appears in
 the display operator's slice, an output in the audio operator's, a
 radio in the Bluetooth operator's:
@@ -151,7 +208,7 @@ the device.
 ## 7. Write the list into the manifest
 
 A live patch changes the cluster and nothing else. Copy the final
-`spec.modules` and `spec.moduleParameters` into the machine's
-manifest in your deployment directory, so the next install stick
-and the next reinstall start from the same list. On a fleet run from
+`spec.modules`, `spec.moduleParameters`, and `spec.serio` into the
+machine's manifest in your deployment directory, so the next install
+stick and the next reinstall start from the same list. On a fleet run from
 git, the commit is the edit, and the machine converges to it.

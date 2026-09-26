@@ -333,6 +333,41 @@ func moduleParametersCondition(declared map[string]string, observed []machine.Mo
 		none)
 }
 
+// serioAttachedCondition is the type of the condition serioCondition
+// builds. The phase and the Ready roll-up skip it by this name
+// (phase.go).
+const serioAttachedCondition = "SerioAttached"
+
+// serioCondition summarizes status.serio. It is True when every entry
+// is Attached. Otherwise its reason is the first unattached entry's
+// state, Missing or Refused, and its message names that entry and
+// carries init's message, which gives the kernel's error text or the
+// module to declare. Unlike the modules, the attachments change while
+// the machine runs, because an adapter can be unplugged, so this
+// condition moves between passes without a boot.
+func serioCondition(observed []machine.SerioStatus) api.Condition {
+	for _, s := range observed {
+		if s.State == machine.SerioAttached {
+			continue
+		}
+		reason := string(machine.SerioRefused)
+		if s.State == machine.SerioMissing {
+			reason = string(machine.SerioMissing)
+		}
+		entry := s.Attachment().String()
+		if s.TTY != "" {
+			entry += " on " + s.TTY
+		}
+		return api.Condition{
+			Type: serioAttachedCondition, Status: api.ConditionFalse,
+			Reason: reason, Message: entry + ": " + s.Message,
+		}
+	}
+	return outcomesCondition(serioAttachedCondition, len(observed), nil, "", "AllAttached",
+		fmt.Sprintf("all %d serio attachments hold", len(observed)),
+		"no serio entries declared")
+}
+
 // featuresCondition summarizes the boot's feature outcomes as one
 // condition, in the same form as modulesCondition. Any state other
 // than Active carries init's message, which names the fix. For a

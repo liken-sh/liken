@@ -132,12 +132,21 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 	if err != nil {
 		return Delivery{}
 	}
-	var delivery Delivery
-	_ = filepath.WalkDir(resolved, func(path string, entry fs.DirEntry, err error) error {
+	return Delivery{Nodes: SubtreeNodes(resolved), BusNode: usbfsNode(sysRoot, d)}
+}
+
+// SubtreeNodes walks one sysfs directory and returns the device nodes
+// under it, in walk order, stopping at the boundaries isSubtreeBoundary
+// names. The directory must be a real directory, not a symlink to one,
+// so that its children are real directories too. A directory that
+// does not exist has no nodes.
+func SubtreeNodes(dir string) []DeliveredNode {
+	var nodes []DeliveredNode
+	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || !entry.IsDir() {
 			return nil
 		}
-		if path != resolved && isSubtreeBoundary(path) {
+		if path != dir && isSubtreeBoundary(path) {
 			return fs.SkipDir
 		}
 		if _, err := os.Stat(filepath.Join(path, "dev")); err != nil {
@@ -151,11 +160,10 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 		if node.Subsystem == "block" {
 			node.Block = filepath.Base(path)
 		}
-		delivery.Nodes = append(delivery.Nodes, node)
+		nodes = append(nodes, node)
 		return nil
 	})
-	delivery.BusNode = usbfsNode(sysRoot, d)
-	return delivery
+	return nodes
 }
 
 // usbfsNode reports the usbfs node of the USB device that an

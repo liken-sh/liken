@@ -145,6 +145,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteBootNetwork(in.boot.Network)
 	tree.WriteBootModules(in.boot.Modules)
 	tree.WriteBootModuleParameters(in.boot.ModuleParameters)
+	tree.WriteBootSerio(in.boot.Serio)
 	tree.WriteBootRlimits(in.boot.Rlimits)
 	tree.WriteBootManifest(in.boot.ManifestSource, in.boot.ManifestHash)
 	tree.WriteBootClusterManifest(in.boot.ClusterManifestSource, in.boot.ClusterManifestHash)

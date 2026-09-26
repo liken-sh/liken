@@ -59,6 +59,12 @@ these three conditions are true:
    disk belongs to the machine, through a storage role, or to the
    workloads, through a claim, but never to both.
 
+One node is withheld from every device: the tty of a serial line
+that a `spec.serio` entry matches. The machine holds that line
+attached to the kernel's serio layer, and a pod that received the tty
+could end the attachment under every other claim. See
+[Serial-line adapters](#serial-line-adapters).
+
 The slice is an allocation offer, not a full record of the machine's
 hardware. The scheduler can allocate only what a slice lists, so the
 slice contents control which devices workloads can claim.
@@ -96,7 +102,7 @@ correct result.
 | `driver` | string | the name of the bound driver, such as `i915` |
 | `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
-| `subsystem` | string | the kind of device that `liken` published: `drm`, `sound`, `tty`. It is absent when the delivery is a mix `liken` has no name for, and when the device delivers no node of its own, as a Bluetooth adapter does |
+| `subsystem` | string | the kind of device that `liken` published: `drm`, `sound`, `tty`, `cec`. It is absent when the delivery is a mix `liken` has no name for, and when the device delivers no node of its own, as a Bluetooth adapter does |
 | `renderNode` | bool | the device supplies a DRM render node |
 | `displayNode` | bool | the device supplies a DRM card node, which provides modesetting |
 | `name` | string | the name of the device in words, from its own strings or from the PCI database |
@@ -184,6 +190,12 @@ connected. The legacy framebuffer node is not delivered at all:
 holding it grants display takeover, and no workload claims a bare
 framebuffer.
 
+A USB-CEC adapter that a `spec.serio` entry attaches publishes two
+devices, both exclusive: the CEC bus, with `subsystem: cec`, and the
+TV remote's input device, with the suffix `-input` and
+`subsystem: input`.
+[Serial-line adapters](#serial-line-adapters) gives the reasons.
+
 A device that delivers one kind of node publishes as one device,
 unless it is a GPU. When a device delivers a mix that `liken` has no
 name for, `liken` publishes the whole device as exclusive and omits
@@ -238,7 +250,9 @@ that its image gives its user.
 ### USB devices
 
 A claim on a USB device also delivers that device's usbfs node,
-`/dev/bus/usb/<busnum>/<devnum>`. A program that uses libusb, for
+`/dev/bus/usb/<busnum>/<devnum>`. The devices of an attached serial
+line are the exception, and
+[Serial-line adapters](#serial-line-adapters) says why. A program that uses libusb, for
 example Network UPS Tools, reads sysfs to find the hardware and then
 opens this node to communicate with it. A node that a kernel driver
 registers, such as `hidraw`, supplies that driver's protocol only, so
@@ -310,6 +324,64 @@ events from the real node, which comes and goes with the radio link,
 into a virtual device whose node stays. `uinput` is built into the
 `liken` kernel, so every machine has `/dev/uinput`. The bound is 32
 input devices on one machine.
+
+### Serial-line adapters
+
+Some USB devices present a serial line, and their kernel driver binds
+only after a program attaches the line to the kernel's serio layer
+and keeps it attached. A USB-CEC adapter is one: `cdc_acm` creates
+`/dev/ttyACM0`, and the adapter's driver, `pulse8_cec` or
+`rainshadow_cec`, binds to the serio port that exists only while the
+attachment holds. The kernel's
+[CEC admin guide](https://docs.kernel.org/admin-guide/media/cec.html)
+describes the setup on a general-purpose distribution. On `liken`, a
+[`spec.serio`](/docs/reference/machine/#spec--serio) entry declares
+the attachment, and the machine holds it for the life of the boot.
+[Load the drivers for a machine's hardware](/docs/guides/hardware-modules/#attach-a-usb-cec-adapter)
+gives the steps.
+
+The attached driver creates a CEC adapter, `/dev/cec0`, and the CEC
+core registers an input device for the TV remote's keys, with an
+event node under `/dev/input`. `liken` publishes the adapter's
+serial-line interface as two devices:
+
+* **The CEC bus**, with the interface's bare name and
+  `subsystem: cec`. A claim on it delivers the `/dev/cec*` node. It
+  is exclusive. The CEC core lets several processes open one adapter,
+  but only one can be the exclusive initiator or follower, and two
+  programs that configure logical addresses on one adapter undo each
+  other.
+* **The TV remote**, with the suffix `-input` and `subsystem: input`.
+  A claim on it delivers the event node. It is exclusive, because one
+  reader must own the remote's key presses.
+
+The two devices answer different claims: a program that talks on the
+bus claims the first, and a program that reads the remote claims the
+second. Both carry the adapter's attributes, so one claim can pair
+them with `matchAttribute: liken.sh/address`. The remote-control core
+registers no LIRC node for a device whose only protocol is CEC, so a
+claim delivers none.
+
+The tty is never published, before or after the attachment. A pod
+that received it could set another line discipline or write to the
+line, and either one ends the attachment under every other claim.
+So before the attachment, the adapter's serial line publishes
+nothing. The usbfs node is not delivered either, because through it
+a program could detach `cdc_acm` and end the attachment the same way.
+The adapter's other interfaces keep their own devices: the
+Pulse-Eight's HID interface still publishes as an ordinary device.
+
+An unplug removes both devices from the slice. A pod that holds them
+keeps file descriptors for nodes that are gone, and Kubernetes does
+not evict it. A program that holds one of these claims must end when
+a read or an `ioctl` returns `ENODEV`. The kubelet then restarts the
+container, and the new container receives the nodes that the claim's
+CDI specification names at that moment. The node rewrites that
+specification on every pass, so when the adapter returns to the same
+USB port, the devices return with the same names and the program
+runs again with no new allocation. A published name follows the USB
+port, so an adapter moved to another port is a different device, and
+its claimant needs a new pod.
 
 ## Limits
 

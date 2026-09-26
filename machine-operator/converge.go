@@ -323,9 +323,11 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	added, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
 	parameterDiffs := machine.ModuleParameterDrift(m.Spec.Modules, facts.Boot.Modules,
 		m.Spec.ModuleParameters, facts.Boot.ModuleParameters)
+	serioAdded, serioRetracted := machine.SerioSetDiff(m.Spec.Serio, facts.Boot.Serio)
 	drift := slices.Concat(storageDiffs, networkDiffs,
 		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules,
 			m.Spec.ModuleParameters, facts.Boot.ModuleParameters),
+		machine.SerioDrift(m.Spec.Serio, facts.Boot.Serio),
 		machine.RlimitDrift(m.Spec.Rlimits, facts.Boot.Rlimits))
 	// The order difference stays apart from drift and never joins it.
 	// The lines in drift are the count that decides the live-load
@@ -388,6 +390,12 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	if err := machine.ValidateRlimits(m.Spec.Rlimits); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}
+	// A serio entry that fails here could never match a device, and
+	// the API server refuses the same entries, so only a manifest
+	// that no API server admitted reaches this check.
+	if err := machine.ValidateSerio(m.Spec.Serio); err != nil {
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}
@@ -440,7 +448,14 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// applies the additions in the order the manifest lists them, and
 	// the reorder of what the boot already loaded stays staged for the
 	// next boot.
-	if len(retracted) == 0 && len(drift) == len(added) {
+	//
+	// An added serio entry is live-class on the same terms. Init
+	// attaches it the moment the load declares it, and SerioDrift
+	// writes exactly one line for each added entry, so the count
+	// extends without naming a field. A retracted entry is
+	// reboot-class, like a retracted module: its holder keeps the port
+	// for the pods that hold the devices the port created.
+	if len(retracted) == 0 && len(serioRetracted) == 0 && len(drift) == len(added)+len(serioAdded) {
 		c.requestLoad = true
 		c.condition = notConverged("SpecConverged", "LoadRequested",
 			fmt.Sprintf("module load requested to apply the staged spec (%.12s) in place: %s", hash, diffs))

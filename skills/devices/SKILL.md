@@ -110,6 +110,14 @@ remote or a keyboard. The adapter's claim then delivers `/dev/uhid`.
 The [device reference](https://liken.sh/docs/reference/devices/#bluetooth-adapters)
 states why.
 
+A USB-CEC adapter needs a `spec.serio` entry beside its modules,
+because its driver binds only after the machine attaches the
+adapter's serial line.
+[Attach a USB-CEC adapter](https://liken.sh/docs/guides/hardware-modules/#attach-a-usb-cec-adapter)
+gives the steps, and the
+[device reference](https://liken.sh/docs/reference/devices/#serial-line-adapters)
+describes the two devices the adapter publishes.
+
 ## 3. Say what your workload needs
 
 A `DeviceClass` is a named set of conditions on hardware. Write one

@@ -233,6 +233,14 @@ milestone number because their implementation scope is not settled.
   series in the plan's table wait on facts the machine does not hold:
   an upgrade's duration, and the firmware version and update state
   that plan 33 brings.
+* **70.** [Init attaches serio devices to their serial lines](completed/70-init-attaches-serio-devices.md).
+  Built 2026-09-26. A `spec.serio` entry names a protocol and a USB
+  device, and init holds the `serport` line discipline on that
+  device's serial line for the life of the boot, so a USB-CEC
+  adapter's kernel driver binds. The DRA driver publishes the result
+  as a CEC device and an input device, and never publishes the serial
+  line. A hand drill proved the kernel path on a Pulse-Eight adapter;
+  the drills in the plan run with the release.
 
 ## Rejected
 
@@ -281,12 +289,6 @@ milestone number because their implementation scope is not settled.
   in pinned, signed stagex images. A component builds only when its
   pin changes, and each build goes to `releases.liken.sh/components/`
   once, with its source, its recipe, and a signed attestation.
-* **70.** [Init attaches serio devices to their serial lines](70-init-attaches-serio-devices.md).
-  A `spec.serio` entry names a protocol and a USB device, and init
-  holds the `serport` line discipline on that device's serial line
-  for the life of the boot, so a USB-CEC adapter's kernel driver
-  binds. The DRA driver publishes the result as a CEC device and an
-  input device, and never publishes the serial line.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 

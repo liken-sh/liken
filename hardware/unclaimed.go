@@ -60,9 +60,11 @@ func LoadCatalog(moduleDir, pciIDsPath string) (*Catalog, error) {
 
 // Discover walks sysfs and returns the machine's current unclaimed
 // devices. init makes this one call at boot, and again each time a
-// uevent reports that the hardware changed.
-func (c *Catalog) Discover(sysRoot string) []machine.UnclaimedDevice {
-	return c.Unclaimed(DiscoverDevices(sysRoot, c.PCI))
+// uevent reports that the hardware changed. serio is the machine's
+// spec.serio list, which decides whether a serial-line adapter is
+// finished (unclaimedserio.go).
+func (c *Catalog) Discover(sysRoot string, serio []machine.SerioAttachment) []machine.UnclaimedDevice {
+	return c.Unclaimed(DiscoverDevices(sysRoot, c.PCI), serio)
 }
 
 // Unclaimed judges a walked device list. Unclaimed reports a device
@@ -74,10 +76,17 @@ func (c *Catalog) Discover(sysRoot string) []machine.UnclaimedDevice {
 // sorts the result so that the report stays stable across walks. A
 // status object that reorders on every read causes watches to fire
 // for no reason.
-func (c *Catalog) Unclaimed(devices []Device) []machine.UnclaimedDevice {
+//
+// A driven device joins the report in one case: a serial-line adapter
+// that works only after an attachment, which no spec.serio entry
+// declares (unclaimedserio.go).
+func (c *Catalog) Unclaimed(devices []Device, serio []machine.SerioAttachment) []machine.UnclaimedDevice {
 	var unclaimed []machine.UnclaimedDevice
 	for _, d := range devices {
 		if d.Driver != "" {
+			if u, ok := unattachedAdapter(d, serio); ok {
+				unclaimed = append(unclaimed, u)
+			}
 			continue
 		}
 		var candidates, aboard []string

@@ -41,6 +41,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteFirmware(s.Firmware))
 	must(tree.WriteStorage(s.Storage))
 	must(tree.WriteModules(s.Modules))
+	must(tree.WriteSerio(s.Serio))
 	must(tree.WriteFeatures(s.Features))
 	must(tree.WriteRegistries(s.Registries))
 	must(tree.WriteRuntime(s.Runtime))
@@ -56,6 +57,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteBootModules(s.Boot.Modules))
 	must(tree.WriteBootRlimits(s.Boot.Rlimits))
 	must(tree.WriteBootModuleParameters(s.Boot.ModuleParameters))
+	must(tree.WriteBootSerio(s.Boot.Serio))
 	must(tree.WriteBootStorage(s.Boot.Storage))
 	must(tree.WriteBootNetwork(s.Boot.Network))
 	must(tree.WriteRejection(RejectMachine, s.Boot.Rejection))
@@ -202,6 +204,24 @@ func everythingSet() *MachineStatus {
 				Parameters: map[string]string{"power_save": "1", "enable_msi": "Y"},
 			},
 		},
+		// An attached adapter with its nodes, one whose attach the
+		// kernel refused, and an entry no line matches, so the round
+		// trip covers every state and the node list.
+		Serio: []SerioStatus{
+			{
+				Protocol: "pulse8-cec", USB: SerioUSB{Vendor: "2548", Product: "1002"},
+				TTY: "ttyACM0", Port: "serio0", State: SerioAttached,
+				Nodes: []string{"/dev/cec0", "/dev/input/event14"},
+			},
+			{
+				Protocol: "pulse8-cec", USB: SerioUSB{Vendor: "2548", Product: "1002"},
+				TTY: "ttyACM1", State: SerioRefused, Message: "TIOCSETD: operation not permitted",
+			},
+			{
+				Protocol: "rainshadow-cec", USB: SerioUSB{Vendor: "0000", Product: "0001", Serial: "RS-7"},
+				State: SerioMissing, Message: "no USB device 0000:0001 is plugged in",
+			},
+		},
 		Features: []FeatureStatus{
 			{Name: "gpu", State: FeatureActive},
 			{Name: "sr-iov", State: FeatureFailed, Message: "module refused"},
@@ -228,6 +248,10 @@ func everythingSet() *MachineStatus {
 			// a scalar fact and a space is not a separator there.
 			CommandLine: "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10",
 			Modules:     []string{"nvme", "e1000e", "snd_hda_intel"},
+			Serio: []SerioAttachment{
+				{Protocol: "pulse8-cec", USB: SerioUSB{Vendor: "2548", Product: "1002"}},
+				{Protocol: "rainshadow-cec", USB: SerioUSB{Vendor: "0000", Product: "0001", Serial: "RS-7"}},
+			},
 			// The declared map as the manifest wrote it: the dotted key
 			// the kernel uses, and a value the kernel renders differently
 			// when it is read back.

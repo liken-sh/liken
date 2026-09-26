@@ -37,7 +37,7 @@ func TestUnclaimedReportsAnUndrivenDeviceWithShippedCandidates(t *testing.T) {
 	devices := []Device{{Bus: "usb", Modalias: stickModalias,
 		Name: "QEMU QEMU USB HARDDRIVE", Class: "mass-storage"}}
 
-	got := c.Unclaimed(devices)
+	got := c.Unclaimed(devices, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("Unclaimed = %+v, want 1 entry", got)
@@ -59,7 +59,7 @@ func TestUnclaimedNamesTheFixWhenTheImageLacksTheDriver(t *testing.T) {
 	c := catalog(t, stickAliases, nil, nil)
 	devices := []Device{{Bus: "usb", Modalias: stickModalias}}
 
-	got := c.Unclaimed(devices)
+	got := c.Unclaimed(devices, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("Unclaimed = %+v, want 1 entry", got)
@@ -73,7 +73,7 @@ func TestUnclaimedPrefersShippedCandidatesInTheMessage(t *testing.T) {
 	c := catalog(t, stickAliases, []string{"usb_storage"}, nil)
 	devices := []Device{{Bus: "usb", Modalias: stickModalias}}
 
-	got := c.Unclaimed(devices)
+	got := c.Unclaimed(devices, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("Unclaimed = %+v, want 1 entry", got)
@@ -90,7 +90,7 @@ func TestUnclaimedSkipsBoundDevices(t *testing.T) {
 	c := catalog(t, stickAliases, []string{"usb_storage"}, nil)
 	devices := []Device{{Bus: "usb", Modalias: stickModalias, Driver: "usb-storage"}}
 
-	if got := c.Unclaimed(devices); got != nil {
+	if got := c.Unclaimed(devices, nil); got != nil {
 		t.Errorf("Unclaimed = %+v, want nil for a driven device", got)
 	}
 }
@@ -100,7 +100,7 @@ func TestUnclaimedSkipsDevicesNoModuleCouldDrive(t *testing.T) {
 	devices := []Device{{Bus: "pci",
 		Modalias: "pci:v00008086d00001237sv00000000sd00000000bc06sc00i00"}}
 
-	if got := c.Unclaimed(devices); got != nil {
+	if got := c.Unclaimed(devices, nil); got != nil {
 		t.Errorf("Unclaimed = %+v, want nil when no alias matches", got)
 	}
 }
@@ -111,7 +111,7 @@ func TestUnclaimedSkipsDevicesWhoseOnlyCandidateIsBuiltin(t *testing.T) {
 	devices := []Device{{Bus: "usb",
 		Modalias: "usb:v1D6Bp0002d0515dc09dsc00dp01ic09isc00ip00in00"}}
 
-	if got := c.Unclaimed(devices); got != nil {
+	if got := c.Unclaimed(devices, nil); got != nil {
 		t.Errorf("Unclaimed = %+v, want nil when the driver is resident already", got)
 	}
 }
@@ -124,7 +124,7 @@ func TestUnclaimedSortsByBusThenModalias(t *testing.T) {
 		{Bus: "pci", Modalias: "pci:v00001AF4d00001050sv00001AF4sd00001100bc03sc80i00"},
 	}
 
-	got := c.Unclaimed(devices)
+	got := c.Unclaimed(devices, nil)
 
 	if len(got) != 2 || got[0].Bus != "pci" || got[1].Bus != "usb" {
 		t.Errorf("Unclaimed order = %+v, want pci before usb", got)

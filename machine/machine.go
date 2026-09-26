@@ -170,6 +170,20 @@ type MachineSpec struct {
 	// next boot like every other reboot-class edit.
 	ModuleParameters map[string]string `json:"moduleParameters,omitempty"`
 
+	// Serio names the serial-line devices whose kernel driver binds
+	// only after a program attaches the line to the serio layer, such
+	// as a USB-CEC adapter (serio.go). Init holds each attachment for
+	// the life of the boot. An entry loads no module for itself: the
+	// line driver, serport, and the protocol's driver belong in
+	// Modules, the same as every other driver.
+	//
+	// The field converges on the terms Modules does. An added entry
+	// attaches without a reboot, through the same live load that
+	// loads an added module. A removed entry stages for the next
+	// boot, because the holder keeps the port for any pod that holds
+	// the devices the port created.
+	Serio []SerioAttachment `json:"serio,omitempty"`
+
 	// NodeLabels is this machine's scheduling identity: the labels
 	// that its Kubernetes Node object carries. Workloads select
 	// machines using these labels, for example to find which machine

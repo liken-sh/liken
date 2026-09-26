@@ -129,6 +129,13 @@ type MachineStatus struct {
 	// image, not to the spec.
 	Modules []ModuleStatus `json:"modules,omitempty"`
 
+	// Serio reports each attachment init holds or tried to hold for
+	// spec.serio, and the device nodes each attached driver created.
+	// Unlike Modules, it changes while the machine runs: an adapter
+	// that is unplugged goes Missing, and it goes Attached again
+	// when it is plugged back in.
+	Serio []SerioStatus `json:"serio,omitempty"`
+
 	// Features reports this machine's standing on every feature that
 	// the cluster document enables, in the Cluster's spec.features.
 	// It makes queryable the same verdicts that init prints at boot.
@@ -800,6 +807,13 @@ type BootStatus struct {
 	// for spec.modules. It records the request; the readback lives
 	// in status.modules[].parameters.
 	ModuleParameters map[string]string `json:"moduleParameters,omitempty"`
+
+	// Serio is the spec.serio list this boot declared, the drift
+	// reference for that field the same way Modules is for
+	// spec.modules. It records the request whatever each attachment's
+	// outcome was; status.serio reports the outcomes. A live load
+	// adds the entries it applied.
+	Serio []SerioAttachment `json:"serio,omitempty"`
 
 	// Slot is the system slot this boot came from, "A" or "B", read
 	// from the liken.slot= parameter in each boot entry's command

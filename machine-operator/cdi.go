@@ -244,7 +244,7 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device)
 		if !ok {
 			continue
 		}
-		published, ok := resolveAllocated(allocated, sysRoot, byName)
+		published, ok := resolveAllocated(allocated, sysRoot, byName, declaredSerio())
 		if !ok {
 			continue
 		}

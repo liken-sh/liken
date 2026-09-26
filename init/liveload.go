@@ -8,9 +8,11 @@ package main
 // the kernel binds a resident driver to already-plugged hardware on
 // its own, in either order. So an additive spec.modules edit
 // converges here, in place, with nothing drained and nothing
-// restarted. The operator stages the manifest as it would for a
-// reboot (durability: the next boot must load the same list) and
-// writes a modules intent. This file is init's response.
+// restarted. An added spec.serio entry converges the same way, in the
+// same load: the serio watch attaches it as soon as this load
+// declares it (serio.go). The operator stages the manifest as it
+// would for a reboot (durability: the next boot must load the same
+// list) and writes a modules intent. This file is init's response.
 //
 // The intent is only a signal. The staged store is the truth about
 // what to apply, and init re-derives the manifest's live-applicability
@@ -58,7 +60,11 @@ type moduleLoader struct {
 	// the intent, so a stale or forged intent still applies nothing
 	// that a reboot would apply differently.
 	bootParameters map[string]string
-	statuses       []machine.ModuleStatus
+	// bootSerio is the spec.serio list the machine counts as declared,
+	// and serio is the registry a load declares an added entry to.
+	bootSerio []machine.SerioAttachment
+	serio     *serioRegistry
+	statuses  []machine.ModuleStatus
 }
 
 // apply performs one live load. It reads the staged manifest, refuses
@@ -121,6 +127,16 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 		return
 	}
 
+	// A retracted serio entry waits for a boot, the same as a
+	// retracted module: its holder keeps the port for the pods that
+	// hold the devices the port created.
+	addedSerio, retractedSerio := machine.SerioSetDiff(doc.Spec.Serio, l.bootSerio)
+	if len(retractedSerio) != 0 {
+		fmt.Printf("liken: modules: the staged spec (%.12s) retracts a serio entry (%s); it needs a boot, not a load\n",
+			hash, strings.Join(machine.SerioDrift(doc.Spec.Serio, l.bootSerio), "; "))
+		return
+	}
+
 	// The diff's added set comes back sorted, and a reboot loads
 	// spec.modules in the manifest's own order. The live load must
 	// match the reboot it claims equivalence with, because the order
@@ -147,6 +163,7 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 	// report a declared reorder as converged.
 	l.bootModules = slices.Concat(l.bootModules, load)
 	l.bootParameters = deliveredParameters(doc.Spec.ModuleParameters, outcomes)
+	l.bootSerio = slices.Concat(l.bootSerio, addedSerio)
 	l.statuses = mergeModuleStatuses(l.statuses, outcomes)
 	// The write order is the commit protocol. boot/modules and modules/
 	// land first, and boot/manifest lands last, because the manifest
@@ -155,10 +172,32 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 	// promoted manifest hash before the module facts that explain it.
 	l.tree.WriteBootModules(l.bootModules)
 	l.tree.WriteBootModuleParameters(l.bootParameters)
+	l.tree.WriteBootSerio(l.bootSerio)
 	l.tree.WriteModules(l.statuses)
 	l.tree.WriteBootManifest(machine.ManifestSourceProven, hash)
-	fmt.Printf("liken: spec %.12s applied in place: %s loaded without a reboot\n",
-		hash, strings.Join(load, ", "))
+	// The declaration comes after the commit point. The serio watch
+	// reports each attachment in status.serio on its own, and the
+	// operator's convergence judges only the boot record above.
+	if l.serio != nil && len(addedSerio) != 0 {
+		l.serio.declare(l.bootSerio)
+	}
+	fmt.Printf("liken: spec %.12s applied in place without a reboot: %s\n",
+		hash, appliedInPlace(load, addedSerio))
+}
+
+// appliedInPlace names what a live load applied, for its console line.
+func appliedInPlace(loaded []string, attached []machine.SerioAttachment) string {
+	var parts []string
+	if len(loaded) != 0 {
+		parts = append(parts, strings.Join(loaded, ", ")+" loaded")
+	}
+	for _, a := range attached {
+		parts = append(parts, a.String()+" declared for attachment")
+	}
+	if len(parts) == 0 {
+		return "nothing to load"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // deliveredParameters is the record a live load writes: the staged

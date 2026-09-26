@@ -280,6 +280,12 @@ func main() {
 	boot.Modules = slices.Clone(m.Spec.Modules)
 	boot.ModuleParameters = m.Spec.ModuleParameters
 	moduleStatuses := loadDeclaredModules(m.Spec.Modules, m.Spec.ModuleParameters)
+	// The serio entries depend on the modules above, so they are
+	// declared after the loads. The boot record keeps the request, the
+	// drift reference, the same way it keeps the module list. The
+	// serio watch attaches them once the facts tree exists (serio.go).
+	boot.Serio = slices.Clone(m.Spec.Serio)
+	serioAttachments.declare(m.Spec.Serio)
 
 	// The cluster's opt-in features are actuated and reported per
 	// machine, the same way as declared modules (features.go). Bundled
@@ -500,6 +506,12 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// device database, and a machine gains its first iSCSI session long
 	// after this boot, whenever a workload asks for a volume.
 	plane.start("the disk links", watchDiskLinks)
+	// The serio watch holds the attachments spec.serio declares
+	// (serio.go). It starts here, before k3s, so an adapter that is
+	// plugged in at boot has its devices before the machine operator
+	// publishes its first slice. It runs on every machine, because a
+	// live load can declare the first entry at any time.
+	plane.start("the serio watch", watchSerio(serioAttachments, factsTree))
 	// A machine with time sources keeps disciplining its clock for
 	// as long as it runs. A free-running machine has no source to
 	// follow, and its status already states this.
@@ -540,6 +552,8 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		bootNetwork:    m.Spec.Network,
 		bootModules:    boot.Modules,
 		bootParameters: boot.ModuleParameters,
+		bootSerio:      boot.Serio,
+		serio:          serioAttachments,
 		statuses:       moduleStatuses,
 	}
 	plane.start("the module loader", func(ctx context.Context) error {

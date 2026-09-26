@@ -48,12 +48,13 @@ func loadHardwareCatalog() *hardware.Catalog {
 }
 
 // discoverUnclaimed is the boot-time walk, nil-safe for images with
-// no catalog.
+// no catalog. The declared serio entries decide whether a serial-line
+// adapter still needs one (hardware/unclaimedserio.go).
 func discoverUnclaimed(catalog *hardware.Catalog) []machine.UnclaimedDevice {
 	if catalog == nil {
 		return nil
 	}
-	return catalog.Discover(sysfsRoot)
+	return catalog.Discover(sysfsRoot, serioAttachments.declaredEntries())
 }
 
 // watchHardware is the machine-plane component that keeps the report
@@ -92,7 +93,7 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 			settle(ctx, uevents, time.Second, 5*time.Second)
 
 			devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
-			unclaimed := catalog.Unclaimed(devices)
+			unclaimed := catalog.Unclaimed(devices, serioAttachments.declaredEntries())
 			disks := discoverBlockDevices()
 			for _, line := range hardwareTransitions(last, unclaimed, devices) {
 				fmt.Println(line)
@@ -159,7 +160,12 @@ func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hard
 				driver = d.Driver
 			}
 		}
-		if driver != "" {
+		// An entry with no candidates is a serial-line adapter that
+		// already had its driver. It leaves the list when a
+		// spec.serio entry declares it, not when a driver binds.
+		if driver != "" && len(u.Candidates) == 0 {
+			lines = append(lines, fmt.Sprintf("liken: hardware: %s is now declared in spec.serio", nameOrModalias(u)))
+		} else if driver != "" {
 			lines = append(lines, fmt.Sprintf("liken: hardware: %s is now driven by %s", nameOrModalias(u), driver))
 		} else {
 			lines = append(lines, fmt.Sprintf("liken: hardware: %s was removed", nameOrModalias(u)))

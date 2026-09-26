@@ -24,7 +24,7 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "2-1:1.0", Driver: "uas", Modalias: "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00",
 			Name: "QEMU QEMU USB HARDDRIVE", Class: "mass-storage", Serial: "1-0000:00:04.0-1", Vendor: "46f4", Product: "0001"},
-	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/sda", Subsystem: "block", Block: "sda"}}}), nil)
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/sda", Subsystem: "block", Block: "sda"}}}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want 1", devices)
@@ -78,7 +78,7 @@ func gpu() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
 
 func TestInventorySplitsTheGPUAndSharesTheGraphicsHalf(t *testing.T) {
 	discovered, inspect := gpu()
-	devices := inventoryDevices(discovered, inspect, nil)
+	devices := inventoryDevices(discovered, inspect, nil, nil)
 
 	if len(devices) != 3 {
 		t.Fatalf("devices = %+v, want the graphics device, the display companion, and the i2c companion", devices)
@@ -142,7 +142,7 @@ func TestInventoryGivesOneCardsDevicesOneAddress(t *testing.T) {
 		Bus: "pci", Address: "0000:03:00.0", Driver: "amdgpu", Class: "display",
 		ClassCode: "030000", Name: "Navi 23 [Radeon RX 6600]", Vendor: "1002", Product: "73ff",
 	})
-	devices := inventoryDevices(discovered, inspect, nil)
+	devices := inventoryDevices(discovered, inspect, nil, nil)
 
 	addresses := map[string]string{}
 	for _, d := range devices {
@@ -177,7 +177,7 @@ func TestInventoryPublishesAnAudioControllerExclusively(t *testing.T) {
 		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
 		{Path: "/dev/snd/pcmC0D3p", Subsystem: "sound"},
 		{Path: "/dev/input/event16", Subsystem: "input"},
-	}}), nil)
+	}}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want the controller", devices)
@@ -200,7 +200,7 @@ func TestInventoryStampsSupportsSoundOnASoundDevice(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
 		{Path: "/dev/snd/pcmC0D3p", Subsystem: "sound"},
-	}}), nil)
+	}}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want the controller", devices)
@@ -216,7 +216,7 @@ func TestInventoryStampsSupportsSoundOnNothingElse(t *testing.T) {
 		{Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display"},
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/card0", Subsystem: "drm"},
-	}}), nil)
+	}}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want the card device", devices)
@@ -235,7 +235,7 @@ func TestInventoryRefusesToShareARenderNodeBesideSomethingElse(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 		{Path: "/dev/ttyS4", Subsystem: "tty"},
-	}}), nil)
+	}}), nil, nil)
 
 	if devices[0].AllowMultipleAllocations != nil {
 		t.Error("only a whole graphics device may be shared")
@@ -250,7 +250,7 @@ func TestInventoryKeepsEveryOtherDeviceExclusive(t *testing.T) {
 		{Bus: "usb", Address: "3-1:1.0", Driver: "cp210x", Class: "vendor-specific", ClassCode: "ff"},
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/ttyUSB0", Subsystem: "tty"},
-	}}), nil)
+	}}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want 1", devices)
@@ -272,7 +272,7 @@ func TestInventoryNamesNoSubsystemForAMixedDelivery(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/snd/pcmC0D0p", Subsystem: "sound"},
 		{Path: "/dev/dri/renderD129", Subsystem: "drm"},
-	}}), nil)
+	}}), nil, nil)
 
 	if _, ok := devices[0].Attributes["subsystem"]; ok {
 		t.Error("a mixed delivery names no one subsystem")
@@ -285,7 +285,7 @@ func TestInventoryNamesNoSubsystemForAMixedDelivery(t *testing.T) {
 func TestInventorySkipsUndrivenDevices(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:02.0", Driver: "", Modalias: "pci:v...", Name: "QEMU Standard VGA"},
-	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/dri/card0", Subsystem: "drm"}}}), nil)
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/dri/card0", Subsystem: "drm"}}}), nil, nil)
 
 	if len(devices) != 0 {
 		t.Errorf("devices = %+v, want none: undriven hardware is the unclaimed report's story", devices)
@@ -298,7 +298,7 @@ func TestInventorySkipsBusPlumbing(t *testing.T) {
 		{Bus: "usb", Address: "usb2", Driver: "usb", Name: "Linux Foundation xHCI Host Controller"},
 		{Bus: "usb", Address: "2-0:1.0", Driver: "hub"},
 		{Bus: "pci", Address: "0000:00:01.0", Driver: "pcieport", Name: "Root Port"},
-	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/bus/usb/002/001", Subsystem: "usb"}}}), nil)
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/bus/usb/002/001", Subsystem: "usb"}}}), nil, nil)
 
 	if len(devices) != 0 {
 		t.Errorf("devices = %+v, want none: plumbing is not claimable inventory", devices)
@@ -309,7 +309,7 @@ func TestInventorySkipsUndeliverableDevices(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:04.0", Driver: "virtio-pci",
 			Name: "Red Hat, Inc. Virtio network device", Class: "network"},
-	}, delivering(hardware.Delivery{}), nil)
+	}, delivering(hardware.Delivery{}), nil, nil)
 
 	if len(devices) != 0 {
 		t.Errorf("devices = %+v, want none: a device with no nodes has nothing to hand a pod", devices)
@@ -325,7 +325,7 @@ func TestInventoryPublishesAnIdleBluetoothAdapter(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "1-8:1.0", Driver: "btusb", Class: "wireless", ClassCode: "e0",
 			Name: "Intel AX211 Bluetooth", Vendor: "8087", Product: "0033"},
-	}, delivering(hardware.Delivery{BusNode: "/dev/bus/usb/001/008"}), nil)
+	}, delivering(hardware.Delivery{BusNode: "/dev/bus/usb/001/008"}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want the adapter", devices)
@@ -353,7 +353,7 @@ func TestInventoryWithholdsThePlatformsOwnDisks(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/vda", Subsystem: "block", Block: "vda"},
 		{Path: "/dev/vda1", Subsystem: "block", Block: "vda1"},
-	}}), platform)
+	}}), platform, nil)
 
 	if len(devices) != 0 {
 		t.Errorf("devices = %+v, want none: a platform role holds this disk", devices)
@@ -367,7 +367,7 @@ func TestInventoryPublishesAnUnroledDisk(t *testing.T) {
 			Name: "QEMU QEMU USB HARDDRIVE"},
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/sda", Subsystem: "block", Block: "sda"},
-	}}), platform)
+	}}), platform, nil)
 
 	if len(devices) != 1 {
 		t.Errorf("devices = %+v, want the stick: no platform role holds it", devices)
@@ -379,7 +379,7 @@ func TestInventoryOmitsAttributesTheHardwareLacks(t *testing.T) {
 		{Bus: "pci", Address: "0000:00:09.0", Driver: "virtio-pci",
 			Modalias: "pci:v00001AF4d00001050sv00001AF4sd00001100bc03sc80i00",
 			Name:     "Red Hat, Inc. Virtio GPU", Class: "display", Vendor: "1af4", Product: "1050"},
-	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/dri/renderD128", Subsystem: "drm"}}}), nil)
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/dri/renderD128", Subsystem: "drm"}}}), nil, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want 1", devices)
@@ -393,7 +393,7 @@ func TestInventoryNamesAreValidDNSLabels(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:1F.3", Driver: "snd_hda_intel", Name: "audio"},
 		{Bus: "usb", Address: "2-1.4:1.0", Driver: "cdc_acm", Name: "modem"},
-	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/snd/pcmC0D0p", Subsystem: "sound"}}}), nil)
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/snd/pcmC0D0p", Subsystem: "sound"}}}), nil, nil)
 
 	if devices[0].Name != "pci-0000-00-1f-3" {
 		t.Errorf("name = %q, want lowercased with separators dashed", devices[0].Name)

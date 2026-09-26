@@ -220,6 +220,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Conditions = api.SetCondition(status.Conditions,
 		moduleParametersCondition(m.Spec.ModuleParameters, status.Modules), now)
 
+	// The serio attachments report what init holds now, not what the
+	// boot did: init's serio watch rewrites status.serio when an
+	// adapter is plugged in or unplugged. An entry declared since the
+	// last pass has no report yet, and SpecConverged carries it until
+	// the live load declares it to init.
+	status.Conditions = api.SetCondition(status.Conditions,
+		serioCondition(status.Serio), now)
+
 	// The unclaimed-hardware report deliberately has no condition,
 	// even though it looks like modules and features at first
 	// glance. The difference is that those judge requests: a
@@ -294,8 +302,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// garbage-collected along with the old Node. The facts supply
 	// the storage roles, which is what keeps the machine's own disks
 	// out of the offer.
+	//
+	// The serio list is the spec's and the boot record's together
+	// (dra.go), set here for the DRA plugin as well, so the inventory
+	// and the claims it prepares withhold the same serial lines.
+	serio := serioInEffect(m.Spec.Serio, facts)
+	setDeclaredSerio(serio)
 	if nodeErr == nil {
-		publishDeviceInventory(c, node, facts, mm)
+		publishDeviceInventory(c, node, facts, serio, mm)
 	}
 
 	// The claims the kubelet already prepared get the same treatment,

@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/liken-sh/liken/hardware"
 	"github.com/liken-sh/liken/kubernetes"
@@ -75,13 +76,13 @@ const maxSliceDevices = 128
 // condition. Inventory is a report about hardware, and a failure to
 // write it is a problem in the operator's own machinery, not a fact
 // about the machine.
-func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machine.MachineStatus, mm *machineMetrics) {
+func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) {
 	devices := inventoryDevices(
 		hardware.DiscoverDevices(draSysfsRoot, draNaming()),
 		func(d hardware.Device) hardware.Delivery {
 			return hardware.InspectDelivery(draSysfsRoot, d)
 		},
-		platformBlocks(facts))
+		platformBlocks(facts), serio)
 	if len(devices) > maxSliceDevices {
 		fmt.Fprintf(os.Stderr, "device inventory: %d devices exceed one slice's capacity of %d; dropping the overflow\n",
 			len(devices), maxSliceDevices)
@@ -101,6 +102,38 @@ func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machi
 	if err := kubernetes.EnsureResourceSlice(c, node.Metadata.Name, owner, devices); err != nil {
 		fmt.Fprintf(os.Stderr, "device inventory: %v\n", err)
 	}
+}
+
+// serioInEffect is the spec.serio list the machine holds attachments
+// for: the spec's entries, and the boot record's. A retracted entry
+// stays in the boot record until the next boot, and its holder keeps
+// the port until then, so its tty must stay withheld until then too.
+// An entry added since the boot is in the spec before init reports it,
+// so its tty is withheld from the first pass after the edit.
+func serioInEffect(spec []machine.SerioAttachment, facts *machine.MachineStatus) []machine.SerioAttachment {
+	if facts == nil {
+		return slices.Clone(spec)
+	}
+	return slices.Concat(spec, facts.Boot.Serio)
+}
+
+// serioDeclared carries serioInEffect to the DRA plugin, which
+// prepares claims on the kubelet's schedule, apart from the reconcile
+// pass. main seeds it from the boot manifest and the boot's facts
+// before the plugin serves, and every pass sets it again from the
+// live spec, so the plugin never resolves a claim to a serial line
+// that init holds.
+var serioDeclared atomic.Pointer[[]machine.SerioAttachment]
+
+func setDeclaredSerio(entries []machine.SerioAttachment) {
+	serioDeclared.Store(&entries)
+}
+
+func declaredSerio() []machine.SerioAttachment {
+	if entries := serioDeclared.Load(); entries != nil {
+		return *entries
+	}
+	return nil
 }
 
 // platformBlocks returns the block devices the machine depends on:
@@ -146,12 +179,18 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 //     disk belongs either to the machine, as a storage role, or to
 //     the workloads, through DRA, never both.
 //
+// A serial line that init holds a serio attachment for passes the
+// three tests with its tty node, and the policy then publishes the
+// devices the attached driver created and never the tty
+// (publishingserio.go). serio names those lines.
+//
 // A ResourceSlice is an offer, not a full record of the hardware.
 // The scheduler can only allocate what a slice lists, so publishing
 // the slice is itself the enforcement, ahead of whatever checks a
 // deployment's DeviceClasses perform.
 func inventoryDevices(discovered []hardware.Device,
-	inspect func(hardware.Device) hardware.Delivery, platform map[string]bool) []kubernetes.SliceDevice {
+	inspect func(hardware.Device) hardware.Delivery, platform map[string]bool,
+	serio []machine.SerioAttachment) []kubernetes.SliceDevice {
 	plumbing := map[string]bool{"usb": true, "hub": true, "pcieport": true}
 	var out []kubernetes.SliceDevice
 	for _, d := range discovered {
@@ -171,7 +210,7 @@ func inventoryDevices(discovered []hardware.Device,
 		// slice device, joined to the physical device's own name, so
 		// the primary keeps the bare name and an allocation made
 		// before a split stays valid.
-		for _, p := range publishDevices(d, delivery) {
+		for _, p := range publishFor(d, delivery, serio) {
 			attrs := map[string]kubernetes.DeviceAttribute{}
 			// Attribute names are unqualified, so the Kubernetes API
 			// places them under the driver's own domain: a DeviceClass

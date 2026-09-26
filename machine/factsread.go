@@ -74,6 +74,9 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	if s.Modules, err = t.readModules(); err != nil {
 		return nil, err
 	}
+	if s.Serio, err = t.readSerio(); err != nil {
+		return nil, err
+	}
 	if s.Features, err = t.readFeatures(); err != nil {
 		return nil, err
 	}

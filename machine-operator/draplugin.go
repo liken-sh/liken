@@ -48,6 +48,7 @@ import (
 
 	"github.com/liken-sh/liken/hardware"
 	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/machine"
 )
 
 // The kubelet's plugin directories. The registry is where the
@@ -157,9 +158,9 @@ func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePre
 // this claim would receive now. The bare names are tried first,
 // exactly: one device's bare name can begin with another's, so a
 // prefix alone identifies nothing.
-func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device) (publishedDevice, bool) {
+func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device, serio []machine.SerioAttachment) (publishedDevice, bool) {
 	if device, ok := byName[name]; ok {
-		for _, p := range publishDevices(device, claimDelivery(sysRoot, device)) {
+		for _, p := range publishFor(device, claimDelivery(sysRoot, device), serio) {
 			if p.Suffix == "" {
 				return p, true
 			}
@@ -170,7 +171,7 @@ func resolveAllocated(name string, sysRoot string, byName map[string]hardware.De
 		if !strings.HasPrefix(name, bare+"-") {
 			continue
 		}
-		for _, p := range publishDevices(device, claimDelivery(sysRoot, device)) {
+		for _, p := range publishFor(device, claimDelivery(sysRoot, device), serio) {
 			if bare+p.Suffix == name {
 				return p, true
 			}
@@ -217,7 +218,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// That driver's own plugin prepares it.
 			continue
 		}
-		published, ok := resolveAllocated(result.Device, draSysfsRoot, byName)
+		published, ok := resolveAllocated(result.Device, draSysfsRoot, byName, declaredSerio())
 		if !ok {
 			return fail("allocated device %s is not in this machine's inventory now", result.Device)
 		}

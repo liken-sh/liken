@@ -35,6 +35,14 @@ package main
 // /dev/uinput adds that node and the legacy evdev range beside it.
 // claimDelivery states the reasoning.
 //
+// A serio attachment is the fourth examined shape, and the one that
+// needs the Machine's own spec. A USB-CEC adapter's serial line
+// delivers a tty node alone until init attaches the line
+// (init/serio.go). Then the kernel registers the serio port under the
+// tty, the CEC adapter under the port, and the remote-control input
+// device under the adapter, and the same interface delivers tty, cec,
+// and input nodes. publishingserio.go states the policy for them.
+//
 // The mechanism is generic; the tables below are deliberately not.
 // Only a shape somebody examined splits. Everything else publishes
 // whole and exclusive, so hardware liken has not met keeps the

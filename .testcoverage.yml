@@ -37,10 +37,10 @@ override:
   # the ID databases, and the tests run them against fixture trees.
   # What stays untested is a scattering of I/O error returns.
   - path: ^hardware$
-    threshold: 89
+    threshold: 90
   # The Machine API: pure functions over declared types.
   - path: ^machine$
-    threshold: 87
+    threshold: 88
   # The identity package: minting, adoption, and the kubeconfig are
   # pure crypto and file layout, and the tests cover them end to end.
   # What stays untested is a scattering of I/O error returns.
@@ -68,7 +68,7 @@ override:
   # real facts files and the live API, is exercised by the QEMU
   # harness, not unit tests.
   - path: ^machine-operator$
-    threshold: 78
+    threshold: 79
   # The cluster operator: the sweep and rollout decisions are pure
   # and tested, and the acting halves run against a miniature API
   # server. What stays untested is main's loop.
@@ -79,7 +79,7 @@ override:
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
-    threshold: 73
+    threshold: 74
   # mount(8): the option parser, the command-line parser, and the
   # helper lookup are pure, and the tests cover them against the
   # command lines the kubelet really builds. What stays untested is

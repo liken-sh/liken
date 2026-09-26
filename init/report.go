@@ -268,7 +268,7 @@ func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool
 	devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
 	seen := map[string]bool{}
 	var recommendations []moduleRecommendation
-	for _, u := range catalog.Unclaimed(devices) {
+	for _, u := range catalog.Unclaimed(devices, nil) {
 		if len(u.Candidates) == 0 || seen[u.Modalias] || !want(u.Class) {
 			continue
 		}

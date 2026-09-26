@@ -24,7 +24,9 @@ package machine
 //	hardware/blockDevices/         the hardware watch
 //	hardware/unclaimed/            the hardware watch
 //	boot/manifest, boot/modules    the module loader
+//	boot/serio/                    the module loader
 //	modules/                       the module loader
+//	serio/                         the serio watch
 //	boot/clusterManifest           the restart path
 //	boot/credentials               the restart path
 //	boot/restarts                  the restart path
@@ -54,8 +56,9 @@ package machine
 //  5. A group of facts that change together mid-run is one record file
 //     of key=value lines.
 //
-// Rule 5 applies to four boot records only: boot/manifest,
-// boot/clusterManifest, boot/credentials, and boot/imports. Each of
+// Rule 5 applies to four boot records, boot/manifest,
+// boot/clusterManifest, boot/credentials, and boot/imports, and to
+// each element of the two serio lists, serio/ and boot/serio/. Each of
 // these is rewritten while the machine runs. A rename replaces one
 // inode in one step, so a rename of one file is the only write that a
 // concurrent reader can never see half done. The paired fields of each
