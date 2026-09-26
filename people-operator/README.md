@@ -8,10 +8,10 @@ and nothing more. No program runs.
 apiVersion: people.liken.sh/v1alpha1
 kind: Person
 metadata:
-  name: thora
+  name: alex
 spec:
-  displayName: Thora
-  nickname: Thora
+  displayName: Alex
+  nickname: Alex
 ```
 
 Other operators refer to a `Person` by name and attach their own

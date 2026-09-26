@@ -30,10 +30,10 @@ shows, and `nickname` is a one-word form of it.
 apiVersion: people.liken.sh/v1alpha1
 kind: Person
 metadata:
-  name: thora
+  name: alex
 spec:
-  displayName: Thora
-  nickname: Thora
+  displayName: Alex
+  nickname: Alex
 ```
 
 `kubectl get people` lists them. Nothing writes a `Person`'s status
