@@ -211,6 +211,39 @@ func TestApplySysctlSetSkipsAConvergedParameter(t *testing.T) {
 	}
 }
 
+// The kernel reports a parameter that holds several values with a tab
+// between each pair, and a spec writes them with spaces. The two
+// spellings name the same setting, so a pass that finds the kernel
+// holding it leaves the file alone and reports the kernel's reading.
+func TestApplySysctlSetSkipsAMultiValueParameterTheKernelSeparatesWithTabs(t *testing.T) {
+	const name = "net.ipv4.ip_local_port_range"
+	dir := sysctlDir(t, name)
+	path := filepath.Join(dir, "net", "ipv4", "ip_local_port_range")
+	if err := os.WriteFile(path, []byte("1024\t65535\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observed, err := applySysctlSet(dir, map[string]string{name: "1024 65535"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed[name] != "1024\t65535" {
+		t.Errorf("observed = %q, want the kernel's own reading", observed[name])
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("a converged parameter must not be written: mtime moved from %v to %v", before.ModTime(), after.ModTime())
+	}
+}
+
 func TestApplySysctlSetReportsEveryFailure(t *testing.T) {
 	// The condition built from this error is the operator's whole
 	// report, so one bad parameter must not hide another. A person

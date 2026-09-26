@@ -163,12 +163,13 @@ func applySysctls(dir string, defaults, desired map[string]string) (map[string]s
 // (hosts.go): read a parameter first, and write it only when the
 // kernel's reported value differs from the desired one. A converged
 // parameter costs one read and no write, which is the common case on
-// every pass after the first. The comparison is a plain string
-// compare, which is enough because every parameter this package
-// writes is a single token; a value that the kernel echoes back
-// differently from how it was written, through whitespace
-// normalization, is still written once, read back, and reported from
-// that reading, not rewritten forever.
+// every pass after the first.
+//
+// The comparison ignores how the values are spaced. A parameter that
+// holds several values, such as net.ipv4.ip_local_port_range, is
+// written as "1024 65535", and the kernel reports it as "1024\t65535".
+// Without this, every such parameter differs from its spec, and every
+// pass writes it again.
 //
 // The returned map holds what the kernel now reports, not what the
 // function wrote. If another process resets a value, the next pass
@@ -178,7 +179,7 @@ func applySysctlSet(dir string, desired map[string]string) (map[string]string, e
 	observed := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(desired)) {
 		value := desired[name]
-		if current, err := machine.ReadSysctl(dir, name); err == nil && current == value {
+		if current, err := machine.ReadSysctl(dir, name); err == nil && sameSysctlValue(current, value) {
 			observed[name] = current
 			continue
 		}
@@ -191,6 +192,14 @@ func applySysctlSet(dir string, desired map[string]string) (map[string]string, e
 		}
 	}
 	return observed, errors.Join(errs...)
+}
+
+// sameSysctlValue reports whether two spellings of a parameter's value
+// hold the same values in the same order. The kernel separates the
+// values of a parameter with tabs, and a spec separates them with
+// spaces.
+func sameSysctlValue(a, b string) bool {
+	return slices.Equal(strings.Fields(a), strings.Fields(b))
 }
 
 // storageCondition summarizes storage as one standard Kubernetes
