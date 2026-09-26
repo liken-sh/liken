@@ -368,19 +368,22 @@ func (n *cecNode) startScans(ctx context.Context, own cec.LogicalAddress) {
 }
 
 // heard is where every message the adapter receives arrives. It
-// updates the directory, and in Control it answers what a follower
-// owes.
+// updates the directory, logs a message a person notices, and in
+// Control it answers what a follower owes.
 func (n *cecNode) heard(message cec.Message) {
-	if n.directory.Observe(message) {
+	before, after, changed := n.directory.Hear(message)
+	if changed {
 		n.markDirty()
 	}
 	n.mutex.Lock()
+	bus := n.bus
 	control := n.applied.mode == CECControl && n.entry.LogicalAddress != nil
 	own := cec.AddressUnregistered
 	if control {
 		own = cec.LogicalAddress(*n.entry.LogicalAddress)
 	}
 	n.mutex.Unlock()
+	n.logHeard(bus, message, before, after, own)
 	if !control {
 		return
 	}

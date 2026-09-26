@@ -71,6 +71,13 @@ const (
 	OpUserControlPressed  Opcode = 0x44
 	OpUserControlReleased Opcode = 0x45
 
+	// The system audio family. A device asks the audio system for
+	// System Audio Mode with System Audio Mode Request, and the audio
+	// system turns the mode on or off with Set System Audio Mode. In the
+	// mode, the audio system plays the sound and the TV mutes its own
+	// speakers.
+	OpSystemAudioModeRequest Opcode = 0x70
+
 	// The answers from other families that can arrive at a follower
 	// after a request. A follower must not answer an answer with a
 	// Feature Abort.

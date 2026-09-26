@@ -134,3 +134,46 @@ func TestPeersAreInLogicalOrder(t *testing.T) {
 		t.Errorf("peers = %+v", peers)
 	}
 }
+
+func TestHearAnswersTheSenderBeforeAndAfter(t *testing.T) {
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+	directory.Observe(cec.SetOSDName(0, 4, "TV"))
+
+	before, after, changed := directory.Hear(cec.ReportPowerStatus(0, 4, cec.PowerStandby))
+
+	if before.Power != cec.PowerUnknown || after.Power != cec.PowerStandby || after.OSDName != "TV" || !changed {
+		t.Errorf("before %+v, after %+v, changed %v", before, after, changed)
+	}
+}
+
+func TestHearAnswersANewSenderWithEveryFactUnknown(t *testing.T) {
+	directory := cec.NewDirectory()
+
+	before, after, changed := directory.Hear(cec.ActiveSource(8, 0x1500))
+
+	if before.Physical != cec.InvalidPhysicalAddress || before.Type != cec.TypePlayback || after.Physical != 0x1500 || !changed {
+		t.Errorf("before %+v, after %+v, changed %v", before, after, changed)
+	}
+}
+
+func TestHearAnswersNoDeviceWithEveryFactUnknown(t *testing.T) {
+	directory := cec.NewDirectory()
+
+	before, after, changed := directory.Hear(cec.ActiveSource(15, 0x1500))
+
+	if after.Physical != cec.InvalidPhysicalAddress || after.Type != cec.TypeUnregistered || before != after || changed {
+		t.Errorf("before %+v, after %+v, changed %v", before, after, changed)
+	}
+}
+
+func TestLookupAnswersAPeerOrEveryFactUnknown(t *testing.T) {
+	directory := cec.NewDirectory()
+	directory.Observe(cec.SetOSDName(5, 0, "AVR"))
+
+	held, stranger := directory.Lookup(5), directory.Lookup(8)
+
+	if held.OSDName != "AVR" || stranger.OSDName != "" || stranger.Logical != 8 || stranger.Physical != cec.InvalidPhysicalAddress {
+		t.Errorf("held %+v, stranger %+v", held, stranger)
+	}
+}

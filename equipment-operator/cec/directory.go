@@ -89,22 +89,46 @@ func (d *Directory) peer(address LogicalAddress) *Peer {
 // address becomes a peer. The unregistered address is no device, and
 // the adapter's own messages say nothing about a peer.
 func (d *Directory) Observe(message Message) bool {
-	if message.From == AddressUnregistered {
-		return false
-	}
+	_, _, changed := d.Hear(message)
+	return changed
+}
+
+// Hear folds one message into the directory like Observe, and also
+// answers the sender as the directory held it before the message and
+// after it. A log line needs both in one step: the facts after the
+// message name the sender, and the power before it shows whether a
+// Report Power Status is news. A sender that is no peer comes back
+// with every fact unknown.
+func (d *Directory) Hear(message Message) (before, after Peer, changed bool) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	if message.From == d.own {
-		return false
+	if message.From == AddressUnregistered || message.From == d.own {
+		stranger := *newPeer(message.From)
+		return stranger, stranger, false
 	}
-	_, known := d.peers[message.From]
+	held, known := d.peers[message.From]
+	if known {
+		before = *held
+	} else {
+		before = *newPeer(message.From)
+	}
 	peer := d.peer(message.From)
-	before := *peer
 	learn(peer, message)
 	if opcode, _ := message.Opcode(); opcode == OpReportPowerStatus && !message.IsPoll() {
 		delete(d.missed, message.From)
 	}
-	return !known || *peer != before
+	return before, *peer, !known || *peer != before
+}
+
+// Lookup answers the peer at an address, with every fact unknown when
+// the directory does not hold one there.
+func (d *Directory) Lookup(address LogicalAddress) Peer {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	if held, known := d.peers[address]; known {
+		return *held
+	}
+	return *newPeer(address)
 }
 
 // learn reads the one fact a message states about its sender.

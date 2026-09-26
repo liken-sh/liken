@@ -59,4 +59,8 @@ reads the cause from the log or the status without opening a shell.
 
 Each operation at human scale writes one log line that states its
 trigger, the command, and the device's report, and a scan, a poll, or
-a steady status write writes none.
+a steady status write writes none. The CEC node workload also writes
+one line for each message it hears that a person notices, such as
+Active Source, Routing Change, Image View On, or Standby, with the
+sender's logical address, name, and physical address, in
+`cecnode_heard.go`.
