@@ -117,6 +117,10 @@ type DisplayStatus struct {
 	// The panel's physical size, as the monitor states it.
 	WidthMillimeters  int `json:"widthMillimeters,omitempty"`
 	HeightMillimeters int `json:"heightMillimeters,omitempty"`
+	// The CEC physical address of the port this machine's cable is
+	// in, from the EDID, and the last valid one while the connector
+	// serves none. The PhysicalAddressCurrent condition says which.
+	PhysicalAddress string `json:"physicalAddress,omitempty"`
 	// The mode the output runs, as the card and the compositor
 	// each report it, and every mode the card offers for this
 	// connector. Status has no attribute-length limit, so this list

@@ -9,8 +9,8 @@ package main
 // file rather than a bus, and it needs no privilege to read what is
 // plugged in.
 //
-// The format is VESA's, and the part this operator reads is the first
-// 128-byte block. Byte 0 to byte 7 are a fixed header. Bytes 8 and 9
+// The format is VESA's, and most of what this operator reads is in the
+// first 128-byte block. Byte 0 to byte 7 are a fixed header. Bytes 8 and 9
 // hold the manufacturer's PNP id as three five-bit letters. Bytes 10
 // and 11 hold the product code. Bytes 54 to 125 hold four 18-byte
 // descriptors: a descriptor whose first two bytes are zero holds
@@ -39,8 +39,9 @@ import (
 )
 
 // blockSize is the length of one EDID block. A monitor with extension
-// blocks answers with several of them, and everything this operator
-// publishes is in the first one.
+// blocks answers with several of them. The identity and the preferred
+// mode are in the first one, and a CTA-861 extension can add text
+// descriptors and the HDMI vendor block.
 const blockSize = 128
 
 // descriptor tags. The tag is byte 3 of a descriptor whose first
@@ -88,6 +89,12 @@ type EDID struct {
 	// size.
 	WidthMillimeters  int
 	HeightMillimeters int
+	// PhysicalAddress is the CEC physical address that the HDMI
+	// vendor block states for the sink's port this cable is in, in the
+	// dotted form 1.2.0.0. It is empty when the monitor serves no HDMI
+	// vendor block, or an address that names no path.
+	// physicaladdress.go has the rules.
+	PhysicalAddress string
 }
 
 // ParseEDID reads the facts this operator publishes out of one
@@ -203,8 +210,9 @@ func (edid *EDID) readDescriptor(descriptor []byte) {
 	}
 }
 
-// readExtensions reads the display descriptors in the CTA-861
-// extension blocks.
+// readExtensions reads the display descriptors and the HDMI vendor
+// block in the CTA-861 extension blocks. The first extension that
+// states a valid physical address sets it.
 //
 // A monitor with a CTA extension often writes its name and its serial
 // there rather than in the base block, and the LG ultrawide on the lab
@@ -212,9 +220,9 @@ func (edid *EDID) readDescriptor(descriptor []byte) {
 // its extension states the string 202NTRLCC070, which is the number
 // printed on the back of the monitor.
 //
-// Only the descriptors are read. The extension's own detailed timings
-// are alternative modes, and the preferred mode is the base block's
-// first timing, which is what the compositor drives.
+// The descriptors and the HDMI vendor block are read. The extension's
+// own detailed timings are alternative modes, and the preferred mode is
+// the base block's first timing, which is what the compositor drives.
 func (edid *EDID) readExtensions(raw []byte, count int) {
 	for block := 1; block <= count; block++ {
 		start := block * blockSize
@@ -238,6 +246,9 @@ func (edid *EDID) readExtensions(raw []byte, count int) {
 				continue
 			}
 			edid.readDescriptor(descriptor)
+		}
+		if edid.PhysicalAddress == "" {
+			edid.PhysicalAddress = physicalAddress(extension)
 		}
 	}
 }

@@ -52,6 +52,7 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				RefreshMillihertz: 59999,
 				WidthMillimeters:  879,
 				HeightMillimeters: 366,
+				PhysicalAddress:   "2.0.0.0",
 			},
 		},
 		{
@@ -66,6 +67,7 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				RefreshMillihertz: 60000,
 				WidthMillimeters:  344,
 				HeightMillimeters: 196,
+				PhysicalAddress:   "1.0.0.0",
 			},
 		},
 		{

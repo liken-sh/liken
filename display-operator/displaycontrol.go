@@ -725,7 +725,7 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, true,
 		"PanelAttached", output.Connector+" carries this panel"))
 	status.Conditions = setCondition(status.Conditions, d.responsive(facts))
-	return status
+	return d.withPhysicalAddress(status, output)
 }
 
 // The mode block of one output, and nothing at all when
@@ -767,6 +767,11 @@ func (d *displayControl) absent(display *Display) error {
 	status := display.Status
 	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, false,
 		"NoPanel", "no panel on "+status.Connector))
+	// The connector serves no EDID, or the EDID of another monitor,
+	// such as the TV's EDID that a receiver in standby can pass
+	// through. Either way the port this machine's cable is in has not
+	// moved, so the address stays.
+	status = d.retainAddress(status, status.Connector+" no longer serves this monitor's EDID")
 	return d.publish(display, status)
 }
 

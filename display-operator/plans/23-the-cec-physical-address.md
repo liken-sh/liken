@@ -99,18 +99,26 @@ EDID states, and equipment-operator owns everything that speaks CEC
 The adapter on the machine comes from `liken`'s
 [milestone 70](https://github.com/liken-sh/liken/blob/main/plans/70-init-attaches-serio-devices.md).
 
-**Two connectors to one receiver.** Pulse-Eight's two-cable setup
-connects one machine to one receiver with two cables: one carries
-the picture, and one passes through the CEC adapter. A drill on
-2026-09-26 found that both connectors then read the receiver's EDID,
-with a different physical address on each: `1.2.0.0` and `1.1.0.0`.
-The operator names a `Display` from the EDID's manufacturer, product,
-and model, so both connectors map to one `Display` name, and the
-cluster showed one `Display` for the two. The address this plan
-publishes is per connector, so the plan must give each connector its
-own `Display` in that case, or publish the address per connector
-under one `Display`. The build decides which, and it states the rule
-in the reference.
+**Two connectors to one receiver.** A second drill on 2026-09-26
+found that the CEC adapter works on a spare receiver input with
+nothing in its HDMI source socket. The adapter needs no source
+cable, so the machine has one connector to the receiver, and the
+case of two connectors to one receiver does not arise in the CEC
+setup. A `Display` keeps one connector.
+
+The case stays an open edge of the naming. The operator names a
+`Display` from the EDID's manufacturer, product code, and model
+name, so two connectors on one node that serve the same identity
+map to one `Display`. The controller's pass keeps the connected
+connector that sorts last by name, so the choice is deterministic
+while both stay connected, and the `Display` moves to the other
+connector while that one is dark. The placement pass writes both
+screens' surfaces to that one `Display`, one after the other. The name
+leaves out the serial, so two monitors of one model on one node
+collide the same way. Across nodes the collision is worse: two
+nodes on one receiver each write the one `Display`, and its
+`status.node` and `status.connector` alternate on every pass of
+either node.
 
 ## What was considered and set aside
 

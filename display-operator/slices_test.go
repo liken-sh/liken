@@ -81,6 +81,9 @@ func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 		"model":          "LG HDR WQHD",
 		"serial":         "202NTRLCC070",
 		pairingAttribute: "gsm-7716-lg-hdr-wqhd",
+		// The lab machine's cable is in the ultrawide's second HDMI
+		// input, and the EDID on that input states its address.
+		"physicalAddress": "2.0.0.0",
 	}
 	for name, value := range want {
 		attribute, ok := ultrawide[name]
@@ -383,6 +386,44 @@ func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 	}
 	if dark.Taints[0].Key != disconnectedTaint || dark.Taints[0].Effect != "NoExecute" {
 		t.Errorf("taints[0] = %+v", dark.Taints[0])
+	}
+}
+
+// The physical address follows the EDID on the wire and never the
+// monitor a dark connector remembers. A device the scheduler allocates
+// describes the hardware as it is now, and a dark connector's address
+// is a retained value, which only the Display's status carries.
+func TestSliceDevicesPublishesThePhysicalAddressOnlyFromTheWire(t *testing.T) {
+	monitor := EDID{Manufacturer: "DON", ProductCode: 0x0001, ModelName: "DENON-AVR", PhysicalAddress: "1.2.0.0"}
+	cases := []struct {
+		name   string
+		output Output
+		want   string
+	}{
+		{
+			name:   "a connector that serves the EDID",
+			output: Output{Connector: "HDMI-A-1", Connected: true, Monitor: monitor},
+			want:   "1.2.0.0",
+		},
+		{
+			name:   "a dark connector that remembers the monitor",
+			output: Output{Connector: "HDMI-A-1", Remembered: monitor},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			device := sliceDevices([]Output{c.output})[0]
+
+			// An absent attribute reads as the empty string, which is
+			// what a case that wants none states.
+			got := device.Attributes["physicalAddress"].String
+			if got == nil {
+				got = new(string)
+			}
+			if *got != c.want {
+				t.Errorf("physicalAddress = %q, want %q", *got, c.want)
+			}
+		})
 	}
 }
 

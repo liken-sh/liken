@@ -58,6 +58,46 @@ a compositor, and `kernel` is absent while the connector drives
 nothing. `kubectl get displays` shows the two as the `MODE` and
 `CANVAS` columns.
 
+## The physical address
+
+`status.physicalAddress` is the HDMI-CEC physical address of the
+port this machine's cable is in: four hex digits that give the path
+from the TV, one digit for each HDMI port on the way. A machine on
+input 2 of a receiver that is on the TV's input 1 reads `1.2.0.0`.
+An HDMI sink serves each of its ports an EDID whose vendor block
+states that port's address, and the operator reads it from the EDID
+on the connector. A CEC adapter on the machine has no EDID of its
+own, so it announces this address when it sends `Active Source`,
+and the receiver and the TV switch to the machine's picture. The
+operator does not open a CEC adapter or send a CEC message.
+
+A receiver in standby can stop serving its EDID, or pass the TV's
+EDID through, which belongs to another `Display`. The machine's port
+has not moved, so the field keeps the last valid address, and the
+`PhysicalAddressCurrent` condition states where the value came
+from:
+
+| Status | Reason | Meaning |
+| --- | --- | --- |
+| `True` | `ReadFromEDID` | The connector's current EDID serves this address. |
+| `False` | `Retained` | The connector serves no EDID for this monitor, or serves no valid address in it. The message names the time it stopped serving the address. |
+
+The condition is absent while the monitor has never served a valid
+address, for example on a DisplayPort cable. `0.0.0.0` is the TV's
+own address, which a sink serves when it states none, and `f.f.f.f`
+is the invalid address, so the operator publishes neither. It also
+refuses an address with a non-zero digit after a zero, such as
+`1.0.2.0`, because a zero ends the path. The output device publishes
+the same value as its `physicalAddress` attribute, from the current
+EDID only, so a dark connector publishes none. Read the retained
+value from the `Display`.
+
+The address belongs to one connector, and a `Display` has one
+connector. Two connectors on one machine that serve EDIDs with the
+same identity, such as two cables to one receiver, map to one
+`Display`, and it reports the connector that sorts last by name
+among those that are connected.
+
 ## Shared screens
 
 A monitor with several inputs dims all of them at once, because

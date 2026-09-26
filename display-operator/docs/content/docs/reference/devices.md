@@ -110,6 +110,7 @@ sysfs.
 | `widthMillimeters`, `heightMillimeters` | int | the panel's physical size |
 | `modes` | string | the resolutions the monitor accepts, described below |
 | `currentMode` | string | the mode the output runs right now, described below |
+| `physicalAddress` | string | the HDMI-CEC physical address of the port this cable is in, `1.2.0.0`, from the EDID's HDMI vendor block. It follows the EDID on the wire now, so a dark connector publishes none; the [`Display`](/docs/reference/displays/#the-physical-address) keeps the last address |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
 | `controlsBrightness` | bool | the panel answered the brightness control over DDC/CI, described below |
 | `controlsPower` | bool | the panel answered the power control over DDC/CI, described below |

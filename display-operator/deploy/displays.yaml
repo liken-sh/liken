@@ -147,6 +147,9 @@ spec:
                 heightMillimeters:
                   type: integer
                   description: "The panel's physical height, as the monitor states it."
+                physicalAddress:
+                  type: string
+                  description: "The HDMI-CEC physical address of the port this machine's cable is in, in the dotted form 1.2.0.0, from the HDMI vendor block of the EDID the connector serves. A CEC adapter announces this address when it speaks for this machine. The field keeps the last valid address while the connector serves no EDID for this monitor or serves no valid address in it, and the PhysicalAddressCurrent condition says which. The field is absent while the monitor has never served a valid address, for example on a DisplayPort cable. 0.0.0.0, f.f.f.f, and an address with a non-zero digit after a zero are not valid."
                 mode:
                   type: object
                   description: "The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows."
@@ -264,7 +267,7 @@ spec:
                             description: "The id of the window on top of the region, the newest of the claim it shows, or the word empty when no window matched it."
                 conditions:
                   type: array
-                  description: "Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False."
+                  description: "Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. The condition is absent while the monitor has never served a valid address."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]

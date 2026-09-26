@@ -93,6 +93,7 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--serial"></span>`serial` | string | no | The monitor's serial, from its EDID, and absent when the monitor states none. |
 | <span id="status--widthmillimeters"></span>`widthMillimeters` | integer | no | The panel's physical width, as the monitor states it. |
 | <span id="status--heightmillimeters"></span>`heightMillimeters` | integer | no | The panel's physical height, as the monitor states it. |
+| <span id="status--physicaladdress"></span>`physicalAddress` | string | no | The HDMI-CEC physical address of the port this machine's cable is in, in the dotted form 1.2.0.0, from the HDMI vendor block of the EDID the connector serves. A CEC adapter announces this address when it speaks for this machine. The field keeps the last valid address while the connector serves no EDID for this monitor or serves no valid address in it, and the PhysicalAddressCurrent condition says which. The field is absent while the monitor has never served a valid address, for example on a DisplayPort cable. 0.0.0.0, f.f.f.f, and an address with a non-zero digit after a zero are not valid. |
 | <span id="status--mode"></span>`mode` | [object](#statusmode) | no | The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows. |
 | <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
@@ -100,7 +101,7 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart. |
 | <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs. |
 | <span id="status--layout"></span>`layout` | [object](#statuslayout) | no | The arrangement the screen is drawn to, and what each region shows. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. The condition is absent while the monitor has never served a valid address. |
 
 ### status.mode
 
@@ -177,7 +178,7 @@ Each region in stacking order, with the window on top of it.
 
 ### status.conditions[]
 
-Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False.
+Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. The condition is absent while the monitor has never served a valid address.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -246,6 +247,46 @@ free. `weston` is absent while the operator holds no connection to
 a compositor, and `kernel` is absent while the connector drives
 nothing. `kubectl get displays` shows the two as the `MODE` and
 `CANVAS` columns.
+
+## The physical address
+
+`status.physicalAddress` is the HDMI-CEC physical address of the
+port this machine's cable is in: four hex digits that give the path
+from the TV, one digit for each HDMI port on the way. A machine on
+input 2 of a receiver that is on the TV's input 1 reads `1.2.0.0`.
+An HDMI sink serves each of its ports an EDID whose vendor block
+states that port's address, and the operator reads it from the EDID
+on the connector. A CEC adapter on the machine has no EDID of its
+own, so it announces this address when it sends `Active Source`,
+and the receiver and the TV switch to the machine's picture. The
+operator does not open a CEC adapter or send a CEC message.
+
+A receiver in standby can stop serving its EDID, or pass the TV's
+EDID through, which belongs to another `Display`. The machine's port
+has not moved, so the field keeps the last valid address, and the
+`PhysicalAddressCurrent` condition states where the value came
+from:
+
+| Status | Reason | Meaning |
+| --- | --- | --- |
+| `True` | `ReadFromEDID` | The connector's current EDID serves this address. |
+| `False` | `Retained` | The connector serves no EDID for this monitor, or serves no valid address in it. The message names the time it stopped serving the address. |
+
+The condition is absent while the monitor has never served a valid
+address, for example on a DisplayPort cable. `0.0.0.0` is the TV's
+own address, which a sink serves when it states none, and `f.f.f.f`
+is the invalid address, so the operator publishes neither. It also
+refuses an address with a non-zero digit after a zero, such as
+`1.0.2.0`, because a zero ends the path. The output device publishes
+the same value as its `physicalAddress` attribute, from the current
+EDID only, so a dark connector publishes none. Read the retained
+value from the `Display`.
+
+The address belongs to one connector, and a `Display` has one
+connector. Two connectors on one machine that serve EDIDs with the
+same identity, such as two cables to one receiver, map to one
+`Display`, and it reports the connector that sorts last by name
+among those that are connected.
 
 ## Shared screens
 

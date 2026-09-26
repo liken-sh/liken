@@ -214,6 +214,12 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			// absent while the output drives nothing and when the
 			// card could not answer.
 			addAttribute(device.Attributes, "currentMode", output.CurrentMode)
+			// The CEC physical address of the port this cable is in,
+			// 1.2.0.0, from the EDID on the wire now. A dark connector
+			// publishes none, because a device the scheduler allocates
+			// describes the hardware as it is now. The Display's status
+			// keeps the last address while the connector is dark.
+			addAttribute(device.Attributes, "physicalAddress", output.Monitor.PhysicalAddress)
 			// Each control attribute promises one thing: the panel
 			// answered the VCP code behind it when the operator asked.
 			// A claim that states the matching parameter has something
