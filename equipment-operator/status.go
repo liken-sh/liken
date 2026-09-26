@@ -1,11 +1,14 @@
 package main
 
 // The status one receiver reports: what it last said, in its own units,
-// and the one condition that says whether the operator can still reach
-// it.
+// the condition that says whether the operator can still reach it, and
+// the condition that names the declared fields the receiver did not
+// confirm.
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/denon"
@@ -13,13 +16,16 @@ import (
 	"github.com/liken-sh/equipment-operator/wiim"
 )
 
-// The one condition this operator reports, and the reason for each
+// The conditions this operator reports, and the reason for each
 // verdict.
 const (
 	reachableConditionType = "Reachable"
 	reasonConnected        = "Connected"
 	reasonUnreachable      = "Unreachable"
 	reasonConnecting       = "Connecting"
+
+	settingsConfirmedConditionType = "SettingsConfirmed"
+	reasonNotConfirmed             = "NotConfirmed"
 )
 
 // reachableWords is the reason and the message each verdict carries.
@@ -56,6 +62,30 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 		}
 	}
 	return condition
+}
+
+// settingsConfirmed builds the condition that names the declared fields
+// the operator stopped sending, because the receiver did not report the
+// declared value after sendLimit sends in this generation. It exists
+// only while such a field exists, and it keeps the moment it appeared.
+func settingsConfirmed(unconfirmed []string, generation int64, previous []Condition, now time.Time) (Condition, bool) {
+	if len(unconfirmed) == 0 {
+		return Condition{}, false
+	}
+	condition := Condition{
+		Type:               settingsConfirmedConditionType,
+		Status:             ConditionFalse,
+		ObservedGeneration: generation,
+		Reason:             reasonNotConfirmed,
+		Message:            fmt.Sprintf("the receiver did not report the declared value after %d sends: %s", sendLimit, strings.Join(unconfirmed, ", ")),
+		LastTransitionTime: timestamp(now),
+	}
+	for _, held := range previous {
+		if held.Type == settingsConfirmedConditionType && held.Status == ConditionFalse && held.LastTransitionTime != "" {
+			condition.LastTransitionTime = held.LastTransitionTime
+		}
+	}
+	return condition, true
 }
 
 // buildReceiverStatus is the whole status one receiver's state makes,

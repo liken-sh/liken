@@ -40,6 +40,9 @@ type settingSpec struct {
 	// error a declared value that no command can carry returns, and
 	// whether the settings declare the field at all.
 	command func(s *Settings) (string, error, bool)
+	// take copies the field from src into dst when src declares it, so
+	// Pending builds a Settings that holds only the fields to send.
+	take func(dst, src *Settings)
 }
 
 // settingsTable is the assembled id table. The channel volumes are not
@@ -264,10 +267,10 @@ func deepCopySettings(s *Settings) {
 	}
 }
 
-// ApplySettings sends the wire command for every declared field. The
-// controller calls it only when the spec changed, so it does not
-// re-assert by itself, and an undeclared field sends nothing. A family
-// the receiver does not echo is asked for again after the sets.
+// ApplySettings sends the wire command for every declared field, and an
+// undeclared field sends nothing. The controller passes it only the
+// fields Pending keeps. A family the receiver does not echo is asked
+// for again after the sets.
 func (d *Client) ApplySettings(want Settings) error {
 	var sent []string
 	for _, spec := range settingsTable {
@@ -366,6 +369,11 @@ func wordSetting(id string, build func(string) (string, error), set func(*Settin
 			command, err := build(*value)
 			return command, err, true
 		},
+		take: func(dst, src *Settings) {
+			if value := get(src); value != nil {
+				set(dst, *value)
+			}
+		},
 	}
 }
 
@@ -398,6 +406,11 @@ func numberSetting(id string, build func(int) (string, error), set func(*Setting
 			command, err := build(*value)
 			return command, err, true
 		},
+		take: func(dst, src *Settings) {
+			if value := get(src); value != nil {
+				set(dst, *value)
+			}
+		},
 	}
 }
 
@@ -424,6 +437,11 @@ func boolSetting(id string, build func(bool) (string, error), set func(*Settings
 			}
 			command, err := build(*value)
 			return command, err, true
+		},
+		take: func(dst, src *Settings) {
+			if value := get(src); value != nil {
+				set(dst, *value)
+			}
 		},
 	}
 }

@@ -62,17 +62,19 @@ type receiverUnit struct {
 	// The last power the operator applied, so a reconcile and a toggle
 	// share one memory of what was sent and neither re-asserts it.
 	power atomic.Pointer[equipment.Power]
-	// The last settings the operator applied, so a reconcile applies a
-	// declared change once and a bus write that returns a value to the
-	// spec is not re-sent on the next pass.
+	// The last settings the operator applied. A field the receiver does
+	// not report is compared with it, so the field is sent once per spec
+	// change.
 	settings atomic.Pointer[denon.Settings]
 	// The same memory for a WiiM, which has its own settings type and no
 	// shared field with the Denon's.
 	wiimSettings atomic.Pointer[wiim.Settings]
-	// The last zone controls the operator applied, keyed by zone, so a
-	// reconcile sends a declared change once and a pass with no change
-	// sends nothing.
+	// The last zone controls the operator applied, keyed by zone, for
+	// the controls a zone does not report, the same way as settings.
 	zones atomic.Pointer[map[string]ZoneSpec]
+	// How many times the operator sent each declared field in this spec
+	// generation, so a field the receiver never confirms stops.
+	budget *sendBudget
 
 	mutex   sync.Mutex
 	session *session
@@ -131,6 +133,9 @@ func (u *receiverUnit) write() {
 
 	settings := u.denonSettings()
 	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.Address(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
+	if condition, held := settingsConfirmed(u.budget.unconfirmed(), u.generation.Load(), u.applied.Conditions, now); held {
+		status.Conditions = append(status.Conditions, condition)
+	}
 	if u.written && sameStatus(status, u.applied) {
 		return
 	}
@@ -299,99 +304,110 @@ func (u *receiverUnit) wiimStatus() *wiim.Status {
 }
 
 // setSettings drives the receiver to the settings a person declared.
-// A declared value is enforced: when the settings block changes, every
-// declared field is re-sent on purpose, so a value declared in the spec
-// is authoritative over a change made at the receiver. A block already
-// sent whose reported fields confirm is left alone; a block the
-// receiver has not confirmed is sent again on the next pass and stops
-// the moment the receiver reports it; a block with no reported fields
-// confirms trivially, so it sends once per spec change. A command sent
-// before the connection is open is dropped, so the change waits for a
-// reachable receiver rather than applying a value the equipment never
-// saw. An apply error is logged and not recorded, so the next pass
-// tries again.
+// It sends only the declared fields that Pending keeps: a field the
+// receiver reports at another value, and a field the receiver does not
+// report that the spec changed since the last apply. A restart against
+// a receiver that already holds the declared settings sends nothing
+// and logs nothing, and a change made at the receiver is sent back on
+// the next pass. A field the receiver reports is sent on each pass
+// until the receiver reports the declared value. A field it does not
+// report is sent once per spec change, and not after a restart,
+// because the operator starts with no record of what it applied. The
+// apply waits for the survey, because before it the receiver has
+// reported nothing to compare with. An apply error is logged and the
+// spec is not recorded as applied, so the next pass tries again.
 func (u *receiverUnit) setSettings(want denon.Settings) {
 	if u.denonClient == nil {
 		return
 	}
-	// A setting is compared against what the receiver reported, and a
-	// receiver the driver has not surveyed yet has reported nothing.
-	// Applying the diff then would send the whole block on every
-	// restart, so the apply waits for the survey.
 	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	observed := u.denonClient.Settings()
-	if reflect.DeepEqual(u.settingsApplied(), want) && want.ConfirmedBy(observed) {
-		return
-	}
-	line := fmt.Sprintf("generation %d declares spec.denon.settings %s; sent it", u.generation.Load(), declared(want))
-	began := time.Now()
-	if err := u.denonClient.ApplySettings(want); err != nil {
-		u.log.refused(line, err)
-		return
-	}
-	if u.log.fresh("spec.denon.settings", want) {
-		u.log.confirm(line, began, settingsCheck(func() bool { return want.ConfirmedBy(u.denonClient.Settings()) }))
+	previous, known := u.settingsApplied()
+	pending := budgeted(u, "spec.denon.settings", want.Pending(u.denonClient.Settings(), previous, known))
+	if !reflect.DeepEqual(pending, denon.Settings{}) {
+		line := fmt.Sprintf("generation %d declares spec.denon.settings %s; sent it", u.generation.Load(), declared(pending))
+		began := time.Now()
+		if err := u.denonClient.ApplySettings(pending); err != nil {
+			u.log.refused(line, err)
+			return
+		}
+		if u.log.fresh("spec.denon.settings", pending) {
+			u.log.confirm(line, began, settingsCheck(func() bool { return pending.ConfirmedBy(u.denonClient.Settings()) }))
+		}
 	}
 	u.settings.Store(&want)
 }
 
-// settingsApplied answers the last settings the operator settled on.
-func (u *receiverUnit) settingsApplied() denon.Settings {
-	if held := u.settings.Load(); held != nil {
-		return *held
+// budgeted spends the unit's send budget on one block's pending fields
+// and answers the fields it may send. When the fields the budget holds
+// back change, it asks for a status write, so the SettingsConfirmed
+// condition follows.
+func budgeted[T any](u *receiverUnit, family string, pending T) T {
+	before := u.budget.unconfirmed()
+	kept := spend(u.budget, u.generation.Load(), family, pending)
+	if !slices.Equal(before, u.budget.unconfirmed()) {
+		poke(u.dirty)
 	}
-	return denon.Settings{}
+	return kept
+}
+
+// settingsApplied answers the last settings the operator settled on,
+// and whether it has settled on any since it started.
+func (u *receiverUnit) settingsApplied() (denon.Settings, bool) {
+	if held := u.settings.Load(); held != nil {
+		return *held, true
+	}
+	return denon.Settings{}, false
 }
 
 // setWiimSettings drives the device to the settings a person declared.
-// It is the Denon path's shape in WiiM's own terms: a declared value is
-// enforced when the block changes, a block the device has not confirmed
-// is sent again on the next pass, and a pass with no change sends
-// nothing. The two settings types never meet.
+// It is the Denon path in WiiM's own terms: it sends only the declared
+// fields that Pending keeps, so a restart against a device that already
+// holds them sends nothing, and a change made at the device is sent
+// back. The two settings types never meet.
 func (u *receiverUnit) setWiimSettings(want wiim.Settings) {
 	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	observed := u.wiimClient.Settings()
-	if reflect.DeepEqual(u.wiimSettingsApplied(), want) && want.ConfirmedBy(observed) {
-		return
-	}
-	line := fmt.Sprintf("generation %d declares spec.wiim.settings %s; sent it", u.generation.Load(), declared(want))
-	began := time.Now()
-	if err := u.wiimClient.ApplySettings(want); err != nil {
-		u.log.refused(line, err)
-		return
-	}
-	if u.log.fresh("spec.wiim.settings", want) {
-		u.log.confirm(line, began, settingsCheck(func() bool { return want.ConfirmedBy(u.wiimClient.Settings()) }))
+	previous, known := u.wiimSettingsApplied()
+	pending := budgeted(u, "spec.wiim.settings", want.Pending(u.wiimClient.Settings(), previous, known))
+	if !reflect.DeepEqual(pending, wiim.Settings{}) {
+		line := fmt.Sprintf("generation %d declares spec.wiim.settings %s; sent it", u.generation.Load(), declared(pending))
+		began := time.Now()
+		if err := u.wiimClient.ApplySettings(pending); err != nil {
+			u.log.refused(line, err)
+			return
+		}
+		if u.log.fresh("spec.wiim.settings", pending) {
+			u.log.confirm(line, began, settingsCheck(func() bool { return pending.ConfirmedBy(u.wiimClient.Settings()) }))
+		}
 	}
 	u.wiimSettings.Store(&want)
 }
 
 // wiimSettingsApplied answers the last WiiM settings the operator
-// settled on.
-func (u *receiverUnit) wiimSettingsApplied() wiim.Settings {
+// settled on, and whether it has settled on any since it started.
+func (u *receiverUnit) wiimSettingsApplied() (wiim.Settings, bool) {
 	if held := u.wiimSettings.Load(); held != nil {
-		return *held
+		return *held, true
 	}
-	return wiim.Settings{}
+	return wiim.Settings{}, false
 }
 
-// setZones drives the non-main zones to the controls a person declared.
-// A declared value is enforced: when a zone's block changes, every
-// declared field of that zone is re-sent on purpose, so a value declared
-// in the spec is authoritative over a change made at the receiver. A
-// block already sent whose reported controls confirm is left alone; a
-// block the receiver has not confirmed is sent again on the next pass
-// and stops the moment the receiver reports it; a block for a zone the
-// receiver has not reported at all confirms trivially, so it sends once
-// per spec change. A command sent before the connection is open is
-// dropped, so the change waits for a reachable receiver. The main zone
-// is spec.power and spec.session, so a zones map that names main is a
-// misconfiguration and is rejected rather than fought. An apply error
-// is logged and not recorded, so the next pass tries again.
+// setZones drives the non-main zones to the controls a person
+// declared. For each zone it sends only the controls that
+// ZoneSpec.Pending keeps: a control the zone reports at another value,
+// and a control the zone does not report that the spec changed since
+// the last apply. A restart against a receiver whose zones already
+// hold the declared controls sends nothing and logs nothing, and a
+// change made at the receiver is sent back on the next pass. A control
+// the zone does not report is sent once per spec change, and not after
+// a restart, because the operator starts with no record of what it
+// applied. The main zone is spec.power and spec.session, so a zones map
+// that names main is a misconfiguration and is rejected rather than
+// fought. An apply error is logged and the zone is not recorded as
+// applied, so the next pass tries again.
 func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
@@ -399,29 +415,29 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 	// zonesApplied returns a copy, so this loop writes a fresh map that
 	// never shares its backing with the snapshot the last pass stored; a
 	// later setZones cannot reach back into an earlier one.
-	applied := u.zonesApplied()
+	applied, known := u.zonesApplied()
 	state := u.driver.State()
+	resolution := u.driver.VolumeResolution()
 	for name, spec := range want {
 		if name == equipment.MainZone {
 			fmt.Fprintf(os.Stderr, "zone %q on receiver %s: the main zone is spec.power and spec.session, not spec.zones\n", name, u.name)
 			continue
 		}
 		observed, reported := state.Zone(name)
-		confirmed := !reported || spec.ConfirmedBy(observed, u.driver.VolumeResolution())
-		if reflect.DeepEqual(applied[name], spec) && confirmed {
-			continue
-		}
-		line := fmt.Sprintf("generation %d declares zone %s %s; sent it", u.generation.Load(), name, declared(spec))
-		began := time.Now()
-		if err := u.applyZone(name, spec); err != nil {
-			u.log.refused(line, err)
-			continue
-		}
-		if u.log.fresh("spec.zones."+name, spec) {
-			u.log.confirm(line, began, settingsCheck(func() bool {
-				observed, reported := u.driver.State().Zone(name)
-				return !reported || spec.ConfirmedBy(observed, u.driver.VolumeResolution())
-			}))
+		pending := budgeted(u, "spec.zones."+name, spec.Pending(observed, reported, applied[name], known, resolution))
+		if pending != (ZoneSpec{}) {
+			line := fmt.Sprintf("generation %d declares zone %s %s; sent it", u.generation.Load(), name, declared(pending))
+			began := time.Now()
+			if err := u.applyZone(name, pending); err != nil {
+				u.log.refused(line, err)
+				continue
+			}
+			if u.log.fresh("spec.zones."+name, pending) {
+				u.log.confirm(line, began, settingsCheck(func() bool {
+					observed, reported := u.driver.State().Zone(name)
+					return !reported || pending.ConfirmedBy(observed, resolution)
+				}))
+			}
 		}
 		applied[name] = spec
 	}
@@ -430,15 +446,15 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) {
 
 // zonesApplied answers the last zone controls the operator settled on,
 // as a copy, so a caller can never mutate the stored snapshot.
-func (u *receiverUnit) zonesApplied() map[string]ZoneSpec {
+func (u *receiverUnit) zonesApplied() (map[string]ZoneSpec, bool) {
 	if held := u.zones.Load(); held != nil {
 		copy := make(map[string]ZoneSpec, len(*held))
 		for name, spec := range *held {
 			copy[name] = spec
 		}
-		return copy
+		return copy, true
 	}
-	return map[string]ZoneSpec{}
+	return map[string]ZoneSpec{}, false
 }
 
 // applyZone sends the declared controls for one zone. Volume is in
@@ -799,6 +815,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		log:           newReceiverLog(c.log, receiver.Metadata.Name),
 		cancel:        cancel,
 		dirty:         make(chan struct{}, 1),
+		budget:        newSendBudget(),
 	}
 	unit.setVolume(receiver.Spec.Volume)
 	unit.setInputs(receiver.Spec.Inputs)

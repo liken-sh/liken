@@ -196,7 +196,7 @@ var denonSettingPrefixes = []string{
 	"ECO", "DIM ", "STBY", "SPPR ", "SD", "SV", "BTTX ", "PSMULTEQ:", "PSDYNEQ ",
 	"PSREFLEV ", "PSDYNVOL ", "PSLOM ", "PSDRC ", "PSLFE ", "PSEFF ", "PSDELAY ",
 	"PSDEL ", "PSSWR ", "PSRSTR ", "PSGEQ ", "PSHEQ ", "PSSPV ", "PSDEH ",
-	"PSBAS ", "PSTRE ", "PSTONE CTRL ", "CV",
+	"PSBAS ", "PSTRE ", "PSTONE CTRL ", "CV", "VSAUDIO ", "SSHOS",
 }
 
 // isDenonSetting answers whether one command sets a setting, which is a
@@ -224,6 +224,18 @@ func (f *fakeDenon) holdSetting(command, report string) {
 		f.settingsHold = map[string]string{}
 	}
 	f.settingsHold[command] = report
+}
+
+// volunteer is a hand on the receiver's own buttons: the receiver sends
+// each line as an event, with nothing having asked. A test uses it to
+// have the receiver report a setting or a zone control before the
+// operator compares the spec with it.
+func (f *fakeDenon) volunteer(lines ...string) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	for _, line := range lines {
+		f.send(line)
+	}
 }
 
 // ignorePowerOn makes the receiver take PWON without ever answering it,
@@ -280,6 +292,27 @@ func (f *fakeDenon) refuseCommand(t *testing.T, unwanted string, within time.Dur
 		case command := <-f.commands:
 			if command == unwanted {
 				t.Fatalf("the client sent %q again", unwanted)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// refuseAnySet fails the test if the client sends any set command for a
+// setting or a non-main zone inside the window. Queries and the
+// heartbeat end in ? and pass.
+func (f *fakeDenon) refuseAnySet(t *testing.T, within time.Duration) {
+	t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case command := <-f.commands:
+			if strings.HasSuffix(command, "?") {
+				continue
+			}
+			if isDenonSetting(command) || strings.HasPrefix(command, "Z2") || strings.HasPrefix(command, "Z3") {
+				t.Fatalf("the client sent %q", command)
 			}
 		case <-deadline:
 			return

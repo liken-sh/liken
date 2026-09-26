@@ -123,6 +123,70 @@ func (z ZoneSpec) ConfirmedBy(observed equipment.ZoneState, resolution int) bool
 	return true
 }
 
+// Pending answers the declared controls to send for one zone, as a
+// ZoneSpec that holds only those controls. A control the zone reports
+// is sent only while the zone reports another value, so a restart
+// against a receiver that already holds the declared zone sends
+// nothing, and a change made at the receiver is driven back. A control
+// the zone does not report is compared with previous, the zone the
+// operator applied before, so it is sent once when the spec changes it.
+// known says whether the operator has applied any zones since it
+// started; after a restart it has not, and an unreported control waits
+// for the spec to change it. Volume is compared in the driver's
+// smallest steps.
+func (z ZoneSpec) Pending(observed equipment.ZoneState, reported bool, previous ZoneSpec, known bool, resolution int) ZoneSpec {
+	changed := func(same bool) bool { return known && !same }
+	var pending ZoneSpec
+	if z.Power != "" {
+		on := z.Power != equipment.PowerStandby && z.Power != equipment.PowerOff
+		if reported && observed.Power != "" {
+			if on != (observed.Power == equipment.PowerOn) {
+				pending.Power = z.Power
+			}
+		} else if changed(previous.Power == z.Power) {
+			pending.Power = z.Power
+		}
+	}
+	if z.Input != "" {
+		if reported && observed.Input != "" {
+			if observed.Input != z.Input {
+				pending.Input = z.Input
+			}
+		} else if changed(previous.Input == z.Input) {
+			pending.Input = z.Input
+		}
+	}
+	if z.Volume != nil {
+		steps := int(math.Round(*z.Volume * float64(resolution)))
+		if reported && observed.Volume != equipment.Unknown {
+			if observed.Volume != steps {
+				pending.Volume = z.Volume
+			}
+		} else if changed(previous.Volume != nil && *previous.Volume == *z.Volume) {
+			pending.Volume = z.Volume
+		}
+	}
+	if z.Mute != nil {
+		if reported {
+			if observed.Mute != *z.Mute {
+				pending.Mute = z.Mute
+			}
+		} else if changed(previous.Mute != nil && *previous.Mute == *z.Mute) {
+			pending.Mute = z.Mute
+		}
+	}
+	if z.Sleep != nil {
+		if reported && observed.Sleep != equipment.Unknown {
+			if observed.Sleep != *z.Sleep {
+				pending.Sleep = z.Sleep
+			}
+		} else if changed(previous.Sleep != nil && *previous.Sleep == *z.Sleep) {
+			pending.Sleep = z.Sleep
+		}
+	}
+	return pending
+}
+
 // How loud the room may get and how far one press moves it, both in the
 // receiver's own scale. A Denon requires max. An absent step is one
 // whole unit of that scale.

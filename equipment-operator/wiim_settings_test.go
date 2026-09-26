@@ -1,7 +1,7 @@
 package main
 
-// The WiiM settings path: a declared block reaches the device once, and
-// a block the device already reports is not re-sent.
+// The WiiM settings path: the operator sends only the declared fields
+// the device reports at another value.
 
 import (
 	"context"
@@ -124,36 +124,44 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio")}
+	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio"), budget: newSendBudget()}
 }
 
-// A declared block is enforced once even when the device already
-// reports it, because the operator starts with no memory of what it
-// applied, and a second pass with the same block sends nothing.
-func TestADeclaredWiimSettingReachesTheDeviceOnce(t *testing.T) {
+// A restart against a device that already reports every declared value
+// sends nothing: the operator compares the spec with what the device
+// reports, not with a memory it lost in the restart.
+func TestARestartAgainstASettledWiimSendsNothing(t *testing.T) {
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
 
-	name := "Studio"
-	led := true
+	name, led := "Studio", true
 	want := wiim.Settings{Device: wiim.DeviceSettings{Name: &name, LED: &led}}
 
 	unit.setWiimSettings(want)
+	unit.setWiimSettings(want)
+	time.Sleep(50 * time.Millisecond)
+	mustDeepEqual(t, amp.sent(), []string(nil))
+}
+
+// One declared field the device reports at another value sends that
+// field and nothing beside it.
+func TestOneDifferingWiimFieldSendsOnlyThatField(t *testing.T) {
+	amp := startFakeWiim(t)
+	_, unit := waitingWiim(t, amp)
+
+	name, led := "Studio", false
+	unit.setWiimSettings(wiim.Settings{Device: wiim.DeviceSettings{Name: &name, LED: &led}})
+
 	deadline := time.After(testTimeout)
-	for len(amp.sent()) < 2 {
+	for len(amp.sent()) < 1 {
 		select {
 		case <-deadline:
-			t.Fatalf("only sent %v", amp.sent())
+			t.Fatal("the operator sent nothing")
 		case <-time.After(time.Millisecond):
 		}
 	}
-	mustDeepEqual(t, amp.sent(), []string{"setDeviceName:Studio", "LED_SWITCH_SET:1"})
-
-	// The device reports the declared values and the operator remembers
-	// applying them, so the same block sends nothing again.
-	unit.setWiimSettings(want)
 	time.Sleep(50 * time.Millisecond)
-	mustDeepEqual(t, amp.sent(), []string{"setDeviceName:Studio", "LED_SWITCH_SET:1"})
+	mustDeepEqual(t, amp.sent(), []string{"LED_SWITCH_SET:0"})
 }
 
 func TestAnUndeclaredWiimSettingSendsNothing(t *testing.T) {

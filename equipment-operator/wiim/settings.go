@@ -76,6 +76,45 @@ func (w Settings) ConfirmedBy(observed Settings) bool {
 	return true
 }
 
+// Pending answers the declared fields to send, as Settings that hold
+// only those fields. A field the device reports is sent only while the
+// device reports another value, so a restart against a device that
+// already holds the declared settings sends nothing, and a change made
+// at the device is driven back. A field the device does not report is
+// compared with previous, the settings the operator applied before, so
+// it is sent once when the spec changes it. known says whether previous
+// holds anything since the operator started; after a restart it does
+// not, and an unreported field waits for the spec to change it.
+func (w Settings) Pending(observed, previous Settings, known bool) Settings {
+	var pending Settings
+	if isPending(w.Audio.Balance, observed.Audio.Balance, previous.Audio.Balance, known) {
+		pending.Audio.Balance = w.Audio.Balance
+	}
+	if isPending(w.Device.Name, observed.Device.Name, previous.Device.Name, known) {
+		pending.Device.Name = w.Device.Name
+	}
+	if isPending(w.Device.LED, observed.Device.LED, previous.Device.LED, known) {
+		pending.Device.LED = w.Device.LED
+	}
+	if isPending(w.Device.Buttons, observed.Device.Buttons, previous.Device.Buttons, known) {
+		pending.Device.Buttons = w.Device.Buttons
+	}
+	return pending
+}
+
+// isPending answers whether one declared field is sent: a reported
+// field that differs, or an unreported field the spec changed since
+// the operator last applied it.
+func isPending[T comparable](want, observed, previous *T, known bool) bool {
+	switch {
+	case want == nil:
+		return false
+	case observed != nil:
+		return *observed != *want
+	}
+	return known && (previous == nil || *previous != *want)
+}
+
 // setBalanceCommand builds the wire command for a declared balance. The
 // value runs from -1.0, full left, to 1.0, full right. A value outside
 // that range is an error that names it.
@@ -126,8 +165,8 @@ func (c *Client) Settings() Settings {
 
 // ApplySettings sends the wire command for every declared field, in a
 // fixed order: audio before device, and name before led before buttons.
-// The controller calls it only when the spec changed, so it does not
-// re-assert by itself, and an undeclared field sends nothing. A
+// An undeclared field sends nothing, and the controller passes it only
+// the fields Pending keeps. A
 // command the receiver refuses stops the apply at that field, and the
 // first error is the one returned.
 func (c *Client) ApplySettings(want Settings) error {

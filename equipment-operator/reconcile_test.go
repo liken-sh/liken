@@ -717,9 +717,9 @@ func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 	}
 }
 
-// A declarative settings change is applied once the receiver is
-// reachable, and a re-list with the same settings sends nothing further:
-// the operator owns the declared settings and never re-asserts them.
+// A declared setting the receiver reports at another value is applied
+// once the receiver is reachable, and once the receiver reports the
+// declared value, a re-list with the same settings sends nothing.
 func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
@@ -734,29 +734,46 @@ func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
 	waitForSurvey(t, operator)
+	fake.holdSetting("PSBAS 53", "PSBAS 53")
+	fake.volunteer("PSBAS 50")
+	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+		return s.Tone.Bass != nil && *s.Tone.Bass == 0
+	})
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "PSBAS 53")
+	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+		return *s.Tone.Bass == 3
+	})
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.refuseCommand(t, "PSBAS 53", quietPeriod)
 }
 
-// Declared zone controls reach the right wire lines for each non-main
-// zone, and a re-list with the same zones sends nothing further.
+// Declared zone controls the zone reports at other values reach the
+// right wire lines for each non-main zone, and once the zone reports
+// them, a re-list with the same zones sends nothing further.
 func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 	cases := []struct {
-		name   string
-		zone   string
-		power  equipment.Power
-		input  string
-		volume float64
-		mute   bool
-		sleep  int
-		want   []string
+		name    string
+		zone    string
+		power   equipment.Power
+		input   string
+		volume  float64
+		mute    bool
+		sleep   int
+		before  []string
+		want    []string
+		reports []string
 	}{
-		{"zone2", "zone2", equipment.PowerOn, "CD", 40, true, 30, []string{"Z2ON", "Z2CD", "Z2MV40", "Z2MUON", "Z2SLP030"}},
-		{"zone3", "zone3", equipment.PowerStandby, "TV", 30, false, 30, []string{"Z3OFF", "Z3TV", "Z3MV30", "Z3MUOFF", "Z3SLP030"}},
+		{"zone2", "zone2", equipment.PowerOn, "CD", 40, true, 30,
+			[]string{"Z2OFF", "Z2PHONO", "Z220", "Z2MUOFF", "Z2SLPOFF"},
+			[]string{"Z2ON", "Z2CD", "Z2MV40", "Z2MUON", "Z2SLP030"},
+			[]string{"Z2ON", "Z2CD", "Z240", "Z2MUON", "Z2SLP030"}},
+		{"zone3", "zone3", equipment.PowerStandby, "TV", 30, false, 30,
+			[]string{"Z3ON", "Z3PHONO", "Z320", "Z3MUON", "Z3SLPOFF"},
+			[]string{"Z3OFF", "Z3TV", "Z3MV30", "Z3MUOFF", "Z3SLP030"},
+			[]string{"Z3OFF", "Z3TV", "Z330", "Z3MUOFF", "Z3SLP030"}},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -772,14 +789,20 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 			mustSucceed(t, operator.pass(t.Context()))
 			api.waitForStatus(t, connected)
 			waitForSurvey(t, operator)
+			for index, command := range one.want {
+				fake.holdSetting(command, one.reports[index])
+			}
+			fake.volunteer(one.before...)
+			waitForObservedZone(t, operator, "theater", one.zone, 40)
 
 			mustSucceed(t, operator.pass(t.Context()))
 			for _, want := range one.want {
 				fake.waitForCommands(t, want)
 			}
+			waitForObservedZone(t, operator, "theater", one.zone, int(one.volume*2))
 
 			mustSucceed(t, operator.pass(t.Context()))
-			fake.refuseCommand(t, one.want[0], quietPeriod)
+			fake.refuseAnySet(t, quietPeriod)
 		})
 	}
 }
@@ -816,11 +839,14 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
 	waitForSurvey(t, operator)
+	fake.holdSetting("Z2MV30", "Z230")
+	fake.volunteer("Z220")
+	waitForObservedZone(t, operator, "theater", "zone2", 40)
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "Z2MV30")
 
 	unit := operator.units["theater"]
-	snapshot := unit.zonesApplied()
+	snapshot, _ := unit.zonesApplied()
 
 	// A later setZones drives a second zone and must not reach back into
 	// the snapshot read before it.
@@ -1076,6 +1102,10 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	// The receiver is in standby, so it takes the eco command but keeps
 	// reporting the standby value.
 	fake.holdSetting("ECOON", "ECOOFF")
+	fake.volunteer("ECOOFF")
+	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
+		return s.System.Eco != nil && *s.System.Eco == "off"
+	})
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "ECOON")
@@ -1096,29 +1126,6 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
 		return s.System.Eco != nil && *s.System.Eco == "on"
 	})
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseCommand(t, "ECOON", quietPeriod)
-}
-
-// A declared setting the receiver never reports is sent once and not
-// retried: a block with no reported field confirms trivially, so the
-// operator stops asking.
-func TestASettingTheReceiverNeverReportsSendsOnce(t *testing.T) {
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	eco := "on"
-	receiver.Spec.Denon.Settings = denon.Settings{System: denon.SystemSettings{Eco: &eco}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
-
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "ECOON")
-
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.refuseCommand(t, "ECOON", quietPeriod)
 }
@@ -1144,10 +1151,11 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	// declared level. The set command is Z2MV40, and the receiver
 	// reports a volume as Z2 followed by the digits.
 	fake.holdSetting("Z2MV40", "Z230")
+	fake.volunteer("Z230")
+	waitForObservedZone(t, operator, "theater", "zone2", 60)
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "Z2MV40")
-	waitForObservedZone(t, operator, "theater", "zone2", 60)
 
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "Z2MV40")
@@ -1158,29 +1166,6 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, "Z2MV40")
 	waitForObservedZone(t, operator, "theater", "zone2", 80)
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.refuseCommand(t, "Z2MV40", quietPeriod)
-}
-
-// A declared zone control for a zone the receiver never reports is sent
-// once and not retried: a zone with no reported state confirms
-// trivially, so the operator stops asking.
-func TestAZoneTheReceiverNeverReportsSendsOnce(t *testing.T) {
-	api := startFakeAPI(t)
-	fake := startFakeDenon(t)
-	receiver := testReceiver("theater", fake.address())
-	volume := 40.0
-	receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
-	api.setReceivers(receiver)
-	operator := startController(t, api)
-
-	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
-
-	mustSucceed(t, operator.pass(t.Context()))
-	fake.waitForCommands(t, "Z2MV40")
-
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.refuseCommand(t, "Z2MV40", quietPeriod)
 }
