@@ -43,6 +43,7 @@ The receiver's settings, one family per block, in display units. A declared valu
 | <span id="specdenonsettings--tone"></span>`tone` | [object](#specdenonsettingstone) | no | The tone control and the two trims, in display units where 0dB is neutral. |
 | <span id="specdenonsettings--audyssey"></span>`audyssey` | [object](#specdenonsettingsaudyssey) | no | The Audyssey room correction settings. |
 | <span id="specdenonsettings--audio"></span>`audio` | [object](#specdenonsettingsaudio) | no | The audio processing settings. |
+| <span id="specdenonsettings--hdmi"></span>`hdmi` | [object](#specdenonsettingshdmi) | no | The HDMI setup, the receiver's Video > HDMI Setup menu, with its HDMI-CEC switches. |
 | <span id="specdenonsettings--channelvolumes"></span>`channelVolumes` | map[string]number | no | One trim per channel, keyed by the channel's name, in display units where 0dB is neutral. |
 
 #### spec.denon.settings.system
@@ -99,6 +100,22 @@ The audio processing settings.
 | <span id="specdenonsettingsaudio--headphoneeq"></span>`headphoneEq` | string | no | The Headphone EQ: off or on. |
 | <span id="specdenonsettingsaudio--speakervirtualizer"></span>`speakerVirtualizer` | boolean | no | Whether the Speaker Virtualizer is on. |
 | <span id="specdenonsettingsaudio--dialogenhancer"></span>`dialogEnhancer` | string | no | The Dialog Enhancer level: off, low, mid, or high. |
+
+#### spec.denon.settings.hdmi
+
+The HDMI setup, the receiver's Video > HDMI Setup menu, with its HDMI-CEC switches.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdenonsettingshdmi--audioout"></span>`audioOut` | string | no | Where HDMI audio plays: avr for the receiver's own amplifier, or tv. One of: `avr`, `tv`. |
+| <span id="specdenonsettingshdmi--passthrough"></span>`passThrough` | boolean | no | Whether HDMI Pass Through sends a source to the TV while the receiver is in standby. |
+| <span id="specdenonsettingshdmi--passthroughsource"></span>`passThroughSource` | string | no | The source that passes through in standby: last for the last source selected, or hdmi1 to hdmi7 for one HDMI input jack. The receiver offers only the jacks that have a source assigned. One of: `last`, `hdmi1`, `hdmi2`, `hdmi3`, `hdmi4`, `hdmi5`, `hdmi6`, `hdmi7`. |
+| <span id="specdenonsettingshdmi--rcsourceselect"></span>`rcSourceSelect` | string | no | What a source button on the remote does while the receiver is in standby: powerOnAndSource turns the receiver on and selects the source, and sourceSelectOnly selects the source for pass through and leaves the receiver in standby. One of: `powerOnAndSource`, `sourceSelectOnly`. |
+| <span id="specdenonsettingshdmi--control"></span>`control` | boolean | no | Whether HDMI Control, the receiver's HDMI-CEC switch, is on. |
+| <span id="specdenonsettingshdmi--arc"></span>`arc` | boolean | no | Whether the Audio Return Channel is on. It needs HDMI Control. |
+| <span id="specdenonsettingshdmi--tvaudioswitching"></span>`tvAudioSwitching` | boolean | no | Whether the receiver selects the TV input when the TV plays its own sound over HDMI Control. |
+| <span id="specdenonsettingshdmi--poweroffcontrol"></span>`powerOffControl` | string | no | Which devices the TV's power off turns off over HDMI Control: all, video, or off. One of: `all`, `video`, `off`. |
+| <span id="specdenonsettingshdmi--powersaving"></span>`powerSaving` | boolean | no | Whether HDMI Control's power saving is on. |
 
 ### spec.wiim
 
@@ -212,7 +229,7 @@ What the receiver last reported, in its own units, plus the protocol's own setti
 | <span id="status--address"></span>`address` | string | no | The address the operator reached the receiver on: a WiiM's is the address discovery found, and a Denon's is the declared address resolved. Empty until the operator builds the driver. |
 | <span id="status--driver"></span>`driver` | string | no | The protocol driver the receiver's spec names: denon or wiim. It is the block the operator built the driver from, so a reader sees which protocol the row is driven through. Empty until the operator builds the driver. |
 | <span id="status--zones"></span>`zones` | [map\[string\]object](#statuszones) | no | One entry per zone the receiver reported, keyed by the zone's protocol name. A single-zone receiver reports main. |
-| <span id="status--denon"></span>`denon` | object | no | The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it. |
+| <span id="status--denon"></span>`denon` | object | no | The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, the HDMI setup, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it. |
 | <span id="status--wiim"></span>`wiim` | object | no | The WiiM protocol's own observable status, in the device's units: identity, network, playback, now-playing, audio, equalizer, timers, Bluetooth, presets, and controls. The driver owns this shape, and wiim/AGENTS.md documents it. |
 | <span id="status--service"></span>`service` | string | no | The Service that represents the receiver on the cluster network after the operator creates it. Empty until then. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. |

@@ -24,6 +24,7 @@ type Settings struct {
 	Tone           ToneSettings       `json:"tone"`
 	Audyssey       AudysseySettings   `json:"audyssey"`
 	Audio          AudioSettings      `json:"audio"`
+	HDMI           HDMISettings       `json:"hdmi"`
 	ChannelVolumes map[string]float64 `json:"channelVolumes,omitempty"`
 }
 
@@ -43,11 +44,12 @@ type settingSpec struct {
 
 // settingsTable is the assembled id table. The channel volumes are not
 // here, because their ids name a channel and so cannot be enumerated.
-var settingsTable = append(append(append(append(
+var settingsTable = append(append(append(append(append(
 	[]settingSpec{}, systemSettings...),
 	toneSettings...),
 	audysseySettings...),
-	audioSettings...)
+	audioSettings...),
+	hdmiSettings...)
 
 // settingsById is the same table as a map for a bus write that names
 // one id.
@@ -159,6 +161,9 @@ func (w Settings) ConfirmedBy(observed Settings) bool {
 	if !sameString(w.Audio.DialogEnhancer, observed.Audio.DialogEnhancer) {
 		return false
 	}
+	if !w.HDMI.confirmedBy(observed.HDMI) {
+		return false
+	}
 	for channel, want := range w.ChannelVolumes {
 		got, held := observed.ChannelVolumes[channel]
 		if held && want != got {
@@ -240,6 +245,16 @@ func deepCopySettings(s *Settings) {
 	copyBool(&s.Audio.SpeakerVirtualizer)
 	copyString(&s.Audio.DialogEnhancer)
 
+	copyString(&s.HDMI.AudioOut)
+	copyBool(&s.HDMI.PassThrough)
+	copyString(&s.HDMI.PassThroughSource)
+	copyString(&s.HDMI.RCSourceSelect)
+	copyBool(&s.HDMI.Control)
+	copyBool(&s.HDMI.ARC)
+	copyBool(&s.HDMI.TVAudioSwitching)
+	copyString(&s.HDMI.PowerOffControl)
+	copyBool(&s.HDMI.PowerSaving)
+
 	if s.ChannelVolumes != nil {
 		copied := make(map[string]float64, len(s.ChannelVolumes))
 		for channel, value := range s.ChannelVolumes {
@@ -251,8 +266,10 @@ func deepCopySettings(s *Settings) {
 
 // ApplySettings sends the wire command for every declared field. The
 // controller calls it only when the spec changed, so it does not
-// re-assert by itself, and an undeclared field sends nothing.
+// re-assert by itself, and an undeclared field sends nothing. A family
+// the receiver does not echo is asked for again after the sets.
 func (d *Client) ApplySettings(want Settings) error {
+	var sent []string
 	for _, spec := range settingsTable {
 		if command, err, declared := spec.command(&want); declared {
 			if err != nil {
@@ -261,7 +278,11 @@ func (d *Client) ApplySettings(want Settings) error {
 			if err := d.send(command); err != nil {
 				return err
 			}
+			sent = append(sent, command)
 		}
+	}
+	if err := d.sendReadBacks(sent); err != nil {
+		return err
 	}
 	commands, err := channelCommands(&want)
 	if err != nil {
@@ -287,7 +308,10 @@ func (d *Client) Set(id string, value equipment.SettingValue) error {
 	if err != nil {
 		return err
 	}
-	return d.send(command)
+	if err := d.send(command); err != nil {
+		return err
+	}
+	return d.sendReadBacks([]string{command})
 }
 
 // applySetting folds one bus value into the settings and answers the

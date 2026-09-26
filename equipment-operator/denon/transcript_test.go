@@ -84,6 +84,16 @@ func TestTheAVRX1700HTranscriptFoldsIntoItsState(t *testing.T) {
 	mustMatch(t, *state.Settings.Audio.SpeakerVirtualizer, true)
 	mustMatch(t, *state.Settings.Audio.DialogEnhancer, "off")
 
+	mustMatch(t, *state.Settings.HDMI.AudioOut, "avr")
+	mustMatch(t, *state.Settings.HDMI.PassThrough, true)
+	mustMatch(t, *state.Settings.HDMI.PassThroughSource, "last")
+	mustMatch(t, *state.Settings.HDMI.RCSourceSelect, "powerOnAndSource")
+	mustMatch(t, *state.Settings.HDMI.Control, true)
+	mustMatch(t, *state.Settings.HDMI.ARC, false)
+	mustMatch(t, *state.Settings.HDMI.TVAudioSwitching, false)
+	mustMatch(t, *state.Settings.HDMI.PowerOffControl, "all")
+	mustMatch(t, *state.Settings.HDMI.PowerSaving, false)
+
 	mustMatch(t, state.Settings.ChannelVolumes["FL"], 0)
 	mustMatch(t, state.Settings.ChannelVolumes["FR"], 0)
 	mustMatch(t, state.Settings.ChannelVolumes["SW"], 0)

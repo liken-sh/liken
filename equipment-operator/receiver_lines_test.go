@@ -41,7 +41,7 @@ func reachedController(t *testing.T, receiver Receiver, brokerAddress string) (*
 // Each declared change is one line when the operator sends it, and a
 // later pass with the same spec adds none.
 func TestADeclaredChangeIsOneLine(t *testing.T) {
-	bass, volume := 3, 40.0
+	bass, volume, last := 3, 40.0, "last"
 	cases := []struct {
 		name    string
 		declare func(*Receiver)
@@ -61,6 +61,14 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 			},
 			"PSBAS 53",
 			`Receiver theater: generation 4 declares spec.denon.settings {"tone":{"bass":3}}; sent it; the receiver reported no value that differs after <time>`,
+		},
+		{
+			"hdmi settings",
+			func(receiver *Receiver) {
+				receiver.Spec.Denon.Settings = denon.Settings{HDMI: denon.HDMISettings{PassThroughSource: &last}}
+			},
+			"SSHOSCONSTS LAS",
+			`Receiver theater: generation 4 declares spec.denon.settings {"hdmi":{"passThroughSource":"last"}}; sent it; the receiver reported no value that differs after <time>`,
 		},
 		{
 			"zone",

@@ -1,8 +1,8 @@
 package denon
 
 // The receiver's own state: one entry per zone, the system settings,
-// the tone and Audyssey settings, the audio settings, and the channel
-// volumes. The state is in the receiver's units, and the driver
+// the tone and Audyssey settings, the audio settings, the HDMI setup,
+// and the channel volumes. The state is in the receiver's units, and the driver
 // translates it into the equipment contract and into the protocol
 // snapshot the status carries.
 
@@ -185,6 +185,9 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 		}
 		state.Settings.System.SpeakerPreset = intPtr(preset)
 		return state, "", speakerPresetField, true
+	case strings.HasPrefix(line, hdmiAudioOutKey), strings.HasPrefix(line, "SSHOS"):
+		field, ok := applyHDMILine(&state.Settings.HDMI, line)
+		return state, "", field, ok
 	case strings.HasPrefix(line, "SD"):
 		mode, ok := inputModeWord(line[2:])
 		if !ok {

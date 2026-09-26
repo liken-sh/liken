@@ -194,6 +194,41 @@ spec:
                             dialogEnhancer:
                               type: string
                               description: "The Dialog Enhancer level: off, low, mid, or high."
+                        hdmi:
+                          type: object
+                          description: "The HDMI setup, the receiver's Video > HDMI Setup menu, with its HDMI-CEC switches."
+                          properties:
+                            audioOut:
+                              type: string
+                              enum: [avr, tv]
+                              description: "Where HDMI audio plays: avr for the receiver's own amplifier, or tv."
+                            passThrough:
+                              type: boolean
+                              description: "Whether HDMI Pass Through sends a source to the TV while the receiver is in standby."
+                            passThroughSource:
+                              type: string
+                              enum: [last, hdmi1, hdmi2, hdmi3, hdmi4, hdmi5, hdmi6, hdmi7]
+                              description: "The source that passes through in standby: last for the last source selected, or hdmi1 to hdmi7 for one HDMI input jack. The receiver offers only the jacks that have a source assigned."
+                            rcSourceSelect:
+                              type: string
+                              enum: [powerOnAndSource, sourceSelectOnly]
+                              description: "What a source button on the remote does while the receiver is in standby: powerOnAndSource turns the receiver on and selects the source, and sourceSelectOnly selects the source for pass through and leaves the receiver in standby."
+                            control:
+                              type: boolean
+                              description: "Whether HDMI Control, the receiver's HDMI-CEC switch, is on."
+                            arc:
+                              type: boolean
+                              description: "Whether the Audio Return Channel is on. It needs HDMI Control."
+                            tvAudioSwitching:
+                              type: boolean
+                              description: "Whether the receiver selects the TV input when the TV plays its own sound over HDMI Control."
+                            powerOffControl:
+                              type: string
+                              enum: [all, video, off]
+                              description: "Which devices the TV's power off turns off over HDMI Control: all, video, or off."
+                            powerSaving:
+                              type: boolean
+                              description: "Whether HDMI Control's power saving is on."
                         channelVolumes:
                           type: object
                           description: "One trim per channel, keyed by the channel's name, in display units where 0dB is neutral."
@@ -433,7 +468,7 @@ spec:
                         description: "Minutes until the zone sleeps, and zero when no sleep timer stands."
                 denon:
                   type: object
-                  description: "The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it."
+                  description: "The Denon protocol's own settings, in the receiver's units: the system settings, the tone trims, the Audyssey settings, the audio settings, the HDMI setup, and the channel volumes. The driver owns this shape, and denon/AGENTS.md documents it."
                   x-kubernetes-preserve-unknown-fields: true
                 wiim:
                   type: object

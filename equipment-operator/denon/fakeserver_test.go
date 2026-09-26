@@ -29,7 +29,24 @@ type fakeReceiver struct {
 	mute      bool
 	input     string
 	soundMode string
+	hdmi      map[string]string
 	conns     []net.Conn
+}
+
+// hdmiKeys are the HDMI setup keys the fake holds, in the order the
+// AVR-X1700H answers SSHOS ?. VSAUDIO is its own query.
+var hdmiKeys = []string{
+	"SSHOSCONARC", "SSHOSCONPSV", "SSHOSRSS", "SSHOSCON", "SSHOSCONSTS",
+	"SSHOSCONPOF", "SSHOSPAS", "SSHOSTAS",
+}
+
+// houseHDMI is what the AVR-X1700H answered to VSAUDIO ? and SSHOS ?.
+func houseHDMI() map[string]string {
+	return map[string]string{
+		"VSAUDIO": "AMP", "SSHOSCONARC": "OFF", "SSHOSCONPSV": "OFF",
+		"SSHOSRSS": "POS", "SSHOSCON": "ON", "SSHOSCONSTS": "LAS",
+		"SSHOSCONPOF": "ALL", "SSHOSPAS": "ON", "SSHOSTAS": "OFF",
+	}
 }
 
 // startFakeReceiver listens on the loopback and answers until the test
@@ -47,6 +64,7 @@ func startFakeReceiver(t *testing.T) *fakeReceiver {
 		volumeMax: 139,
 		input:     "MPLAY",
 		soundMode: "MULTI CH IN",
+		hdmi:      houseHDMI(),
 	}
 	t.Cleanup(func() {
 		listener.Close()
@@ -129,6 +147,20 @@ func (f *fakeReceiver) answer(command string) {
 	case strings.HasPrefix(command, InputPrefix):
 		f.input = command[len(InputPrefix):]
 		f.send("SI" + f.input)
+	case command == "VSAUDIO ?":
+		f.send("VSAUDIO " + f.hdmi["VSAUDIO"])
+	case command == "SSHOS ?":
+		for _, key := range hdmiKeys {
+			f.send(key + " " + f.hdmi[key])
+		}
+		f.send("SSHOS END")
+	case strings.HasPrefix(command, "VSAUDIO "), strings.HasPrefix(command, "SSHOS"):
+		// The AVR-X1700H sent no line after an HDMI setup command, so
+		// the fake stores the value and reports it only when asked.
+		key, word, held := strings.Cut(command, " ")
+		if held {
+			f.hdmi[key] = word
+		}
 	case isSettingCommand(command):
 		// A set command for a setting is echoed back, which the parser
 		// folds into the state the way a real receiver would.

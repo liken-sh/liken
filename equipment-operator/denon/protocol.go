@@ -32,7 +32,7 @@ var Queries = []string{
 	"PSMULTEQ: ?", "PSDYNEQ ?", "PSREFLEV ?", "PSDYNVOL ?", "PSTONE CTRL ?",
 	"PSBAS ?", "PSTRE ?", "PSDRC ?", "PSLFE ?", "PSEFF ?", "PSDEL ?", "PSDELAY ?",
 	"PSSWR ?", "PSRSTR ?", "PSLOM ?", "PSGEQ ?", "PSHEQ ?", "PSSPV ?", "PSDEH ?",
-	"BTTX ?",
+	"BTTX ?", hdmiAudioOutQuery, hdmiSetupQuery,
 }
 
 // The set commands this operator sends.
