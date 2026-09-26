@@ -1,6 +1,6 @@
 # The receiver's HTTP interface and the TV wake
 
-Plan 07. The findings are collected and the design is not written.
+Plan 07. The findings are collected. The TV wake is designed in plan 09, and the HTTP driver design is not written.
 
 ## The problem
 
@@ -44,12 +44,12 @@ All, and Power Saving off.
 
 A TV wakes only when a device connected to it originates CEC. The
 `liken` machines have no CEC on their HDMI ports, so the wake needs a
-CEC adapter. Plan 05 leaves the design of that node-attached component
-open.
+CEC adapter. [Plan 09](09-cec.md) designs that node-attached
+component: the `CECBus`, the `Television`, and the wake job that runs
+when a `Receiver`'s session wakes.
 
-This plan must decide two things. The first is that design, and the
-node that the adapter connects to. The second is how the driver uses
-the HTTP interface above, and which of its controls the driver takes.
+This plan still decides how the driver uses the HTTP interface above,
+and which of its controls the driver takes.
 
 ## What was considered and set aside
 
