@@ -289,6 +289,12 @@ decided yet what work they become.
   A claim stating a mode the panel will not sync loops the kubelet's
   prepare retries through compositor restarts until the whole card
   taints and the compositor enters restart backoff.
+* [Two monitors of one model share a Display](open-problems/two-monitors-of-one-model-share-a-display.md).
+  A `Display` name leaves out the serial, the node, and the connector,
+  so two monitors of one model are one `Display`, and on two nodes its
+  node and connector alternate every pass. The name cannot gain the
+  serial alone, because it is also the pairing identity that the ELD
+  must match.
 * [An external layout engine](open-problems/an-external-layout-engine.md).
   Plan 17 decides every placement in one function. The seam where a
   different engine would go is the `Service`, `EndpointSlice`, and
