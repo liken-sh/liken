@@ -68,6 +68,13 @@ type endpointControl struct {
 	// default writes to a new node alone.
 	nodes map[string]nodeRecord
 
+	// started is true once the first pass has run. The first pass
+	// finds nodes PipeWire built before this operator started, with
+	// levels a person may have chosen, so it records them as seen and
+	// writes no unity to them. Only a node that appears after it is
+	// new.
+	started bool
+
 	// refusals keeps the report of a declaration this operator cannot
 	// write to one line for each run of passes that finds it.
 	refusals map[string]string
@@ -139,6 +146,7 @@ func (e *endpointControl) pass(ctx context.Context, endpoints []alsaEndpoint,
 	if err := e.sweep(present); err != nil {
 		failures = append(failures, err)
 	}
+	e.started = true
 	return errors.Join(failures...)
 }
 
@@ -383,7 +391,10 @@ func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading
 // node read. A new node is written to unity once. A level a person
 // set by hand on a node that stands is left alone: it reaches
 // status.observed and nothing else, because the spec declares no
-// level and the operator invents none.
+// level and the operator invents none. A node the first pass finds
+// is not new, because the memory starts empty when the operator
+// starts, and a node that stood before the start can hold a level a
+// person chose, under a claim that plays.
 func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
 	if !facts.HasNode {
 		delete(e.nodes, facts.Name)
@@ -392,7 +403,7 @@ func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
 	last, seen := e.nodes[facts.Name]
 	if !seen || last.id != facts.Node.ID {
 		e.nodes[facts.Name] = nodeRecord{id: facts.Node.ID}
-		return nodeMemory{New: true}
+		return nodeMemory{New: e.started}
 	}
 	return nodeMemory{Written: last.written}
 }

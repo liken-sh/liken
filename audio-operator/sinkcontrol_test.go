@@ -131,48 +131,77 @@ func TestPassWritesTheStatusOnce(t *testing.T) {
 	}
 }
 
-// The unity default is for a node PipeWire has just built. A level a
-// person set on a node that stands reaches the status and nothing
-// else.
-func TestUnityIsWrittenOnceForEachNode(t *testing.T) {
+// turnedDownGraph is the lab graph after a person turned the analog
+// jack to 40 percent and the speaker to 30 percent on the speaker's
+// own absolute volume.
+func turnedDownGraph() pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	analog := graph.Nodes[address]
+	analog.Volumes = []float64{0.4, 0.4}
+	graph.Nodes[address] = analog
+	speaker := graph.Speakers[testSpeakerAddress]
+	speaker.Device = 64
+	speaker.Route = &pwRoute{Device: 1, Volumes: []float64{0.3, 0.3}, AbsoluteVolume: true}
+	graph.Speakers[testSpeakerAddress] = speaker
+	return graph
+}
+
+// An operator that starts, or starts again, finds nodes that were
+// built before it and levels a person chose. The first pass records
+// those nodes and writes nothing to them, so a speaker that plays a
+// film under a claim keeps the level it has.
+func TestAStartWritesNothingToNodesThatStand(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	control.claims.prepared("claim-1",
+		EndpointClaim{Namespace: "media", Name: "film"}, []string{testSpeakerName})
+	ctx := context.Background()
+
+	for range 2 {
+		if err := control.pass(ctx, labEndpoints(), testSpeakers(), turnedDownGraph()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if record.node != nil || record.route != nil {
+		t.Errorf("a start wrote a level to a node that stood: %+v", record)
+	}
+}
+
+// The unity default is for a node PipeWire builds after the operator
+// started. It takes the write once, and a level a person sets on it
+// after that reaches the status and nothing else.
+func TestUnityIsWrittenOnceForANodeBuiltAfterTheStart(t *testing.T) {
 	api := newEndpointAPI()
 	record := &writeRecord{}
 	control := testEndpointControl(t, api, record)
 	ctx := context.Background()
 
-	graph := labGraph()
-	quiet := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}]
-	quiet.Volumes = []float64{0.4, 0.4}
-	graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}] = quiet
-
+	graph := turnedDownGraph()
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
 		t.Fatal(err)
 	}
-	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
-		t.Fatalf("a new node was left at 40 percent: %+v", record)
+
+	// A node PipeWire built again carries a new object id, and it is
+	// born at the configuration's level, so it takes the write.
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	rebuilt := graph.Nodes[address]
+	rebuilt.ID = 77
+	graph.Nodes[address] = rebuilt
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.node.ID != 77 || record.level.Volume == nil || *record.level.Volume != unityPercent {
+		t.Fatalf("a node built after the start was left at 40 percent: %+v", record)
 	}
 
-	// The same node, still at the level the graph reports, is left
-	// alone: the operator wrote it once and a person may have moved it
-	// since.
 	record.node, record.level = nil, levelWrite{}
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
 		t.Fatal(err)
 	}
 	if record.node != nil {
-		t.Errorf("the second pass wrote the level again: %+v", record)
-	}
-
-	// A node PipeWire built again carries a new object id, and it is
-	// born at the configuration's level, so it takes the write.
-	rebuilt := quiet
-	rebuilt.ID = 77
-	graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}] = rebuilt
-	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
-		t.Fatal(err)
-	}
-	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
-		t.Errorf("a node that was built again was left at 40 percent: %+v", record)
+		t.Errorf("the next pass wrote the level again: %+v", record)
 	}
 }
 
@@ -305,15 +334,20 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 		return errors.New("pw-cli set-param: no such object")
 	}
 
-	graph := labGraph()
+	// The first pass finds no analog node, so the node the second
+	// pass finds is one PipeWire built after the start.
+	graph := turnedDownGraph()
 	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
 	quiet := graph.Nodes[address]
-	quiet.Volumes = []float64{0.4, 0.4}
+	delete(graph.Nodes, address)
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
 	graph.Nodes[address] = quiet
 
-	// The first pass reports the failed write, which is what the
-	// reconcile loop logs and carries on from.
-	ctx := context.Background()
+	// This pass reports the failed write, which is what the reconcile
+	// loop logs and carries on from.
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err == nil {
 		t.Fatal("a failed write reported nothing")
 	}

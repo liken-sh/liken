@@ -243,7 +243,10 @@ in the operator's log and is never written. An empty `spec` writes
 nothing at all. The operator invents no value: an endpoint with no
 declarations keeps whatever the hardware holds, except that every
 sink starts at unity gain so that no hidden multiplier costs
-resolution before the codec runs.
+resolution before the codec runs. The unity write goes only to a
+node PipeWire builds while the operator runs. After a restart, the
+operator writes nothing to a sink that was there before it started,
+and the sink keeps the level it holds.
 
 `volume`, `mute`, and `controls` apply at once, whether a claim
 holds the endpoint or not. `codec` waits for the claim to end,
