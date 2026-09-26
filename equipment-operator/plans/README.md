@@ -33,7 +33,7 @@ becomes a new plan or an open problem.
 
 ## Open problems
 
-* [The WiiM settings the amp will not confirm](open-problems/the-wiim-settings-the-amp-will-not-confirm.md). The equalizer, the output mode, and the subwoofer have setters but no readable value, so they wait for a model whose reads answer. The alarm slots and the per-model command set sit beside them.
+* [WiiM settings that the amp does not report back](open-problems/the-wiim-settings-the-amp-will-not-confirm.md). The equalizer, the output mode, and the subwoofer have setters but no readable value, so they wait for a model whose reads answer. The alarm slots and the per-model command set sit beside them.
 
 ## Completed
 
