@@ -307,9 +307,15 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 			unexpectedStderr(tap.encoded.String()))
 	}
 	tap.Body = readCloser{Reader: encoded, close: encoded.Close}
-	waited := make(chan error, 1)
-	go func() { waited <- encoder.Wait() }()
 	tap.stop = func(drain bool) tapExit {
+		// The wait starts here, after the response has stopped
+		// reading, and not when the encoder starts. Wait closes the
+		// encoder's stdout pipe when the process exits, and an encoder
+		// that finishes a short span before the first read would then
+		// take its whole output with it: the client would get a 200
+		// with an empty body.
+		waited := make(chan error, 1)
+		go func() { waited <- encoder.Wait() }()
 		ended := tapExit{}
 		// A span that ran out closed the encoder's stdin, so the
 		// encoder is already writing its last bytes and exiting on its

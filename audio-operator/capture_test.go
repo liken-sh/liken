@@ -202,8 +202,8 @@ func TestAnEncoderGetsTheEndpointsFormatAndTheMD5WarningIsNotAFailure(t *testing
 		t.Errorf("the type is %q", got)
 	}
 	body, _ := io.ReadAll(answer.Body)
-	if string(body[:4]) != "fLaC" {
-		t.Errorf("the body starts %q", body[:4])
+	if !strings.HasPrefix(string(body), "fLaC") {
+		t.Errorf("the body is %d bytes and starts %q", len(body), body[:min(len(body), 4)])
 	}
 	args, err := os.ReadFile(harness.encoder)
 	if err != nil {

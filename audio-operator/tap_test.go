@@ -151,6 +151,59 @@ func waitFor(t *testing.T, ready func() bool) {
 	t.Fatal("the pump never reached the state this test waits for")
 }
 
+// lateReader holds back the first read of a body. A short span on a
+// busy node is encoded, and the encoder exits, before the response
+// has read the first block. The delay puts every tap in that order.
+type lateReader struct {
+	from    io.ReadCloser
+	delay   time.Duration
+	delayed bool
+}
+
+func (l *lateReader) Read(into []byte) (int, error) {
+	if !l.delayed {
+		l.delayed = true
+		time.Sleep(l.delay)
+	}
+	return l.from.Read(into)
+}
+
+func (l *lateReader) Close() error { return l.from.Close() }
+
+// readsLate makes the response read each tap's body only after the
+// delay.
+func (h *captureHarness) readsLate(delay time.Duration) {
+	start := h.server.start
+	h.server.start = func(ctx context.Context, plan tapPlan) (*runningTap, error) {
+		tap, err := start(ctx, plan)
+		if err != nil {
+			return nil, err
+		}
+		tap.Body = &lateReader{from: tap.Body, delay: delay}
+		return tap, nil
+	}
+}
+
+// The encoder's output waits in the pipe after the encoder exits, and
+// the response reads all of it. A pipe closed at the exit would answer
+// a 200 with an empty body.
+func TestAnEncoderThatExitsBeforeTheBodyIsReadDeliversEveryByte(t *testing.T) {
+	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
+	harness.readsLate(250 * time.Millisecond)
+	answer := harness.call(t, "GET",
+		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0,0.125")
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("reading the body: %v", err)
+	}
+	// The fake encoder's four-byte marker, then 0.125 s of samples:
+	// 48,000 Hz, two channels, two bytes a sample.
+	if len(body) != 4+24000 || !strings.HasPrefix(string(body), "fLaC") {
+		t.Errorf("the body is %d bytes and starts %q, want fLaC and 24000 bytes",
+			len(body), body[:min(len(body), 4)])
+	}
+}
+
 // Both encoders write a banner and a progress bar to stderr and exit
 // zero on every successful tap, so stderr alone says nothing about
 // whether a tap worked. The drill counted one encoder failure for
