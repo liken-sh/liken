@@ -404,7 +404,7 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 		memoryLimit string
 	}{
 		{container: scannerContainer, cpuRequest: "10m", memoryLimit: "64Mi"},
-		{container: catalogContainer, cpuRequest: "10m", memoryLimit: "512Mi"},
+		{container: catalogContainer, cpuRequest: "10m", memoryLimit: "1Gi"},
 	}
 	pod := testScanPod(studioMovies())
 	for _, one := range cases {

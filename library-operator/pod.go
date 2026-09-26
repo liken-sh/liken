@@ -95,6 +95,18 @@ const scannerGracePeriod = 60
 // The catalog agent's ceiling is the wide one. Its first sync holds
 // the whole catalog in memory as it applies it, which measured up to
 // 380 MB, and it settles far below that once the sync completes.
+//
+// The agent of a Library's Job has a higher ceiling than the other
+// agents. The catalog claim of a Job is per node, so every node that
+// first runs a Job of a Library syncs the whole namespace onto an empty
+// claim once. On a house cluster that first sync killed the agent at
+// 512Mi two or three times per walk. Each restart continued from the
+// state.db on the claim, and the walk completed, but only because of
+// the claim. On the testbed the same sync peaked at 384Mi, and after
+// the sync the agent used about 190Mi. The request stays the same,
+// because the request is what the scheduler places the pod by. A
+// Library's Job tolerates no taint, so it does not run on a small
+// screen node that carries the playerTaintKey taint.
 const (
 	scannerCPURequest    = "10m"
 	scannerMemoryRequest = "32Mi"
@@ -103,6 +115,8 @@ const (
 	catalogCPURequest    = "10m"
 	catalogMemoryRequest = "64Mi"
 	catalogMemoryLimit   = "512Mi"
+
+	libraryJobAgentMemoryLimit = "1Gi"
 )
 
 // The pod shape of a worker with one container: the container, the
@@ -126,7 +140,7 @@ func workerPodTemplate(library *Library, worker string, container Container, cor
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
 			InitContainers: []Container{
-				catalogSidecar(corrosionImage),
+				libraryJobAgent(corrosionImage),
 			},
 			Containers: []Container{container},
 			Volumes: []Volume{
@@ -254,6 +268,15 @@ func catalogSidecar(image string) Container {
 		// wedged agent after three failures, at near-zero cost.
 		LivenessProbe: catalogProbe(30, 3),
 	}
+}
+
+// libraryJobAgent is the catalog agent of a Library's Job: the same
+// native sidecar, with the higher memory limit a first sync on an
+// empty claim needs.
+func libraryJobAgent(image string) Container {
+	agent := catalogSidecar(image)
+	agent.Resources.Limits = map[string]string{"memory": libraryJobAgentMemoryLimit}
+	return agent
 }
 
 // CatalogProbe builds a probe that runs the catalog agent's query

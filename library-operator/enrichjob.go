@@ -132,7 +132,7 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 		RestartPolicy:                 "Never",
 		TerminationGracePeriodSeconds: &grace,
 		AutomountServiceAccountToken:  &noToken,
-		InitContainers:                []Container{catalogSidecar(images.corrosion)},
+		InitContainers:                []Container{libraryJobAgent(images.corrosion)},
 		Containers:                    containers,
 		Volumes:                       libraryJobVolumes(library, providers, included),
 	}

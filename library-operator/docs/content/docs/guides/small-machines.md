@@ -71,7 +71,7 @@ requests:
 
 | Container | Memory request | Memory limit | CPU request |
 |---|---|---|---|
-| the catalog agent | `64Mi` | `512Mi` | `10m` |
+| the catalog agent | `64Mi` | `1Gi` | `10m` |
 | `scan`, in a walk | `32Mi` | `64Mi` | `10m` |
 | `probe` | `32Mi` | `256Mi` | `10m` |
 | `art` | `32Mi` | `256Mi` | `10m` |
@@ -84,9 +84,20 @@ containers beside the agent, so the pod requests about `448Mi`. A `Job`
 that fills gaps runs only the phases with work, and requests less. The
 probe and trickplay limits are wide because `ffmpeg` and `ffprobe` hold
 a decoded stream, and the art limit because the art container holds an
-image while it writes it. Every pod that runs an agent has a
-sixty-second termination grace period, twice the default, because a
-busy agent flushes its database as it stops.
+image while it writes it.
+
+The agent of a `Job` has a higher limit than the agent of a screen.
+The catalog claim of a `Job` is on the node, so the first `Job` of a
+`Library` on each node syncs the whole namespace onto an empty claim.
+One such first sync peaked at 384 MiB, and on a larger catalog the
+agent needed more than `512Mi`. After the sync the agent used about
+190 MiB. The request stays at `64Mi`, because the scheduler places
+the pod by its request. A `Job` tolerates no taint, so it does not run
+on a screen machine that carries the `media.liken.sh/player` taint.
+
+Every pod that runs an agent has a sixty-second termination grace
+period, twice the default, because a busy agent flushes its database
+as it stops.
 
 The peak memory of a whole `Job` on a one-gigabyte machine is not
 measured yet.
@@ -114,6 +125,7 @@ measured yet.
 * **Refresh one fact at a time.** Each name in `spec.refresh` reopens
   every title for that fact, and a `Job` fills it before the next.
 
-The agent's `512Mi` limit and the `emptyDir` cache's `640Mi` cap are
-constants of the operator's build, not fields. The art claim's size
+The agent's `512Mi` limit, the `1Gi` limit of a `Job`'s agent, and the
+`emptyDir` cache's `640Mi` cap are constants of the operator's build,
+not fields. The art claim's size
 is a field, `spec.screens.artCache.size`.
