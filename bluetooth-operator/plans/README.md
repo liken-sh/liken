@@ -60,7 +60,7 @@ considered and why.
 
 ## Open problems
 
-* [The restore set is proven for one BR/EDR device](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
+* [The restore set is tested on one BR/EDR device only](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
   The adapter's own `identity` file does not travel, and no LE device
   has been through a restore.
 * [The operator serves one adapter](open-problems/the-operator-serves-one-adapter.md).
