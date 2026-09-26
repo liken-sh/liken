@@ -459,6 +459,16 @@ machine into the socket.
   the `CECBus` condition says that no device answers and that the
   cable between the adapter and the receiver may not carry CEC.
 
+**A claim works with no privilege, except `Listen`.** A second drill
+on 2026-09-26 ran on `liken` 2026.09.26-001 with a `spec.serio`
+entry. A pod with no privileged flag, no added capability, and no host
+mount claimed the `-cec` device through a `DeviceClass` on the
+`cec` subsystem, received `/dev/cec0` and no other node, joined the
+bus as Playback Device 1, scanned the tree, and read the TV's and the
+receiver's power status. The kernel refused monitor-all mode to that
+pod, because monitor modes need `CAP_NET_ADMIN`. So the node pod adds
+that one capability for `Listen`, and `Control` needs none.
+
 ## Failure and recovery
 
 **The receiver in standby.** The adapter is connected to a receiver's
