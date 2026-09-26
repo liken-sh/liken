@@ -371,9 +371,11 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 	if message.IsPoll() {
 		return nil
 	}
+	a.bus.obey(message)
 	replies := a.bus.carry(message, a)
 	if peer, isPeer := a.bus.peers[message.To]; isPeer {
 		reply, aborted, ok := peer.answer(message)
+		a.bus.peers[message.To] = peer.asked(message)
 		if aborted {
 			raw.RxStatus = cec.RxStatusFeatureAbort | cec.RxStatusOK
 			return nil

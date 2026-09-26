@@ -4,8 +4,9 @@
 # amps no person has claimed. It never creates a Receiver for a wired
 # protocol or one a person declared: discovery defers to a claimed
 # identity and prunes only the objects that carry its own marker label.
-# It also derives each CECBus's status. The CEC node workload has its
-# own identity, at the end of this file.
+# It also derives each CECBus's and each Television's status, and
+# creates and deletes the Televisions its own discovery makes. The CEC
+# node workload has its own identity, at the end of this file.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -45,6 +46,25 @@ rules:
   - apiGroups: [equipment.liken.sh]
     resources: [cecbuses/status]
     verbs: [get, patch]
+  # The Televisions. The Deployment writes each one's derived status:
+  # the TV's facts and power from its CECBus, the Displays that reach
+  # it, and the Reachable and InCharge conditions. create is for the
+  # Television it makes, under the bus's name, for a TV that a CECBus
+  # in Control finds and no Television names. delete removes that
+  # Television when another Television names the same bus. It deletes
+  # only a Television that carries the discovered label and has its
+  # bus's name. It never writes a Television spec.
+  - apiGroups: [equipment.liken.sh]
+    resources: [televisions]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [equipment.liken.sh]
+    resources: [televisions/status]
+    verbs: [get, patch]
+  # A Television lists the Displays whose pictures reach it, from the
+  # physical address display-operator publishes on each Display.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -60,8 +80,8 @@ subjects:
     namespace: liken-system
 ---
 # The CEC node workload's identity, apart from the Deployment's, so the
-# pod on an adapter's machine can reach only the CECBus objects and the
-# Displays it reads.
+# pod on an adapter's machine can reach only the CECBus and Television
+# objects and the Displays it reads.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -90,6 +110,17 @@ rules:
   - apiGroups: [display.liken.sh]
     resources: [displays]
     verbs: [get]
+  # The watch wakes the pod when a person changes a Television's
+  # spec.power. The pod whose adapter sends the bus's commands applies
+  # the change and writes status.powerGeneration and the PowerApplied
+  # condition, under a field manager named after the machine. It never
+  # writes a Television spec.
+  - apiGroups: [equipment.liken.sh]
+    resources: [televisions]
+    verbs: [get, list, watch]
+  - apiGroups: [equipment.liken.sh]
+    resources: [televisions/status]
+    verbs: [get, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

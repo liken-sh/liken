@@ -1,12 +1,13 @@
 package main
 
-// A fake API server for the CECBus tests. It holds CECBus and Display
-// objects and applies each write the way server-side apply does for
-// the fields these writers state: a node workload's apply replaces its
-// own machine's entry under status.adapters, and the Deployment's
-// apply replaces the devices and the conditions. A watch gets one
-// event for each change, so a loop under test wakes the way it wakes
-// on a cluster.
+// A fake API server for the CECBus and Television tests. This file
+// holds the CECBus and Display objects, and televisionapi_test.go adds
+// the Televisions and the Receivers. It applies each write the way
+// server-side apply does for the fields these writers state: a node
+// workload's apply replaces its own machine's entry under
+// status.adapters, and the Deployment's apply replaces the devices and
+// the conditions. A watch gets one event for each change, so a loop
+// under test wakes the way it wakes on a cluster.
 
 import (
 	"encoding/json"
@@ -23,16 +24,35 @@ import (
 )
 
 type cecAPI struct {
-	mutex    sync.Mutex
-	buses    map[string]*CECBus
-	displays map[string]*Display
-	version  int
-	watchers []chan string
-	deleted  []string
-	client   *Client
+	mutex       sync.Mutex
+	buses       map[string]*CECBus
+	displays    map[string]*Display
+	televisions map[string]*Television
+	receivers   map[string]Receiver
+	// deletedTelevisions names each Television a writer deleted, and the
+	// two counts are the Television status writes of the Deployment and
+	// of the node workloads.
+	deletedTelevisions []string
+	derivedWrites      int
+	powerWrites        int
+	version            int
+	watchers           []chan string
+	deleted            []string
+	client             *Client
 	// refusing makes every list and every status write fail with a
 	// 500, the way an API server answers while it is unhealthy.
-	refusing bool
+	// refusingTelevisions does the same for the Television list alone.
+	refusing            bool
+	refusingTelevisions bool
+	// refusingPowerWrites refuses the node workloads' Television status
+	// writes, and noTelevisionDefinition answers every Television path
+	// with not found, the way a cluster without the definition does.
+	refusingPowerWrites    bool
+	noTelevisionDefinition bool
+	// uids numbers the Televisions the fake creates, and created names
+	// each one a writer created with a POST.
+	uids    int
+	created []string
 	// entryWrites counts the status writes of each node workload's
 	// field manager.
 	entryWrites map[string]int
@@ -47,7 +67,10 @@ func (a *cecAPI) refuse(refusing bool) {
 
 func startCECAPI(t *testing.T) *cecAPI {
 	t.Helper()
-	api := &cecAPI{buses: map[string]*CECBus{}, displays: map[string]*Display{}}
+	api := &cecAPI{
+		buses: map[string]*CECBus{}, displays: map[string]*Display{},
+		televisions: map[string]*Television{}, receivers: map[string]Receiver{},
+	}
 	api.client = testAPIClient(t, http.HandlerFunc(api.handle))
 	return api
 }
@@ -73,6 +96,9 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 	watch := r.URL.Query().Get("watch") == "true"
 	if refusing && !watch && (r.Method == http.MethodGet && path == cecBusesPath || strings.HasSuffix(path, "/status")) {
 		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if a.serveTelevisionAPI(w, r) {
 		return
 	}
 	switch {

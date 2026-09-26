@@ -76,11 +76,15 @@ const metricsComponent = "equipment-operator"
 // reconcile layer is labeled by kind so a dashboard built across
 // several operators reads the same series everywhere. The reconcile
 // series carry this one value; the watch restarts also count the
-// CECBus watch under its own kind.
+// CECBus and Television watches, each under its own kind.
 const receiverKind = "Receiver"
 
-// cecBusKind labels the CECBus watch's restarts.
-const cecBusKind = "CECBus"
+// cecBusKind and televisionKind label the restarts of the CECBus and
+// Television watches.
+const (
+	cecBusKind     = "CECBus"
+	televisionKind = "Television"
+)
 
 // The three outcomes equipment_commands_total counts. The Denon
 // protocol carries no acknowledgement tied to a particular command, so
@@ -233,6 +237,12 @@ func (m *metrics) watchRestarted() {
 // watch, under its own kind.
 func (m *metrics) cecBusWatchRestarted() {
 	m.watchRestarts.WithLabelValues(cecBusKind).Inc()
+}
+
+// televisionWatchRestarted records the same for the Deployment's
+// Television watch.
+func (m *metrics) televisionWatchRestarted() {
+	m.watchRestarts.WithLabelValues(televisionKind).Inc()
 }
 
 // recordObservation puts one receiver's freshly read state on the

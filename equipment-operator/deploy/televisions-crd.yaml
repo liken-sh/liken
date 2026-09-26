@@ -1,0 +1,157 @@
+# A Television is the TV at the root of one HDMI tree. It names its
+# protocol by the block it carries, and the first block is cec:.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: televisions.equipment.liken.sh
+spec:
+  group: equipment.liken.sh
+  names:
+    kind: Television
+    listKind: TelevisionList
+    plural: televisions
+    singular: television
+    shortNames: [tv]
+    categories: [equipment]
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. A person declares the spec. The operator's Deployment
+      # writes what it derives from the CECBus, and the node workload
+      # that sends the bus's commands writes what it applied.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Bus
+          type: string
+          jsonPath: .spec.cec.bus
+        - name: Power
+          type: string
+          jsonPath: .status.power
+        - name: Reachable
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Reachable")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "The TV at the root of one HDMI tree. A CEC bus has at most one TV, and the TV is always at physical address 0.0.0.0 and logical address 0, so spec.cec.bus identifies the TV and no address is needed. When a CECBus in Control finds a TV and no Television names that bus, the operator creates a Television with the bus's own name and the equipment.liken.sh/discovered label. The operator owns only that object: a labeled Television under another name is a person's. To adopt the discovered Television, apply your own Television under the bus's name, with the spec you want. The object keeps the label, and the operator keeps it for as long as no other Television names the same bus. A Television of another name that names the same bus also works: the operator then deletes the discovered one."
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              description: "The protocol block and the power a person asks for. A person writes every field."
+              # A Television names its protocol by the block it carries.
+              # cec: is the one block now, and a later block could reach a
+              # TV over its network protocol, so the rule asks for at
+              # least one block and does not require cec: by name.
+              x-kubernetes-validations:
+                - rule: "has(self.cec)"
+                  message: "a Television carries a protocol block, such as cec"
+              properties:
+                cec:
+                  type: object
+                  description: "The TV is on a CEC bus. The node workload reads the TV's power over that bus and sends the TV its power commands."
+                  required: [bus]
+                  properties:
+                    bus:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: "The CECBus the TV is on. The bus must be in Control for the operator to read the TV's power or send it a command, because Listen sends nothing."
+                power:
+                  type: string
+                  enum: ["On", Standby]
+                  description: "The power the operator drives the TV to. The node workload applies each generation of the spec once: each spec edit is a new metadata.generation, and it never asserts a generation again, so a person who turns the TV off with its own remote is not overruled. To ask for the same value again, edit the spec, such as by removing this field and adding it back. A new object applies its spec.power when it is created, so a Television deleted and created again, by a GitOps prune or a restore, applies its spec.power again. The node workload that sends the bus's commands reads the TV's power first, and sends nothing when the TV already reports the state, unless it sent the TV a command in the last 15 seconds: a TV answers its old state for a while after a command. It sends Image View On for On, or Standby to the TV alone for Standby, and reads the power every second until the TV reports the new state. A TV takes seconds to change state and reports ToOn or ToStandby while it does. When 10 seconds pass and no read showed the new state or the transition toward it, the node workload sends the command again. One generation gets at most three commands, and an application stops reading after 30 seconds. A new generation cancels an application of an older one. status.powerGeneration and the PowerApplied condition report the result. An absent field is no request, and the operator leaves the TV where it is. When two Televisions name one bus, the operator applies only the spec.power of the one in charge, which the InCharge condition names. When that one is deleted, the other takes over, and the operator applies its spec.power once then, as it does for a new object. Quote the value On in YAML, as power: \"On\": kubectl reads an unquoted On as the boolean true, and the API server refuses it. Image View On also asks the TV to show a source, so a TV can switch to the input of the adapter's Display when it wakes."
+            status:
+              type: object
+              description: "What the bus reports about the TV, and what the operator applied."
+              properties:
+                cec:
+                  type: object
+                  description: "The TV as the adapters of its CECBus found it. The operator copies each fact from the TV's entry in the CECBus's status.devices. A fact the TV has not stated is absent: one TV answers its power status in standby and does not answer Give OSD Name."
+                  required: [logicalAddress]
+                  properties:
+                    physicalAddress:
+                      type: string
+                      description: "The TV's physical address, 0.0.0.0."
+                    logicalAddress:
+                      type: integer
+                      minimum: 0
+                      maximum: 15
+                      description: "The TV's logical address, 0."
+                    osdName:
+                      type: string
+                      description: "The name the TV reports, at most 14 characters."
+                    vendor:
+                      type: string
+                      description: "The TV's IEEE OUI, as six hex digits."
+                    cecVersion:
+                      type: string
+                      description: "The CEC version the TV reports: 1.3a, 1.4, or 2.0."
+                power:
+                  type: string
+                  description: "The power status the TV last reported: On, Standby, ToOn, or ToStandby. The adapters in Control ask the TV every 10 seconds with Give Device Power Status, and the adapters also read every Report Power Status the TV sends them. A TV in a deep standby or an eco mode can stop answering. After two questions in a row without an answer, this field is absent and Reachable is False; one missed answer keeps the last power, because a TV that wakes can miss one. The operator does not report Standby for a TV that did not answer."
+                powerGeneration:
+                  type: integer
+                  format: int64
+                  description: "The metadata.generation whose spec.power the node workload applied. The node workload applies a generation when it differs from this field, so a restart of the node workload applies no generation twice."
+                displays:
+                  type: array
+                  description: "The Displays whose pictures reach this TV: the Display that each adapter of the CECBus names in spec.adapters[].display, while the bus is in Control and the Display has a physical address from its EDID. The operator derives the list. Each such adapter announces its Display's physical address on this bus, so that Display's picture enters this tree. A Display that no adapter names is not listed, even on a machine the bus names: that machine's other HDMI output can go to another TV, and a physical address does not name its tree."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
+                  items:
+                    type: object
+                    required: [name, physicalAddress]
+                    properties:
+                      name:
+                        type: string
+                        description: "The Display."
+                      physicalAddress:
+                        type: string
+                        description: "The Display's physical address, from display-operator, in the dotted form 1.3.0.0."
+                      via:
+                        type: object
+                        description: "The Receiver the picture passes through: a Receiver with an input that names this Display's machine and this Display as its monitor, when the CECBus has an audio system above the Display in the tree. The physical address shows the path: a receiver at 1.0.0.0 is above a Display at 1.3.0.0 and not above one at 2.0.0.0. It is absent when no Receiver is on the path, such as for a Receiver whose optical input names a Display that is connected straight to the TV."
+                        required: [kind, name]
+                        properties:
+                          kind:
+                            type: string
+                            description: "The kind of the object, Receiver."
+                          name:
+                            type: string
+                            description: "The object's name."
+                conditions:
+                  type: array
+                  description: "Reachable: the TV answers its power status on its CECBus. It is Unknown while the bus is in Listen or has not finished a scan, Unknown with the reason Stale when an adapter's entry is stale, and False when the bus does not exist, when no adapter finds a TV, or when the TV acknowledges its address and does not answer. InCharge: whether this Television speaks for the TV of its bus; of two Televisions on one bus, the one not in charge names the one that is. PowerApplied: whether the TV reported the state that spec.power asked for, with the command the node workload sent, the number of commands, and the power the TV last reported."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                      reason:
+                        type: string
+                        maxLength: 1024
+                      message:
+                        type: string
+                        maxLength: 32768
+                      lastTransitionTime:
+                        type: string
+                        format: date-time

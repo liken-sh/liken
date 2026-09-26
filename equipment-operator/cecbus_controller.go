@@ -1,15 +1,19 @@
 package main
 
-// The Deployment's loop over CECBus objects. It has the Receiver
-// loop's shape: level-triggered, woken by a watch, with a ticker as
-// the backstop. Each pass derives every bus's device list and
-// conditions from the adapters' reports and writes only what changed.
+// The Deployment's loop over CECBus and Television objects. It has
+// the Receiver loop's shape: level-triggered, woken by a watch on each
+// kind, with a ticker as the backstop. Each pass derives every bus's
+// device list and conditions from the adapters' reports, then every
+// Television's status from those buses, and writes only what changed.
+// A change to a Display or a Receiver sends no event to this loop, so
+// the backstop tick carries it to a Television's status.
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -28,8 +32,8 @@ func newCECBusController(client *Client) *cecBusController {
 	return &cecBusController{client: client, now: time.Now, wake: make(chan struct{}, 1)}
 }
 
-// pass derives and writes every bus. A write that fails is logged,
-// and the next pass tries it again.
+// pass derives and writes every bus, and then every Television. A
+// write that fails is logged, and the next pass tries it again.
 func (c *cecBusController) pass() error {
 	list, err := ListCECBuses(c.client)
 	if err != nil {
@@ -38,13 +42,18 @@ func (c *cecBusController) pass() error {
 	for index := range list.Items {
 		bus := &list.Items[index]
 		devices, conditions := deriveCECBus(bus, c.now())
-		if reflect.DeepEqual(devices, bus.Status.Devices) && reflect.DeepEqual(conditions, bus.Status.Conditions) {
+		changed := !reflect.DeepEqual(devices, bus.Status.Devices) || !reflect.DeepEqual(conditions, bus.Status.Conditions)
+		// The Television pass reads what this pass derived, so a TV's
+		// power reaches its Television in the same pass that merged it.
+		bus.Status.Devices, bus.Status.Conditions = devices, conditions
+		if !changed {
 			continue
 		}
 		if err := ApplyCECBusDerived(c.client, bus.Metadata.Name, devices, conditions); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the status of CECBus %s: %v\n", bus.Metadata.Name, err)
 		}
 	}
+	c.passTelevisions(list.Items)
 	return nil
 }
 
@@ -53,17 +62,26 @@ func (c *cecBusController) pass() error {
 // tick until ctx ends.
 func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	var list *CECBusList
+	var televisions *TelevisionList
 	for ctx.Err() == nil {
 		var err error
 		err = retryThrottled(ctx, func() error {
 			var err error
 			list, err = ListCECBuses(c.client)
-			return err
+			if err != nil {
+				return fmt.Errorf("listing CECBuses: %w", err)
+			}
+			televisions, err = ListTelevisions(c.client)
+			if err != nil {
+				return fmt.Errorf("listing Televisions: %w", err)
+			}
+			return nil
 		})
 		if err == nil {
 			break
 		}
-		fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
+		list = nil
+		fmt.Fprintln(os.Stderr, err)
 		select {
 		case <-ctx.Done():
 			return
@@ -73,14 +91,21 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	if list == nil {
 		return
 	}
-	// run returns only after the watch stops, so nothing it started
+	// run returns only after both watches stop, so nothing it started
 	// outlives it.
-	watching := make(chan struct{})
-	go func() {
-		defer close(watching)
+	var watching sync.WaitGroup
+	watching.Go(func() {
 		watchCECBuses(ctx, c.client, list.Metadata.ResourceVersion, c.wake, readings.cecBusWatchRestarted)
-	}()
-	defer func() { <-watching }()
+	})
+	// A cluster without the Television definition lists no version and
+	// gets no Television watch; the backstop tick finds a definition
+	// installed later.
+	if televisions.Metadata.ResourceVersion != "" {
+		watching.Go(func() {
+			watchTelevisions(ctx, c.client, televisions.Metadata.ResourceVersion, c.wake, readings.televisionWatchRestarted)
+		})
+	}
+	defer watching.Wait()
 	ticker := time.NewTicker(backstopInterval)
 	defer ticker.Stop()
 	for {

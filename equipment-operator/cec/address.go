@@ -49,6 +49,32 @@ func ParsePhysicalAddress(text string) (PhysicalAddress, error) {
 	return address, nil
 }
 
+// depth is how many of the four numbers the address uses before its
+// first 0. The TV at 0.0.0.0 has depth 0, and a device on its input 1
+// at 1.0.0.0 has depth 1.
+func (p PhysicalAddress) depth() int {
+	for level := range 4 {
+		if p>>(12-4*level)&0xf == 0 {
+			return level
+		}
+	}
+	return 4
+}
+
+// Above answers whether another address is in the subtree below this
+// one: whether a device at the other address is connected through the
+// device at this one. A receiver at 1.0.0.0 is above a machine on its
+// input 3 at 1.3.0.0, and not above a machine on the TV's input 2 at
+// 2.0.0.0. An address is not above itself.
+func (p PhysicalAddress) Above(other PhysicalAddress) bool {
+	depth := p.depth()
+	if other.depth() <= depth {
+		return false
+	}
+	shift := 16 - 4*depth
+	return p>>shift == other>>shift
+}
+
 // A LogicalAddress is the number from 0 to 15 that a device claims
 // when it joins the bus. The number states the device's type. 0 is
 // the TV and 5 is the audio system, and each of those two exists at

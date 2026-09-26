@@ -11,15 +11,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
 	"golang.org/x/sys/unix"
 )
 
+// vividTVVariable names what plays vivid's TV. Unset, a test plays the
+// TV itself on vivid's capture adapter. With the value cec-follower,
+// cec-follower from v4l-utils plays it, and the test leaves the
+// capture adapter alone; cec/AGENTS.md gives the command.
+const vividTVVariable = "CEC_VIVID_TV"
+
 // vividPair opens vivid's TV adapter and one output adapter that vivid
-// connected to the TV, and answers the output's physical address.
-func vividPair(t *testing.T) (*cec.Device, *cec.Device, cec.PhysicalAddress) {
+// connected to the TV, and answers the output's physical address. The
+// TV's handle is for a test that plays the TV. A test that leaves the
+// TV to cec-follower passes playsTV false, and the handle closes with
+// no change to the claim cec-follower holds.
+func vividPair(t *testing.T, playsTV bool) (*cec.Device, *cec.Device, cec.PhysicalAddress) {
 	t.Helper()
 	lockVivid(t)
 	paths, _ := filepath.Glob("/dev/cec*")
@@ -46,8 +57,13 @@ func vividPair(t *testing.T) (*cec.Device, *cec.Device, cec.PhysicalAddress) {
 	if tv == nil || output == nil {
 		t.Skip("no vivid TV with a connected output is open to this user; see cec/AGENTS.md")
 	}
+	owned := []*cec.Device{tv, output}
+	if !playsTV {
+		_ = tv.Close()
+		owned = owned[1:]
+	}
 	t.Cleanup(func() {
-		for _, device := range []*cec.Device{tv, output} {
+		for _, device := range owned {
 			_ = device.Initiate()
 			_ = device.Release()
 			_ = device.Close()
@@ -79,7 +95,10 @@ func playTV(t *testing.T, tv *cec.Device) {
 }
 
 func TestVividTheNodeWorkloadJoinsAndFindsTheTV(t *testing.T) {
-	tv, output, address := vividPair(t)
+	if os.Getenv(vividTVVariable) != "" {
+		t.Skipf("%s names another player for the TV, and this test plays the TV itself", vividTVVariable)
+	}
+	tv, output, address := vividPair(t, true)
 	playTV(t, tv)
 	api := startCECAPI(t)
 	api.putDisplay("acm-0001-receiver", "node-1", address.String())
@@ -119,4 +138,103 @@ func lockVivid(t *testing.T) {
 		_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
 		_ = file.Close()
 	})
+}
+
+// playWakingTV makes a vivid adapter a TV in standby that obeys the
+// power commands, until the test ends. Image View On moves it to ToOn,
+// and a second later to On, because a TV takes time to wake and
+// reports the transition while it does. Standby moves it the same way
+// to Standby.
+func playWakingTV(t *testing.T, tv *cec.Device) {
+	t.Helper()
+	mustSucceed(t, tv.Follow())
+	mustSucceed(t, tv.Release())
+	mustSucceed(t, tv.Claim(cec.Claim{Type: cec.TypeTV, OSDName: "TV"}))
+	var mutex sync.Mutex
+	power, settles := cec.PowerStandby, time.Time{}
+	current := func() cec.PowerStatus {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if !settles.IsZero() && time.Now().After(settles) {
+			power = map[cec.PowerStatus]cec.PowerStatus{cec.PowerToOn: cec.PowerOn, cec.PowerToStandby: cec.PowerStandby}[power]
+			settles = time.Time{}
+		}
+		return power
+	}
+	move := func(through, to cec.PowerStatus) {
+		if current() == to {
+			return
+		}
+		mutex.Lock()
+		defer mutex.Unlock()
+		power, settles = through, time.Now().Add(time.Second)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = cec.Read(ctx, tv, func(message cec.Message) {
+			opcode, _ := message.Opcode()
+			switch {
+			case message.IsPoll():
+			case opcode == cec.OpImageViewOn && message.To == cec.AddressTV:
+				move(cec.PowerToOn, cec.PowerOn)
+				return
+			case opcode == cec.OpStandby:
+				move(cec.PowerToStandby, cec.PowerStandby)
+				return
+			}
+			if reply, answers := cec.Answer(message, cec.AddressTV, current()); answers {
+				_, _ = tv.Transmit(reply, 0, 0)
+			}
+		}, func(cec.Event) {})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+// vividPowerTime bounds one application of spec.power on vivid: the
+// node workload joins and scans at the speed of a real CEC wire, and a
+// TV that cec-follower plays takes about 9 seconds to wake.
+const vividPowerTime = 60 * time.Second
+
+// The node workload puts the kernel's TV in standby and wakes it again,
+// and each time reads the power back from the TV. The Deployment's pass
+// then copies the TV's power into the Television. A TV that already
+// reports the state gets no command, so the test asks for Standby
+// first, whatever state the TV is in when the test starts.
+func TestVividTheNodeWorkloadWakesTheTV(t *testing.T) {
+	external := os.Getenv(vividTVVariable) == "cec-follower"
+	tv, output, address := vividPair(t, !external)
+	if !external {
+		playWakingTV(t, tv)
+	}
+	api := startCECAPI(t)
+	api.putDisplay("acm-0001-receiver", "node-1", address.String())
+	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	api.putTelevision(lounge(TelevisionStandby))
+	startNode(t, api, "node-1", output)
+	api.waitForTelevisionWithin(t, "lounge", vividPowerTime, func(television Television) bool {
+		return television.Status.PowerGeneration == 1
+	})
+
+	api.putTelevision(lounge(TelevisionOn))
+
+	television := api.waitForTelevisionWithin(t, "lounge", vividPowerTime, func(television Television) bool {
+		return television.Status.PowerGeneration == 2
+	})
+	applied := conditionOf(television.Status.Conditions, conditionPowerApplied)
+	t.Logf("PowerApplied: %s %s: %s", applied.Status, applied.Reason, applied.Message)
+	mustMatch(t, applied.Status, ConditionTrue)
+	if !strings.Contains(applied.Message, "sent Image View On") {
+		t.Errorf("the TV was on before the command: %s", applied.Message)
+	}
+	// The node workload's entry carries the TV's power to the
+	// Deployment, and the entry write follows the confirmation.
+	api.waitForEntryWithin(t, "den", "node-1", vividPowerTime, func(entry CECAdapterStatus) bool {
+		return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
+	})
+	passes(t, api, 1)
+	television, _ = api.television("lounge")
+	t.Logf("status.power %s, status.cec %+v", television.Status.Power, television.Status.CEC)
+	mustMatch(t, television.Status.Power, "On")
 }

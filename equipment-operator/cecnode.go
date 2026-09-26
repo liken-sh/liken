@@ -147,9 +147,18 @@ type cecNode struct {
 	// declared is the set of a person's buses that last named the
 	// machine, as the log last stated it.
 	declared string
-	// stopMode ends the scan loop of the mode the adapter runs, and
-	// returns once the loop has stopped.
-	stopMode func()
+	// stopMode ends the work of the mode the adapter runs, the scans,
+	// the power reads, and a power application, and returns once all of
+	// it has stopped. modeContext ends with the mode, and modeWork
+	// counts the work, so a power application that starts later in the
+	// mode stops with it. Only the loop's goroutine starts or stops the
+	// mode's work.
+	stopMode    func()
+	modeContext context.Context
+	modeWork    *sync.WaitGroup
+	// powered is what the node workload holds about its applications of
+	// a Television's spec.power.
+	powered powerMemory
 }
 
 // newCECNode reads the adapter's capabilities, which every later
@@ -244,7 +253,7 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 	n.logged = entry
 }
 
-// loop is run's body: the first list, the watch, and the passes.
+// loop is run's body: the first lists, the watches, and the passes.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	var list *CECBusList
 	err := retryThrottled(ctx, func() error {
@@ -258,9 +267,30 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("listing CECBuses: %w", err)
 	}
+	var televisions *TelevisionList
+	err = retryThrottled(ctx, func() error {
+		var err error
+		televisions, err = ListTelevisions(n.client)
+		return err
+	})
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("listing Televisions: %w", err)
+	}
 	started.Go(func() {
 		watchCECBuses(ctx, n.client, list.Metadata.ResourceVersion, n.wake, func() {})
 	})
+	// A change of a Television's spec.power wakes the loop, because the
+	// pass is where the adapter that sends the bus's commands applies it.
+	// A cluster without the Television definition lists no version and
+	// gets no watch; the backstop tick finds a definition installed later.
+	if televisions.Metadata.ResourceVersion != "" {
+		started.Go(func() {
+			watchTelevisions(ctx, n.client, televisions.Metadata.ResourceVersion, n.wake, func() {})
+		})
+	}
 	backstop := time.NewTicker(backstopInterval)
 	defer backstop.Stop()
 	heartbeat := time.NewTicker(cecReportInterval)

@@ -28,6 +28,9 @@ func TestASecondPassWritesNothing(t *testing.T) {
 	api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
 	controller := newCECBusController(api.client)
 	controller.now = func() time.Time { return derivedAt }
+	// The bus has a TV, so the first pass creates the Television that
+	// discovery owns, and the second pass writes that Television's status.
+	mustSucceed(t, controller.pass())
 	mustSucceed(t, controller.pass())
 	api.mutex.Lock()
 	before := api.version
@@ -78,33 +81,47 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 
 // A watch that ends is opened again from a fresh list, and each
 // reopening is counted.
-func TestTheCECBusWatchReopens(t *testing.T) {
+func TestTheDeploymentsWatchesReopen(t *testing.T) {
 	was := watchRetryPause
 	watchRetryPause = time.Millisecond
 	t.Cleanup(func() { watchRetryPause = was })
-	api := &cannedAPI{answers: map[string]any{"GET " + cecBusesPath: CECBusList{Metadata: ListMeta{ResourceVersion: "7"}}}}
-	client := testAPIClient(t, api.handler())
-	ctx, cancel := context.WithCancel(context.Background())
-	wake := make(chan struct{}, 1)
-	restarts := make(chan struct{}, 64)
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		watchCECBuses(ctx, client, "1", wake, func() {
-			select {
-			case restarts <- struct{}{}:
-			default:
-			}
-		})
-	}()
-
-	select {
-	case <-restarts:
-	case <-time.After(testTimeout):
-		t.Error("the watch never reopened")
+	type watcher func(context.Context, *Client, string, chan<- struct{}, func())
+	cases := []struct {
+		name  string
+		path  string
+		list  any
+		watch watcher
+	}{
+		{"CECBus", cecBusesPath, CECBusList{Metadata: ListMeta{ResourceVersion: "7"}}, watchCECBuses},
+		{"Television", televisionsPath, TelevisionList{Metadata: ListMeta{ResourceVersion: "7"}}, watchTelevisions},
 	}
-	cancel()
-	<-stopped
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &cannedAPI{answers: map[string]any{"GET " + c.path: c.list}}
+			client := testAPIClient(t, api.handler())
+			ctx, cancel := context.WithCancel(context.Background())
+			wake := make(chan struct{}, 1)
+			restarts := make(chan struct{}, 64)
+			stopped := make(chan struct{})
+			go func() {
+				defer close(stopped)
+				c.watch(ctx, client, "1", wake, func() {
+					select {
+					case restarts <- struct{}{}:
+					default:
+					}
+				})
+			}()
+
+			select {
+			case <-restarts:
+			case <-time.After(testTimeout):
+				t.Error("the watch never reopened")
+			}
+			cancel()
+			<-stopped
+		})
+	}
 }
 
 func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {

@@ -30,6 +30,7 @@ the install needs no clone:
     kubectl apply -n liken-system \
       -f https://equipment.liken.sh/deploy/receivers-crd.yaml \
       -f https://equipment.liken.sh/deploy/cecbuses-crd.yaml \
+      -f https://equipment.liken.sh/deploy/televisions-crd.yaml \
       -f https://equipment.liken.sh/deploy/deviceclasses.yaml \
       -f https://equipment.liken.sh/deploy/rbac.yaml \
       -f https://equipment.liken.sh/deploy/operator.yaml \
@@ -40,7 +41,9 @@ the install needs no clone:
 `cec-adapter` `DeviceClass`, so on a node with no adapter the pod
 stays `Pending`, and the `DaemonSet` never reports all its pods
 ready. The [`CECBus`](https://equipment.liken.sh/docs/reference/cecbuses/)
-reference describes what the pod reports.
+reference describes what the pod reports, and the
+[`Television`](https://equipment.liken.sh/docs/reference/televisions/) reference describes the
+TV that a `CECBus` in `Control` finds.
 
 For GitOps, point a `Kustomization` at the base and pin `<ref>` to a
 release tag:

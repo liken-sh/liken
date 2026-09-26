@@ -208,6 +208,16 @@ func ActiveSource(from LogicalAddress, address PhysicalAddress) Message {
 	return NewMessage(from, AddressBroadcast, OpActiveSource, byte(address>>8), byte(address))
 }
 
+func ImageViewOn(from, to LogicalAddress) Message {
+	return NewMessage(from, to, OpImageViewOn)
+}
+
+// Standby is directed to one device, or broadcast to put every device
+// on the bus in standby.
+func Standby(from, to LogicalAddress) Message {
+	return NewMessage(from, to, OpStandby)
+}
+
 // PowerStatus is the operand of Report Power Status.
 type PowerStatus byte
 

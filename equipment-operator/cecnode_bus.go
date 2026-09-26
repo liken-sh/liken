@@ -48,7 +48,11 @@ func (n *cecNode) pass(ctx context.Context) error {
 	if err := n.apply(ctx, want); err != nil {
 		return err
 	}
-	return n.syncAddresses(ctx, want)
+	if err := n.syncAddresses(ctx, want); err != nil {
+		return err
+	}
+	n.passTelevision(bus)
+	return nil
 }
 
 // choose answers the CECBus this machine's adapter belongs to. A

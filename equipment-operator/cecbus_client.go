@@ -1,6 +1,6 @@
 package main
 
-// The API calls for CECBus, and the one read of a Display. Each write
+// The API calls for CECBus, and the reads of the Displays. Each write
 // is a server-side apply that states only the fields its writer owns.
 // Three kinds of writer share one CECBus: the person who writes the
 // spec, the node workload on each adapter's machine, which writes its
@@ -162,4 +162,23 @@ func GetDisplay(c *Client, name string) (*Display, error) {
 		return nil, err
 	}
 	return display, nil
+}
+
+type DisplayList struct {
+	Items []Display `json:"items"`
+}
+
+// ListDisplays reads every Display. A cluster without display-operator
+// has no Display definition, and the API server answers the list with
+// not found; that is a cluster with no Display, not a failure.
+func ListDisplays(c *Client) (*DisplayList, error) {
+	list := &DisplayList{}
+	err := c.RequestJSON(http.MethodGet, displaysPath, nil, list)
+	if err == ErrNotFound {
+		return &DisplayList{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }

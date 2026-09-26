@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
@@ -327,15 +328,17 @@ func (n *cecNode) adapterError(err error) error {
 // scanFailure starts the message of a scan the kernel refused.
 const scanFailure = "scanning the bus: "
 
-// startScans runs a scan now and then every cecScanInterval, until the
-// mode changes. stopMode waits for a scan in progress to finish, so no
-// scan transmits after the handle leaves Control.
+// startScans runs a scan now and then every cecScanInterval, and reads
+// the TV's power every cecPowerInterval, until the mode changes.
+// stopMode waits for a scan or a read in progress to finish, so neither
+// transmits after the handle leaves Control.
 func (n *cecNode) startScans(ctx context.Context, own cec.LogicalAddress) {
 	ctx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	n.stopMode = func() { cancel(); <-done }
-	go func() {
-		defer close(done)
+	work := &sync.WaitGroup{}
+	n.stopMode = func() { cancel(); work.Wait() }
+	n.modeContext, n.modeWork = ctx, work
+	work.Go(func() { n.readPower(ctx, own) })
+	work.Go(func() {
 		for ctx.Err() == nil {
 			_, err := cec.Scan(n.device, n.directory, own)
 			if err != nil && cec.IsGone(err) {
@@ -361,7 +364,7 @@ func (n *cecNode) startScans(ctx context.Context, own cec.LogicalAddress) {
 			case <-time.After(cecScanInterval):
 			}
 		}
-	}()
+	})
 }
 
 // heard is where every message the adapter receives arrives. It

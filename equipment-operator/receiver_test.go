@@ -23,10 +23,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The two definitions this repository ships.
+// The definitions this repository ships.
 const (
-	receiversCRD = "deploy/receivers-crd.yaml"
-	cecBusesCRD  = "deploy/cecbuses-crd.yaml"
+	receiversCRD   = "deploy/receivers-crd.yaml"
+	cecBusesCRD    = "deploy/cecbuses-crd.yaml"
+	televisionsCRD = "deploy/televisions-crd.yaml"
 )
 
 func loadCRD(t *testing.T) *apiextensionsv1.CustomResourceDefinition {
@@ -194,7 +195,7 @@ func TestCRDPrinterColumns(t *testing.T) {
 // cluster refuses whole, and no amount of validating objects against
 // the schema would find it.
 func TestTheAPIServerWouldAcceptTheCRD(t *testing.T) {
-	for _, path := range []string{receiversCRD, cecBusesCRD} {
+	for _, path := range []string{receiversCRD, cecBusesCRD, televisionsCRD} {
 		t.Run(path, func(t *testing.T) {
 			scheme := runtime.NewScheme()
 			install.Install(scheme)

@@ -66,16 +66,6 @@ func stopped(machine string) CECAdapterStatus {
 	return CECAdapterStatus{Machine: machine, Mode: CECControl, State: AdapterStopped, Message: "the node workload received terminated"}
 }
 
-// conditionOf finds one condition by type.
-func conditionOf(conditions []Condition, kind string) Condition {
-	for _, condition := range conditions {
-		if condition.Type == kind {
-			return condition
-		}
-	}
-	return Condition{}
-}
-
 func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
 	one := []string{"node-1"}
 	two := []string{"node-1", "node-2"}

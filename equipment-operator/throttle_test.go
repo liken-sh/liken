@@ -69,6 +69,7 @@ func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T
 	}{
 		{"a Receiver", func(c *Client) error { return DeleteReceiver(c, "theater") }},
 		{"a CECBus", func(c *Client) error { return DeleteCECBus(c, "den") }},
+		{"a Television", func(c *Client) error { return DeleteTelevision(c, "den") }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

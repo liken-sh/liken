@@ -2,9 +2,10 @@
 
 This repository holds the `Receiver` resource and the operator that
 drives it: A/V equipment at the far end of a `liken` machine's cable,
-reached over the network for volume, power, and input. The manifests and
-the tests are the documentation, and the comments teach how the system
-works.
+reached over the network for volume, power, and input. It also holds
+the `CECBus` and `Television` resources, which reach the same
+equipment over the HDMI-CEC wire. The manifests and the tests are the
+documentation, and the comments teach how the system works.
 
 `plans/README.md` indexes the plans. Code exists only where a plan calls
 for it.
@@ -38,6 +39,15 @@ node workload's own files are `cecnode*.go`, and the `Deployment`'s
 own files are `cecbus_derive.go` and `cecbus_controller.go`. Both
 workloads use the `CECBus` types in `cecbus.go` and the API calls in
 `cecbus_client.go`.
+
+A `Television` is the TV of one `CECBus`. The `Deployment` derives
+its status from the bus, the `Display` objects, and the `Receiver`
+objects in `television_derive.go`, and `television_controller.go`
+runs that pass at the end of each `CECBus` pass. The node workload
+whose adapter sends the bus's commands applies each generation of
+`spec.power` once in `cecnode_power.go`, and reads the TV's power in
+`cecnode_television.go`. Both use the types in `television.go` and
+the API calls in `television_client.go`.
 
 ## Errors include their source's text
 

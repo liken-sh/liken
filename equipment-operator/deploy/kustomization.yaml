@@ -15,6 +15,7 @@ namespace: liken-system
 resources:
   - receivers-crd.yaml
   - cecbuses-crd.yaml
+  - televisions-crd.yaml
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml

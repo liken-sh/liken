@@ -46,8 +46,15 @@ says who sends it and what answers it. The package uses four:
   Vendor ID, and Get CEC Version, with their reports. A scan asks each
   device all four.
 - **Power.** Give Device Power Status and Report Power Status.
-- **One-touch play.** Image View On and Active Source. The package
-  builds Active Source; the wake job of a later phase sends it.
+  `ReadPower` asks one device and records the answer in the
+  directory. After two questions in a row that a device acknowledges
+  and does not answer, the directory forgets the power it held. One
+  missed answer keeps it, because a TV that wakes can miss one.
+- **One-touch play.** Image View On, Standby, and Active Source.
+  `PowerCommand` is the generic command for a TV power state: Image
+  View On for On, and Standby directed to the TV alone for Standby.
+  The package builds Active Source; the wake job of a later phase
+  sends it.
 - **Remote control.** User Control Pressed and Released. The kernel
   turns them into key events on the adapter's input device when the
   claim sets passthrough, and this package never reads them.
@@ -113,6 +120,25 @@ sudo chmod 666 /dev/cec*
 
 go test -run Vivid -v ./cec/ .
 sudo modprobe -r vivid
+```
+
+With no follower on vivid's TV adapter, the kernel's CEC core answers
+Give Device Power Status with a Feature Abort, before and after an
+Image View On, so something must play the TV. Each `Vivid` test plays the TV itself on the capture adapter. The
+test that wakes the TV can leave the TV to `cec-follower` from
+v4l-utils instead, which is an independent implementation of a TV's
+power states: after Image View On it reports Standby for about 2
+seconds and ToOn for about 6 more. Start it, then run that test alone,
+because the other `Vivid` tests claim the same adapter:
+
+```sh
+# /dev/cec0 is the adapter named vivid-000-vid-cap0.
+docker run -d --name vivid-tv --device /dev/cec0 debian:trixie-slim sh -c \
+  'apt-get update -qq && apt-get install -qq -y v4l-utils >/dev/null &&
+   cec-ctl -d0 --tv -o TV >/dev/null && exec cec-follower -d0 -s -n'
+
+CEC_VIVID_TV=cec-follower go test -run TestVividTheNodeWorkloadWakesTheTV -v .
+docker rm -f vivid-tv
 ```
 
 `/dev/video2` is the capture node named `vivid-000-vid-cap` under

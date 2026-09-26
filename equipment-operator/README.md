@@ -48,6 +48,28 @@ spec:
       display: acm-0001-receiver
 ```
 
+A `Television` is the TV at the root of that tree. When a `CECBus` in
+`Control` finds a TV, the operator creates a `Television` with the
+bus's name. To adopt it, apply your own `Television` under that name.
+The `Television` reports the TV's power and the `Display` objects whose
+pictures reach it. Each edit of the spec wakes the TV or puts it in
+standby once, as `spec.power` asks, and the operator reads the power
+back to confirm it:
+
+```yaml
+apiVersion: equipment.liken.sh/v1alpha1
+kind: Television
+metadata:
+  name: den
+spec:
+  cec:
+    bus: den
+  power: "On"
+```
+
+Quote `"On"`, because `kubectl` reads an unquoted `On` as the boolean
+`true`.
+
 The manual is at [equipment.liken.sh](https://equipment.liken.sh/).
 `plans/README.md` indexes the plans. `make test` runs every check CI
 runs.

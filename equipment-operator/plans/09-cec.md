@@ -1,7 +1,9 @@
 # The TV and the receiver over HDMI-CEC
 
-Plan 09. Phase 1 built 2026-09-26 and tested against `vivid`; its
-hardware drills and phases 2 to 5 are open. It depends on `liken` plan 70, which
+Plan 09. Phase 1 built 2026-09-26 and tested against `vivid`. Phase 2
+built 2026-09-26 and tested against `vivid`, with `cec-follower`
+playing the TV. The hardware drills of both phases and phases 3 to 5
+are open. It depends on `liken` plan 70, which
 attaches a USB CEC adapter and publishes it as a device, and on
 display-operator plan 23, which publishes each `Display`'s CEC
 physical address.
@@ -177,7 +179,7 @@ status:
     power: Standby
     represents:
       kind: Television
-      name: den-television
+      name: den
   - physicalAddress: 1.0.0.0
     logicalAddress: 5
     type: AudioSystem
@@ -185,7 +187,7 @@ status:
     power: On
     represents:
       kind: Receiver
-      name: den-receiver
+      name: den
   conditions:
   - type: AddressKnown
   - type: Joined
@@ -301,11 +303,11 @@ network protocol.
 apiVersion: equipment.liken.sh/v1alpha1
 kind: Television
 metadata:
-  name: den-television
+  name: den
 spec:
   cec:
     bus: den
-  power: On
+  power: "On"
 status:
   cec:
     physicalAddress: 0.0.0.0
@@ -320,18 +322,24 @@ status:
     physicalAddress: 1.3.0.0
     via:
       kind: Receiver
-      name: den-receiver
+      name: den
   conditions:
   - type: Reachable
 ```
 
 **The name is the role.** A bus has at most one TV, and the TV is
 always at `0.0.0.0`. So `spec.cec.bus` identifies the TV, and no
-address or name is needed. Discovery creates a `Television` named
-`<bus>-television` when a bus in `Control` finds a TV. A person can
-adopt it into their own configuration repository: they commit a
-`Television` of any name whose `spec.cec.bus` names the same bus, and
-the discovered copy steps aside, as it does for a `Receiver`.
+address or name is needed. Discovery creates a `Television` with the
+bus's own name when a bus in `Control` finds a TV. The name carries no
+suffix, because the kind already says the object is a TV, and a
+`CECBus` name carries none either. Discovery owns only the labeled
+`Television` with its bus's name. A person adopts it into their own
+configuration repository by committing a `Television` under the bus's
+name with the spec they want. The object keeps the discovered label,
+and discovery keeps it for as long as no other `Television` names the
+same bus. A `Television` of another name for the same bus also works,
+and discovery then deletes its own. A labeled `Television` under
+another name, such as a copy of the discovered YAML, is a person's.
 
 **`spec.power`** is applied once per change, and it is never
 re-asserted. This is the rule `Receiver.spec.power` follows. So a
@@ -355,9 +363,15 @@ switches to its own apps or to an input without CEC sends nothing, so
 this field states the last CEC source, and it does not state what the
 TV shows.
 
-**`status.displays`** lists every `Display` whose physical address is
-on this bus. The `Deployment` derives it: a `Display` at `1.3.0.0` on
-the bus's machines leads to the TV at `0.0.0.0`. `via` names the
+**`status.displays`** lists the `Display` that each adapter of the bus
+names in `spec.adapters[].display`, while the bus is in `Control`. The
+`Deployment` derives it: the adapter announces its `Display`'s
+physical address on this wire, so a `Display` at `1.3.0.0` leads to
+the TV at `0.0.0.0`. A `Display` no adapter names is not listed, even
+on a machine the bus names. That machine's other HDMI output can go to
+another TV, and a physical address does not name its tree, so the
+session match would read that `Display` here and could wake the wrong
+TV. `via` names the
 `Receiver` on that path when one is. With this list, the path from a
 `Player` to its TV is a lookup: `Player`, then `Display`, then
 `Television`. A TV with no CEC has no tree to read. A declared list
@@ -403,7 +417,7 @@ no second object:
 ```yaml
 spec:
   denon:
-    address: den-receiver.example
+    address: den.example
   cec:
     bus: den
 ```
@@ -525,6 +539,111 @@ above:
   So the path that announces the `Display`'s address runs only on a
   USB adapter and in the bus in memory the tests use, and on `vivid`
   the pod announces the port's own address and says so in its entry.
+
+## What phase 2 found
+
+Phase 2 ran against the kernel's `vivid` driver on 2026-09-26, with a
+TV the tests play in Go and with `cec-follower` from v4l-utils playing
+the TV. Five findings correct or add to the text above:
+
+* **Quote `On`.** `kubectl` reads YAML through `sigs.k8s.io/yaml`,
+  which follows YAML 1.1, so an unquoted `On` is the boolean `true`,
+  and the API server refuses it for the `spec.power` enum. The
+  example above now writes `power: "On"`, and the field's description
+  says so.
+* **The kernel does not play the TV.** With vivid's TV adapter
+  claimed as a TV and no follower on it, the CEC core answered Give
+  Device Power Status with a Feature Abort, before and after an Image
+  View On. So a test plays the TV, or `cec-follower` does. After Image View On, `cec-follower` reported
+  Standby for about 2 seconds, then ToOn, and On at about 9 seconds.
+* **Read before the command.** The node workload reads the TV's power
+  first and sends nothing when the TV already reports the state asked
+  for, because Image View On also switches a TV's input.
+* **Send again only without progress.** A TV that reports ToOn or
+  ToStandby is on its way. So the node workload sends the command
+  again only when a 10-second window ends without the new state or
+  the transition toward it. It sends at most three commands and stops
+  after 30 seconds. A fixed resend after 10 seconds would have sent a
+  second Image View On to a TV that `cec-follower` plays.
+* **A TV that stops answering loses its power.** A scan keeps a fact a
+  device does not answer. The power read of this phase clears the
+  power after two questions in a row without an answer, so
+  `status.power` is absent and `Reachable` is `False` for a TV that
+  acknowledges and does not answer, as the design above states. One
+  missed answer keeps the power, because a TV that wakes can miss one,
+  and `Reachable` would otherwise change back and forth.
+
+Phase 2 settled these questions that the design left open:
+
+* **What records a change as applied: the generation.** The node
+  workload applies each generation of each `Television` once, keyed
+  by the object's uid and its `metadata.generation`, and writes the
+  generation it applied to `status.powerGeneration`. So a restart of
+  the node workload, such as after an unplug, sends no command again.
+  Every spec edit is a new generation, so a person asks for the same
+  value again by an edit, such as removing `spec.power` and adding it
+  back. A new object applies its `spec.power` when it is created, so
+  a `Television` deleted and created again, by a GitOps prune or a
+  restore, applies its `spec.power` again; the uid tells it from the
+  old object of the same name. The node workload records a generation
+  as done in memory before it writes the result, so a write the API
+  server refuses is written again at a later pass, and the command is
+  never sent again. One generation gets at most three commands,
+  whatever happens to its applications. A new generation cancels an
+  application of an older one, and an application checks for its
+  cancellation before each command. The node workload records a
+  confirmed and an unconfirmed result alike, so a TV that never
+  confirms gets no command loop. The `PowerApplied` condition, which
+  the node workload owns, states the command, the number of commands,
+  and the power the TV last reported. The `Deployment` owns
+  `Reachable` and `InCharge`. The conditions are a map keyed by type,
+  so the two writers do not remove each other's conditions.
+* **Read first, except right after a command.** The node workload
+  reads the TV's power before the command and sends nothing when the
+  TV already reports the state. It skips that read when the adapter
+  sent the TV a command in the last 15 seconds, because a TV answers
+  its old state for a while after a command. Without that rule, a
+  change from On to Standby inside one window left the TV on, with
+  the spec and the status both at Standby.
+* **Which workload discovers a Television.** The `Deployment`
+  creates a `Television` with the bus's own name when a `CECBus` in
+  `Control` has a TV in its merged `status.devices`, because only the
+  `Deployment` reads every adapter's report. It creates the object
+  with a create, not an apply, so an object that already has the name
+  stays as it is. It deletes its own `Television` only when another
+  `Television` names the same bus.
+* **Two Televisions on one bus.** A person's `Television` is in
+  charge over the discovered one, and of two of a person's, the first
+  by name. The node workload applies only the `spec.power` of the one
+  in charge, and the `InCharge` condition of the other names the one
+  in charge. When that one is deleted, the other takes over, and its
+  `spec.power` is applied once then, as a new object's is.
+* **A cluster without the Television definition.** Both workloads
+  read a missing `Television` collection as empty and start no watch
+  on it, so the `CECBus` work of phase 1 goes on.
+* **A stale adapter entry.** `Reachable` takes the reason `Stale` from
+  the bus's `Scanned` condition, and not `NotScanned`.
+* **Every adapter reads the power, and one adapter commands.** Each
+  adapter in `Control` asks the TV for its power every 10 seconds, and
+  the `Deployment` merges the reads with the rest of the devices, the
+  first adapter in `spec.adapters` first. The node workload reads the
+  other adapters' state from their current entries to find the first
+  adapter that holds a logical address.
+* **`via` in `status.displays`.** The `Receiver` a picture passes
+  through is the `Receiver` with an input that names the `Display`'s
+  machine and the `Display` as its monitor, when the bus has an audio
+  system above the `Display` in the tree: a receiver at `1.0.0.0` is
+  above `1.3.0.0` and not above `2.0.0.0`. An input match alone is not
+  enough, because a receiver's optical input can name a machine whose
+  `Display` is connected straight to the TV.
+* **`status.displays` follows the adapters.** The list is the
+  `Display` each adapter of a bus in `Control` names, as the design
+  above now states. The first draft listed every `Display` on a
+  machine the bus names. That would list a machine's second output to
+  another TV under this TV, and the session match of phase 3 could
+  then wake the wrong TV.
+* **`status.activeSource`** is not built. The session match of
+  phase 3 is its first reader.
 
 ## Failure and recovery
 

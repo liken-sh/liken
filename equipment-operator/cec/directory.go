@@ -45,11 +45,14 @@ type Directory struct {
 	// A monitor holds none, so AddressUnregistered stands for it.
 	own   LogicalAddress
 	peers map[LogicalAddress]*Peer
+	// missed counts the power questions each peer acknowledged and did
+	// not answer since its last Report Power Status.
+	missed map[LogicalAddress]int
 }
 
 // NewDirectory starts an empty directory.
 func NewDirectory() *Directory {
-	return &Directory{own: AddressUnregistered, peers: map[LogicalAddress]*Peer{}}
+	return &Directory{own: AddressUnregistered, peers: map[LogicalAddress]*Peer{}, missed: map[LogicalAddress]int{}}
 }
 
 // SetOwn records the adapter's own logical address, and forgets any
@@ -67,6 +70,7 @@ func (d *Directory) Reset() {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.peers = map[LogicalAddress]*Peer{}
+	d.missed = map[LogicalAddress]int{}
 }
 
 // peer finds or adds the peer at an address. The caller holds the
@@ -97,6 +101,9 @@ func (d *Directory) Observe(message Message) bool {
 	peer := d.peer(message.From)
 	before := *peer
 	learn(peer, message)
+	if opcode, _ := message.Opcode(); opcode == OpReportPowerStatus && !message.IsPoll() {
+		delete(d.missed, message.From)
+	}
 	return !known || *peer != before
 }
 
@@ -131,6 +138,7 @@ func (d *Directory) Forget(address LogicalAddress) bool {
 	defer d.mutex.Unlock()
 	_, held := d.peers[address]
 	delete(d.peers, address)
+	delete(d.missed, address)
 	return held
 }
 
@@ -145,6 +153,28 @@ func (d *Directory) Present(address LogicalAddress) bool {
 	_, held := d.peers[address]
 	d.peer(address)
 	return !held
+}
+
+// missedReplies is how many power questions in a row a device may
+// leave unanswered before its power is unknown. A TV that wakes can
+// miss one question, and forgetting its power then would make its
+// Television flap between reachable and not.
+const missedReplies = 2
+
+// Unanswered records a device that acknowledged a power question and
+// did not answer it. The device is present. After missedReplies such
+// questions in a row, its power is unknown.
+func (d *Directory) Unanswered(address LogicalAddress) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	if address == d.own || address == AddressUnregistered {
+		return
+	}
+	peer := d.peer(address)
+	d.missed[address]++
+	if d.missed[address] >= missedReplies {
+		peer.Power = PowerUnknown
+	}
 }
 
 // Peers copies every peer, in the order of their logical addresses.

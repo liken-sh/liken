@@ -19,9 +19,13 @@ import (
 const equipmentAPIVersion = "equipment.liken.sh/v1alpha1"
 
 // ObjectMeta carries what this operator reads or writes: name for the
-// URL, and resourceVersion for the conditional write.
+// URL, uid for the identity of one object, and resourceVersion for the
+// conditional write.
 type ObjectMeta struct {
-	Name            string            `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
+	// UID tells an object from an earlier one of the same name, which a
+	// delete and a create leave behind.
+	UID             string            `json:"uid,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
 	Generation      int64             `json:"generation,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`

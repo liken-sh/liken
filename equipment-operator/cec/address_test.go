@@ -67,3 +67,31 @@ func TestALogicalAddressImpliesItsDeviceType(t *testing.T) {
 		})
 	}
 }
+
+// One address is above another when the other is in the subtree below
+// it: a receiver at 1.0.0.0 is above a machine on its input 3 at
+// 1.3.0.0, and a machine straight on the TV's input 2 at 2.0.0.0 is
+// below the TV and not below that receiver.
+func TestAnAddressIsAboveTheAddressesBelowIt(t *testing.T) {
+	cases := []struct {
+		above, below cec.PhysicalAddress
+		want         bool
+	}{
+		{0x0000, 0x1300, true},
+		{0x1000, 0x1300, true},
+		{0x1000, 0x1320, true},
+		{0x1300, 0x1320, true},
+		{0x1000, 0x2000, false},
+		{0x1000, 0x1000, false},
+		{0x1300, 0x1000, false},
+		{0x1300, 0x1400, false},
+		{0x0000, 0x0000, false},
+	}
+	for _, c := range cases {
+		t.Run(c.above.String()+" over "+c.below.String(), func(t *testing.T) {
+			if got := c.above.Above(c.below); got != c.want {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
