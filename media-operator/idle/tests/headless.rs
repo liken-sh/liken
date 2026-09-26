@@ -22,6 +22,9 @@ struct Run {
     exit: String,
     log: String,
     seconds: f64,
+    // The processor time the client took, user and system together, as the
+    // shell under cage counts its children's time.
+    cpu: f64,
 }
 
 // A directory of this run's own, so one run never reads another's frames.
@@ -91,7 +94,12 @@ fn wired(dir: &Path, flags: &[&str], wiring: &[(&str, String)]) -> Run {
         line.push(' ');
         line.push_str(&quoted(flag));
     }
-    line.push_str(&format!("; echo $? > {}", quoted(&text(&exit_path))));
+    let times_path = dir.join("times");
+    line.push_str(&format!(
+        "; echo $? > {}; times > {}",
+        quoted(&text(&exit_path)),
+        quoted(&text(&times_path))
+    ));
 
     let started = Instant::now();
     let child = Command::new("cage")
@@ -117,6 +125,7 @@ fn wired(dir: &Path, flags: &[&str], wiring: &[(&str, String)]) -> Run {
         exit: read(&exit_path).trim().to_string(),
         seconds: started.elapsed().as_secs_f64(),
         log: read(&log_path),
+        cpu: children_cpu(&read(&times_path)),
     }
 }
 
@@ -228,6 +237,21 @@ fn measurements(path: &Path, run: &Run) -> serde_json::Value {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("{}: {error}\n{}", path.display(), run.log));
     serde_json::from_str(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+// The shell's `times` prints two lines: its own user and system time, then
+// its children's, each as `<m>m<s>s`. The second line is the client's.
+fn children_cpu(times: &str) -> f64 {
+    times
+        .lines()
+        .nth(1)
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|field| {
+            let (minutes, seconds) = field.strip_suffix('s')?.split_once('m')?;
+            Some(minutes.parse::<f64>().ok()? * 60.0 + seconds.parse::<f64>().ok()?)
+        })
+        .sum()
 }
 
 fn read(path: &Path) -> String {
@@ -445,4 +469,31 @@ fn the_client_reads_the_bus_and_draws_what_it_says() {
     // The frame loop drew what the bus delivered.
     let measured = measurements(&stats, &run);
     assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
+}
+
+// A client whose window never draws waits out its grace asleep. The wgpu
+// backend named here does not exist on Linux, so the window gets no surface
+// and the watchdog counts. The loop sleeps until the grace runs out and then
+// the client exits with the watchdog's code. A loop that polled for the
+// whole grace would take about as much processor time as the grace is long.
+#[test]
+fn a_client_with_no_window_sleeps_through_its_grace() {
+    let dir = workspace("grace");
+
+    let run = wired(
+        &dir,
+        &["--size", "1920x1080", "--quit-after", "25"],
+        &[
+            ("IDLE_WINDOW_GRACE_SECONDS", "3".into()),
+            ("WGPU_BACKEND", "metal".into()),
+        ],
+    );
+
+    assert_eq!(run.exit, "7", "{}", run.log);
+    assert!(
+        run.cpu < 1.0,
+        "the client took {} s of processor time in a 3 s grace\n{}",
+        run.cpu,
+        run.log
+    );
 }

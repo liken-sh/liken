@@ -36,9 +36,13 @@ const KEEPALIVE: Duration = Duration::from_secs(30);
 /// The broker sets no limit of its own.
 const MAX_PACKET_SIZE: usize = 256 * 1024;
 
-/// The wait after a failed session, so a broker that is down is no tight
-/// reconnect loop.
-const RECONNECT_WAIT: Duration = Duration::from_secs(1);
+/// The bounds of the wait after a failed session. The wait starts at the
+/// floor, doubles on each failure up to the ceiling, and returns to the floor
+/// on the next session, so a broker that is down is no tight reconnect loop
+/// and a broker that returns is reached within the ceiling. They are the
+/// bounds `media-operator`'s own bus client uses.
+const RECONNECT_MIN: Duration = Duration::from_secs(1);
+const RECONNECT_MAX: Duration = Duration::from_secs(30);
 
 /// The longest the clock sleeps between two reads of the armed window. The
 /// client asks for the shade on its own thread, and that request arms the off
@@ -229,6 +233,7 @@ fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> Option<()> {
 /// holds no subscription across a session, and it folds each message through
 /// the rules before the channel, so the client's loop takes finished values.
 fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, ConnectionError>>) {
+    let mut backoff = RECONNECT_MIN;
     for event in events {
         let Some(screen) = threads.screen() else {
             return;
@@ -236,6 +241,7 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
         let effects = match event {
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                 crate::metrics::bus_connected(true);
+                backoff = RECONNECT_MIN;
                 fold(&screen, |screen| {
                     let effects = screen.connected();
                     let filters = screen.filters().into_iter().map(|path| SubscribeFilter {
@@ -262,7 +268,8 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
                 // The client reconnects on its own, so the line is the record
                 // and not a request for anything.
                 eprintln!("media-screen: bus: {error}");
-                std::thread::sleep(RECONNECT_WAIT);
+                std::thread::sleep(backoff);
+                backoff = next_backoff(backoff);
                 Vec::new()
             }
             Ok(_) => Vec::new(),
@@ -300,6 +307,12 @@ fn clock(threads: &Threads) {
             return;
         }
     }
+}
+
+/// The wait after the next failure: twice this one, and never above the
+/// ceiling.
+fn next_backoff(backoff: Duration) -> Duration {
+    (backoff * 2).min(RECONNECT_MAX)
 }
 
 /// How long the clock sleeps: to the armed deadline, and never longer than

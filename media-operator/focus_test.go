@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // focusOperator builds an operator with a focus desk and a bus that is
@@ -266,18 +267,44 @@ func TestReconcileFocusClearsAMarkWithNoBoundPlayer(t *testing.T) {
 	}
 }
 
-// reconcileFocus over a bus that never Ran records a recovered mark on
-// the desk and does not panic, the state a pass runs in under the test.
-func TestReconcileFocusOverANeverRunBusIsSafe(t *testing.T) {
-	o := focusOperator(t)
-	key := controllerKey("house", "sofa")
-	players := []Player{focusPlayer("theater", "sofa")}
+// caughtUpFocusOperator is focusBrokerOperator with the broker's catch-up
+// over, so an empty desk means the broker holds no mark.
+func caughtUpFocusOperator(t *testing.T) (*operator, *fakeBroker) {
+	t.Helper()
+	o, broker := focusBrokerOperator(t)
+	o.catchUpEnds = time.Now()
+	return o, broker
+}
+
+// A controller with no mark after the catch-up is set on the first
+// Player of its set, so it always drives a unit that lists it.
+func TestReconcileFocusSetsAMarkTheBrokerDoesNotHold(t *testing.T) {
+	o, broker := caughtUpFocusOperator(t)
+
+	o.reconcileFocus([]Player{focusPlayer("theater", "sofa")})
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, string(published.payload), "theater")
+}
+
+// An operator that starts before the broker's catch-up holds no mark, and
+// that is not a mark the broker lacks. Recovery writes nothing before the
+// first connect's grace or inside it, so the retained mark that arrives
+// late still names the room a person chose, and nothing is written over it.
+func TestReconcileFocusWritesNoMarkBeforeTheCatchUp(t *testing.T) {
+	o, broker := focusBrokerOperator(t)
+	players := []Player{focusPlayer("aaa", "sofa"), focusPlayer("theater", "sofa")}
 
 	o.reconcileFocus(players)
+	o.reestablishRetained()
+	o.reconcileFocus(players)
+	o.handleBusMessage(remoteFocusTopic(defaultTopicBase, "house", "sofa"), []byte("theater"))
+	o.catchUpEnds = time.Now()
+	o.reconcileFocus(players)
 
-	if got := o.focus.markFor(key); got != "theater" {
-		t.Errorf("mark = %q, want theater set by recovery", got)
-	}
+	mustMatch(t, o.focus.markFor(controllerKey("house", "sofa")), "theater")
+	mustPublishNothing(t, broker)
 }
 
 // One pass settles the mark and publishes it on the unit's bus
@@ -287,7 +314,7 @@ func TestOnePassMarksTheFocusedRemoteOnTheBusStatus(t *testing.T) {
 	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("gamepad")
 	cluster.keymaps["gamepad"] = testKeymap()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media, _ := caughtUpOperator(t, cluster)
 
 	media.pass()
 

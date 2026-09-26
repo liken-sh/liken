@@ -88,14 +88,15 @@ const backstopInterval = 10 * time.Second
 // writes on every tick.
 const positionWriteInterval = 8 * time.Second
 
-// volumeSeedGrace is how long the pass waits after a broker session
-// begins before it seeds any unit's level. The broker delivers the
-// retained levels within milliseconds of the subscribe, and the wait
-// covers that delivery, so the first pass reads a desk that already
-// holds what the broker holds. A pass that seeded inside the window
-// would publish unity over a level a person had set. It is a variable
-// so a test seeds without waiting.
-var volumeSeedGrace = 2 * time.Second
+// catchUpGrace is how long the pass waits after a broker session
+// begins before it writes a retained value it did not read: a unit's
+// first level, or a controller's first focus mark. The broker delivers
+// the retained values within milliseconds of the subscribe, and the
+// wait covers that delivery, so the pass reads desks that already hold
+// what the broker holds. A write inside the window would put unity over
+// a level a person set, or move a controller to another room. It is a
+// variable so a test writes without waiting.
+var catchUpGrace = 2 * time.Second
 
 // defaultTTLSecondsAfterFinished is how long a Finished Play stands when
 // its spec sets no ttlSecondsAfterFinished. Five minutes is the default
@@ -194,11 +195,11 @@ type operator struct {
 	// holds none.
 	volumes *volumeDesk
 
-	// volumeSeedAfter is when the pass may seed again. A fresh bus
-	// session's retained messages arrive on their own goroutine moments
-	// after the subscribe, so each connect pushes the first seed out by
-	// volumeSeedGrace. Only the pass goroutine touches it.
-	volumeSeedAfter time.Time
+	// catchUpEnds is when the current broker session's retained values
+	// have had time to arrive. Each connect pushes it out by catchUpGrace.
+	// It is zero before the first session, and caughtUp reads zero as a
+	// catch-up that has not started. Only the pass goroutine touches it.
+	catchUpEnds time.Time
 
 	// endingLabeled names the runs whose playback pod already carries the
 	// ending label, so one run patches its pod once and not once a pass.
@@ -743,12 +744,24 @@ func (o *operator) reestablishRetained() {
 	o.playerStatuses.reset()
 	// The levels are the one retained state this rewrite skips. The
 	// sidecars and the broker hold them, not the operator, so the pass
-	// waits out volumeSeedGrace and then seeds only the units nothing
+	// waits out catchUpGrace and then seeds only the units nothing
 	// answered for.
-	o.volumeSeedAfter = time.Now().Add(volumeSeedGrace)
+	o.catchUpEnds = time.Now().Add(catchUpGrace)
 	for key, player := range o.focus.snapshot() {
 		o.publishFocus(key, player, "the broker session is new")
 	}
+}
+
+// caughtUp answers whether the current broker session's retained
+// values have had time to arrive, so a desk that holds nothing for a
+// key means the broker holds nothing for it too. It is false before
+// the first session, while no session is live, and from the connect
+// until the pass that starts the grace.
+func (o *operator) caughtUp() bool {
+	if o.catchUpEnds.IsZero() || o.busReconnected.Load() || !o.bus.Connected() {
+		return false
+	}
+	return !time.Now().Before(o.catchUpEnds)
 }
 
 // retire gives a Finished Play its two endings: the playback objects go at
@@ -1044,14 +1057,15 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// The equipment the unit's cable lands on, and the session it holds
 		// there. The session stands for as long as the unit matches an input,
 		// and its active flag follows the standing run.
-		desired.Receiver = o.reconcileReceiver(player, playerHasStandingPlay(player, plays))
+		standing := playerHasStandingPlay(player, plays)
+		desired.Receiver = o.reconcileReceiver(player, standing)
 		matched[key] = desired.Receiver != nil
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
 			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase),
 			desired.Receiver != nil)
-		o.seedVolume(player, key)
+		o.seedVolume(player, key, standing)
 		// The retained status is what says the film is over, and the idle
 		// screen client draws its return from it. The client subscribes to
 		// that topic itself, so the status reaches it in bus time, seconds
@@ -1138,13 +1152,21 @@ func playOf(status PlayerStatus) string {
 // pass writes the same value, so the race settles itself. A Player
 // with no sinks is not seeded, because a unit with nothing to hear
 // has no level to mean anything.
-func (o *operator) seedVolume(player *Player, key string) {
-	if len(player.Spec.Sinks) == 0 || time.Now().Before(o.volumeSeedAfter) {
+//
+// A unit with a standing Play is not seeded either. Its playback pod
+// holds the level the room hears and publishes it again on each
+// connect, so after a broker restart the pod restores the level.
+// The pod's reconnect can come later than catchUpGrace, and a seed in
+// that gap would put the film at unity.
+func (o *operator) seedVolume(player *Player, key string, standing bool) {
+	if len(player.Spec.Sinks) == 0 || standing || !o.caughtUp() {
 		return
 	}
 	if _, held := o.volumes.stateFor(key); held {
 		return
 	}
+	logLine(o.log, "player %s: no level on the broker after the catch-up, published %s to %s",
+		key, describeVolume(defaultVolumeState()), playerVolumeTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name))
 	o.publishVolume(player.Metadata.Namespace, player.Metadata.Name, defaultVolumeState())
 }
 

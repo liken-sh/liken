@@ -208,7 +208,6 @@ func TestALiveLevelLogsWhereItWent(t *testing.T) {
 	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":true}`))
 	nextLine(t, lines)
 	nextLine(t, lines)
-	nextLine(t, lines)
 
 	mustLogOnce(t, log, "command: "+c.volumeTopic+` delivered level 45, muted, sent ["no-osd","set","volume","45"] and ["no-osd","set","mute","yes"] to mpv, mpv answered success`)
 }

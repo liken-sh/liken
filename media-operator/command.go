@@ -297,13 +297,25 @@ func runCommand() {
 // It publishes online, and re-publishes the last-known report, because
 // the broker drops its retained set on a restart and a reconnect must
 // leave the current status behind again.
+//
+// It re-publishes the level too, once the topic delivered one. The pod
+// holds the level the room hears, and after a broker restart the
+// broker holds none, so the operator would seed unity and the film
+// would jump to full volume. A first session holds no level yet and
+// publishes none, so a pod that starts writes nothing it did not read.
 func (c *commander) onConnect(bus *Bus) {
 	// A fresh session redelivers the retained level, so that message
 	// is a catch-up again and applies silently again.
 	c.volumeMutex.Lock()
 	c.volumeCaughtUp = false
+	held, state := c.haveVolume, c.volume
 	c.volumeMutex.Unlock()
 	bus.Publish(c.availabilityTopic, []byte(availabilityOnline), true)
+	if held && c.volumeTopic != "" {
+		if payload, err := marshalVolumeState(state); err == nil {
+			bus.Publish(c.volumeTopic, payload, true)
+		}
+	}
 	c.reportMutex.Lock()
 	payload, have := c.marshalLastReport()
 	c.reportMutex.Unlock()

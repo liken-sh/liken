@@ -405,6 +405,64 @@ func TestThePanelDesireMovesTheAwakeFlag(t *testing.T) {
 	}
 }
 
+// heldSession is the session an earlier run of the operator left on the
+// house Receiver, with the given awake flag.
+func heldSession(awake bool) *ReceiverSession {
+	return &ReceiverSession{
+		Player:      "house/theater",
+		Input:       "GAME",
+		Awake:       awake,
+		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
+	}
+}
+
+// An operator that restarts reads the session its earlier run left on the
+// Receiver. Before the bus delivers the panel desire, and after a desire
+// that agrees with it, the pass sends nothing, so a slow bus never powers
+// the equipment on in a dark room.
+func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
+	cases := []struct {
+		name   string
+		awake  bool
+		desire string
+	}{
+		{name: "a dark room before the desire arrives", awake: false},
+		{name: "a lit room before the desire arrives", awake: true},
+		{name: "a dark room with the off desire", awake: false, desire: panelDesireOff},
+		{name: "a lit room with the on desire", awake: true, desire: panelDesireOn},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := receiverCluster()
+			cluster.receivers["living-room-denon"].Spec.Session = heldSession(each.awake)
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+			if each.desire != "" {
+				statePanelDesire(media, each.desire)
+			}
+
+			runPlayers(media, []Player{*housePlayer()}, nil)
+			runPlayers(media, []Player{*housePlayer()}, nil)
+
+			mustMatch(t, len(cluster.sessions), 0)
+		})
+	}
+}
+
+// A desire that differs from the session the Receiver holds is a person's
+// press or a timer, and it reaches the equipment.
+func TestADesireThatDiffersFromTheHeldSessionIsApplied(t *testing.T) {
+	cluster := receiverCluster()
+	cluster.receivers["living-room-denon"].Spec.Session = heldSession(false)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	runPlayers(media, []Player{*housePlayer()}, nil)
+	statePanelDesire(media, panelDesireOn)
+	runPlayers(media, []Player{*housePlayer()}, nil)
+
+	mustMatch(t, appliedAwake(cluster), "true")
+}
+
 // The press that turns the panel on is applied on the next pass,
 // because the tracking compares the whole session and only the awake
 // flag changed.

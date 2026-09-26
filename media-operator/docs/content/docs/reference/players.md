@@ -312,6 +312,12 @@ mark on `volume/owner` is non-empty: the position it adopts when the
 session starts, and the position the receiver reports after a press
 or a turn of its own knob.
 
+The seed waits out the broker's retained catch-up after each connect,
+and it skips a unit while a `Play` stands on it. The playback pod's
+command sidecar holds the level the room hears, and it publishes that
+level again on each reconnect, so a broker restart does not move a
+playing film to unity.
+
 Every pod for the unit subscribes and applies what it reads, so the
 unit plays at the one level the topic holds. While the owner mark is
 non-empty, no pod applies the level: each holds `mpv` at unity, volume
@@ -362,7 +368,15 @@ The desire the idle screen client states for the unit's screen:
 
 The two desires are `on` and `off`. The client holds no API
 credentials and writes no hardware, so the operator reads this topic
-and applies or lifts `spec.override` on the screen's `Display`. What
+and applies or lifts `spec.override` on the screen's `Display`.
+
+A client that starts reads the retained desire before it states one,
+and it states a desire only when a press, a starting `Play`, or the
+off window changes the panel. A client that restarts in a dark room
+keeps the room dark. On a reconnect, a client states again the desire
+it holds, so a broker that restarted holds the desire again. The
+operator reads no desire as no statement: it writes no override, and
+the session on a receiver keeps the awake flag it carries. What
 the panel actually shows comes back the other way, from the
 `Display`'s observed state into `status.panel`. The operator clears
 the topic with an empty payload when the unit's controller becomes

@@ -172,8 +172,16 @@ func (o *operator) reconcileFocus(players []Player) {
 	// set, so a controller always drives a unit that lists it. It never
 	// moves a mark that still names a Player in the set, so it does not
 	// steal from a holder.
+	//
+	// An empty desk is not an empty mark until the broker's catch-up has
+	// had time to arrive. Before that, the retained mark can still be on
+	// its way, and a recovery would move a shared controller to the first
+	// room of the set.
 	for key, names := range sets {
 		current := o.focus.markFor(key)
+		if current == "" && !o.caughtUp() {
+			continue
+		}
 		if current == "" || !slices.Contains(names, current) {
 			o.publishFocus(key, names[0], "the mark named no player that lists the remote")
 		}

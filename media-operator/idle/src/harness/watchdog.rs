@@ -43,11 +43,12 @@ impl Watchdog {
         self.missing_since = None;
     }
 
-    /// Whether the grace is running. The loop takes every pass it can while it
-    /// is, because a client with no window gets no event, and
-    /// [`Watchdog::expire_if_late`] runs between passes.
-    pub fn counting(&self) -> bool {
-        self.grace.is_some() && self.missing_since.is_some()
+    /// The moment the running grace runs out, and nothing while no grace
+    /// runs. A client with no window gets no event, so the loop sleeps until
+    /// this moment and [`Watchdog::expire_if_late`] runs when it wakes. A loop
+    /// that polled instead would spin one core for the whole grace.
+    pub fn deadline(&self) -> Option<Instant> {
+        Some(self.missing_since? + self.grace?)
     }
 
     /// Leave the process when the grace has run out with no window. The
@@ -102,14 +103,14 @@ mod tests {
     fn an_unarmed_watchdog_never_expires() {
         let now = Instant::now();
         let watchdog = Watchdog::new(None, now);
-        assert!(!watchdog.counting());
+        assert_eq!(watchdog.deadline(), None);
         assert!(!watchdog.late(now + Duration::from_secs(86_400)));
     }
 
     #[test]
     fn the_grace_runs_from_the_launch() {
         let (watchdog, now) = armed(30);
-        assert!(watchdog.counting());
+        assert_eq!(watchdog.deadline(), Some(now + Duration::from_secs(30)));
         assert!(!watchdog.late(now + Duration::from_secs(29)));
         assert!(watchdog.late(now + Duration::from_secs(30)));
     }
@@ -118,7 +119,7 @@ mod tests {
     fn a_window_stops_the_grace() {
         let (mut watchdog, now) = armed(30);
         watchdog.present();
-        assert!(!watchdog.counting());
+        assert_eq!(watchdog.deadline(), None);
         assert!(!watchdog.late(now + Duration::from_secs(60)));
     }
 
@@ -128,7 +129,7 @@ mod tests {
         watchdog.present();
         watchdog.missing(now + Duration::from_secs(60));
 
-        assert!(watchdog.counting());
+        assert_eq!(watchdog.deadline(), Some(now + Duration::from_secs(90)));
         assert!(!watchdog.late(now + Duration::from_secs(89)));
         assert!(watchdog.late(now + Duration::from_secs(90)));
     }
@@ -137,6 +138,7 @@ mod tests {
     fn a_second_failure_does_not_extend_a_running_grace() {
         let (mut watchdog, now) = armed(30);
         watchdog.missing(now + Duration::from_secs(20));
+        assert_eq!(watchdog.deadline(), Some(now + Duration::from_secs(30)));
         assert!(watchdog.late(now + Duration::from_secs(30)));
     }
 

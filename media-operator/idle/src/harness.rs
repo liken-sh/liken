@@ -367,11 +367,11 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         self.watchdog.expire_if_late(std::time::Instant::now());
 
         // A client waiting for a window has nothing to draw and a grace to
-        // check, so the loop takes every pass it can until one is up. Winit
-        // waits for an event otherwise, and a compositor that gives no window
-        // sends none.
-        if self.watchdog.counting() {
-            event_loop.set_control_flow(ControlFlow::Poll);
+        // check. A compositor that gives no window sends no event, so the
+        // loop sleeps until the grace runs out, and the check above runs on
+        // that wake. An event before then wakes the loop sooner.
+        if let Some(deadline) = self.watchdog.deadline() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
             return;
         }
 

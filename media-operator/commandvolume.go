@@ -50,7 +50,10 @@ func (c *commander) applyVolume(payload []byte) {
 		return
 	}
 	c.applyVolumeState(state, line)
-	if signal {
+	// Only a level that moved draws the indicator. A message that repeats
+	// the held level is a restore, such as this pod's own republish after
+	// a reconnect, and a person changed nothing the screen should show.
+	if signal && moved {
 		c.command(volumeChangedCommand())
 	}
 }
@@ -128,7 +131,7 @@ func (c *commander) applyVolumeOwner(payload []byte) {
 }
 
 // pressVolume publishes what a press means, retained, and writes
-// nothing to mpv. It computes from the last message the topic
+// no level to mpv. It computes from the last message the topic
 // delivered, or from unity before any message arrives, so a pod
 // that just started still steps from a definite level.
 //
@@ -142,7 +145,24 @@ func (c *commander) pressVolume(trigger string, command mediaCommand, quiet bool
 		}
 		return
 	}
-	next := nextVolume(c.heldVolume(), command)
+	held := c.heldVolume()
+	next := nextVolume(held, command)
+	// A press that moves nothing, a step up at the cap, sends nothing.
+	// The topic already holds the level, so the press draws the
+	// indicator here as its feedback, unless equipment owns the level.
+	if next == held {
+		c.volumeMutex.Lock()
+		owned := c.volumeOwned
+		c.volumeMutex.Unlock()
+		if !owned {
+			c.command(volumeChangedCommand())
+		}
+		if !quiet {
+			logLine(c.log, "command: %s: %s, published nothing, because the level is already %s",
+				trigger, describeCommand(command), describeVolume(held))
+		}
+		return
+	}
 	payload, err := marshalVolumeState(next)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "command: volume: %v\n", err)

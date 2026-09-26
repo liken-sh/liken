@@ -183,10 +183,13 @@ pub struct Screen {
     idle: bool,
     /// Whether the shade is down.
     asleep: bool,
-    /// The panel state this client last stated, on or off. The client writes
-    /// no hardware; the operator reads the desire from the bus and overrides
-    /// the screen's `Display`.
-    desire: &'static str,
+    /// The panel desire as the client knows it: the retained desire the
+    /// broker delivered, or the one this client last stated. `None` is a
+    /// desire not read yet, and the client states none until a press or a
+    /// window changes the panel. The client writes no hardware; the
+    /// operator reads the desire from the bus and overrides the screen's
+    /// `Display`.
+    desire: Option<&'static str>,
     /// The armed window and the moment it runs out.
     deadline: Option<(Instant, Window)>,
     /// The lines the folds since the last [`Screen::take_lines`] wrote, one
@@ -226,10 +229,10 @@ impl Screen {
             volume: None,
             idle: false,
             asleep: false,
-            // A client that starts holds the on desire, and states it on its
-            // first bus session, so a pod that returns while the panel is
-            // dark lights it again.
-            desire: panel::ON,
+            // A client that starts has not read the retained desire yet. It
+            // adopts the one the broker holds, so a pod that restarts in a
+            // dark room keeps the room dark.
+            desire: None,
             deadline: None,
             lines: Vec::new(),
         }
@@ -265,13 +268,16 @@ impl Screen {
     ///
     /// A press on any of the unit's controllers reaches the quiet window, so
     /// every events topic is read. The focus topic is retained, so each mark
-    /// arrives on subscribe and the gate stands before the first press.
+    /// arrives on subscribe and the gate stands before the first press. The
+    /// panel topic is read for the same reason: the retained desire arrives
+    /// before the client states one.
     pub fn filters(&self) -> Vec<String> {
         let mut filters = vec![
             self.status_topic.clone(),
             self.volume_topic.clone(),
             self.volume_owner_topic.clone().unwrap_or_default(),
             self.commands_topic.clone(),
+            self.panel_topic.clone(),
         ];
         for remote in &self.remotes {
             filters.push(remote.events.clone());
@@ -327,6 +333,9 @@ impl Screen {
         }
         if !self.commands_topic.is_empty() && topic == self.commands_topic {
             return self.on_command(payload);
+        }
+        if !self.panel_topic.is_empty() && topic == self.panel_topic {
+            return self.on_panel(payload, retained, now);
         }
         // The client's own topics are read last, so a topic that is also one
         // of the screen's fires the screen's rule alone and never twice.
@@ -399,9 +408,11 @@ impl Screen {
     /// mark itself stands across the reconnect, so the gate does not open or
     /// close on a broker restart alone.
     ///
-    /// The panel desire is this client's own retained state, so it goes out
-    /// again on every session. A client that returns while the panel is dark
-    /// states the on desire here, and the operator lifts the override.
+    /// The panel desire is this client's own retained state, so a desire the
+    /// client holds goes out again on every session, and a broker that
+    /// restarted holds it again. A client that has read no desire and stated
+    /// none sends nothing, because a restart is not a reason to change the
+    /// panel.
     ///
     /// [`Moment::Connected`] tells the client the same thing, so a client
     /// republishes the retained state it owns on the topics it named.
@@ -443,6 +454,29 @@ impl Screen {
         self.rearm(now);
         self.shade(moment, &mut effects);
         effects
+    }
+
+    /// Fold one message off the panel topic. The retained desire is what the
+    /// panel shows now, so a client that holds no desire yet adopts it. An
+    /// adopted off desire is a dark panel, so the shade comes down with it:
+    /// a press then wakes the screen and states the on desire. A live message
+    /// is this client's own publish coming back, and it changes nothing.
+    fn on_panel(&mut self, payload: &[u8], retained: bool, now: Instant) -> Vec<Effect> {
+        if !retained || self.desire.is_some() {
+            return Vec::new();
+        }
+        let Some(adopted) =
+            crate::object::<panel::Stated>(payload).and_then(|stated| stated.desire())
+        else {
+            return Vec::new();
+        };
+        self.desire = Some(adopted);
+        if adopted == panel::ON || self.asleep {
+            return Vec::new();
+        }
+        self.asleep = true;
+        self.rearm(now);
+        vec![Effect::Moment(Moment::Sleep)]
     }
 
     /// Fold one message off the volume topic. The level is held for two
@@ -504,6 +538,7 @@ impl Screen {
         if !press.edge() {
             return Vec::new();
         }
+        let down = press.down();
 
         let mut moment = None;
         let mut forwarded = None;
@@ -569,7 +604,12 @@ impl Screen {
 
         self.rearm(now);
         let mut effects = Vec::new();
-        let desire = self.shade(moment, &mut effects);
+        let mut desire = self.shade(moment, &mut effects);
+        // A client that read no desire does not know whether the panel is
+        // dark. A press is a person in the room, so it states the on desire.
+        if self.desire.is_none() && down {
+            desire = self.desire(panel::ON, &mut effects);
+        }
         if let Some(line) = line {
             self.lines.push(line + &desire);
         }
@@ -702,15 +742,16 @@ impl Screen {
     }
 
     /// Hold the new desire and publish it. An unchanged desire publishes
-    /// nothing, because the broker holds the last one.
+    /// nothing, because the broker holds the last one. A client that holds
+    /// no desire yet publishes any desire, because it has no value to match.
     ///
     /// The answer is the end of a line that says where the desire went, or
     /// nothing when it did not move.
     fn desire(&mut self, desire: &'static str, effects: &mut Vec<Effect>) -> String {
-        if self.desire == desire {
+        if self.desire == Some(desire) {
             return String::new();
         }
-        self.desire = desire;
+        self.desire = Some(desire);
         self.publish_desire(effects);
         if self.panel_topic.is_empty() {
             return format!(", and the player has no panel topic for the {desire} desire");
@@ -722,15 +763,15 @@ impl Screen {
     /// current one the moment it subscribes. A `Player` with no panel topic
     /// states no desire.
     fn publish_desire(&self, effects: &mut Vec<Effect>) {
+        let Some(desire) = self.desire else {
+            return;
+        };
         if self.panel_topic.is_empty() {
             return;
         }
         effects.push(Effect::Publish(Publish {
             topic: self.panel_topic.clone(),
-            payload: panel::Desire {
-                desire: self.desire,
-            }
-            .payload(),
+            payload: panel::Desire { desire }.payload(),
             retained: true,
         }));
     }
@@ -739,14 +780,14 @@ impl Screen {
     /// the screen is awake, the unit plays nothing, and the policy is above
     /// zero; every other state leaves it disarmed. The off window runs from
     /// the moment the shade came down, so the two windows measure one quiet
-    /// stretch, and it arms only while the desire is still on.
+    /// stretch, and it arms only while the panel is not already dark.
     fn rearm(&mut self, now: Instant) {
         self.deadline = None;
         if !self.idle {
             return;
         }
         if self.asleep {
-            if self.off_after.is_zero() || self.desire != panel::ON {
+            if self.off_after.is_zero() || self.desire == Some(panel::OFF) {
                 return;
             }
             self.deadline = Some((now + (self.off_after - self.fade_after), Window::Off));

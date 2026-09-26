@@ -370,6 +370,16 @@ fn the_client_asks_for_the_shade_and_reads_it_back() {
 }
 
 #[test]
+fn the_reconnect_wait_doubles_up_to_the_ceiling() {
+    let waits: Vec<Duration> =
+        std::iter::successors(Some(RECONNECT_MIN), |wait| Some(next_backoff(*wait)))
+            .take(7)
+            .collect();
+
+    assert_eq!(waits, [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs));
+}
+
+#[test]
 fn the_clock_sleeps_to_the_armed_window_and_never_longer_than_a_tick() {
     let now = Instant::now();
     assert_eq!(

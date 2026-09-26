@@ -64,9 +64,10 @@ fn two_remotes() -> Wiring {
 }
 
 /// A screen whose controllers all hold this unit's mark, with each mark
-/// already caught up. That is the state a running client holds once the
-/// retained marks arrive, so a test about the quiet window presses a
-/// controller that points here and says nothing about focus.
+/// already caught up, and with the retained on desire read. That is the
+/// state a running client holds once the retained marks and the desire
+/// arrive, so a test about the quiet window presses a controller that points
+/// here and says nothing about focus or the panel.
 fn focused(wiring: &Wiring) -> Screen {
     let mut screen = Screen::new(wiring);
     for mark in &mut screen.marks {
@@ -75,6 +76,7 @@ fn focused(wiring: &Wiring) -> Screen {
             caught_up: true,
         };
     }
+    screen.desire = Some(crate::panel::ON);
     screen
 }
 
@@ -141,6 +143,7 @@ fn the_screen_subscribes_to_every_topic_the_operator_named() {
             VOLUME,
             VOLUME_OWNER,
             COMMANDS,
+            PANEL,
             ARMCHAIR_EVENTS,
             ARMCHAIR_FOCUS,
             SOFA_EVENTS,
@@ -158,7 +161,7 @@ fn a_unit_with_no_sinks_subscribes_to_no_level() {
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
-        [STATUS, COMMANDS, SOFA_EVENTS, SOFA_FOCUS]
+        [STATUS, COMMANDS, PANEL, SOFA_EVENTS, SOFA_FOCUS]
     );
 }
 
@@ -170,7 +173,7 @@ fn a_unit_whose_operator_named_no_owner_topic_subscribes_to_no_mark() {
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
-        [STATUS, VOLUME, COMMANDS, SOFA_EVENTS, SOFA_FOCUS]
+        [STATUS, VOLUME, COMMANDS, PANEL, SOFA_EVENTS, SOFA_FOCUS]
     );
 }
 
@@ -185,7 +188,7 @@ fn a_controller_with_no_focus_topic_subscribes_to_no_mark() {
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
-        [STATUS, VOLUME, VOLUME_OWNER, COMMANDS, SOFA_EVENTS]
+        [STATUS, VOLUME, VOLUME_OWNER, COMMANDS, PANEL, SOFA_EVENTS]
     );
 }
 
@@ -216,6 +219,7 @@ fn a_client_subscribes_to_its_own_topics_beside_the_screens() {
             VOLUME,
             VOLUME_OWNER,
             COMMANDS,
+            PANEL,
             SOFA_EVENTS,
             SOFA_FOCUS,
             WATCHING
@@ -234,6 +238,7 @@ fn a_client_topic_with_no_name_is_no_topic() {
             VOLUME,
             VOLUME_OWNER,
             COMMANDS,
+            PANEL,
             SOFA_EVENTS,
             SOFA_FOCUS,
             WATCHING
@@ -1293,170 +1298,6 @@ fn every_other_action_and_a_payload_that_does_not_decode_state_nothing() {
     }
 }
 
-// The panel desire.
-
-#[test]
-fn every_bus_session_states_the_desire_the_client_holds() {
-    let mut screen = Screen::new(&wiring());
-
-    assert_eq!(
-        publishes(screen.connected()),
-        [Publish {
-            topic: PANEL.into(),
-            payload: br#"{"desire":"on"}"#.to_vec(),
-            retained: true,
-        }]
-    );
-}
-
-#[test]
-fn a_player_with_no_panel_topic_states_no_desire() {
-    let wiring = Wiring {
-        panel_topic: String::new(),
-        ..wiring()
-    };
-    let mut screen = Screen::new(&wiring);
-
-    assert!(publishes(screen.connected()).is_empty());
-}
-
-#[test]
-fn every_bus_session_tells_the_client_it_connected() {
-    let mut screen = Screen::new(&wiring());
-
-    assert_eq!(moments(screen.connected()), [Moment::Connected]);
-}
-
-#[test]
-fn the_off_window_states_the_off_desire_behind_a_black_screen() {
-    let wiring = Wiring {
-        fade_after: Duration::from_secs(600),
-        off_after: Duration::from_secs(1800),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-
-    let dark = now + Duration::from_secs(600);
-    assert_eq!(moments(screen.tick(dark)), [Moment::Sleep]);
-    // The off window runs from the moment the shade came down, so the two
-    // windows measure one quiet stretch and nothing states a desire between
-    // them.
-    assert!(screen.tick(now + Duration::from_secs(1799)).is_empty());
-    assert_eq!(
-        publishes(screen.tick(now + Duration::from_secs(1800))),
-        [Publish {
-            topic: PANEL.into(),
-            payload: br#"{"desire":"off"}"#.to_vec(),
-            retained: true,
-        }]
-    );
-    assert_eq!(screen.next_deadline(), None);
-}
-
-#[test]
-fn an_off_window_of_zero_never_darkens_the_panel() {
-    let wiring = Wiring {
-        fade_after: Duration::from_secs(600),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-
-    screen.tick(now + Duration::from_secs(600));
-
-    assert_eq!(screen.next_deadline(), None);
-}
-
-#[test]
-fn a_press_states_the_on_desire_and_relights_the_panel() {
-    let wiring = Wiring {
-        fade_after: Duration::from_secs(600),
-        off_after: Duration::from_secs(1800),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-    screen.tick(now + Duration::from_secs(600));
-    screen.tick(now + Duration::from_secs(1800));
-
-    let pressed = now + Duration::from_secs(2000);
-    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_PLAYPAUSE", 1), false, pressed);
-
-    assert_eq!(moments(effects.clone()), [Moment::Wake]);
-    assert_eq!(publishes(effects)[0].payload, br#"{"desire":"on"}"#);
-    assert_eq!(
-        screen.next_deadline(),
-        Some(pressed + Duration::from_secs(600))
-    );
-}
-
-#[test]
-fn a_starting_play_states_the_on_desire() {
-    let wiring = Wiring {
-        fade_after: Duration::from_secs(600),
-        off_after: Duration::from_secs(1800),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-    screen.tick(now + Duration::from_secs(600));
-    screen.tick(now + Duration::from_secs(1800));
-
-    let effects = screen.deliver(STATUS, &status("Starting"), true, now);
-
-    assert_eq!(publishes(effects)[0].payload, br#"{"desire":"on"}"#);
-}
-
-#[test]
-fn a_press_inside_the_off_window_keeps_the_panel_lit() {
-    let wiring = Wiring {
-        fade_after: Duration::from_secs(600),
-        off_after: Duration::from_secs(1800),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-    screen.tick(now + Duration::from_secs(600));
-
-    let pressed = now + Duration::from_secs(1700);
-    screen.deliver(SOFA_EVENTS, &key("KEY_PLAYPAUSE", 1), false, pressed);
-
-    // The press woke the screen, so the window armed now is the quiet one and
-    // no desire went out at all.
-    assert_eq!(
-        screen.next_deadline(),
-        Some(pressed + Duration::from_secs(600))
-    );
-    assert!(screen.tick(now + Duration::from_secs(1800)).is_empty());
-    assert_eq!(screen.desire, panel::ON);
-}
-
-#[test]
-fn a_dark_panel_arms_no_second_off_window() {
-    let wiring = Wiring {
-        fade_after: Duration::from_secs(600),
-        off_after: Duration::from_secs(1800),
-        ..wiring()
-    };
-    let now = Instant::now();
-    let mut screen = idling(&wiring, now);
-    screen.tick(now + Duration::from_secs(600));
-    screen.tick(now + Duration::from_secs(1800));
-    assert_eq!(screen.desire, panel::OFF);
-
-    // A status that repeats the activity leaves the windows where they
-    // stand, so the rearm here is the one a live mark for another unit makes.
-    screen.deliver(
-        SOFA_FOCUS,
-        b"cinema",
-        false,
-        now + Duration::from_secs(1900),
-    );
-
-    assert_eq!(screen.next_deadline(), None);
-}
-
 #[test]
 fn a_tick_before_the_deadline_and_a_tick_with_no_deadline_state_nothing() {
     let wiring = Wiring {
@@ -1473,3 +1314,4 @@ fn a_tick_before_the_deadline_and_a_tick_with_no_deadline_state_nothing() {
 }
 
 mod lines;
+mod panel;

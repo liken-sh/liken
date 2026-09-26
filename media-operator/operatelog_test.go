@@ -181,7 +181,7 @@ func TestASpecVolumeLogsTheLevelItSet(t *testing.T) {
 	play.Spec.Volume = &PlayVolume{Level: level(35)}
 	cluster.plays["movie"] = play
 	cluster.players["theater"] = housePlayer()
-	media, _ := volumeOperator(t, cluster)
+	media, _ := caughtUpOperator(t, cluster)
 	var log logBuffer
 	media.log = &log
 
@@ -248,7 +248,7 @@ func TestAFocusMoveLogsItsReason(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			o := focusOperator(t)
+			o, _ := caughtUpFocusOperator(t)
 			var log logBuffer
 			o.log = &log
 			if each.mark != "" {

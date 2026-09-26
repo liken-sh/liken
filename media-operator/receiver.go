@@ -71,7 +71,8 @@ type ReceiverInput struct {
 //
 // Awake says whether the unit's panel is up. It follows the panel
 // desire the idle client publishes: the off desire is a dark room, and
-// every other desire, none at all included, is a room that is awake.
+// the on desire is a room that is awake. A unit with no desire yet
+// keeps the flag its session already carries.
 type ReceiverSession struct {
 	Player      string `json:"player,omitempty"`
 	Input       string `json:"input,omitempty"`
@@ -198,8 +199,7 @@ func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerRecei
 		o.ensure.set(key, "")
 		return nil
 	}
-	awake := o.panels.stateFor(key) != panelDesireOff
-	o.applySession(player, receiver, input, standing, awake)
+	o.applySession(player, receiver, input, standing, o.awake(player, receiver))
 	// A unit that matches a receiver keeps its commands topic on the
 	// ensure desk, so a press on its controller asks that receiver for
 	// the unit's input.
@@ -209,6 +209,26 @@ func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerRecei
 		Input:     input,
 		Reachable: receiverReachable(receiver),
 	}
+}
+
+// awake reads the awake flag from the panel desire. A unit with no
+// desire yet keeps the flag its session on this Receiver already
+// carries, because no desire is not a statement that the room is lit:
+// an operator that starts before the bus delivers the desire would
+// otherwise power the equipment on in a dark room. A unit with no
+// desire and no session there is awake, the flag a new session starts
+// with.
+func (o *operator) awake(player *Player, receiver *Receiver) bool {
+	switch o.panels.stateFor(playerKey(player.Metadata.Namespace, player.Metadata.Name)) {
+	case panelDesireOff:
+		return false
+	case "":
+		held := receiver.Spec.Session
+		if held != nil && held.Player == player.Metadata.Namespace+"/"+player.Metadata.Name {
+			return held.Awake
+		}
+	}
+	return true
 }
 
 // matchReceiver resolves the unit's screen and finds the input it is
@@ -261,6 +281,13 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	}
 	held, tracked := o.receiverSessions[key]
 	if tracked && held.receiver == receiver.Metadata.Name && held.session == session {
+		return
+	}
+	// A session the Receiver already carries is the one an earlier run
+	// of this operator applied. The equipment acts on power and input
+	// once, so the same session is recorded and not sent again.
+	if !tracked && receiver.Spec.Session != nil && *receiver.Spec.Session == session {
+		o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
 		return
 	}
 	if tracked && held.receiver != receiver.Metadata.Name {

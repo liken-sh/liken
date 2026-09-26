@@ -994,7 +994,7 @@ func TestAPassWritesTheFocusedPlayerOntoTheRemote(t *testing.T) {
 	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("gamepad")
 	cluster.keymaps["gamepad"] = testKeymap()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media, _ := caughtUpOperator(t, cluster)
 
 	media.pass()
 
@@ -1836,11 +1836,11 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		peripherals: newPeripheralDesk(),
 		codes:       newCodesDesk(nil),
 		panels:      newPanelDesk(nil),
-		volumes:     newVolumeDesk(),
-		// These tests read what the status publish leaves on the bus,
-		// so the volume seed is held off for longer than any of them runs.
-		// The volume tests run their own operator with the grace elapsed.
-		volumeSeedAfter: time.Now().Add(time.Hour),
+		// These tests read what the status publish leaves on the bus.
+		// catchUpEnds stays zero, so the operator reads the broker as not
+		// caught up and seeds no level. The volume tests run their own
+		// operator with the grace elapsed.
+		volumes: newVolumeDesk(),
 	}, brokers[0]
 }
 
@@ -1968,14 +1968,16 @@ func TestADeletedPlayerClearsItsRetainedStatus(t *testing.T) {
 	mustMatch(t, cleared.retained, true)
 }
 
-// volumeOperator wires a whole operator to a fake broker, with the seed
-// grace already elapsed, so a test reads the levels a pass publishes.
-func volumeOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+// caughtUpOperator wires a whole operator to a fake broker, with the
+// broker's catch-up already over, so a test reads the levels and the focus
+// marks a pass publishes for units the broker holds nothing for.
+func caughtUpOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.bus = bus
+	media.catchUpEnds = time.Now()
 	return media, brokers[0]
 }
 
@@ -2025,7 +2027,7 @@ func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
 // default. The seed runs once: the pass that follows reads the level
 // it wrote and writes nothing more.
 func TestAPassSeedsAPlayerWithNoLevel(t *testing.T) {
-	media, broker := volumeOperator(t, newFakeCluster())
+	media, broker := caughtUpOperator(t, newFakeCluster())
 	player := settledPlayer(housePlayer())
 
 	media.reconcilePlayers([]Player{player}, nil, "", nil)
@@ -2039,10 +2041,27 @@ func TestAPassSeedsAPlayerWithNoLevel(t *testing.T) {
 	mustPublishNoVolume(t, broker)
 }
 
+// The seed is a write to the room's level, so it writes one line that
+// says why and where, and the pass that follows writes none.
+func TestTheSeedLogsWhatItPublished(t *testing.T) {
+	media, broker := caughtUpOperator(t, newFakeCluster())
+	var log logBuffer
+	media.log = &log
+	player := settledPlayer(housePlayer())
+
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
+	mustPublishVolume(t, broker)
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
+
+	mustMatchAll(t, linesAbout(&log, "player house/theater"), []string{
+		"player house/theater: no level on the broker after the catch-up, published level 100, not muted to " + theaterVolumeTopic(),
+	})
+}
+
 // A level that stands on the broker is never written over by the
 // seed, so a room keeps the level a person set across an operator restart.
 func TestThePassDoesNotSeedOverALevelThatStands(t *testing.T) {
-	media, broker := volumeOperator(t, newFakeCluster())
+	media, broker := caughtUpOperator(t, newFakeCluster())
 	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
 
 	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
@@ -2053,7 +2072,7 @@ func TestThePassDoesNotSeedOverALevelThatStands(t *testing.T) {
 // A Player with no sinks is not seeded, because a unit with nothing
 // to hear has no level to mean anything.
 func TestThePassDoesNotSeedASpeakerlessPlayer(t *testing.T) {
-	media, broker := volumeOperator(t, newFakeCluster())
+	media, broker := caughtUpOperator(t, newFakeCluster())
 	player := housePlayer()
 	player.Spec.Sinks = nil
 
@@ -2067,10 +2086,34 @@ func TestThePassDoesNotSeedASpeakerlessPlayer(t *testing.T) {
 // for the grace. A seed inside that window would write unity over a level
 // a person had set.
 func TestTheSeedWaitsOutTheGraceAfterAConnect(t *testing.T) {
-	media, broker := volumeOperator(t, newFakeCluster())
+	media, broker := caughtUpOperator(t, newFakeCluster())
 
 	media.reestablishRetained()
 	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A pass that runs before the first session's catch-up has started seeds
+// nothing. The session's queue opens a moment before the pass learns of the
+// connect, and a seed in that moment would put unity over the retained
+// level on its way to the desk.
+func TestTheSeedWaitsForTheFirstCatchUp(t *testing.T) {
+	media, broker := caughtUpOperator(t, newFakeCluster())
+	media.catchUpEnds = time.Time{}
+
+	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A unit with a standing Play is not seeded after a broker restart. Its
+// playback pod holds the level the room hears and publishes it again when
+// it reconnects, and that reconnect can come after the grace.
+func TestThePassDoesNotSeedAUnitWithAStandingPlay(t *testing.T) {
+	media, broker := caughtUpOperator(t, newFakeCluster())
+
+	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, standingPlays(), "", nil)
 
 	mustPublishNoVolume(t, broker)
 }
@@ -2084,7 +2127,7 @@ func TestAPlayWritesItsLevelThroughBeforeThePodExists(t *testing.T) {
 	play.Spec.Volume = &PlayVolume{Level: level(35)}
 	cluster.plays["movie"] = play
 	cluster.players["theater"] = housePlayer()
-	media, broker := volumeOperator(t, cluster)
+	media, broker := caughtUpOperator(t, cluster)
 	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":true}`))
 
 	media.pass()
@@ -2105,7 +2148,7 @@ func TestAPlayWritesItsLevelThroughOnlyOnce(t *testing.T) {
 	play.Spec.Volume = &PlayVolume{Level: level(35)}
 	cluster.plays["movie"] = play
 	cluster.players["theater"] = housePlayer()
-	media, broker := volumeOperator(t, cluster)
+	media, broker := caughtUpOperator(t, cluster)
 
 	media.pass()
 	mustPublishVolume(t, broker)
@@ -2127,7 +2170,7 @@ func TestAPlayAgainstASpeakerlessPlayerWritesNoLevelThrough(t *testing.T) {
 	player := housePlayer()
 	player.Spec.Sinks = nil
 	cluster.players["theater"] = player
-	media, broker := volumeOperator(t, cluster)
+	media, broker := caughtUpOperator(t, cluster)
 
 	media.pass()
 
@@ -2140,7 +2183,7 @@ func TestAPlayWithNoLevelStartsAtTheUnitsOwn(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
-	media, broker := volumeOperator(t, cluster)
+	media, broker := caughtUpOperator(t, cluster)
 	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":false}`))
 
 	media.pass()
@@ -2156,7 +2199,7 @@ func TestAnOwnedLevelCarriesNoLevelOntoThePod(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
-	media, _ := volumeOperator(t, cluster)
+	media, _ := caughtUpOperator(t, cluster)
 	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":40,"muted":false}`))
 	media.handleBusMessage(theaterVolumeOwnerTopic(), []byte("house/theater"))
 
@@ -2171,7 +2214,7 @@ func TestAClearedMarkCarriesTheLevelOntoThePod(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
-	media, _ := volumeOperator(t, cluster)
+	media, _ := caughtUpOperator(t, cluster)
 	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":40,"muted":false}`))
 	media.handleBusMessage(theaterVolumeOwnerTopic(), []byte("house/theater"))
 	media.handleBusMessage(theaterVolumeOwnerTopic(), nil)
