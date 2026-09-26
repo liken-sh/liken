@@ -200,9 +200,12 @@ type serioHolder struct {
 	endErr    error
 
 	// identity is the inode of the tty's sysfs directory when the
-	// holder started, started is when it started, and failures is the
-	// count of failures in a row on this tty before it (serioretry.go).
+	// holder started, usbPath is the sysfs path of the USB device
+	// above the tty, started is when it started, and failures is the
+	// count of failures in a row on that USB port before it
+	// (serioretry.go).
 	identity uint64
+	usbPath  string
 	started  time.Time
 	failures int
 }

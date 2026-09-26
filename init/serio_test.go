@@ -43,9 +43,7 @@ func waitEnded(t *testing.T, r *serioRegistry, tty string) {
 func TestAWalkAttachesAMatchedLine(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
-	pulse := adapter{port: "1-4", tty: "ttyACM0"}
-	pulse.plug(t)
-	pulse.registerPort(t)
+	adapter{port: "1-4", tty: "ttyACM0"}.plug(t)
 	ttys := newFakeTTYs(t)
 	r := declaredSerio(ttys, pulse8Entry)
 
@@ -286,7 +284,7 @@ func TestAWalkWithNothingDeclaredReportsNothing(t *testing.T) {
 }
 
 // A driver that blocks the open cannot stall the walk. The walk
-// reports the wait, and the walk after the open returns finds the
+// reports the wait, and the walk after the open returns reports the
 // holder attached.
 func TestAWalkBoundsTheWaitForTheAttachCalls(t *testing.T) {
 	fakeSerioMachine(t)
@@ -301,7 +299,16 @@ func TestAWalkBoundsTheWaitForTheAttachCalls(t *testing.T) {
 
 	waiting := walkOnce(r)
 	close(ttys.gate)
-	serioSettleTimeout = 5 * time.Second
+	// A walk reports a holder it did not start without waiting on it,
+	// so this waits for the attach calls the gate released.
+	r.mu.Lock()
+	h := r.holders["ttyACM0"]
+	r.mu.Unlock()
+	select {
+	case <-h.settled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the holder never finished its attach calls")
+	}
 	attached := walkOnce(r)
 
 	if waiting[0].State != machine.SerioRefused || attached[0].State != machine.SerioAttached || ttys.openCount() != 1 {
@@ -314,7 +321,7 @@ func TestAWalkBoundsTheWaitForTheAttachCalls(t *testing.T) {
 func TestPublishWritesTheFactsWhenTheReportChanges(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
-	pulse := adapter{port: "1-4", tty: "ttyACM0"}
+	pulse := adapter{port: "1-4", tty: "ttyACM0", portless: true}
 	pulse.plug(t)
 	tree := machine.FactsTree{Dir: t.TempDir()}
 	r := declaredSerio(newFakeTTYs(t), pulse8Entry)
@@ -336,13 +343,14 @@ func TestPublishWritesTheFactsWhenTheReportChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(facts.Serio) != 1 || facts.Serio[0].State != machine.SerioAttached {
+	if len(facts.Serio) != 1 || facts.Serio[0].State != machine.SerioRefused {
 		t.Errorf("first publish = %+v", facts.Serio)
 	}
 	if unchanged == nil {
 		t.Error("an unchanged report must not be written again")
 	}
-	if len(withPort.Serio) != 1 || withPort.Serio[0].Port != "serio0" || len(withPort.Serio[0].Nodes) != 2 {
+	if len(withPort.Serio) != 1 || withPort.Serio[0].State != machine.SerioAttached ||
+		withPort.Serio[0].Port != "serio0" || len(withPort.Serio[0].Nodes) != 2 {
 		t.Errorf("publish after the port = %+v", withPort.Serio)
 	}
 }
@@ -408,6 +416,9 @@ func TestDeclaredEntriesIsACopy(t *testing.T) {
 	}
 }
 
+// attachedNodes are the nodes the fixture's attached port carries.
+var attachedNodes = []string{"/dev/cec0", "/dev/input/event13"}
+
 // The most specific entry wins: an entry that names a serial claims its
 // line first, whatever the declaration order, and an entry without a
 // serial takes only the lines no serial-specific entry took.
@@ -423,26 +434,32 @@ func TestTheMostSpecificEntryClaimsItsLineFirst(t *testing.T) {
 		{"the serial-less entry first", []machine.SerioAttachment{pulse8Entry, specific},
 			[]adapter{{port: "1-4", serial: "A1", tty: "ttyACM0"}, {port: "1-5", serial: "B2", tty: "ttyACM1"}},
 			[]machine.SerioStatus{
-				{Protocol: "pulse8-cec", USB: pulse8Entry.USB, TTY: "ttyACM1", State: machine.SerioAttached},
-				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached},
+				{Protocol: "pulse8-cec", USB: pulse8Entry.USB, TTY: "ttyACM1", State: machine.SerioAttached,
+					Port: "serio0", Nodes: attachedNodes},
+				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached,
+					Port: "serio0", Nodes: attachedNodes},
 			}},
 		{"the specific entry first", []machine.SerioAttachment{specific, pulse8Entry},
 			[]adapter{{port: "1-4", serial: "A1", tty: "ttyACM0"}, {port: "1-5", serial: "B2", tty: "ttyACM1"}},
 			[]machine.SerioStatus{
-				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached},
-				{Protocol: "pulse8-cec", USB: pulse8Entry.USB, TTY: "ttyACM1", State: machine.SerioAttached},
+				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached,
+					Port: "serio0", Nodes: attachedNodes},
+				{Protocol: "pulse8-cec", USB: pulse8Entry.USB, TTY: "ttyACM1", State: machine.SerioAttached,
+					Port: "serio0", Nodes: attachedNodes},
 			}},
 		{"one adapter, the serial-less entry first", []machine.SerioAttachment{pulse8Entry, specific},
 			[]adapter{{port: "1-4", serial: "A1", tty: "ttyACM0"}},
 			[]machine.SerioStatus{
 				{Protocol: "pulse8-cec", USB: pulse8Entry.USB, State: machine.SerioMissing,
 					Message: "every serial line of USB device 2548:1002 is held for another spec.serio entry"},
-				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached},
+				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached,
+					Port: "serio0", Nodes: attachedNodes},
 			}},
 		{"one adapter, the specific entry first", []machine.SerioAttachment{specific, pulse8Entry},
 			[]adapter{{port: "1-4", serial: "A1", tty: "ttyACM0"}},
 			[]machine.SerioStatus{
-				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached},
+				{Protocol: "pulse8-cec", USB: specific.USB, TTY: "ttyACM0", State: machine.SerioAttached,
+					Port: "serio0", Nodes: attachedNodes},
 				{Protocol: "pulse8-cec", USB: pulse8Entry.USB, State: machine.SerioMissing,
 					Message: "every serial line of USB device 2548:1002 is held for another spec.serio entry"},
 			}},

@@ -25,11 +25,14 @@ import (
 // serialLineInfo is one tty with a USB device above it. identity is
 // the inode of the tty's sysfs directory, which is new each time the
 // kernel registers the tty, so a tty that registers again under the
-// same name reads as new hardware.
+// same name reads as new hardware. usbPath is the sysfs path of the
+// USB device, which names the port the adapter is plugged into and
+// stays the same when the adapter enumerates again.
 type serialLineInfo struct {
 	tty                     string
 	dir                     string
 	identity                uint64
+	usbPath                 string
 	vendor, product, serial string
 }
 
@@ -69,6 +72,7 @@ func discoverSerialLines() []serialLineInfo {
 			tty:      entry.Name(),
 			dir:      dir,
 			identity: stat.Ino,
+			usbPath:  usb,
 			vendor:   sysfsString(usb, "idVendor"),
 			product:  sysfsString(usb, "idProduct"),
 			serial:   sysfsString(usb, "serial"),

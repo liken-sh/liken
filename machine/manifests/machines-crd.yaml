@@ -3185,14 +3185,18 @@ spec:
                         enum: [Attached, Missing, Refused]
                         description: >-
                           Attached means that the machine holds the
-                          attachment, and port names the serio port
-                          once the kernel registers it. Missing
+                          attachment and the protocol's driver bound
+                          the serio port that port names. Missing
                           means that no serial line matches the
                           entry: the adapter is unplugged, or its
                           line driver is not in spec.modules.
                           Refused means that a line matches and the
                           attachment did not complete, or that the
-                          protocol's driver did not bind the port.
+                          protocol's driver did not bind the port. A
+                          message that starts with "attaching:" is
+                          an attachment in progress: the kernel has
+                          not registered the port yet, or the driver
+                          is still probing it.
                           The message gives the call that failed and
                           the kernel's error text, the module to
                           declare, or the driver that did not bind.

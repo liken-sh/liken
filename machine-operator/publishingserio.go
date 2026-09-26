@@ -65,10 +65,21 @@ const (
 // container would open that device instead.
 const serioAbsentNode = "/dev/liken.sh/serio-device-absent"
 
-// serioDeviceName reports whether an allocated device name is one of
-// the two a CEC adapter publishes.
-func serioDeviceName(name string) bool {
-	return strings.HasSuffix(name, serioCECSuffix) || strings.HasSuffix(name, serioInputSuffix)
+// serioFailsClosed reports whether a claim's device that no longer
+// resolves must name serioAbsentNode instead of keeping its old nodes.
+// It must when the name is one of the two a CEC adapter publishes, and
+// when the name is an interface of a matched adapter. The second is a
+// claim allocated before spec.serio declared the adapter, to the tty's
+// device or to another interface that delivered the usbfs node. Its
+// old nodes are the tty and the usbfs node, and a restarted container
+// that received them could set another line discipline or reset the
+// adapter, and either one ends the attachment under every CEC claim.
+func serioFailsClosed(name string, byName map[string]hardware.Device, serio []machine.SerioAttachment) bool {
+	if strings.HasSuffix(name, serioCECSuffix) || strings.HasSuffix(name, serioInputSuffix) {
+		return true
+	}
+	device, ok := byName[name]
+	return ok && serioAdapter(device, serio)
 }
 
 // publishSerio publishes one attached serial line as the devices its

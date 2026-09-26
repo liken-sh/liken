@@ -366,8 +366,12 @@ that received it could set another line discipline or write to the
 line, and either one ends the attachment under every other claim.
 So before the attachment, the adapter's serial line publishes
 nothing. Neither device keeps the interface's bare name. Before an
-entry declared the adapter, the bare name was the tty's device, so a
-claim allocated then resolves to nothing, and never to the CEC node.
+entry declared the adapter, the bare name was the tty's device, and
+its claim delivered the tty and the usbfs node. After the entry, the
+node rewrites such a claim's specification to name a node that does
+not exist, so its container cannot start again, and it never receives
+the CEC node. Delete the claim, and claim the `-cec` or `-input`
+device instead.
 
 The usbfs node is not delivered either, because through it a program
 could detach `cdc_acm` or reset the adapter and end the attachment

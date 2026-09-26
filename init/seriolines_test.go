@@ -58,9 +58,12 @@ func loadSerioModules(t *testing.T, names ...string) {
 
 // adapter is one fake USB device: its port path on the bus, its
 // identity, and the tty cdc_acm gave it. An empty tty is an adapter
-// whose line driver is not loaded.
+// whose line driver is not loaded. plug also builds the serio port
+// with its driver bound, the state an attach leads to, unless portless
+// asks for a tty that the kernel has not attached anything under yet.
 type adapter struct {
 	port, serial, tty string
+	portless          bool
 }
 
 func (a adapter) deviceDir() string {
@@ -95,6 +98,9 @@ func (a adapter) plug(t *testing.T) {
 	writeSysfs(t, dir, "uevent", "DEVNAME="+a.tty+"\n")
 	symlink(t, iface, filepath.Join(dir, "device"))
 	symlink(t, dir, filepath.Join(sysfsRoot, "class", "tty", a.tty))
+	if !a.portless {
+		a.registerPort(t)
+	}
 }
 
 // unplug removes everything plug built, the way the kernel removes a
@@ -198,9 +204,10 @@ func TestDiscoverSerialLinesReadsTheIdentityAboveEachTTY(t *testing.T) {
 
 	got := discoverSerialLines()
 
+	two := adapter{port: "1-5", tty: "ttyACM1"}
 	want := []serialLineInfo{
-		{tty: "ttyACM0", dir: one.ttyDir(), vendor: "2548", product: "1002", serial: "A1"},
-		{tty: "ttyACM1", dir: adapter{port: "1-5", tty: "ttyACM1"}.ttyDir(), vendor: "2548", product: "1002"},
+		{tty: "ttyACM0", dir: one.ttyDir(), usbPath: one.deviceDir(), vendor: "2548", product: "1002", serial: "A1"},
+		{tty: "ttyACM1", dir: two.ttyDir(), usbPath: two.deviceDir(), vendor: "2548", product: "1002"},
 	}
 	identities := map[uint64]bool{}
 	for i := range got {

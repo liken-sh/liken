@@ -5,6 +5,8 @@ package main
 // refusal on the same tty retries after a bounded backoff.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -216,19 +218,62 @@ func TestANudgeSettlesBeforeTheWalk(t *testing.T) {
 	}
 }
 
-// A port whose driver did not bind has no CEC device, whatever the
-// holder does, and the status says which driver to look for.
-func TestAPortWithNoDriverIsRefused(t *testing.T) {
+// A refusal whose backoff ran out, on a machine that then lost a
+// module the attach needs, waits for its next backoff instead of
+// asking for a walk at once, forever.
+func TestARetryBlockedByAMissingModuleWaitsAgain(t *testing.T) {
+	fakeSerioMachine(t)
+	loadSerioModules(t, "serport", "pulse8_cec")
+	adapter{port: "1-4", tty: "ttyACM0"}.plug(t)
+	r, clock := clocked(newFakeTTYs(t, &fakeLine{disciplineErr: unix.EPERM}), pulse8Entry)
+	walkOnce(r)
+	if err := os.RemoveAll(filepath.Join(sysModuleDir, "pulse8_cec")); err != nil {
+		t.Fatal(err)
+	}
+
+	clock.now = clock.now.Add(serioRetryBase)
+	got := walkOnce(r)
+	wait, ok := r.nextRetry()
+
+	if got[0].Message != "declare pulse8_cec in spec.modules" || !ok || wait <= 0 {
+		t.Errorf("walk = %+v, next retry in %s (%v)", got, wait, ok)
+	}
+}
+
+// An adapter that enumerates again on every attach gets a new tty each
+// time. The first new tty attaches at once, and the failures that
+// follow on the same USB port back off, because the count belongs to
+// the port and not to the tty.
+func TestAnAdapterThatReenumeratesOnEveryAttachBacksOff(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
 	pulse := adapter{port: "1-4", tty: "ttyACM0"}
 	pulse.plug(t)
-	pulse.registerUnboundPort(t)
+	first, second := holdingLine(), holdingLine()
+	ttys := newFakeTTYs(t, first, second)
+	r, clock := clocked(ttys, pulse8Entry)
+	walkOnce(r)
 
-	got := walkOnce(declaredSerio(newFakeTTYs(t), pulse8Entry))
+	reenumerate := func(line *fakeLine) {
+		pulse.unplug(t)
+		pulse.plug(t)
+		close(line.release)
+		waitEnded(t, r, "ttyACM0")
+	}
+	reenumerate(first)
+	once := walkOnce(r)
+	reenumerate(second)
+	twice := walkOnce(r)
+	clock.now = clock.now.Add(serioBackoff(2))
+	later := walkOnce(r)
 
-	want := "serio0 on ttyACM0 has no driver: pulse8_cec did not bind it; the kernel log names the cause"
-	if got[0].State != machine.SerioRefused || got[0].Message != want || got[0].Port != "serio0" {
-		t.Errorf("walk = %+v", got)
+	if once[0].TTY != "ttyACM0" || ttys.openCount() < 2 {
+		t.Errorf("the first new tty = %+v after %d opens", once, ttys.openCount())
+	}
+	if twice[0].State != machine.SerioRefused {
+		t.Errorf("the second new tty = %+v", twice)
+	}
+	if later[0].State == machine.SerioMissing || ttys.openCount() != 3 {
+		t.Errorf("after the backoff = %+v after %d opens", later, ttys.openCount())
 	}
 }

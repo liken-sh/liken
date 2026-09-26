@@ -213,7 +213,9 @@ func refreshCDISpecs(sysRoot string) {
 // A CEC adapter's devices are the exception. Their spec names a node
 // that does not exist until the device returns (serioAbsentNode), so
 // a container fails to start rather than open a node whose number
-// another device may hold.
+// another device may hold. So does a claim allocated to the adapter's
+// interface before spec.serio declared it: its old nodes are the tty
+// and the usbfs node, which end the attachment (serioFailsClosed).
 //
 // A device that is present with no driver is a different case: the
 // program under this claim detached the kernel driver, and the
@@ -249,8 +251,9 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device)
 		if !ok {
 			continue
 		}
-		published, ok := resolveAllocated(allocated, sysRoot, byName, declaredSerio())
-		if !ok && serioDeviceName(allocated) {
+		serio := declaredSerio()
+		published, ok := resolveAllocated(allocated, sysRoot, byName, serio)
+		if !ok && serioFailsClosed(allocated, byName, serio) {
 			published, ok = publishedDevice{Nodes: []string{serioAbsentNode}}, true
 		}
 		if !ok {

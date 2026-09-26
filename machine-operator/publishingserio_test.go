@@ -202,3 +202,41 @@ func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// A claim allocated before the entry holds the interface's bare name,
+// which was the tty's device, and its spec names the tty and the usbfs
+// node. After the entry, that name resolves to nothing, and the old
+// nodes are the two that end the attachment: TIOCSETD on the tty and
+// USBDEVFS_RESET on the usbfs node. So the spec fails closed.
+func TestAClaimOnTheTTYFromBeforeTheEntryFailsClosed(t *testing.T) {
+	old := cdiDir
+	cdiDir = t.TempDir()
+	t.Cleanup(func() { cdiDir = old })
+	t.Cleanup(func() { setDeclaredSerio(nil) })
+	setDeclaredSerio([]machine.SerioAttachment{pulse8Serio})
+	devices := []cdiDevice{{
+		Name:           "claim-1-usb-1-4-1-0",
+		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/ttyACM0", "/dev/bus/usb/001/004"})},
+	}}
+	if err := writeCDISpec("claim-1", devices); err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]hardware.Device{deviceName(pulse8Line): pulse8Line}
+	if err := refreshCDISpec(t.TempDir(), "claim-1", byName); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(cdiSpecPath("claim-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	nodes := spec.Devices[0].ContainerEdits.DeviceNodes
+	if len(nodes) != 1 || nodes[0].Path != serioAbsentNode {
+		t.Errorf("nodes = %+v", nodes)
+	}
+}

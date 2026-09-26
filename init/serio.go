@@ -12,8 +12,9 @@ package main
 // kernel hangs up the tty, serport ends the read, the holder ends, and
 // the next walk no longer lists the tty. The plug that follows sends
 // uevents, and the walk after them starts a new holder. A refusal is
-// kept for the tty it happened on and retried after a bounded backoff
-// (serioretry.go), so an adapter that resets comes back by itself.
+// kept for the USB port it happened on and retried after a bounded
+// backoff (serioretry.go), so an adapter that resets comes back by
+// itself.
 //
 // The attachment belongs on the machine plane for the reason module
 // loading does. It is what makes the hardware appear, and no pod can
@@ -68,6 +69,7 @@ type serioRegistry struct {
 	declared []machine.SerioAttachment
 	holders  map[string]*serioHolder
 	refusals map[string]serioRefusal
+	unbound  map[string]serioUnbound
 	nudge    chan struct{}
 	open     openLine
 	now      func() time.Time
@@ -83,6 +85,7 @@ func newSerioRegistry(open openLine) *serioRegistry {
 	return &serioRegistry{
 		holders:  map[string]*serioHolder{},
 		refusals: map[string]serioRefusal{},
+		unbound:  map[string]serioUnbound{},
 		nudge:    make(chan struct{}, 1),
 		open:     open,
 		now:      time.Now,
@@ -222,7 +225,8 @@ func (r *serioRegistry) plan() ([]machine.SerioStatus, []startedHolder) {
 		return nil, nil
 	}
 	lines := discoverSerialLines()
-	r.prune(lines)
+	r.prune()
+	r.pruneUnbound(lines)
 	// The most specific entry wins. Entries that name a serial take
 	// their lines first, so an entry without one, declared earlier,
 	// cannot hold a line that a specific entry names. The report keeps

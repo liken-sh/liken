@@ -10,14 +10,22 @@ package main
 // unbinds it and probes it again, and a new tty takes the old name
 // within milliseconds, often inside one settle of the uevent burst.
 //
-// So a refusal is kept for the tty it happened on, identified by the
-// inode of the tty's sysfs directory. The kernel gives a tty that
-// registers again a new directory with a new inode, so a new tty under
-// the old name is new hardware, and the walk attaches it at once. A
-// refusal on the same tty retries after a backoff that doubles from
+// So a refusal is kept for the USB port the adapter is plugged into,
+// the sysfs path of its USB device, with the tty it happened on,
+// identified by the inode of the tty's sysfs directory. The kernel
+// gives a tty that registers again a new directory with a new inode.
+// A refusal on the same tty retries after a backoff that doubles from
 // one second to five minutes. Opening the line on every uevent instead
 // would toggle the adapter's modem lines to get the same refusal
 // again, and uevents arrive often on a machine that runs pods.
+//
+// A new tty on the port attaches at once after the first failure, so
+// an adapter that resets once comes back at once. The failure count
+// belongs to the port, not to the tty, so an adapter that enumerates
+// again on every attach still backs off from its second failure on.
+// A refusal stays while its port is empty, so an adapter that is
+// plugged in again keeps its count: a long hold before the unplug
+// already started the count over.
 
 import (
 	"time"
@@ -35,9 +43,9 @@ const (
 	serioStableHold = time.Minute
 )
 
-// serioRefusal is one refused tty: its identity when the refusal
-// happened, the message the status carries, the count of failures in
-// a row, and the time of the next attempt.
+// serioRefusal is one refused USB port: the identity of the tty the
+// refusal happened on, the message the status carries, the count of
+// failures in a row on the port, and the time of the next attempt.
 type serioRefusal struct {
 	identity uint64
 	message  string
@@ -66,10 +74,10 @@ func nextFailures(prior int, held time.Duration) int {
 	return prior + 1
 }
 
-// refuse records a failure on a holder's tty.
-func (r *serioRegistry) refuse(tty string, h *serioHolder, message string, held time.Duration) {
+// refuse records a failure on a holder's USB port.
+func (r *serioRegistry) refuse(h *serioHolder, message string, held time.Duration) {
 	failures := nextFailures(h.failures, held)
-	r.refusals[tty] = serioRefusal{
+	r.refusals[h.usbPath] = serioRefusal{
 		identity: h.identity,
 		message:  message,
 		failures: failures,
@@ -77,13 +85,10 @@ func (r *serioRegistry) refuse(tty string, h *serioHolder, message string, held 
 	}
 }
 
-// prune removes the holders that ended and records why each ended,
-// and forgets the refusals of ttys that left or registered again.
-func (r *serioRegistry) prune(lines []serialLineInfo) {
-	current := map[string]uint64{}
-	for _, l := range lines {
-		current[l.tty] = l.identity
-	}
+// prune removes the holders that ended, and records why each ended on
+// its USB port. A holder whose tty registered again while it held the
+// read ends the same way, and replace records it (seriostatus.go).
+func (r *serioRegistry) prune() {
 	for tty, h := range r.holders {
 		select {
 		case <-h.done:
@@ -91,20 +96,17 @@ func (r *serioRegistry) prune(lines []serialLineInfo) {
 			continue
 		}
 		delete(r.holders, tty)
-		if identity, present := current[tty]; !present || identity != h.identity {
-			continue
-		}
-		if h.attachErr != nil {
-			r.refuse(tty, h, h.attachErr.Error(), 0)
-			continue
-		}
-		r.refuse(tty, h, endMessage(h.endErr), r.now().Sub(h.started))
+		r.recordEnd(h)
 	}
-	for tty, refusal := range r.refusals {
-		if identity, present := current[tty]; !present || identity != refusal.identity {
-			delete(r.refusals, tty)
-		}
+}
+
+// recordEnd records the failure a holder's end stands for.
+func (r *serioRegistry) recordEnd(h *serioHolder) {
+	if h.attachErr != nil {
+		r.refuse(h, h.attachErr.Error(), 0)
+		return
 	}
+	r.refuse(h, endMessage(h.endErr), r.now().Sub(h.started))
 }
 
 // endMessage words a holder's end for the status.
@@ -115,20 +117,30 @@ func endMessage(err error) string {
 	return "read: the kernel ended the attachment while the tty stayed"
 }
 
-// nextRetry returns the wait until the earliest refusal's next
-// attempt, and false when no refusal waits. No uevent announces that a
-// backoff ran out, so the component sets a timer for it.
+// nextRetry returns the wait until the earliest moment a walk is due
+// with no uevent to announce it: a refusal's next attempt, or the end
+// of an unbound port's grace (seriostatus.go). A moment that has
+// passed is not due again. The walk at that moment either acted on it
+// or moved it forward, and a refusal whose port is empty has nothing
+// to act on, so counting past moments would wake the walk in a loop.
 func (r *serioRegistry) nextRetry() (time.Duration, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	now := r.now()
 	var earliest time.Time
-	for _, refusal := range r.refusals {
-		if earliest.IsZero() || refusal.retryAt.Before(earliest) {
-			earliest = refusal.retryAt
+	due := func(at time.Time) {
+		if at.After(now) && (earliest.IsZero() || at.Before(earliest)) {
+			earliest = at
 		}
+	}
+	for _, refusal := range r.refusals {
+		due(refusal.retryAt)
+	}
+	for _, u := range r.unbound {
+		due(u.since.Add(serioBindGrace))
 	}
 	if earliest.IsZero() {
 		return 0, false
 	}
-	return max(earliest.Sub(r.now()), 0), true
+	return earliest.Sub(now), true
 }

@@ -55,8 +55,18 @@ A release that is older than a field in the `Machine` spec cannot
 read a manifest that uses that field. `spec.serio` is such a field:
 releases before it reject a manifest that declares it. A machine
 that declares `spec.serio` and boots an older release cannot use its
-proven manifest. It boots the manifest from its install stick, if
-the image carries one, or it powers off.
+proven manifest, and it falls back to the seed manifest in the
+release's image on that slot:
+
+* If the image carries a seed for the machine, the machine boots
+  under it. The seed is the install-time manifest, so its storage and
+  network can be stale, and the boot records it as the new proven
+  manifest.
+* If the image carries no seed, the machine boots under an empty
+  `Machine`.
+* If the seed declares `spec.serio` too, the older release cannot
+  read it either, and the machine powers off. Recovery needs a new
+  install stick.
 
 To roll back a machine that declares `spec.serio`, remove the field
 first:
@@ -66,11 +76,15 @@ first:
        kubectl patch machine <name> --type=json \
          -p '[{"op":"remove","path":"/spec/serio"}]'
 
-2. Wait until the `SpecConverged` condition reports that the removal
-   is staged for the next boot, with the reason `RebootPending` or
-   `AwaitingTurn`. A removed entry stays attached until that boot.
-3. Point `spec.version` at the older release. The rollback's reboot
-   applies the staged manifest, which the older release can read.
+2. Wait until the `SpecConverged` condition shows that the removal
+   is staged: the reason `RebootPending` or `AwaitingTurn`. With
+   `rebootPolicy: Auto`, the reason is `RebootRequested`, and the
+   machine reboots at once. Then wait until the condition is `True`
+   after that reboot. A removed entry stays attached until the boot
+   that applies the removal.
+3. Point `spec.version` at the older release. The older release
+   boots the staged manifest, or the proven one that the reboot in
+   step 2 promoted, and it can read both.
 
 The older release does not know the `SerioAttached` condition, so it
 keeps whatever value the condition had. If that value is `False`, the
