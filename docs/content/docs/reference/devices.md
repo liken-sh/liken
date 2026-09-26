@@ -345,8 +345,7 @@ core registers an input device for the TV remote's keys, with an
 event node under `/dev/input`. `liken` publishes the adapter's
 serial-line interface as two devices:
 
-* **The CEC bus**, with the interface's bare name and
-  `subsystem: cec`. A claim on it delivers the `/dev/cec*` node. It
+* **The CEC bus**, with the suffix `-cec` and `subsystem: cec`. A claim on it delivers the `/dev/cec*` node. It
   is exclusive. The CEC core lets several processes open one adapter,
   but only one can be the exclusive initiator or follower, and two
   programs that configure logical addresses on one adapter undo each
@@ -366,22 +365,36 @@ The tty is never published, before or after the attachment. A pod
 that received it could set another line discipline or write to the
 line, and either one ends the attachment under every other claim.
 So before the attachment, the adapter's serial line publishes
-nothing. The usbfs node is not delivered either, because through it
-a program could detach `cdc_acm` and end the attachment the same way.
-The adapter's other interfaces keep their own devices: the
-Pulse-Eight's HID interface still publishes as an ordinary device.
+nothing. Neither device keeps the interface's bare name. Before an
+entry declared the adapter, the bare name was the tty's device, so a
+claim allocated then resolves to nothing, and never to the CEC node.
+
+The usbfs node is not delivered either, because through it a program
+could detach `cdc_acm` or reset the adapter and end the attachment
+the same way. The adapter's other interfaces keep their own devices
+without the usbfs node: the Pulse-Eight's HID interface still
+publishes its `hidraw` and input nodes.
 
 An unplug removes both devices from the slice. A pod that holds them
 keeps file descriptors for nodes that are gone, and Kubernetes does
 not evict it. A program that holds one of these claims must end when
 a read or an `ioctl` returns `ENODEV`. The kubelet then restarts the
 container, and the new container receives the nodes that the claim's
-CDI specification names at that moment. The node rewrites that
-specification on every pass, so when the adapter returns to the same
-USB port, the devices return with the same names and the program
-runs again with no new allocation. A published name follows the USB
-port, so an adapter moved to another port is a different device, and
-its claimant needs a new pod.
+CDI specification names at that moment.
+
+While a device is absent, its claim's specification names a node that
+does not exist, so a container cannot start. The old nodes would be
+unsafe: an event node carries a fixed device number, and another
+input device can take that number while the adapter is gone. The
+kubelet retries the container under its restart backoff, which
+doubles from 10 seconds to 5 minutes. The node rewrites every claim's
+specification on each pass, so when the adapter returns to the same
+USB port, the devices return with the same names, and the container
+starts at its next retry with no new allocation. After a long
+absence, that retry can come up to 5 minutes after the adapter
+returns. A published name follows the USB port, so an adapter moved
+to another port is a different device, and its claimant needs a new
+pod.
 
 ## Limits
 

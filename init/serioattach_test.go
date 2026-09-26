@@ -23,7 +23,7 @@ import (
 type fakeLine struct {
 	termiosErr, disciplineErr, typeErr error
 	reads                              []error
-	readPanics                         bool
+	readPanics, closePanics            bool
 	release                            chan struct{}
 
 	termios    *unix.Termios
@@ -32,6 +32,7 @@ type fakeLine struct {
 	readCalls  int
 	sigBlk     uint64
 	closed     bool
+	closeCalls int
 }
 
 func (f *fakeLine) setTermios(t *unix.Termios) error {
@@ -70,6 +71,10 @@ func (f *fakeLine) read() error {
 
 func (f *fakeLine) close() error {
 	f.closed = true
+	f.closeCalls++
+	if f.closePanics {
+		panic("a fault in the close")
+	}
 	return nil
 }
 
@@ -297,6 +302,18 @@ func TestAPanicInTheReadClosesTheLine(t *testing.T) {
 
 	if !line.closed {
 		t.Error("a line left open keeps serport's discipline on the tty")
+	}
+}
+
+// A panic in the final close is recovered, and the recovery does not
+// close the line a second time.
+func TestAPanicInTheFinalCloseClosesOnce(t *testing.T) {
+	line := &fakeLine{closePanics: true}
+	h, _ := startHolder(t, line, nil)
+	waitDone(t, h)
+
+	if line.closeCalls != 1 || h.endErr == nil {
+		t.Errorf("closes %d, endErr %v", line.closeCalls, h.endErr)
 	}
 }
 

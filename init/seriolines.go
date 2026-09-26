@@ -17,13 +17,19 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/liken-sh/liken/machine"
 )
 
-// serialLineInfo is one tty with a USB device above it.
+// serialLineInfo is one tty with a USB device above it. identity is
+// the inode of the tty's sysfs directory, which is new each time the
+// kernel registers the tty, so a tty that registers again under the
+// same name reads as new hardware.
 type serialLineInfo struct {
 	tty                     string
 	dir                     string
+	identity                uint64
 	vendor, product, serial string
 }
 
@@ -55,12 +61,17 @@ func discoverSerialLines() []serialLineInfo {
 		if usb == "" {
 			continue
 		}
+		var stat unix.Stat_t
+		if err := unix.Stat(dir, &stat); err != nil {
+			continue
+		}
 		lines = append(lines, serialLineInfo{
-			tty:     entry.Name(),
-			dir:     dir,
-			vendor:  sysfsString(usb, "idVendor"),
-			product: sysfsString(usb, "idProduct"),
-			serial:  sysfsString(usb, "serial"),
+			tty:      entry.Name(),
+			dir:      dir,
+			identity: stat.Ino,
+			vendor:   sysfsString(usb, "idVendor"),
+			product:  sysfsString(usb, "idProduct"),
+			serial:   sysfsString(usb, "serial"),
 		})
 	}
 	return lines

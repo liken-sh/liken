@@ -40,7 +40,7 @@ func TestUnclaimedKeepsAKnownAdapterNoEntryAttaches(t *testing.T) {
 		u.Name != "Pulse-Eight CEC Adapter" || u.Class != "communications" || len(u.Candidates) != 0 {
 		t.Errorf("entry = %+v", u)
 	}
-	if u.Message != "declare serport and pulse8_cec in spec.modules and a pulse8-cec entry in spec.serio" {
+	if u.Message != "for the kernel CEC driver, declare serport and pulse8_cec in spec.modules and a pulse8-cec entry in spec.serio; the entry withholds the tty from workloads, so leave it out when a pod drives the adapter over its serial line" {
 		t.Errorf("Message = %q", u.Message)
 	}
 }

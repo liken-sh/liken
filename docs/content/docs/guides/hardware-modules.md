@@ -133,9 +133,20 @@ unit when a machine has two adapters of one model. An entry with a
 serial takes its adapter first, and an entry without one attaches
 the adapters of that model that no entry with a serial names. An
 added entry attaches without a reboot, and a removed entry stays
-attached until the next boot. `status.hardware.unclaimed` lists an
-adapter that `cdc_acm` drives and no entry attaches, with the message
-`declare serport and pulse8_cec in spec.modules and a pulse8-cec entry in spec.serio`.
+attached until the next boot.
+
+An entry withholds the adapter's tty from every workload, because
+the machine holds the line. A program that drives the adapter itself
+over the tty, such as one built on libCEC, needs no entry and no
+`serport` or `pulse8_cec`: declare `cdc_acm` alone, and claim the
+tty. `status.hardware.unclaimed` lists an adapter that `cdc_acm`
+drives and no entry attaches, and its message names both uses.
+
+A release older than `spec.serio` cannot read a manifest that
+declares it. Remove the field before you roll a machine back to such
+a release, and let the removal stage for the next boot.
+[Roll back](/docs/guides/rollback/#before-you-roll-back-past-a-spec-field)
+gives the steps.
 
 ## 4. Set the parameters a driver needs
 
@@ -191,7 +202,11 @@ adapter's driver created, such as `/dev/cec0` and the remote's event
 node. `Missing` means no serial line matches the entry: the adapter
 is unplugged, or `cdc_acm` is not loaded. `Refused` means a line
 matches and the attachment did not complete, and the message names
-the module to declare or gives the kernel's error. The
+the module to declare, gives the kernel's error, or says that the
+adapter's driver did not bind the port. The kernel log then names the
+cause. A refused attachment is tried again after a backoff that
+grows from one second to five minutes, and at once when the adapter
+is plugged in again. The
 `SerioAttached` condition names the first entry that is not
 attached. It does not change the machine's `Ready` condition,
 because a machine with an unplugged adapter still works.

@@ -113,9 +113,18 @@ func (a adapter) unplug(t *testing.T) {
 }
 
 // registerPort builds what the kernel registers under the tty once the
-// attach holds: the serio port, the CEC adapter under it, and the
-// remote-control input device with its event node.
+// attach holds: the serio port with its driver bound, the CEC adapter
+// under it, and the remote-control input device with its event node.
 func (a adapter) registerPort(t *testing.T) {
+	t.Helper()
+	a.registerUnboundPort(t)
+	port := filepath.Join(a.ttyDir(), "serio0")
+	symlink(t, filepath.Join(sysfsRoot, "bus", "serio", "drivers", "pulse8-cec"), filepath.Join(port, "driver"))
+}
+
+// registerUnboundPort builds the port and its devices with no driver
+// link on the port, the state a driver whose probe failed leaves.
+func (a adapter) registerUnboundPort(t *testing.T) {
 	t.Helper()
 	port := filepath.Join(a.ttyDir(), "serio0")
 	node := func(rel, subsystem, devname string) {
@@ -193,8 +202,32 @@ func TestDiscoverSerialLinesReadsTheIdentityAboveEachTTY(t *testing.T) {
 		{tty: "ttyACM0", dir: one.ttyDir(), vendor: "2548", product: "1002", serial: "A1"},
 		{tty: "ttyACM1", dir: adapter{port: "1-5", tty: "ttyACM1"}.ttyDir(), vendor: "2548", product: "1002"},
 	}
+	identities := map[uint64]bool{}
+	for i := range got {
+		identities[got[i].identity] = true
+		got[i].identity = 0
+	}
 	if !slices.Equal(got, want) {
 		t.Errorf("lines = %+v", got)
+	}
+	if len(identities) != 2 || identities[0] {
+		t.Errorf("each tty carries its own identity: %v", identities)
+	}
+}
+
+// A tty that registers again under the same name gets a new directory,
+// and the walk reads it as new hardware.
+func TestATTYThatRegistersAgainHasANewIdentity(t *testing.T) {
+	fakeSerioMachine(t)
+	pulse := adapter{port: "1-4", tty: "ttyACM0"}
+	pulse.plug(t)
+	before := discoverSerialLines()
+	pulse.unplug(t)
+	pulse.plug(t)
+	after := discoverSerialLines()
+
+	if before[0].identity == after[0].identity {
+		t.Errorf("identity %d stayed", after[0].identity)
 	}
 }
 

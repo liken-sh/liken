@@ -263,8 +263,11 @@ The policy for the shape:
   discipline or write to the line and take the port down under every
   other claim. This is the same rule the inventory applies to a disk
   that holds a storage role.
-- **The CEC node publishes as the primary device**, with the bare
-  name and the `subsystem` attribute `cec`.
+- **The CEC node publishes as a device** with the suffix `-cec` and
+  the `subsystem` attribute `cec`. No device keeps the interface's
+  bare name, because before `spec.serio` declared the adapter the
+  bare name was the tty's device, and a claim allocated to the tty
+  must resolve to nothing, not to the CEC node.
 - **The input node publishes as a second device** with the suffix
   `-input` and the `subsystem` attribute `input`.
 - **Both devices are exclusive.** The CEC core allows several opens

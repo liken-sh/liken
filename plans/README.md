@@ -325,6 +325,12 @@ patch. A design question needs agreement on behavior before implementation.
 
 ### Design decisions and policy questions
 
+* [Keep a newer manifest readable after a rollback](open-problems/rollback-drops-a-manifest-with-newer-fields.md).
+  A strict parse makes an older init drop a proven manifest that uses
+  a field it does not know, so a rollback boots the install-time
+  manifest or powers off. The fix is a guard before the rollback, a
+  lenient fallback parse, or both.
+
 * [Make disruption approvals one-shot](open-problems/disruption-approvals-can-be-reused.md).
   Choose how to identify or consume approvals without widening node
   permissions. The design must account for annotation compatibility and

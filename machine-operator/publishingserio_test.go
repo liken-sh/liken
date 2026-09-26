@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
 	"testing"
 
@@ -28,15 +30,17 @@ var attachedDelivery = hardware.Delivery{
 	BusNode: "/dev/bus/usb/001/004",
 }
 
-// The fourth examined shape: the tty is never published, the CEC node
-// is the primary, and the input node is an exclusive companion. The
-// usbfs node is delivered nowhere, because through it a claimant could
+// The fourth examined shape: the tty is never published, and the CEC
+// node and the input node publish as two exclusive devices, each with
+// a suffix. No device keeps the bare name, so a claim allocated to the
+// tty before the entry was declared resolves to nothing. The usbfs
+// node is delivered nowhere, because through it a claimant could
 // detach cdc_acm and end the port under the other claim.
 func TestASerioAttachmentPublishesTheBusAndTheRemote(t *testing.T) {
 	published := publishFor(pulse8Line, attachedDelivery, []machine.SerioAttachment{pulse8Serio})
 
 	want := []publishedDevice{
-		{Subsystem: "cec", Nodes: []string{"/dev/cec0"}},
+		{Suffix: "-cec", Subsystem: "cec", Nodes: []string{"/dev/cec0"}},
 		{Suffix: "-input", Subsystem: "input", Nodes: []string{"/dev/input/event13"}},
 	}
 	if !slices.EqualFunc(published, want, samePublished) {
@@ -54,29 +58,43 @@ func TestASerioLinePublishesNothingBeforeTheAttachment(t *testing.T) {
 	}
 }
 
+// pulse8HID is the adapter's HID interface, which hid-generic binds
+// for the firmware's keyboard mode. It has the adapter's USB identity
+// and no serial line.
+var pulse8HID = hardware.Device{Bus: "usb", Address: "1-4:1.2", Driver: "usbhid", Vendor: "2548", Product: "1002"}
+
+var pulse8HIDDelivery = hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	{Path: "/dev/hidraw0", Subsystem: "hidraw"},
+}, BusNode: "/dev/bus/usb/001/004"}
+
 // Without an entry, the adapter is an ordinary serial line and keeps
-// the default. The adapter's HID interface carries no tty, so an entry
-// leaves it as it was.
-func TestTheSerioShapeNeedsAnEntryAndASerialLine(t *testing.T) {
-	hid := hardware.Device{Bus: "usb", Address: "1-4:1.2", Driver: "usbhid", Vendor: "2548", Product: "1002"}
-	hidDelivery := hardware.Delivery{Nodes: []hardware.DeliveredNode{
-		{Path: "/dev/hidraw0", Subsystem: "hidraw"},
-	}, BusNode: "/dev/bus/usb/001/004"}
+// the default.
+func TestTheSerioShapeNeedsAnEntry(t *testing.T) {
+	got := publishFor(pulse8Line, attachedDelivery, nil)
+	want := publishDevices(pulse8Line, attachedDelivery)
+	if !slices.EqualFunc(got, want, samePublished) {
+		t.Errorf("published = %+v, want %+v", got, want)
+	}
+}
+
+// The HID interface keeps its own device, but not the usbfs node: the
+// node opens the whole adapter, and a USBDEVFS_RESET through it would
+// end the attachment under every CEC claim. Without an entry, the
+// interface delivers the node as before.
+func TestASiblingInterfaceOfAnAttachedLineLosesTheUsbfsNode(t *testing.T) {
 	tests := []struct {
-		name     string
-		device   hardware.Device
-		delivery hardware.Delivery
-		serio    []machine.SerioAttachment
+		name  string
+		serio []machine.SerioAttachment
+		want  []string
 	}{
-		{"no entry", pulse8Line, attachedDelivery, nil},
-		{"the HID interface", hid, hidDelivery, []machine.SerioAttachment{pulse8Serio}},
+		{"an entry", []machine.SerioAttachment{pulse8Serio}, []string{"/dev/hidraw0"}},
+		{"no entry", nil, []string{"/dev/hidraw0", "/dev/bus/usb/001/004"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := publishFor(test.device, test.delivery, test.serio)
-			want := publishDevices(test.device, test.delivery)
-			if !slices.EqualFunc(got, want, samePublished) {
-				t.Errorf("published = %+v, want %+v", got, want)
+			got := publishFor(pulse8HID, pulse8HIDDelivery, test.serio)
+			if len(got) != 1 || !slices.Equal(got[0].Nodes, test.want) || got[0].Subsystem != "hidraw" {
+				t.Errorf("published = %+v", got)
 			}
 		})
 	}
@@ -101,7 +119,7 @@ func TestTheInventoryPublishesBothSerioDevicesExclusive(t *testing.T) {
 			t.Errorf("device = %+v", d)
 		}
 	}
-	if !slices.Equal(names, []string{"usb-1-4-1-0", "usb-1-4-1-0-input"}) ||
+	if !slices.Equal(names, []string{"usb-1-4-1-0-cec", "usb-1-4-1-0-input"}) ||
 		!slices.Equal(subsystems, []string{"cec", "input"}) {
 		t.Errorf("names = %v, subsystems = %v", names, subsystems)
 	}
@@ -138,5 +156,49 @@ func TestDeclaredSerioIsWhatWasLastSet(t *testing.T) {
 
 	if got := declaredSerio(); !slices.Equal(got, []machine.SerioAttachment{pulse8Serio}) {
 		t.Errorf("got %v", got)
+	}
+}
+
+// While an allocated serio device is absent, or publishes nothing, its
+// claim's spec names a node that does not exist, so a container that
+// starts in that window fails to start instead of receiving whatever
+// device took the old node's number meanwhile.
+func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
+	old := cdiDir
+	cdiDir = t.TempDir()
+	t.Cleanup(func() { cdiDir = old })
+	devices := []cdiDevice{
+		{Name: "claim-1-usb-1-4-1-0-cec", ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/cec0"})}},
+		{Name: "claim-1-usb-1-4-1-0-input", ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event13"})}},
+		{Name: "claim-1-usb-2-1-1-0", ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/sda"})}},
+	}
+	if err := writeCDISpec("claim-1", devices); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := refreshCDISpec(t.TempDir(), "claim-1", map[string]hardware.Device{}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(cdiSpecPath("claim-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{serioAbsentNode}, {serioAbsentNode}, {"/dev/sda"}}
+	for i, device := range spec.Devices {
+		var paths []string
+		for _, node := range device.ContainerEdits.DeviceNodes {
+			paths = append(paths, node.Path)
+			if node.Major != 0 {
+				t.Errorf("%s names a device number: %+v", device.Name, node)
+			}
+		}
+		if !slices.Equal(paths, want[i]) {
+			t.Errorf("%s = %v", device.Name, paths)
+		}
 	}
 }

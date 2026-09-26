@@ -3191,9 +3191,14 @@ spec:
                           entry: the adapter is unplugged, or its
                           line driver is not in spec.modules.
                           Refused means that a line matches and the
-                          attachment did not complete. The message
-                          gives the call that failed and the kernel's
-                          error text, or the module to declare.
+                          attachment did not complete, or that the
+                          protocol's driver did not bind the port.
+                          The message gives the call that failed and
+                          the kernel's error text, the module to
+                          declare, or the driver that did not bind.
+                          The machine tries a refused attachment
+                          again after a backoff that grows from one
+                          second to five minutes.
                       message:
                         type: string
                         maxLength: 1024

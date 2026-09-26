@@ -16,9 +16,11 @@ package main
 // PID 1 makes that read harder to hold than it is for inputattach.
 // Init reaps every orphaned process on the machine, so SIGCHLD arrives
 // often, and a signal that lands on the reading thread wakes the
-// kernel's wait. serport then unregisters the port even though the
-// read restarts, and the CEC adapter disappears under every pod that
-// holds it. So each holder locks its goroutine to one OS thread and
+// kernel's wait. serport's read then unregisters the port and returns
+// zero, so a signal ends the port the same way an unplug does, and the
+// CEC adapter disappears under every pod that holds it. A read that
+// ran again would register a new port, not keep the old one. So each
+// holder locks its goroutine to one OS thread and
 // blocks signals on that thread before the first call. The kernel
 // delivers a process-directed signal to a thread that does not block
 // it, so the rest of init still receives SIGCHLD.
@@ -33,6 +35,7 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -155,10 +158,13 @@ var faultSignals = []unix.Signal{
 
 // holderSignalMask is every signal except the fault signals. The mask
 // includes the real-time signal that the Go runtime sends to every
-// thread for a setuid-family call (runtime.doAllThreadsSyscall). Init
-// runs as root for its whole life and makes no such call; if it ever
-// did, a blocked holder thread would stall that call, where an open
-// one would lose its port.
+// thread for a setuid-family call (runtime.doAllThreadsSyscall). That
+// call stops the world, signals each thread, and spins until each one
+// answers, and a holder's thread never answers, so the call would
+// freeze all of PID 1. The rule is that init never makes a
+// setuid-family call: syscall.Setuid, Setgid, Setgroups, and their
+// relatives. Init runs as root for its whole life and needs none of
+// them.
 func holderSignalMask() unix.Sigset_t {
 	var set unix.Sigset_t
 	for i := range set.Val {
@@ -184,11 +190,21 @@ func sigsetHas(set *unix.Sigset_t, sig unix.Signal) bool {
 // closes when the four attach calls finish, after attachErr is
 // written, and a nil attachErr means the holder is in its read. done
 // closes when the goroutine ends, after endErr is written.
+//
+// The registry keeps the last three fields beside the holder, under
+// its own lock. The goroutine never reads or writes them.
 type serioHolder struct {
 	settled   chan struct{}
 	attachErr error
 	done      chan struct{}
 	endErr    error
+
+	// identity is the inode of the tty's sysfs directory when the
+	// holder started, started is when it started, and failures is the
+	// count of failures in a row on this tty before it (serioretry.go).
+	identity uint64
+	started  time.Time
+	failures int
 }
 
 // startSerioHolder starts the goroutine that attaches the tty at path
@@ -230,7 +246,9 @@ func (h *serioHolder) run(open openLine, path string, p machine.SerioProtocol, n
 	// The goroutine never unlocks its thread. When a goroutine ends
 	// while it holds its lock, the Go runtime ends the thread with it,
 	// so the blocked mask leaves with the thread and never reaches a
-	// goroutine that expects signals.
+	// goroutine that expects signals. On the process's main thread the
+	// runtime parks the thread for good instead, which keeps the mask
+	// out of every other goroutine the same way.
 	runtime.LockOSThread()
 	mask := holderSignalMask()
 	if err := unix.PthreadSigmask(unix.SIG_SETMASK, &mask, nil); err != nil {
@@ -246,7 +264,11 @@ func (h *serioHolder) run(open openLine, path string, p machine.SerioProtocol, n
 	close(h.settled)
 	attached = true
 	h.endErr = holdRead(line)
-	line.close()
+	// The recover path closes line when it is set, so the final close
+	// clears it first and a panic in the close cannot close twice.
+	last := line
+	line = nil
+	last.close()
 }
 
 // closeAfterPanic closes a line inside the holder's recovery. A second
