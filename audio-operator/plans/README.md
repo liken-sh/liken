@@ -112,6 +112,6 @@ Nothing is planned right now.
 owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.
 
-* [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
+* [Every published sink is exclusive, though PipeWire can share one](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
   PipeWire mixes streams and every device this operator publishes is
   exclusive, so the second pod to claim a sink waits behind the first.
