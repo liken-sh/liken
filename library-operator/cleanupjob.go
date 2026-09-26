@@ -25,6 +25,7 @@ func cleanupJobName(library string) string {
 // and the operator's own settings alone.
 func buildCleanupJob(library *Library, scannerImage, corrosionImage string) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
+	deadline := int64(libraryJobDeadline / time.Second)
 	return &Job{
 		APIVersion: batchAPIVersion,
 		Kind:       "Job",
@@ -36,6 +37,7 @@ func buildCleanupJob(library *Library, scannerImage, corrosionImage string) *Job
 		},
 		Spec: JobSpec{
 			BackoffLimit:            &backoff,
+			ActiveDeadlineSeconds:   &deadline,
 			TTLSecondsAfterFinished: &ttl,
 			Template: workerPodTemplate(library, workerCleanup,
 				cleanupSidecar(library, scannerImage), corrosionImage),

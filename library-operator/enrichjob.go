@@ -68,6 +68,7 @@ func libraryJobName(library, mode string, created time.Time) string {
 func buildLibraryJob(library *Library, providers providerSet, languages []string,
 	plan libraryJob, images jobImages, created time.Time) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
+	deadline := int64(libraryJobDeadline / time.Second)
 	labels := workerLabels(library.Metadata.Name, plan.mode)
 	annotations := map[string]string{jobCreatedAnnotation: created.UTC().Format(time.RFC3339Nano)}
 	if len(plan.paths) > 0 {
@@ -85,6 +86,7 @@ func buildLibraryJob(library *Library, providers providerSet, languages []string
 		},
 		Spec: JobSpec{
 			BackoffLimit:            &backoff,
+			ActiveDeadlineSeconds:   &deadline,
 			TTLSecondsAfterFinished: &ttl,
 			Template:                libraryPodTemplate(library, providers, languages, plan, images),
 		},

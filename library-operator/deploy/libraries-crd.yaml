@@ -431,7 +431,7 @@ spec:
                         this path and the title's own path under it.
                 phase:
                   type: string
-                  description: "What this library is doing. Scanning while a walk runs, Enriching while the Job's phases run after its walk or in a Job that fills gaps, Idle between Jobs, Pending while the storage, the catalog pod, or the schedule is not ready, Failed when the last walk failed and wrote no rows, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
+                  description: "What this library is doing. Scanning while a walk runs, Enriching while the Job's phases run after its walk or in a Job that fills gaps, Idle between Jobs, Pending while the storage, the catalog pod, or the schedule is not ready, Blocked while a Job of this library has a pod that has not started for five minutes, Failed when the last walk failed and wrote no rows or when a Job failed and no later Job succeeded, and Offline when the namespace's reporter has left the bus. The Ready condition names the Job and the reason Kubernetes gives for Blocked and for a failed Job. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
                 titles:
                   type: integer
                   minimum: 0
@@ -568,10 +568,17 @@ spec:
                     VolumeNotFound. Ready reports the scanning path:
                     True when the namespace's catalog pod runs with
                     every container ready, spec.scan.schedule parses,
-                    and the reporter has reported this library, and
-                    False with the reason NotBound, NoCatalog,
-                    ManyCatalogs, CatalogPending, ScheduleInvalid,
-                    Offline, or NoReport.
+                    the library's Jobs start and succeed, and the
+                    reporter has reported this library, and False with
+                    the reason NotBound, NoCatalog, ManyCatalogs,
+                    CatalogPending, ScheduleInvalid, JobNotStarted,
+                    JobFailed, Offline, or NoReport. JobNotStarted
+                    names a Job whose pod has stayed Pending for five
+                    minutes, with the reason from the pod's scheduling
+                    condition or from its newest Warning event.
+                    JobFailed names the newest Job that failed, with
+                    the reason the Job controller gives, until a later
+                    Job succeeds.
                     Departing reports the teardown of a deleted Library:
                     True for as long as the operator's finalizer holds
                     the object open, with the reason ScanRunning,

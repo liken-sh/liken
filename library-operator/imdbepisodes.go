@@ -20,14 +20,15 @@ func isEpisodeID(id string) bool { return strings.HasPrefix(id, scopeEpisode+":"
 
 // One episode's fill. It returns the result the attempt recorded, or an
 // empty result for an episode the run left: one out of scope, or one the
-// reads could not answer this run.
-func (e *enricher) fillEpisodeRating(ctx context.Context, id string) string {
+// reads could not answer this run. It also returns whether the .nfo file
+// changed.
+func (e *enricher) fillEpisodeRating(ctx context.Context, id string) (string, bool) {
 	if e.datasets == nil || e.datasets.wait(ctx) != nil {
-		return ""
+		return "", false
 	}
 	target := e.datasets.targets[id]
 	if target == nil || target.path == "" || !e.inScope(target.path) {
-		return ""
+		return "", false
 	}
 	absolute := filepath.Join(e.root, target.path)
 	folder, file := filepath.Dir(absolute), filepath.Base(absolute)
@@ -35,7 +36,7 @@ func (e *enricher) fillEpisodeRating(ctx context.Context, id string) string {
 	document, err := os.ReadFile(nfoPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		e.logf("could not read the .nfo file of %s: %v", target.path, err)
-		return e.recordEpisodeRating(folder, file, target, attemptError, "")
+		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 	}
 	if !hasRootElement(document) {
 		document = minimalNFO(nfoRootEpisode, target.title)
@@ -43,33 +44,40 @@ func (e *enricher) fillEpisodeRating(ctx context.Context, id string) string {
 	group := nfoGroup(factRatingIMDb)
 	if fought, err := e.episodeGroupHeldByAnother(folder, file, group, document); err != nil {
 		e.logf("could not read the %s of %s: %v", factRatingIMDb, target.path, err)
-		return e.recordEpisodeRating(folder, file, target, attemptError, "")
+		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 	} else if fought {
 		e.logf("another writer holds the %s of %s, so this run left it", factRatingIMDb, target.path)
-		return e.recordEpisodeRating(folder, file, target, attemptFight, "")
+		return e.recordEpisodeRating(folder, file, target, attemptFight, ""), false
 	}
 	rating, held := e.datasets.ratings[target.imdb]
 	if target.imdb == "" || !held {
-		return e.recordEpisodeRating(folder, file, target, attemptNothing, "")
+		return e.recordEpisodeRating(folder, file, target, attemptNothing, ""), false
 	}
 	answer := factAnswer{Rating: &rating}
-	if ratingChanged(document, answer) {
+	written := ratingChanged(document, answer)
+	if written {
 		edited, err := editElementGroup(document, group, nfoElements(factRatingIMDb, answer))
 		if err == nil {
 			err = e.writer.write(nfoPath, edited)
 		}
 		if err != nil {
 			e.logf("could not write the %s of %s: %v", factRatingIMDb, target.path, err)
-			return e.recordEpisodeRating(folder, file, target, attemptError, "")
+			return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 		}
 		document = edited
 	}
 	hash, err := groupHash(document, group)
 	if err != nil {
 		e.logf("could not read back the %s of %s: %v", factRatingIMDb, target.path, err)
-		return e.recordEpisodeRating(folder, file, target, attemptError, "")
+		return e.recordEpisodeRating(folder, file, target, attemptError, ""), false
 	}
-	return e.recordEpisodeRating(folder, file, target, attemptFound, hash)
+	path := relativePath(e.root, absolute)
+	if written {
+		e.logf("wrote the %s of %s from %s", factRatingIMDb, path, providerBlockIMDb)
+	} else {
+		e.logf("the .nfo file of %s already holds the %s from %s", path, factRatingIMDb, providerBlockIMDb)
+	}
+	return e.recordEpisodeRating(folder, file, target, attemptFound, hash), written
 }
 
 // The fight check of an episode, keyed by its file, as the fight check of a
@@ -117,10 +125,6 @@ func (e *enricher) recordEpisodeRating(folder, file string, target *imdbTarget, 
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v", factRatingIMDb, file, err)
-	}
-	if result == attemptFound {
-		e.logf("wrote the %s of %s from %s", factRatingIMDb, relativePath(e.root, filepath.Join(folder, file)),
-			providerBlockIMDb)
 	}
 	e.writeEpisodeRatingRows(folder, file, target.id, result == attemptFound)
 	return result

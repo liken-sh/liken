@@ -39,7 +39,7 @@ type binding struct {
 // one Catalog. Every Job's catalog agent joins the cluster that Catalog
 // creates and uses a volume that it sizes.
 func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice,
-	jobs []Job, providers providerSet, now time.Time) error {
+	jobs []Job, pods []Pod, providers providerSet, now time.Time) error {
 	if err := o.holdLibrary(ctx, library); err != nil {
 		return err
 	}
@@ -88,6 +88,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		resolved:          resolveSources(library, providers),
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,
+		fault:             o.observeJobFault(ctx, jobs, pods, report, namespace, name, now),
 	}, now))
 }
 

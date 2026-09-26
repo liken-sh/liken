@@ -174,8 +174,8 @@ Now [declare a library](https://library.liken.sh/docs/guides/libraries/). Once i
 the listing shows its counts and its phase:
 
     $ kubectl -n media get libraries
-    NAME     KIND     TITLES   ITEMS   FILES   WAITING   STATUS   READY   AGE
-    movies   movies   0        0       0       0         Idle     True    2m
+    NAME     KIND     TITLES   ITEMS   FILES   WAITING   SOURCES   STATUS   READY   AGE
+    movies   movies   0        0       0       0                   Idle     True    2m
 
 ## Running a development build
 

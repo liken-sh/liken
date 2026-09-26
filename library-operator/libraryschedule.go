@@ -30,6 +30,26 @@ const (
 	scanJobTTL       = 3600
 )
 
+// How long a Job of a Library may run before Kubernetes fails it. The gate
+// holds every other Job of the Library while one is unfinished, so without a
+// deadline a Job whose pod never starts holds them for ever. The deadline
+// counts from the Job's start, and the time a pod stays Pending counts. At the
+// deadline the Job controller fails the Job with the reason DeadlineExceeded,
+// and the next Job follows on the backoff that mayFollow applies.
+//
+// The deadline is above the longest healthy Job. The longest Job measured on
+// liken-1 ran for 7 minutes 53 seconds: a full walk of 1,439 movies onto an
+// empty catalog claim, where the agent's first sync took most of the time.
+// Trickplay and the trailer files start no title after phaseTimeLimit, 15
+// minutes, and then finish the title they have. One trickplay title can
+// decode for up to ffmpegTimeout, one hour, and one trailer file can take
+// trailerPullTimeout and then trailerRemuxTimeout, 20 minutes. So a healthy
+// Job ends in about 15 + 60 minutes after its phases start, plus the sync
+// before them and the hand-off after them. Two hours leaves room for all of
+// it. A Job that Kubernetes retries after a failed pod has less time for its
+// last pod, because the deadline counts every pod of the Job.
+const libraryJobDeadline = 2 * time.Hour
+
 // The Jobs of one Library and one worker, out of the whole cluster's Jobs
 // the pass listed.
 func jobsOf(jobs []Job, namespace, library, worker string) []Job {
@@ -71,23 +91,11 @@ func jobCreated(job *Job) time.Time {
 	return created
 }
 
-// The newest Job of one Library that the controller has ended, or nil.
-func newestFinishedJob(jobs []Job, namespace, library string) *Job {
-	var newest *Job
-	for _, job := range jobsOfLibrary(jobs, namespace, library) {
-		if !job.finished() || (newest != nil && !jobCreated(&job).After(jobCreated(newest))) {
-			continue
-		}
-		newest = &job
-	}
-	return newest
-}
-
 // The library step of one Library's pass. It creates at most one Job.
 func (o *operator) runLibrary(ctx context.Context, library *Library, report *libraryReport,
 	jobs []Job, providers providerSet, now time.Time) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
-	if libraryJobUnfinished(jobs, namespace, name) || !o.mayFollow(jobs, namespace, name, now) {
+	if libraryJobUnfinished(jobs, namespace, name) || !o.mayFollow(jobs, reportRuns(report), namespace, name, now) {
 		return nil
 	}
 	held := o.paths.held(namespace, name)
@@ -114,18 +122,26 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	return nil
 }
 
-// Whether the pass may start a Job after the newest one ended. A Job that
-// failed is followed on the backoff curve a cleanup Job uses, so a cause
-// nobody has repaired costs one Job per delay and not one Job per pass. A Job
-// that succeeded resets the curve.
-func (o *operator) mayFollow(jobs []Job, namespace, library string, now time.Time) bool {
+// Whether the pass may start a Job after one failed. A failure that no later
+// Job answered is followed on the backoff curve a cleanup Job uses, so a cause
+// nobody has repaired costs one Job per delay and not one Job per pass. A later
+// success resets the curve. The status reads the same failure, so the gate and
+// the Ready condition agree.
+func (o *operator) mayFollow(jobs []Job, runs []libraryRun, namespace, library string, now time.Time) bool {
 	key := libraryKey(namespace, library) + "/job"
-	newest := newestFinishedJob(jobs, namespace, library)
-	if newest == nil || !newest.failed() {
+	if unansweredFailure(jobsOfLibrary(jobs, namespace, library), runs) == nil {
 		delete(o.failedStands, key)
 		return true
 	}
 	return o.mayRestandFailed(key, now)
+}
+
+// The runs a report carries, and none for a Library with no report yet.
+func reportRuns(report *libraryReport) []libraryRun {
+	if report == nil {
+		return nil
+	}
+	return report.Runs
 }
 
 // The Job this pass would start, and whether one is due. A walk comes first,

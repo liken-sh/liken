@@ -195,10 +195,19 @@ rules:
   # watch are cluster-scoped, because a Catalog and a Player live in any
   # namespace, and the watch wakes the loop when a pod becomes ready or
   # Kubernetes removes one. The pods of a Job are the Job controller's
-  # and never this operator's.
+  # and never this operator's. The operator reads them to learn whether
+  # a library Job's pod has started.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
+  # The Warning events about a library Job's pod that has not started.
+  # A pod whose volume the kubelet cannot mount has no reason in its
+  # status, and the Library status copies the event's words. The
+  # operator lists the events of one pod by a field selector, and only
+  # while that pod stays Pending. It writes no event.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [list]
   # The workers. A Library runs one Job at a time: a walk on its
   # schedule, for a request, or for a webhook's folders, and a Job that
   # fills gaps between walks. A Job runs the sweep of a departing

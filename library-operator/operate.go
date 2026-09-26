@@ -441,7 +441,8 @@ func (o *operator) pass() {
 	o.languages = householdLanguages(preferences)
 	// The Jobs and the member pods are read once for the whole
 	// pass, because a Library's status reads both and the catalog step
-	// reads the pods again. A list that fails ends the pass: without the
+	// reads the pods again. The member pods include the pods of every
+	// library Job, because each one runs a catalog agent. A list that fails ends the pass: without the
 	// Jobs the pass cannot tell what is running, and without the pods it
 	// cannot tell whether a namespace's catalog stands.
 	jobs, err := ListWorkerJobs(ctx, o.client)
@@ -512,7 +513,7 @@ func (o *operator) pass() {
 			continue
 		}
 
-		err := o.reconcile(ctx, library, choice, jobs.Items, checked, now)
+		err := o.reconcile(ctx, library, choice, jobs.Items, members.Items, checked, now)
 		o.metrics.observeReconcile(kindLibrary, time.Since(started), err)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)

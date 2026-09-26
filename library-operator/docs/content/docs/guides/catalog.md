@@ -120,6 +120,12 @@ The next `Job` can run on another node and use that node's copy. On
 every other class the operator writes `ReadWriteOnce`, and its rule of
 one `Job` at a time is the only guard.
 
+A `Job` whose pod cannot start holds that rule for the `Library` until
+the `Job`'s deadline of two hours. The `Library`'s phase is `Blocked`
+while it waits, and [A Job that does not start or that
+fails](/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
+says what to do.
+
 A claim's access mode cannot change after it is created, and the
 operator creates each claim once. So a `<library>-catalog` claim made
 by an earlier release keeps its mode. To move it to `ReadWriteOncePod`

@@ -179,6 +179,54 @@ a time is what keeps two agents off one database. On a per-node class
 the claim is also `ReadWriteOncePod`, so the scheduler keeps a second
 pod of the claim `Pending` while the first one runs.
 
+## A Job that does not start or that fails
+
+Only one `Job` of a `Library` runs at a time, so a `Job` whose pod
+cannot start holds back every walk and every phase of that `Library`.
+The `Library`'s status names such a `Job`. When the pod of a `Job`
+stays `Pending` for five minutes, the phase is `Blocked`, and the
+`Ready` condition is `False` with the reason `JobNotStarted`:
+
+    $ kubectl -n media get libraries
+    NAME         KIND         TITLES   ITEMS   FILES   WAITING   SOURCES   STATUS    READY   AGE
+    franchises   franchises   35       35      0       0                   Blocked   False   19d
+
+    $ kubectl -n media get library franchises -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}{"\n"}'
+    the pod franchises-walk-dlov5hvq2ryn-gklk6 of the Job franchises-walk-dlov5hvq2ryn has not started: GitVolumeRefused: readOnly: a claim on this driver has to be mounted read-only; set readOnly: true on the pod's persistentVolumeClaim volume
+
+The text after the `Job`'s name is from Kubernetes. When no node can
+take the pod, it is the scheduler's reason, `Unschedulable`, and its
+sentence. When a node took the pod, it is the newest `Warning` event
+about the pod, for example a volume that a CSI driver refused or an
+image that the kubelet cannot pull. `kubectl describe pod` shows every
+event of the pod.
+
+Repair what the message names. A `Job` keeps the pod spec it was
+created with, so when the repair is in the `Library` or in the
+operator, delete the `Job`. The next pass then creates the `Job` that
+is due from the `Library` as it is now:
+
+    kubectl -n media delete job franchises-walk-dlov5hvq2ryn
+
+Every `Job` of a `Library` has a deadline of two hours in
+`activeDeadlineSeconds`, and the time its pod stays `Pending` counts.
+The longest healthy `Job` is shorter: trickplay and the trailer files
+start no title after 15 minutes, and one trickplay title decodes for at
+most an hour. At the deadline, Kubernetes fails the `Job` with the
+reason `DeadlineExceeded`, so a `Job` whose pod never starts holds
+back the next `Job` of the `Library` for at most two hours.
+
+A `Job` also fails when three of its pods fail, with the reason
+`BackoffLimitExceeded`. After a `Job` fails, the phase is `Failed`,
+and `Ready` is `False` with the reason `JobFailed`, until a later `Job`
+of the `Library` succeeds. The message names the `Job` and the reason.
+The operator starts the next `Job` at once after the first failure.
+After each failure that follows, it waits 10 seconds, and it doubles
+the wait up to 5 minutes. A `Job` that succeeds resets the wait. A
+failed `Job` stays for an hour, so its logs can be read:
+
+    kubectl -n media logs job/franchises-walk-dlov5hvq2ryn --all-containers
+
 ## Mark and sweep
 
 Each full walk has an epoch. The walk marks every id, path, and link

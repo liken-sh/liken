@@ -54,7 +54,7 @@ func TestAnEpisodeTheRunLeavesRecordsNothing(t *testing.T) {
 			work.scopes = one.scopes
 			work.startDatasetReads(t.Context(), one.facts)
 
-			if got := work.fillEpisodeRating(t.Context(), id); got != "" {
+			if got, _ := work.fillEpisodeRating(t.Context(), id); got != "" {
 				t.Errorf("result = %q, want none", got)
 			}
 			if names := namesIn(t, filepath.Dir(nfoPath)); slices.Contains(names, likenDirectory) {
@@ -112,7 +112,7 @@ func TestAnEpisodeLedgerThatWillNotReadIsAnError(t *testing.T) {
 	writeFile(t, filepath.Join(filepath.Dir(nfoPath), likenDirectory, likenLedgerName(factRatingIMDb)), "items: [")
 	work.startDatasetReads(t.Context(), []string{factRatingIMDb})
 
-	if got := work.fillEpisodeRating(t.Context(), id); got != attemptError {
+	if got, _ := work.fillEpisodeRating(t.Context(), id); got != attemptError {
 		t.Errorf("result = %q, want an error", got)
 	}
 	if log := work.log.(*bytes.Buffer).String(); !strings.Contains(log, "could not record the rating.imdb attempt") {
@@ -171,7 +171,7 @@ func TestAnEpisodeFillRecordsWhatItsNFOAllowed(t *testing.T) {
 			one.setup(t, nfoPath)
 			work.startDatasetReads(t.Context(), []string{factRatingIMDb})
 
-			if got := work.fillEpisodeRating(t.Context(), id); got != one.result {
+			if got, _ := work.fillEpisodeRating(t.Context(), id); got != one.result {
 				t.Errorf("result = %q, want %q", got, one.result)
 			}
 		})
@@ -199,7 +199,7 @@ func TestARefusedEpisodeRowIsLogged(t *testing.T) {
 			}
 			agent.transactionsLeft = one.refused
 
-			if got := work.fillEpisodeRating(t.Context(), id); got != attemptFound {
+			if got, _ := work.fillEpisodeRating(t.Context(), id); got != attemptFound {
 				t.Errorf("result = %q, want found", got)
 			}
 			if log := work.log.(*bytes.Buffer).String(); !strings.Contains(log, one.log) {

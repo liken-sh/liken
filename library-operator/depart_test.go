@@ -67,7 +67,7 @@ func TestReconcileHoldsALibraryAgainstDeletion(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,7 +88,7 @@ func TestReconcileSwapsTheFormerFinalizer(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,7 +108,7 @@ func TestReconcileDoesNotPatchAFinalizerItAlreadyHolds(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{libraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 

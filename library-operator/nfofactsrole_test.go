@@ -273,7 +273,7 @@ func TestAFactLeavesAGroupAnotherWriterHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := work.fillNFOFact(t.Context(), factOverview, lineOf(fake), item); got != attemptFight {
+	if got, _ := work.fillNFOFact(t.Context(), factOverview, lineOf(fake), item); got != attemptFight {
 		t.Fatalf("the rerun answered %q, want a fight", got)
 	}
 

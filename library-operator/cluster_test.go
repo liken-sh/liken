@@ -52,6 +52,9 @@ type fakeCluster struct {
 	// which the operator deletes.
 	jobs     map[string]*Job
 	cronJobs map[string]bool
+	// The events the operator reads about a pod that has not started, which
+	// the operator reads and never writes.
+	events []Event
 	// The ResourceClaimTemplates the operator keeps for the Libraries that name
 	// a render node, by namespace and name.
 	claimTemplates map[string]*ResourceClaimTemplate
@@ -241,6 +244,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.jobs[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case strings.HasSuffix(r.URL.Path, "/events"):
+		f.serveEvents(w, r)
 	case strings.Contains(r.URL.Path, "/cronjobs"):
 		f.serveCronJob(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case strings.Contains(r.URL.Path, "/jobs"):
@@ -1165,4 +1170,17 @@ func boundStudio(cluster *fakeCluster) *Library {
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	}
 	return library
+}
+
+// The events of one namespace that the field selector names, the way the API
+// server narrows the list to one object and one type.
+func (f *fakeCluster) serveEvents(w http.ResponseWriter, r *http.Request) {
+	list := EventList{}
+	for _, event := range f.events {
+		selector := "involvedObject.name=" + event.InvolvedObject.Name + ",type=" + event.Type
+		if event.Metadata.Namespace == namespaceOf(r.URL.Path) && r.URL.Query().Get("fieldSelector") == selector {
+			list.Items = append(list.Items, event)
+		}
+	}
+	_ = json.NewEncoder(w).Encode(list)
 }

@@ -71,7 +71,7 @@ func TestReconcileReportsStorageThatIsNotBound(t *testing.T) {
 				cluster.claims["movies"] = one.claim
 			}
 
-			if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+			if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 				t.Fatal(err)
 			}
 
@@ -102,7 +102,7 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestReconcileReportsTheWebhookAddress(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +146,7 @@ func TestReconcileReportsNoWebhookForAnUnboundLibrary(t *testing.T) {
 	library := boundHouse(cluster)
 	delete(cluster.claims, "movies")
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,7 +163,7 @@ func TestReconcileReportsAVolumeItKnowsNothingAbout(t *testing.T) {
 	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
 		`{"csi":{"driver":"nas.example","volumeHandle":"movies"}}}`
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,7 +180,7 @@ func TestReconcileWaitsForACatalog(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, singleCatalog(nil), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, singleCatalog(nil), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,7 +203,7 @@ func TestReconcileProvisionsTheCatalogClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -236,7 +236,7 @@ func TestReconcileFailsWhenTheClusterCannotBeRead(t *testing.T) {
 			library := boundHouse(cluster)
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow)
+			err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow)
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the pass could not read past")
@@ -255,11 +255,11 @@ func TestReconcileWritesASettledStatusOnce(t *testing.T) {
 	operator.reporters.mark("house", true)
 	operator.reports.fold("house", "movies", libraryReport{Titles: 12, Unidentified: 2})
 
-	if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 	written := cluster.heldLibrary("movies")
-	if err := operator.reconcile(t.Context(), written, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := operator.reconcile(t.Context(), written, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -311,7 +311,7 @@ func TestReconcileDeletesTheObjectsOfAnEarlierRelease(t *testing.T) {
 	operator := testOperator(t, cluster)
 
 	for range 2 {
-		if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+		if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -339,7 +339,7 @@ func TestReconcileReportsAFailedFolderScan(t *testing.T) {
 	operator.paths.hold("house", "movies", "/library/movies/Arrival (2016)")
 	cluster.broken["/apis/batch/v1/namespaces/house/jobs"] = http.StatusInternalServerError
 
-	err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow)
+	err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow)
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -354,7 +354,7 @@ func TestReconcileStartsTheFirstWalk(t *testing.T) {
 	library := boundHouse(cluster)
 	operator := testOperator(t, cluster)
 
-	if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
+	if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -373,7 +373,7 @@ func TestReconcileStartsTheFirstWalk(t *testing.T) {
 	walking := jobs[0]
 	walking.Status = JobStatus{Active: 1}
 	if err := operator.reconcile(t.Context(), cluster.heldLibrary("movies"), standingCatalog(),
-		[]Job{walking}, nil, testNow.Add(time.Minute)); err != nil {
+		[]Job{walking}, nil, nil, testNow.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -433,7 +433,7 @@ func TestReconcileStartsNoWalkWhenAScanHasRun(t *testing.T) {
 				operator.reports.fold("house", "movies", *one.report)
 			}
 
-			if err := operator.reconcile(t.Context(), library, standingCatalog(), one.jobs, nil, testNow); err != nil {
+			if err := operator.reconcile(t.Context(), library, standingCatalog(), one.jobs, nil, nil, testNow); err != nil {
 				t.Fatal(err)
 			}
 
@@ -462,7 +462,7 @@ func TestReconcileBindsTheStorageClaimOfAFranchisesLibrary(t *testing.T) {
 		`"csi":{"driver":"git.liken.sh"}}}`
 
 	if err := testOperator(t, cluster).reconcile(t.Context(), library,
-		standingCatalog(), nil, nil, testNow); err != nil {
+		standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 

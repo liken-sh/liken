@@ -134,17 +134,24 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 	case factCredits:
 		e.coverCreditGap(ctx, ids)
 	}
-	wrote, fights, left := 0, 0, 0
+	// Answered counts the titles a provider answered, and wrote counts the
+	// .nfo files that changed. The two differ where the file already holds
+	// the answer, for example an IMDb rating that is the same at one decimal.
+	answered, wrote, fights, left := 0, 0, 0, 0
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		// An episode's rating is the imdb block's alone, so it takes its own path.
 		if isEpisodeID(id) {
-			switch e.fillEpisodeRating(ctx, id) {
+			result, written := e.fillEpisodeRating(ctx, id)
+			switch result {
 			case attemptFight:
 				fights++
 			case attemptFound:
+				answered++
+			}
+			if written {
 				wrote++
 			}
 			continue
@@ -160,17 +167,21 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 			left++
 			continue
 		}
-		switch e.fillNFOFact(ctx, fact, line, item) {
+		result, written := e.fillNFOFact(ctx, fact, line, item)
+		switch result {
 		case attemptFight:
 			fights++
 		case attemptFound:
-			wrote++
+			answered++
 		case "":
 			left++
 		}
+		if written {
+			wrote++
+		}
 	}
-	e.logf("wrote the %s of %d of the %d titles that lacked it, with %d held by another writer",
-		fact, wrote, len(ids), fights)
+	e.logf("answered the %s of %d of the %d titles that lacked it and changed %d .nfo files, "+
+		"with %d held by another writer", fact, answered, len(ids), wrote, fights)
 	if left > 0 {
 		e.logf("left the %s of %d titles for the next run, because no provider can answer again in this run", fact, left)
 	}
@@ -179,15 +190,16 @@ func (e *enricher) nfoGap(ctx context.Context, fact string, line *answerLine) er
 
 // One title's fill, in order: the .nfo file is read, the fight check runs, the
 // providers are asked, the group is written, and the answer is recorded. A
-// group another writer changed stops this title and nothing else.
-func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLine, item identityItem) string {
+// group another writer changed stops this title and nothing else. It returns
+// the result the attempt recorded, and whether the .nfo file changed.
+func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLine, item identityItem) (string, bool) {
 	folder := filepath.Join(e.root, item.path)
 	nfoPath, rootElement := identityNFO(e.kind, folder)
 	document, err := os.ReadFile(nfoPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		e.logf("could not read the .nfo file of %s: %v", item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
-		return attemptError
+		return attemptError, false
 	}
 	if !hasRootElement(document) {
 		document = minimalNFO(rootElement, item.title)
@@ -197,26 +209,26 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 	if fought, err := e.groupHeldByAnother(folder, fact, group, document); err != nil {
 		e.logf("could not read the %s of %s: %v", fact, item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
-		return attemptError
+		return attemptError, false
 	} else if fought {
 		e.logf("another writer holds the %s of %s, so this run left it", fact, item.path)
 		e.recordNFO(folder, fact, nil, attemptFight, nil)
-		return attemptFight
+		return attemptFight, false
 	}
 
 	answers, spent, err := line.ask(ctx, fact, titleRef{kind: e.kind, ids: nfoIDs(document)})
 	if err != nil {
 		e.logf("could not ask for the %s of %s: %v", fact, item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, nil)
-		return attemptError
+		return attemptError, false
 	}
 	if len(answers) == 0 {
 		if spent {
-			return ""
+			return "", false
 		}
 		e.logf("no provider holds the %s of %s", fact, item.path)
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
-		return attemptNothing
+		return attemptNothing, false
 	}
 
 	merged, names := mergeAnswers(fact, answers)
@@ -225,7 +237,7 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 	}
 	if !answersFact(fact, merged) {
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
-		return attemptNothing
+		return attemptNothing, false
 	}
 	return e.writeNFOFact(folder, nfoPath, fact, item, group, document, merged, names)
 }
@@ -255,37 +267,38 @@ func creditsOrNFO(merged factAnswer, document []byte) factAnswer {
 // again, and changes this fact's group in what it reads, and an element
 // another container wrote in the meantime stays.
 func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem, group elementGroup,
-	document []byte, merged factAnswer, names providerNames) string {
+	document []byte, merged factAnswer, names providerNames) (string, bool) {
 	release, err := lockNFO(e.writer.locks, nfoPath)
 	if err != nil {
 		e.logf("could not write the %s of %s: %v", fact, item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, names)
-		return attemptError
+		return attemptError, false
 	}
 	defer release()
 	if fresh, err := os.ReadFile(nfoPath); err == nil && hasRootElement(fresh) {
 		document = fresh
 	}
 	edited := document
-	if groupNeedsWrite(fact, document, merged) {
-		written, err := editElementGroup(document, group, nfoElements(fact, merged))
+	written := groupNeedsWrite(fact, document, merged)
+	if written {
+		changed, err := editElementGroup(document, group, nfoElements(fact, merged))
 		if err != nil {
 			e.logf("could not write the %s of %s: %v", fact, item.path, err)
 			e.recordNFO(folder, fact, nil, attemptError, names)
-			return attemptError
+			return attemptError, false
 		}
-		if err := e.writer.write(nfoPath, written); err != nil {
+		if err := e.writer.write(nfoPath, changed); err != nil {
 			e.logf("could not write the %s of %s: %v", fact, item.path, err)
 			e.recordNFO(folder, fact, nil, attemptError, names)
-			return attemptError
+			return attemptError, false
 		}
-		edited = written
+		edited = changed
 	}
 	hash, err := groupHash(edited, group)
 	if err != nil {
 		e.logf("could not read back the %s of %s: %v", fact, item.path, err)
 		e.recordNFO(folder, fact, nil, attemptError, names)
-		return attemptError
+		return attemptError, false
 	}
 	// The credits fact writes credits.yaml and the people it names after the
 	// actor elements, so a person the store has no entry for gains one on the
@@ -293,11 +306,15 @@ func (e *enricher) writeNFOFact(folder, nfoPath, fact string, item identityItem,
 	if fact == factCredits {
 		e.writeCredits(folder, merged)
 	}
-	e.logf("wrote the %s of %s from %s", fact, item.path, strings.Join(names, ", "))
+	if written {
+		e.logf("wrote the %s of %s from %s", fact, item.path, strings.Join(names, ", "))
+	} else {
+		e.logf("the .nfo file of %s already holds the %s from %s", item.path, fact, strings.Join(names, ", "))
+	}
 	e.recordNFO(folder, fact, &likenItem{
 		Path: likenSelfPath, Provider: names, Wrote: hash, Written: time.Now().UTC(),
 	}, attemptFound, names)
-	return attemptFound
+	return attemptFound, written
 }
 
 // Which facts write their group on every answer and which compare first. The

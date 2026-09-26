@@ -299,17 +299,17 @@ func TestAFailedJobIsFollowedOnTheBackoff(t *testing.T) {
 	failed.Metadata.Annotations = map[string]string{jobCreatedAnnotation: testNow.Format(time.RFC3339Nano)}
 	jobs := []Job{failed}
 
-	if !operator.mayFollow(jobs, "house", "movies", testNow) {
+	if !operator.mayFollow(jobs, nil, "house", "movies", testNow) {
 		t.Fatal("the first Job after a failure waited")
 	}
-	if operator.mayFollow(jobs, "house", "movies", testNow.Add(time.Second)) {
+	if operator.mayFollow(jobs, nil, "house", "movies", testNow.Add(time.Second)) {
 		t.Error("a second Job followed inside the backoff")
 	}
 	succeeded := walkCreated("movies-walk-2", testNow.Add(time.Minute))
-	if !operator.mayFollow(append(jobs, succeeded), "house", "movies", testNow.Add(2*time.Second)) {
+	if !operator.mayFollow(append(jobs, succeeded), nil, "house", "movies", testNow.Add(2*time.Second)) {
 		t.Error("a Job after a success waited on the backoff")
 	}
-	if !operator.mayFollow(jobs, "house", "movies", testNow.Add(3*time.Second)) {
+	if !operator.mayFollow(jobs, nil, "house", "movies", testNow.Add(3*time.Second)) {
 		t.Error("the curve held after the success reset it")
 	}
 }
@@ -403,5 +403,52 @@ func TestAFailedDeleteOfAnEarlierReleasesObjectsIsAskedAgain(t *testing.T) {
 	}
 	if got := cluster.countRequests("DELETE", "cronjobs"); got != 2 {
 		t.Errorf("CronJob deletes = %d, want one for each pass that had not finished", got)
+	}
+}
+
+// The backoff after a failure ends once a later Job succeeded, whether that
+// Job is still listed or only its finished run row remains after the operator
+// deleted it. The status reads the same rule, so the gate and the status agree.
+func TestTheBackoffEndsAtALaterSuccess(t *testing.T) {
+	failed := failedJob("movies-walk-1", "house", workerLabels("movies", jobModeWalk))
+	failed.Metadata.Annotations = map[string]string{jobCreatedAnnotation: testNow.Format(time.RFC3339Nano)}
+	later := testNow.Add(time.Minute)
+
+	cases := []struct {
+		name string
+		jobs []Job
+		runs []libraryRun
+		open bool
+	}{
+		{name: "a failed Job with no later success", jobs: []Job{failed}},
+		{
+			name: "a failed Job and a later Job that succeeded",
+			jobs: []Job{failed, walkCreated("movies-walk-2", later)},
+			open: true,
+		},
+		{
+			name: "a failed Job and the run row of a later Job the operator deleted",
+			jobs: []Job{failed},
+			runs: []libraryRun{{Worker: workerEnrich, Job: "movies-walk-2", Started: later, Finished: later}},
+			open: true,
+		},
+		{
+			name: "a failed Job and a run row from before it",
+			jobs: []Job{failed},
+			runs: []libraryRun{{Worker: workerEnrich, Job: "movies-walk-0",
+				Started: testNow.Add(-time.Hour), Finished: testNow.Add(-time.Minute)}},
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			operator := testOperator(t, newFakeCluster())
+			// The first Job after a failure starts at once, so the second call
+			// is the one the backoff decides.
+			operator.mayFollow(one.jobs, one.runs, "house", "movies", testNow)
+
+			if got := operator.mayFollow(one.jobs, one.runs, "house", "movies", testNow.Add(time.Second)); got != one.open {
+				t.Errorf("mayFollow = %v, want %v", got, one.open)
+			}
+		})
 	}
 }

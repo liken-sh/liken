@@ -752,7 +752,7 @@ func TestASourceNoCheckHasReachedHoldsEveryJob(t *testing.T) {
 				Runs: scanRunReport().Runs})
 
 			if err := operator.reconcile(t.Context(), library, standingCatalog(),
-				nil, providers, testNow); err != nil {
+				nil, nil, providers, testNow); err != nil {
 				t.Fatal(err)
 			}
 
@@ -789,7 +789,7 @@ func TestProviderCheckOnAProviderThatIsDown(t *testing.T) {
 	}
 
 	if err := operator.reconcile(t.Context(), library, standingCatalog(),
-		nil, providers, testNow); err != nil {
+		nil, nil, providers, testNow); err != nil {
 		t.Fatal(err)
 	}
 	if jobs := cluster.heldJobs(); len(jobs) != 1 || jobs[0].Metadata.Labels[workerLabelKey] != jobModeGaps {

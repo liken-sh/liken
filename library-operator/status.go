@@ -38,6 +38,9 @@ type libraryObservation struct {
 	// One entry per name in spec.sources, resolved against the same providers
 	// the verdict above read.
 	resolved []librarySource
+	// The Job of this Library whose pod has not started, or the Job that
+	// failed with no later success, and nil while the Jobs do their work.
+	fault *jobFault
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
@@ -104,8 +107,10 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 // LibraryPhase says what the library is doing, in the word a person reads in
 // the status column. It reads the Ready condition this same derivation built,
 // so the column and the condition never disagree. The phase is Offline when
-// the reporter has left the bus, Pending while any other step of the path is
-// missing, Scanning while the report says a walk runs, Enriching while the
+// the reporter has left the bus, Blocked while a Job's pod has not started,
+// Failed while a Job failed and no later Job succeeded, Pending while any
+// other step of the path is missing, Failed while the scan run carries a
+// failure, Scanning while the report says a walk runs, Enriching while the
 // report carries an enrich run that has started and not finished, and Idle
 // otherwise.
 //
@@ -118,6 +123,10 @@ func libraryPhase(ready Condition, library *Library, seen libraryObservation) st
 	switch {
 	case ready.Reason == reasonOffline:
 		return phaseOffline
+	case ready.Reason == reasonJobNotStarted:
+		return phaseBlocked
+	case ready.Reason == reasonJobFailed:
+		return phaseFailed
 	case ready.Status != ConditionTrue:
 		return phasePending
 	case latest != nil && scanRunOf(latest).Failure != "":
@@ -190,8 +199,8 @@ func boundCondition(bound binding, generation int64) Condition {
 // ReadyCondition reports whether this library is being scanned.
 // Ready is the whole path working: the storage is bound, the namespace
 // holds one Catalog whose pod runs with every container ready, the
-// walk's schedule parses, the reporter is on the bus, and it has
-// reported this library. Each reason names the step that has not
+// walk's schedule parses, the Library's Jobs start and succeed, the
+// reporter is on the bus, and it has reported this library. Each reason names the step that has not
 // happened, so the condition says where to look.
 func readyCondition(seen libraryObservation, schedule string, generation int64) Condition {
 	condition := Condition{
@@ -219,6 +228,12 @@ func readyCondition(seen libraryObservation, schedule string, generation int64) 
 		// it cannot read is a Library that never walks.
 		condition.Reason = reasonScheduleInvalid
 		condition.Message = unparsed.Error()
+	case seen.fault != nil:
+		// A Job that cannot start holds the Library's gate, and a Job that
+		// failed did not do its work, so the Library is not being scanned
+		// whatever the reporter says.
+		condition.Reason = seen.fault.reason
+		condition.Message = seen.fault.message()
 	case !seen.online:
 		condition.Reason = reasonOffline
 		condition.Message = "the namespace's reporter is not on the bus"

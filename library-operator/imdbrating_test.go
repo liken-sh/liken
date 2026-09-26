@@ -102,15 +102,23 @@ func TestTheDatasetsWriteAMovieRatingWithItsVotes(t *testing.T) {
 }
 
 // The .nfo file changes only when the one-decimal rating does. A new vote
-// count alone leaves every byte as it was.
+// count alone leaves every byte as it was, and the log says which of the two
+// happened.
 func TestTheRatingIsWrittenOnlyWhenItChanges(t *testing.T) {
 	cases := []struct {
 		name    string
 		held    string
 		written bool
+		logged  []string
 	}{
-		{name: "the same rating with other votes", held: "7.9", written: false},
-		{name: "a rating that moved", held: "7.8", written: true},
+		{name: "the same rating with other votes", held: "7.9", written: false, logged: []string{
+			"the .nfo file of Winter Harbour (2011) already holds the rating.imdb from imdb",
+			"answered the rating.imdb of 1 of the 1 titles that lacked it and changed 0 .nfo files",
+		}},
+		{name: "a rating that moved", held: "7.8", written: true, logged: []string{
+			"wrote the rating.imdb of Winter Harbour (2011) from imdb",
+			"answered the rating.imdb of 1 of the 1 titles that lacked it and changed 1 .nfo files",
+		}},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -124,11 +132,18 @@ func TestTheRatingIsWrittenOnlyWhenItChanges(t *testing.T) {
   </ratings>
 `, "")
 			before := readFileString(t, nfoPath)
+			log := &bytes.Buffer{}
+			work.log = log
 
 			runIMDbRating(t, work)
 
 			if changed := readFileString(t, nfoPath) != before; changed != one.written {
 				t.Errorf("written = %v, want %v", changed, one.written)
+			}
+			for _, line := range one.logged {
+				if !strings.Contains(log.String(), line) {
+					t.Errorf("log = %s, want the line %q", log, line)
+				}
 			}
 		})
 	}
@@ -333,5 +348,30 @@ func TestAFileIMDbWillNotServeLeavesTheGap(t *testing.T) {
 	}
 	if got := strings.Count(log.String(), "IMDb answered 500 for title.ratings"); got != 1 {
 		t.Errorf("log = %q, want the answer once", log.String())
+	}
+}
+
+// An episode whose .nfo file already holds the rating is answered and not
+// written, and the log says so, so a person counts the files that changed.
+func TestAnEpisodeWhoseRatingHoldsIsAnsweredAndNotWritten(t *testing.T) {
+	work, catalog, _, root := imdbEnricher(t, libraryKindSeries)
+	nfoPath, id := seedIMDbEpisode(t, catalog, root, "tt9000003")
+	work.startDatasetReads(t.Context(), []string{factRatingIMDb})
+	if _, written := work.fillEpisodeRating(t.Context(), id); !written {
+		t.Fatal("the first fill wrote nothing, want the rating written")
+	}
+	before := readFileString(t, nfoPath)
+	log := &bytes.Buffer{}
+	work.log = log
+
+	result, written := work.fillEpisodeRating(t.Context(), id)
+
+	if result != attemptFound || written || readFileString(t, nfoPath) != before {
+		t.Errorf("result = %q, written = %v, want found and no write", result, written)
+	}
+	want := "the .nfo file of Harbour Watch (2019)/Season 01/Harbour Watch - S01E02.mkv " +
+		"already holds the rating.imdb from imdb"
+	if !strings.Contains(log.String(), want) {
+		t.Errorf("log = %s, want %q", log, want)
 	}
 }

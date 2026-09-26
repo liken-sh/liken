@@ -52,10 +52,12 @@ type JobList struct {
 }
 
 // BackoffLimit is how many times Kubernetes replaces a failed
-// pod before the Job itself fails, and TTLSecondsAfterFinished is how
+// pod before the Job itself fails, ActiveDeadlineSeconds is how long the
+// Job may run before Kubernetes fails it, and TTLSecondsAfterFinished is how
 // long a finished Job stays for a person to read its logs.
 type JobSpec struct {
 	BackoffLimit            *int32          `json:"backoffLimit,omitempty"`
+	ActiveDeadlineSeconds   *int64          `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32          `json:"ttlSecondsAfterFinished,omitempty"`
 	Template                PodTemplateSpec `json:"template"`
 }
@@ -77,11 +79,13 @@ type JobStatus struct {
 }
 
 // JobCondition is one verdict of the Job controller, in the shape
-// batch/v1 writes it.
+// batch/v1 writes it. The reason of a Failed verdict is BackoffLimitExceeded
+// or DeadlineExceeded, and the message is the controller's sentence.
 type JobCondition struct {
-	Type   string          `json:"type"`
-	Status ConditionStatus `json:"status"`
-	Reason string          `json:"reason,omitempty"`
+	Type    string          `json:"type"`
+	Status  ConditionStatus `json:"status"`
+	Reason  string          `json:"reason,omitempty"`
+	Message string          `json:"message,omitempty"`
 }
 
 // The two condition types that end a Job, one for each way it ends.
@@ -111,7 +115,8 @@ func (j *Job) gaveUp() bool {
 // stays for its TTL, because a person reads its logs.
 func (j *Job) succeeded() bool { return j.holds(jobComplete) }
 
-// failed is true when the controller ended the Job on the backoff limit.
+// failed is true when the controller ended the Job on the backoff limit or
+// the deadline.
 func (j *Job) failed() bool { return j.holds(jobFailed) }
 
 // holds is true when the Job carries one condition of the given type with

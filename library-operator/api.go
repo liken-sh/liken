@@ -771,6 +771,10 @@ const (
 	reasonCatalogPending  = "CatalogPending"
 	reasonScheduleInvalid = "ScheduleInvalid"
 	reasonOffline         = "Offline"
+	// A Job of the library has a pod that has not started, and a Job of the
+	// library failed and no later Job succeeded.
+	reasonJobNotStarted = "JobNotStarted"
+	reasonJobFailed     = "JobFailed"
 
 	// The Departing condition's reasons, in the order depart.go
 	// reaches them: a walk Job of this library is still running, the
@@ -789,7 +793,7 @@ const (
 )
 
 // The values status.phase takes. libraryPhase in status.go derives
-// the first four from the Ready condition, the scanner's
+// every value but Departing from the Ready condition, the scanner's
 // availability on the bus, and the newest report. Departing is not
 // derived: depart.go writes it on a Library with a deletion
 // timestamp, for as long as the finalizer holds the object open.
@@ -801,8 +805,13 @@ const (
 	phaseIdle      = "Idle"
 	phaseDeparting = "Departing"
 	// Failed means the last scan of this library failed and wrote no
-	// rows. The tables hold what the last good scan left.
+	// rows, or a Job of this library failed and no later Job succeeded.
+	// The tables hold what the last good Job left.
 	phaseFailed = "Failed"
+	// Blocked means a Job of this library has a pod that has not started.
+	// The one-Job gate starts no other Job of the library until that Job
+	// ends.
+	phaseBlocked = "Blocked"
 )
 
 // ConditionStatus is a condition's verdict. It is a string rather than

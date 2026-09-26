@@ -60,14 +60,16 @@ you are likely to set:
 The listing shows the counts and the phase:
 
     $ kubectl -n media get libraries
-    NAME     KIND     TITLES   ITEMS   FILES   WAITING   STATUS   READY   AGE
-    movies   movies   128      128     560     1         Idle     True    12d
+    NAME     KIND     TITLES   ITEMS   FILES   WAITING   SOURCES   STATUS   READY   AGE
+    movies   movies   128      128     560     1         2/2       Idle     True    12d
 
 `Titles` is what the last walk cataloged. `Items` counts movies, or
 series and episodes together. `Files` counts the video files with their
 `.nfo` files, art, subtitles, and trickplay directories. `Waiting` counts
 the titles a provider returned candidates for, which a person resolves
-by naming the right `uniqueid` in the `.nfo`. With `-o wide` the listing
+by naming the right `uniqueid` in the `.nfo`. `Sources` counts the
+ready providers against the names in `spec.sources`, and it is empty
+for a library that names none. With `-o wide` the listing
 adds the claim and the `Unidentified` count. Those are the folders the
 walk could not name, and they are still browsable under their folder
 names.
@@ -75,8 +77,13 @@ names.
 `Status` is the phase. `Pending` means the storage, the catalog pod, or
 the schedule is not ready yet. `Scanning` means a walk runs, and
 `Enriching` means the phases of a `Job` run after its walk or in a
-`Job` that fills gaps. `Idle` is the state between `Jobs`. `Failed`
-means the last walk failed and wrote no rows. `Offline` means the
+`Job` that fills gaps. `Idle` is the state between `Jobs`. `Blocked`
+means the pod of a `Job` has stayed `Pending` for five minutes, and no
+other `Job` of the `Library` starts until that `Job` ends. `Failed`
+means the last walk failed and wrote no rows, or a `Job` failed and no
+later `Job` succeeded. [A Job that does not start or that
+fails](/docs/guides/scanning/#a-job-that-does-not-start-or-that-fails)
+says what to do for both. `Offline` means the
 namespace's reporter has left the bus. `Departing` means a deleted
 `Library` is still removing its rows from the catalog.
 
@@ -85,10 +92,13 @@ Four conditions report why the phase is what it is:
 * `Bound` reports the storage. The reasons for `False` are
   `ClaimNotFound`, `ClaimUnbound`, and `VolumeNotFound`.
 * `Ready` reports the scanning path: the catalog pod runs,
-  `spec.scan.schedule` parses, and the reporter has reported this
-  library. The reasons for `False`, in the order they are checked, are
-  `NotBound`, `NoCatalog`, `ManyCatalogs`, `CatalogPending`,
-  `ScheduleInvalid`, `Offline`, and `NoReport`.
+  `spec.scan.schedule` parses, the library's `Jobs` start and succeed,
+  and the reporter has reported this library. The reasons for `False`,
+  in the order they are checked, are `NotBound`, `NoCatalog`,
+  `ManyCatalogs`, `CatalogPending`, `ScheduleInvalid`, `JobNotStarted`,
+  `JobFailed`, `Offline`, and `NoReport`. The message of
+  `JobNotStarted` and of `JobFailed` names the `Job` and the reason
+  Kubernetes gives.
 * `Sources` reports `spec.sources`. It is absent on a library that
   names none.
 * `Departing` reports the teardown of a deleted library, for as long
