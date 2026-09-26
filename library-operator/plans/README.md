@@ -77,6 +77,10 @@ for a later agent to shape.
 * [56, Backing up progress](56-backing-up-progress.md). A stub: a
   copy of the progress store a person can take off the cluster and
   put back, and the test that says the copy is current.
+* [67, A subtitle offset that stays with the media](67-a-subtitle-offset-that-stays.md).
+  A stub: an offset a person nudges on the screen is saved beside the
+  library's files, keyed by the video file and the subtitle track, and
+  is the default for the next play.
 
 Enrichment is one design in five plans. Plan 27 states the contracts
 they share, and plans 28 to 31 build them in order.
