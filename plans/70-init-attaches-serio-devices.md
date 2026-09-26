@@ -342,6 +342,35 @@ spare HDMI input of a receiver:
 6. **A missing module.** With `pulse8_cec` removed from
    `spec.modules`, the entry reports `Refused` and names the module.
 
+## What the first drill measured
+
+A drill on 2026-09-26 ran the attachment by hand on a machine of the
+current release, from a privileged pod with `inputattach` and
+`cec-ctl`:
+
+- `cdc_acm`, `serport`, and `pulse8_cec` loaded live through
+  `spec.modules`, with no reboot.
+- The attach bound the driver. The kernel logged firmware version 12
+  (built 2020-04-28), created `/dev/cec0`, and created the rc device
+  under `ttyACM0/serio0/rc/rc0` with protocol `cec` and one event
+  node. No LIRC node appeared.
+- The adapter reported one available logical address, and the
+  capabilities `PHYS_ADDR`, `LOG_ADDRS`, `TRANSMIT`, `PASSTHROUGH`,
+  `RC`, and `MONITOR_ALL`.
+- When the attaching process ended, `/dev/cec0` went away, as part
+  three states.
+- **The adapter has a third USB interface.** Beside the two
+  `cdc_acm` interfaces, interface 2 is a USB HID device that
+  `hid-generic` binds as a mouse. The firmware uses it to type the
+  remote's keys as a keyboard in its autonomous mode. The inventory
+  publishes it as a device of its own today. The examined shape
+  decides whether it stays published.
+- **The adapter's EEPROM had autonomous mode on.** libCEC's
+  `cec-client` read `autonomous mode = enabled` and a stored physical
+  address of `1.0.0.0` from a new adapter. So an adapter can arrive
+  able to act on the bus by itself, which makes the EEPROM question
+  below a real case.
+
 ## What was considered and set aside
 
 - **A privileged pod that runs `inputattach`.** The nodes it creates
