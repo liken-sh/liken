@@ -255,6 +255,13 @@ say why it is built the way it is.
   on the CPU, a 1080p clip cost about one core at 15 fps and about
   two at 30 fps, held 30.0 fps over 441 frames, and put no two
   captures in flight over 1,334 frames.
+* [23, The CEC physical address](23-the-cec-physical-address.md).
+  Proposed. Each connected `Display` reports the HDMI-CEC physical
+  address that its EDID gives the machine's port, as
+  `status.physicalAddress` and a slice attribute, and keeps the last
+  valid address while a receiver in standby serves none.
+  equipment-operator's CEC adapter announces this address when it
+  speaks for the machine.
 
 ## Open problems
 
