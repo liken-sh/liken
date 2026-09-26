@@ -1,23 +1,25 @@
 # Durability and safety in the boot chain, the operators, and CI
 
 Milestone 66. Proposed. A survey of the tree on 2026-09-11 found a set
-of places where `liken`'s own promises do not hold under a power cut, a
-failed read, or a build that stopped early. None of them has failed in
-the lab yet. Each one is small. This milestone fixes them as one
-round, because the firmware work in plan 33 stands on exactly these
-paths, and a firmware trial must not be the first thing to find them.
+of places where `liken`'s own durability and safety rules do not hold
+under a power cut, a failed read, or a build that stopped early. None
+of them has failed in the lab yet. Each one is small. This milestone
+fixes them as one round, because the firmware work in plan 33 depends
+on exactly these code paths, and a firmware trial must not be the
+first test that finds these defects.
 
 The round has four parts: the boot chain's writes, init's process
-supervision, the operators' failure paths, and the CRD and CI
-contracts. Dependency bumps are not part of it. The stale pins the
+supervision, the operators' failure paths, and the CRD schema and CI
+workflows. Dependency bumps are not part of it. The stale pins the
 survey listed move on their own schedule.
 
 ## The rule this milestone enforces
 
-Every fix below follows one rule. When the code does not know, it must
-refuse or report, never act. A write that may not have reached the
-disk is not armed. A read that failed is not an empty result. A
-condition that this pass did not check is not restamped as current.
+Every fix below follows one rule. When the code cannot confirm a
+state, it must refuse or report, and never act. So a trial whose arm
+write may not have reached the disk does not count as armed, a failed
+read does not count as an empty result, and a condition that this
+pass did not check is not stamped as current again.
 
 ## Part one: the boot chain's writes reach the disk
 
@@ -28,9 +30,9 @@ renames it. Nothing flushes the block device after the rename. On FAT,
 the rename's directory entry is in buffers attached to the block
 device, and an fsync of the directory does not reach them.
 `init/slotloader.go` explains this at length, and the lab found it on
-the first promotion drill of plan 33's built half. The GRUB arm takes
-the same path with no flush. A power cut after the arm can lose the
-arm while the attempted marker remains, and the next boot reads that as
+the first promotion drill of the built part of plan 33. The GRUB arm
+takes the same path with no flush. A power cut after the arm can lose
+the arm write while the attempted marker remains, and the next boot reads that as
 a release that ran and fell back. The `grub.cfg` heal in the same
 file has the same gap, and a boot home with a `.partial` file and no
 `grub.cfg` drops GRUB to a rescue prompt.
@@ -38,19 +40,20 @@ file has the same gap, and a boot home with a `.partial` file and no
 The fix is `unix.Sync()` after each of those writes, which is what the
 installer, the loader writer, and the report already do.
 
-**The readback after that write proves nothing.** The same file
-re-reads what it just wrote and calls that the same trust as the UEFI
-dialect's readback of `BootOrder`. The UEFI readback crosses efivarfs
-to the firmware. This one comes back from the page cache. The flush
-above is what makes the readback mean something.
+**The readback after that write reads the page cache.** The same file
+re-reads what it just wrote, and its comment says this check is as
+reliable as the UEFI dialect's readback of `BootOrder`. The UEFI
+readback goes through efivarfs to the firmware. This one comes back
+from the page cache. The readback is useful only after the flush
+above.
 
 **Two comments state opposite rules about FAT.** `init/durable.go`
 says a FAT directory fsync flushes the whole block device, so one call
 covers every rename. `init/slotloader.go` says the opposite, and the
-lab proved the second one. `init/install.go` acts on the first one at
-its `grub.cfg` write and calls only `syncDirectory`. The wrong comment
-is the reassuring one, so it keeps producing new call sites without a
-flush. This milestone deletes it and makes every FAT writer call
+lab showed that the second one is correct. `init/install.go` follows
+the first one at its `grub.cfg` write and calls only `syncDirectory`.
+The wrong comment says one directory fsync is enough, so code that
+follows it keeps adding new call sites without a flush. This milestone deletes it and makes every FAT writer call
 `unix.Sync()`.
 
 **A half-copied crash batch is read as complete.** `preserveCrashRecords`
@@ -79,7 +82,7 @@ partitioner. Fix the function and the test together.
 
 **Exit statuses of orphans are kept forever.** init is PID 1, so it
 reaps every orphan on the machine. `deathRegistry.record`
-(`init/supervisor.go`) parks each unmatched exit status in a map, and
+(`init/supervisor.go`) stores each unmatched exit status in a map, and
 only `await` removes an entry. Almost no orphan has a waiter, so the
 map grows for the life of the boot. After the kernel's pid counter
 wraps, `await` on a new process can return an old process's status at
@@ -105,16 +108,16 @@ done channel the reader checks, or a close that waits for the reader.
 **Two waits have no bound after SIGKILL.** `stopK3s` receives on the
 death channel with no timeout after the kill. On the reboot path this
 is between the operator's request and the reboot syscall.
-`stopSupplicant` (`init/wireless.go`) has the same receive, and on the
-plane-cancel path the reaper has already returned, so nothing will
-ever send. Both receives get a deadline, and a miss is printed and
+`stopSupplicant` (`init/wireless.go`) has the same receive. When the
+machine plane is cancelled, the reaper has already returned, so
+nothing will ever send. Both receives get a deadline, and a miss is printed and
 reported.
 
 **The proving watchdog blocks its own shutdown.** `provingWatch`
 (`init/proving.go`) calls `rebootMachine` from inside a machine-plane
 component. `rebootMachine` shuts the plane down and waits on the
 plane's wait group, which counts the goroutine that called it. Every
-watchdog reboot burns the full ten-second shutdown timeout and then
+watchdog reboot waits the full ten-second shutdown timeout and then
 prints that the proving watch did not stop. The watch should signal
 the reboot and return, so the plane can stop it like any other
 component. `provingWatch` has no test today and gets one here.
@@ -128,12 +131,12 @@ to ten minutes. One `Close` after `ReadAll` fixes it.
 `persistNodePassword` (`init/k3s.go`) returns early when the symlink
 write fails, and `mintNodePassword` never runs. That mint exists to
 stop k3s from writing its own password with a torn-write window that
-locks a machine out of its cluster. The mint is the point and the
-symlink is incidental, so the mint runs first.
+locks a machine out of its cluster. The password matters more than
+the symlink, so the fix runs `mintNodePassword` first.
 
 ## Part three: the operators refuse instead of guessing
 
-**A facts-read error offers the machine's own disks.**
+**A facts-read error publishes the machine's own disks as devices.**
 `reconcile.go` publishes the device inventory whenever the Node read
 succeeded, with `facts` nil when the facts read failed.
 `platformBlocks` (`machine-operator/dra.go`) then protects nothing,
@@ -151,10 +154,10 @@ not be read are the same input. The fix is a type change:
 `DiscoverDevices` returns an error, and the slice writer refuses to
 delete on an error.
 
-**The drain bypass is wider than its reason.** `disruptions.gate`
+**The drain is skipped on any failed Node read.** `disruptions.gate`
 (`machine-operator/reconcile.go`) skips the drain whenever the Node
-read failed. The comment justifies that by demotion, when there is no
-Node to cordon. A 500 or a timeout on one pass has the same effect: an
+read failed. The comment gives demotion as the reason, when there is
+no Node to cordon. A 500 or a timeout on one pass has the same effect: an
 approved reboot skips eviction. No test covers the gate. This is the
 open problem [node-read-errors-bypass-draining](open-problems/node-read-errors-bypass-draining.md).
 The fix distinguishes the two: a 404 during a demotion skips the
@@ -165,7 +168,7 @@ status writer sets `observedGeneration` on every condition at the end
 of each pass. When the Node read failed, `NodeHealthy`,
 `NodeLabelsApplied`, and `NodeTaintsApplied` carry forward from the
 previous status untouched, and then get stamped with the current
-generation. A reader takes that as a judgment this pass made. The fix
+generation. A reader takes those conditions as results of this pass. The fix
 adds one condition, `NodeObserved`, that says whether this pass read
 the Node. When it is False, the three conditions that depend on the
 Node are written as `Unknown`, with a message that names the read
@@ -191,9 +194,9 @@ which turns the leader-first gate off for that sweep. The flux janitor
 falls through to stripping finalizers when a delete failed for a
 reason other than not-found. Both return the error instead.
 
-## Part four: the CRD and CI contracts match the code
+## Part four: the CRD schema and CI workflows match the code
 
-**`status.boot.network` prunes half the record.** The Go type is
+**The API server prunes part of `status.boot.network`.** The Go type is
 `*NetworkSpec`, which contains `hostEntries` and each interface's
 `wireless` block. The CRD schema declares only `interfaces` with four
 fields. The API server prunes the rest. Drift detection works only
@@ -209,7 +212,7 @@ USB dongles produce two entries with one key, the API server refuses
 the write, and the machine publishes no status at all. The fix folds
 duplicates into one entry with a count.
 
-**The grow-only storage rule fires on status writes.** Nine CEL rules
+**The grow-only storage rule runs on status writes.** Nine CEL rules
 on the root of the Machine schema compare `spec.storage.<role>.size`
 against `status.boot.storage.<role>.size`. A root rule runs on a
 status write as well as a spec write. A manifest that arrived on a
@@ -245,14 +248,14 @@ index and a `versions.yaml` that name no releases. Two other steps
 pipe `gh run list` and `curl` the same way. One `defaults.run.shell:
 bash` at the top of each workflow turns pipefail on for every step.
 
-**The release proves only one boot chain.** The build workflow runs
+**The release workflow tests only one boot chain.** The build workflow runs
 `make smoke-uefi` and `make smoke-bios`. The release workflow runs
 only `make smoke-uefi`, and it requires a green checks run for the
 commit, not a green build run. A commit whose BIOS drill failed can
 be tagged and published, and releases are immutable. The release
 workflow runs both drills.
 
-**The certificate tool is unverified and holds the wider token.** The
+**The certificate workflow runs an unverified tool with the wider token.** The
 certificate workflow downloads `lego` by version with no digest and
 runs it with the account-wide Linode token, which can write the
 releases bucket. The release upload key is scoped to that bucket
@@ -274,7 +277,7 @@ the prerequisite and the declaration.
 It does not move any pin. It does not change the CLI's credential
 handling, the four fetch scripts that take their checksum from the
 same origin, or the reproducibility of the squashfs. Those are real
-and they are separate rounds. It does not resolve the open problems it
+problems, and each is a separate round. It does not resolve the open problems it
 touches beyond the fixes named above: leader election, one-shot
 approvals, and fleet-wide credentials keep their design questions.
 

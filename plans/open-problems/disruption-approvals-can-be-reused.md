@@ -1,7 +1,7 @@
 # Make disruption approvals one-shot
 
-Open bug and design question. Review priority: low. The documented
-approval contract permits one disruption. The implementation leaves the
+Open bug and design question, low priority. The documentation says that
+one approval permits one disruption. The implementation leaves the
 approval annotation in place and matches it against a deterministic
 configuration hash. A later return to identical configuration can reuse
 that approval.
@@ -19,8 +19,9 @@ in [converge.go](../../machine-operator/converge.go) uses the match to
 allow a `Manual` machine into the ordinary disruption path, including
 the conductor's turn and, for reboots, draining.
 
-A content hash identifies bytes. It does not identify the occasion on
-which those bytes were approved. No component consumes this annotation.
+The hash depends only on the configuration bytes. It does not record
+which request for those bytes the person approved. No component consumes
+this annotation.
 
 ## Replay sequence
 
@@ -30,59 +31,64 @@ which those bytes were approved. No component consumes this annotation.
    path without replacing the annotation with `H(B)`.
 4. A is requested again under `Manual`, with the same canonical bytes.
    Its pending hash matches the old annotation and permits another
-   disruption without approval for this occasion.
+   disruption, although nobody approved this new request.
 
-B must actually have been applied. Merely staging B and reverting while
-the machine still runs A creates no drift back to A and no replay.
-Explicitly approving B normally replaces the annotation and prevents
-reuse of A's grant. Any policy changes in the sequence must also return
-the hashed document to A's exact bytes.
+The machine must actually apply B. If B is only staged and then reverted
+while the machine still runs A, there is no drift back to A and no
+replay. An explicit approval of B normally replaces the annotation and
+prevents reuse of A's grant. Any policy changes in the sequence must also
+return the hashed document to A's exact bytes.
 
-This reuses approval for previously authorized content. It does not
-demonstrate a hash-collision attack or permission to apply different
-unapproved content. The risk is an unexpected repeat disruption.
+The replay reuses approval for content that a person already approved.
+It does not show a hash-collision attack, and it does not let a machine
+apply different unapproved content. The risk is an unexpected repeat
+disruption.
 
 `liken.sh/request-reboot` uses a different rule: it names the current
-`BootID`. It is not the deterministic manifest-hash replay described here.
+`BootID`. The deterministic manifest-hash replay described here does not
+apply to it.
 
 ## Evidence
 
-The annotation comparison, CLI write, and disruption gate were inspected
-statically. No live-cluster replay or full lifecycle fixture was run.
-A regression test must exercise the whole sequence, including B being
-applied without replacing the annotation.
+This review read the annotation comparison, the CLI write, and the
+disruption gate. It did not run a replay on a live cluster or a full
+lifecycle fixture. A regression test must exercise the whole sequence,
+including B being applied without replacing the annotation.
 
 ## Candidate remedies
 
 Bind approval to a pending operation as well as its document, or consume
 it through an authorized writer after the operation completes. A boot
-identity, generation, or nonce could contribute to an operation identity,
-but none should be chosen without checking restart-only changes and
-multiple operations in one boot.
+identity, generation, or nonce could be part of an operation identity.
+Check restart-only changes and multiple operations in one boot before
+choosing any of them.
 
 Local bookkeeping could prevent some repeats without new write
-permissions. It cannot simply block a hash forever: a person must still
-be able to approve those same bytes again explicitly. The current
-annotation value alone cannot distinguish that new approval from the
-old value still present.
+permissions. It cannot simply block a hash forever, because a person
+must still be able to approve those same bytes again explicitly. The
+current annotation value alone cannot distinguish that new approval from the
+old value that is still present.
 
 Clearing annotations through the machine operator would require additional
 `machines` write permission. Granting every node broad spec-write access
-to solve approval consumption would introduce a different security issue.
+to consume approvals would introduce a different security issue.
 
 ## Remedy scope
 
-**An approval-representation and compatibility decision.** Restoring the
-promised one-shot behavior does not require redefining the user's intent.
-The design question is how to represent and consume each approval while
-preserving explicit repeat approvals and narrow permissions.
+The fix is a decision about how to represent approvals, and about
+compatibility with existing ones. One-shot behavior is what the
+documentation already describes, so the meaning of an approval stays the
+same. The design question is how to represent and consume each approval,
+while a person can still approve the same bytes again and permissions
+stay narrow.
 
 A new annotation format or CLI output affects existing automation and
 GitOps documents. A new consuming writer affects RBAC. The design must
 state how old approvals behave and how reboot and restart operations
-share the mechanism. Treating approvals as permanent authorization for
-bytes would instead change the documented contract and needs an explicit
-product decision; it is not assumed as the fix.
+share the mechanism. The alternative is to treat an approval as a
+permanent authorization for its bytes. That would change the documented
+behavior and needs an explicit product decision. This problem does not
+assume it as the fix.
 
 ## Tests needed
 

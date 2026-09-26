@@ -2,41 +2,43 @@
 
 Open problem. The cluster operator is deployed as one replica, but the
 code has no leader election. More than one instance can issue rollout
-grants and update fleet state. The safety of those concurrent decisions
-has not been established by the replica setting.
+grants and update fleet state. The replica setting does not show that
+concurrent decisions from two instances are safe.
 
-## How overlap can occur
+## How two instances can run at once
 
 The `Deployment` uses `replicas: 1` and `strategy: Recreate`. This
-sequences ordinary template replacements; it is not a process-level
-exclusion mechanism.
+setting orders ordinary template replacements. It does not stop a second
+process from running.
 
 A partitioned node can continue running an old pod while Kubernetes
-creates a replacement elsewhere. Whether a replacement starts depends
-on the observed failure and controller behavior, not merely on the
-existence of a partition. An operator or automation can also patch
-`replicas` to `2`, deliberately creating two instances. `Recreate`
-does not prevent either case.
+creates a replacement elsewhere. A partition does not always cause a
+replacement: that depends on the observed failure and on controller
+behavior. An operator or automation can also patch `replicas` to `2`,
+which deliberately creates two instances. `Recreate` does not prevent
+either case.
 
 ## What the instances write
 
 The cluster operator updates `Cluster` and `Machine` status, issues
-`RebootApproved` grants, and evicts stale system pods. OS `AddOn`
-manifests are written by `init` on leaders and applied by `k3s`; they
-are not an output of the cluster operator's reconcile loop.
+`RebootApproved` grants, and evicts stale system pods. `init` on leaders
+writes the OS `AddOn` manifests, and `k3s` applies them. The cluster
+operator's reconcile loop does not write them.
 
-[main.go](../../cluster-operator/main.go) argues that overlap is safe
-because both instances derive their decisions from cluster state and
-use optimistic concurrency. That protects individual resource updates
-from conflicting versions. It does not prove that two instances read
-the same fleet snapshot or preserve a budget across different resources.
+A comment in [main.go](../../cluster-operator/main.go) says that overlap
+is safe, because both instances derive their decisions from cluster
+state and use optimistic concurrency. Optimistic concurrency protects
+each resource update from a conflicting version. It does not make two
+instances read the same fleet snapshot, and it does not hold a budget
+across different resources.
 
 `decideRollout` computes a fleet-wide decision, then `carryOutRollout`
 in [rollout.go](../../cluster-operator/rollout.go) writes grants one
 `Machine` at a time. The open concern is conflicting decisions from
 different snapshots. A partial write followed by a crash also needs
-safe recovery, though a partial write alone does not prove a budget
-violation. No two-instance violation was reproduced in this review.
+safe recovery, though a partial write alone does not show that the
+budget was exceeded.
+This review did not reproduce a violation with two instances.
 
 ## Proposed safeguard
 
@@ -48,37 +50,37 @@ leader-election protocol.
 The machine heartbeat code already uses `Lease` objects, but heartbeat
 renewal is not an election algorithm. The election needs ownership
 checks, expiry handling, and safe handoff. A contender should acquire an
-expired lease through a conditional update, not require a person to
-transfer it.
+expired lease through a conditional update, without a person
+transferring it.
 
-A `Lease` is also not a fence on writes to other API resources. A paused
-former leader can resume after another instance has acquired the lease;
-requests already in flight can complete after local cancellation. The
-implementation must bound requests, stop new work when leadership is
-lost, and establish how stale writes and partial grant sequences remain
-safe. Existing per-object version checks are useful but do not themselves
-make the rollout budget a transaction.
+A `Lease` does not block writes to other API resources. A paused former
+leader can resume after another instance has acquired the lease.
+Requests already in flight can complete after local cancellation. The
+implementation must bound requests and stop new work when leadership is
+lost. It must also show how stale writes and partial grant sequences
+stay safe. Per-object version checks help, but they do not make the
+rollout budget a transaction.
 
 ## Remedy scope
 
-**Implementation reliability work with a concurrency design to verify.**
-The intended contract already has one active fleet coordinator. Adding
-leader election need not change the `Cluster` API, disruption budget, or
-normal single-replica deployment. It is more than adding a heartbeat:
-the handoff and write-safety protocol need review and failure tests.
+The fix is implementation reliability work, plus a concurrency design
+that needs verification. The intended design already has one active
+fleet coordinator. Leader election can be added without a change to the
+`Cluster` API, the disruption budget, or the normal single-replica
+deployment. The work is more than a heartbeat: the handoff and the
+write-safety protocol need review and failure tests.
 
-Supporting multiple standby replicas as an HA feature is a separate
-operational decision. Takeover latency would include lease expiry,
-retry, and scheduling delays; one lease duration is not a guaranteed
-downtime bound.
+Support for multiple standby replicas as an HA feature is a separate
+operational decision. Takeover time would include lease expiry, retry,
+and scheduling delays, so one lease duration does not bound the downtime.
 
 ## Related problem
 
-The separate `media-operator` repository records the same singleton
+The separate `media-operator` repository records the same single-instance
 concern in `plans/open-problems/two-operators-can-run-at-once.md`.
-Both operators need code-level coordination rather than reliance on a
-replica count alone. Their election and write-safety requirements should
-be compared before sharing an implementation.
+Both operators need coordination in code; a replica count does not give
+it. Compare their election and write-safety requirements before they
+share an implementation.
 
 ## Verification needed
 

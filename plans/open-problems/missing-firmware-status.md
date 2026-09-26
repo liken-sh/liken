@@ -16,15 +16,15 @@ requested `intel/ibt-hw-37.8.10-fw-22.50.19.14.f.bseq`, logged
 without the patch. Every Bluetooth link repeatedly disconnected.
 
 The `Machine` reported `Ready` with every condition true. Reading
-`/dev/kmsg` from a privileged pod exposed the missing file. The release
+`/dev/kmsg` from a privileged pod showed the missing file. The release
 had omitted the `ibt` files for weeks without showing this failure:
-the controller retained its patch across warm reboots and did not request
+the controller kept its patch across warm reboots and did not request
 the file again until the power reset.
 
 ## Proposed reporting
 
-Report unresolved firmware requests rather than listing every firmware
-file loaded. An entry would name the requested file and, where the log
+Report unresolved firmware requests. Do not list every firmware file
+that loaded. An entry would name the requested file and, where the log
 provides it, the requesting device or driver. Possible locations are
 `status.hardware.missingFirmware` or a list beside `unclaimed`.
 
@@ -33,25 +33,26 @@ needed firmware should remove the previous boot's report without a
 manual reset. A request that later succeeds, or succeeds through a
 supported fallback filename, should not remain an unresolved failure.
 
-The existing kernel-log reader is the `liken-logs` relay, not the machine
-operator. [kmsg.go](../../logs/kmsg.go) reads `/dev/kmsg`, and
-[cursor.go](../../logs/cursor.go) stores its resume point. The kernel
-container in [logs.yaml](../../logs/manifests/logs.yaml) emits facility-0
-records to stdout and has no mounted API token. Collecting these failures
-into status therefore needs a path to the status publisher or another
-reader, not only a new log pattern.
+The existing kernel-log reader is the `liken-logs` relay. The machine
+operator does not read the kernel log. [kmsg.go](../../logs/kmsg.go)
+reads `/dev/kmsg`, and [cursor.go](../../logs/cursor.go) stores its
+resume point. The kernel container in
+[logs.yaml](../../logs/manifests/logs.yaml) emits facility-0 records to
+stdout and has no mounted API token. A new log pattern is therefore not
+enough: the failures also need a path to the status publisher, or
+another reader.
 
 ## Remedy scope
 
-**A small API and health-policy design, followed by implementation work.**
-The collection mechanism is ordinary code. These reporting choices need
-agreement before it is built:
+The fix needs a small API and health-policy design first, then
+implementation work. The collection mechanism is ordinary code. These
+reporting choices need agreement before it is built:
 
 - Which errors count. `-2` means a missing file; other errors need their
   own interpretation. Drivers can retry or use alternative firmware.
 - How early collection starts. Requests often occur during module probe,
   before the operator runs. The kernel ring buffer can also wrap, so a
-  late reader must not equate an incomplete log with no failures.
+  late reader must not treat an incomplete log as a log with no failures.
 - Where the list belongs, which process collects it, and how status gets
   updated. `unclaimed` describes undriven hardware; this list describes
   firmware failures on hardware with a driver.
@@ -66,5 +67,5 @@ agreement before it is built:
 Use kernel-log fixtures for an unresolved request, a successful retry,
 a fallback filename, an error other than `-2`, and missing early records.
 Verify status across reader restarts and a reboot into a corrected image.
-A cold-power hardware test is necessary for the controller behavior that
-warm reboots did not expose.
+A hardware test with a cold power cycle is necessary, because warm
+reboots did not show the controller behavior.
