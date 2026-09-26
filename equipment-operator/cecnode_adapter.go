@@ -17,10 +17,13 @@ import (
 )
 
 // adapterConfig is what the spec asks of the adapter. In Control it
-// also holds the physical address the Display states, or the reason
-// the node workload has none.
+// also holds the OSD name the adapter announces, and the physical
+// address the Display states or the reason the node workload has none.
+// A change of either is a new claim of the logical address, because
+// the kernel announces both from the claim.
 type adapterConfig struct {
 	mode     CECMode
+	osdName  string
 	display  string
 	physical cec.PhysicalAddress
 	problem  string
@@ -40,12 +43,12 @@ type adapterDisplay struct {
 // last good read of the same Display, so an API server that is briefly
 // unreachable does not take the adapter off the bus, and the entry's
 // message gives the read's error.
-func (n *cecNode) desired(mode CECMode, display string) adapterConfig {
+func (n *cecNode) desired(bus string, mode CECMode, display string) adapterConfig {
 	n.displayNote = ""
 	if mode != CECControl {
 		return adapterConfig{mode: CECListen}
 	}
-	want := adapterConfig{mode: CECControl, display: display, physical: cec.InvalidPhysicalAddress}
+	want := adapterConfig{mode: CECControl, osdName: osdName(bus), display: display, physical: cec.InvalidPhysicalAddress}
 	if display == "" {
 		want.problem = fmt.Sprintf("the CECBus names no display for machine %s", n.machine)
 		return want
@@ -166,14 +169,17 @@ func (n *cecNode) listen() (CECAdapterStatus, error) {
 	return entry, nil
 }
 
-// osdName is the name the adapter announces: its machine's name, cut
-// to the fourteen bytes CEC carries, so each adapter on a bus sees the
-// others by name.
-func osdName(machine string) string {
-	if len(machine) > 14 {
-		return machine[:14]
+// osdName is the name the adapter announces: its bus's name, cut to
+// the fourteen bytes CEC carries. The kernel's osd_name field is 15
+// bytes with the terminating NUL. A TV lists each source by this name,
+// and a room's name reads better there than a machine's. A CECBus name
+// is a Kubernetes name, so it is ASCII and a byte cut splits no
+// character.
+func osdName(bus string) string {
+	if len(bus) > 14 {
+		return bus[:14]
 	}
-	return machine
+	return bus
 }
 
 // The Joining messages for a claim the kernel did not complete.
@@ -209,7 +215,7 @@ func (n *cecNode) control(want adapterConfig) (CECAdapterStatus, error) {
 	// Passthrough makes the kernel turn the TV remote's buttons into key
 	// events on the adapter's input device as well, which a media
 	// Remote claims.
-	if err := n.device.Claim(cec.Claim{OSDName: osdName(n.machine), Passthrough: true}); err != nil {
+	if err := n.device.Claim(cec.Claim{OSDName: want.osdName, Passthrough: true}); err != nil {
 		return entry, err
 	}
 	return n.readClaim(entry, want)

@@ -197,14 +197,16 @@ func joined(spec CECBusSpec, entries reports) verdict {
 	return verdict{ConditionTrue, conditionJoined, "every adapter holds a logical address"}
 }
 
-// coherent: each adapter that finished a scan sees every other one by
-// its OSD name. An adapter that never sees the others is on a different
-// wire than the spec states. The logical address is not compared,
-// because an adapter that joins again can take another one, and the
-// other adapter's last scan still names the old one.
+// coherent: each adapter that finished a scan sees every other one at
+// the physical address it announces. An adapter that never sees the
+// others is on a different wire than the spec states. Every adapter
+// on a bus announces the bus's name, so the name cannot tell them
+// apart. The physical address can: each is its own Display's address,
+// and it stays the same when an adapter joins again at another logical
+// address.
 func coherent(spec CECBusSpec, entries reports) verdict {
 	if spec.Mode != CECControl {
-		return verdict{ConditionUnknown, reasonListening, "the bus is in Listen, and an adapter in Listen announces no OSD name for the others to see"}
+		return verdict{ConditionUnknown, reasonListening, "the bus is in Listen, and an adapter in Listen announces nothing for the others to see"}
 	}
 	var members []CECAdapterStatus
 	for _, adapter := range spec.Adapters {
@@ -222,18 +224,22 @@ func coherent(spec CECBusSpec, entries reports) verdict {
 		for _, seen := range members {
 			if seer.Machine != seen.Machine && !sees(seer, seen) {
 				return verdict{ConditionFalse, reasonApart, fmt.Sprintf(
-					"the adapter on %s does not see the adapter on %s by its OSD name %q; the two adapters may be on different wires",
-					seer.Machine, seen.Machine, seen.OSDName)}
+					"the adapter on %s does not see the adapter on %s at physical address %s; the two adapters may be on different wires",
+					seer.Machine, seen.Machine, seen.PhysicalAddress)}
 			}
 		}
 	}
 	return verdict{ConditionTrue, conditionCoherent, "every adapter sees every other adapter on the bus"}
 }
 
-// sees answers whether one adapter's devices include another adapter.
+// sees answers whether one adapter's devices include another adapter,
+// found at the physical address the other announces.
 func sees(seer, seen CECAdapterStatus) bool {
+	if seen.PhysicalAddress == "" {
+		return false
+	}
 	for _, device := range seer.Devices {
-		if device.OSDName == seen.OSDName {
+		if device.PhysicalAddress == seen.PhysicalAddress {
 			return true
 		}
 	}

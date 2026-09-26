@@ -207,9 +207,9 @@ func TestFindAdapterFailsWithNoNode(t *testing.T) {
 	mustFail(t, err)
 }
 
-func TestTheOSDNameIsTheMachineCutToFourteenBytes(t *testing.T) {
-	mustMatch(t, osdName("node-1"), "node-1")
-	mustMatch(t, osdName("a-machine-name-longer"), "a-machine-name")
+func TestTheOSDNameIsTheBusNameCutToFourteenBytes(t *testing.T) {
+	mustMatch(t, osdName("den"), "den")
+	mustMatch(t, osdName("a-very-long-room-name"), "a-very-long-ro")
 }
 
 // Each failure before the node workload runs is the process's last

@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/liken-sh/equipment-operator/cec"
 )
@@ -25,7 +27,14 @@ func (n *cecNode) pass(ctx context.Context) error {
 	n.mutex.Lock()
 	previous := n.bus
 	n.mutex.Unlock()
-	if previous != "" && (bus == nil || bus.Metadata.Name != previous) {
+	chosen := ""
+	if bus != nil {
+		chosen = bus.Metadata.Name
+	}
+	if chosen != previous {
+		fmt.Fprintf(n.log, "the adapter on %s moves from %s to %s\n", n.machine, busWords(previous), busWords(chosen))
+	}
+	if previous != "" && chosen != previous {
 		n.leave(previous)
 	}
 	if bus == nil {
@@ -35,7 +44,7 @@ func (n *cecNode) pass(ctx context.Context) error {
 	n.bus = bus.Metadata.Name
 	n.mutex.Unlock()
 	adapter, _ := bus.Spec.names(n.machine)
-	want := n.desired(bus.Spec.Mode, adapter.Display)
+	want := n.desired(bus.Metadata.Name, bus.Spec.Mode, adapter.Display)
 	if err := n.apply(ctx, want); err != nil {
 		return err
 	}
@@ -69,11 +78,10 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 				fmt.Fprintf(os.Stderr, "pruning CECBus %s: %v\n", own.Metadata.Name, err)
 			}
 		}
-		if len(declared) > 1 {
-			fmt.Fprintf(os.Stderr, "%d CECBuses name machine %s; the adapter follows %s, the first by name\n", len(declared), n.machine, declared[0].Metadata.Name)
-		}
+		n.logDeclared(declared)
 		return declared[0]
 	}
+	n.logDeclared(nil)
 	if len(discovered) > 0 {
 		return discovered[0]
 	}
@@ -124,4 +132,33 @@ func (n *cecNode) idle() error {
 	n.applied, n.entry, n.retryAt, n.retryWait = adapterConfig{}, CECAdapterStatus{}, n.now(), 0
 	n.mutex.Unlock()
 	return nil
+}
+
+// busWords names a bus in a log line, and an empty name as none.
+func busWords(name string) string {
+	if name == "" {
+		return "none"
+	}
+	return "CECBus " + name
+}
+
+// logDeclared states that more than one of a person's buses name the
+// machine, which a person has to settle, and which one the adapter
+// follows. The pass runs on every change to any bus, so the line
+// prints only when the set of those buses changes.
+func (n *cecNode) logDeclared(declared []*CECBus) {
+	names := make([]string, 0, len(declared))
+	for _, bus := range declared {
+		names = append(names, bus.Metadata.Name)
+	}
+	slices.Sort(names)
+	set := strings.Join(names, ", ")
+	if set == n.declared {
+		return
+	}
+	n.declared = set
+	if len(names) > 1 {
+		fmt.Fprintf(n.log, "%d CECBuses name machine %s: %s; the adapter follows %s, the first by name\n",
+			len(names), n.machine, set, declared[0].Metadata.Name)
+	}
 }

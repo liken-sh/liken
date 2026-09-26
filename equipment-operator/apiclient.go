@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 )
@@ -163,10 +164,10 @@ func (c *Client) requestJSON(method, path, contentType string, body []byte, out 
 		return ErrConflict
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		message := responseText(resp.Body)
 		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return &throttledError{err: err, wait: retryAfter(resp.Header.Get("Retry-After"), message)}
+			return &throttledError{err: err, wait: retryAfter(resp.Header.Get("Retry-After"), []byte(message))}
 		}
 		return err
 	}
@@ -225,6 +226,15 @@ func retryThrottled(ctx context.Context, call func() error) error {
 		case <-time.After(throttled.wait):
 		}
 	}
+}
+
+// responseText is the start of an answer's body, for an error that
+// carries the server's own text. The API server ends its Status body
+// with a newline, and the text leaves it out, so the error and the log
+// line that prints it stay on one line.
+func responseText(body io.Reader) string {
+	message, _ := io.ReadAll(io.LimitReader(body, 2048))
+	return strings.TrimRightFunc(string(message), unicode.IsSpace)
 }
 
 // drain reads whatever the caller left in the body, then closes it.
@@ -407,7 +417,7 @@ func DeleteReceiver(c *Client, name string) error {
 		return nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		message := responseText(resp.Body)
 		return fmt.Errorf("deleting receiver %s: %s: %s", name, resp.Status, message)
 	}
 	return nil

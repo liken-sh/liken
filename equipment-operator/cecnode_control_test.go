@@ -24,7 +24,7 @@ func TestAControllingAdapterJoinsAndScans(t *testing.T) {
 	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 	mustMatch(t, entry.PhysicalAddress, "1.3.0.0")
 	mustMatch(t, *entry.LogicalAddress, 4)
-	mustMatch(t, entry.OSDName, "node-1")
+	mustMatch(t, entry.OSDName, "den")
 	mustMatch(t, entry.Message, "")
 	mustDeepEqual(t, entry.Devices, []CECDevice{
 		{LogicalAddress: 0, PhysicalAddress: "0.0.0.0", Type: "TV", OSDName: "TV", Vendor: "00e091", CECVersion: "1.4", Power: "Standby"},
@@ -160,7 +160,55 @@ func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
 	node, err := newCECNode(startCECAPI(t).client, "node-1", device)
 	mustSucceed(t, err)
 
-	want := node.desired(CECControl, "")
+	want := node.desired("den", CECControl, "")
 
 	mustMatch(t, want.problem, "the CECBus names no display for machine node-1")
+}
+
+// In Control the adapter announces its bus's name, which the TV lists
+// as the source's name, cut to the 14 bytes CEC carries.
+func TestAControllingAdapterAnnouncesItsBusName(t *testing.T) {
+	cases := []struct {
+		bus  string
+		name string
+	}{
+		{"den", "den"},
+		{"a-very-long-room-name", "a-very-long-ro"},
+	}
+	for _, c := range cases {
+		t.Run(c.bus, func(t *testing.T) {
+			api := startCECAPI(t)
+			_, device := usbAdapter(cecRoom())
+			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+			api.putBus(controlBus(c.bus, CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+
+			startNode(t, api, "node-1", device)
+
+			entry := api.waitForEntry(t, c.bus, "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+			mustMatch(t, entry.OSDName, c.name)
+			held, err := device.Addresses()
+			mustSucceed(t, err)
+			mustMatch(t, held.OSDName, c.name)
+		})
+	}
+}
+
+// A move to another bus changes the name the adapter announces, so the
+// adapter claims its logical address again under the new name.
+func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
+	api := startCECAPI(t)
+	adapter, device := usbAdapter(cecRoom())
+	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+	api.putBus(controlBus("living-room-cec", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+	startNode(t, api, "node-1", device)
+	api.waitForEntry(t, "living-room-cec", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	claims := adapter.Claims()
+
+	api.putBus(controlBus("living-room", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+
+	entry := api.waitForEntry(t, "living-room", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	mustMatch(t, entry.OSDName, "living-room")
+	if adapter.Claims() <= claims {
+		t.Errorf("the adapter announces a new name with no new claim")
+	}
 }

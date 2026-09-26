@@ -90,7 +90,7 @@ func TestVividTheNodeWorkloadJoinsAndFindsTheTV(t *testing.T) {
 	entry := api.waitForEntryWithin(t, "den", "node-1", vividScanTime, func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
 	t.Logf("the entry: %+v", entry)
 	mustMatch(t, entry.PhysicalAddress, address.String())
-	mustMatch(t, entry.OSDName, "node-1")
+	mustMatch(t, entry.OSDName, "den")
 	mustMatch(t, entry.Message, "")
 	if len(entry.Devices) != 1 {
 		t.Fatalf("devices = %+v, want the TV alone", entry.Devices)

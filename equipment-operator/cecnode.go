@@ -144,6 +144,9 @@ type cecNode struct {
 	retryWait time.Duration
 	// logged is the state and the message the log last stated.
 	logged CECAdapterStatus
+	// declared is the set of a person's buses that last named the
+	// machine, as the log last stated it.
+	declared string
 	// stopMode ends the scan loop of the mode the adapter runs, and
 	// returns once the loop has stopped.
 	stopMode func()

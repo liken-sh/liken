@@ -43,7 +43,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One HDMI tree, which means one CEC wire, and the USB CEC adapters on the cluster's machines that are connected to it. CEC gives a bus no name, so a person names it. A node workload that holds an adapter no CECBus names creates a CECBus in Listen, named after its machine, with the equipment.liken.sh/discovered label. A person's CECBus that names the same machine takes over, and the node workload deletes the one it created. To adopt a discovered CECBus, create one under a new name that names the same machine. Do not apply one under the discovered name: that conflicts with the node workload, which owns that object's spec."
+          description: "One HDMI tree, which means one CEC wire, and the USB CEC adapters on the cluster's machines that are connected to it. CEC gives a bus no name, so a person names it. The name is also what the TV shows for each adapter in Control, as its OSD name, and CEC shows only its first 14 characters. A node workload that holds an adapter no CECBus names creates a CECBus in Listen, named after its machine, with the equipment.liken.sh/discovered label. A person's CECBus that names the same machine takes over, and the node workload deletes the one it created. To adopt a discovered CECBus, create one under a new name that names the same machine. Do not apply one under the discovered name: that conflicts with the node workload, which owns that object's spec."
           required: [spec]
           properties:
             spec:
@@ -60,7 +60,7 @@ spec:
                 mode:
                   type: string
                   enum: [Listen, Control]
-                  description: "The consent a person gives the adapters, because a device on a CEC bus can wake the TV and switch its input. Listen claims no logical address and sends nothing: each adapter opens the bus as a monitor, which needs CAP_NET_ADMIN, and reports the devices it hears. A full device list needs polls, and a poll is a transmission, so the device list in Listen is partial. Control claims a playback logical address with the machine's name as the OSD name, announces the Display's physical address, answers the TV, and scans the bus every minute."
+                  description: "The consent a person gives the adapters, because a device on a CEC bus can wake the TV and switch its input. Listen claims no logical address and sends nothing: each adapter opens the bus as a monitor, which needs CAP_NET_ADMIN, and reports the devices it hears. A full device list needs polls, and a poll is a transmission, so the device list in Listen is partial. Control claims a playback logical address with the bus's name, cut to 14 characters, as the OSD name, announces the Display's physical address, answers the TV, and scans the bus every minute."
                 adapters:
                   type: array
                   minItems: 1
@@ -115,7 +115,7 @@ spec:
                         description: "The logical address the adapter holds. It is absent in Listen and while the adapter holds none."
                       osdName:
                         type: string
-                        description: "The OSD name the adapter announces: its machine's name, cut to 14 characters."
+                        description: "The OSD name the adapter announces in Control: its bus's name, cut to 14 characters."
                       message:
                         type: string
                         description: "Why the adapter is not where its mode asks, in the words of the call that failed."
@@ -185,7 +185,7 @@ spec:
                         description: "The power status the device last reported: On, Standby, ToOn, or ToStandby."
                 conditions:
                   type: array
-                  description: "AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, and an adapter that does not is on a different wire than the spec states. Scanned: the device list is complete, which only Control achieves; a bus where an adapter finds no device says that the HDMI cable at the adapter's output may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their OSD names."
+                  description: "AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, each at the physical address it announces, and an adapter that does not is on a different wire than the spec states. Scanned: the device list is complete, which only Control achieves; a bus where an adapter finds no device says that the HDMI cable at the adapter's output may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their physical addresses, because every adapter of a bus announces the same OSD name."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

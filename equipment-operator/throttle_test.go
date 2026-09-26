@@ -50,6 +50,42 @@ func (a *busyAPI) count() int {
 // storage starts.
 const initializingBody = `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"storage is (re)initializing","reason":"TooManyRequests","details":{"retryAfterSeconds":2},"code":429}`
 
+// The API server ends its Status body with a newline, and an error that
+// carried it would break its log line in two.
+func TestAnErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
+	api := &busyAPI{busy: 1, body: initializingBody + "\n"}
+
+	_, err := ListCECBuses(testAPIClient(t, http.HandlerFunc(api.handle)))
+
+	if err == nil || !strings.HasSuffix(err.Error(), `"code":429}`) {
+		t.Errorf("got %q", err)
+	}
+}
+
+func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
+	cases := []struct {
+		name   string
+		delete func(*Client) error
+	}{
+		{"a Receiver", func(c *Client) error { return DeleteReceiver(c, "theater") }},
+		{"a CECBus", func(c *Client) error { return DeleteCECBus(c, "den") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte("forbidden\n"))
+			}))
+
+			err := c.delete(client)
+
+			if err == nil || !strings.HasSuffix(err.Error(), ": forbidden") {
+				t.Errorf("got %q", err)
+			}
+		})
+	}
+}
+
 func TestA429StatesHowLongToWait(t *testing.T) {
 	cases := []struct {
 		name   string

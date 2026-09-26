@@ -239,9 +239,12 @@ The mode is the person's consent. A device that joins a CEC bus can
 switch the TV's input or wake it. A new adapter must not change the
 room until a person allows it.
 
-**The OSD name.** In `Control`, an adapter's OSD name is its machine's
-name, cut to 14 characters. Each adapter then sees the other adapters
-of the same bus by name in its scan.
+**The OSD name.** In `Control`, an adapter's OSD name is its bus's
+name, cut to 14 characters, because the kernel's `osd_name` field
+holds 14 bytes and a terminating NUL. A TV lists each source by its
+OSD name, and a room's name reads better there than a machine's. Every
+adapter of one bus announces the same name, so a change of the bus, or
+of its name, is a new claim of the logical address under the new name.
 
 **Observation and derivation.** Each node pod writes only its own
 entry under `status.adapters`, with server-side apply keyed by the
@@ -253,9 +256,12 @@ adapters' reports, and it merges the devices by physical address.
   from its `Display`.
 * `Joined`: every adapter in `Control` holds a logical address.
 * `Coherent`: the adapters of one bus that finished a scan see each
-  other's OSD names. An adapter that never sees the others is on a
-  different wire than the spec states. The logical address is not
-  compared, because an adapter that joins again can take another one.
+  other, each at the physical address it announces. An adapter that
+  never sees the others is on a different wire than the spec states.
+  The OSD name cannot tell the adapters apart, because they all
+  announce the bus's name. The physical address can: each is its own
+  `Display`'s address, and it stays the same when an adapter joins
+  again at another logical address.
 * `Scanned`: the device list is complete. Only `Control` completes
   it: every adapter finished a scan and found at least one device. A
   bus in `Listen` reports `False` with the reason `Listening`. An

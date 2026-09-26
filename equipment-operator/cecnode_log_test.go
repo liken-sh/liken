@@ -75,7 +75,8 @@ func TestTheNodeLogsWhatTheAdapterHeldAndEachStateChange(t *testing.T) {
 	// the log holds one or two state changes before it settles.
 	lines := log.lines()
 	mustMatch(t, lines[0], `the adapter on node-1 (cectest) holds logical address 4 as "node-1" when the pod opens it`)
-	mustMatch(t, lines[1][:len("CECBus den: the adapter on node-1 went from none to ")], "CECBus den: the adapter on node-1 went from none to ")
+	mustMatch(t, lines[1], "the adapter on node-1 moves from none to CECBus den")
+	mustMatch(t, lines[2][:len("CECBus den: the adapter on node-1 went from none to ")], "CECBus den: the adapter on node-1 went from none to ")
 	mustMatch(t, lines[len(lines)-1][len(lines[len(lines)-1])-len(" to Scanned"):], " to Scanned")
 	mustMatch(t, len(lines), settled)
 }
@@ -90,6 +91,73 @@ func TestTheNodeLogsAMessageWithTheState(t *testing.T) {
 
 	mustDeepEqual(t, log.lines(), []string{
 		`the adapter on node-1 (cectest) holds no logical address when the pod opens it`,
+		`the adapter on node-1 moves from none to CECBus den`,
 		`CECBus den: the adapter on node-1 went from none to Joining: reading Display acm-0001-receiver: not found`,
 	})
+}
+
+// linesWith answers the log lines that contain a text.
+func linesWith(log *logBuffer, text string) []string {
+	var found []string
+	for _, line := range log.lines() {
+		if strings.Contains(line, text) {
+			found = append(found, line)
+		}
+	}
+	return found
+}
+
+// Two of a person's buses that name one machine are logged once, not
+// on every pass, and again only when the set changes.
+func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
+	api := startCECAPI(t)
+	for _, name := range []string{"study", "den"} {
+		api.putBus(listenBus(name))
+	}
+	_, device := usbAdapter(cecRoom())
+	log := loggedNode(t, api, device)
+	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+
+	for range 5 {
+		api.nudge()
+	}
+	api.putBus(listenBus("attic"))
+	api.waitForEntry(t, "attic", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	for range 5 {
+		api.nudge()
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	mustDeepEqual(t, linesWith(log, "CECBuses name machine"), []string{
+		"2 CECBuses name machine node-1: den, study; the adapter follows den, the first by name",
+		"3 CECBuses name machine node-1: attic, den, study; the adapter follows attic, the first by name",
+	})
+}
+
+// A bus rename adds the new bus before it prunes the old one. The
+// adapter moves to the new bus, says so, and removes its entry from the
+// old bus, which still exists and still names the machine.
+func TestAnAdapterThatMovesBusesLeavesTheOldOne(t *testing.T) {
+	api := startCECAPI(t)
+	api.putBus(listenBus("living-room-cec"))
+	_, device := usbAdapter(cecRoom())
+	log := loggedNode(t, api, device)
+	api.waitForEntry(t, "living-room-cec", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+
+	api.putBus(listenBus("living-room"))
+
+	api.waitForEntry(t, "living-room", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
+	api.waitUntil(t, "the entry in the old bus to go", func() bool {
+		_, held := api.entry("living-room-cec", "node-1")
+		return !held
+	})
+	mustDeepEqual(t, linesWith(log, "moves from"), []string{
+		"the adapter on node-1 moves from none to CECBus living-room-cec",
+		"the adapter on node-1 moves from CECBus living-room-cec to CECBus living-room",
+	})
+}
+
+// listenBus is a person's bus in Listen that names node-1.
+func listenBus(name string) CECBus {
+	return CECBus{Metadata: ObjectMeta{Name: name}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}}
 }

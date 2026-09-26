@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -138,7 +137,7 @@ func DeleteCECBus(c *Client, name string) error {
 		return nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		message := responseText(resp.Body)
 		return fmt.Errorf("deleting CECBus %s: %s: %s", name, resp.Status, message)
 	}
 	return nil

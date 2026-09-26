@@ -18,9 +18,19 @@ func logical(address int) *int {
 // the given devices.
 func scannedEntry(machine string, address int, devices ...CECDevice) CECAdapterStatus {
 	return CECAdapterStatus{
-		Machine: machine, Mode: CECControl, State: AdapterScanned, PhysicalAddress: "1.3.0.0",
-		LogicalAddress: logical(address), OSDName: machine, Devices: devices,
+		Machine: machine, Mode: CECControl, State: AdapterScanned, PhysicalAddress: announced[machine],
+		LogicalAddress: logical(address), OSDName: "den", Devices: devices,
 	}
+}
+
+// announced is the physical address each machine's Display gives its
+// adapter. Every adapter on a bus announces the bus's name, so the
+// address is what tells two adapters apart.
+var announced = map[string]string{"node-1": "1.3.0.0", "node-2": "1.4.0.0"}
+
+// adapterSeen is another adapter of the bus as a scan finds it.
+func adapterSeen(machine string, address int) CECDevice {
+	return CECDevice{LogicalAddress: address, PhysicalAddress: announced[machine], Type: "Playback", OSDName: "den"}
 }
 
 var (
@@ -93,23 +103,26 @@ func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
 		{"a scan in progress", busWith(CECControl, one, CECAdapterStatus{Machine: "node-1", State: AdapterJoined, PhysicalAddress: "1.3.0.0", LogicalAddress: logical(4)}), conditionScanned, ConditionUnknown, reasonScanning},
 		{"a scan that found nothing", busWith(CECControl, one, scannedEntry("node-1", 4)), conditionScanned, ConditionFalse, reasonNoAnswer},
 		{"two adapters that see each other", busWith(CECControl, two,
-			scannedEntry("node-1", 4, CECDevice{LogicalAddress: 8, OSDName: "node-2"}),
-			scannedEntry("node-2", 8, CECDevice{LogicalAddress: 4, OSDName: "node-1"})), conditionCoherent, ConditionTrue, conditionCoherent},
+			scannedEntry("node-1", 4, adapterSeen("node-2", 8)),
+			scannedEntry("node-2", 8, adapterSeen("node-1", 4))), conditionCoherent, ConditionTrue, conditionCoherent},
 		{"two adapters on different wires", busWith(CECControl, two,
 			scannedEntry("node-1", 4, tvDevice),
 			scannedEntry("node-2", 4, tvDevice)), conditionCoherent, ConditionFalse, reasonApart},
-		{"an adapter that rejoined at a new address is still seen by name", busWith(CECControl, two,
-			scannedEntry("node-1", 4, CECDevice{LogicalAddress: 8, OSDName: "node-2"}),
-			scannedEntry("node-2", 11, CECDevice{LogicalAddress: 4, OSDName: "node-1"})), conditionCoherent, ConditionTrue, conditionCoherent},
+		{"an adapter that rejoined at a new logical address is still seen", busWith(CECControl, two,
+			scannedEntry("node-1", 4, adapterSeen("node-2", 8)),
+			scannedEntry("node-2", 11, adapterSeen("node-1", 4))), conditionCoherent, ConditionTrue, conditionCoherent},
+		{"a device with the bus's name at another address is not the adapter", busWith(CECControl, two,
+			scannedEntry("node-1", 4, CECDevice{LogicalAddress: 8, PhysicalAddress: "2.0.0.0", OSDName: "den"}),
+			scannedEntry("node-2", 8, adapterSeen("node-1", 4))), conditionCoherent, ConditionFalse, reasonApart},
 		{"an adapter that has not scanned is not judged", busWith(CECControl, two,
 			scannedEntry("node-1", 4, tvDevice),
-			CECAdapterStatus{Machine: "node-2", State: AdapterJoined, PhysicalAddress: "1.4.0.0", LogicalAddress: logical(8), OSDName: "node-2"}), conditionCoherent, ConditionTrue, reasonOneAdapter},
+			CECAdapterStatus{Machine: "node-2", State: AdapterJoined, PhysicalAddress: "1.4.0.0", LogicalAddress: logical(8), OSDName: "den"}), conditionCoherent, ConditionTrue, reasonOneAdapter},
 		{"a stale entry has not joined", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))), conditionJoined, ConditionUnknown, reasonStale},
 		{"a stale entry has no address", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))), conditionAddressKnown, ConditionUnknown, reasonStale},
 		{"a stale entry has not scanned", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))), conditionScanned, ConditionUnknown, reasonStale},
 		{"a stale entry sees no one", busWith(CECControl, two,
-			scannedEntry("node-1", 4, CECDevice{LogicalAddress: 8, OSDName: "node-2"}),
-			reportedAt(scannedEntry("node-2", 8, CECDevice{LogicalAddress: 4, OSDName: "node-1"}), derivedAt.Add(-2*time.Minute))), conditionCoherent, ConditionUnknown, reasonStale},
+			scannedEntry("node-1", 4, adapterSeen("node-2", 8)),
+			reportedAt(scannedEntry("node-2", 8, adapterSeen("node-1", 4)), derivedAt.Add(-2*time.Minute))), conditionCoherent, ConditionUnknown, reasonStale},
 		{"an entry with no report time is stale", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), time.Time{})), conditionJoined, ConditionUnknown, reasonStale},
 		{"a stopped adapter has not joined", busWith(CECControl, one, stopped("node-1")), conditionJoined, ConditionFalse, reasonStopped},
 		{"a stopped adapter has not scanned", busWith(CECControl, one, stopped("node-1")), conditionScanned, ConditionFalse, reasonStopped},
@@ -145,7 +158,7 @@ func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 		{"a silent cable", busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4)),
 			conditionScanned, "no device answered the polls of the adapter on node-1; the HDMI cable at the adapter's output may not carry the CEC wire"},
 		{"two wires", busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4, tvDevice), scannedEntry("node-2", 4, tvDevice)),
-			conditionCoherent, `the adapter on node-1 does not see the adapter on node-2 by its OSD name "node-2"; the two adapters may be on different wires`},
+			conditionCoherent, `the adapter on node-1 does not see the adapter on node-2 at physical address 1.4.0.0; the two adapters may be on different wires`},
 		{"a stale entry", busWith(CECControl, []string{"node-1"}, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))),
 			conditionJoined, "the node workload on node-1 last reported at 2026-09-26T11:58:00Z, more than 1m30s ago; it may have stopped"},
 		{"a stopped adapter", busWith(CECControl, []string{"node-1"}, stopped("node-1")),
