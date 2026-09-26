@@ -132,8 +132,13 @@ by its lowercased UUID and marked with the `equipment.liken.sh/discovered`
 label. The marker is what lets the operator prune only its own objects.
 A person's Receiver that names the same UUID always wins: the operator
 creates nothing beside it and deletes its own copy, so the person's
-room-named object stands. An amp that stops answering takes the
-operator's copy with it.
+room-named object stands, at once. The operator deletes its own copy
+for any other reason only on evidence that the amp left: three full
+searches in a row that missed it. The count starts with the operator,
+so an operator that just restarted, and has heard from no amp yet, does
+not delete a Receiver because its first search missed the amp. Until
+the count is reached, the Receiver stands and reports the amp
+unreachable while discovery holds no address for it.
 
 ### The input binding
 

@@ -33,33 +33,48 @@ var (
 )
 
 // discovery holds the amps the operator last found and reconciles the
-// Receivers it owns for them. An amp a search missed keeps its last
-// address and its Receiver until it has missed discoveryMisses
-// searches, because multicast drops a device for one search and the
-// amp has not moved.
+// Receivers it owns for them. It deletes a Receiver it owns only on
+// evidence that the amp left: discoveryMisses full searches in a row
+// that missed it. Multicast drops a device for one search, and an
+// operator that just started has heard from no amp yet, so neither is
+// evidence. The count starts with the operator: an amp no search has
+// found since the start has missed every search since the start.
 type discovery struct {
 	client *Client
 	wake   func()
 	// log takes a line for each Receiver discovery creates or deletes.
 	log io.Writer
+	// now stamps each search, so a delete states how long the amp was
+	// missed. It is a field so a test holds the clock.
+	now func() time.Time
 
 	mutex   sync.Mutex
 	devices map[string]wiim.Device
-	misses  map[string]int
+	// searches counts the full searches since the start, and
+	// firstSearch and lastSearch stamp the first and the latest.
+	searches    int
+	firstSearch time.Time
+	lastSearch  time.Time
+	// foundIn is the number of the search that last found each amp, and
+	// missedSince stamps the first search that missed it after that.
+	foundIn     map[string]int
+	missedSince map[string]time.Time
 }
 
-// discoveryMisses is how many searches in a row may miss an amp before
-// the operator forgets it. One missed search is multicast, not an amp
-// that left.
+// discoveryMisses is how many full searches in a row must miss an amp
+// before the operator forgets its address and deletes the Receiver it
+// made for it. One missed search is multicast, not an amp that left.
 const discoveryMisses = 3
 
 func newDiscovery(client *Client, wake func()) *discovery {
 	return &discovery{
-		client:  client,
-		wake:    wake,
-		log:     os.Stderr,
-		devices: map[string]wiim.Device{},
-		misses:  map[string]int{},
+		client:      client,
+		wake:        wake,
+		log:         os.Stderr,
+		now:         time.Now,
+		devices:     map[string]wiim.Device{},
+		foundIn:     map[string]int{},
+		missedSince: map[string]time.Time{},
 	}
 }
 
@@ -84,9 +99,15 @@ func (d *discovery) run(ctx context.Context) {
 	}
 }
 
-// once is one search window and the Receiver reconcile that follows.
+// once is one search window and the Receiver reconcile that follows. A
+// search that ctx cut short did not run its full window, so it is no
+// evidence that an amp it missed left, and the operator does not count
+// it.
 func (d *discovery) once(ctx context.Context) {
 	found := discover(ctx, discoveryWindow)
+	if ctx.Err() != nil {
+		return
+	}
 	d.store(found)
 	if err := d.reconcile(); err != nil {
 		fmt.Fprintf(os.Stderr, "reconciling discovered receivers: %v\n", err)
@@ -94,29 +115,52 @@ func (d *discovery) once(ctx context.Context) {
 	d.wake()
 }
 
-// store folds one search into the devices the operator holds. An amp
-// the search found takes its address and clears its miss count. An amp
+// store folds one full search into the devices the operator holds. An
+// amp the search found takes its address and clears its misses. An amp
 // the search missed keeps the address it had, and is forgotten once it
 // has missed discoveryMisses searches.
 func (d *discovery) store(found []wiim.Device) {
-	seen := make(map[string]bool, len(found))
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	now := d.now()
+	d.searches++
+	if d.searches == 1 {
+		d.firstSearch = now
+	}
+	d.lastSearch = now
 	for _, device := range found {
-		seen[device.UUID] = true
 		d.devices[device.UUID] = device
-		d.misses[device.UUID] = 0
+		d.foundIn[device.UUID] = d.searches
+		delete(d.missedSince, device.UUID)
 	}
 	for uuid := range d.devices {
-		if seen[uuid] {
+		if d.foundIn[uuid] == d.searches {
 			continue
 		}
-		d.misses[uuid]++
-		if d.misses[uuid] >= discoveryMisses {
+		if _, ok := d.missedSince[uuid]; !ok {
+			d.missedSince[uuid] = now
+		}
+		if d.searches-d.foundIn[uuid] >= discoveryMisses {
 			delete(d.devices, uuid)
-			delete(d.misses, uuid)
 		}
 	}
+}
+
+// missed answers how many full searches in a row have missed one amp,
+// and the time from the first of them to the latest. An amp no search
+// has found since the start has missed every search since the start.
+func (d *discovery) missed(uuid string) (int, time.Duration) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	misses := d.searches - d.foundIn[uuid]
+	if misses == 0 {
+		return 0, 0
+	}
+	since, ok := d.missedSince[uuid]
+	if !ok {
+		since = d.firstSearch
+	}
+	return misses, d.lastSearch.Sub(since)
 }
 
 // held copies the devices the operator holds, which keep an amp through
@@ -139,8 +183,9 @@ func discoveredName(uuid string) string {
 }
 
 // reconcile creates a Receiver for every discovered amp no Receiver
-// claims, and prunes the Receivers the operator owns whose amp is gone
-// or whose identity a person's Receiver now claims.
+// claims, and prunes the Receivers the operator owns whose amp full
+// searches have missed discoveryMisses times in a row, or whose
+// identity a person's Receiver now claims.
 func (d *discovery) reconcile() error {
 	list, err := ListReceivers(d.client)
 	if err != nil {
@@ -160,13 +205,10 @@ func (d *discovery) reconcile() error {
 		}
 	}
 
-	// The reconcile follows what the operator holds, not the last search
+	// The creates follow what the operator holds, not the last search
 	// alone, so an amp one search missed keeps the Receiver the operator
 	// made for it.
-	held := d.held()
-	heldSet := map[string]bool{}
-	for _, device := range held {
-		heldSet[device.UUID] = true
+	for _, device := range d.held() {
 		if len(claimants[device.UUID]) > 0 {
 			// A Receiver already names this amp, so discovery creates
 			// nothing and defers to what stands.
@@ -182,32 +224,34 @@ func (d *discovery) reconcile() error {
 
 	for uuid, receiver := range owned {
 		name := receiver.Metadata.Name
-		if heldSet[uuid] && !claimedByOther(claimants[uuid], name) {
+		reason := d.pruneReason(uuid, name, claimants[uuid])
+		if reason == "" {
 			continue
 		}
 		if err := DeleteReceiver(d.client, name); err != nil {
 			fmt.Fprintf(os.Stderr, "pruning receiver %s: %v\n", name, err)
 			continue
 		}
-		reason := fmt.Sprintf("discovery holds no address for the WiiM %s", uuid)
-		if others := slices.DeleteFunc(slices.Clone(claimants[uuid]), func(other string) bool { return other == name }); len(others) > 0 {
-			reason = fmt.Sprintf("Receiver %s names the WiiM %s", strings.Join(others, ", "), uuid)
-		}
 		fmt.Fprintf(d.log, "deleted the discovered Receiver %s: %s\n", name, reason)
 	}
 	return nil
 }
 
-// claimedByOther answers whether a Receiver other than the named one
-// claims the identity, which means a person took the amp over and the
-// operator's copy steps aside.
-func claimedByOther(claimants []string, name string) bool {
-	for _, claimant := range claimants {
-		if claimant != name {
-			return true
-		}
+// pruneReason answers why the operator deletes the Receiver it owns for
+// one amp, and an empty string when the Receiver stands. A person's
+// Receiver that names the amp replaces the operator's copy at once. An
+// amp that full searches missed discoveryMisses times in a row is gone.
+// An amp with fewer misses keeps its Receiver, which reports the amp
+// unreachable while discovery holds no address for it.
+func (d *discovery) pruneReason(uuid, name string, claimants []string) string {
+	if others := slices.DeleteFunc(slices.Clone(claimants), func(other string) bool { return other == name }); len(others) > 0 {
+		return fmt.Sprintf("Receiver %s names the WiiM %s", strings.Join(others, ", "), uuid)
 	}
-	return false
+	misses, span := d.missed(uuid)
+	if misses < discoveryMisses {
+		return ""
+	}
+	return fmt.Sprintf("the WiiM %s missed %d searches in a row over %d s", uuid, misses, int(span.Seconds()))
 }
 
 // resolvedAddress is the address a Receiver's protocol block declares,

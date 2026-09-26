@@ -112,52 +112,6 @@ func TestDiscoveryCreatesUnclaimedAndDefersToAPerson(t *testing.T) {
 	mustDeepEqual(t, api.deletedNames(), []string(nil))
 }
 
-func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
-	api, client := startDiscoveryAPI(t)
-	api.list = receiversWith(
-		discoveredReceiver(strings.ToLower(firstUUID), firstUUID),
-		wiimReceiver("studio", firstSpellOf(firstUUID)),
-	)
-
-	held := newDiscovery(client, func() {})
-	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
-	if err := held.reconcile(); err != nil {
-		t.Fatal(err)
-	}
-
-	mustDeepEqual(t, api.deletedNames(), []string{strings.ToLower(firstUUID)})
-	mustDeepEqual(t, api.appliedNames(), []string(nil))
-}
-
-func TestDiscoveryPrunesItsOwnWhenTheAmpIsGone(t *testing.T) {
-	api, client := startDiscoveryAPI(t)
-	api.list = receiversWith(discoveredReceiver(strings.ToLower(secondUUID), secondUUID))
-
-	held := newDiscovery(client, func() {})
-	for range discoveryMisses {
-		held.store(nil)
-	}
-	if err := held.reconcile(); err != nil {
-		t.Fatal(err)
-	}
-
-	mustDeepEqual(t, api.deletedNames(), []string{strings.ToLower(secondUUID)})
-}
-
-func TestDiscoveryKeepsItsOwnWhileTheAmpStands(t *testing.T) {
-	api, client := startDiscoveryAPI(t)
-	api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
-
-	held := newDiscovery(client, func() {})
-	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
-	if err := held.reconcile(); err != nil {
-		t.Fatal(err)
-	}
-
-	mustDeepEqual(t, api.deletedNames(), []string(nil))
-	mustDeepEqual(t, api.appliedNames(), []string(nil))
-}
-
 func TestDiscoveryAddressNormalizesTheIdentity(t *testing.T) {
 	held := newDiscovery(nil, func() {})
 	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
@@ -167,31 +121,8 @@ func TestDiscoveryAddressNormalizesTheIdentity(t *testing.T) {
 	mustMatch(t, held.address(secondUUID), "")
 }
 
-// One missed search is multicast, not an amp that left: the address
-// and the Receiver both stand through it.
-func TestDiscoveryKeepsAnAmpThroughOneMissedSearch(t *testing.T) {
-	api, client := startDiscoveryAPI(t)
-	api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
-
-	held := newDiscovery(client, func() {})
-	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
-	held.store(nil)
-
-	mustMatch(t, held.address(firstUUID), "192.0.2.1")
-	if err := held.reconcile(); err != nil {
-		t.Fatal(err)
-	}
-	mustDeepEqual(t, api.deletedNames(), []string(nil))
-}
-
 func TestDiscoveredNameIsTheLowercasedIdentity(t *testing.T) {
 	mustMatch(t, discoveredName("FF98F2F78136CE45A780D8A1"), "ff98f2f78136ce45a780d8a1")
-}
-
-func TestClaimedByOther(t *testing.T) {
-	mustMatch(t, claimedByOther([]string{"only"}, "only"), false)
-	mustMatch(t, claimedByOther([]string{"mine", "theirs"}, "mine"), true)
-	mustMatch(t, claimedByOther(nil, "mine"), false)
 }
 
 // run searches, reconciles, and stops with its context.
@@ -265,7 +196,7 @@ func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 			"an amp that is gone",
 			[]Receiver{discoveredReceiver(strings.ToLower(secondUUID), secondUUID)},
 			nil,
-			[]string{"deleted the discovered Receiver " + strings.ToLower(secondUUID) + ": discovery holds no address for the WiiM " + secondUUID},
+			[]string{"deleted the discovered Receiver " + strings.ToLower(secondUUID) + ": the WiiM " + secondUUID + " missed 3 searches in a row over 60 s"},
 		},
 		{
 			"an amp whose Receiver stands",
@@ -279,6 +210,7 @@ func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 			api, client := startDiscoveryAPI(t)
 			api.list = receiversWith(one.list...)
 			held := newDiscovery(client, func() {})
+			held.now = searchClock()
 			log := &logBuffer{}
 			held.log = log
 			for range discoveryMisses {
@@ -288,6 +220,135 @@ func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 			mustSucceed(t, held.reconcile())
 
 			mustDeepEqual(t, log.lines(), one.want)
+		})
+	}
+}
+
+// searchClock answers a time 30 s later on each call, as the searches
+// of a running operator are.
+func searchClock() func() time.Time {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	return func() time.Time {
+		at = at.Add(30 * time.Second)
+		return at
+	}
+}
+
+// Each case runs the full searches in order and reconciles after each
+// one, as a running operator does. The operator's own Receiver for the
+// amp stands until discoveryMisses searches in a row miss the amp. The
+// count starts with the operator, so a start that has not heard from the
+// amp yet is no evidence either way.
+func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T) {
+	amp := []wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}}
+	cases := []struct {
+		name     string
+		searches [][]wiim.Device
+		deleted  []string
+	}{
+		{"a start with no search yet", nil, nil},
+		{"a start whose first search misses", [][]wiim.Device{nil}, nil},
+		{"a start whose first two searches miss", [][]wiim.Device{nil, nil}, nil},
+		{"a start whose searches never find the amp", [][]wiim.Device{nil, nil, nil}, []string{strings.ToLower(firstUUID)}},
+		{"an amp that stands", [][]wiim.Device{amp, amp, amp}, nil},
+		{"an amp missed twice", [][]wiim.Device{amp, nil, nil}, nil},
+		{"an amp that is gone", [][]wiim.Device{amp, nil, nil, nil}, []string{strings.ToLower(firstUUID)}},
+		{"an amp that returns after a start", [][]wiim.Device{nil, nil, amp, nil, nil}, nil},
+		{"an amp that returns before the bound", [][]wiim.Device{amp, nil, nil, amp, nil, nil}, nil},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api, client := startDiscoveryAPI(t)
+			api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
+			held := newDiscovery(client, func() {})
+			held.now = searchClock()
+			held.log = &logBuffer{}
+
+			mustSucceed(t, held.reconcile())
+			for _, found := range one.searches {
+				held.store(found)
+				mustSucceed(t, held.reconcile())
+			}
+
+			mustDeepEqual(t, api.deletedNames(), one.deleted)
+			mustDeepEqual(t, api.appliedNames(), []string(nil))
+		})
+	}
+}
+
+// A person's Receiver that names the amp replaces the operator's copy at
+// once, whatever the searches have found.
+func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
+	cases := []struct {
+		name     string
+		searches [][]wiim.Device
+	}{
+		{"before any search", nil},
+		{"after a search that missed the amp", [][]wiim.Device{nil}},
+		{"after a search that found the amp", [][]wiim.Device{{{UUID: firstUUID, Address: "192.0.2.1"}}}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api, client := startDiscoveryAPI(t)
+			api.list = receiversWith(
+				discoveredReceiver(strings.ToLower(firstUUID), firstUUID),
+				wiimReceiver("studio", firstSpellOf(firstUUID)),
+			)
+			held := newDiscovery(client, func() {})
+			held.log = &logBuffer{}
+			for _, found := range one.searches {
+				held.store(found)
+			}
+
+			mustSucceed(t, held.reconcile())
+
+			mustDeepEqual(t, api.deletedNames(), []string{strings.ToLower(firstUUID)})
+			mustDeepEqual(t, api.appliedNames(), []string(nil))
+		})
+	}
+}
+
+// One missed search is multicast, not an amp that left, so the address
+// stands through it.
+func TestDiscoveryKeepsTheAddressThroughAMissedSearch(t *testing.T) {
+	held := newDiscovery(nil, func() {})
+	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
+	held.store(nil)
+
+	mustMatch(t, held.address(firstUUID), "192.0.2.1")
+}
+
+// A search its context cut short did not run its full window, so it
+// does not count as a miss.
+func TestDiscoveryCountsOnlyFullSearches(t *testing.T) {
+	cases := []struct {
+		name    string
+		cut     bool
+		deleted []string
+	}{
+		{"full searches", false, []string{strings.ToLower(firstUUID)}},
+		{"searches cut short", true, nil},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api, client := startDiscoveryAPI(t)
+			api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
+			restore := discover
+			t.Cleanup(func() { discover = restore })
+			discover = func(context.Context, time.Duration) []wiim.Device { return nil }
+			held := newDiscovery(client, func() {})
+			held.log = &logBuffer{}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			if one.cut {
+				cancel()
+			}
+
+			for range discoveryMisses {
+				held.once(ctx)
+			}
+
+			mustDeepEqual(t, api.deletedNames(), one.deleted)
 		})
 	}
 }
