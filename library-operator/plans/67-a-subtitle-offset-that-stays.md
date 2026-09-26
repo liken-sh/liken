@@ -9,13 +9,13 @@ starts with that offset.
 
 Some subtitle tracks are early or late against the video. The control
 strip on the media-operator screen has a subtitle offset that moves
-mpv's `sub-delay` by 50 ms for each press, so a person can correct the
+mpv's `sub-delay` by 100 ms for each press, so a person can correct the
 timing by hand. The correction is lost when the play ends. The next play
 of the same film starts at 0, and the person must find the same offset
 again.
 
 The strip also does not say which direction is which. Right makes the
-offset larger and left makes it smaller, but a person who sees "+250 ms"
+offset larger and left makes it smaller, but a person who sees "+300 ms"
 cannot tell whether the subtitles now show sooner or later.
 
 ## The idea
@@ -47,7 +47,7 @@ stored.
 **The strip names the direction.** A positive `sub-delay` shows the
 subtitles later. The adjuster's hint changes to name the direction of
 each key, for example "left: subtitles sooner, right: subtitles later",
-and the value carries the same word, for example "+250 ms later". That
+and the value carries the same word, for example "+300 ms later". That
 change is in media-operator's `display` crate.
 
 ## What the design must answer
@@ -66,7 +66,7 @@ design that builds this plan decides how to meet them.
   plays at 0, and that 0 must not erase the saved offset.
 - A subtitle file that is renamed or removed leaves its saved offset
   with no track. The scanner's mark-and-sweep must remove it.
-- The adjuster clamps the offset to 5 seconds in each direction.
+- The adjuster clamps the offset to 10 seconds in each direction.
 
 ## Not in this plan
 
