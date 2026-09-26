@@ -20,7 +20,7 @@ to leave a plan open. The built part closes, and the part still owed
 becomes a new plan or an open problem.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 70.
+milestone is 71.
 
 [`open-problems/`](open-problems/) records unresolved bugs and design
 questions. Each document explains the evidence, possible remedies, and
@@ -281,6 +281,12 @@ milestone number because their implementation scope is not settled.
   in pinned, signed stagex images. A component builds only when its
   pin changes, and each build goes to `releases.liken.sh/components/`
   once, with its source, its recipe, and a signed attestation.
+* **70.** [Init attaches serio devices to their serial lines](70-init-attaches-serio-devices.md).
+  A `spec.serio` entry names a protocol and a USB device, and init
+  holds the `serport` line discipline on that device's serial line
+  for the life of the boot, so a USB-CEC adapter's kernel driver
+  binds. The DRA driver publishes the result as a CEC device and an
+  input device, and never publishes the serial line.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
