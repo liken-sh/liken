@@ -5,7 +5,7 @@
 // the browser holds the stack, so a screen names the screen it opens
 // and never pushes one itself.
 
-use super::Browser;
+use super::{Browser, lines};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::screens::{self, Step, loading};
@@ -101,6 +101,8 @@ impl<S: Source, A: Art> Browser<S, A> {
         self.on_strip = false;
         if self.stack.pop().is_some() {
             self.reread_top();
+            let top = lines::screen(self.top());
+            self.did(format!("went back to {top}"));
             return;
         }
         self.home();
@@ -111,8 +113,12 @@ impl<S: Source, A: Art> Browser<S, A> {
     // back to the browser the way a quiet window's does. A browser with no
     // bus has no shade to ask for.
     pub(super) fn rest(&mut self) {
-        if let Some(bus) = &self.bus {
-            bus.sleep();
+        match &self.bus {
+            Some(bus) => {
+                bus.sleep();
+                self.did("asked for the shade");
+            }
+            None => self.did("changed nothing, because this run has no bus to ask for the shade"),
         }
     }
 
@@ -122,6 +128,10 @@ impl<S: Source, A: Art> Browser<S, A> {
     pub(super) fn search(&mut self, text: &str, grid: bool) {
         let screen = screens::wall::searched(text, grid, &mut self.source);
         self.opened(screen);
+        self.did(match grid {
+            true => "opened the search wall with the keyboard grid",
+            false => "opened the search wall with the character typed",
+        });
     }
 
     // Home drops every screen over the home page in one press and then
@@ -134,9 +144,11 @@ impl<S: Source, A: Art> Browser<S, A> {
             if let screens::Screen::Home(home) = &mut self.home {
                 home.top();
             }
+            self.did("moved focus to the top of the home page");
             return;
         }
         self.stack.clear();
         self.refresh_home();
+        self.did("went to the home page");
     }
 }

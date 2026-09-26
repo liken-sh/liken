@@ -51,7 +51,10 @@ func (o *operator) holdPerson(ctx context.Context, person *Person) {
 	if _, err := PatchPersonFinalizers(ctx, o.client, person.Metadata.Name,
 		person.Metadata.ResourceVersion, person.Metadata.with(progressFinalizer)); err != nil {
 		fmt.Fprintf(os.Stderr, "holding person %s: %v\n", person.Metadata.Name, err)
+		return
 	}
+	o.logf("person %s: holding the finalizer %s, so a delete waits for the progress stores",
+		person.Metadata.Name, progressFinalizer)
 }
 
 // forgetPerson asks every store to drop the person's rows and releases
@@ -61,6 +64,10 @@ func (o *operator) holdPerson(ctx context.Context, person *Person) {
 func (o *operator) forgetPerson(ctx context.Context, person *Person, stores map[string]bool, now time.Time) {
 	name := person.Metadata.Name
 	forget := personForgetTopic(o.topicBase, name)
+	if _, asked := o.published[forget]; !asked {
+		o.logf("person %s is deleting: asked the progress stores of %s to forget the person's progress",
+			name, counted(len(stores), "namespace"))
+	}
 	o.publishStanding(forget, personForgetRequest{At: now.UTC().Format(time.RFC3339)})
 
 	forgotten := o.marks.forgottenBy(name)
@@ -87,6 +94,8 @@ func (o *operator) forgetPerson(ctx context.Context, person *Person, stores map[
 		o.clearTopic(personForgottenTopic(o.topicBase, name, namespace))
 	}
 	o.marks.dropForgotten(name)
+	o.logf("person %s: released the finalizer, because the progress stores of %s forgot the person's progress",
+		name, counted(len(stores), "namespace"))
 }
 
 // personNamed is the Person the cluster holds under one name, or

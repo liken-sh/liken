@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use crate::harness::Waker;
+use crate::log::opaque;
 
 // The local module implements this seam over plan 06's delivery: a
 // read-only open of the agent's file, and its update stream.
@@ -639,17 +640,18 @@ pub enum Selection {
 }
 
 impl Selection {
-    /// The choice as one line, for the log line a resolve that found
-    /// nothing writes.
+    /// The choice as the browser's log lines name it. Each id goes
+    /// through `log::opaque`, so an id that carries a folder name
+    /// names no title in the pod log.
     pub fn named(&self) -> String {
         match self {
-            Self::Movie { id } => id.clone(),
-            Self::Trailer { id } => format!("{id} trailer"),
+            Self::Movie { id } => opaque(id),
+            Self::Trailer { id } => format!("{} trailer", opaque(id)),
             Self::Episode {
                 series,
                 season,
                 episode,
-            } => format!("{series} S{season}E{episode}"),
+            } => format!("{} S{season}E{episode}", opaque(series)),
         }
     }
 }
@@ -793,5 +795,15 @@ mod tests {
             .named(),
             "series:tvdb:1 S2E4"
         );
+    }
+
+    #[test]
+    fn a_choice_named_by_its_folder_names_no_folder_in_the_log() {
+        let named = Selection::Movie {
+            id: "movie:path:Film A (2001)".into(),
+        }
+        .named();
+        assert_eq!(named, crate::log::opaque("movie:path:Film A (2001)"));
+        assert!(!named.contains("Film A"));
     }
 }

@@ -224,7 +224,7 @@ func TestAWorkOrAPersonJellyfinDoesNotHoldIsSkipped(t *testing.T) {
 		line    string
 	}{
 		{name: "a film jellyfin does not hold", people: []string{"chris"},
-			aliases: map[string]string{"tmdb": "1"}, line: "jellyfin holds no item for play-1"},
+			aliases: map[string]string{"tmdb": "1"}, line: "jellyfin holds no item for the Play of tmdb:1"},
 		{name: "a person jellyfin does not hold", people: []string{"nobody"},
 			aliases: map[string]string{"tmdb": "603"}, line: "jellyfin holds no user named nobody"},
 	} {
@@ -358,11 +358,11 @@ func TestAMessageOfAnotherShapeLeavesALine(t *testing.T) {
 		read func(*jellyfinOutbound)
 		line string
 	}{
-		{name: "the status", line: "the status of play-1 reads as no report",
+		{name: "the status", line: "the status of a Play with no audience yet reads as no report",
 			read: func(out *jellyfinOutbound) { out.status("play-1", []byte("{")) }},
-		{name: "the audience", line: "the audience of play-1 reads as no audience",
+		{name: "the audience", line: "the audience of a Play with no audience yet reads as no audience",
 			read: func(out *jellyfinOutbound) { out.audience("play-1", []byte("{")) }},
-		{name: "the final", line: "the final status of play-1 reads as no status",
+		{name: "the final", line: "the final status of a Play with no audience yet reads as no status",
 			read: func(out *jellyfinOutbound) { out.final(t.Context(), "play-1", []byte("{")) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -384,7 +384,7 @@ func TestAPositionOfAnotherShapeReadsAsTheStart(t *testing.T) {
 
 	out.status("play-1", []byte(`{"item":0,"position":"soon","duration":"2:16:00"}`))
 
-	if !strings.Contains(logged.String(), `the position "soon" of play-1 reads as no time`) {
+	if !strings.Contains(logged.String(), `the position "soon" of a Play with no audience yet reads as no time`) {
 		t.Errorf("log = %q, want the position it could not read", logged.String())
 	}
 }

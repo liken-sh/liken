@@ -109,6 +109,15 @@ func (j *jellyfin) webhook(w http.ResponseWriter, request *http.Request) {
 	// post catches the next, ten seconds later, and a stop repeats the
 	// final position.
 	j.publish(playOutsideTopic(j.topicBase, j.namespace, name), payload, false)
+	// A progress post comes every ten seconds of a play, so only the
+	// events a person causes, a start, a stop, and a mark by hand, leave a
+	// line.
+	if !strings.EqualFold(event.Event, jellyfinProgressEvent) {
+		j.logf("jellyfin %s for person %s, user %s, item %s, of %s: published position %s of %s, ended %t",
+			event.Event, event.User, jellyfinID(event.UserID), jellyfinID(event.ItemID),
+			workNamed(play.Aliases, play.Season, play.Episode),
+			positionText(play.Position), positionText(play.Duration), play.Ended)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

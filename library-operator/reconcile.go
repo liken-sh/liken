@@ -43,6 +43,12 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 	if err := o.holdLibrary(ctx, library); err != nil {
 		return err
 	}
+	// The status records the generation this pass judged, so the next pass
+	// reads it back and the edit leaves one line.
+	if observedGeneration(library.Status.Conditions) < library.Metadata.Generation {
+		o.logf("library %s/%s: acting on spec generation %d, which the status has not observed",
+			library.Metadata.Namespace, library.Metadata.Name, library.Metadata.Generation)
+	}
 
 	bound, err := resolveStorage(ctx, o.client, library)
 	if err != nil {
@@ -315,4 +321,14 @@ func stampTemplateHash(metadata *ObjectMeta, spec any) error {
 // anything but this operator counts as diverged.
 func sameTemplate(live, desired *ObjectMeta) bool {
 	return live.Annotations[templateHashAnnotation] == desired.Annotations[templateHashAnnotation]
+}
+
+// The newest generation any condition of a status judged, and zero for a
+// status that holds none.
+func observedGeneration(conditions []Condition) int64 {
+	var newest int64
+	for _, condition := range conditions {
+		newest = max(newest, condition.ObservedGeneration)
+	}
+	return newest
 }

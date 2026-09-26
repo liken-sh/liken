@@ -52,6 +52,16 @@ The browser's first log line reports the home page's open time:
 
     media-browser: the home page opened in 38.2 ms
 
+After that, the browser prints one line for each press, each play
+request, and each change the bus confirms. A line names a title by
+its catalog id and never by its name, and it names a typed character
+only as "a character":
+
+    media-browser: press enter (KEY_OK): opened the movie page of movie:tmdb:1001 in media/films
+    media-browser: play movie:tmdb:1001 in media/films from the start for person-a: sent a request for 1 file on liken/library/players/media/living-room-player/play
+    media-browser: press enter (KEY_OK): asked to play movie:tmdb:1001
+    media-browser: the player went from idle to starting
+
 When the default `MediaPreferences` states `spec.timeZone`, the
 browser draws its clock in that zone. Otherwise it runs on UTC.
 

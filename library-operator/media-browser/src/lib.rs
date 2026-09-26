@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod clock;
 pub mod focus;
 pub mod harness;
+pub mod log;
 pub mod look;
 pub mod metrics;
 pub mod sample;

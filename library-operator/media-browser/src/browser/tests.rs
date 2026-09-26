@@ -11,6 +11,7 @@ mod clock;
 mod home;
 mod identity;
 mod keys;
+mod lines;
 mod loading;
 mod moments;
 mod pages;

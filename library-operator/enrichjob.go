@@ -47,6 +47,29 @@ type libraryJob struct {
 	paths  []string
 	phases []servedPhase
 	sync   syncTarget
+	// Why the pass starts the Job, in the words of the log line.
+	cause string
+}
+
+// What the Job covers, in the words of the log line: a full walk or a walk
+// of some folders, or a Job that fills gaps, with the phases it runs. The
+// folders appear only as a count, because a folder carries a title.
+func (j libraryJob) described() string {
+	names := make([]string, 0, len(j.phases))
+	for _, phase := range j.phases {
+		names = append(names, phase.name)
+	}
+	phases := "no phases"
+	if len(names) > 0 {
+		phases = "the phases " + strings.Join(names, ", ")
+	}
+	switch {
+	case j.mode == jobModeGaps:
+		return "a job that fills gaps with " + phases
+	case len(j.paths) > 0:
+		return "a walk of " + counted(len(j.paths), "folder") + " with " + phases
+	}
+	return "a full walk with " + phases
 }
 
 // The images a library Job runs: the operator's own, the one with ffmpeg for

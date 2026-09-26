@@ -56,7 +56,7 @@ func (o *operator) reconcilePlays(ctx context.Context, plays []Play, stores map[
 		// release. The operator releases it itself.
 		if !stores[play.Metadata.Namespace] {
 			if play.Metadata.holds(progressFinalizer) {
-				o.releasePlay(ctx, play)
+				o.releasePlay(ctx, play, "namespace "+play.Metadata.Namespace+" holds no progress store")
 			}
 			continue
 		}
@@ -96,7 +96,8 @@ func (o *operator) reconcilePlay(ctx context.Context, play *Play) {
 		return
 	}
 	if recorded, held := o.marks.recordedFor(namespace, name); held && recorded.Ended {
-		o.releasePlay(ctx, play)
+		o.releasePlay(ctx, play, fmt.Sprintf("the progress store recorded its end at item %d, position %s",
+			recorded.Item, recorded.Position))
 	}
 }
 
@@ -174,7 +175,10 @@ func playFinalOf(play *Play) playFinal {
 // one no store will record, then drops the three retained messages that
 // stood for it. The finalizer goes first, because the object is what a
 // person is waiting on and the topics are the operator's own to tidy.
-func (o *operator) releasePlay(ctx context.Context, play *Play) {
+//
+// The line names the Play by its uid and its work, because its name is
+// minted from the title.
+func (o *operator) releasePlay(ctx context.Context, play *Play, why string) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 
 	_, err := PatchPlayMetadata(ctx, o.client, namespace, name, play.Metadata.ResourceVersion,
@@ -191,6 +195,9 @@ func (o *operator) releasePlay(ctx context.Context, play *Play) {
 	}
 	o.clearPlayTopics(namespace, name)
 	o.marks.dropRecorded(namespace, name)
+	audience := playAudienceOf(play)
+	o.logf("released the Play with uid %s of %s, because %s", play.Metadata.UID,
+		workNamed(audience.Aliases, audience.Season, audience.Episode), why)
 }
 
 // clearPlayTopics drops every retained message one Play stood on the

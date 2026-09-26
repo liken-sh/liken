@@ -77,7 +77,7 @@ func TestReleaseCarriesOnFromAConflictAndAnAbsentLibrary(t *testing.T) {
 			operator := testOperator(t, cluster)
 			one.setup(cluster)
 
-			if err := operator.releaseLibrary(t.Context(), library); err != nil {
+			if err := operator.releaseLibrary(t.Context(), library, "the test released it"); err != nil {
 				t.Fatalf("the release reported %v, want it to carry on", err)
 			}
 		})
@@ -93,7 +93,7 @@ func TestReleaseReportsAFailureToRetireTheCleanupJob(t *testing.T) {
 	cluster.holdJob(&done)
 	cluster.broken["/apis/batch/v1/namespaces/house/jobs/movies-cleanup"] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).releaseLibrary(t.Context(), library)
+	err := testOperator(t, cluster).releaseLibrary(t.Context(), library, "the test released it")
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure the release could not read past")

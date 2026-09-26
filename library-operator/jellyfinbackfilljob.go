@@ -106,9 +106,15 @@ func (o *operator) standJellyfinBackfill(ctx context.Context, catalog *Namespace
 		return &CatalogJellyfinStatus{Server: server, Backfill: backfillPending}
 	}
 	created := buildJellyfinBackfillJob(catalog, o.scannerImage, o.busAddress, o.topicBase, o.mediaTopicBase)
-	if _, err := CreateJob(ctx, o.client, created); err != nil && !errors.Is(err, ErrConflict) {
-		fmt.Fprintf(os.Stderr, "creating the jellyfin backfill job in %s: %v\n", namespace, err)
+	_, err := CreateJob(ctx, o.client, created)
+	if err != nil && !errors.Is(err, ErrConflict) {
+		o.logf("catalog %s/%s: could not create the job %s: %v", namespace, name, created.Metadata.Name, err)
 		return &CatalogJellyfinStatus{Server: server, Backfill: backfillPending}
+	}
+	// A conflict is another writer's create, and that writer's line says so.
+	if err == nil {
+		o.logf("catalog %s/%s: created the job %s to copy every person's progress "+
+			"from the jellyfin server spec.jellyfin names", namespace, name, created.Metadata.Name)
 	}
 	return &CatalogJellyfinStatus{Server: server, Backfill: backfillRunning}
 }
@@ -122,12 +128,19 @@ func (o *operator) readJellyfinBackfillJob(ctx context.Context, catalog *Namespa
 	switch {
 	case job.Status.Succeeded > 0:
 		delete(o.backfillStands, libraryKey(namespace, name))
+		// The status says finished from the first pass that reads the
+		// success, so that pass alone writes the line.
+		if !backfilledFrom(catalog.Status.Jellyfin, server) {
+			o.logf("catalog %s/%s: the job %s finished the jellyfin backfill", namespace, name, job.Metadata.Name)
+		}
 		return &CatalogJellyfinStatus{
 			Server:     server,
 			Backfill:   backfillFinished,
 			Backfilled: backfilledAt(catalog.Status.Jellyfin, server, now),
 		}
 	case job.gaveUp():
+		o.logf("catalog %s/%s: the job %s failed the jellyfin backfill after %d attempts, "+
+			"and a later pass creates it again", namespace, name, job.Metadata.Name, job.Status.Failed)
 		if err := o.retireJellyfinBackfill(ctx, namespace, name); err != nil {
 			fmt.Fprintf(os.Stderr, "deleting the failed jellyfin backfill job in %s: %v\n", namespace, err)
 		}

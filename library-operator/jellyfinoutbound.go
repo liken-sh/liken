@@ -77,7 +77,7 @@ func (o *jellyfinOutbound) status(name string, payload []byte) {
 	}
 	status := mediaPlayStatus{}
 	if err := json.Unmarshal(payload, &status); err != nil {
-		o.logf("the status of %s reads as no report: %v", name, err)
+		o.logf("the status of %s reads as no report: %v", o.named(name), err)
 		return
 	}
 	position, duration := o.seconds(name, status.Position), o.seconds(name, status.Duration)
@@ -98,7 +98,7 @@ func (o *jellyfinOutbound) audience(name string, payload []byte) {
 	}
 	audience := playAudience{}
 	if err := json.Unmarshal(payload, &audience); err != nil {
-		o.logf("the audience of %s reads as no audience: %v", name, err)
+		o.logf("the audience of %s reads as no audience: %v", o.named(name), err)
 		return
 	}
 
@@ -119,7 +119,7 @@ func (o *jellyfinOutbound) final(ctx context.Context, name string, payload []byt
 	}
 	final := playFinal{}
 	if err := json.Unmarshal(payload, &final); err != nil {
-		o.logf("the final status of %s reads as no status: %v", name, err)
+		o.logf("the final status of %s reads as no status: %v", o.named(name), err)
 		return
 	}
 	position, duration := o.seconds(name, final.Position), o.seconds(name, final.Duration)
@@ -130,7 +130,7 @@ func (o *jellyfinOutbound) final(ctx context.Context, name string, payload []byt
 	held.reported = true
 	o.mutex.Unlock()
 
-	o.write(ctx, name)
+	o.write(ctx, name, true)
 }
 
 // tick writes every Play whose position moved since its last write. A Play
@@ -138,7 +138,7 @@ func (o *jellyfinOutbound) final(ctx context.Context, name string, payload []byt
 // bus and no request to Jellyfin.
 func (o *jellyfinOutbound) tick(ctx context.Context) {
 	for _, name := range o.moved() {
-		o.write(ctx, name)
+		o.write(ctx, name, false)
 	}
 }
 
@@ -162,7 +162,11 @@ func (o *jellyfinOutbound) moved() []string {
 // A work or a person Jellyfin does not hold leaves a line in the pod log and
 // no write. The index has already asked the server again by the time this
 // answers.
-func (o *jellyfinOutbound) write(ctx context.Context, name string) {
+//
+// A final write is the end of a Play a person stopped or watched through,
+// so each person's write leaves a line. A tick's write moves a position
+// that plays on, and leaves a line only where it fails.
+func (o *jellyfinOutbound) write(ctx context.Context, name string, final bool) {
 	o.mutex.Lock()
 	live, standing := o.plays[name]
 	if !standing {
@@ -177,7 +181,7 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string) {
 	}
 	item, found := o.index.itemFor(ctx, held.aliases, held.season, held.episode)
 	if !found {
-		o.logf("jellyfin holds no item for %s", name)
+		o.logf("jellyfin holds no item for %s", described(held))
 		return
 	}
 	data := jellyfinUserData{
@@ -186,7 +190,11 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string) {
 		LastPlayedDate:        o.now().UTC().Format(time.RFC3339),
 	}
 	for _, person := range held.people {
-		o.writeOne(ctx, person, item, held.position, data)
+		user, wrote := o.writeOne(ctx, person, item, held.position, data)
+		if wrote && final {
+			o.logf("wrote the final position %s of %s to jellyfin for person %s: item %s, user %s, played %t",
+				positionText(held.position), described(held), person, item, user, data.Played)
+		}
 	}
 
 	o.mutex.Lock()
@@ -195,17 +203,46 @@ func (o *jellyfinOutbound) write(ctx context.Context, name string) {
 }
 
 // One person's write, and the position it leaves behind for the echo drop.
-func (o *jellyfinOutbound) writeOne(ctx context.Context, person, item string, position int, data jellyfinUserData) {
+func (o *jellyfinOutbound) writeOne(ctx context.Context, person, item string, position int,
+	data jellyfinUserData) (string, bool) {
 	user, known := o.index.userFor(ctx, person)
 	if !known {
 		o.logf("jellyfin holds no user named %s", person)
-		return
+		return "", false
 	}
 	if err := o.api.writeUserData(ctx, item, user, data); err != nil {
 		o.logf("could not write the progress of %s in jellyfin: %v", person, err)
-		return
+		return "", false
 	}
 	o.echoes.remember(user, item, position)
+	return user, true
+}
+
+// named is one Play as a line names it: by its work, where its audience has
+// arrived. The name on the topic is minted from the title, so no line
+// carries it.
+func (o *jellyfinOutbound) named(name string) string {
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+	held, standing := o.plays[name]
+	if !standing {
+		return "a Play with no audience yet"
+	}
+	return described(*held)
+}
+
+// described is a Play the role holds, named by its work.
+func described(held jellyfinPlay) string {
+	if len(held.aliases) == 0 {
+		return "a Play with no audience yet"
+	}
+	return "the Play of " + workNamed(held.aliases, held.season, held.episode)
+}
+
+// positionText is a position in seconds in the H:MM:SS form the Play's
+// status carries, so a line reads the way the Play does.
+func positionText(seconds int) string {
+	return fmt.Sprintf("%d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
 }
 
 // forget drops one Play. The operator clears a Play's topics once it releases
@@ -232,7 +269,7 @@ func (o *jellyfinOutbound) entry(name string) *jellyfinPlay {
 func (o *jellyfinOutbound) seconds(name, value string) int {
 	seconds, ok := parsePosition(value)
 	if !ok {
-		o.logf("the position %q of %s reads as no time", value, name)
+		o.logf("the position %q of %s reads as no time", value, o.named(name))
 	}
 	return seconds
 }

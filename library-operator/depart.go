@@ -36,6 +36,8 @@ type departure struct {
 	clear   bool
 	reason  string
 	message string
+	// Why the finalizer may go, in the words of the log line.
+	why string
 }
 
 // depart runs one pass over a deleting Library. A Library that does
@@ -51,7 +53,7 @@ func (o *operator) depart(ctx context.Context, library *Library, choice catalogC
 		return err
 	}
 	if stage.clear {
-		return o.releaseLibrary(ctx, library)
+		return o.releaseLibrary(ctx, library, stage.why)
 	}
 	return writeLibraryStatus(ctx, o.client, library,
 		departingStatus(library, stage, time.Now().UTC()))
@@ -69,7 +71,7 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 	// everything else and no new Job can start.
 	if choice.catalog == nil {
 		if choice.reason == reasonNoCatalog {
-			return departure{clear: true}, nil
+			return departure{clear: true, why: "the namespace holds no Catalog"}, nil
 		}
 		// More than one Catalog: the sweep cannot tell which cluster it
 		// would be deleting from, so the departure waits for a person.
@@ -111,7 +113,8 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 		return departure{reason: reasonBlocked, message: blocker}, nil
 	}
 	if cleanupComplete(job, report) {
-		return departure{clear: true}, nil
+		return departure{clear: true, why: "the job " + job.Metadata.Name +
+			" swept its rows and the reporter echoed it"}, nil
 	}
 	if job != nil && job.Status.Succeeded > 0 {
 		return departure{
@@ -150,7 +153,7 @@ func (o *operator) standDepartureClaim(ctx context.Context, library *Library, ch
 // finalizer off last, so the act that releases the object is the final
 // one. The garbage collector then takes the catalog claim with the
 // Library.
-func (o *operator) releaseLibrary(ctx context.Context, library *Library) error {
+func (o *operator) releaseLibrary(ctx context.Context, library *Library, why string) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 
 	if err := o.retireCleanupJob(ctx, namespace, name); err != nil {
@@ -175,6 +178,7 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library) error {
 		return err
 	}
 	delete(o.cleanupStands, libraryKey(namespace, name))
+	o.logf("library %s/%s: released the finalizer, because %s", namespace, name, why)
 	return nil
 }
 

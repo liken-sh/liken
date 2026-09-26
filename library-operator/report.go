@@ -104,12 +104,38 @@ func libraryKey(namespace, name string) string {
 // walk and when it applies a change, and neither happens often, so
 // there is nothing here to throttle: a report that arrives is a report
 // worth writing into the resource at once.
-func (r *reports) fold(namespace, name string, report libraryReport) {
+//
+// It answers with the runs this report ended: a row that carries a finish
+// the desk's report did not. A desk that held no report answers none, because
+// the first report after a restart replays runs that ended long ago.
+func (r *reports) fold(namespace, name string, report libraryReport) []libraryRun {
 	key := libraryKey(namespace, name)
 	r.mutex.Lock()
+	before, held := r.latest[key]
 	r.latest[key] = report
 	r.mutex.Unlock()
 	r.poke()
+	if !held {
+		return nil
+	}
+	return endedRuns(before.Runs, report.Runs)
+}
+
+// The runs that carry a finish the earlier runs did not, for the same Job. A
+// Job writes its finished row twice, the second time with the write that
+// made it, and the finish does not move, so the second write ends nothing.
+func endedRuns(before, after []libraryRun) []libraryRun {
+	var ended []libraryRun
+	for _, run := range after {
+		if run.Finished.IsZero() {
+			continue
+		}
+		if was, ran := runOf(before, run.Worker); ran && was.Job == run.Job && was.Finished.Equal(run.Finished) {
+			continue
+		}
+		ended = append(ended, run)
+	}
+	return ended
 }
 
 // latestFor returns the newest report, the only one kept, or nil when

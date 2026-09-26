@@ -16,7 +16,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -108,8 +110,15 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	}
 	job := buildLibraryJob(library, providers, o.languages, plan,
 		jobImages{operator: o.scannerImage, ffmpeg: o.ffmpegImage, corrosion: o.corrosionImage}, now)
-	if _, err := CreateJob(ctx, o.client, job); err != nil && !errors.Is(err, ErrConflict) {
+	_, err := CreateJob(ctx, o.client, job)
+	if err != nil && !errors.Is(err, ErrConflict) {
 		return fmt.Errorf("creating the library job %s: %w", job.Metadata.Name, err)
+	}
+	// A conflict is another writer's create of the same Job, and that
+	// writer's line is the one that says so.
+	if err == nil {
+		o.logf("library %s/%s: created the job %s, %s, because %s",
+			namespace, name, job.Metadata.Name, plan.described(), plan.cause)
 	}
 	// A walk covers every folder the webhooks named before it, so each one
 	// the pass read is released. A folder named after the read stays for
@@ -150,17 +159,53 @@ func nextLibraryJob(library *Library, report *libraryReport, jobs []Job, provide
 	held []string, now time.Time) (libraryJob, bool) {
 	served := servedPhases(library, providers)
 	last := lastWalkStart(report, jobs, library.Metadata.Namespace, library.Metadata.Name)
-	if walkDue(library, last, now) || walkRequested(library, last) || slices.Contains(held, "") {
-		return libraryJob{mode: jobModeWalk, phases: served}, true
+	if cause := walkCause(library, last, held, now); cause != "" {
+		return libraryJob{mode: jobModeWalk, phases: served, cause: cause}, true
 	}
 	if len(held) > 0 {
-		return libraryJob{mode: jobModeWalk, paths: held, phases: served}, true
+		return libraryJob{mode: jobModeWalk, paths: held, phases: served,
+			cause: "a webhook named " + counted(len(held), "folder")}, true
 	}
 	if report == nil {
 		return libraryJob{}, false
 	}
 	gaps := gapPhases(library, report, providers, served, now)
-	return libraryJob{mode: jobModeGaps, phases: gaps}, len(gaps) > 0
+	return libraryJob{mode: jobModeGaps, phases: gaps, cause: gapCause(library, report.Runs, now)}, len(gaps) > 0
+}
+
+// Why a full walk is due, in the words of the log line, or empty where
+// none is due. The schedule comes first, because a walk it starts answers
+// a request and a webhook too.
+func walkCause(library *Library, last time.Time, held []string, now time.Time) string {
+	switch {
+	case last.IsZero():
+		return "the library has no walk yet"
+	case walkDue(library, last, now):
+		return "spec.scan.schedule came due"
+	case walkRequested(library, last):
+		return "spec.refresh asked for a walk at " + library.Spec.Refresh[refreshWalk].UTC().Format(time.RFC3339)
+	case slices.Contains(held, ""):
+		return "a webhook asked for a full walk"
+	}
+	return ""
+}
+
+// Why a Job that fills gaps is due, in the words of the log line: the facts
+// a person asked again for through spec.refresh since the last Job started,
+// or the gaps alone.
+func gapCause(library *Library, runs []libraryRun, now time.Time) string {
+	enrich, _ := runOf(runs, workerEnrich)
+	var asked []string
+	for _, fact := range slices.Sorted(maps.Keys(library.Spec.Refresh)) {
+		refresh := library.Spec.Refresh[fact]
+		if isContainerFact(fact) && !refresh.After(now) && refresh.After(enrich.Started) {
+			asked = append(asked, fact)
+		}
+	}
+	if len(asked) == 0 {
+		return "gaps are open"
+	}
+	return "spec.refresh asked again for " + strings.Join(asked, ", ")
 }
 
 // When the last full walk of this Library started: the later of the scan run

@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -155,6 +156,11 @@ type operator struct {
 	// so a test that builds an operator by hand needs to set neither.
 	metrics        *metrics
 	metricsAddress string
+
+	// Where the lines of logline.go go: standard output in the process, and
+	// a buffer in a test that reads them. The mutex is logf's.
+	log      io.Writer
+	logMutex sync.Mutex
 }
 
 // NewOperator builds the operator and the two things it listens
@@ -191,6 +197,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, ffm
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
 		providerCalls:  map[string]providerCall{},
+		log:            os.Stdout,
 	}
 	// The operator names no will. Its one publish is the empty
 	// retained payload that drops a departed library's topics, and a
@@ -641,5 +648,23 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		fmt.Fprintf(os.Stderr, "reading the report on %s: %v\n", topic, err)
 		return
 	}
-	o.reports.fold(namespace, name, report)
+	for _, run := range o.reports.fold(namespace, name, report) {
+		o.logRun(namespace, name, run)
+	}
+}
+
+// logRun writes the line of one run that ended: the Job, the worker, and
+// what it left, or the failure in the worker's own words. Only a walk counts
+// titles, so only a walk's line carries counts.
+func (o *operator) logRun(namespace, name string, run libraryRun) {
+	switch {
+	case run.Failure != "":
+		o.logf("library %s/%s: the job %s ended its %s run with a failure: %s",
+			namespace, name, run.Job, run.Worker, run.Failure)
+	case run.Worker == workerScan || run.Worker == workerRescan:
+		o.logf("library %s/%s: the job %s finished its %s run: %d unidentified, %d removed",
+			namespace, name, run.Job, run.Worker, run.Unidentified, run.Removed)
+	default:
+		o.logf("library %s/%s: the job %s finished its %s run", namespace, name, run.Job, run.Worker)
+	}
 }

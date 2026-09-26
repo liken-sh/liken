@@ -150,7 +150,15 @@ func (o *operator) webhookHandler() http.Handler {
 			return
 		}
 		body, _ := io.ReadAll(io.LimitReader(request.Body, webhookBodyLimit))
-		o.paths.hold(namespace, name, extractWebhookPath(body))
+		folder := extractWebhookPath(body)
+		o.paths.hold(namespace, name, folder)
+		// The folder is a count in the line, because its name is a title.
+		if folder == "" {
+			o.logf("library %s/%s: a webhook named no folder, so the next pass walks the whole library",
+				namespace, name)
+		} else {
+			o.logf("library %s/%s: a webhook named 1 folder, which the next pass walks", namespace, name)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 }

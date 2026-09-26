@@ -563,6 +563,7 @@ func (f *fakeCluster) createPlay(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&created)
 	created.Metadata.Name = created.Metadata.GenerateName + mintedSuffix
 	created.Metadata.GenerateName = ""
+	created.Metadata.UID = mintedSuffix + "-uid"
 	f.plays = append(f.plays, created)
 	_ = json.NewEncoder(w).Encode(created)
 }

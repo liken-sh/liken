@@ -95,6 +95,8 @@ func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs [
 		if err != nil {
 			return nil, err
 		}
+		o.logf("library %s/%s is deleting: created the job %s to sweep its rows from the catalog",
+			namespace, name, created.Metadata.Name)
 		return created, nil
 	}
 	if live.Metadata.DeletionTimestamp != "" {

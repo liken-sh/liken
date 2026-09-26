@@ -141,15 +141,34 @@ func (o *operator) createPlays(ctx context.Context, players []Player, libraries 
 	for _, request := range o.plays.take() {
 		play, err := request.play(players, libraries, people, catalogs[request.Namespace])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "playing on %s/%s: %v\n",
-				request.Namespace, request.Player, err)
+			o.logf("%s: refused the request: %v", request.described(), err)
 			continue
 		}
-		if _, err := CreatePlay(ctx, o.client, play); err != nil {
-			fmt.Fprintf(os.Stderr, "playing on %s/%s: %v\n",
-				request.Namespace, request.Player, err)
+		created, err := CreatePlay(ctx, o.client, play)
+		if err != nil {
+			o.logf("%s: the API server refused the Play: %v", request.described(), err)
+			continue
 		}
+		o.logf("%s: created the Play with uid %s", request.described(), created.Metadata.UID)
 	}
+}
+
+// described is what a person asked for on the screen, as a log line may
+// carry it: the Player, the work by its ids, the library, how many items,
+// who is watching, and where the play starts. The slug and the paths carry
+// the title, so the line names neither.
+func (r playRequest) described() string {
+	people := "nobody"
+	if len(r.People) > 0 {
+		people = strings.Join(r.People, ", ")
+	}
+	start := "start at the beginning"
+	if r.Start != "" {
+		start = "start " + r.Start
+	}
+	return fmt.Sprintf("play request from player %s/%s for %s in library %s, %s, people %s, %s",
+		r.Namespace, r.Player, workNamed(r.Aliases, r.Season, r.Episode), r.Library,
+		counted(len(r.Items), "item"), people, start)
 }
 
 // play is the Play one request becomes, or the reason it becomes none.
@@ -423,7 +442,7 @@ func (i playRequestItem) stamped(library *Library) (PlayItem, error) {
 // created.
 func reference(library *Library, relative string) (string, error) {
 	if !inside(relative) {
-		return "", fmt.Errorf("the path %q is not inside the library", relative)
+		return "", fmt.Errorf("a path of the request is outside the library")
 	}
 	return "claim://" + library.Spec.screenClaim() + "/" +
 		path.Join(library.Spec.screenRoot(), relative), nil

@@ -27,6 +27,10 @@ response body, or its error string. The wrapped error and the status
 field or record that the failure writes both include it, so a person
 reads the cause from the log or the status without opening a shell.
 
+Every operation at human scale prints one line that says its cause,
+what was sent, and what came back, and names a title only by its
+catalog id through `opaqueID` or `log::opaque`.
+
 ## Releases and development builds
 
 A pushed tag is a release. The tag names a version in `liken`'s calendar

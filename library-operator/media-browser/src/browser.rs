@@ -23,12 +23,17 @@ use crate::catalog::search::Size;
 use crate::catalog::{Selection, Source};
 use crate::clock;
 use crate::harness::{Screen, Waker};
+use crate::log::Log;
 use crate::look;
 use crate::screens::upnext::{self, Next};
 use crate::screens::{self, Step, home, lights, loading, volume};
 use crate::views;
 
 mod keys;
+// The words the log lines use for screens, presses, and activities.
+mod lines;
+// One press and the line it prints.
+mod press;
 mod reader;
 // The refresh policy: the one place that decides when the browser reads
 // the catalog again.
@@ -143,6 +148,12 @@ pub struct Browser<S: Source, A: Art> {
     // nothing before the first tick. The clock draws a reading to the
     // minute, so this is the one frame it asks for.
     minute: Option<f64>,
+    // Where the lines for what a person does go. It is a field so a test
+    // reads the lines the browser printed.
+    log: Log,
+    // What the press in flight did, which its line reports. The handlers
+    // set it, and the press takes it when it ends.
+    did: Option<String>,
 }
 
 // How long focus stands still before the browser asks the store for the
@@ -195,6 +206,8 @@ impl<S: Source, A: Art> Browser<S, A> {
             on_strip: false,
             strip_focus: views::clock::strip::Target::default(),
             minute: None,
+            log: Log::default(),
+            did: None,
         }
     }
 
@@ -294,6 +307,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             self.audience.known().len(),
             &chosen,
         ));
+        self.did("raised the person picker");
     }
 
     // The picker as a layer over the stack, while the picker is up.
@@ -314,7 +328,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // The idle window ends an answer whether or not anybody pressed, so
         // the message on the bus goes here as well as on a press.
         if self.audience.lapse(self.clock) {
-            self.clear_audience();
+            self.lapsed();
         }
         let due = self.picker.is_none()
             && !self.asleep()
@@ -329,14 +343,19 @@ impl<S: Source, A: Art> Browser<S, A> {
     // Take the picker's answer: set who is watching, drop the gate, put
     // the room on the bus, and read again for the new people.
     fn answered(&mut self, chosen: Vec<usize>) {
-        let names = chosen
-            .into_iter()
-            .filter_map(|index| self.audience.known().get(index))
-            .map(|person| person.name.clone())
-            .collect();
+        let names = self.names(&chosen);
+        let people = lines::people(&names);
         self.audience.answer(names, self.clock);
         self.picker = None;
-        self.publish_audience((self.now)());
+        let sent = match self.publish_audience((self.now)()) {
+            true => format!("sent it on {}", self.audience_topic),
+            false => {
+                "sent nothing, because this browser has no audience topic on a bus".to_string()
+            }
+        };
+        self.did(format!(
+            "answered who is watching with {people}, and {sent}"
+        ));
         self.read_again();
     }
 
@@ -361,15 +380,17 @@ impl<S: Source, A: Art> Browser<S, A> {
     //
     // An audience with no answer publishes nothing: the message that
     // clears the topic is the lapse's, and it says something else.
-    fn publish_audience(&mut self, at: i64) {
+    //
+    // The answer is whether the message went out.
+    fn publish_audience(&mut self, at: i64) -> bool {
         let Some(people) = self.audience.watching(self.clock) else {
-            return;
+            return false;
         };
         let Some(bus) = &self.bus else {
-            return;
+            return false;
         };
         if self.audience_topic.is_empty() {
-            return;
+            return false;
         }
         bus.publish(
             &self.audience_topic,
@@ -377,6 +398,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             true,
         );
         self.audience.stamped(at);
+        true
     }
 
     // The answer lapsed, so the message goes with it. An empty payload is
@@ -390,6 +412,21 @@ impl<S: Source, A: Art> Browser<S, A> {
             return;
         }
         bus.publish(&self.audience_topic, Vec::new(), true);
+    }
+
+    // The idle window ended the answer to who is watching. The line
+    // prints once per answer, because the audience answers a lapse once.
+    fn lapsed(&mut self) {
+        self.clear_audience();
+        let cleared = match self.bus.is_some() && !self.audience_topic.is_empty() {
+            true => format!("cleared the message on {}", self.audience_topic),
+            false => {
+                "cleared nothing, because this browser has no audience topic on a bus".to_string()
+            }
+        };
+        self.log.line(format!(
+            "the answer to who is watching lapsed, and {cleared}"
+        ));
     }
 
     // The bus session started, so this client republishes the retained
@@ -429,7 +466,12 @@ impl<S: Source, A: Art> Browser<S, A> {
         // the distance from now, which is a second before zero on a run
         // that has just opened. The lapse measures that distance the same
         // way either side of zero.
-        let names = held.people.into_iter().map(|person| person.name).collect();
+        let names: Vec<String> = held.people.into_iter().map(|person| person.name).collect();
+        self.log.line(format!(
+            "took who is watching from the retained message on {}: {}",
+            self.audience_topic,
+            lines::people(&names)
+        ));
         self.audience.answer(names, self.clock - age);
         self.audience.stamped(held.at);
         // A picker the ask raised stands over the screen with nobody part
@@ -452,7 +494,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     // home, and the browser asks who is here now.
     fn pressed(&mut self) {
         if self.audience.touch(self.clock) {
-            self.clear_audience();
+            self.lapsed();
             return;
         }
         let now = (self.now)();
@@ -467,13 +509,20 @@ impl<S: Source, A: Art> Browser<S, A> {
     // binds no key for changes nothing.
     fn receive(&mut self, moment: Moment) {
         match moment {
-            Moment::Press(name) => {
-                if let Some(key) = key_of(&name) {
-                    self.key(key);
+            Moment::Press(name) => match key_of(&name) {
+                Some(key) => {
+                    self.press(key, Some(&name));
                 }
+                None => self.log.line(format!(
+                    "press {name}: changed nothing, because no key is bound to it"
+                )),
+            },
+            Moment::Sleep => {
+                self.log.line("the shade is down");
+                self.refresh.shade(true);
             }
-            Moment::Sleep => self.refresh.shade(true),
             Moment::Wake => {
+                self.log.line("the shade is up");
                 self.refresh.shade(false);
                 self.refresh.cover(false);
                 self.presented();
@@ -499,6 +548,15 @@ impl<S: Source, A: Art> Browser<S, A> {
             // still on its way draws its curtain over a page at full
             // brightness.
             Moment::Status(status) => {
+                // The operator publishes a status on every change of the
+                // unit, so only a change of activity is a line.
+                if self.activity != status.activity {
+                    self.log.line(format!(
+                        "the player went from {} to {}",
+                        lines::activity(self.activity),
+                        lines::activity(status.activity)
+                    ));
+                }
                 if self.activity != Activity::Idle && status.activity == Activity::Idle {
                     self.returning = true;
                     self.lifted();
@@ -547,9 +605,16 @@ impl<S: Source, A: Art> Browser<S, A> {
     // the run chains. A block this browser did not write starts nothing.
     fn play_next(&mut self, payload: &[u8]) {
         let Some(request) = next::request(payload) else {
-            eprintln!("media-browser: the play-next ask carried no request of this browser's");
+            self.log.line(
+                "the player asked for up next, and the ask carried no request of this browser's",
+            );
             return;
         };
+        self.log.line(format!(
+            "the player asked for up next: {} in {}",
+            request.selection.named(),
+            request.library
+        ));
         let people = self.audience.current(self.clock).to_vec();
         let (start, next) = upnext::again(&mut self.source, &request, &people);
         self.take(Step::Play {
@@ -641,25 +706,38 @@ impl<S: Source, A: Art> Browser<S, A> {
         start: Option<i64>,
         next: Option<&Next>,
     ) -> bool {
+        let people = self.audience.current(self.clock).to_vec();
+        let asked = format!(
+            "play {} in {library} {} for {}",
+            selection.named(),
+            lines::start(start),
+            lines::people(&people)
+        );
+        self.did(format!("asked to play {}", selection.named()));
         let items = self.source.play(library, selection);
         if items.is_empty() {
-            eprintln!(
-                "media-browser: no file to play for {} in {library}",
-                selection.named()
-            );
+            self.log.line(format!(
+                "{asked}: sent nothing, because the catalog holds no file to play"
+            ));
             return false;
         }
         // The work is read before the bus is borrowed, because the read
         // wants the source and the publish holds a borrow of the bus.
         let identity = self.source.identity(library, selection);
+        let files = lines::count(items.len(), "file");
         let Some(bus) = &self.bus else {
+            self.log.line(format!(
+                "{asked}: sent nothing, because this run has no bus"
+            ));
             return true;
         };
         // An older library operator names no topic, and the browser
         // then browses and starts nothing. The line in the pod log is
         // the only sign of the gap.
         if self.play_topic.is_empty() {
-            eprintln!("media-browser: no play topic, so this browser starts nothing");
+            self.log.line(format!(
+                "{asked}: sent nothing, because the operator named no play topic"
+            ));
             return true;
         }
         // A request is an event, so it is not retained: a broker that
@@ -667,16 +745,13 @@ impl<S: Source, A: Art> Browser<S, A> {
         // reconnect.
         bus.publish(
             &self.play_topic,
-            play::payload(
-                library,
-                &items,
-                self.audience.current(self.clock),
-                &identity,
-                start,
-                next,
-            ),
+            play::payload(library, &items, &people, &identity, start, next),
             false,
         );
+        self.log.line(format!(
+            "{asked}: sent a request for {files} on {}",
+            self.play_topic
+        ));
         true
     }
 
@@ -766,6 +841,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                         self.leave_strip();
                         let top = self.stack.last_mut().unwrap_or(&mut self.home);
                         top.show_grid();
+                        self.did("showed the keyboard grid");
                     }
                     false => self.search("", true),
                 }
@@ -789,7 +865,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         let top = self.stack.last_mut().unwrap_or(&mut self.home);
         let step = top.key(name, &mut self.source);
         let still = matches!(step, Step::Still);
-        self.take(step);
+        self.step(step);
         if still && name == "up" {
             self.enter_strip();
             return true;
@@ -813,100 +889,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     }
 
     fn key(&mut self, name: &str) -> bool {
-        // Every press holds the audience's answer open, whatever the press
-        // then does, because a person at the remote is a person in the room.
-        self.pressed();
-        // A home press is answered ahead of the loading gate and the picker
-        // gate, so a film that covered the browser ends over the home page
-        // and not over the page a person chose it from. The playback pod
-        // sends the press just before the film ends, and the loading state
-        // stays for the return path to end.
-        if name == "home" && (self.loading.is_some() || self.activity != Activity::Idle) {
-            self.picker = None;
-            self.home();
-            return true;
-        }
-        // A press during the loading state reaches no screen under it.
-        // Back exits the state here and now, and cancels nothing: the
-        // `Play` this browser asked for is the operator's to run.
-        if self.loading.is_some() {
-            if name == "escape" || name == "backspace" {
-                self.presented();
-            }
-            return true;
-        }
-        // The press that raises the picker does nothing else, so a room
-        // that answered hours ago never plays under the last room's name.
-        if self.ask() {
-            return true;
-        }
-        if let Some(picker) = &mut self.picker {
-            if let Some(chosen) = picker.key(name) {
-                self.answered(chosen);
-            }
-            return true;
-        }
-        let mut changed = true;
-        match name {
-            // Escape on the strip gives focus back to the screen and pops
-            // nothing, because the strip is over the stack and not on it.
-            "escape" if self.on_strip => self.leave_strip(),
-            // The screen on top is asked first, because a search wall
-            // reads backspace as a deleted character, and escape as the
-            // grid closed or the text cleared. Every other screen takes
-            // neither, and both words are then back.
-            "escape" | "backspace" => {
-                let top = self.stack.last_mut().unwrap_or(&mut self.home);
-                match top.escape(name, &mut self.source) {
-                    Some(step) => self.take(step),
-                    None => self.back(),
-                }
-            }
-            "home" => self.home(),
-            // The people key raises the picker over whatever screen is
-            // up, the way home pops to the home page. A press that arrives
-            // while the picker stands never reaches here: the picker took
-            // it above and binds no word for people, so it stands as it
-            // was. A browser that knows no people has an empty picker to
-            // draw and nothing to ask, so the key moves nothing there, the
-            // way the ask never raises one.
-            "people" => match self.audience.known().is_empty() {
-                true => changed = false,
-                false => self.raise_picker(),
-            },
-            // The power key asks for the shade. The crate decides, and the
-            // sleep moment comes back here; the press itself changes
-            // nothing on the screen. A press that arrives asleep never
-            // reaches here, because the crate wakes on it instead, so one
-            // button is the shade down and the shade up.
-            "power" => {
-                changed = false;
-                self.rest();
-            }
-            // The search key opens the empty wall with the grid shown, and
-            // does nothing on a search wall.
-            "search" => match self.top().searching() {
-                true => changed = false,
-                false => self.search("", true),
-            },
-            // A letter or a digit opens the search wall seeded with the
-            // character and the grid hidden, because a person who typed a
-            // letter has a keyboard. It happens here and not in a screen,
-            // so every screen reaches search the same way. The wall is
-            // pushed, so back returns to the screen the person left. On
-            // the search wall the letter types.
-            _ if views::field::typed(name) && !self.top().searching() => {
-                self.search(name, false);
-            }
-            _ if self.on_strip => changed = self.on_strip(name),
-            _ => changed = self.on_screen(name),
-        }
-        // Every press starts the rest again, so the store decodes the
-        // backdrop of the item a person stopped on and not of every item
-        // focus passed over. A strip that holds focus asks for nothing,
-        // because no press there opens a page over art.
-        self.rest = (!self.on_strip && self.top().prefetches()).then_some(self.clock + REST);
-        changed
+        self.press(name, None)
     }
 
     // Art that landed changes the frame and not the rows, so a
