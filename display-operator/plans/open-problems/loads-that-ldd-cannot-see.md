@@ -53,18 +53,19 @@ driver for a card the build machine does not have is never opened. A
 missing `iris_dri.so` passes every check the build runs and fails on
 the one machine that has an Intel card in it.
 
-## The pin is deliberate
+## Why the Debian suite is pinned
 
 The Debian suite is pinned in the `Dockerfile`. `weston-closure.sh`
 names weston 14 in the path of every module it copies, so a suite that
-ships weston 15 fails the build. That is the intended report: the
-module set needs reading again against the new release. The cost is
-that a distribution upgrade is a manual step, and it is accepted.
+ships weston 15 fails the build. That failure is intended: it tells
+the maintainer to check the module set again against the new
+release. The cost is that a distribution upgrade is a manual step,
+and the project accepts that cost.
 
-## The shape of an answer
+## Possible fixes
 
-Nothing is decided. Two directions are open, and they are not
-exclusive:
+Nothing is decided. There are two possible fixes, and a design can
+use both:
 
 * Check the closure against the packages rather than against a run.
   The builder has the full Debian install beside the closure it wrote,

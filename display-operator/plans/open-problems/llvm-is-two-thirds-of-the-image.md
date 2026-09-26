@@ -4,9 +4,9 @@ Open problem. The compositor image is already `FROM scratch`, and it is
 still 234,346,900 bytes. Since [plan 16](../completed/16-the-vulkan-base-image.md)
 that LLVM is in the `vulkan` base layer, where the AMD Vulkan driver
 links it too, and the media browser and the idle screen share the one
-copy with the compositor. The cost per node is one LLVM instead of
-three. The cost per image is unchanged, and this document is about
-that. `libLLVM.so.19.1` and the three libraries that
+copy with the compositor. So each node stores one LLVM instead of
+three. The size of each image is unchanged, and this document is
+about that size. `libLLVM.so.19.1` and the three libraries that
 only LLVM needs are 159,444,752 of them, which is 68% of the image.
 LLVM is in the closure because Debian builds mesa with llvmpipe, and
 llvmpipe is the one driver in that build that no liken machine ever
@@ -18,7 +18,7 @@ floor for Debian's mesa. Mesa's own build has options that Debian does
 not take, and this document states what those options would drop, what
 they would cost, and what nobody has measured.
 
-## What the closure measures
+## Sizes in the closure
 
 These numbers come from a rebuild of `weston-closure.sh` in
 `debian:trixie-slim` on 2026-08-16, with mesa 25.0.7-2+deb13u1,
@@ -34,7 +34,7 @@ for the published image.
 | 1,799,256 | `libxml2.so.2` | `libLLVM.so.19.1` names it, and nothing else does |
 | 220,752 | `libedit.so.2` | `libLLVM.so.19.1` names it, and nothing else does |
 
-`libz3.so.4` is the finding that was not in plan 01. Z3 is a theorem
+Plan 01 did not record `libz3.so.4`. Z3 is a theorem
 prover. Nothing in mesa calls it. It is in the image because Debian
 builds LLVM with `-DLLVM_ENABLE_Z3_SOLVER=ON`, which
 `llvm-toolchain-19` sets for every architecture except sh4 whenever
@@ -92,11 +92,11 @@ A build configured as `-Dgallium-drivers=iris -Dvulkan-drivers=
 -Dllvm=disabled -Dglx=disabled -Dplatforms=wayland` violates none of
 the `enable_if` rules above. If it links, it drops 159 MB of LLVM,
 Z3, libxml2 and libedit, and it drops whatever share of `libgallium`
-the other twelve drivers hold. That is the candidate. Nobody has run
-it.
+the other twelve drivers hold. That build is the candidate. Nobody
+has run it.
 
-The three other options are worth naming because they cut different
-things. `-Dvulkan-drivers=` drops lavapipe, which is the second reason
+The three other options remove other parts of the closure.
+`-Dvulkan-drivers=` drops lavapipe, which is the second reason
 Debian's build needs LLVM. `-Dglx=disabled` and
 `-Dplatforms=wayland` drop mesa's X11 paths, which is where
 `libX11-xcb.so.1` enters the closure from `libEGL_mesa.so.0`.
@@ -110,17 +110,18 @@ closure stage into a source build, and four costs follow from that.
   `apt-get install` and one `go build` today. A mesa build replaces the
   first of those, and neither its duration nor a cache strategy for it
   has been measured.
-* **A version to own.** Debian's suite pin already fixes weston at
-  14 and mesa at 25.0.7. A source build replaces the mesa half of that
-  pin with a tag this repository chooses, and with the security updates
-  this repository then owes. Debian issued 25.0.7-2+deb13u1 as an
-  update. Nobody here would see the next one.
+* **A mesa version to maintain.** Debian's suite pin already fixes
+  weston at 14 and mesa at 25.0.7. A source build replaces the mesa half of that
+  pin with a tag this repository chooses, and this repository then
+  has to follow mesa's security updates itself. Debian issued
+  25.0.7-2+deb13u1 as an update. With a source build, this repository
+  would not receive the next such update.
 * **The dependency set.** Mesa needs libdrm, wayland-protocols,
   libxkbcommon and more at their build versions, and it needs Rust for
-  some options. The build stage grows a list that the three
-  `apt-get install` lines do not have today.
-* **Two mesas in the tree.** The closure would ship mesa from source
-  and weston from Debian, and weston links against Debian's libdrm and
+  some options. The build stage needs a list of build dependencies
+  that the three `apt-get install` lines do not install today.
+* **Libraries from two sources in the tree.** The closure would ship
+  mesa from source and weston from Debian, and weston links against Debian's libdrm and
   libwayland. Whether mesa built from source loads correctly beside
   those is unverified.
 
@@ -133,7 +134,7 @@ Plan 01 records what that run printed: `GL renderer: llvmpipe (LLVM
 19.1.7)`. llvmpipe is what makes the check possible. A mesa without
 llvmpipe fails that check on the first line it reads.
 
-Three ways out, none chosen:
+There are three options, and none is chosen:
 
 * **Keep a second image that includes llvmpipe, and check that one.**
   The check then passes on bytes the fleet never runs. Plan 01 builds
@@ -157,21 +158,21 @@ Three ways out, none chosen:
   already asks for this for a different reason: a headless runner never
   opens the DRI driver for a real card, so a missing `iris_dri.so`
   passes every check the build runs. One machine with an Intel card
-  answers both questions. The release workflow has no such machine.
+  would cover both problems. The release workflow has no such machine.
 
 ## What a narrow driver list costs in coverage
 
-Today the cost of breadth is one file. The `dri` directory holds
-fourteen names, thirteen of them symlinks to `libdril_dri.so`, so the
-image runs on any card mesa supports. A build of `iris` alone chooses
-the cards the image runs on.
+Today the image supports every card that mesa supports, and that
+support costs one file. The `dri` directory holds fourteen names,
+thirteen of them symlinks to `libdril_dri.so`. A build of `iris` alone
+limits the image to the cards that `iris` drives.
 
-The fleet this operator was written for is Intel throughout: Coffee
+The fleet this operator was written for is all Intel: Coffee
 Lake i5 parts with Iris Plus graphics, and Alder Lake-N parts. liken's
 own testbed, `liken-1`, is an N95. A machine that declares no graphics
-module publishes no GPU, because an undriven GPU stays out of the
-`ResourceSlice` and no GPU claim lands there. Every part in the fleet
-is Gen9 or newer.
+module publishes no GPU, because a GPU with no driver is not in the
+`ResourceSlice`, and no GPU claim is allocated on that machine.
+Every part in the fleet is Gen9 or newer.
 Mesa's `src/loader/pci_id_driver_map.h` sorts an Intel card into
 `i915`, `crocus`, or `iris`: the first two have explicit chip-id
 lists, and `iris` takes everything its predicate accepts, which is Gen8
@@ -179,18 +180,19 @@ and newer. So `iris` alone covers this fleet, and `crocus`, `i915`,
 `radeonsi`, `r300`, `r600`, `nouveau`, `svga`, `virgl`, `d3d12` and
 `zink` cover nothing in it.
 
-liken is wider than this fleet, and that is the open half of the
-question. liken publishes no supported-hardware list, and its image
+liken supports more hardware than this fleet, and that part of the
+question is open. liken publishes no supported-hardware list, and its image
 keeps `i915`, `xe`, `radeon` and `amdgpu` so that a console works on an
 ordinary machine
 ([milestone 32](https://github.com/liken-sh/liken/blob/main/plans/completed/32-hardware-support-in-the-image.md)).
 An `iris`-only compositor image would be narrower than the OS that runs
 it. A machine with AMD integrated graphics would boot, publish a GPU,
 and then start a compositor with no driver for the card. The image is
-one artifact on ghcr.io, and every liken user pulls the same one. What
-that image owes a machine it was not built for is not decided.
+one artifact on ghcr.io, and every liken user pulls the same one. It
+is not decided what that image must support on a machine it was not
+built for.
 
-## What is next after LLVM and gallium
+## The next largest items after LLVM and gallium
 
 Take LLVM, Z3, libxml2, libedit and gallium out, and 32.3 MB is left.
 The next items are small, and the closure attributes each of them to a
@@ -207,11 +209,11 @@ seed adds:
   libsystemd through libseat, libva, libva-drm, and libdisplay-info.
   That is the backend the fleet runs, and it is 0.8% of the image.
 * **`wayland-info` is 55,976 bytes.** Plan 01 keeps it as the only
-  diagnostic in an image with no shell. At 0.02% of the image, the
-  size argument against it does not exist.
+  diagnostic in an image with no shell. At 0.02% of the image, its
+  size is no reason to remove it.
 
-There is one more candidate that keeps llvmpipe and still cuts most of
-the weight. Debian's `libLLVM.so.19.1` exports the target
+One more candidate keeps llvmpipe and still removes most of the
+size. Debian's `libLLVM.so.19.1` exports the target
 initialisers for X86, AArch64, AMDGPU, NVPTX, WebAssembly, RISCV,
 SystemZ, Hexagon and PowerPC, measured with `nm -D`. llvmpipe on
 x86_64 uses X86. Mesa's `meson.build` asks LLVM for the `native` module
