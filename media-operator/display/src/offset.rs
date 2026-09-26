@@ -12,11 +12,6 @@ use crate::ipc::Command;
 use crate::presentation::Presentation;
 use crate::theme;
 
-/// The nudge step and the clamp range for a delay, in seconds. One press moves
-/// the delay by the step, and the clamp holds it within the range.
-const STEP: f64 = 0.05;
-const RANGE: f64 = 5.0;
-
 /// The panel the adjuster draws: the label, the delay in large type, and a
 /// nudge hint.
 const X: f32 = theme::MARGIN_X;
@@ -61,6 +56,34 @@ impl Offset {
         }
     }
 
+    /// The nudge step, in seconds. The audio offset corrects the latency of a
+    /// receiver or a television, which a person hears in tens of
+    /// milliseconds, so it moves in fine steps. A person sees subtitle timing
+    /// errors only from about 100 ms, so finer steps only add presses.
+    fn step(self) -> f64 {
+        match self {
+            Offset::Audio => 0.05,
+            Offset::Subtitle => 0.1,
+        }
+    }
+
+    /// The clamp range, in seconds, in each direction. Receiver latency stays
+    /// well under 5 s. A subtitle track made for a different cut of the video
+    /// can be several seconds off, so its range is longer.
+    fn range(self) -> f64 {
+        match self {
+            Offset::Audio => 5.0,
+            Offset::Subtitle => 10.0,
+        }
+    }
+
+    /// The delay one step from `at`, held inside the range. The delay rounds
+    /// to a whole millisecond, so repeated steps do not collect float error.
+    fn nudge(self, at: f64, direction: f64) -> f64 {
+        let next = ((at + direction * self.step()) * 1000.0).round() / 1000.0;
+        next.clamp(-self.range(), self.range())
+    }
+
     /// The delay as mpv reports it.
     pub fn delay(self, film: &Film) -> f64 {
         match self {
@@ -87,8 +110,8 @@ impl Offset {
             ]]
         };
         match action {
-            Action::Left => write(clamp(at - STEP)),
-            Action::Right => write(clamp(at + STEP)),
+            Action::Left => write(self.nudge(at, -1.0)),
+            Action::Right => write(self.nudge(at, 1.0)),
             Action::Up => write(0.0),
             _ => Vec::new(),
         }
@@ -136,10 +159,6 @@ impl Offset {
             brush.text(line);
         }
     }
-}
-
-fn clamp(at: f64) -> f64 {
-    at.clamp(-RANGE, RANGE)
 }
 
 /// Format a delay in seconds with a sign, for the panel.
@@ -204,8 +223,12 @@ mod tests {
         assert_eq!(seconds(-1.234), "-1.23 s");
     }
 
+    fn written(offset: Offset, action: Action, film: &Film) -> f64 {
+        offset.handle(action, film)[0][2].as_f64().unwrap()
+    }
+
     #[test]
-    fn a_nudge_moves_the_delay_by_one_step_and_holds_inside_the_range() {
+    fn each_offset_nudges_by_its_own_step_and_holds_inside_its_own_range() {
         let rest = film(0.0, 0.0);
         assert_eq!(
             Offset::Audio.handle(Action::Right, &rest),
@@ -217,25 +240,25 @@ mod tests {
         );
         assert_eq!(
             Offset::Subtitle.handle(Action::Left, &rest),
-            vec![vec![
-                json!("set_property"),
-                json!("sub-delay"),
-                json!(-0.05)
-            ]]
+            vec![vec![json!("set_property"), json!("sub-delay"), json!(-0.1)]]
         );
 
-        let far = film(5.0, -5.0);
+        let subtitle_off = film(0.0, 0.2);
+        assert_eq!(written(Offset::Subtitle, Action::Right, &subtitle_off), 0.3);
+
+        let audio_far = film(5.0, 0.0);
+        assert_eq!(written(Offset::Audio, Action::Right, &audio_far), 5.0);
+
+        let subtitle_past_audio = film(0.0, -5.0);
         assert_eq!(
-            Offset::Audio.handle(Action::Right, &far),
-            vec![vec![
-                json!("set_property"),
-                json!("audio-delay"),
-                json!(5.0)
-            ]]
+            written(Offset::Subtitle, Action::Left, &subtitle_past_audio),
+            -5.1
         );
+
+        let subtitle_far = film(0.0, -10.0);
         assert_eq!(
-            Offset::Subtitle.handle(Action::Left, &far),
-            vec![vec![json!("set_property"), json!("sub-delay"), json!(-5.0)]]
+            written(Offset::Subtitle, Action::Left, &subtitle_far),
+            -10.0
         );
     }
 
