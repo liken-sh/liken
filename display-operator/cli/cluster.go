@@ -28,7 +28,7 @@ const (
 	operatorNamespace = "liken-system"
 
 	// The label the base binary selects on to find an
-	// operator's Deployment, and this operator's value for it.
+	// operator's workload, and this operator's value for it.
 	pluginLabel  = "cli.liken.sh/plugin"
 	pluginDomain = "display"
 
@@ -46,7 +46,7 @@ const (
 	trustKey       = "ca.crt"
 )
 
-// The label selector for the operator Deployment.
+// The label selector for the operator DaemonSet.
 var pluginSelector = pluginLabel + "=" + pluginDomain
 
 // The Display resource the capture positional names, as the
@@ -77,21 +77,23 @@ func listDisplays(ctx context.Context, client dynamic.Interface) ([]string, erro
 }
 
 // operatorVersion reads the version tag off the
-// operator Deployment's image, the one source every CLI can read with
-// no new API.
+// operator DaemonSet's image, the one source every CLI can read with
+// no new API. The operator runs one pod per node from a DaemonSet, and
+// the label is on that DaemonSet, not on the display-api Deployment,
+// because the display-api image has no -cli image beside it.
 func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
-	deployments, err := clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{
+	daemonSets, err := clientset.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{
 		LabelSelector: pluginSelector,
 	})
 	if err != nil {
 		return "", err
 	}
-	if len(deployments.Items) == 0 {
-		return "", fmt.Errorf("no Deployment carries the label %s", pluginSelector)
+	if len(daemonSets.Items) == 0 {
+		return "", fmt.Errorf("no DaemonSet carries the label %s", pluginSelector)
 	}
-	containers := deployments.Items[0].Spec.Template.Spec.Containers
+	containers := daemonSets.Items[0].Spec.Template.Spec.Containers
 	if len(containers) == 0 {
-		return "", fmt.Errorf("the operator Deployment declares no container")
+		return "", fmt.Errorf("the operator DaemonSet declares no container")
 	}
 	return imageTag(containers[0].Image), nil
 }

@@ -42,17 +42,17 @@ func TestImageTag(t *testing.T) {
 	}
 }
 
-func labeledDeployment(image string) *appsv1.Deployment {
-	return &appsv1.Deployment{
+func labeledDaemonSet(image string) *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      apiServiceName,
+			Name:      "display-operator",
 			Namespace: operatorNamespace,
 			Labels:    map[string]string{pluginLabel: pluginDomain},
 		},
-		Spec: appsv1.DeploymentSpec{
+		Spec: appsv1.DaemonSetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{Name: "api", Image: image}},
+					Containers: []corev1.Container{{Name: "operator", Image: image}},
 				},
 			},
 		},
@@ -60,7 +60,7 @@ func labeledDeployment(image string) *appsv1.Deployment {
 }
 
 func TestOperatorVersionReadsTheImageTag(t *testing.T) {
-	clientset := fake.NewSimpleClientset(labeledDeployment("ghcr.io/liken-sh/display-api:2026.09.03-007"))
+	clientset := fake.NewSimpleClientset(labeledDaemonSet("ghcr.io/liken-sh/display-operator:2026.09.03-007"))
 	got, err := operatorVersion(context.Background(), clientset)
 	if err != nil {
 		t.Fatalf("operatorVersion: %v", err)
@@ -70,10 +70,10 @@ func TestOperatorVersionReadsTheImageTag(t *testing.T) {
 	}
 }
 
-func TestOperatorVersionWithoutADeployment(t *testing.T) {
+func TestOperatorVersionWithoutADaemonSet(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	if _, err := operatorVersion(context.Background(), clientset); err == nil {
-		t.Fatal("operatorVersion returned no error with no labeled Deployment")
+		t.Fatal("operatorVersion returned no error with no labeled DaemonSet")
 	}
 }
 

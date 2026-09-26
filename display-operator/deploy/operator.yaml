@@ -47,6 +47,12 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: display-operator
+  labels:
+    # liken's plugins commands select on this label, and the CLI selects
+    # on it to read the operator's version. Both take the image of the
+    # first container and pull its -cli image at the same tag, so the
+    # label goes on the workload that runs the display-operator image.
+    cli.liken.sh/plugin: display
 spec:
   selector:
     matchLabels:
