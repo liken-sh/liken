@@ -651,7 +651,7 @@ mod tests {
         unit.fold(
             Moment::Message {
                 topic: "liken/library/screens/house/theater/watching".into(),
-                payload: b"chris".to_vec(),
+                payload: b"person-a".to_vec(),
                 retained: true,
             },
             2.0,

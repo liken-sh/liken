@@ -236,13 +236,13 @@ fn a_message_on_a_client_topic_reaches_the_client() {
     let owned = "liken/library/screens/house/theater/watching";
     let (reader, threads) = reader_reading(wiring(), &[owned.into()]);
 
-    read(&threads, [Ok(publish(owned, "chris", true))].into_iter());
+    read(&threads, [Ok(publish(owned, "person-a", true))].into_iter());
 
     assert_eq!(
         reader.drain(),
         [Moment::Message {
             topic: owned.into(),
-            payload: b"chris".to_vec(),
+            payload: b"person-a".to_vec(),
             retained: true,
         }]
     );

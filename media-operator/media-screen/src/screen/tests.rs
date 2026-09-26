@@ -257,10 +257,10 @@ fn every_message_on_a_client_topic_reaches_the_client() {
     let mut screen = idling(&wiring(), now).reading(&[WATCHING.into()]);
 
     assert_eq!(
-        moments(screen.deliver(WATCHING, b"chris", true, now)),
+        moments(screen.deliver(WATCHING, b"person-a", true, now)),
         [Moment::Message {
             topic: WATCHING.into(),
-            payload: b"chris".to_vec(),
+            payload: b"person-a".to_vec(),
             retained: true,
         }]
     );

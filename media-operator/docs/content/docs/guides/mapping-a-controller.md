@@ -60,20 +60,26 @@ Follow the pod's log and press each button in turn:
 
     kubectl logs -f den-remote-remote
 
-The pod first logs one verdict line per input node, then each press:
+The pod logs one verdict line per input node, then the node
+connecting, then each press:
 
     remote: event3 "Handheld Remote" keep: 58 key codes, no hat axes
-    remote: event3 "Handheld Remote" EV_KEY (1) KEY_PLAYPAUSE (164) press (1)
-    remote:   - press: KEY_PLAYPAUSE   # code 164
+    remote: controller connected on event3 "Handheld Remote": 58 key codes, no hat axes
+    remote: event3 "Handheld Remote" EV_KEY (1) BTN_SOUTH (304) press (1)
+    remote:   - press: BTN_SOUTH   # code 304
     remote:     key: <a KEY_* name, or none>
+    remote: event3 "Handheld Remote": BTN_SOUTH (304) pressed, published KEY_ENTER to liken/media/remotes/house/den-remote/events
 
 The two indented lines are a `Keymap` row. Paste it under
 `spec.buttons`, or under `spec.axes` for a hat direction. Then
 replace the key line with the kernel name the control should report,
-or with `none` to drop the control. A control that already reports
-the right name needs no row. `KEY_PLAYPAUSE` above pauses a film as
-it is. Only a press needs a row. A release or a repeat logs a line
-that says so.
+or with `none` to drop the control. The last line names what the pod
+published for the press, so check it before you paste the row: it
+already publishes `KEY_ENTER` for `BTN_SOUTH` above, the base
+mapping's own answer for a gamepad's south button, so that row is not
+needed. Only a press earns this last line. A release or a repeat logs
+the raw line above it instead, naming the code and saying a Keymap
+binds the press alone.
 
 If the controller has modes, press every button in every mode. A
 combined remote can emit different codes for one button per mode. An
@@ -111,6 +117,11 @@ to do:
         - press: KEY_ESC
           key: none
     EOF
+
+Once the table reaches the pod, a press of the escape key logs what it
+drops instead of what it would otherwise pass through:
+
+    remote: event3 "Handheld Remote": KEY_ESC (1) pressed, published nothing, because the key table maps it to none
 
 A row on a gamepad button that a person holds, a bumper that seeks
 for example, adds a `repeat` block, because a gamepad never
