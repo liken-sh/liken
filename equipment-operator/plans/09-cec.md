@@ -405,6 +405,58 @@ and those names are the names a `Keymap` uses. equipment-operator
 does not read or forward the keys. A remote on a bus in `Listen`
 sends no keys, because the adapter holds no logical address.
 
+## What the first drill measured
+
+A drill on 2026-09-26 ran the design by hand with `cec-ctl`. The
+machine had a Pulse-Eight adapter on a receiver's spare input, and a
+second HDMI cable from the machine's unused port into the adapter,
+as in Pulse-Eight's two-cable setup. The TV was on the receiver's
+output, and a streaming player was on another receiver input.
+
+* **The tree is what the design expects.** With the adapter set to
+  the physical address from the machine's `Display` EDID, a scan
+  found the TV at `0.0.0.0`, the receiver at `1.0.0.0` as the audio
+  system, the adapter at `1.2.0.0` as Playback Device 1, and the
+  streaming player at `1.5.0.0` as Playback Device 2. Each device
+  answered Give OSD Name, Give Device Vendor ID, Give Device Power
+  Status, and Get CEC Version. The TV's OSD name was cut at 14
+  characters.
+* **The receiver keeps the CEC wire and the EDID in standby.** After
+  a broadcast Standby, the TV and the receiver both answered their
+  power status as standby, and the machine's two ports read the same
+  physical addresses as before. Image View On to the TV, then Active
+  Source for `1.2.0.0`, woke the TV and the receiver.
+* **Another source can take the input after a wake.** The first
+  Active Source went out while the receiver woke, and the receiver
+  came up on the streaming player's input, because that player
+  claimed Active Source for itself. A second Active Source, sent
+  once the room was on, switched the receiver to the machine. So
+  the wake job confirms the active source after the room is on, and
+  it sends Active Source again when another source holds it.
+* **`Listen` hears directed messages.** In the kernel's monitor-all
+  mode, the adapter reported messages between other devices, such
+  as the TV's power query to the receiver. The TV and the streaming
+  player each polled every logical address about every 15 seconds,
+  so a bus in `Listen` learns which addresses are taken without
+  sending a poll.
+* **The TV asks the adapter for its power status.** The kernel does
+  not answer Give Device Power Status, so the node pod answers it as
+  a follower.
+* **The TV remote reaches the input device.** With the adapter as the
+  active source, the TV sent User Control Pressed for the arrows, OK,
+  and back, and the kernel's input device delivered `KEY_UP`,
+  `KEY_DOWN`, `KEY_LEFT`, `KEY_RIGHT`, `KEY_OK`, and `KEY_EXIT`.
+  media-operator binds all six today. The TV's remote has no play or
+  pause key, so the drill did not test the transport keys.
+* **A cable without the CEC wire fails silently.** With the first
+  cable from the adapter to the receiver, every message ended in
+  `TRANSMIT_FAILED_ACK`, and the adapter heard no traffic at all,
+  with both this operator's path and libCEC's `cec-client`. A second
+  cable fixed it. Many HDMI cables leave out the CEC wire. So when
+  every poll from an adapter goes unacknowledged and it hears nothing,
+  the `CECBus` condition says that no device answers and that the
+  cable between the adapter and the receiver may not carry CEC.
+
 ## Failure and recovery
 
 **The receiver in standby.** The adapter is connected to a receiver's
