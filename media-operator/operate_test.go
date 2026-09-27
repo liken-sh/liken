@@ -34,6 +34,10 @@ type fakeCluster struct {
 	// Terminating while its containers stop.
 	podsLinger map[string]bool
 
+	// claimsLinger names the claims this server leaves standing after a
+	// delete, the way a real claim stays until no pod holds it.
+	claimsLinger map[string]bool
+
 	// The hardware the display-operator publishes: one Display
 	// per panel, and the slices that name each allocated device. applies
 	// is every apply this operator sent, in order, the refused ones
@@ -95,15 +99,16 @@ type receiverApplied struct {
 
 func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
-		plays:      map[string]*Play{},
-		players:    map[string]*Player{},
-		remotes:    map[string]*Remote{},
-		keymaps:    map[string]*Keymap{},
-		mediaprefs: map[string]*MediaPreferences{},
-		claims:     map[string]*ResourceClaim{},
-		pods:       map[string]*Pod{},
-		podsLinger: map[string]bool{},
-		displays:   map[string]*Display{},
+		plays:        map[string]*Play{},
+		players:      map[string]*Player{},
+		remotes:      map[string]*Remote{},
+		keymaps:      map[string]*Keymap{},
+		mediaprefs:   map[string]*MediaPreferences{},
+		claims:       map[string]*ResourceClaim{},
+		pods:         map[string]*Pod{},
+		podsLinger:   map[string]bool{},
+		claimsLinger: map[string]bool{},
+		displays:     map[string]*Display{},
 
 		receivers: map[string]*Receiver{},
 
@@ -228,6 +233,13 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pods"):
 			pod := &Pod{}
 			_ = json.NewDecoder(r.Body).Decode(pod)
+			// A name that is taken answers 409, the lingering pod's name
+			// included, the way the API server refuses a create until a
+			// deleted pod is gone.
+			if _, taken := f.pods[pod.Metadata.Name]; taken {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
 			f.pods[pod.Metadata.Name] = pod
 			_ = json.NewEncoder(w).Encode(pod)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/pods/"):
@@ -243,7 +255,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			}
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/resourceclaims/"):
-			delete(f.claims, name)
+			if claim, standing := f.claims[name]; standing && f.claimsLinger[name] {
+				claim.Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
+			} else {
+				delete(f.claims, name)
+			}
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -435,6 +451,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
+		replacements:     map[string]string{},
 		wake:             wake,
 	}
 }
@@ -1437,10 +1454,10 @@ func TestANonShapingPlayerEditRecreatesNothing(t *testing.T) {
 	}
 }
 
-// A Player that now names a different controller reshapes the remote set,
-// so the operator recreates the pod at the film's place with the new
-// controller's sidecar wiring.
-func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
+// remoteChangeCluster seeds a Play running with the sofa controller,
+// under a Player that a person has since edited to name the armchair
+// controller in its place.
+func remoteChangeCluster() *fakeCluster {
 	cluster := newFakeCluster()
 	play := housePlay("https://nas/film.mkv")
 	play.Status = PlayStatus{Phase: phaseRunning, Activity: activityPlaying, Pod: "movie-playback"}
@@ -1469,7 +1486,14 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 	cluster.claims["movie-devices"] = buildClaim(play, player)
 
 	player.Spec.Remotes = []PlayerRemote{{Name: "armchair"}}
+	return cluster
+}
 
+// A Player that now names a different controller reshapes the remote set,
+// so the operator recreates the pod at the film's place with the new
+// controller's sidecar wiring.
+func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
+	cluster := remoteChangeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:30:00"})
 	media.pass()

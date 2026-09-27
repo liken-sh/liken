@@ -258,6 +258,11 @@ type operator struct {
 	// cap. Only the pass goroutine touches it.
 	recreateBackoff map[string]backoffState
 
+	// replacements holds, per run, the reason for a recreate whose delete
+	// went out and whose new pod is not created yet. replace.go says why
+	// the create waits. Only the pass goroutine touches it.
+	replacements map[string]string
+
 	// wake is the loop's own wake channel. The operator schedules one wake at
 	// a backoff deadline, so a run waiting out its backoff resumes when the
 	// wait ends rather than on the next backstop tick.
@@ -356,6 +361,7 @@ func operate() {
 		displayRestarts:  map[string]displayRestartMemo{},
 		keysPublished:    map[string]string{},
 		recreateBackoff:  map[string]backoffState{},
+		replacements:     map[string]string{},
 		wake:             wake,
 		metrics:          metrics,
 		log:              os.Stdout,
@@ -579,6 +585,11 @@ func (o *operator) pass() {
 	for key := range o.recreateBackoff {
 		if !live[key] {
 			delete(o.recreateBackoff, key)
+		}
+	}
+	for key := range o.replacements {
+		if !live[key] {
+			delete(o.replacements, key)
 		}
 	}
 	o.reclaimPlays(live)
@@ -1477,16 +1488,21 @@ func messageOf(status PlayStatus) string {
 // because the container set is fixed once it runs and a Keymap broken
 // mid-film must not fail the film. A running pod its Player reshaped is
 // recreated at the film's place, and a running pod its Player left
-// alone is kept.
+// alone is kept. A pod on its way out is left to finish, and the pass
+// that finds it gone creates the pod its recreate owes.
 //
-// The bool reports a genuinely new pod, true only in the no-existing-pod
-// branch. A fresh Play uses it to steal its controllers, and a recreate,
-// which returns false, leaves the focus mark alone.
+// The bool reports a genuinely new pod, true only when the run has no pod
+// and owes no recreate. A fresh Play uses it to steal its controllers,
+// and a recreate, which returns false, leaves the focus mark alone.
 func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
 	running, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, ErrNotFound) {
+		if reason, owed := o.replacements[key]; owed {
+			pod, err := o.finishReplacement(play, claim, resolved, prefs, remotes, reason)
+			return pod, false, err
+		}
 		// Nothing answers for the pod: a taint evicted it, its node was lost,
 		// or the Play never had one. A run with a saved place resumes without
 		// stealing its controllers back, and a run with no saved place starts
@@ -1526,6 +1542,18 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if err != nil {
 		return nil, false, err
 	}
+	if running.Metadata.deleting() {
+		// The pod is on its way out, and its replacement reuses its name,
+		// so nothing can be created until it is gone. What the terminating
+		// pod says is not the run's state either: its remote set is the old
+		// one, and its mpv exits 4 on the delete's SIGTERM, which fails the
+		// pod. The pod watch reports the delete, and that pass creates the
+		// replacement.
+		return nil, false, nil
+	}
+	// A live pod under the name is the run's pod, whoever created it, so no
+	// replacement is owed any more.
+	delete(o.replacements, key)
 	if keepExisting {
 		return running, false, nil
 	}
@@ -1536,11 +1564,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		if !o.mayResume(key) {
 			return running, false, nil
 		}
-		pod, err := o.recreateForResume(play, claim, resolved, prefs, remotes)
-		if err == nil {
-			logLine(o.log, "play %s: recreated playback pod %s at %s, because the pod failed%s",
-				key, pod.Metadata.Name, startName(o.stashedPosition(play)), podMessage(running))
-		}
+		pod, err := o.replace(play, claim, resolved, prefs, remotes, false, "the pod failed"+podMessage(running))
 		return pod, false, err
 	}
 
@@ -1551,15 +1575,12 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if !claimChanged && sameRemoteSet(running, remotes) {
 		return running, false, nil
 	}
-	pod, err := o.recreate(play, claim, resolved, prefs, remotes, claimChanged)
-	if err == nil {
-		changed := "its remotes"
-		if claimChanged {
-			changed = "its devices"
-		}
-		logLine(o.log, "play %s: recreated playback pod %s at %s, because a spec edit changed %s on player %s",
-			key, pod.Metadata.Name, startName(o.stashedPosition(play)), changed, player.Metadata.Name)
+	changed := "its remotes"
+	if claimChanged {
+		changed = "its devices"
 	}
+	pod, err := o.replace(play, claim, resolved, prefs, remotes, claimChanged,
+		"a spec edit changed "+changed+" on player "+player.Metadata.Name)
 	return pod, false, err
 }
 
@@ -1578,41 +1599,6 @@ func podMessage(pod *Pod) string {
 		return ""
 	}
 	return ": " + pod.Status.Message
-}
-
-// recreate replaces a running pod its Player reshaped and keeps the
-// film's place. It deletes the pod, deletes and recreates the claim only
-// when the claim itself diverged, and creates the replacement so mpv
-// starts where the film was. The image is already on the machine, so the
-// film resumes within about a second.
-func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool) (*Pod, error) {
-	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
-		return nil, err
-	}
-	if claimChanged {
-		if err := DeleteResourceClaim(o.client, namespace, claimName(name)); err != nil {
-			return nil, err
-		}
-		if err := ensureClaim(o.client, claim); err != nil {
-			return nil, err
-		}
-	}
-	return o.createPodAtStash(play, claim, resolved, prefs, remotes)
-}
-
-// recreateForResume replaces a pod that failed and keeps the film's place.
-// The claim outlives the pod, so this ensures the claim, deletes the dead
-// pod, and creates the replacement at the film's place.
-func (o *operator) recreateForResume(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
-	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	if err := ensureClaim(o.client, claim); err != nil {
-		return nil, err
-	}
-	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
-		return nil, err
-	}
-	return o.createPodAtStash(play, claim, resolved, prefs, remotes)
 }
 
 // createPodAtStash creates the playback pod with mpv's start set to the
