@@ -281,6 +281,16 @@ func (w *objectWatch) follow(ctx context.Context, version string) (last string, 
 			if err == io.EOF {
 				return version, accepted, nil
 			}
+			// A line that is not JSON is an event that does not decode,
+			// and the server sends it again from the same version, so
+			// the empty version lists after the backoff. A read that
+			// fails is the connection, and the next watch opens from
+			// the last version.
+			var syntax *json.SyntaxError
+			var mistyped *json.UnmarshalTypeError
+			if errors.As(err, &syntax) || errors.As(err, &mistyped) {
+				return "", accepted, fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
+			}
 			return version, accepted, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
 		}
 		// An event whose object does not decode, or carries no

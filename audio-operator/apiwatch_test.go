@@ -361,6 +361,7 @@ func TestA410OnTheFreshListsWatchWaitsOutTheBackoff(t *testing.T) {
 // Opening again at the same version would read the same event again.
 func TestAnEventThatDoesNotDecodeListsAgainAfterABackoff(t *testing.T) {
 	for _, event := range []string{
+		`this line is not JSON`,
 		`{"type":"MODIFIED","object":"not an object"}`,
 		`{"type":"MODIFIED","object":{"metadata":{}}}`,
 		`{"type":"ERROR","object":{"kind":"Status","code":500,"message":"etcdserver: leader changed"}}`,
