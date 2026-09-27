@@ -430,22 +430,24 @@ func inSpec(receiver *Receiver, session *ReceiverSession)   { receiver.Spec.Sess
 // that agrees with it, the pass sends nothing, so a slow bus never powers
 // the equipment on in a dark room.
 //
-// A session in spec alone is adopted the same way. The status write waits
-// for the next change, because the equipment operator reads spec when the
-// status holds no session.
+// A session in spec alone, from an earlier build, moves to the status
+// once with the same flags, and the spec field is released. The equipment
+// operator reads that move as the same session and sends nothing.
 func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
 	cases := []struct {
-		name   string
-		hold   holdIn
-		awake  bool
-		desire string
+		name     string
+		hold     holdIn
+		awake    bool
+		desire   string
+		moved    int
+		released int
 	}{
 		{name: "a dark room before the desire arrives", hold: inStatus, awake: false},
 		{name: "a lit room before the desire arrives", hold: inStatus, awake: true},
 		{name: "a dark room with the off desire", hold: inStatus, awake: false, desire: panelDesireOff},
 		{name: "a lit room with the on desire", hold: inStatus, awake: true, desire: panelDesireOn},
-		{name: "a dark room held in spec", hold: inSpec, awake: false},
-		{name: "a lit room held in spec with the on desire", hold: inSpec, awake: true, desire: panelDesireOn},
+		{name: "a dark room held in spec", hold: inSpec, awake: false, moved: 1, released: 1},
+		{name: "a lit room held in spec with the on desire", hold: inSpec, awake: true, desire: panelDesireOn, moved: 1, released: 1},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -459,8 +461,11 @@ func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
 			runPlayers(media, []Player{*housePlayer()}, nil)
 			runPlayers(media, []Player{*housePlayer()}, nil)
 
-			mustMatch(t, len(cluster.sessions), 0)
-			mustMatch(t, len(cluster.specReleases), 0)
+			mustMatch(t, len(cluster.sessions), each.moved)
+			mustMatch(t, len(cluster.specReleases), each.released)
+			if each.moved > 0 {
+				mustMatch(t, *cluster.sessions[0].session, *heldSession(each.awake))
+			}
 		})
 	}
 }
@@ -512,9 +517,9 @@ func TestTheOldSpecSessionIsReleasedOnceTheStatusHoldsTheSession(t *testing.T) {
 	}
 }
 
-// A unit that goes away while the old spec.session stands lifts both
-// halves, so an equipment operator that falls back to spec finds no
-// session there either.
+// A unit that goes away after its old spec.session moved to the status
+// lifts both halves, so an equipment operator that falls back to spec
+// finds no session there either.
 func TestALiftReleasesTheOldSpecSessionToo(t *testing.T) {
 	cluster := receiverCluster()
 	cluster.receivers["living-room-denon"].Spec.Session = heldSession(true)
@@ -524,7 +529,7 @@ func TestALiftReleasesTheOldSpecSessionToo(t *testing.T) {
 	runPlayers(media, nil, nil)
 
 	mustMatch(t, appliedReleases(cluster), "living-room-denon: "+applyFieldManager)
-	mustMatch(t, appliedSessions(cluster), "living-room-denon: lift")
+	mustMatch(t, appliedSessions(cluster), "living-room-denon: GAME, living-room-denon: lift")
 	mustMatch(t, cluster.receivers["living-room-denon"].Spec.Session == nil, true)
 }
 

@@ -314,11 +314,21 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	switch {
 	case tracked && held.receiver == receiver.Metadata.Name && held.session == session:
 		// The session this run applied still stands, so nothing is sent.
-	case !tracked && standing != nil && *standing == session:
+	case !tracked && standing != nil && *standing == session && statusHolds:
 		// A session the Receiver already carries is the one an earlier
 		// run of this operator applied. The equipment acts on power and
 		// input once, so the same session is recorded and not sent again.
 		o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
+	case !tracked && standing != nil && *standing == session:
+		// The same session, held in spec by an earlier build of this
+		// operator. It moves to the status once, so the old spec field can
+		// be released and later dropped from the schema. The equipment
+		// operator reads a session that moves unchanged from spec to status
+		// as the same session, so the move sends the receiver nothing.
+		if !o.writeSession(key, receiver, session, held, tracked) {
+			return
+		}
+		statusHolds = true
 	default:
 		if !o.writeSession(key, receiver, session, held, tracked) {
 			return
