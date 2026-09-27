@@ -69,10 +69,13 @@ const tailMask = unix.IN_MODIFY | unix.IN_CREATE | unix.IN_MOVED_FROM
 // backstopInterval bounds how long a lost event can hide growth or a
 // rotation. inotify raises an event on every append and every rename, so
 // a healthy tailer wakes on the event and never waits this long. The
-// timer only covers two faults that liken does not currently have: an
-// inotify queue that overflows and drops events, and a filesystem that
-// does not raise IN_MODIFY. On either fault the tailer still catches up
-// within one interval. A long interval keeps the idle cost near zero.
+// timer only covers two faults that liken does not currently have: a
+// watch whose reader stopped after a poll or read error, which never
+// wakes the tailer again, and a filesystem that does not raise
+// IN_MODIFY. A queue that overflows is not one of them, because the
+// reader treats IN_Q_OVERFLOW as a wake. On either fault the tailer
+// still catches up within one interval. A long interval keeps the idle
+// cost near zero.
 var backstopInterval = 30 * time.Second
 
 // tailCursor is the resume point: which file, identified by identity
