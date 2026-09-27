@@ -295,10 +295,12 @@ func (f *graphFeed) follow(ctx context.Context, wake func()) {
 // kubelet's restart of this container is the retry.
 const pipewireReadyTimeout = 60 * time.Second
 
-// pipewireReadyInterval is how often the startup wait asks again.
-// PipeWire raises no event that says it is ready, and the operator
-// has no connection to it until it is, so this one wait polls. Every
-// later read is driven by an event.
+// pipewireReadyInterval is how often the two startup waits read
+// again: the wait for PipeWire to answer and the wait for its
+// declared nodes. Each is a clock with a deadline, pipewireReadyTimeout
+// and nodeReadyTimeout, and runs once per start. PipeWire raises no
+// event that says it is ready, and the graph feed does not run yet,
+// so these two waits poll. Every later read is driven by an event.
 const pipewireReadyInterval = time.Second
 
 // nodeReadyTimeout bounds the wait for the declared nodes to appear

@@ -18,9 +18,16 @@ package main
 // its device number: the id is stable per codec, and the number is
 // this boot's.
 //
-// A name is a DNS label, so it holds 63 characters, and a name past
-// that is refused rather than shortened. The ALSA address, card0-pcm3,
-// survives only as the PipeWire node name.
+// A name is a DNS label, so it holds 63 characters. A USB serial is
+// often 20 characters or more, so the serial form passes 63 on a
+// machine with a longer name. When it would, the name holds the first
+// eight hex digits of the serial's SHA-256 in place of the serial,
+// and keeps the machine, the vendor, the product, and the PCM id. The
+// hash is stable, so the name is too, and two serials give two
+// hashes, so two identical dongles on one machine still get two
+// names. Any other name past 63 characters is refused rather than
+// shortened. The ALSA address, card0-pcm3, survives only as the
+// PipeWire node name.
 //
 // The pairing identity is a different thing. monitor.liken.sh/id
 // names the monitor a claim asks for, in a domain that neither this
@@ -33,6 +40,8 @@ package main
 // different names that never match.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -45,10 +54,22 @@ import (
 const PairingAttribute = "monitor.liken.sh/id"
 
 // maxDeviceName is the length of a DNS label, which is what a DRA
-// device name must be. A name past it is refused rather than
-// shortened, because a silently shortened name is a name nobody can
-// predict from the hardware.
+// device name must be. A name past it is refused rather than cut,
+// because a cut name is a name nobody can predict from the hardware.
+// The one exception is the hashed serial, which a person can compute
+// from the serial the card reports.
 const maxDeviceName = 63
+
+// serialHash is what a USB name holds in place of a serial that would
+// take it past maxDeviceName: the first eight hex digits of the
+// SHA-256 of the serial as sysfs reports it. Eight digits keep a
+// collision between two dongles of one model on one machine out of
+// reach. They leave the serial form room for a machine name of 22
+// characters, with the PCM id usb-audio and the capture suffix.
+func serialHash(serial string) string {
+	sum := sha256.Sum256([]byte(serial))
+	return hex.EncodeToString(sum[:])[:8]
+}
 
 // captureSuffix separates a capture endpoint's name from the
 // playback endpoint beside it. A USB card serves both directions
@@ -87,6 +108,11 @@ func endpointName(machine string, card cardIdentity, pcmID string, capture bool)
 		return "", fmt.Errorf("this machine has no name to build a %s card's name from", card.Bus)
 	}
 
+	suffix := ""
+	if capture {
+		suffix = captureSuffix
+	}
+
 	var name string
 	switch {
 	case card.Bus == usbBus && card.Serial != "":
@@ -94,16 +120,16 @@ func endpointName(machine string, card cardIdentity, pcmID string, capture bool)
 		if vendor == "" || product == "" {
 			return "", fmt.Errorf("the USB card states no vendor or product identifier")
 		}
-		name = strings.Join([]string{node, usbBus, vendor, product, serial, pcm}, "-")
+		name = strings.Join([]string{node, usbBus, vendor, product, serial, pcm}, "-") + suffix
+		if len(name) > maxDeviceName {
+			name = strings.Join([]string{node, usbBus, vendor, product, serialHash(card.Serial), pcm}, "-") + suffix
+		}
 	default:
 		location := slug(card.Location)
 		if location == "" {
 			return "", fmt.Errorf("sysfs states no %s address for the card", card.Bus)
 		}
-		name = strings.Join([]string{node, card.Bus, location, pcm}, "-")
-	}
-	if capture {
-		name += captureSuffix
+		name = strings.Join([]string{node, card.Bus, location, pcm}, "-") + suffix
 	}
 
 	if len(name) > maxDeviceName {

@@ -138,7 +138,8 @@ survives a reboot and a second card: the node and the PCI address
 for an onboard card, the node, vendor, product, and serial for a USB
 card that has one, and the driver's own name for the PCM on the end,
 `hdmi-0` or `usb-audio`. A capture endpoint's name ends in
-`-capture`. The [`Sink` reference](/docs/reference/sinks/#the-name)
+`-capture`. A USB name that would pass 63 characters holds a hash of
+the serial in place of the serial. The [`Sink` reference](/docs/reference/sinks/#the-name)
 gives the three forms. The name repeats as the `sink` or `source`
 attribute because a CEL selector reads attributes and never the
 device's name.

@@ -73,7 +73,7 @@ speaker at night is one patch per `Sink`.
 [Set endpoint volume and controls](/docs/guides/rest/) walks through
 it.
 
-One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card's playback side, or a Bluetooth speaker. Its status reports hardware facts and the values the operator last read. Its spec declares desired endpoint settings.
+One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card's playback side, or a Bluetooth speaker. Its status reports hardware facts and the values the operator last read. Its spec declares desired endpoint settings. The name is the machine's name and the card's identity, as the Sink reference gives them. When a USB card's name would pass 63 characters, it holds the first eight hex digits of the SHA-256 of the serial in place of the serial.
 
 ## spec
 
@@ -215,6 +215,7 @@ a reboot and a second card:
 | --- | --- | --- |
 | onboard PCI card | node, PCI address, PCM id | `node-1-pci-0000-00-1f-3-hdmi-0` |
 | USB card with a serial | node, vendor, product, serial, PCM id | `node-1-usb-0573-1573-a34004801402-usb-audio` |
+| USB card with a serial, past 63 characters | node, vendor, product, serial hash, PCM id | `studio-screen-12-usb-046d-0a44-5fe3de05-usb-audio` |
 | USB card with no serial | node, USB port path, PCM id | `node-1-usb-1-6-usb-audio` |
 | Bluetooth speaker | address | `7c-66-ef-01-23-45` |
 
@@ -228,6 +229,21 @@ moves to another port. The old `Sink` stays, with its `spec`, and
 the operator on the old machine sets its `Connected` condition to
 `False`. Delete it when you no longer need its declaration. A card that plays and records through one PCM
 gives its `Source` the same name with `-capture` on the end.
+
+A name is a DNS label, so it holds at most 63 characters. A USB
+serial is often 20 characters or more, so on a machine with a longer
+name the serial form can pass that. Then the name holds the first
+eight hex digits of the serial's SHA-256 in place of the serial, and
+keeps the rest. The hash is stable and differs for each serial, so
+two identical dongles on one machine still get two names. To compute
+it by hand:
+
+```sh
+printf %s ABCDEF0123456789ABCDEF0 | sha256sum | cut -c1-8
+```
+
+The operator refuses any other name that passes 63 characters, and
+its log names the endpoint and the length.
 
 On an Intel HDMI codec, `hdmi-0` names the card's first HDMI slot
 and not a physical port. A pin binds to the first free slot when a

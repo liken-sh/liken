@@ -357,7 +357,8 @@ func TestAwaitPipeWireWritesNothingWhenPipeWireAnswers(t *testing.T) {
 	}
 }
 
-// The event sources are the jack nodes and the backstop tick. A
+// The event sources are the cards' control devices, the graph feed,
+// the watch on the two collections, and the backstop tick. A
 // closed channel while the context is live leaves the operator with
 // no way to notice a monitor again, so it stops instead.
 func TestRunStopsWhenTheEventSourcesClose(t *testing.T) {

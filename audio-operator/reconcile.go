@@ -40,8 +40,8 @@ func run(ctx context.Context, operator *reconciler, settled <-chan struct{}) err
 				if ctx.Err() != nil {
 					return nil
 				}
-				// The wake channel merges the jack nodes, bluetoothd,
-				// the cards' own control devices, the graph feed, and
+				// The wake channel merges bluetoothd, the cards' own
+				// control devices, the graph feed, and
 				// the backstop tick. A closed channel while the context
 				// is live leaves the operator running with no way to
 				// notice a change again, so it exits and the kubelet

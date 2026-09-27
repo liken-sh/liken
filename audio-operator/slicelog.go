@@ -27,9 +27,11 @@ import (
 )
 
 // sliceLivenessInterval is the longest a running operator stays quiet
-// about its slice. A person who reads the log and finds the newest
-// slice line older than this knows the loop is not running, whatever
-// the API server still shows.
+// about its slice. It is a clock on the log and reads nothing: the
+// line prints on the first pass after the interval, so a person who
+// reads the log and finds the newest slice line older than this plus
+// one backstop tick knows the loop is not running, whatever the API
+// server still shows.
 //
 // The bound is time, not a count of passes. The loop's rate sets how
 // fast passes accumulate: the backstop tick alone gives one pass a

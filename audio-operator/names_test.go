@@ -96,6 +96,86 @@ func TestEndpointName(t *testing.T) {
 	}
 }
 
+// A name that would pass 63 characters keeps the machine, the vendor,
+// the product, and the PCM id, and holds the first eight hex digits of
+// the serial's SHA-256 in place of the serial. A name that fits keeps
+// the serial itself. The two 23-character serials are the length a
+// common webcam microphone reports.
+func TestAUSBNamePastALabelHoldsAHashOfTheSerial(t *testing.T) {
+	webcam := func(serial string) cardIdentity {
+		return cardIdentity{Bus: "usb", Location: "1-6", Vendor: "046d", Product: "0a44", Serial: serial}
+	}
+	cases := []struct {
+		name    string
+		machine string
+		serial  string
+		capture bool
+		want    string
+	}{
+		{
+			name:    "exactly 63 characters keeps the serial",
+			machine: "node-100",
+			serial:  "ABCDEF0123456789ABCDEF",
+			capture: true,
+			want:    "node-100-usb-046d-0a44-abcdef0123456789abcdef-usb-audio-capture",
+		},
+		{
+			name:    "64 characters holds the hash",
+			machine: "node-100",
+			serial:  "ABCDEF0123456789ABCDEF0",
+			capture: true,
+			want:    "node-100-usb-046d-0a44-" + serialHash("ABCDEF0123456789ABCDEF0") + "-usb-audio-capture",
+		},
+		{
+			name:    "a longer machine's playback side",
+			machine: "studio-screen-12",
+			serial:  "ABCDEF0123456789ABCDEF0",
+			want:    "studio-screen-12-usb-046d-0a44-" + serialHash("ABCDEF0123456789ABCDEF0") + "-usb-audio",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := endpointName(c.machine, webcam(c.serial), "USB Audio", c.capture)
+			if err != nil {
+				t.Fatalf("endpointName reported %v", err)
+			}
+			if got != c.want {
+				t.Errorf("name = %q, want %q", got, c.want)
+			}
+			if len(got) > maxDeviceName {
+				t.Errorf("name %q is %d characters", got, len(got))
+			}
+		})
+	}
+}
+
+// The hash is the contract a person can compute by hand from the
+// serial the card reports, so the digits are pinned here.
+func TestSerialHash(t *testing.T) {
+	// printf %s ABCDEF0123456789ABCDEF0 | sha256sum | cut -c1-8
+	if got := serialHash("ABCDEF0123456789ABCDEF0"); got != "5fe3de05" {
+		t.Errorf("serialHash = %q", got)
+	}
+}
+
+// Two dongles of one model on one machine keep two names when both
+// names hold a hash, because their serials differ.
+func TestTwoHashedSerialsGiveTwoNames(t *testing.T) {
+	first, err := endpointName("studio-screen-12",
+		cardIdentity{Bus: "usb", Vendor: "046d", Product: "0a44", Serial: "ABCDEF0123456789ABCDEF0"}, "USB Audio", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := endpointName("studio-screen-12",
+		cardIdentity{Bus: "usb", Vendor: "046d", Product: "0a44", Serial: "ABCDEF0123456789ABCDEF1"}, "USB Audio", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Errorf("two serials both named %q", first)
+	}
+}
+
 // A name this operator cannot build is a device it does not publish,
 // and the reason reaches the log rather than a shortened name that
 // nobody can predict.

@@ -43,7 +43,7 @@ var version = "dev"
 const (
 	// settleWindow is how long the loop waits for quiet after the last
 	// event before it writes. A monitor that a person plugs in
-	// produces a burst of jack events, and PipeWire needs a moment
+	// produces a burst of control events, and PipeWire needs a moment
 	// after them to build the sink, so one write must cover the whole
 	// burst.
 	//
@@ -60,13 +60,15 @@ const (
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. The tick covers the changes that no event source
-	// reports: a jack on a card whose claim delivered no input node, a
-	// switch event on a jack node the watcher has not opened yet, a
-	// control moved on a card whose control device would not open as
-	// an event source, and a write that failed on the last pass. The
-	// graph feed delivers every change in PipeWire's graph, a renamed
-	// node included, so the graph needs no tick.
+	// to prompt it. It is a backstop for the changes that no event
+	// source reports: a change on a card whose control device would
+	// not open as an event source, a change on a card whose event
+	// reader stopped on an error until the next pass opens it again,
+	// and a slice or status write that failed on the last pass, which
+	// no event repeats. A jack, an ELD, and a control all report on
+	// the card's control device, and the graph feed delivers every
+	// change in PipeWire's graph, a renamed node included, so none of
+	// them needs the tick.
 	backstopInterval = 60 * time.Second
 
 	// maxSinkFailures is how many graph reads may fail in a row before
@@ -265,6 +267,11 @@ func operate() {
 	// resolves its device rather than reporting a name this driver
 	// does publish as one it does not.
 	operator.endpoints.publish(named)
+	// The cards' control devices open as event sources before the
+	// first pass reads them, so a monitor that a person plugs in
+	// while the pass runs wakes a second pass. The pass follows the
+	// same cards again and opens nothing twice.
+	operator.cards.follow(cardNumbers(named))
 	waitForNodes(ctx, operator.graph, sinkEndpoints(named), nodeReadyTimeout)
 
 	// The graph feed starts before the plugin serves, so that a codec
@@ -282,17 +289,12 @@ func operate() {
 		}
 	}()
 
-	jacks, err := watchJacks(ctx)
-	if err != nil {
-		fatal("watching the jack nodes: %v", err)
-	}
-
 	// The watch on the two collections starts before the first pass,
 	// so that a change it carries wakes the loop from the moment it
 	// runs.
 	watchEndpoints(ctx, client, nodeName, wake, readings)
 
-	settled := settle(ctx, wakes(ctx, jacks, bluez, operator.cards.Events(), pokes),
+	settled := settle(ctx, wakes(ctx, bluez, operator.cards.Events(), pokes),
 		settleWindow, settleLimit)
 
 	// The first pass runs before any event, because the operator
@@ -310,8 +312,9 @@ func operate() {
 // channel. None of them holds state that the loop uses, so the merge
 // loses nothing: all of them say to look again.
 //
-// cards carries every control a person moved, on a knob or from
-// another process, and pokes is where the graph feed and the watch
+// cards carries every change a card reports on its control device: a
+// control a person moved, on a knob or from another process, a jack
+// that a plug changed, and an ELD that a monitor rewrote. pokes is where the graph feed and the watch
 // on the two collections arrive, because neither one carries an
 // event the pass reads: the pass reads everything again.
 //
@@ -319,12 +322,11 @@ func operate() {
 // receive on a nil channel blocks forever, so the merge needs no
 // branch for that pod.
 //
-// A closed bluez channel ends the merge, the same way a closed jack
-// channel does. The relay closes it when the connection to the bus
+// A closed bluez or cards channel ends the merge. The bluez relay closes it when the connection to the bus
 // is lost, and a lost bus is a bluetoothd this operator can no
 // longer read, so the loop stops and the kubelet restarts the pod.
-func wakes(ctx context.Context, jacks <-chan jackEvent, bluez <-chan struct{},
-	cards <-chan controlEvent, pokes <-chan struct{}) <-chan struct{} {
+func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent,
+	pokes <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -340,12 +342,6 @@ func wakes(ctx context.Context, jacks <-chan jackEvent, bluez <-chan struct{},
 			select {
 			case <-ctx.Done():
 				return
-			case event, ok := <-jacks:
-				if !ok {
-					return
-				}
-				fmt.Printf("jack: %s\n", event)
-				wake()
 			case _, ok := <-bluez:
 				if !ok {
 					return

@@ -16,12 +16,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/url"
 	"os"
 	"sync"
-	"time"
 )
 
 // operatorSelector is the label the DaemonSet's pods carry.
@@ -30,13 +26,6 @@ const operatorSelector = "app=audio-operator"
 // captureContainer is the container whose readiness decides whether a
 // pod can answer a tap.
 const captureContainer = "capture"
-
-// podWatchTimeout and podWatchRetry follow the endpoint watches in
-// sinks.go, for the same reasons.
-const (
-	podWatchTimeout = 290 * time.Second
-	podWatchRetry   = 5 * time.Second
-)
 
 // capturePod is what the API needs about one pod: where to dial it and
 // whether its capture container is running.
@@ -60,13 +49,6 @@ type pod struct {
 			Ready bool   `json:"ready"`
 		} `json:"containerStatuses"`
 	} `json:"status"`
-}
-
-type podList struct {
-	Metadata struct {
-		ResourceVersion string `json:"resourceVersion"`
-	} `json:"metadata"`
-	Items []pod `json:"items"`
 }
 
 // capture reads one pod into the answer a request needs. A pod with no
@@ -105,7 +87,7 @@ func (index *podIndex) on(node string) (capturePod, bool) {
 }
 
 // replace takes a whole list, which is what the informer's first read
-// and every reopen deliver.
+// and every list after an expired version deliver.
 func (index *podIndex) replace(pods []pod) {
 	next := map[string]capturePod{}
 	for _, held := range pods {
@@ -133,55 +115,52 @@ func (index *podIndex) apply(kind string, held pod) {
 	index.byNode[held.Spec.NodeName] = held.capture()
 }
 
-// watchPods holds one list and one watch open for the life of the
-// process. A watch the API server closes, and a network fault, both
-// bring the loop back to the list, so the memory is rebuilt whole
-// rather than followed from a resource version that may have aged out.
+// watchPods lists the operator's pods once and follows the changes
+// for the life of the process. The watch is the one in apiwatch.go: a
+// watch the API server ends opens again from the last event's version,
+// and only a version the server no longer keeps lists the pods again.
 func watchPods(ctx context.Context, client *Client, namespace string,
 	index *podIndex, complain func(error)) {
-	path := "/api/v1/namespaces/" + namespace + "/pods?labelSelector=" +
-		url.QueryEscape(operatorSelector)
-	for ctx.Err() == nil {
-		if err := followPods(ctx, client, path, index); err != nil && ctx.Err() == nil {
-			complain(err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(podWatchRetry):
-		}
+	go podWatch(client, namespace, index, complain).run(ctx)
+}
+
+// podWatch builds the watch with the production waits.
+func podWatch(client *Client, namespace string, index *podIndex, complain func(error)) *objectWatch {
+	return &objectWatch{
+		client:     client,
+		kind:       "Pod",
+		collection: "/api/v1/namespaces/" + namespace + "/pods",
+		selector:   operatorSelector,
+		labels:     true,
+		keep:       podKeeper{index},
+		complain:   complain,
+		retry:      objectWatchRetry,
+		retryLimit: objectWatchRetryLimit,
 	}
 }
 
-// followPods lists once and then follows the changes.
-func followPods(ctx context.Context, client *Client, path string, index *podIndex) error {
-	list, err := get[podList](client, path)
-	if err != nil {
-		return fmt.Errorf("listing the operator's pods: %w", err)
-	}
-	index.replace(list.Items)
+// podKeeper reads the watch's objects as pods into the index.
+type podKeeper struct{ index *podIndex }
 
-	body, err := client.Watch(ctx, fmt.Sprintf("%s&watch=true&resourceVersion=%s&timeoutSeconds=%d",
-		path, list.Metadata.ResourceVersion, int(podWatchTimeout.Seconds())))
-	if err != nil {
-		return fmt.Errorf("watching the operator's pods: %w", err)
-	}
-	defer drain(body)
-
-	events := json.NewDecoder(body)
-	for {
-		var event struct {
-			Type   string `json:"type"`
-			Object pod    `json:"object"`
-		}
-		if err := events.Decode(&event); err != nil {
-			if err == io.EOF {
-				return nil
-			}
+func (k podKeeper) replace(items json.RawMessage) error {
+	var pods []pod
+	// A list with no pods can leave the items out.
+	if len(items) > 0 {
+		if err := json.Unmarshal(items, &pods); err != nil {
 			return err
 		}
-		index.apply(event.Type, event.Object)
 	}
+	k.index.replace(pods)
+	return nil
+}
+
+func (k podKeeper) apply(kind string, object json.RawMessage) error {
+	var held pod
+	if err := json.Unmarshal(object, &held); err != nil {
+		return err
+	}
+	k.index.apply(kind, held)
+	return nil
 }
 
 // podNamespace is where the API looks for the operator's pods, which

@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestTheIndexAnswersWhichPodIsOnANode(t *testing.T) {
@@ -109,5 +113,52 @@ func TestTheNamespaceComesFromTheDownwardAPI(t *testing.T) {
 	t.Setenv("POD_NAMESPACE", "")
 	if got := podNamespace(); got != "liken-system" {
 		t.Errorf("the namespace is %q, want liken-system", got)
+	}
+}
+
+// podEvent is one watch event for the operator's pod on a node, at a
+// resource version.
+func podEvent(kind, node, version string) string {
+	held := samplePod(node)
+	body, _ := json.Marshal(map[string]any{
+		"type": kind,
+		"object": map[string]any{
+			"metadata": map[string]string{"name": held.Metadata.Name, "resourceVersion": version},
+			"spec":     held.Spec,
+			"status":   held.Status,
+		},
+	})
+	return string(body)
+}
+
+// A pod watch that the API server ends opens again from the version of
+// the last event, and does not list the pods again. The index keeps
+// what the events put in it.
+func TestThePodWatchResumesFromTheLastEvent(t *testing.T) {
+	fake := newOneObject(t)
+	index := newPodIndex()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	watch := podWatch(NewClient(fake.server.URL, fake.server.Client(), ""), "liken-system", index, func(error) {})
+	watch.retry, watch.retryLimit = time.Millisecond, 10*time.Millisecond
+	go watch.run(ctx)
+
+	listed := next(t, fake.listed, "list")
+	next(t, fake.watched, "watch")
+	fake.events <- podEvent("ADDED", "node-1", "11")
+	fake.events <- endWatch
+	reopened := next(t, fake.watched, "second watch")
+
+	if !strings.Contains(listed, "labelSelector=app%3Daudio-operator") {
+		t.Errorf("the list %q does not select the operator's pods", listed)
+	}
+	if !strings.Contains(reopened, "resourceVersion=11") {
+		t.Errorf("the second watch %q does not resume from the last event", reopened)
+	}
+	if len(fake.listed) != 0 {
+		t.Error("a watch that ended cleanly was followed by a list")
+	}
+	if held, found := index.on("node-1"); !found || held.IP != "10.42.0.7" {
+		t.Errorf("the index holds %+v, %v for node-1", held, found)
 	}
 }

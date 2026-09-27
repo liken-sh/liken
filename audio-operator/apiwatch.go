@@ -22,6 +22,11 @@ package main
 // selectable field. The API server then sends a machine's operator the
 // changes to that machine's resources alone, and not a change to every
 // Sink in the cluster.
+//
+// The API follows the operator's own pods with the label selector
+// app=audio-operator, and keeps them in memory, because every tap
+// needs the pod on one node and a read per tap would load the API
+// server. The watch hands each object to a keeper, which holds them.
 
 import (
 	"context"
@@ -48,18 +53,22 @@ const (
 	objectWatchRetryLimit = time.Minute
 )
 
-// objectWatch follows the objects one field selector takes. changed
-// runs once for every list and once for every event that changes one
-// of them, deleted included. The caller reads the objects again
-// itself, so the watch carries no part of an object but its resource
-// version.
+// objectWatch follows the objects one selector takes. changed runs
+// once for every list and once for every event that changes one of
+// them, deleted included. A caller that reads the objects again itself
+// sets changed alone, and the watch carries no part of an object but
+// its resource version. A caller that holds the objects in memory sets
+// keep, which takes the list's items and each event's object.
 type objectWatch struct {
 	client     *Client
 	kind       string
 	collection string
-	// selector is the field selector, such as metadata.name=<name>.
+	// selector is the field selector, such as metadata.name=<name>,
+	// or the label selector when labels is true.
 	selector string
+	labels   bool
 	changed  func()
+	keep     objectKeeper
 	complain func(error)
 
 	// restarted runs each time a watch opens after the first, and is
@@ -128,9 +137,27 @@ func (w *objectWatch) run(ctx context.Context) {
 	}
 }
 
-// query is the query string that carries the field selector.
+// objectKeeper holds the objects a watch follows in memory. replace
+// takes a list's items, which is the whole present state, and apply
+// takes one event's type and object.
+type objectKeeper interface {
+	replace(items json.RawMessage) error
+	apply(kind string, object json.RawMessage) error
+}
+
+// query is the query string that carries the selector.
 func (w *objectWatch) query() string {
+	if w.labels {
+		return "labelSelector=" + url.QueryEscape(w.selector)
+	}
 	return "fieldSelector=" + url.QueryEscape(w.selector)
+}
+
+// notify runs changed, when the caller set it.
+func (w *objectWatch) notify() {
+	if w.changed != nil {
+		w.changed()
+	}
 }
 
 // list reads the collection's version, and runs changed: the list is
@@ -141,11 +168,17 @@ func (w *objectWatch) list() (string, error) {
 		Metadata struct {
 			ResourceVersion string `json:"resourceVersion"`
 		} `json:"metadata"`
+		Items json.RawMessage `json:"items"`
 	}
 	if err := w.client.RequestJSON(http.MethodGet, w.collection+"?"+w.query(), nil, &list); err != nil {
 		return "", fmt.Errorf("listing the %s %s: %w", w.kind, w.selector, err)
 	}
-	w.changed()
+	if w.keep != nil {
+		if err := w.keep.replace(list.Items); err != nil {
+			return "", fmt.Errorf("reading the list of the %s %s: %w", w.kind, w.selector, err)
+		}
+	}
+	w.notify()
 	return list.Metadata.ResourceVersion, nil
 }
 
@@ -176,19 +209,23 @@ func (w *objectWatch) follow(ctx context.Context, version string) (string, error
 	events := json.NewDecoder(body)
 	for {
 		var event struct {
-			Type   string `json:"type"`
+			Type   string          `json:"type"`
+			Raw    json.RawMessage `json:"object"`
 			Object struct {
 				Metadata struct {
 					ResourceVersion string `json:"resourceVersion"`
 				} `json:"metadata"`
 				Code    int    `json:"code"`
 				Message string `json:"message"`
-			} `json:"object"`
+			} `json:"-"`
 		}
 		if err := events.Decode(&event); err != nil {
 			if err == io.EOF {
 				return version, nil
 			}
+			return version, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
+		}
+		if err := json.Unmarshal(event.Raw, &event.Object); err != nil {
 			return version, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
 		}
 		switch event.Type {
@@ -202,7 +239,15 @@ func (w *objectWatch) follow(ctx context.Context, version string) (string, error
 			version = event.Object.Metadata.ResourceVersion
 		default:
 			version = event.Object.Metadata.ResourceVersion
-			w.changed()
+			if w.keep != nil {
+				// An object the keeper cannot read leaves the memory
+				// short of it, so the empty version sends the loop
+				// back to a list, which reads the whole state again.
+				if err := w.keep.apply(event.Type, event.Raw); err != nil {
+					return "", fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
+				}
+			}
+			w.notify()
 		}
 	}
 }

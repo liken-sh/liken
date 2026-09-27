@@ -44,9 +44,15 @@ const apiService = "audio-api"
 
 // certificateCheck is how often the API looks at the lives of the
 // certificates it holds and mints a leaf again when one is nearing its
-// end. The certificates are in memory, and no object changes when one
-// nears its end, so this is a clock and not a watch. A year of life
-// needs no closer look than this.
+// end. No object changes when a certificate nears its end, so this is
+// a clock and not a watch. A year of life needs no closer look than
+// this.
+//
+// The pass reads the three objects again, which costs three gets an
+// hour. That read is also the backstop for the Secret audio-api-tls
+// and the ConfigMap audio-api-ca, which no watch follows: a person
+// who deletes or edits one sees it written back on the next pass. The
+// capture Secret and the client authority have watches of their own.
 const certificateCheck = time.Hour
 
 // apiServer is the whole of this mode's state.
@@ -114,7 +120,7 @@ func serveAPI() {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	})
 
-	go watchPods(ctx, client, namespace, server.pods, func(err error) {
+	watchPods(ctx, client, namespace, server.pods, func(err error) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	})
 

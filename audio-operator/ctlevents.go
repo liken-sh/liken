@@ -12,6 +12,13 @@ package main
 // operator asks the card nothing on a timer. status.observed follows
 // these events, and a declared value is written back on the pass one
 // of them wakes.
+//
+// The operator reads no jack's input node, because the control device
+// reports every jack too. ALSA gives each jack it senses a control
+// element and reports each plug on it, and the pass reads the jack's
+// state from that element. The input node is a kernel option on top
+// of the element, so a card with the node has the element, and a
+// kernel built without the option still has the element.
 
 import (
 	"context"
@@ -52,8 +59,7 @@ const (
 )
 
 // ctlEvent mirrors struct snd_ctl_event. Nothing reads through it: the
-// reader parses the record by offset, the way jacks.go parses an input
-// event. It is here so a test can assert the layout the offsets
+// reader parses the record by offset. It is here so a test can assert the layout the offsets
 // assume.
 type ctlEvent struct {
 	Type int32
@@ -111,8 +117,7 @@ func watchControls(ctx context.Context, card int) (<-chan controlEvent, error) {
 // back into blocking mode and takes it out of the runtime's poller. A
 // read on it would then hold a thread that a Close cannot interrupt.
 // The descriptor is non-blocking from the open, so the runtime polls
-// it and a Close ends a waiting read, the way jacks.go opens an input
-// node.
+// it and a Close ends a waiting read.
 func subscribeControlEvents(path string) (*os.File, error) {
 	descriptor, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {

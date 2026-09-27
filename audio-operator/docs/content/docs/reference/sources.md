@@ -63,7 +63,7 @@ is the PCM and the jack is a control in `spec.controls`. A Bluetooth
 headset's microphone is not published yet, because it needs the
 headset profiles the pod does not run.
 
-One capture endpoint: an analog input, or a USB card's capture side. A Bluetooth headset's microphone is not published yet. An HDA card serves several input jacks through one capture PCM and picks the live jack with its Input Source control, so the Source is the PCM and the jack is a control.
+One capture endpoint: an analog input, or a USB card's capture side. A Bluetooth headset's microphone is not published yet. An HDA card serves several input jacks through one capture PCM and picks the live jack with its Input Source control, so the Source is the PCM and the jack is a control. The name is the machine's name and the card's identity, as the Sink reference gives them. When a USB card's name would pass 63 characters, it holds the first eight hex digits of the SHA-256 of the serial in place of the serial.
 
 ## spec
 

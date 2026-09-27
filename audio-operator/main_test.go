@@ -118,18 +118,20 @@ func assertQuiet(t *testing.T, out <-chan struct{}, within time.Duration) {
 }
 
 // Every event source ends in one wake, and one pass covers whatever
-// woke it. A control a person turned on the card and a spec somebody
-// edited both arrive here.
+// woke it. A control a person turned on the card, a monitor plugged
+// into an HDMI pin, and a spec somebody edited all arrive here.
 func TestWakesCarriesEverySource(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	jacks := make(chan jackEvent, 1)
 	cards := make(chan controlEvent, 1)
 	pokes := make(chan struct{}, 1)
-	out := wakes(ctx, jacks, nil, cards, pokes)
+	out := wakes(ctx, nil, cards, pokes)
 
 	cards <- controlEvent{Card: 0, Name: "Master Playback Volume", Mask: ctlEventMaskValue}
+	waitForWake(t, out, testLimit)
+
+	cards <- controlEvent{Card: 0, Name: "HDMI/DP,pcm=3 Jack", Mask: ctlEventMaskValue}
 	waitForWake(t, out, testLimit)
 
 	pokes <- struct{}{}
@@ -143,7 +145,7 @@ func TestWakesEndsWhenACardWatcherCloses(t *testing.T) {
 	defer cancel()
 
 	cards := make(chan controlEvent)
-	out := wakes(ctx, make(chan jackEvent), nil, cards, make(chan struct{}))
+	out := wakes(ctx, nil, cards, make(chan struct{}))
 	close(cards)
 
 	select {
