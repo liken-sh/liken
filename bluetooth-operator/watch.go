@@ -37,7 +37,9 @@ const (
 	watchTimeout = 290 * time.Second
 
 	// shortWatch is the shortest time a watch may last and still count
-	// as one that ran. A watch that closes sooner is a failure, whatever
+	// as one that ran. A watch's life starts when the API server accepts
+	// it, and a watch the server refused never ran, however long the
+	// refusal took. A watch that closes sooner is a failure, whatever
 	// it delivered, and a watcher that reopened it with no wait would
 	// send thousands of requests each second while the fault lasts. A
 	// watch that ran this long or longer resets the backoff, even when
@@ -88,12 +90,11 @@ func listThenWatch[T any](ctx context.Context, c *Client, collection, what strin
 			version = list.Metadata.ResourceVersion
 			listed(list.Items)
 		}
-		opened := time.Now()
-		next, err := streamChanges(ctx, c, collection, version, changed)
+		next, accepted, err := streamChanges(ctx, c, collection, version, changed)
 		if ctx.Err() != nil {
 			return
 		}
-		ran := time.Since(opened) >= shortWatch
+		ran := !accepted.IsZero() && time.Since(accepted) >= shortWatch
 		if ran {
 			delay = watchRetry
 		}
@@ -143,15 +144,22 @@ func pauseWatch(ctx context.Context, delay time.Duration) time.Duration {
 // and a close that read the rest of it first would wait minutes before
 // the next list, and miss every change in that time. The cancel ends
 // the request, so the body closes at once.
-func streamChanges[T any](ctx context.Context, c *Client, collection, version string, changed func(string, T)) (string, error) {
+//
+// The time it returns is when the API server accepted the watch, which
+// is when the 200 arrived. It is the zero time for a watch the server
+// refused. A watch's life counts from that moment, because a slow dial
+// or a slow refusal is not a watch that ran.
+func streamChanges[T any](ctx context.Context, c *Client, collection, version string, changed func(string, T)) (string, time.Time, error) {
+	var accepted time.Time
 	path := fmt.Sprintf("%s?watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
 		collection, url.QueryEscape(version), int(watchTimeout.Seconds()))
 	ctx, cancel := context.WithCancel(ctx)
 	body, err := c.Watch(ctx, path)
 	if err != nil {
 		cancel()
-		return version, err
+		return version, accepted, err
 	}
+	accepted = time.Now()
 	defer func() {
 		cancel()
 		drain(body)
@@ -165,28 +173,28 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 		}
 		if err := events.Decode(&event); err != nil {
 			if errors.Is(err, io.EOF) {
-				return version, nil
+				return version, accepted, nil
 			}
-			return version, err
+			return version, accepted, err
 		}
 		var meta struct {
 			Code     int        `json:"code"`
 			Metadata ObjectMeta `json:"metadata"`
 		}
 		if err := json.Unmarshal(event.Object, &meta); err != nil {
-			return version, err
+			return version, accepted, err
 		}
 		switch event.Type {
 		case "ERROR":
 			if meta.Code == 410 {
-				return version, errWatchExpired
+				return version, accepted, errWatchExpired
 			}
-			return version, fmt.Errorf("the watch ended with %s", event.Object)
+			return version, accepted, fmt.Errorf("the watch ended with %s", event.Object)
 		case "BOOKMARK":
 		default:
 			var object T
 			if err := json.Unmarshal(event.Object, &object); err != nil {
-				return version, err
+				return version, accepted, err
 			}
 			changed(event.Type, object)
 		}

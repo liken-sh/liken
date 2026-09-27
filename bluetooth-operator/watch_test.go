@@ -19,6 +19,11 @@ import (
 // its last line, the way the API server does at timeoutSeconds.
 const holdOpen = "hold"
 
+// refuseSlowly, as the first line of a script, answers the watch with
+// a 500 a little later than shortWatch, so the refusal outlasts the
+// time a watch must run to reset the backoff.
+const refuseSlowly = "refuse slowly"
+
 // linger, as a line of a script, keeps the stream open a little longer
 // than shortWatch, so the watch counts as one that ran.
 const linger = "linger"
@@ -75,6 +80,11 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if line == holdOpen {
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
+			return
+		}
+		if line == refuseSlowly {
+			time.Sleep(shortWatch + 200*time.Millisecond)
+			http.Error(w, "the server is overloaded", http.StatusInternalServerError)
 			return
 		}
 		if line == linger {
@@ -354,5 +364,25 @@ func TestAFailedWatchThatStaysOpenListsAgainAfterTheBackoff(t *testing.T) {
 				t.Fatalf("the watcher listed %d times, want 2", lists)
 			}
 		})
+	}
+}
+
+// A watch's life starts when the server accepts it, not when the
+// request begins. A refusal that takes longer than shortWatch is still
+// a watch that never ran, so the backoff grows. The first refusal waits
+// one second, and the second waits two: the gap between the second and
+// the third list is the slow refusal plus two seconds, about 3.2
+// seconds, and a reset backoff would make it about 2.2.
+func TestASlowRefusalStillGrowsTheBackoff(t *testing.T) {
+	server := newWatchServer("/things", "[]", []string{refuseSlowly}, []string{refuseSlowly}, []string{holdOpen})
+	stop := runWatcher(t, server)
+	server.awaitWatches(t, 3)
+	stop()
+
+	server.mu.Lock()
+	gap := server.listTimes[2].Sub(server.listTimes[1])
+	server.mu.Unlock()
+	if want := shortWatch + 200*time.Millisecond + 2*watchRetry; gap < want-300*time.Millisecond {
+		t.Fatalf("the third list came %s after the second, want about %s", gap, want)
 	}
 }
