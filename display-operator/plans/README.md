@@ -296,6 +296,12 @@ decided yet what work they become.
   A claim stating a mode the panel will not sync loops the kubelet's
   prepare retries through compositor restarts until the whole card
   taints and the compositor enters restart backoff.
+* [The operator's restarts wait in the kubelet's crash backoff](open-problems/the-operators-restarts-wait-in-crash-backoff.md).
+  Each restart the operator orders is a container exit, so a second
+  restart within about 10 minutes waits 10 s before weston starts
+  again, and each later one waits twice as long, up to 5 minutes.
+  Two mode switches in a row on liken-1 each took about 30 s to show
+  a picture.
 * [Two monitors of one model share a Display](open-problems/two-monitors-of-one-model-share-a-display.md).
   A `Display` name leaves out the serial, the node, and the connector,
   so two monitors of one model are one `Display`, and on two nodes its
