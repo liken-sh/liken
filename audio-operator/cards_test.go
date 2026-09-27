@@ -38,8 +38,8 @@ func TestReadCardIdentityReadsWhereTheCardIs(t *testing.T) {
 		},
 		{
 			// The USB device above the interface carries the identity,
-			// and the serial is what makes the dongle's name follow it
-			// from machine to machine.
+			// and the serial is what tells two identical dongles on
+			// one machine apart.
 			name:    "the USB card on liken-1",
 			machine: "liken-1",
 			card:    1,

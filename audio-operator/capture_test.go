@@ -123,7 +123,7 @@ func silence(seconds float64, rate, channels int) []byte {
 func TestATapRunsPwRecordWithTheLineThePlanStates(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.5")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.5")
 	if answer.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(answer.Body)
 		t.Fatalf("the tap answered %s: %s", answer.Status, body)
@@ -152,7 +152,7 @@ func TestATapRunsPwRecordWithTheLineThePlanStates(t *testing.T) {
 		t.Errorf("pw-record was given\n%q", given)
 	}
 	tail := "\", stream.capture.sink = true }\n--target\n" +
-		"usb-0573-1573-a34004801402-usb-audio\n--raw\n--format\ns16\n" +
+		"liken-1-usb-0573-1573-a34004801402-usb-audio\n--raw\n--format\ns16\n" +
 		"--rate\n48000\n--channels\n2\n-\n"
 	if !strings.HasSuffix(given, tail) {
 		t.Errorf("pw-record was given\n%q\nwant a line ending\n%q", given, tail)
@@ -163,7 +163,7 @@ func TestATapOnASourceOmitsTheSinkProperty(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.5, 48000, 1))
 	harness.linksTo(t, "47")
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sources/usb-0573-1573-a34004801402-usb-audio-capture/audio.wav?t=0,0.25")
+		"/v1/audio/sources/liken-1-usb-0573-1573-a34004801402-usb-audio-capture/audio.wav?t=0,0.25")
 	if answer.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(answer.Body)
 		t.Fatalf("the tap answered %s: %s", answer.Status, body)
@@ -183,7 +183,7 @@ func TestASpanDiscardsAndThenDelivers(t *testing.T) {
 	// discards 48,000 bytes and delivers 48,000.
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0.25,0.5")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0.25,0.5")
 	body, _ := io.ReadAll(answer.Body)
 	if len(body) != wavHeaderBytes+48000 {
 		t.Errorf("the body is %d bytes, want %d", len(body), wavHeaderBytes+48000)
@@ -193,7 +193,7 @@ func TestASpanDiscardsAndThenDelivers(t *testing.T) {
 func TestAnEncoderGetsTheEndpointsFormatAndTheMD5WarningIsNotAFailure(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0,0.125")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0,0.125")
 	if answer.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(answer.Body)
 		t.Fatalf("the tap answered %s: %s", answer.Status, body)
@@ -219,7 +219,7 @@ func TestAnEncoderGetsTheEndpointsFormatAndTheMD5WarningIsNotAFailure(t *testing
 func TestOpusCarriesTheBitrateKnobThroughToTheEncoder(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.125&bitrate=128")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.125&bitrate=128")
 	if answer.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(answer.Body)
 		t.Fatalf("the tap answered %s: %s", answer.Status, body)
@@ -237,7 +237,7 @@ func TestOpusCarriesTheBitrateKnobThroughToTheEncoder(t *testing.T) {
 func TestATapCarriesTheCaptureOnlyHeadersAndNothingTheAPIAdds(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
 	_, _ = io.Copy(io.Discard, answer.Body)
 	if got := answer.Header.Get("Cache-Control"); got != "no-store" {
 		t.Errorf("the container says Cache-Control: %q", got)
@@ -256,7 +256,7 @@ func TestATapCarriesTheCaptureOnlyHeadersAndNothingTheAPIAdds(t *testing.T) {
 func TestAHeadTakesNoSampleAndStartsNoProcess(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	answer := harness.call(t, http.MethodHead,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	if answer.StatusCode != http.StatusOK {
 		t.Fatalf("the HEAD answered %s", answer.Status)
 	}
@@ -295,7 +295,7 @@ func TestAStreamThatLandsOnAnotherNodeIsAWrongTarget(t *testing.T) {
 	// DAC the request named.
 	harness := newCaptureHarness(t, "graph-wrong-target.json", silence(1, 44100, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	if answer.StatusCode != http.StatusInternalServerError {
 		body, _ := io.ReadAll(answer.Body)
 		t.Fatalf("a wrong target answered %s: %s", answer.Status, body)
@@ -309,11 +309,11 @@ func TestAStreamThatLandsOnAnotherNodeIsAWrongTarget(t *testing.T) {
 func TestAQueryTheGrammarRefusesIsABadRequest(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
 	for _, target := range []string{
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=7,5",
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=2&t=10",
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=61",
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?bitrate=128",
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?width=480",
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=7,5",
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=2&t=10",
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=61",
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?bitrate=128",
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?width=480",
 	} {
 		answer := harness.call(t, http.MethodGet, target)
 		if answer.StatusCode != http.StatusBadRequest {
@@ -330,7 +330,7 @@ func TestTheFifthTapIsRefusedWithARetryAfter(t *testing.T) {
 		harness.server.taps <- struct{}{}
 	}
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	if answer.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("the fifth tap answered %s", answer.Status)
 	}
@@ -412,7 +412,7 @@ func TestTheContainerServesNoNegotiatedRoute(t *testing.T) {
 	// always present, so the API never forwards an extensionless path.
 	harness := newCaptureHarness(t, "graph.json", nil)
 	for _, target := range []string{
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio",
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio",
 		"/v1/audio",
 		"/v1/audio/openapi.json",
 	} {
@@ -446,7 +446,7 @@ func TestTheContainerAnswersTheInfoRouteWithTheGraphsOwnFormat(t *testing.T) {
 func TestOptionsAnswersTheThreeMethodsAndAnythingElseIsRefused(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", nil)
 	answer := harness.call(t, http.MethodOptions,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	if answer.StatusCode != http.StatusNoContent {
 		t.Errorf("OPTIONS answered %s", answer.Status)
 	}
@@ -456,7 +456,7 @@ func TestOptionsAnswersTheThreeMethodsAndAnythingElseIsRefused(t *testing.T) {
 	_ = answer.Body.Close()
 
 	answer = harness.call(t, http.MethodPost,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	if answer.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("POST answered %s", answer.Status)
 	}
@@ -577,7 +577,7 @@ func TestAPipeWireThatDoesNotAnswerIsUnavailableAndNotAWrongTarget(t *testing.T)
 			ErrGraphUnread)
 	}
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	if answer.StatusCode != http.StatusServiceUnavailable {
 		body, _ := io.ReadAll(answer.Body)
 		t.Fatalf("a dead PipeWire answered %s: %s", answer.Status, body)
@@ -631,7 +631,7 @@ func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
 		harness := newCaptureHarness(t, row.graph, silence(0.5, 48000, 2))
 		harness.server.linkDeadline = 300 * time.Millisecond
 		answer := harness.call(t, http.MethodGet,
-			"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/"+row.target)
+			"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/"+row.target)
 		_, _ = io.Copy(io.Discard, answer.Body)
 
 		lines := harness.logged()
@@ -641,7 +641,7 @@ func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
 		}
 		line := lines[0]
 		for _, want := range []string{
-			"target=usb-0573-1573-a34004801402-usb-audio",
+			"target=liken-1-usb-0573-1573-a34004801402-usb-audio",
 			"node=46",
 			"stream=audio-capture-",
 			"format=wav",
@@ -672,7 +672,7 @@ func TestATapRefusedByTheLimitWritesNoTapLine(t *testing.T) {
 		harness.server.taps <- struct{}{}
 	}
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
 	_, _ = io.Copy(io.Discard, answer.Body)
 	if lines := harness.logged(); len(lines) != 0 {
 		t.Errorf("a refused tap wrote %v", lines)
@@ -691,7 +691,7 @@ func TestAPipelineThatDiedMidTapEndsTheBodyIncomplete(t *testing.T) {
 	harness.endsWithTheSamples(t)
 
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,5")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,5")
 	if answer.StatusCode != http.StatusOK {
 		t.Fatalf("the tap answered %s", answer.Status)
 	}
@@ -709,7 +709,7 @@ func TestAPipelineThatDiedMidTapEndsTheBodyIncomplete(t *testing.T) {
 func TestAFinishedSpanEndsCleanly(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
 	body, err := io.ReadAll(answer.Body)
 	if err != nil {
 		t.Fatalf("a finished span ended with %v", err)
@@ -728,7 +728,7 @@ func TestAClientThatHungUpEndsCleanly(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
 	// An open span, read for one block and then abandoned.
 	request, err := http.NewRequest(http.MethodGet,
-		harness.serving.URL+"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
+		harness.serving.URL+"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +768,7 @@ func TestTheContainerSendsItsHeadersBeforeTheDiscardIsOver(t *testing.T) {
 	t.Setenv("CAPTURE_FAKE_ENCODER_QUIET", "yes")
 
 	request, err := http.NewRequest(http.MethodGet, harness.serving.URL+
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0.4,0.5", nil)
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0.4,0.5", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -818,7 +818,7 @@ func TestAFinishedOpusSpanEndsCleanlyOverHTTP2(t *testing.T) {
 	t.Cleanup(serving.Close)
 
 	request, err := http.NewRequest(http.MethodGet, serving.URL+
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.25", nil)
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.25", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,7 +867,7 @@ func TestAFinishedWAVSpanEndsCleanlyOverHTTP2(t *testing.T) {
 	t.Cleanup(serving.Close)
 
 	request, err := http.NewRequest(http.MethodGet, serving.URL+
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.25", nil)
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.25", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

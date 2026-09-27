@@ -43,12 +43,14 @@ const captureTLSDirVariable = "CAPTURE_TLS_DIR"
 // captureTLSDir is where the leaf lands when nothing names another
 // path. The three file names are the kubernetes.io/tls shape's own.
 //
-// leafFallback is the longest the container goes without reading the
-// directory. The kubelet's swap of the volume starts every read that
-// matters, so the fallback reads only when the inotify watch could not
-// start: a node whose fs.inotify.max_user_instances is used up refuses
-// a new watch, and the container then still takes a new leaf within
-// this bound.
+// leafFallback is how often the container reads the directory while
+// the inotify watch on it is down. The kubelet's swap of the volume
+// starts every read that matters, so a read on this interval runs only
+// when the watch could not start: a node whose
+// fs.inotify.max_user_instances is used up refuses a new watch, and
+// the container then still takes a new leaf within this bound. Each
+// read tries the watch again first, and once the watch starts, no
+// timer runs.
 const (
 	captureTLSDir = "/var/run/audio-capture-tls"
 	tlsCertFile   = "tls.crt"
@@ -74,8 +76,8 @@ type leaf struct {
 	// now is a field so a test drives the reload on its own clock.
 	now func() time.Time
 
-	// rereadAfter is a field so a test sets it to an hour, and only
-	// the volume's swap can start a read in time.
+	// rereadAfter is leafFallback, a field so that a test chooses
+	// the interval.
 	rereadAfter time.Duration
 
 	mu       sync.RWMutex
@@ -217,15 +219,18 @@ func (l *leaf) watch(done <-chan struct{}, readings *captureMetrics, complain fu
 // which is not a failure of the certificate.
 //
 // The watch is armed before each read, so a swap that lands during
-// the read starts one more read and is not lost.
+// the read starts one more read and is not lost. The fallback timer
+// runs only after an arm that failed, because a timer that read a
+// watched volume would find nothing the watch had not already
+// delivered.
 func (l *leaf) watchWith(done <-chan struct{}, report func(ready bool, err error), complain func(error)) {
 	swaps := newVolumeSwaps(l.directory, tlsCertFile, tlsKeyFile)
 	defer swaps.close()
-	fallback := time.NewTimer(l.rereadAfter)
-	defer fallback.Stop()
 	for {
+		var fallback <-chan time.Time
 		if err := swaps.arm(); err != nil {
 			complain(fmt.Errorf("watching %s for the kubelet's updates: %w", l.directory, err))
+			fallback = time.After(l.rereadAfter)
 		}
 		err := l.reload()
 		report(l.loaded(), err)
@@ -233,9 +238,8 @@ func (l *leaf) watchWith(done <-chan struct{}, report func(ready bool, err error
 		case <-done:
 			return
 		case <-swaps.swapped:
-		case <-fallback.C:
+		case <-fallback:
 		}
-		fallback.Reset(l.rereadAfter)
 	}
 }
 

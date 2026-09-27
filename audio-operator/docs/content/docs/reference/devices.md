@@ -72,9 +72,9 @@ itself publishes:
             speakers: {string: FL/FR}
             nodeName: {string: liken.audio.card0-pcm3}
             monitor.liken.sh/id: {string: gsm-5b09-lg-ultrawide}
-        - name: usb-0573-1573-a34004801402-usb-audio-capture
+        - name: kitchen-usb-0573-1573-a34004801402-usb-audio-capture
           attributes:
-            source: {string: usb-0573-1573-a34004801402-usb-audio-capture}
+            source: {string: kitchen-usb-0573-1573-a34004801402-usb-audio-capture}
             card: {int: 1}
             pcm: {int: 0}
             connectionType: {string: usb}
@@ -135,8 +135,8 @@ manual describes those raw devices.
 
 The device name is built from the hardware's own identity, so it
 survives a reboot and a second card: the node and the PCI address
-for an onboard card, the vendor, product, and serial for a USB card
-that has one, and the driver's own name for the PCM on the end,
+for an onboard card, the node, vendor, product, and serial for a USB
+card that has one, and the driver's own name for the PCM on the end,
 `hdmi-0` or `usb-audio`. A capture endpoint's name ends in
 `-capture`. The [`Sink` reference](/docs/reference/sinks/#the-name)
 gives the three forms. The name repeats as the `sink` or `source`
@@ -151,7 +151,7 @@ identity BlueZ carries that survives a reboot.
 | Attribute | Type | What it is |
 |---|---|---|
 | `sink` | string | a playback endpoint's name: `kitchen-pci-0000-00-1f-3-hdmi-0` or `a0-ab-51-33-b7-12` |
-| `source` | string | a capture endpoint's name: `usb-0573-1573-a34004801402-usb-audio-capture` |
+| `source` | string | a capture endpoint's name: `kitchen-usb-0573-1573-a34004801402-usb-audio-capture` |
 | `connectionType` | string | `hdmi`, `displayport`, `analog`, `usb`, or `bluetooth` |
 | `nodeName` | string | the PipeWire node name a consumer's streams target |
 | `card` | int | the ALSA card number, this boot |

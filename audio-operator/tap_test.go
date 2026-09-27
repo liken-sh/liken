@@ -191,7 +191,7 @@ func TestAnEncoderThatExitsBeforeTheBodyIsReadDeliversEveryByte(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
 	harness.readsLate(250 * time.Millisecond)
 	answer := harness.call(t, "GET",
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0,0.125")
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0,0.125")
 	body, err := io.ReadAll(answer.Body)
 	if err != nil {
 		t.Fatalf("reading the body: %v", err)

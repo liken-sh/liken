@@ -47,9 +47,9 @@ func TestEveryRouteMatchesItsOwnPath(t *testing.T) {
 		{"/v1/audio/sources/desk-mic/audio.wav", "/v1/audio/sources/{name}/audio.wav", "desk-mic"},
 		{"/v1/audio/sources/desk-mic", "/v1/audio/sources/{name}", "desk-mic"},
 		{
-			"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.opus",
+			"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.opus",
 			"/v1/audio/sinks/{name}/audio.opus",
-			"usb-0573-1573-a34004801402-usb-audio",
+			"liken-1-usb-0573-1573-a34004801402-usb-audio",
 		},
 	}
 	for _, row := range cases {

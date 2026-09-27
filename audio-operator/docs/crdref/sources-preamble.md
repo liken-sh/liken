@@ -9,7 +9,7 @@ delete one. The operator writes the whole of `status`, and you write
 apiVersion: audio.liken.sh/v1alpha1
 kind: Source
 metadata:
-  name: usb-0573-1573-a34004801402-usb-audio-capture
+  name: node-1-usb-0573-1573-a34004801402-usb-audio-capture
 spec:
   mute: true
 status:

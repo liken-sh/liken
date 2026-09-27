@@ -68,8 +68,16 @@ func publishLeaf(t *testing.T, directory string, generation int) {
 // read is reported on the channel.
 func watchLeaf(t *testing.T, directory string) (*leaf, chan struct{}) {
 	t.Helper()
+	return watchLeafEvery(t, directory, time.Hour, func(err error) { t.Error(err) })
+}
+
+// watchLeafEvery runs the watch with the fallback interval a test
+// chooses, and hands a watch that could not start to complain.
+func watchLeafEvery(t *testing.T, directory string, fallback time.Duration,
+	complain func(error)) (*leaf, chan struct{}) {
+	t.Helper()
 	held := newLeaf(directory)
-	held.rereadAfter = time.Hour
+	held.rereadAfter = fallback
 	reads := make(chan struct{}, 64)
 	done := make(chan struct{})
 	finished := make(chan struct{})
@@ -83,8 +91,11 @@ func watchLeaf(t *testing.T, directory string) (*leaf, chan struct{}) {
 			if err != nil {
 				t.Error(err)
 			}
-			reads <- struct{}{}
-		}, func(err error) { t.Error(err) })
+			select {
+			case reads <- struct{}{}:
+			default:
+			}
+		}, complain)
 	}()
 	return held, reads
 }
@@ -117,6 +128,38 @@ func TestTheLeafIsReadWhenTheKubeletSwapsTheVolume(t *testing.T) {
 
 	if string(first.Certificate[0]) == string(second.Certificate[0]) {
 		t.Error("the new leaf was not served")
+	}
+}
+
+// A volume the inotify watch covers is read when it swaps and at no
+// other time. The fallback interval here is a millisecond, so a timer
+// that read the volume on its own would read it many times during the
+// wait.
+func TestAWatchedVolumeIsNotReadOnATimer(t *testing.T) {
+	_, reads := watchLeafEvery(t, t.TempDir(), time.Millisecond, func(err error) { t.Error(err) })
+	next(t, reads, "first read")
+	select {
+	case <-reads:
+		t.Error("the volume was read again with no swap")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// A container whose inotify watch could not start, such as on a node
+// whose fs.inotify.max_user_instances is used up, still reads the
+// volume on the fallback interval, so a new leaf reaches it.
+func TestAVolumeWithNoWatchIsReadOnTheFallback(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "not-mounted")
+	complaints := make(chan error, 64)
+	_, reads := watchLeafEvery(t, missing, time.Millisecond, func(err error) {
+		select {
+		case complaints <- err:
+		default:
+		}
+	})
+	next(t, complaints, "complaint that the watch could not start")
+	for range 3 {
+		next(t, reads, "read on the fallback interval")
 	}
 }
 

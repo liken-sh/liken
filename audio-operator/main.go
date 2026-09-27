@@ -60,10 +60,13 @@ const (
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. A jack that changes while its node is closed for a
-	// rescan costs one edge, and WirePlumber can rename a sink with no
-	// jack event at all, so this tick is what recovers the state after
-	// either one.
+	// to prompt it. The tick covers the changes that no event source
+	// reports: a jack on a card whose claim delivered no input node, a
+	// switch event on a jack node the watcher has not opened yet, a
+	// control moved on a card whose control device would not open as
+	// an event source, and a write that failed on the last pass. The
+	// graph feed delivers every change in PipeWire's graph, a renamed
+	// node included, so the graph needs no tick.
 	backstopInterval = 60 * time.Second
 
 	// maxSinkFailures is how many graph reads may fail in a row before
@@ -287,7 +290,7 @@ func operate() {
 	// The watch on the two collections starts before the first pass,
 	// so that a change it carries wakes the loop from the moment it
 	// runs.
-	watchEndpoints(ctx, client, wake, readings)
+	watchEndpoints(ctx, client, nodeName, wake, readings)
 
 	settled := settle(ctx, wakes(ctx, jacks, bluez, operator.cards.Events(), pokes),
 		settleWindow, settleLimit)

@@ -81,7 +81,7 @@ and it plays into silence until you set `mute` back to `false`.
 
 The same field on a `Source` closes a microphone:
 
-    kubectl patch source usb-0573-1573-a34004801402-usb-audio-capture \
+    kubectl patch source kitchen-usb-0573-1573-a34004801402-usb-audio-capture \
       --type merge -p '{"spec":{"mute":true}}'
 
 To close every microphone in the house at once, run that patch over
@@ -96,7 +96,7 @@ kernel uses, and you set them in `spec.controls` under the same
 names. An integer control takes a number in its range, a switch
 takes `on` or `off`, and a selector takes one of its listed values:
 
-    kubectl patch sink usb-0573-1573-a34004801402-usb-audio --type merge \
+    kubectl patch sink kitchen-usb-0573-1573-a34004801402-usb-audio --type merge \
       -p '{"spec":{"controls":{"PCM Playback Volume":"96"}}}'
 
 The operator checks the name and the value against the capability

@@ -16,8 +16,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // endpointAPI is an API server that holds one collection of each
@@ -31,6 +29,9 @@ type endpointAPI struct {
 	sinks    map[string]*Sink
 	sources  map[string]*Source
 	requests []string
+	// selected records each list and watch of a collection with its
+	// field selector, as "LIST <path> <selector>".
+	selected []string
 	// watches is what the watch handler holds open, so a test can
 	// close a connection and see the operator open another.
 	watches chan struct{}
@@ -48,6 +49,14 @@ func (a *endpointAPI) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mutex.Lock()
 		a.requests = append(a.requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet && (r.URL.Path == SinksPath || r.URL.Path == SourcesPath) {
+			verb := "LIST"
+			if r.URL.Query().Get("watch") == "true" {
+				verb = "WATCH"
+			}
+			a.selected = append(a.selected,
+				verb+" "+r.URL.Path+" "+r.URL.Query().Get("fieldSelector"))
+		}
 		a.mutex.Unlock()
 		if r.URL.Query().Get("watch") == "true" {
 			a.watches <- struct{}{}
@@ -70,7 +79,9 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 	case r.Method == http.MethodGet && r.URL.Path == SinksPath:
 		list := SinkList{}
 		for _, sink := range a.sinks {
-			list.Items = append(list.Items, *sink)
+			if selects(r, sink.Status) {
+				list.Items = append(list.Items, *sink)
+			}
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case r.Method == http.MethodGet:
@@ -99,7 +110,9 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 	case r.Method == http.MethodGet && r.URL.Path == SourcesPath:
 		list := SourceList{}
 		for _, source := range a.sources {
-			list.Items = append(list.Items, *source)
+			if selects(r, source.Status) {
+				list.Items = append(list.Items, *source)
+			}
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case r.Method == http.MethodGet:
@@ -118,6 +131,17 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 	default:
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 	}
+}
+
+// selects answers whether a list's field selector takes a resource,
+// the way the API server answers it for the selectable field
+// status.node. A list with no selector takes every resource.
+func selects(r *http.Request, status EndpointStatus) bool {
+	selector := r.URL.Query().Get("fieldSelector")
+	if selector == "" {
+		return true
+	}
+	return selector == "status.node="+status.Node
 }
 
 // The create states nothing about how the endpoint rests. A spec with
@@ -173,24 +197,25 @@ func TestStatusWritesGoToTheSubresource(t *testing.T) {
 	}
 }
 
-func TestListReadsBothCollections(t *testing.T) {
+func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	api := newEndpointAPI()
 	client := testClient(t, api.handler(t))
-	if _, err := createSink(client, testSinkName); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := createSource(client, testSourceName); err != nil {
-		t.Fatal(err)
-	}
+	api.sinks[testSinkName] = &Sink{Metadata: EndpointMeta{Name: testSinkName},
+		Status: EndpointStatus{Node: "liken-1"}}
+	api.sinks["stick-1-pci-0000-00-0e-0-hdmi-0"] = &Sink{
+		Metadata: EndpointMeta{Name: "stick-1-pci-0000-00-0e-0-hdmi-0"},
+		Status:   EndpointStatus{Node: "stick-1"}}
+	api.sources[testSourceName] = &Source{Metadata: EndpointMeta{Name: testSourceName},
+		Status: EndpointStatus{Node: "liken-1"}}
 
-	sinks, err := listSinks(client)
+	sinks, err := listSinks(client, "liken-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sinks) != 1 || sinks[0].Metadata.Name != testSinkName {
 		t.Errorf("sinks = %+v", sinks)
 	}
-	sources, err := listSources(client)
+	sources, err := listSources(client, "liken-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,64 +227,34 @@ func TestListReadsBothCollections(t *testing.T) {
 // The watch is on both collections, because a Role can grant one
 // without the other and an operator that watched one alone would
 // answer a declaration on a microphone only at the backstop tick.
-func TestWatchOpensBothCollections(t *testing.T) {
+//
+// The list and the watch select the resources whose status.node is
+// this machine. An unselected watch wakes every machine's operator for
+// a write to any Sink in the cluster, and each wake is a pass that
+// reads this machine's resources again.
+func TestWatchSelectsThisMachinesResourcesInBothCollections(t *testing.T) {
 	api := newEndpointAPI()
 	client := testClient(t, api.handler(t))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	watchEndpoints(ctx, client, func() {}, nil)
+	watchEndpoints(ctx, client, "liken-1", func() {}, nil)
 
-	opened := map[string]bool{}
 	for range 2 {
-		select {
-		case <-api.watches:
-		case <-time.After(5 * time.Second):
-			t.Fatal("the watch did not open both collections")
-		}
+		next(t, api.watches, "watch on both collections")
 	}
 	api.mutex.Lock()
-	requests := slices.Clone(api.requests)
+	requests := slices.Clone(api.selected)
 	api.mutex.Unlock()
-	for _, request := range requests {
-		opened[request] = true
-	}
-	for _, path := range []string{"GET " + SinksPath, "GET " + SourcesPath} {
-		if !opened[path] {
-			t.Errorf("the watch opened %v, want %s among them", requests, path)
+	for _, want := range []string{
+		"LIST " + SinksPath + " status.node=liken-1",
+		"WATCH " + SinksPath + " status.node=liken-1",
+		"LIST " + SourcesPath + " status.node=liken-1",
+		"WATCH " + SourcesPath + " status.node=liken-1",
+	} {
+		if !slices.Contains(requests, want) {
+			t.Errorf("the collection requests are %v, want %q among them", requests, want)
 		}
-	}
-}
-
-// audio_watch_restarts_total counts a watch reopening, and not the
-// watch's first open: the first connection is the start of watching,
-// and only a connection the API server or a fault closed is a restart.
-func TestAWatchThatReopensCountsOneRestart(t *testing.T) {
-	readings := newMetrics("test")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	attempts := 0
-	reopened := make(chan struct{})
-	go watchCollection(ctx, SinksPath, SinkKind, func() {}, readings, time.Millisecond,
-		func(ctx context.Context) error {
-			attempts++
-			if attempts == 2 {
-				close(reopened)
-				<-ctx.Done()
-			}
-			return nil
-		})
-
-	select {
-	case <-reopened:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the watch never reopened")
-	}
-	cancel()
-
-	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)); got != 1 {
-		t.Errorf("audio_watch_restarts_total{kind=Sink} = %v, want 1", got)
 	}
 }
 

@@ -34,7 +34,7 @@
     "type": "PipeWire:Interface:Node",
     "info": {
       "props": {
-        "node.name": "usb-0573-1573-a34004801402-usb-audio",
+        "node.name": "liken-1-usb-0573-1573-a34004801402-usb-audio",
         "media.class": "Audio/Sink",
         "audio.card": "1",
         "audio.pcm": "0"
@@ -73,7 +73,7 @@
     "type": "PipeWire:Interface:Node",
     "info": {
       "props": {
-        "node.name": "usb-0573-1573-a34004801402-usb-audio-capture",
+        "node.name": "liken-1-usb-0573-1573-a34004801402-usb-audio-capture",
         "media.class": "Audio/Source",
         "audio.card": "1",
         "audio.pcm": "0"
@@ -136,7 +136,7 @@
         "media.class": "Stream/Input/Audio",
         "node.name": "PWSTREAMNAME",
         "application.name": "pw-record",
-        "target.object": "usb-0573-1573-a34004801402-usb-audio"
+        "target.object": "liken-1-usb-0573-1573-a34004801402-usb-audio"
       },
       "params": {
         "Format": [],

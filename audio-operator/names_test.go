@@ -26,9 +26,9 @@ func TestEndpointName(t *testing.T) {
 			want:    "liken-1-pci-0000-00-1f-3-hdmi-0",
 		},
 		{
-			// The serial form carries no machine name, because the
-			// dongle keeps its identity when somebody moves it, and
-			// status.node reports where it is now.
+			// The serial tells two identical dongles on one machine
+			// apart, and the machine name tells apart two machines
+			// whose dongles of one model report the same serial.
 			name:    "a USB card with a serial",
 			machine: "liken-1",
 			card: cardIdentity{
@@ -36,7 +36,21 @@ func TestEndpointName(t *testing.T) {
 				Vendor: "0573", Product: "1573", Serial: "A34004801402",
 			},
 			pcmID: "USB Audio",
-			want:  "usb-0573-1573-a34004801402-usb-audio",
+			want:  "liken-1-usb-0573-1573-a34004801402-usb-audio",
+		},
+		{
+			// A USB serial is not unique across machines. Dongles of
+			// one model can all report one serial, and without the
+			// machine in the name every machine that holds one would
+			// write the same cluster-scoped Sink.
+			name:    "the same dongle model and serial on a second machine",
+			machine: "stick-1",
+			card: cardIdentity{
+				Bus: "usb", Location: "1-2",
+				Vendor: "0573", Product: "1573", Serial: "A34004801402",
+			},
+			pcmID: "USB Audio",
+			want:  "stick-1-usb-0573-1573-a34004801402-usb-audio",
 		},
 		{
 			// One PCM device of that card records as well as plays, and
@@ -50,12 +64,11 @@ func TestEndpointName(t *testing.T) {
 			},
 			pcmID:   "USB Audio",
 			capture: true,
-			want:    "usb-0573-1573-a34004801402-usb-audio-capture",
+			want:    "liken-1-usb-0573-1573-a34004801402-usb-audio-capture",
 		},
 		{
-			// With no serial the port path is the identity, so the name
-			// carries the machine again, and moving the dongle to
-			// another port makes a new object.
+			// With no serial the port path is the identity, so moving
+			// the dongle to another port makes a new object.
 			name:    "a USB card with no serial",
 			machine: "liken-1",
 			card:    cardIdentity{Bus: "usb", Location: "1-6", Vendor: "1b3f", Product: "2008"},
@@ -173,15 +186,15 @@ func TestSlug(t *testing.T) {
 func TestEndpointInventoryResolvesAName(t *testing.T) {
 	inventory := &endpointInventory{}
 	inventory.publish([]alsaEndpoint{
-		{Card: 1, PCM: 0, DeviceName: "usb-0573-1573-a34004801402-usb-audio"},
-		{Card: 1, PCM: 0, Capture: true, DeviceName: "usb-0573-1573-a34004801402-usb-audio-capture"},
+		{Card: 1, PCM: 0, DeviceName: "liken-1-usb-0573-1573-a34004801402-usb-audio"},
+		{Card: 1, PCM: 0, Capture: true, DeviceName: "liken-1-usb-0573-1573-a34004801402-usb-audio-capture"},
 	})
 
-	sink, published := inventory.lookup("usb-0573-1573-a34004801402-usb-audio")
+	sink, published := inventory.lookup("liken-1-usb-0573-1573-a34004801402-usb-audio")
 	if !published || sink.Capture || sink.Card != 1 || sink.PCM != 0 {
 		t.Errorf("the sink resolved to %+v, %v", sink, published)
 	}
-	source, published := inventory.lookup("usb-0573-1573-a34004801402-usb-audio-capture")
+	source, published := inventory.lookup("liken-1-usb-0573-1573-a34004801402-usb-audio-capture")
 	if !published || !source.Capture {
 		t.Errorf("the source resolved to %+v, %v", source, published)
 	}
@@ -196,10 +209,10 @@ func TestEndpointInventoryResolvesAName(t *testing.T) {
 // machine leaves no name behind for a prepare call to resolve.
 func TestEndpointInventoryHoldsOnlyTheLastPass(t *testing.T) {
 	inventory := &endpointInventory{}
-	inventory.publish([]alsaEndpoint{{Card: 1, DeviceName: "usb-0573-1573-a34004801402-usb-audio"}})
+	inventory.publish([]alsaEndpoint{{Card: 1, DeviceName: "liken-1-usb-0573-1573-a34004801402-usb-audio"}})
 	inventory.publish([]alsaEndpoint{{Card: 0, DeviceName: "liken-1-pci-0000-00-1f-3-hdmi-0"}})
 
-	if _, published := inventory.lookup("usb-0573-1573-a34004801402-usb-audio"); published {
+	if _, published := inventory.lookup("liken-1-usb-0573-1573-a34004801402-usb-audio"); published {
 		t.Error("a card that left the machine still resolves")
 	}
 	if _, published := inventory.lookup("liken-1-pci-0000-00-1f-3-hdmi-0"); !published {

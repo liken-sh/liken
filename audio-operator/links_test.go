@@ -115,8 +115,8 @@ func TestOnlyRegisteredRelationsAreUsed(t *testing.T) {
 
 func TestTheSaveNameReplacesEveryColon(t *testing.T) {
 	at := time.Date(2026, 9, 16, 21, 2, 16, 0, time.UTC)
-	want := `inline; filename="usb-0573-1573-a34004801402-usb-audio-2026-09-16T21-02-16Z.wav"`
-	got := contentDisposition("usb-0573-1573-a34004801402-usb-audio", "wav", at)
+	want := `inline; filename="liken-1-usb-0573-1573-a34004801402-usb-audio-2026-09-16T21-02-16Z.wav"`
+	got := contentDisposition("liken-1-usb-0573-1573-a34004801402-usb-audio", "wav", at)
 	if got != want {
 		t.Errorf("the disposition is %q, want %q", got, want)
 	}

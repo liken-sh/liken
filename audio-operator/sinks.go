@@ -19,8 +19,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -271,16 +271,26 @@ func getSource(c *Client, name string) (*Source, error) {
 	return get[Source](c, SourcesPath+"/"+name)
 }
 
-func listSinks(c *Client) ([]Sink, error) {
-	list, err := get[SinkList](c, SinksPath)
+// machineSelector is the field selector that takes the resources whose
+// status.node is one machine. The CRDs declare status.node as a
+// selectable field, so the API server filters the list and the watch,
+// and a machine reads nothing about another machine's hardware.
+func machineSelector(machine string) string {
+	return "status.node=" + machine
+}
+
+// listSinks and listSources read the resources whose status.node is
+// one machine.
+func listSinks(c *Client, machine string) ([]Sink, error) {
+	list, err := get[SinkList](c, SinksPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
 	if err != nil {
 		return nil, err
 	}
 	return list.Items, nil
 }
 
-func listSources(c *Client) ([]Source, error) {
-	list, err := get[SourceList](c, SourcesPath)
+func listSources(c *Client, machine string) ([]Source, error) {
+	list, err := get[SourceList](c, SourcesPath+"?fieldSelector="+url.QueryEscape(machineSelector(machine)))
 	if err != nil {
 		return nil, err
 	}
@@ -346,76 +356,41 @@ func send[T any](c *Client, method, path string, object *T) (*T, error) {
 	return stored, nil
 }
 
-// endpointWatchTimeout is how long one watch connection lives before
-// the API server closes it and the operator opens another. A watch
-// that never ends holds a connection through every network fault in
-// between.
-const endpointWatchTimeout = 290 * time.Second
-
-// endpointWatchRetry is how long the operator waits before it opens
-// the watch again.
-const endpointWatchRetry = 5 * time.Second
-
-// watchEndpoints turns a spec that changed into one wake, on both
-// collections. Nothing of the event is read but its arrival: the pass
-// that follows reads every endpoint again, the way every other wake in
-// this operator works.
-func watchEndpoints(ctx context.Context, c *Client, wake func(), readings *metrics) {
-	go watchCollection(ctx, SinksPath, SinkKind, wake, readings, endpointWatchRetry,
-		func(ctx context.Context) error { return streamEvents(ctx, c, SinksPath, wake) })
-	go watchCollection(ctx, SourcesPath, SourceKind, wake, readings, endpointWatchRetry,
-		func(ctx context.Context) error { return streamEvents(ctx, c, SourcesPath, wake) })
-}
-
-// watchCollection holds one watch open for as long as the context
-// lives, and counts every time it reopens: the API server closes a
-// watch on its own timeout, and a network fault closes one early, and
-// both bring the loop back here. The first open is not a reopen, so
-// the count starts at the second time open runs.
+// watchEndpoints turns a change to one of this machine's resources
+// into one wake, on both collections. Nothing of the event is read but
+// its arrival: the pass that follows reads every endpoint again, the
+// way every other wake in this operator works.
 //
-// open is the one watch connection, standing for streamEvents so a
-// test drives a reopen with no HTTP server behind it.
-func watchCollection(ctx context.Context, path, kind string, wake func(), readings *metrics,
-	retry time.Duration, open func(context.Context) error) {
-	reopened := false
-	for ctx.Err() == nil {
-		if reopened {
-			readings.watchRestarted(kind)
+// Each watch selects the resources whose status.node is this machine.
+// A watch on the whole collection would wake every machine's operator
+// for a status write to any Sink in the cluster, and each wake is a
+// pass that reads this machine's resources again. A resource enters
+// the selection with the status write that names this machine, and the
+// API server sends that entry as an event, so a spec a person wrote
+// before it is read on the pass that follows.
+//
+// Each watch lists first and then watches from the list's version, and
+// a list wakes the loop, so a change made while no watch was open is
+// read on the pass that follows.
+func watchEndpoints(ctx context.Context, c *Client, machine string, wake func(), readings *metrics) {
+	for _, collection := range []struct{ path, kind string }{
+		{SinksPath, SinkKind},
+		{SourcesPath, SourceKind},
+	} {
+		kind := collection.kind
+		watch := &objectWatch{
+			client:     c,
+			kind:       kind,
+			collection: collection.path,
+			selector:   machineSelector(machine),
+			changed:    wake,
+			complain: func(err error) {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+			},
+			restarted:  func() { readings.watchRestarted(kind) },
+			retry:      objectWatchRetry,
+			retryLimit: objectWatchRetryLimit,
 		}
-		if err := open(ctx); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "watching %s: %v\n", path, err)
-		}
-		reopened = true
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(retry):
-		}
-	}
-}
-
-// streamEvents holds one watch connection. It starts at the present,
-// because an event carries nothing the pass uses and a missed event
-// costs one backstop tick.
-func streamEvents(ctx context.Context, c *Client, path string, wake func()) error {
-	body, err := c.Watch(ctx, fmt.Sprintf("%s?watch=true&timeoutSeconds=%d",
-		path, int(endpointWatchTimeout.Seconds())))
-	if err != nil {
-		return err
-	}
-	defer drain(body)
-
-	events := json.NewDecoder(body)
-	for {
-		var event struct {
-			Type string `json:"type"`
-		}
-		if err := events.Decode(&event); err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-		wake()
+		go watch.run(ctx)
 	}
 }

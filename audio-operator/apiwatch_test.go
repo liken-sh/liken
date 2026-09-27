@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // oneObject stands in for the API server's list and watch of one
@@ -116,7 +118,7 @@ func (f *oneObject) follow(t *testing.T) (changed chan struct{}, complaints chan
 		client:     NewClient(f.server.URL, f.server.Client(), ""),
 		kind:       "Secret",
 		collection: secretsPath("liken-system"),
-		name:       captureTLSSecret,
+		selector:   "metadata.name=" + captureTLSSecret,
 		changed:    func() { changed <- struct{}{} },
 		complain:   func(err error) { complaints <- err },
 		retry:      time.Millisecond,
@@ -256,5 +258,34 @@ func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 	again := store.secretData(t, captureTLSSecret)[tlsCertFile]
 	if string(again) == string(first) {
 		t.Error("the Secret carries the deleted leaf")
+	}
+}
+
+// audio_watch_restarts_total counts a watch reopening, and not the
+// watch's first open: the first connection is the start of watching,
+// and only a connection the API server or a fault closed is a restart.
+func TestAWatchThatReopensCountsOneRestart(t *testing.T) {
+	fake := newOneObject(t)
+	readings := newMetrics("test")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	watch := &objectWatch{
+		client:     NewClient(fake.server.URL, fake.server.Client(), ""),
+		kind:       SinkKind,
+		collection: SinksPath,
+		selector:   "status.node=liken-1",
+		changed:    func() {},
+		complain:   func(error) {},
+		restarted:  func() { readings.watchRestarted(SinkKind) },
+		retry:      time.Millisecond,
+		retryLimit: 10 * time.Millisecond,
+	}
+	go watch.run(ctx)
+	next(t, fake.watched, "watch")
+	fake.events <- endWatch
+	next(t, fake.watched, "second watch")
+
+	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)); got != 1 {
+		t.Errorf("audio_watch_restarts_total{kind=Sink} = %v, want 1", got)
 	}
 }

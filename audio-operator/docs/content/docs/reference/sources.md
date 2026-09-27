@@ -17,7 +17,7 @@ delete one. The operator writes the whole of `status`, and you write
 apiVersion: audio.liken.sh/v1alpha1
 kind: Source
 metadata:
-  name: usb-0573-1573-a34004801402-usb-audio-capture
+  name: node-1-usb-0573-1573-a34004801402-usb-audio-capture
 spec:
   mute: true
 status:
@@ -81,7 +81,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--node"></span>`node` | string | no | The machine that holds the endpoint now. For a USB card with a serial, the value changes when the card moves. |
+| <span id="status--node"></span>`node` | string | no | The machine that holds the endpoint. The name of every Source starts with this machine's name, so a card that moves to another machine gets a new Source. The operator on each machine lists and watches the Sources by this field. |
 | <span id="status--location"></span>`location` | string | no | Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6. |
 | <span id="status--connectiontype"></span>`connectionType` | string | no | How sound enters the machine. One of: `analog`, `usb`. |
 | <span id="status--card"></span>`card` | [object](#statuscard) | no | The ALSA card the endpoint is on. The number and the id are this boot's, and a second card can change both, so nothing durable is keyed to them. |

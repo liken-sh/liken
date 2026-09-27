@@ -19,7 +19,7 @@ read. You write `spec`, which states what the endpoint rests at.
 apiVersion: audio.liken.sh/v1alpha1
 kind: Sink
 metadata:
-  name: usb-0573-1573-a34004801402-usb-audio
+  name: node-1-usb-0573-1573-a34004801402-usb-audio
 spec:
   volume: 80
   controls:
@@ -92,7 +92,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--node"></span>`node` | string | no | The machine that holds the endpoint now. For a USB card with a serial, and for a Bluetooth speaker, the value changes when the hardware moves. |
+| <span id="status--node"></span>`node` | string | no | The machine that holds the endpoint now. For a Bluetooth speaker, the value changes when the speaker moves. The name of every other Sink starts with this machine's name, so a card that moves to another machine gets a new Sink. The operator on each machine lists and watches the Sinks by this field. |
 | <span id="status--location"></span>`location` | string | no | Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6. Absent on a Bluetooth speaker. |
 | <span id="status--connectiontype"></span>`connectionType` | string | no | How sound leaves the machine. One of: `analog`, `hdmi`, `displayport`, `usb`, `bluetooth`. |
 | <span id="status--card"></span>`card` | [object](#statuscard) | no | The ALSA card the endpoint is on. The number and the id are this boot's, and a second card can change both, so nothing durable is keyed to them. |
@@ -214,15 +214,19 @@ a reboot and a second card:
 | Endpoint | Form | Example |
 | --- | --- | --- |
 | onboard PCI card | node, PCI address, PCM id | `node-1-pci-0000-00-1f-3-hdmi-0` |
-| USB card with a serial | vendor, product, serial, PCM id | `usb-0573-1573-a34004801402-usb-audio` |
+| USB card with a serial | node, vendor, product, serial, PCM id | `node-1-usb-0573-1573-a34004801402-usb-audio` |
 | USB card with no serial | node, USB port path, PCM id | `node-1-usb-1-6-usb-audio` |
 | Bluetooth speaker | address | `7c-66-ef-01-23-45` |
 
 The PCM id is the driver's name for the endpoint, `HDMI 0` or
-`USB Audio`, lowercased with dashes. A USB card with a serial keeps
-its `Sink` when it moves to another machine, and `status.node` says
-where it is. A card with no serial that moves to another port
-becomes a new `Sink`. A card that plays and records through one PCM
+`USB Audio`, lowercased with dashes. Every ALSA form starts with the
+node, because a USB serial is not unique across machines: dongles of
+one model can all report the same serial. The serial tells apart two
+identical dongles on one machine. A card that moves to another
+machine becomes a new `Sink`, and so does a card with no serial that
+moves to another port. The old `Sink` stays, with its `spec`, and
+the operator on the old machine sets its `Connected` condition to
+`False`. Delete it when you no longer need its declaration. A card that plays and records through one PCM
 gives its `Source` the same name with `-capture` on the end.
 
 On an Intel HDMI codec, `hdmi-0` names the card's first HDMI slot

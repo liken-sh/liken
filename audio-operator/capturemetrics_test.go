@@ -98,13 +98,13 @@ func TestTheAPIRegistryCarriesTheFourSeriesThePlanNames(t *testing.T) {
 
 func TestTheRouteLabelIsNeverAConcretePath(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("usb-0573-1573-a34004801402-usb-audio", "node-1", drillPipeWireNode)
+	harness.holds("liken-1-usb-0573-1573-a34004801402-usb-audio", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet,
-		"/v1/audio/sinks/usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
+		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
 	_, _ = io.Copy(io.Discard, answer.Body)
 
 	body := scrapeHandler(t, apiRegistryHandler(harness.server.readings, func() bool { return true }))
-	if strings.Contains(body, "usb-0573-1573-a34004801402-usb-audio") {
+	if strings.Contains(body, "liken-1-usb-0573-1573-a34004801402-usb-audio") {
 		t.Errorf("an endpoint's name reached Prometheus:\n%s", body)
 	}
 	if !strings.Contains(body, `route="/v1/audio/sinks/{name}/audio.wav"`) {

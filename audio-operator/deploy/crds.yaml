@@ -40,6 +40,12 @@ spec:
         # status and a person's writes of spec never overwrite each
         # other.
         status: {}
+      # Each machine's operator lists and watches the Sinks whose
+      # status.node is that machine. Without the selectable field, a
+      # watch takes every Sink in the cluster, and a status write on
+      # one machine wakes the operator on every machine.
+      selectableFields:
+        - jsonPath: .status.node
       additionalPrinterColumns:
         - name: Node
           type: string
@@ -101,7 +107,7 @@ spec:
               properties:
                 node:
                   type: string
-                  description: "The machine that holds the endpoint now. For a USB card with a serial, and for a Bluetooth speaker, the value changes when the hardware moves."
+                  description: "The machine that holds the endpoint now. For a Bluetooth speaker, the value changes when the speaker moves. The name of every other Sink starts with this machine's name, so a card that moves to another machine gets a new Sink. The operator on each machine lists and watches the Sinks by this field."
                 location:
                   type: string
                   description: "Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6. Absent on a Bluetooth speaker."
@@ -289,6 +295,10 @@ spec:
       storage: true
       subresources:
         status: {}
+      # The operator selects its own Sources by status.node, for the
+      # reason the Sink kind gives.
+      selectableFields:
+        - jsonPath: .status.node
       additionalPrinterColumns:
         - name: Node
           type: string
@@ -343,7 +353,7 @@ spec:
               properties:
                 node:
                   type: string
-                  description: "The machine that holds the endpoint now. For a USB card with a serial, the value changes when the card moves."
+                  description: "The machine that holds the endpoint. The name of every Source starts with this machine's name, so a card that moves to another machine gets a new Source. The operator on each machine lists and watches the Sources by this field."
                 location:
                   type: string
                   description: "Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6."

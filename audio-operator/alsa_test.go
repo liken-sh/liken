@@ -117,8 +117,8 @@ func TestReadOutputsNamesEveryEndpointOfAMachine(t *testing.T) {
 				"liken-1-pci-0000-00-1f-3-hdmi-1",
 				"liken-1-pci-0000-00-1f-3-hdmi-2",
 				"liken-1-pci-0000-00-1f-3-hdmi-3",
-				"usb-0573-1573-a34004801402-usb-audio",
-				"usb-0573-1573-a34004801402-usb-audio-capture",
+				"liken-1-usb-0573-1573-a34004801402-usb-audio",
+				"liken-1-usb-0573-1573-a34004801402-usb-audio-capture",
 			},
 		},
 		{

@@ -278,7 +278,7 @@ relative reference would resolve against the wrong server.
 
 `Content-Disposition` gives a browser the file name to save as. The
 time in it is RFC 3339 UTC with the colons replaced by dashes, for
-example `usb-0573-1573-a34004801402-usb-audio-2026-09-16T21-02-16Z.wav`.
+example `kitchen-usb-0573-1573-a34004801402-usb-audio-2026-09-16T21-02-16Z.wav`.
 A colon is not a legal file name character on every system a browser
 saves to. This is the only place the API writes a time in a
 non-standard form.

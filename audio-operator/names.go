@@ -3,16 +3,20 @@ package main
 // The identity of a published device.
 //
 // A device name is built from the hardware's own identity, in the
-// same three forms udev encodes into /dev/snd/by-id and by-path. An
-// onboard card is named by the machine and its PCI address, because
-// a PCI address repeats on every machine of the same model and the
-// resources are cluster-scoped. A USB card with a serial is named by
-// its vendor, product, and serial and by no machine at all, because
-// the dongle keeps its identity when it moves and status.node says
-// where it is. A USB card with no serial is named by the machine and
-// its port. Each form ends in the driver's own name for the PCM
-// device, hdmi-0 or usb-audio, and not its device number: the id is
-// stable per codec, and the number is this boot's.
+// same three forms udev encodes into /dev/snd/by-id and by-path, and
+// every form starts with the machine's name. The Sinks and the
+// Sources are cluster-scoped, so a name that two machines derive is
+// one object that both machines write. An onboard card is named by
+// the machine and its PCI address, because a PCI address repeats on
+// every machine of the same model. A USB card with a serial is named
+// by the machine and its vendor, product, and serial. A serial is not
+// unique across machines: dongles of one model can all report the
+// same serial. The serial is still in the name, because it tells
+// apart two identical dongles on one machine. A USB card with no
+// serial is named by the machine and its port. Each form ends in the
+// driver's own name for the PCM device, hdmi-0 or usb-audio, and not
+// its device number: the id is stable per codec, and the number is
+// this boot's.
 //
 // A name is a DNS label, so it holds 63 characters, and a name past
 // that is refused rather than shortened. The ALSA address, card0-pcm3,
@@ -64,16 +68,23 @@ func alsaAddress(card, pcm int) string {
 }
 
 // endpointName builds the DRA device name for one ALSA endpoint,
-// from the hardware's own identity, in the three forms the file
-// header describes. The serial form makes one trade: a dongle with a
-// serial keeps its name when it moves, and a dongle without one
-// becomes a new object at a new port, which is the trade udev made.
-// An error names what was missing, and the caller refuses to publish
-// the endpoint.
+// from the machine and the hardware's own identity, in the three
+// forms the file header describes. The machine in every form makes
+// one trade: a card that moves to another machine, or a card with no
+// serial that moves to another port, becomes a new object, which is
+// the trade udev made. An error names what was missing, and the
+// caller refuses to publish the endpoint.
 func endpointName(machine string, card cardIdentity, pcmID string, capture bool) (string, error) {
 	pcm := slug(pcmID)
 	if pcm == "" {
 		return "", fmt.Errorf("the driver states no id for the PCM device")
+	}
+	if card.Bus != pciBus && card.Bus != usbBus {
+		return "", fmt.Errorf("the card is on no bus this operator can name it by")
+	}
+	node := slug(machine)
+	if node == "" {
+		return "", fmt.Errorf("this machine has no name to build a %s card's name from", card.Bus)
 	}
 
 	var name string
@@ -83,18 +94,13 @@ func endpointName(machine string, card cardIdentity, pcmID string, capture bool)
 		if vendor == "" || product == "" {
 			return "", fmt.Errorf("the USB card states no vendor or product identifier")
 		}
-		name = strings.Join([]string{usbBus, vendor, product, serial, pcm}, "-")
-	case card.Bus == pciBus, card.Bus == usbBus:
-		node, location := slug(machine), slug(card.Location)
-		if node == "" {
-			return "", fmt.Errorf("this machine has no name to build a %s card's name from", card.Bus)
-		}
+		name = strings.Join([]string{node, usbBus, vendor, product, serial, pcm}, "-")
+	default:
+		location := slug(card.Location)
 		if location == "" {
 			return "", fmt.Errorf("sysfs states no %s address for the card", card.Bus)
 		}
 		name = strings.Join([]string{node, card.Bus, location, pcm}, "-")
-	default:
-		return "", fmt.Errorf("the card is on no bus this operator can name it by")
 	}
 	if capture {
 		name += captureSuffix

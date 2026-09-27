@@ -10,6 +10,12 @@ package main
 // machine keeps its Sink. The conditions are what report the absence,
 // and the hardware triple's gauges report it too, because a sweep is a
 // confirmed absence, not an invalid observation.
+//
+// Only the machine that status.node names sweeps a resource, and the
+// sweep keeps status.node. A card's Sink under a name that no machine
+// publishes any more, such as a Sink whose name carries no machine, is
+// therefore reported absent once, by the last machine that wrote it,
+// and no other machine writes it again.
 
 import (
 	"errors"
@@ -25,7 +31,7 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 		return nil
 	}
 	var failures []error
-	sinks, err := listSinks(e.client)
+	sinks, err := listSinks(e.client, e.machine)
 	if err != nil {
 		failures = append(failures, err)
 	}
@@ -42,7 +48,7 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 			failures = append(failures, err)
 		}
 	}
-	sources, err := listSources(e.client)
+	sources, err := listSources(e.client, e.machine)
 	if err != nil {
 		failures = append(failures, err)
 	}

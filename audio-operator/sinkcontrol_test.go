@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -276,6 +277,85 @@ func TestPassLeavesAnotherMachinesEndpointAlone(t *testing.T) {
 	}
 	if got := api.sinks[elsewhere.Metadata.Name].Status.NodeName; got != "liken.audio.card0-pcm3" {
 		t.Errorf("another machine's sink was swept: %q", got)
+	}
+}
+
+// statusWrites counts the status writes among the requests the
+// fixture received.
+func statusWrites(api *endpointAPI) int {
+	api.mutex.Lock()
+	defer api.mutex.Unlock()
+	writes := 0
+	for _, request := range api.requests {
+		if strings.HasPrefix(request, "PUT ") {
+			writes++
+		}
+	}
+	return writes
+}
+
+// A pass later in time over the same hardware writes nothing, for an
+// endpoint that is present and for one the sweep reports absent. A
+// status field that moved on its own, such as a timestamp, would make
+// every pass a write, and every write wakes each reader of the
+// resource.
+func TestALaterPassOverTheSameHardwareWritesNothing(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	written := statusWrites(api)
+
+	// Two hours on, the sweep is due again on the backstop's clock.
+	control.now = func() time.Time { return factsTime.Add(2 * time.Hour) }
+	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusWrites(api); got != written {
+		t.Errorf("a later pass over the same hardware wrote %d statuses", got-written)
+	}
+}
+
+// A resource whose name no machine publishes any more, such as a USB
+// card's Sink under a name that carried no machine, is reported absent
+// once by the machine its status.node names, and never again. It keeps
+// its spec, because the spec is a person's declaration.
+func TestAResourceNoMachinePublishesIsReportedAbsentOnce(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	const shared = "usb-0573-1573-a34004801402-usb-audio"
+	api.sinks[shared] = &Sink{
+		Metadata: EndpointMeta{Name: shared},
+		Spec:     SinkSpec{Volume: pointerTo(40)},
+		Status: EndpointStatus{Node: "liken-1", NodeName: "liken.audio.card1-pcm0", Conditions: []EndpointCondition{
+			condition(ConnectedCondition, true, "CardPresent", "the card is on the bus", factsTime),
+		}},
+	}
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	old := api.sinks[shared]
+	if !holdsCondition(old.Status.Conditions, condition(ConnectedCondition, false, "EndpointAbsent",
+		"this machine no longer publishes the endpoint", factsTime)) {
+		t.Errorf("the old Sink's conditions = %+v, want it reported absent", old.Status.Conditions)
+	}
+	if old.Spec.Volume == nil || *old.Spec.Volume != 40 {
+		t.Errorf("the old Sink's spec = %+v, want the declaration kept", old.Spec)
+	}
+	written := statusWrites(api)
+
+	control.now = func() time.Time { return factsTime.Add(2 * time.Hour) }
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusWrites(api); got != written {
+		t.Errorf("the sweep wrote the absent Sink %d more times", got-written)
 	}
 }
 

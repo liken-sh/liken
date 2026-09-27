@@ -40,7 +40,8 @@ rules:
   # whole of its status. The list and the watch are here because a
   # spec a person edited is what the operator reconciles, and because
   # an endpoint that left the node is found by listing the resources
-  # this node holds. No delete: a Sink keeps its declared spec while
+  # this node holds. Both select status.node, so a machine reads only
+  # its own resources. No delete: a Sink keeps its declared spec while
   # a USB card or a speaker is away, and reports the absence.
   - apiGroups: [audio.liken.sh]
     resources: [sinks, sources]

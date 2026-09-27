@@ -28,7 +28,7 @@ func readGraphFixture(t *testing.T, name string) []byte {
 
 func TestARunningNodeReportsTheFormatItNegotiated(t *testing.T) {
 	format, err := resolveNode(readGraphFixture(t, "graph.json"),
-		"usb-0573-1573-a34004801402-usb-audio", directionSink)
+		"liken-1-usb-0573-1573-a34004801402-usb-audio", directionSink)
 	if err != nil {
 		t.Fatalf("resolving the DAC: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestASuspendedNodeTakesItsChannelsFromTheHardware(t *testing.T) {
 
 func TestASuspendedSourceResolvesToItsOwnNode(t *testing.T) {
 	format, err := resolveNode(readGraphFixture(t, "graph.json"),
-		"usb-0573-1573-a34004801402-usb-audio-capture", directionSource)
+		"liken-1-usb-0573-1573-a34004801402-usb-audio-capture", directionSource)
 	if err != nil {
 		t.Fatalf("resolving the microphone: %v", err)
 	}
@@ -75,11 +75,11 @@ func TestANodeOfTheOtherDirectionIsNotTheOneAsked(t *testing.T) {
 	// names here, but a request for a Source by the Sink's name must
 	// find nothing rather than the Sink.
 	_, err := resolveNode(readGraphFixture(t, "graph.json"),
-		"usb-0573-1573-a34004801402-usb-audio", directionSource)
+		"liken-1-usb-0573-1573-a34004801402-usb-audio", directionSource)
 	if err == nil {
 		t.Fatal("a sink answered a source request")
 	}
-	if !strings.Contains(err.Error(), "usb-0573-1573-a34004801402-usb-audio") {
+	if !strings.Contains(err.Error(), "liken-1-usb-0573-1573-a34004801402-usb-audio") {
 		t.Errorf("the refusal does not name what was asked for: %v", err)
 	}
 }

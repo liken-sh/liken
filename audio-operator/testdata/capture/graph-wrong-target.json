@@ -9,7 +9,7 @@
     "id": 46,
     "type": "PipeWire:Interface:Node",
     "info": {
-      "props": { "node.name": "usb-0573-1573-a34004801402-usb-audio", "media.class": "Audio/Sink" },
+      "props": { "node.name": "liken-1-usb-0573-1573-a34004801402-usb-audio", "media.class": "Audio/Sink" },
       "params": { "Format": [], "EnumFormat": [{ "channels": 2 }] }
     }
   },

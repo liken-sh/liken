@@ -150,7 +150,7 @@ func TestSinkStatusOfAnEmptyHDMISlot(t *testing.T) {
 // endpoint is gone the moment somebody unplugs the card.
 func TestSinkStatusOfAUSBDAC(t *testing.T) {
 	endpoints := likenOne(t)
-	dac := endpoints["usb-0573-1573-a34004801402-usb-audio"]
+	dac := endpoints["liken-1-usb-0573-1573-a34004801402-usb-audio"]
 	volume := levelControl("PCM Playback Volume", 0)
 	mute := switchControl("PCM Playback Switch", 0)
 
@@ -202,7 +202,7 @@ func TestSinkStatusOfAUSBDAC(t *testing.T) {
 // and its controls are the card's capture controls.
 func TestSourceStatusOfAUSBDAC(t *testing.T) {
 	endpoints := likenOne(t)
-	microphone := endpoints["usb-0573-1573-a34004801402-usb-audio-capture"]
+	microphone := endpoints["liken-1-usb-0573-1573-a34004801402-usb-audio-capture"]
 	gain := levelControl("Mic Capture Volume", 0)
 
 	facts := endpointFacts{

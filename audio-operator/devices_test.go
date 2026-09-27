@@ -26,7 +26,7 @@ var labNames = map[pcmAddress]string{
 	{Card: 0, PCM: 3}: testSinkName,
 	{Card: 0, PCM: 8}: "liken-1-pci-0000-00-1f-3-hdmi-1",
 	{Card: 0, PCM: 9}: "liken-1-pci-0000-00-1f-3-hdmi-2",
-	{Card: 1, PCM: 0}: "usb-0573-1573-a34004801402-usb-audio",
+	{Card: 1, PCM: 0}: "liken-1-usb-0573-1573-a34004801402-usb-audio",
 }
 
 // named stamps each endpoint with the name a pass would give it. A

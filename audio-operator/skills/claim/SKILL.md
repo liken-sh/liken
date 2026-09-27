@@ -254,7 +254,7 @@ with `PIPEWIRE_NODE` naming the capture node:
               selectors:
                 - cel:
                     expression: |
-                      device.attributes["audio.liken.sh"].source == "usb-0573-1573-a34004801402-usb-audio-capture"
+                      device.attributes["audio.liken.sh"].source == "kitchen-usb-0573-1573-a34004801402-usb-audio-capture"
 
 A recorder on PipeWire's stream API, such as `pw-record`, reads the
 two variables and captures from that node with no flag. The

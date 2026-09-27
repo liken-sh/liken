@@ -7,12 +7,12 @@ import (
 )
 
 func TestASinkTapCarriesPipeWiresOwnCaptureProperty(t *testing.T) {
-	got := recordCommand("usb-0573-1573-a34004801402-usb-audio", "audio-capture-0f1b2c3d",
+	got := recordCommand("liken-1-usb-0573-1573-a34004801402-usb-audio", "audio-capture-0f1b2c3d",
 		directionSink, captureFormat{Rate: 48000, Channels: 2})
 	want := []string{
 		"pw-record",
 		"-P", `{ node.name = "audio-capture-0f1b2c3d", stream.capture.sink = true }`,
-		"--target", "usb-0573-1573-a34004801402-usb-audio",
+		"--target", "liken-1-usb-0573-1573-a34004801402-usb-audio",
 		"--raw",
 		"--format", "s16",
 		"--rate", "48000",

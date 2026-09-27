@@ -11,7 +11,7 @@ read. You write `spec`, which states what the endpoint rests at.
 apiVersion: audio.liken.sh/v1alpha1
 kind: Sink
 metadata:
-  name: usb-0573-1573-a34004801402-usb-audio
+  name: node-1-usb-0573-1573-a34004801402-usb-audio
 spec:
   volume: 80
   controls:

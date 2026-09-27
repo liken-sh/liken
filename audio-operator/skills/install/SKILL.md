@@ -208,13 +208,13 @@ playback endpoint and one `Source` per capture endpoint, named
 like the devices:
 
     kubectl get sinks
-    NAME                                    NODE      CONNECTION   VOLUME   MUTE    CLAIM   CONNECTED   READY   AGE
-    kitchen-pci-0000-00-1f-3-hdmi-0         kitchen   hdmi         100      false           True        True    2m
-    usb-0573-1573-a34004801402-usb-audio    kitchen   usb          100      false           True        True    2m
+    NAME                                            NODE      CONNECTION   VOLUME   MUTE    CLAIM   CONNECTED   READY   AGE
+    kitchen-pci-0000-00-1f-3-hdmi-0                 kitchen   hdmi         100      false           True        True    2m
+    kitchen-usb-0573-1573-a34004801402-usb-audio    kitchen   usb          100      false           True        True    2m
 
     kubectl get sources
-    NAME                                            NODE      CONNECTION   VOLUME   MUTE    CLAIM   CONNECTED   READY   AGE
-    usb-0573-1573-a34004801402-usb-audio-capture    kitchen   usb          100      false           True        True    2m
+    NAME                                                    NODE      CONNECTION   VOLUME   MUTE    CLAIM   CONNECTED   READY   AGE
+    kitchen-usb-0573-1573-a34004801402-usb-audio-capture    kitchen   usb          100      false           True        True    2m
 
 An output whose monitor answers publishes the monitor's attributes.
 An HDMI output with no monitor publishes too, with taints, so a

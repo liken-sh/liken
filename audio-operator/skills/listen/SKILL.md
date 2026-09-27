@@ -245,7 +245,7 @@ Ten seconds of a microphone, as WAV:
     kubectl -n liken-system exec listen -- curl -sS --fail-with-body \
       --cacert /ca/ca.crt --cert /client/tls.crt --key /client/tls.key \
       -o /tmp/microphone.wav \
-      'https://audio-api.liken-system.svc/v1/audio/sources/usb-0573-1573-a34004801402-usb-audio-capture/audio.wav?t=0,10'
+      'https://audio-api.liken-system.svc/v1/audio/sources/kitchen-usb-0573-1573-a34004801402-usb-audio-capture/audio.wav?t=0,10'
 
 Two seconds, starting five seconds from now, which skips a fade-in:
 

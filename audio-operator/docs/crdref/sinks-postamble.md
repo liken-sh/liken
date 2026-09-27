@@ -6,15 +6,19 @@ a reboot and a second card:
 | Endpoint | Form | Example |
 | --- | --- | --- |
 | onboard PCI card | node, PCI address, PCM id | `node-1-pci-0000-00-1f-3-hdmi-0` |
-| USB card with a serial | vendor, product, serial, PCM id | `usb-0573-1573-a34004801402-usb-audio` |
+| USB card with a serial | node, vendor, product, serial, PCM id | `node-1-usb-0573-1573-a34004801402-usb-audio` |
 | USB card with no serial | node, USB port path, PCM id | `node-1-usb-1-6-usb-audio` |
 | Bluetooth speaker | address | `7c-66-ef-01-23-45` |
 
 The PCM id is the driver's name for the endpoint, `HDMI 0` or
-`USB Audio`, lowercased with dashes. A USB card with a serial keeps
-its `Sink` when it moves to another machine, and `status.node` says
-where it is. A card with no serial that moves to another port
-becomes a new `Sink`. A card that plays and records through one PCM
+`USB Audio`, lowercased with dashes. Every ALSA form starts with the
+node, because a USB serial is not unique across machines: dongles of
+one model can all report the same serial. The serial tells apart two
+identical dongles on one machine. A card that moves to another
+machine becomes a new `Sink`, and so does a card with no serial that
+moves to another port. The old `Sink` stays, with its `spec`, and
+the operator on the old machine sets its `Connected` condition to
+`False`. Delete it when you no longer need its declaration. A card that plays and records through one PCM
 gives its `Source` the same name with `-capture` on the end.
 
 On an Intel HDMI codec, `hdmi-0` names the card's first HDMI slot
