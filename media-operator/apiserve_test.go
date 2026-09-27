@@ -6,11 +6,13 @@ package main
 // line, and the readiness latch.
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -273,4 +275,38 @@ func TestTheApiServesWhileASiblingAnchorIsAbsent(t *testing.T) {
 	mustMatch(t, refused.Code, http.StatusServiceUnavailable)
 	mustMatch(t, refused.Header().Get("Retry-After"), retryAfterSeconds)
 	mustMatch(t, problemOf(t, refused).Detail != "", true)
+}
+
+// A pair that another writer puts in the Secret serves the next
+// connection when the watch delivers it, with no wait for the hourly
+// review.
+func TestTheServingPairFollowsTheSecret(t *testing.T) {
+	api := newCoreAPI()
+	events := make(chan string)
+	defer close(events)
+	watched := make(chan *url.URL, 1)
+	client := testAPIClient(t, watchingAPI(api, events, watched))
+	keeper := newCertificateKeeper(client, "liken-system")
+	server := &apiServer{}
+	mustSucceed(t, refreshCertificate(server, keeper, newAPIMetrics("test")))
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go watchServingPair(client, "liken-system", server, keeper, newAPIMetrics("test")).follow(ctx, "")
+	opened := <-watched
+	mustMatch(t, opened.Path, "/api/v1/namespaces/liken-system/secrets")
+	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+apiTLSSecretName)
+
+	certPEM, keyPEM, caPEM := ownersPair(t, time.Now())
+	owners := &Secret{
+		Metadata: ObjectMeta{Name: apiTLSSecretName, Namespace: "liken-system", ResourceVersion: "30"},
+		Data:     map[string][]byte{apiTLSCertKey: certPEM, apiTLSKeyKey: keyPEM, apiCACertKey: caPEM},
+	}
+	api.seed(t, "secrets/"+apiTLSSecretName, owners)
+	events <- objectEvent(t, "MODIFIED", owners)
+
+	until(t, "the listener never served the pair the watch delivered", func() bool {
+		serving, err := server.servingCertificate()
+		return err == nil && string(serving.Certificate[0]) == string(derOf(t, certPEM))
+	})
 }

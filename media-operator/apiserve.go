@@ -313,16 +313,19 @@ func runAPI() {
 	server.holdCertificate(certificate)
 	metrics.observeExpiry(keeper.expirySeconds())
 	go reviewCertificate(server, keeper, metrics)
+	go watchServingPair(client, namespace, server, keeper, metrics).follow(context.Background(), "")
 
 	// The cluster's client authority is read before the listener
-	// starts, and again every minute. A read that fails is reported
-	// and never fatal: an API that cannot read the ConfigMap still
-	// answers every caller that sends a token, and the next pass
-	// loads the authority once the grant or the API server is back.
-	if err := server.anchors.load(client); err != nil {
+	// starts, and watched after. A read that fails is reported and
+	// never fatal: an API that cannot read the ConfigMap still answers
+	// every caller that sends a token, and the watch loads the
+	// authority once the grant or the API server is back.
+	anchorWatch := watchClientAnchors(client, &server.anchors)
+	anchorVersion, err := anchorWatch.read()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client certificate authority: %v\n", err)
 	}
-	go keepClientAnchors(context.Background(), client, &server.anchors)
+	go anchorWatch.follow(context.Background(), anchorVersion)
 
 	if reviewsAnswer(auth) {
 		server.ready.Store(true)
@@ -406,17 +409,49 @@ func reviewsAnswer(auth *authorizer) bool {
 
 // reviewCertificate looks at the leaf on a clock and not on a
 // request, so a quiet API still re-mints before its leaf expires and
-// no request pays for a mint.
+// no request pays for a mint. The clock is the leaf's remaining life,
+// which no event reports.
 func reviewCertificate(server *apiServer, keeper *certificateKeeper, metrics *apiMetrics) {
 	for range time.Tick(certificateReview) {
-		certificate, err := keeper.ensure()
-		if err != nil {
+		if err := refreshCertificate(server, keeper, metrics); err != nil {
 			fmt.Fprintf(os.Stderr, "re-minting the serving certificate: %v\n", err)
-			continue
 		}
-		server.holdCertificate(certificate)
-		metrics.observeExpiry(keeper.expirySeconds())
 	}
+}
+
+// watchServingPair follows the Secret media-api-tls, so a pair that
+// another writer changes serves the next connection with no restart.
+// That writer is an owner who replaces the pair with one from their
+// own CA, or a second media-api pod that re-minted the leaf first. A
+// deleted Secret is minted again at once, because the listener cannot
+// serve without a pair.
+//
+// The watch starts with no resourceVersion, so its first event is the
+// Secret as it is now. The keeper's own writes return as events too,
+// and each one costs one read that changes nothing.
+func watchServingPair(client *Client, namespace string, server *apiServer, keeper *certificateKeeper,
+	metrics *apiMetrics) *namedWatch {
+	refresh := func() error { return refreshCertificate(server, keeper, metrics) }
+	watch := newNamedWatch(client, namespace, "secrets", apiTLSSecretName,
+		func(json.RawMessage) error { return refresh() }, nil)
+	watch.removed = func() {
+		if err := refresh(); err != nil {
+			watch.report(fmt.Sprintf("minting the serving certificate again: %v", err))
+		}
+	}
+	return watch
+}
+
+// refreshCertificate reads the pair, renews the leaf when it nears
+// its end, and serves the result.
+func refreshCertificate(server *apiServer, keeper *certificateKeeper, metrics *apiMetrics) error {
+	certificate, err := keeper.ensure()
+	if err != nil {
+		return err
+	}
+	server.holdCertificate(certificate)
+	metrics.observeExpiry(keeper.expirySeconds())
+	return nil
 }
 
 func environmentOr(variable, fallback string) string {

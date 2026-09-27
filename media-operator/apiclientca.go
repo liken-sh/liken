@@ -10,13 +10,12 @@ package main
 // way the API server spells them.
 
 import (
-	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 )
@@ -25,18 +24,14 @@ import (
 // certificate authority in, and the key that holds its PEM. The API
 // server writes this object at start and rewrites it when the
 // authority changes, so it is the one anchor every client certificate
-// the cluster issues verifies against.
+// the cluster issues verifies against. The built-in Role
+// extension-apiserver-authentication-reader grants get, list, and
+// watch on this one object.
 const (
 	clientCANamespace = "kube-system"
 	clientCAConfigMap = "extension-apiserver-authentication"
 	clientCAKey       = "client-ca-file"
 )
-
-// How often the API reads the ConfigMap again. A minute is short
-// enough that a rotated authority opens the door without a restart,
-// and one get of one object costs the API server almost nothing. It
-// is a variable so a test can shorten it.
-var clientAnchorInterval = time.Minute
 
 // The anchors a handshake verifies a client certificate against. The
 // pool is replaced and never written to, because a handshake reads it
@@ -65,45 +60,42 @@ func (a *clientAnchors) held() *x509.CertPool {
 	return a.pool
 }
 
-// load reads the ConfigMap and replaces the pool with what it holds.
-// The key carries one PEM block when no rotation is in progress and
-// more than one during a rotation, and a pool takes all of them.
-func (a *clientAnchors) load(client *Client) error {
-	configMap, err := GetConfigMap(client, clientCANamespace, clientCAConfigMap)
-	if err != nil {
-		return fmt.Errorf("reading configmap %s/%s: %w", clientCANamespace, clientCAConfigMap, err)
+// take replaces the pool with what the ConfigMap holds. The key
+// carries one PEM block when no rotation is in progress and more than
+// one during a rotation, and a pool takes all of them. A ConfigMap
+// that carries no usable authority leaves the pool as it is, because
+// the certificates that pool holds are still the ones the cluster
+// issued.
+func (a *clientAnchors) take(object json.RawMessage) error {
+	var configMap ConfigMap
+	if err := json.Unmarshal(object, &configMap); err != nil {
+		return err
 	}
 	anchorPEM := configMap.Data[clientCAKey]
 	if anchorPEM == "" {
-		return fmt.Errorf("configmap %s/%s carries no %s", clientCANamespace, clientCAConfigMap, clientCAKey)
+		return fmt.Errorf("the configmap carries no %s", clientCAKey)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(anchorPEM)) {
-		return fmt.Errorf("the %s of configmap %s/%s holds no certificate",
-			clientCAKey, clientCANamespace, clientCAConfigMap)
+		return fmt.Errorf("the %s of the configmap holds no certificate", clientCAKey)
 	}
 	a.set(pool)
 	return nil
 }
 
-// keepClientAnchors reads the authority again on its own clock, so a
-// rotated authority opens the door with no restart. A read that fails
-// is reported, and the API keeps the pool it could not replace,
-// because the certificates that pool holds are still the ones the
-// cluster issued.
-func keepClientAnchors(ctx context.Context, client *Client, anchors *clientAnchors) {
-	ticker := time.NewTicker(clientAnchorInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := anchors.load(client); err != nil {
-				fmt.Fprintf(os.Stderr, "reading the cluster's client certificate authority: %v\n", err)
-			}
-		}
+// watchClientAnchors is the watch on the cluster's client authority.
+// The API server rewrites the ConfigMap when the authority rotates,
+// and the watch delivers that write, so the rotated authority reaches
+// the next handshake with no restart. A deleted ConfigMap leaves the
+// pool as it is, for the reason take gives, and reports one line.
+func watchClientAnchors(client *Client, anchors *clientAnchors) *namedWatch {
+	watch := newNamedWatch(client, clientCANamespace, "configmaps", clientCAConfigMap, anchors.take, nil)
+	watch.removed = func() {
+		watch.report(fmt.Sprintf(
+			"configmap %s/%s is absent; media-api verifies client certificates against the authority it read last",
+			clientCANamespace, clientCAConfigMap))
 	}
+	return watch
 }
 
 // certificateCaller reads the caller out of a connection that carries

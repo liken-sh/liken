@@ -171,8 +171,10 @@ metadata:
   # authority in the ConfigMap extension-apiserver-authentication in
   # kube-system, and the API reads it to verify a caller's client
   # certificate. extension-apiserver-authentication-reader is the
-  # built-in Role that grants a get on that one object, and it is the
-  # Role every extension API server binds for the same read.
+  # built-in Role that grants get, list, and watch on that one object,
+  # and it is the Role every extension API server binds for the same
+  # read. The API watches the object, so a rotated authority reaches
+  # the next handshake with no restart.
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -235,9 +237,9 @@ metadata:
 rules:
   # The three CA ConfigMaps: this API's own and the two siblings'
   # anchors, watched so a rotation reaches the next connection with
-  # no restart. Both verbs keep their resourceNames, because the watch
-  # opens each ConfigMap's own path rather than the collection, and
-  # RBAC reads a name from the request path.
+  # no restart. Both verbs keep their resourceNames. The watch names
+  # its ConfigMap with the field selector metadata.name, and RBAC reads
+  # the name from that selector.
   - apiGroups: [""]
     resources: [configmaps]
     resourceNames: [display-api-ca, audio-api-ca, media-api-ca]
@@ -254,12 +256,12 @@ rules:
     resourceNames: [media-api-ca]
     verbs: [update]
   # The serving key and certificate, re-minted under a third of the
-  # leaf's life. No watch: the keeper reads the pair at start and once
-  # an hour after.
+  # leaf's life. The watch serves a pair that an owner or another pod
+  # wrote with no restart.
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [media-api-tls]
-    verbs: [get, update]
+    verbs: [get, update, watch]
   # No resourceNames here, because a Deployment's pod name is
   # generated and not known when this file is written. The API reads
   # one pod, its own, for the tag of its own image.

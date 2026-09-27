@@ -12,12 +12,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 )
@@ -213,42 +212,18 @@ func TestTheGrantCacheKeysOnTheCertificate(t *testing.T) {
 	mustMatch(t, len(fixture.plane.reviews), 2)
 }
 
-// The API server's own ConfigMap, served the way it answers a get.
-type authenticationConfigMap struct {
-	server *httptest.Server
-
-	mutex  sync.Mutex
-	caPEM  string
-	absent bool
+// authenticationConfigMap is the API server's own ConfigMap, holding
+// one authority's certificate.
+func authenticationConfigMap(caPEM string, version string) *ConfigMap {
+	return &ConfigMap{
+		Metadata: ObjectMeta{Name: clientCAConfigMap, Namespace: clientCANamespace, ResourceVersion: version},
+		Data:     map[string]string{clientCAKey: caPEM},
+	}
 }
 
-func newAuthenticationConfigMap(t *testing.T, caPEM string) *authenticationConfigMap {
+func publishAuthority(t *testing.T, api *coreAPI, caPEM string) {
 	t.Helper()
-	held := &authenticationConfigMap{caPEM: caPEM}
-	held.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		held.mutex.Lock()
-		defer held.mutex.Unlock()
-		if held.absent {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(ConfigMap{
-			Metadata: ObjectMeta{Name: clientCAConfigMap, Namespace: clientCANamespace},
-			Data:     map[string]string{clientCAKey: held.caPEM},
-		})
-	}))
-	t.Cleanup(held.server.Close)
-	return held
-}
-
-func (m *authenticationConfigMap) holds(caPEM string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.caPEM = caPEM
-}
-
-func (m *authenticationConfigMap) client() *Client {
-	return NewClient(m.server.URL, m.server.Client(), "")
+	api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(caPEM, "7"))
 }
 
 // Whether a leaf of this authority verifies against the anchors the
@@ -263,35 +238,74 @@ func verifiesAgainst(t *testing.T, anchors *clientAnchors, authority *clientAuth
 	return err == nil
 }
 
-// The pool comes from the ConfigMap, and reading it again after the
-// cluster rotated its authority replaces the pool with no restart.
+// The pool comes from the ConfigMap, and the watch delivers the
+// ConfigMap the API server rewrote when it rotated its authority, so
+// the pool changes with no clock and no restart.
 func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
-	published := newAuthenticationConfigMap(t, string(first.certPEM))
+	api := newCoreAPI()
+	publishAuthority(t, api, string(first.certPEM))
+	events := make(chan string)
+	defer close(events)
+	watched := make(chan *url.URL, 1)
 	anchors := &clientAnchors{}
+	watch := watchClientAnchors(testAPIClient(t, watchingAPI(api, events, watched)), anchors)
 
-	mustSucceed(t, anchors.load(published.client()))
+	version, err := watch.read()
+	mustSucceed(t, err)
 	mustMatch(t, verifiesAgainst(t, anchors, first), true)
 	mustMatch(t, verifiesAgainst(t, anchors, second), false)
 
-	published.holds(string(second.certPEM))
-	mustSucceed(t, anchors.load(published.client()))
-	mustMatch(t, verifiesAgainst(t, anchors, second), true)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go watch.follow(ctx, version)
+	opened := <-watched
+	mustMatch(t, opened.Path, "/api/v1/namespaces/kube-system/configmaps")
+	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+clientCAConfigMap)
+	mustMatch(t, opened.Query().Get("resourceVersion"), "7")
+
+	events <- objectEvent(t, "MODIFIED", authenticationConfigMap(string(second.certPEM), "8"))
+	until(t, "the anchors never took up the rotated authority", func() bool {
+		return verifiesAgainst(t, anchors, second)
+	})
 }
 
 // A ConfigMap the API cannot read answers an error and leaves an empty
 // pool behind, because the API still answers every token caller.
 func TestAConfigMapThisAPICannotReadLeavesAnEmptyPool(t *testing.T) {
-	published := newAuthenticationConfigMap(t, "")
-	published.absent = true
+	refusing := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
 	anchors := &clientAnchors{}
 
-	err := anchors.load(published.client())
+	_, err := watchClientAnchors(testAPIClient(t, refusing), anchors).read()
 
 	mustFail(t, err)
 	if anchors.held() == nil {
 		t.Fatal("the pool is nil, so a handshake would verify against the system roots")
 	}
+}
+
+// A deleted ConfigMap leaves the pool as it is and says so, because
+// the certificates the pool holds are still the ones the cluster
+// issued.
+func TestADeletedConfigMapKeepsThePool(t *testing.T) {
+	authority := newClientAuthority(t)
+	api := newCoreAPI()
+	publishAuthority(t, api, string(authority.certPEM))
+	anchors := &clientAnchors{}
+	watch := watchClientAnchors(testAPIClient(t, api.handler()), anchors)
+	var lines []string
+	watch.report = func(line string) { lines = append(lines, line) }
+	_, err := watch.read()
+	mustSucceed(t, err)
+
+	api.hide("configmaps/" + clientCAConfigMap)
+	_, err = watch.read()
+
+	mustSucceed(t, err)
+	mustMatch(t, verifiesAgainst(t, anchors, authority), true)
+	mustMatch(t, len(lines), 1)
 }
 
 // A ConfigMap that carries no usable authority answers an error too.
@@ -305,35 +319,14 @@ func TestAConfigMapWithNoAuthorityAnswersAnError(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			published := newAuthenticationConfigMap(t, row.caPEM)
+			api := newCoreAPI()
+			publishAuthority(t, api, row.caPEM)
 			anchors := &clientAnchors{}
 
-			mustFail(t, anchors.load(published.client()))
+			_, err := watchClientAnchors(testAPIClient(t, api.handler()), anchors).read()
+
+			mustFail(t, err)
 		})
-	}
-}
-
-// The minute loop reads the ConfigMap again, so a rotated authority
-// reaches the next handshake with no restart.
-func TestTheAnchorLoopTakesUpARotatedAuthority(t *testing.T) {
-	first, second := newClientAuthority(t), newClientAuthority(t)
-	published := newAuthenticationConfigMap(t, string(first.certPEM))
-	anchors := &clientAnchors{}
-	held := clientAnchorInterval
-	clientAnchorInterval = 5 * time.Millisecond
-	t.Cleanup(func() { clientAnchorInterval = held })
-
-	ctx, stop := context.WithCancel(context.Background())
-	t.Cleanup(stop)
-	go keepClientAnchors(ctx, published.client(), anchors)
-	published.holds(string(second.certPEM))
-
-	deadline := time.Now().Add(10 * time.Second)
-	for !verifiesAgainst(t, anchors, second) {
-		if time.Now().After(deadline) {
-			t.Fatal("the loop did not take up the rotated authority within ten seconds")
-		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 

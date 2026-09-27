@@ -12,11 +12,8 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -53,22 +50,12 @@ func CreateConfigMap(c *Client, configMap *ConfigMap) (*ConfigMap, error) {
 	return created, nil
 }
 
-// trustAnchor is one sibling's published file, every certificate in
+// trustAnchor is one sibling's published file: every certificate in
 // it, and the resourceVersion its watch resumes from.
 type trustAnchor struct {
 	certificates    []byte
 	resourceVersion string
 }
-
-// A sibling this cluster has not deployed answers 404 to every watch.
-// The wait between attempts starts here and doubles to the ceiling, so
-// one absent sibling costs one request a minute rather than several a
-// second. A watch that opens resets the wait, because the next failure
-// is a new fault and not the same one.
-const (
-	watchBackoffStart = time.Second
-	watchBackoffMax   = time.Minute
-)
 
 // trustStore holds the anchors, one per named ConfigMap, and the pool
 // built from them that every request goroutine reads at dial time.
@@ -77,12 +64,10 @@ type trustStore struct {
 	namespace string
 	names     []string
 
-	// How long a dropped watch waits before it reads the object again.
-	// It is a field so a test drives it in milliseconds.
-	retry time.Duration
-
-	// The bounds of the wait after a watch that would not open. They
-	// are fields for the same reason.
+	// How long an ended watch waits before it opens again, and the
+	// bounds of the wait after a refused one. They are fields so a
+	// test drives the watch in milliseconds.
+	retry        time.Duration
 	backoffStart time.Duration
 	backoffMax   time.Duration
 
@@ -94,6 +79,7 @@ type trustStore struct {
 
 	mu      sync.RWMutex
 	anchors map[string]trustAnchor
+	absent  map[string]bool
 	roots   *x509.CertPool
 }
 
@@ -108,6 +94,7 @@ func newTrustStore(client *Client, namespace string, names ...string) *trustStor
 		pause:        waiting,
 		report:       func(line string) { fmt.Fprintln(os.Stderr, line) },
 		anchors:      map[string]trustAnchor{},
+		absent:       map[string]bool{},
 		roots:        x509.NewCertPool(),
 	}
 }
@@ -117,7 +104,7 @@ func newTrustStore(client *Client, namespace string, names ...string) *trustStor
 // API server that will not answer is.
 func (t *trustStore) load() error {
 	for _, name := range t.names {
-		if _, err := t.read(name); err != nil {
+		if _, err := t.follower(name).read(); err != nil {
 			return err
 		}
 	}
@@ -131,133 +118,42 @@ func (t *trustStore) pool() *x509.CertPool {
 }
 
 // watch follows each ConfigMap in a goroutine of its own, because the
-// Role scopes the get and the watch by resourceNames and one watch
-// cannot cover three named objects.
+// Role scopes the get and the watch by resourceNames, and a field
+// selector names one object, so one watch cannot cover three.
 func (t *trustStore) watch(ctx context.Context) {
 	for _, name := range t.names {
 		go t.follow(ctx, name)
 	}
 }
 
-// follow is the watch loop for one ConfigMap: stream from the last
-// resourceVersion, and when the stream ends, pause, read the object
-// again, and stream from there. The read is what recovers a version
-// the API server no longer holds, so it runs only after a watch that
-// opened; a watch the API server refused has no version to resume from
-// and reading again would double the cost of a sibling that is absent.
-//
-// One line reports each change of state, the first refusal and the
-// return, and nothing reports an attempt that failed the same way as
-// the one before it.
+// follow watches one ConfigMap from the version the last read or
+// event recorded.
 func (t *trustStore) follow(ctx context.Context, name string) {
-	resourceVersion := t.version(name)
-	wait := t.backoffStart
-	refusal := ""
-	for ctx.Err() == nil {
-		version, opened, reason := t.stream(ctx, name, resourceVersion)
-		resourceVersion = version
-		if !opened {
-			if reason != refusal {
-				t.report(fmt.Sprintf(
-					"watching configmap %s: %s; media-api composes no stream through that API until it exists",
-					name, reason))
-				refusal = reason
+	t.follower(name).follow(ctx, t.version(name))
+}
+
+func (t *trustStore) follower(name string) *namedWatch {
+	watch := newNamedWatch(t.client, t.namespace, "configmaps", name,
+		func(object json.RawMessage) error {
+			var configMap ConfigMap
+			if err := json.Unmarshal(object, &configMap); err != nil {
+				return err
 			}
-			if !t.pause(ctx, wait) {
-				return
-			}
-			wait = min(wait*2, t.backoffMax)
-			continue
-		}
-		if refusal != "" {
-			t.report(fmt.Sprintf("watching configmap %s: the object is present and media-api trusts it", name))
-			refusal = ""
-		}
-		wait = t.backoffStart
-		if !t.pause(ctx, t.retry) {
-			return
-		}
-		version, err := t.read(name)
-		if err != nil {
-			t.report(fmt.Sprintf("reading configmap %s to resume the watch: %v", name, err))
-			continue
-		}
-		resourceVersion = version
-	}
+			t.remember(name, &configMap)
+			return nil
+		},
+		func() { t.forget(name) })
+	watch.retry = t.retry
+	watch.backoffStart = t.backoffStart
+	watch.backoffMax = t.backoffMax
+	watch.pause = t.pause
+	watch.report = t.report
+	return watch
 }
 
-// stream opens one watch on the named object's own path, not on the
-// collection with a field selector. RBAC reads resourceNames from the
-// request path, so the Role that names these three ConfigMaps
-// authorizes the object path and refuses a collection watch.
-//
-// It answers whether the watch opened, and the reason it did not. The
-// caller owns the reporting, because only the caller knows whether the
-// reason is the same one as last time.
-func (t *trustStore) stream(ctx context.Context, name, resourceVersion string) (string, bool, string) {
-	query := url.Values{
-		"watch":               {"true"},
-		"allowWatchBookmarks": {"true"},
-		"resourceVersion":     {resourceVersion},
-	}
-	path := configMapsPath(t.namespace) + "/" + url.PathEscape(name) + "?" + query.Encode()
-	resp, err := t.client.Do(http.MethodGet, path, nil)
-	if err != nil {
-		return resourceVersion, false, err.Error()
-	}
-	defer drain(resp.Body)
-	stop := closeOnCancel(ctx, resp.Body)
-	defer stop()
-
-	// A sibling this cluster does not run answers 404, and a Role that
-	// does not name this object answers 403. Both mean there is no
-	// stream to read, and the reason reaches the caller's one line.
-	if resp.StatusCode != http.StatusOK {
-		return resourceVersion, false, resp.Status
-	}
-	return t.readEvents(name, resp, resourceVersion), true, ""
-}
-
-func (t *trustStore) readEvents(name string, resp *http.Response, resourceVersion string) string {
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var event struct {
-			Type   string    `json:"type"`
-			Object ConfigMap `json:"object"`
-		}
-		if err := decoder.Decode(&event); err != nil {
-			return resourceVersion
-		}
-		// A 410 Gone arrives as an ERROR event. The read in the caller
-		// answers it with a current resourceVersion.
-		if event.Type == "ERROR" {
-			return resourceVersion
-		}
-		if event.Object.Metadata.ResourceVersion != "" {
-			resourceVersion = event.Object.Metadata.ResourceVersion
-		}
-		switch event.Type {
-		case "ADDED", "MODIFIED":
-			t.remember(name, &event.Object)
-		case "DELETED":
-			t.forget(name)
-		}
-	}
-}
-
-func (t *trustStore) read(name string) (string, error) {
-	configMap, err := GetConfigMap(t.client, t.namespace, name)
-	if errors.Is(err, ErrNotFound) {
-		t.forget(name)
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("reading configmap %s/%s: %w", t.namespace, name, err)
-	}
-	t.remember(name, configMap)
-	return configMap.Metadata.ResourceVersion, nil
-}
-
+// remember takes up a ConfigMap's anchors. A ConfigMap that returns
+// after it was absent reports one line, because a person who read the
+// absence line reads when it ended.
 func (t *trustStore) remember(name string, configMap *ConfigMap) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -266,13 +162,25 @@ func (t *trustStore) remember(name string, configMap *ConfigMap) {
 		resourceVersion: configMap.Metadata.ResourceVersion,
 	}
 	t.rebuild()
+	if t.absent[name] {
+		delete(t.absent, name)
+		t.report(fmt.Sprintf("configmap %s/%s is present and media-api trusts it", t.namespace, name))
+	}
 }
 
+// forget drops a ConfigMap's anchors. The first absence reports one
+// line, and a repeated one reports nothing.
 func (t *trustStore) forget(name string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.anchors, name)
 	t.rebuild()
+	if !t.absent[name] {
+		t.absent[name] = true
+		t.report(fmt.Sprintf(
+			"configmap %s/%s is absent; media-api composes no stream through that API until it exists",
+			t.namespace, name))
+	}
 }
 
 // rebuild builds a new pool whole on every change and swaps it in, so
@@ -293,32 +201,4 @@ func (t *trustStore) version(name string) string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.anchors[name].resourceVersion
-}
-
-// closeOnCancel closes the body when the context ends, because the
-// client's Do carries no context and the decoder would otherwise
-// block on a stream nobody reads.
-func closeOnCancel(ctx context.Context, body io.Closer) func() {
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = body.Close()
-		case <-done:
-		}
-	}()
-	return func() { close(done) }
-}
-
-// waiting pauses for the retry and answers false when the context
-// ended first, which is how each watch goroutine stops.
-func waiting(ctx context.Context, pause time.Duration) bool {
-	timer := time.NewTimer(pause)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }
