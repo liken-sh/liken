@@ -18,21 +18,23 @@ import (
 	"time"
 )
 
-// The API looks at its own certificate twice a day, which is often
-// enough for a leaf that lives a year and is re-minted with four
-// months left. It looks for the sidecar's Secret every minute,
-// because that Secret can be deleted and nothing else puts it back:
-// a get of one object costs the API server almost nothing, and the
-// alternative is a cluster whose captures answer nothing until the
-// next renewal. The sidecar looks for the files the optional Secret
-// volume delivers every fifteen seconds, because the volume changes
-// with no event a process can wait on, and a fresh install waits
-// this long at most for its first leaf.
+// The API re-mints the leaves it signs on a twelve-hour clock, which is
+// often enough for a leaf that lives a year and is re-minted with four
+// months left. The sidecar reads the files the optional Secret
+// volume delivers when the kubelet updates the volume (see
+// watchCaptureLeaf). It also reads them once an hour, and that pass is
+// a clock and not a wait for a change: it re-mints the sidecar's own
+// leaf when that leaf expires, and a leaf that lives a year needs no
+// finer clock.
 const (
 	renewalInterval = 12 * time.Hour
-	sidecarInterval = time.Minute
-	reloadInterval  = 15 * time.Second
+	reloadFallback  = time.Hour
 )
+
+// The link the kubelet moves into a Secret volume's directory each
+// time it updates the volume, the first time the Secret exists
+// included.
+const secretVolumeData = "..data"
 
 // The two files of a kubernetes.io/tls Secret volume that the sidecar
 // reads, and the directory the manifest mounts the volume at. The
@@ -142,20 +144,31 @@ func startAuthority(ctx context.Context, c *Client, namespace string,
 			apiComponent, apiTLSSecret)
 	}
 	// The loop runs either way. It re-mints the leaf this API minted,
-	// and it takes up the leaf an owner's cert-manager rotated, so
+	// or it watches for the leaf an owner's cert-manager rotated, so
 	// neither one waits for a restart.
 	go keepCertificates(ctx, c, namespace, ca, holder, readings)
 	return anchor, nil
 }
 
-// Twice a day the API re-mints a leaf that has less than a third of
-// its life left, or takes up a leaf an owner rotated, and sets the
-// expiry gauge to the date a person reads on a dashboard.
+// keepCertificates keeps the listener on a current leaf, in one of two
+// ways.
+//
+// An API with a CA of its own re-mints its leaf and the sidecar's once
+// less than a third of a leaf's life remains. That is a clock and not
+// a wait for a change: nothing changes in the cluster when a leaf ages.
+// Twice a day is often enough for a leaf that lives a year.
+//
+// An API that serves an owner's Secret watches that Secret, so a leaf
+// the owner's cert-manager rotated reaches the listener as soon as it
+// lands, with no restart.
 func keepCertificates(ctx context.Context, c *Client, namespace string,
 	ca *certificateAuthority, holder *certificateHolder, readings *apiMetrics) {
-	if ca != nil {
-		go keepSidecarLeaf(ctx, c, namespace, ca)
+	if ca == nil {
+		watchNamed(ctx, c, secretsPath(namespace), apiTLSSecret, "the Secret "+apiTLSSecret,
+			func(held *Secret) { takeOwnersLeaf(held, holder, readings) })
+		return
 	}
+	go keepSidecarLeaf(ctx, c, namespace, ca)
 	tick := time.NewTicker(renewalInterval)
 	defer tick.Stop()
 	for {
@@ -163,42 +176,68 @@ func keepCertificates(ctx context.Context, c *Client, namespace string,
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
-			material, err := servingMaterialNow(c, namespace, ca, now)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "reading the serving certificate: %v\n", err)
-				continue
-			}
-			if material == nil {
-				continue
-			}
-			if err := holder.set(material.CertPEM, material.KeyPEM, false); err != nil {
-				fmt.Fprintf(os.Stderr, "loading the serving certificate: %v\n", err)
-				continue
-			}
-			readings.certificateExpires(material.Expires)
+			renewCertificates(c, namespace, ca, holder, readings, now)
 		}
 	}
 }
 
-// Every minute the API reads the sidecar's Secret and mints it again
-// if it is gone. Nothing else puts that Secret back: an owner who
-// deletes it leaves every node's sidecar serving a certificate of its
-// own making, which the API refuses to verify, so every capture in
-// the cluster answers 503 until this pass runs. A leaf that stands
+// One pass of the renewal clock. A leaf that stands writes nothing.
+func renewCertificates(c *Client, namespace string, ca *certificateAuthority,
+	holder *certificateHolder, readings *apiMetrics, now time.Time) {
+	if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, now); err != nil {
+		fmt.Fprintf(os.Stderr, "minting the sidecar certificate: %v\n", err)
+	}
+	material, err := renewServingMaterial(c, namespace, apiTLSSecret, ca, serviceNames(namespace), now)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "renewing the serving certificate: %v\n", err)
+		return
+	}
+	if material == nil {
+		return
+	}
+	if err := holder.set(material.CertPEM, material.KeyPEM, false); err != nil {
+		fmt.Fprintf(os.Stderr, "loading the serving certificate: %v\n", err)
+		return
+	}
+	readings.certificateExpires(material.Expires)
+}
+
+// Serve the leaf one copy of the owner's Secret holds. A Secret that is
+// gone or holds no valid leaf is reported, and the listener keeps the
+// leaf it serves, which is still a leaf the owner issued.
+func takeOwnersLeaf(held *Secret, holder *certificateHolder, readings *apiMetrics) {
+	if held == nil {
+		fmt.Fprintf(os.Stderr, "the Secret %s is gone, and the API keeps serving the certificate it holds\n", apiTLSSecret)
+		return
+	}
+	material, _, err := readServingMaterial(held)
+	if err == nil {
+		err = holder.set(material.CertPEM, material.KeyPEM, false)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading the serving certificate from the Secret %s: %v\n", apiTLSSecret, err)
+		return
+	}
+	readings.certificateExpires(material.Expires)
+}
+
+// The API watches the sidecar's Secret and mints it again when it goes
+// or holds a leaf that no longer stands. Nothing else puts that Secret
+// back: an owner who deletes it leaves every node's sidecar serving a
+// certificate of its own making, which the API refuses to verify, so
+// every capture in the cluster answers 503 until the Secret returns.
+// The API's own write arrives on the watch too, and a leaf that stands
 // costs one get and writes nothing.
 func keepSidecarLeaf(ctx context.Context, c *Client, namespace string, ca *certificateAuthority) {
-	tick := time.NewTicker(sidecarInterval)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-tick.C:
-			if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, now); err != nil {
+	watchNamed(ctx, c, secretsPath(namespace), sidecarTLSSecret, "the Secret "+sidecarTLSSecret,
+		func(held *Secret) {
+			if held != nil && sidecarLeafStands(held, sidecarName, time.Now()) {
+				return
+			}
+			if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, time.Now()); err != nil {
 				fmt.Fprintf(os.Stderr, "minting the sidecar certificate: %v\n", err)
 			}
-		}
-	}
+		})
 }
 
 // The sidecar's certificate arrives as an optional Secret volume the
@@ -231,34 +270,27 @@ func loadCaptureLeaf(dir string, holder *certificateHolder, now time.Time) error
 	return holder.set(ownCert, ownKey, true)
 }
 
-// The sidecar watches the files on a tick, because a Secret volume
-// changes with no event a process can wait on: the kubelet swaps a
-// symlink under the directory.
-func watchCaptureLeaf(ctx context.Context, dir string, holder *certificateHolder, readings *captureMetrics) {
-	tick := time.NewTicker(reloadInterval)
-	defer tick.Stop()
+// The sidecar reads the files each time the kubelet updates the
+// volume (arrivals.go). The kubelet writes a Secret volume's files
+// into a new directory and then renames a link over ..data, so that
+// rename says the files changed. On the volume's first write the
+// kubelet makes each key's link, such as tls.crt, after the rename, so
+// the watch wakes on those links too, and the read after the last one
+// finds both files. The
+// fallback timer is the clock that re-mints the sidecar's own leaf
+// when that leaf expires.
+func watchCaptureLeaf(ctx context.Context, dir string, holder *certificateHolder, readings *captureMetrics, fallback time.Duration) {
+	watch := newArrivalsIn(dir, secretVolumeData, tlsCertFile, tlsKeyFile)
+	defer watch.close()
 	for {
+		watch.ready()
 		if err := loadCaptureLeaf(dir, holder, time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "loading the capture certificate: %v\n", err)
 		}
 		readings.ready(holder.held())
-		select {
-		case <-ctx.Done():
+		watch.wait(ctx, fallback)
+		if ctx.Err() != nil {
 			return
-		case <-tick.C:
 		}
 	}
-}
-
-// One pass takes one of two shapes. With a CA of its own, the API
-// re-mints the leaf it signed once less than a third of its life
-// remains, and answers nil while it stands. With an owner's Secret,
-// it re-reads the leaf every pass, which is the only way a leaf
-// cert-manager rotated reaches the listener without a restart.
-func servingMaterialNow(c *Client, namespace string, ca *certificateAuthority, now time.Time) (*servingMaterial, error) {
-	if ca != nil {
-		return renewServingMaterial(c, namespace, apiTLSSecret, ca, serviceNames(namespace), now)
-	}
-	material, _, err := ensureServingMaterial(c, namespace, apiTLSSecret, serviceNames(namespace), now)
-	return material, err
 }

@@ -187,9 +187,10 @@ metadata:
   # The API server publishes the cluster's client certificate
   # authority in the ConfigMap extension-apiserver-authentication in
   # kube-system, and the API reads it to verify a caller's client
-  # certificate. extension-apiserver-authentication-reader is the
-  # built-in Role that grants a get on that one object, and it is the
-  # Role every extension API server binds for the same read.
+  # certificate, and watches it for a rotated authority.
+  # extension-apiserver-authentication-reader is the built-in Role
+  # that grants get, list, and watch on that one object, and it is
+  # the Role every extension API server binds for the same read.
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -216,15 +217,17 @@ rules:
   - apiGroups: [""]
     resources: [secrets, configmaps]
     verbs: [create]
-  # The API's own serving leaf and the sidecar's: read at start, read
-  # again on a twelve-hour tick, and rewritten under a third of a
-  # leaf's life. The tick is also how a leaf an owner's cert-manager
-  # rotated reaches the listener, so this API is never restarted to
-  # pick one up.
+  # The API's own serving leaf and the sidecar's: read at start, and
+  # rewritten on a twelve-hour clock under a third of a leaf's life.
+  # The API watches the sidecar's Secret, so a deleted one is minted
+  # again at once, and an owner's serving Secret, so a leaf the owner's
+  # cert-manager rotated reaches the listener with no restart. Each
+  # watch lists and watches with a field selector on the name, which
+  # RBAC matches against resourceNames.
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [display-api-tls, display-capture-server]
-    verbs: [get, update, watch]
+    verbs: [get, list, update, watch]
   # The CA certificate alone, so a client reads the trust anchor with
   # an ordinary get and never touches a Secret.
   - apiGroups: [""]

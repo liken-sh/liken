@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 )
 
 // The ConfigMap the API server publishes the cluster's client
@@ -29,14 +28,6 @@ const (
 	clientCAConfigMap = "extension-apiserver-authentication"
 	clientCAKey       = "client-ca-file"
 )
-
-// How often the API reads the ConfigMap again. A minute is the same
-// pass the sidecar's Secret gets, for the same reason: one get of one
-// object costs the API server almost nothing, and the alternative is
-// a cluster whose rotated authority opens no door until the next
-// restart. It is a variable so a test can shorten it, the way this
-// repository's other waits are.
-var clientAnchorInterval = time.Minute
 
 // The anchors a handshake verifies a client certificate against. The
 // pool is replaced and never written to, because a handshake reads it
@@ -69,11 +60,16 @@ func (a *clientAnchors) held() *x509.CertPool {
 // The key carries one PEM block when no rotation is in progress and
 // more than one during a rotation, and a pool takes all of them.
 func (a *clientAnchors) load(c *Client) error {
-	path := "/api/v1/namespaces/" + clientCANamespace + "/configmaps/" + clientCAConfigMap
-	held, err := get[ConfigMap](c, path)
+	held, err := get[ConfigMap](c, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
 	if err != nil {
 		return fmt.Errorf("reading the ConfigMap %s: %w", clientCAConfigMap, err)
 	}
+	return a.take(held)
+}
+
+// take replaces the pool with the anchors one copy of the ConfigMap
+// holds.
+func (a *clientAnchors) take(held *ConfigMap) error {
 	anchorPEM := held.Data[clientCAKey]
 	if anchorPEM == "" {
 		return fmt.Errorf("the ConfigMap %s carries no %s", clientCAConfigMap, clientCAKey)
@@ -86,24 +82,22 @@ func (a *clientAnchors) load(c *Client) error {
 	return nil
 }
 
-// Every minute the API reads the authority again, so a rotated
-// authority opens the door with no restart. A read that fails is
-// reported, and the API keeps the pool it could not replace, because
-// the certificates that pool holds are still the ones the cluster
-// issued.
+// The API watches the ConfigMap, so a rotated authority opens the door
+// as soon as the API server publishes it, with no restart. A copy that
+// holds no authority is reported, and so is a ConfigMap that is gone.
+// Either way the API keeps the pool it holds, because the certificates
+// that pool holds are still the ones the cluster issued.
 func keepClientAnchors(ctx context.Context, c *Client, anchors *clientAnchors) {
-	tick := time.NewTicker(clientAnchorInterval)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			if err := anchors.load(c); err != nil {
+	watchNamed(ctx, c, configMapsPath(clientCANamespace), clientCAConfigMap, "the ConfigMap "+clientCAConfigMap,
+		func(held *ConfigMap) {
+			if held == nil {
+				fmt.Fprintf(os.Stderr, "the ConfigMap %s is gone, and the API keeps the client authority it holds\n", clientCAConfigMap)
+				return
+			}
+			if err := anchors.take(held); err != nil {
 				fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 			}
-		}
-	}
+		})
 }
 
 // The configuration the API listens with. The certificate and the

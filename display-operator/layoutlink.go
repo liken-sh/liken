@@ -313,14 +313,12 @@ func (l *layoutLink) run(ctx context.Context) {
 	watch := newArrivals(l.socketPath)
 	defer watch.close()
 	wait := l.dial
+	arrived := false
 	for {
 		watch.ready()
-		if l.connection(ctx) {
-			wait = l.dial
-		} else {
-			wait = nextDialDelay(wait, l.dialLimit)
-		}
-		watch.wait(ctx, wait)
+		served := l.connection(ctx)
+		wait = nextDialWait(served, arrived, wait, l.dial, l.dialLimit)
+		arrived = watch.wait(ctx, wait)
 		if ctx.Err() != nil {
 			return
 		}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -339,26 +338,43 @@ func TestAnAbsentConfigMapLeavesNoAnchors(t *testing.T) {
 	}
 }
 
-// The refresh loop reads the ConfigMap on its own clock, so a CA that
-// changed reaches the listener with no restart.
-func TestTheRefreshLoopTakesUpANewAuthority(t *testing.T) {
+// The loop watches the ConfigMap, so a CA that changed reaches the
+// listener with no restart and no clock.
+func TestTheWatchTakesUpANewAuthority(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
-	published := newAuthenticationConfigMap(t, string(first.certPEM))
+	published := newNamedObjects(t)
+	published.put(authenticationConfigMapHolding(string(first.certPEM)))
 	anchors := &clientAnchors{}
-	clientAnchorInterval = 5 * time.Millisecond
-	t.Cleanup(func() { clientAnchorInterval = time.Minute })
 
-	ctx, stop := context.WithCancel(context.Background())
-	t.Cleanup(stop)
-	go keepClientAnchors(ctx, NewClient(published.URL, published.Client(), ""), anchors)
-	published.holds(string(second.certPEM))
+	go keepClientAnchors(t.Context(), published.client(), anchors)
+	eventually(t, "the first authority", func() bool { return verifies(t, anchors, first) })
+	published.put(authenticationConfigMapHolding(string(second.certPEM)))
 
-	deadline := time.Now().Add(5 * time.Second)
-	for !verifies(t, anchors, second) {
-		if time.Now().After(deadline) {
-			t.Fatal("the loop did not take up the second authority within five seconds")
-		}
-		time.Sleep(5 * time.Millisecond)
+	eventually(t, "the second authority", func() bool { return verifies(t, anchors, second) })
+}
+
+// A ConfigMap that goes away leaves the pool as it was, because the
+// certificates it holds are still the ones the cluster issued.
+func TestTheWatchKeepsTheAnchorsWhenTheConfigMapGoes(t *testing.T) {
+	first := newClientAuthority(t)
+	published := newNamedObjects(t)
+	published.put(authenticationConfigMapHolding(string(first.certPEM)))
+	anchors := &clientAnchors{}
+	go keepClientAnchors(t.Context(), published.client(), anchors)
+	eventually(t, "the first authority", func() bool { return verifies(t, anchors, first) })
+
+	published.remove(clientCAConfigMap)
+	time.Sleep(50 * time.Millisecond)
+
+	if !verifies(t, anchors, first) {
+		t.Error("the pool dropped the authority when the ConfigMap went")
+	}
+}
+
+func authenticationConfigMapHolding(caPEM string) ConfigMap {
+	return ConfigMap{
+		Metadata: objectMeta{Name: clientCAConfigMap, Namespace: clientCANamespace},
+		Data:     map[string]string{clientCAKey: caPEM},
 	}
 }
 

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -102,6 +104,65 @@ func TestTheSidecarTakesTheLeafWhenItLands(t *testing.T) {
 	}
 	if len(pair.Leaf.DNSNames) != 1 || pair.Leaf.DNSNames[0] != sidecarName {
 		t.Errorf("the sidecar serves %v, want the name the API verifies it under", pair.Leaf.DNSNames)
+	}
+}
+
+// writeSecretVolume writes files the way the kubelet updates a Secret
+// volume: the files go into a new timestamped directory, a ..data_tmp
+// link points at it, and a rename moves that link over ..data. Each
+// key's file is a link through ..data.
+func writeSecretVolume(t *testing.T, dir string, files map[string][]byte) {
+	t.Helper()
+	stamp := fmt.Sprintf("..%d", time.Now().UnixNano())
+	if err := os.Mkdir(filepath.Join(dir, stamp), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, stamp, name), content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(stamp, filepath.Join(dir, "..data_tmp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "..data_tmp"), filepath.Join(dir, secretVolumeData)); err != nil {
+		t.Fatal(err)
+	}
+	for name := range files {
+		link := filepath.Join(dir, name)
+		if _, err := os.Lstat(link); err == nil {
+			continue
+		}
+		if err := os.Symlink(filepath.Join(secretVolumeData, name), link); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The Secret lands in the sidecar's volume, and the sidecar takes the
+// leaf on the kubelet's rename. The fallback timer is longer than the
+// test, so only the rename can end the wait in time.
+func TestTheSidecarTakesTheLeafOnTheVolumesRename(t *testing.T) {
+	directory := t.TempDir()
+	holder := &certificateHolder{}
+	go watchCaptureLeaf(t.Context(), directory, holder, nil, time.Hour)
+	time.Sleep(50 * time.Millisecond)
+	if holder.held() {
+		t.Fatal("the sidecar reports itself ready with no leaf from the API")
+	}
+
+	certPEM, keyPEM, err := testAuthority(t).mintLeaf(sidecarName, []string{sidecarName}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSecretVolume(t, directory, map[string][]byte{tlsCertFile: certPEM, tlsKeyFile: keyPEM})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !holder.held() {
+		if time.Now().After(deadline) {
+			t.Fatal("the sidecar did not take the leaf the rename delivered")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -265,4 +326,71 @@ func TestTheSidecarSecretIsMintedAgainWhenItGoesAway(t *testing.T) {
 	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != sidecarName {
 		t.Errorf("the leaf names %v, want the sidecar's own SAN", leaf.DNSNames)
 	}
+}
+
+// An owner's Secret: a leaf and its CA certificate, and no CA key, the
+// way cert-manager writes it.
+func ownersSecret(t *testing.T, ca *certificateAuthority) Secret {
+	t.Helper()
+	certPEM, keyPEM, err := ca.mintLeaf(apiAudience, serviceNames(testNamespace), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Secret{
+		Metadata: objectMeta{Name: apiTLSSecret, Namespace: testNamespace},
+		Type:     tlsSecretType,
+		Data:     map[string][]byte{tlsCertKey: certPEM, tlsKeyKey: keyPEM, caCertKey: ca.certPEM},
+	}
+}
+
+// The serial of the leaf the holder serves now.
+func servedSerial(t *testing.T, holder *certificateHolder) string {
+	t.Helper()
+	pair, err := holder.get(nil)
+	if err != nil {
+		return ""
+	}
+	return pair.Leaf.SerialNumber.String()
+}
+
+func serialOf(t *testing.T, secret Secret) string {
+	t.Helper()
+	leaf, err := leafOf(&secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leaf.SerialNumber.String()
+}
+
+// The API serves an owner's Secret and watches it, so a leaf the
+// owner's cert-manager rotated reaches the listener as it lands.
+func TestTheAPITakesUpALeafTheOwnerRotated(t *testing.T) {
+	ca := testAuthority(t)
+	api := newNamedObjects(t)
+	first, second := ownersSecret(t, ca), ownersSecret(t, ca)
+	api.put(first)
+	holder := &certificateHolder{}
+
+	go keepCertificates(t.Context(), api.client(), testNamespace, nil, holder, nil)
+	eventually(t, "the first leaf", func() bool { return servedSerial(t, holder) == serialOf(t, first) })
+	api.put(second)
+
+	eventually(t, "the rotated leaf", func() bool { return servedSerial(t, holder) == serialOf(t, second) })
+}
+
+// An owner deletes the sidecar's Secret, and the API mints it again on
+// the watch's news, not on a clock.
+func TestTheAPIMintsTheSidecarsSecretAgainWhenItGoes(t *testing.T) {
+	ca := testAuthority(t)
+	api := newNamedObjects(t)
+	go keepSidecarLeaf(t.Context(), api.client(), testNamespace, ca)
+	minted := func() bool {
+		held, err := get[Secret](api.client(), secretsPath(testNamespace)+"/"+sidecarTLSSecret)
+		return err == nil && sidecarLeafStands(held, sidecarName, time.Now())
+	}
+	eventually(t, "the first mint", minted)
+
+	api.remove(sidecarTLSSecret)
+
+	eventually(t, "the second mint", minted)
 }

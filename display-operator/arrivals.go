@@ -14,6 +14,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -27,7 +28,28 @@ func nextDialDelay(delay, limit time.Duration) time.Duration {
 	return min(2*delay, limit)
 }
 
-// An inotify watch on one directory for one file name. A process
+// A process creates its socket file with bind and accepts connections
+// only after listen, so a dial right after the file arrives can meet a
+// refusal. The wait after that dial is this short, because listen
+// follows bind at once.
+const listenGrace = 20 * time.Millisecond
+
+// The wait before the next dial of a socket. A connection that served
+// starts the wait over at first. A dial that the socket's arrival
+// started and that failed waits listenGrace. Any other failed dial
+// doubles the wait, up to limit.
+func nextDialWait(served, arrived bool, wait, first, limit time.Duration) time.Duration {
+	switch {
+	case served:
+		return first
+	case arrived:
+		return listenGrace
+	default:
+		return nextDialDelay(wait, limit)
+	}
+}
+
+// An inotify watch on one directory for one or more file names. A process
 // creates a socket with bind and a file with open, which the kernel
 // reports as a create in the directory, and a file renamed into place
 // reports as a move.
@@ -39,7 +61,8 @@ func nextDialDelay(delay, limit time.Duration) time.Duration {
 // volume mounts, which no process can remove while they are mounted,
 // so this is the path of a mount that went away under a live pod.
 type arrivals struct {
-	path string
+	dir   string
+	names []string
 	// Arrived holds one wake at most. A waiter needs to know that the
 	// file arrived, not how many times.
 	arrived chan struct{}
@@ -52,7 +75,12 @@ type arrivals struct {
 // A watch for path. The directory need not exist yet: until it does,
 // the watch is down, and a wait lasts its whole fallback.
 func newArrivals(path string) *arrivals {
-	a := &arrivals{path: path, arrived: make(chan struct{}, 1)}
+	return newArrivalsIn(filepath.Dir(path), filepath.Base(path))
+}
+
+// A watch for any of several names in one directory.
+func newArrivalsIn(dir string, names ...string) *arrivals {
+	a := &arrivals{dir: dir, names: names, arrived: make(chan struct{}, 1)}
 	_ = a.arm()
 	return a
 }
@@ -68,7 +96,7 @@ func (a *arrivals) arm() error {
 	if err != nil {
 		return os.NewSyscallError("inotify_init1", err)
 	}
-	if _, err := unix.InotifyAddWatch(fd, filepath.Dir(a.path), unix.IN_CREATE|unix.IN_MOVED_TO); err != nil {
+	if _, err := unix.InotifyAddWatch(fd, a.dir, unix.IN_CREATE|unix.IN_MOVED_TO); err != nil {
 		_ = unix.Close(fd)
 		return os.NewSyscallError("inotify_add_watch", err)
 	}
@@ -82,7 +110,6 @@ func (a *arrivals) arm() error {
 // Read events until the watch closes or its directory goes, and wake
 // on each event that names the file.
 func (a *arrivals) read(file *os.File) {
-	name := filepath.Base(a.path)
 	buffer := make([]byte, 64*(unix.SizeofInotifyEvent+unix.NAME_MAX+1))
 	for {
 		n, err := file.Read(buffer)
@@ -100,7 +127,9 @@ func (a *arrivals) read(file *os.File) {
 				a.lost(file)
 				return
 			}
-			if string(bytes.TrimRight(buffer[start:end], "\x00")) == name {
+			// An overflow means the kernel dropped events, and one of
+			// them can be the arrival, so the waiter looks again.
+			if mask&unix.IN_Q_OVERFLOW != 0 || slices.Contains(a.names, string(bytes.TrimRight(buffer[start:end], "\x00"))) {
 				a.wake()
 			}
 			offset = start + length

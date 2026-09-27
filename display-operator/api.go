@@ -108,11 +108,11 @@ func serveAPI() {
 	}
 
 	// The cluster's client authority is read before the listener
-	// starts, and again every minute. A read that fails is reported
-	// and never fatal: an API that cannot read the ConfigMap still
-	// answers every caller that sends a Bearer token, and the next
-	// pass loads the authority once the grant or the API server is
-	// back.
+	// starts, and a watch on the ConfigMap takes up each change after
+	// that. A read that fails is reported and never fatal: an API that
+	// cannot read the ConfigMap still answers every caller that sends
+	// a Bearer token, and the watch loads the authority once the grant
+	// or the API server is back.
 	anchors := &clientAnchors{}
 	if err := anchors.load(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)

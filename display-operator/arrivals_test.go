@@ -171,6 +171,29 @@ func TestTheDialDelayDoublesUpToItsLimit(t *testing.T) {
 	}
 }
 
+// A connection that served starts the wait over, and a dial that the
+// socket's arrival started waits only for the socket to listen.
+func TestTheWaitBeforeTheNextDial(t *testing.T) {
+	cases := []struct {
+		name    string
+		served  bool
+		arrived bool
+		want    time.Duration
+	}{
+		{"after a connection that served", true, false, compositorDialInterval},
+		{"after a refusal the arrival started", false, true, listenGrace},
+		{"after a refusal the fallback started", false, false, 2 * time.Second},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := nextDialWait(c.served, c.arrived, time.Second, compositorDialInterval, compositorDialLimit)
+			if got != c.want {
+				t.Errorf("nextDialWait = %s, want %s", got, c.want)
+			}
+		})
+	}
+}
+
 // The watch starts with no compositor, and its fallback timer is far
 // longer than the test. The compositor's socket arrives, and the watch
 // connects to it on the arrival.

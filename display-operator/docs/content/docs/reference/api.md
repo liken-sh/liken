@@ -48,8 +48,9 @@ Kubernetes API server reads a client certificate, so the credentials
 in your kubeconfig identify you here the same way they identify you
 to `kubectl`. The API reads the authority from the `ConfigMap`
 `extension-apiserver-authentication` in `kube-system`, which is where
-the API server publishes it, and reads it again every minute. A
-rotated authority takes effect with no restart. A certificate from
+the API server publishes it, and watches it for changes. A rotated
+authority takes effect as the API server publishes it, with no
+restart. A certificate from
 any other authority ends the TLS handshake.
 
 ### Bearer token
@@ -421,10 +422,11 @@ copies it from this header into the `Content-Type` of a composed
 stream.
 
 **A re-minted `Secret`.** If you delete the `Secret`
-`display-capture-server`, the API mints it again within a minute, and
-the screens come back about 98 seconds after the delete. The API's
-part takes under 30 seconds. The rest is the kubelet's own sync period
-for the projected volume, which nothing in this operator controls. A
+`display-capture-server`, the API mints it again as soon as its watch
+reports the delete. The screens come back when the kubelet next syncs
+the projected volume, and that sync period is the kubelet's own, which
+nothing in this operator controls. A capture container reads the new
+files as the kubelet writes them. A
 capture container that still has the old leaf certificate keeps
 returning 200 the whole time, because that leaf is still valid and
 this API still trusts it. You only see a 503 where the capture

@@ -415,17 +415,15 @@ func (w *outputWatch) run(ctx context.Context) {
 	watch := newArrivals(w.socketPath)
 	defer watch.close()
 	delay := w.retry
+	arrived := false
 	for {
 		watch.ready()
 		session := w.served().session
 		_ = w.connection(ctx)
 		w.closed()
-		if w.served().session != session {
-			delay = w.retry
-		} else {
-			delay = nextDialDelay(delay, w.retryLimit)
-		}
-		watch.wait(ctx, delay)
+		served := w.served().session != session
+		delay = nextDialWait(served, arrived, delay, w.retry, w.retryLimit)
+		arrived = watch.wait(ctx, delay)
 		if ctx.Err() != nil {
 			return
 		}

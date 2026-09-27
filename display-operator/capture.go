@@ -113,7 +113,7 @@ func serveCaptureSidecar() {
 		fatal("the capture certificate: %v", err)
 	}
 	readings.ready(holder.held())
-	go watchCaptureLeaf(ctx, directory, holder, readings)
+	go watchCaptureLeaf(ctx, directory, holder, readings, reloadFallback)
 
 	// A node with no render device still serves the metrics and
 	// answers a capture with the encoder's own words, rather than
