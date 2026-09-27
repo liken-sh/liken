@@ -218,11 +218,13 @@ func main() {
 	// announces. A sysctl or an /etc/hosts entry that another process
 	// changes sends no event, so the pass writes each one back within
 	// ten seconds. The DRA inventory comes from a walk of sysfs on
-	// each pass. The operator reads the Node, the Cluster, the
-	// registry credentials Secret, and the OS pods on its node with
-	// plain requests, and the only watch it holds covers its own
-	// Machine. A release download that finishes between passes
-	// reaches status on the next one.
+	// each pass. The only watch the operator holds covers its own
+	// Machine, so it reads every other object with plain requests on
+	// each pass: for example the Node, the Cluster, the registry
+	// credentials Secret, the OS pods on its node, the node's
+	// ResourceSlice, and the HelmCharts and LoadBalancer Services that
+	// a retracted feature leaves behind. A release download that
+	// finishes between passes reaches status on the next one.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		// Sync before the read closes the window between a new subtree

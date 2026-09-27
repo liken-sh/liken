@@ -262,15 +262,15 @@ func TestPollAndReportBoundsEachFetchByThePatienceLeft(t *testing.T) {
 	}
 }
 
-func TestPollAndReportCapsEachFetchAtTheRequestTimeout(t *testing.T) {
+func TestPollAndReportCapsEachFetchAtTheCallTimeout(t *testing.T) {
 	var got time.Duration
 	fetch := func(timeout time.Duration) (string, bool) {
 		got = timeout
 		return "node-1   Ready", true
 	}
 	pollAndReport(t.Context(), time.Millisecond, time.Hour, "node", fetch, containsReady)
-	if got != kubectlRequestTimeout {
-		t.Errorf("fetch timeout = %s, want %s", got, kubectlRequestTimeout)
+	if got != kubectlCallTimeout {
+		t.Errorf("fetch timeout = %s, want %s", got, kubectlCallTimeout)
 	}
 }
 
@@ -291,5 +291,45 @@ func TestPodsSettled(t *testing.T) {
 				t.Errorf("podsSettled = %v, want %v", got, c.settled)
 			}
 		})
+	}
+}
+
+// reapForTest runs init's reaper for one test, because runWithin
+// learns of its child's exit only through the death registry. No init
+// test runs in parallel, so the reaper collects only this test's
+// children.
+func reapForTest(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		_ = reap(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	// reap installs its SIGCHLD handler on its own goroutine; a child
+	// that exits before the handler exists would never be collected.
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestRunWithinReturnsTheOutputOfACommandThatFinishes(t *testing.T) {
+	reapForTest(t)
+	out, ok := runWithin(10*time.Second, "echo", "node-1   Ready")
+	if !ok || out != "node-1   Ready" {
+		t.Errorf("runWithin = %q, %v; want the output and success", out, ok)
+	}
+}
+
+func TestRunWithinKillsACommandThatOutlivesItsTimeout(t *testing.T) {
+	reapForTest(t)
+	started := time.Now()
+	_, ok := runWithin(200*time.Millisecond, "sleep", "60")
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Errorf("runWithin returned after %s; the 200ms timeout did not end the command", elapsed)
+	}
+	if ok {
+		t.Error("a killed command is not a success")
 	}
 }

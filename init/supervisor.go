@@ -451,7 +451,7 @@ func describeExit(status unix.WaitStatus) string {
 // moment.
 func reportWhenReady(ctx context.Context) error {
 	fetch := func(timeout time.Duration) (string, bool) {
-		return run(k3sBinary, kubectlGet(timeout, "nodes")...)
+		return runWithin(timeout, k3sBinary, kubectlGet(timeout, "nodes")...)
 	}
 	if pollAndReport(ctx, 3*time.Second, 5*time.Minute, "node", fetch, containsReady) {
 		fmt.Println("liken: kubernetes is up")
@@ -469,7 +469,7 @@ func reportWhenReady(ctx context.Context) error {
 // settles.
 func reportPods(ctx context.Context) {
 	fetch := func(timeout time.Duration) (string, bool) {
-		return run(k3sBinary, kubectlGet(timeout, "pods", "-A")...)
+		return runWithin(timeout, k3sBinary, kubectlGet(timeout, "pods", "-A")...)
 	}
 	if pollAndReport(ctx, 5*time.Second, 5*time.Minute, "pod", fetch, podsSettled) {
 		fmt.Println("liken: all system pods are settled")
@@ -478,7 +478,7 @@ func reportPods(ctx context.Context) {
 	}
 }
 
-// kubectlRequestTimeout bounds one kubectl request from the boot
+// kubectlCallTimeout bounds one kubectl call from the boot
 // reporters. An API server that accepts the connection and never
 // answers would otherwise hold kubectl, and the reporter with it,
 // past its patience, because kubectl sets no request timeout of its
@@ -486,11 +486,16 @@ func reportPods(ctx context.Context) {
 // second, so ten seconds is room for a slow start, and a server that
 // does not answer in ten seconds costs one skipped table, not the
 // whole wait.
-const kubectlRequestTimeout = 10 * time.Second
+const kubectlCallTimeout = 10 * time.Second
 
-// kubectlGet builds the arguments for one `k3s kubectl get` with its
-// request timeout. The timeout is always positive, because kubectl
-// reads a zero --request-timeout as no timeout at all.
+// kubectlGet builds the arguments for one `k3s kubectl get` with a
+// request timeout. The flag bounds each HTTP request, not the whole
+// run: kubectl with no discovery cache retries its discovery request
+// several times, and each retry waits the full timeout. runWithin
+// bounds the run. The flag still ends a hung request early, so a
+// retry can reach a server that has started to answer. The timeout
+// is always positive, because kubectl reads a zero --request-timeout
+// as no timeout at all.
 func kubectlGet(timeout time.Duration, args ...string) []string {
 	timeout = max(timeout.Round(time.Millisecond), time.Millisecond)
 	out := []string{"kubectl", "get"}
@@ -506,9 +511,10 @@ func kubectlGet(timeout time.Duration, args ...string) []string {
 // readable: a table that stays unchanged for a minute produces no
 // lines at all.
 //
-// Each fetch gets kubectlRequestTimeout or the patience that is left,
-// whichever is shorter, so a server that never answers cannot hold
-// the loop past its deadline by more than kubectl's own start.
+// Each fetch gets kubectlCallTimeout or the patience that is left,
+// whichever is shorter, and the fetch kills kubectl when that time
+// passes (runWithin). So a server that never answers holds the loop
+// no longer than its patience plus one interval, the last sleep.
 func pollAndReport(ctx context.Context, interval, patience time.Duration, prefix string,
 	fetch func(timeout time.Duration) (string, bool), settled func(string) bool) bool {
 	last := ""
@@ -521,7 +527,7 @@ func pollAndReport(ctx context.Context, interval, patience time.Duration, prefix
 		if left <= 0 {
 			return false
 		}
-		out, ok := fetch(min(kubectlRequestTimeout, left))
+		out, ok := fetch(min(kubectlCallTimeout, left))
 		if !ok || out == "" {
 			continue
 		}
@@ -560,6 +566,54 @@ func podsSettled(out string) bool {
 		}
 	}
 	return true
+}
+
+// runWithin executes a command like run, and kills it with SIGKILL
+// when the timeout passes. The reaper stays the only caller of wait:
+// runWithin waits for the death registry's report, the same way
+// stopK3s does, and sends the kill only when no report has arrived.
+// A process that the reaper has not collected keeps its pid. The
+// reaper can collect it between that check and the kill, and
+// stopK3s accepts the same short window. The output is read on its own goroutine,
+// because a command that fills the pipe blocks until someone reads it,
+// and that command would then never exit on its own.
+func runWithin(timeout time.Duration, path string, args ...string) (string, bool) {
+	cmd := exec.Command(path, args...)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", false
+	}
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		return "", false
+	}
+	pid := cmd.Process.Pid
+	died := make(chan unix.WaitStatus, 1)
+	go func() { died <- deaths.await(pid) }()
+	output := make(chan []byte, 1)
+	go func() {
+		buf, _ := io.ReadAll(out)
+		_ = out.Close()
+		output <- buf
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var status unix.WaitStatus
+	select {
+	case status = <-died:
+	case <-timer.C:
+		select {
+		case status = <-died:
+		default:
+			fmt.Fprintf(os.Stderr, "liken: %s did not finish within %s; killing it\n", path, timeout)
+			_ = unix.Kill(pid, unix.SIGKILL)
+			status = <-died
+		}
+	}
+	_ = cmd.Process.Release()
+	buf := <-output
+	return strings.TrimRight(string(buf), "\r\n"), status.Exited() && status.ExitStatus() == 0
 }
 
 // runNarrated executes a command, echoes its output live to the

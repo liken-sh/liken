@@ -119,11 +119,10 @@ func main() {
 	// for the steward, the feature workloads for the janitor, each
 	// stage of the flux teardown, and the flux deploy key Secret.
 	// Ten seconds keeps those verdicts inside the same window that
-	// the machine operators work on. A pass costs about ten reads. On
-	// a nine-machine fleet, this program and the machine operators
-	// together sent a small share of the API server's requests, so a
-	// watch for each of these kinds would add code without a
-	// measurable gain.
+	// the machine operators work on. This program runs as a single
+	// replica, and a pass sends about ten reads. A watch for each of
+	// these kinds would replace that small, fixed cost with several
+	// long-lived streams and the restart handling each one needs.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		started := time.Now()
