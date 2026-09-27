@@ -28,6 +28,9 @@ func (d *fixedDriver) SetVolume(string, int) error       { return nil }
 func (d *fixedDriver) SetMute(string, bool) error        { return nil }
 func (d *fixedDriver) SetSoundMode(string, string) error { return nil }
 func (d *fixedDriver) SetSleep(string, int) error        { return nil }
+func (d *fixedDriver) SameSoundMode(declared, reported string) bool {
+	return declared == reported
+}
 
 func TestASessionFallsBackToTheReportedCeiling(t *testing.T) {
 	reported := &fixedDriver{state: equipment.State{

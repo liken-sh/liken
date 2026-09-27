@@ -861,6 +861,12 @@ func (c *Client) SetSoundMode(zone, mode string) error {
 	return fmt.Errorf("a WiiM carries no sound mode")
 }
 
+// SameSoundMode compares the two words. A WiiM reports no sound mode,
+// so the compare only answers the contract.
+func (c *Client) SameSoundMode(declared, reported string) bool {
+	return declared == reported
+}
+
 // SetSleep sets the sleep timer in minutes. Zero cancels it, and a
 // positive value pauses playback when the timer reaches zero. The
 // device's own timer is the closest thing it has to power control.

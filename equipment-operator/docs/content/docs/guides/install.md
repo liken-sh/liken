@@ -96,8 +96,11 @@ a `Play` stands, and the sound mode.
 
 You declare no session by hand. The `media-operator` resolves each
 `Player` screen to a machine and monitor ID, then finds the input that
-matches both values. It applies `spec.session` while the `Player` has
-that screen, including the idle screen. The session reads the level
+matches both values. It applies `status.session` while the `Player`
+has that screen, including the idle screen. A `media-operator` that
+does not write `status.session` applies `spec.session` instead, and the
+operator reads that block while `status.session` is absent. The
+session reads the level
 from the `Player` volume topic for that whole period. The room remote
 therefore changes the receiver's level while a film plays and while
 the screen is idle. The topic and payload belong to `media-operator`.
@@ -107,7 +110,7 @@ described on [the receiver on the bus](/docs/reference/bus/). When a
 `Play` starts, the session powers the receiver on and selects the input
 once. It sends each command only when the receiver reports another
 value. Waking the screen also triggers those commands through
-`spec.session.awake`, even with no `Play`. Starting an idle screen after
+`status.session.awake`, even with no `Play`. Starting an idle screen after
 a reboot does not by itself power the receiver on, and an operator
 restart sends nothing for the sessions it finds.
 

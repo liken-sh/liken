@@ -694,13 +694,15 @@ func (s *session) waitForSurvey(ctx context.Context) bool {
 
 // selectTheInput sends the session's input and the sound mode that
 // travels with it, each only when the receiver reports another value.
-// The power one-shot and the ensure both reach it, so the mode and the
+// The driver compares the sound mode, because a receiver can report the
+// mode it runs in other words than the command that selects it. The
+// power one-shot and the ensure both reach it, so the mode and the
 // input can never drift apart.
 func (s *session) selectTheInput(trigger string) {
 	state := mainZone(s.driver.State())
 	mode := s.inputSoundMode(s.spec.Input)
 	sendInput := state.Input != s.spec.Input
-	sendMode := mode != "" && state.SoundMode != mode
+	sendMode := mode != "" && !s.driver.SameSoundMode(mode, state.SoundMode)
 	switch {
 	case !sendInput && !sendMode:
 		reports := []string{powerWords(state, 0), inputWords(state, 0)}
@@ -716,7 +718,7 @@ func (s *session) selectTheInput(trigger string) {
 			s.log.refused(line, err)
 			return
 		}
-		s.log.confirm(line, began, mainZoneCheck(s.driver, "sound mode "+mode, soundModeWords))
+		s.log.confirm(line, began, soundModeCheck(s.driver, mode))
 		return
 	}
 	line := fmt.Sprintf("%s; sent input %s", trigger, s.spec.Input)

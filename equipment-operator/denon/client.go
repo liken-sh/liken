@@ -218,6 +218,12 @@ func (d *Client) SetSoundMode(zone, mode string) error {
 	return d.send(SoundModeCommand(mode))
 }
 
+// SameSoundMode answers whether the reported mode is the declared one,
+// by the command families in sound_mode.go.
+func (d *Client) SameSoundMode(declared, reported string) bool {
+	return SameSoundMode(declared, reported)
+}
+
 // SetSleep sets one zone's sleep timer, in minutes, where zero is off.
 // The receiver's timer runs to 120 minutes. An unknown zone or an
 // out-of-range value is an error.

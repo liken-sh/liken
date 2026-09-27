@@ -522,6 +522,13 @@ func TestTheSettersReachTheirWireCommands(t *testing.T) {
 	}
 }
 
+// A WiiM reports no sound mode, so the compare is of the two words.
+func TestAWiimComparesSoundModesByTheirWords(t *testing.T) {
+	client := startFakeAmp(t).client(nil)
+	mustMatch(t, client.SameSoundMode("STEREO", "STEREO"), true)
+	mustMatch(t, client.SameSoundMode("STEREO", ""), false)
+}
+
 // The setters reject what the device cannot do: an unknown zone, a
 // power-off, a sound mode, an unknown input, and an out-of-range timer.
 func TestTheSettersRejectWhatTheDeviceCannotDo(t *testing.T) {

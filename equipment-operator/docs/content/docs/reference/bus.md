@@ -15,7 +15,7 @@ gives the whole tree, and the
 the rules every topic follows.
 
 The `media-operator` writes the volume topic into
-`spec.session.volumeTopic` in full, base included, so this page
+`status.session.volumeTopic` in full, base included, so this page
 writes both topics in full.
 
 | Topic | Payload | Retained | This operator |
@@ -49,7 +49,7 @@ connection because a restarted broker has no retained state.
 
 The operator clears the mark on two paths:
 
-* A stop. The `media-operator` removes `spec.session`, or writes a
+* A stop. The `media-operator` removes `status.session`, or writes a
   session that names another `Player`, input, or volume topic. The
   same stop runs when the `Receiver` is deleted, and when its
   protocol address changes. The operator publishes the empty

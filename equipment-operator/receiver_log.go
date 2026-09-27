@@ -189,6 +189,16 @@ func mainZoneCheck(driver equipment.Driver, want string, words ...func(equipment
 	}
 }
 
+// soundModeCheck answers a check that passes when the main zone reports
+// a sound mode the driver matches with mode, which can be other words
+// than mode itself.
+func soundModeCheck(driver equipment.Driver, mode string) func() (string, bool) {
+	return func() (string, bool) {
+		zone := mainZone(driver.State())
+		return soundModeWords(zone, 0), driver.SameSoundMode(mode, zone.SoundMode)
+	}
+}
+
 // The words a line uses for each field of a zone.
 func powerWords(zone equipment.ZoneState, _ int) string {
 	if zone.Power == "" {

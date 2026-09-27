@@ -2,10 +2,11 @@ package main
 
 // spec.power against a restart, an upgrade, and a live change. The
 // operator adopts the spec.power it finds in its first pass and sends
-// nothing, and records the generation in status.powerGeneration. A
-// change of spec.power it sees while it runs goes out once, and only
-// when the receiver reports another power. A generation that changes
-// another field, such as a session flag, sends nothing.
+// nothing, and records the value in status.settledPower. A spec.power
+// that differs from status.settledPower at a restart, and a change of
+// spec.power it sees while it runs, go out once, and only when the
+// receiver reports another power. A generation that changes another
+// field, such as a session flag, sends nothing.
 
 import (
 	"encoding/json"
@@ -27,21 +28,20 @@ func switchedOn(t *testing.T) *fakeDenon {
 	return fake
 }
 
-// asking is a Receiver that asks for a power, with the generation the
-// operator last recorded for it.
-func asking(fake *fakeDenon, power equipment.Power, recorded int64) Receiver {
+// asking is a Receiver that asks for a power, with the power the
+// operator last settled for it.
+func asking(fake *fakeDenon, power, settled equipment.Power) Receiver {
 	receiver := testReceiver("theater", fake.address())
 	receiver.Spec.Power = power
-	receiver.Status.PowerGeneration = recorded
+	receiver.Status.SettledPower = settled
 	return receiver
 }
 
-// A restart at the recorded generation sends nothing, even when a
-// person has turned the receiver on since the operator put it in
-// standby.
-func TestARestartAtTheRecordedGenerationSendsNoPower(t *testing.T) {
+// A restart at the settled power sends nothing, even when a person has
+// turned the receiver on since the operator put it in standby.
+func TestARestartAtTheSettledPowerSendsNoPower(t *testing.T) {
 	fake := switchedOn(t)
-	_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, 4), "127.0.0.1:1")
+	_, operator, log := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
 
 	mustSucceed(t, operator.pass(t.Context()))
 
@@ -51,17 +51,20 @@ func TestARestartAtTheRecordedGenerationSendsNoPower(t *testing.T) {
 	})
 }
 
-// An upgrade meets Receivers with no status.powerGeneration. The
-// operator adopts the spec.power it finds when it starts, even one a
-// toggle wrote before the receiver was turned on again: it records the
-// generation, sends nothing, and says so in one line.
+// An upgrade meets Receivers with status.powerGeneration and no
+// status.settledPower. The operator adopts the spec.power it finds when
+// it starts, even one a toggle wrote before the receiver was turned on
+// again: it records the value, sends nothing, and says so in one line.
+// Its status apply no longer states powerGeneration, so the API server
+// removes it.
 //
 // The old operator wrote the lowercase form, and the API server keeps
 // an unchanged stored value under the new enum, so the operator reads
 // it as its PascalCase value.
 func TestAnUpgradeAdoptsTheSpecPower(t *testing.T) {
 	fake := switchedOn(t)
-	stored := asking(fake, "", 0)
+	stored := asking(fake, "", "")
+	stored.Status.PowerGeneration = 3
 	stored.Spec.Power = decodedPower(t, `"standby"`)
 	api, operator, log := reachedController(t, stored, "127.0.0.1:1")
 
@@ -71,15 +74,46 @@ func TestAnUpgradeAdoptsTheSpecPower(t *testing.T) {
 	mustDeepEqual(t, linesWith(log, "asks power"), []string{
 		"Receiver theater: generation 4 asks power Standby; the operator found it when it started, so it sent nothing",
 	})
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.PowerGeneration == 4 })
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
+}
+
+// A spec.power that differs from status.settledPower at a restart is an
+// edit no operator settled, so it goes out once.
+func TestASpecPowerEditedWhileTheOperatorWasDownSendsOnce(t *testing.T) {
+	fake := startFakeDenon(t)
+	api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
+
+	mustSucceed(t, operator.pass(t.Context()))
+	fake.waitForCommands(t, denon.PowerOnCommand)
+	mustSucceed(t, operator.pass(t.Context()))
+
+	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+	mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
+		"Receiver theater: generation 4 asks power On; sent power On; the receiver reported power On after <time>",
+	})
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
+}
+
+// The same edit sends nothing when the receiver already reports it.
+func TestASpecPowerEditedWhileTheOperatorWasDownSendsNothingTheReceiverReports(t *testing.T) {
+	fake := switchedOn(t)
+	api, operator, log := reachedController(t, asking(fake, equipment.PowerOn, equipment.PowerStandby), "127.0.0.1:1")
+
+	mustSucceed(t, operator.pass(t.Context()))
+
+	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
+	mustDeepEqual(t, waitForLines(t, log, "asks power", 1), []string{
+		"Receiver theater: generation 4 asks power On; sent nothing, because the receiver reports power On",
+	})
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
 }
 
 // A spec.power that changes while the operator runs goes out once.
 func TestALiveSpecPowerChangeSendsOnce(t *testing.T) {
 	fake := startFakeDenon(t)
-	api, operator, _ := reachedController(t, asking(fake, "", 0), "127.0.0.1:1")
+	api, operator, _ := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
 
-	changed := asking(fake, equipment.PowerOn, 0)
+	changed := asking(fake, equipment.PowerOn, "")
 	changed.Metadata.Generation = 5
 	api.setReceivers(changed)
 	mustSucceed(t, operator.pass(t.Context()))
@@ -87,16 +121,16 @@ func TestALiveSpecPowerChangeSendsOnce(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 
 	fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.PowerGeneration == 5 })
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerOn })
 }
 
 // A live change compares spec.power with the power the receiver
 // reports, and sends nothing when they agree.
 func TestALiveChangeSendsNoPowerTheReceiverReports(t *testing.T) {
 	fake := switchedOn(t)
-	api, operator, log := reachedController(t, asking(fake, "", 0), "127.0.0.1:1")
+	api, operator, log := reachedController(t, asking(fake, "", ""), "127.0.0.1:1")
 
-	changed := asking(fake, equipment.PowerOn, 0)
+	changed := asking(fake, equipment.PowerOn, "")
 	changed.Metadata.Generation = 5
 	api.setReceivers(changed)
 	mustSucceed(t, operator.pass(t.Context()))
@@ -116,7 +150,7 @@ func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
 	operator, log := loggedController(t, api, "127.0.0.1:1")
 	mustSucceed(t, operator.pass(t.Context()))
 
-	api.setReceivers(asking(fake, equipment.PowerOn, 0))
+	api.setReceivers(asking(fake, equipment.PowerOn, ""))
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
 	waitForSurvey(t, operator)
@@ -135,19 +169,19 @@ func TestAReceiverCreatedWhileRunningSendsItsPowerOnce(t *testing.T) {
 // a person turned the receiver on after it.
 func TestAnotherFieldsGenerationSendsNoPower(t *testing.T) {
 	fake := startFakeDenon(t)
-	api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, 3), "127.0.0.1:1")
+	api, operator, _ := reachedController(t, asking(fake, equipment.PowerStandby, equipment.PowerStandby), "127.0.0.1:1")
 	mustSucceed(t, operator.pass(t.Context()))
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.PowerGeneration == 4 })
+	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.SettledPower == equipment.PowerStandby })
 	handOnTheRemote(t, fake, denon.PowerOnCommand)
 	waitForMainPower(t, operator, equipment.PowerOn)
 
-	edited := asking(fake, equipment.PowerStandby, 4)
+	edited := asking(fake, equipment.PowerStandby, equipment.PowerStandby)
 	edited.Metadata.Generation = 5
+	edited.Metadata.Labels = map[string]string{"room": "den"}
 	api.setReceivers(edited)
 	mustSucceed(t, operator.pass(t.Context()))
 
 	fake.refuseCommand(t, "PWSTANDBY", quietPeriod)
-	api.waitForStatus(t, func(status ReceiverStatus) bool { return status.PowerGeneration == 5 })
 }
 
 // decodedPower reads a power the way the operator reads it from an
@@ -176,10 +210,10 @@ func waitForMainPower(t *testing.T, operator *controller, power equipment.Power)
 // spec.power.
 func TestANewAddressSendsNoPower(t *testing.T) {
 	first := startFakeDenon(t)
-	api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, 0), "127.0.0.1:1")
+	api, operator, _ := reachedController(t, asking(first, equipment.PowerStandby, ""), "127.0.0.1:1")
 	moved := switchedOn(t)
 
-	api.setReceivers(asking(moved, equipment.PowerStandby, 4))
+	api.setReceivers(asking(moved, equipment.PowerStandby, equipment.PowerStandby))
 	mustSucceed(t, operator.pass(t.Context()))
 	waitForMainPower(t, operator, equipment.PowerOn)
 	waitForSurvey(t, operator)

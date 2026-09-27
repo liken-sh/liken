@@ -133,7 +133,8 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 		state.Main.seen = true
 		return state, equipment.MainZone, quickField, true
 	case strings.HasPrefix(line, SoundModePrefix) && len(line) > 2:
-		state.Main.SoundMode = line[2:]
+		// A report can end in spaces, which name no part of the mode.
+		state.Main.SoundMode = strings.TrimSpace(line[2:])
 		state.Main.seen = true
 		return state, equipment.MainZone, soundModeField, true
 	case strings.HasPrefix(line, "SLP"):

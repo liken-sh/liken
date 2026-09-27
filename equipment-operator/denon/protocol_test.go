@@ -66,6 +66,8 @@ func TestApplyDenonLineFoldsEveryLineTheReceiverSends(t *testing.T) {
 			want: foldedInto(func(s *denonState) { s.Main.Input = "CBL/SAT"; s.Main.seen = true })},
 		{name: "a sound mode with a space", line: "MSMULTI CH IN", zone: equipment.MainZone, field: soundModeField,
 			want: foldedInto(func(s *denonState) { s.Main.SoundMode = "MULTI CH IN"; s.Main.seen = true })},
+		{name: "a sound mode that ends in spaces", line: "MSDOLBY AUDIO-DD  ", zone: equipment.MainZone, field: soundModeField,
+			want: foldedInto(func(s *denonState) { s.Main.SoundMode = "DOLBY AUDIO-DD"; s.Main.seen = true })},
 		{name: "a sound mode", line: "MSSTEREO", zone: equipment.MainZone, field: soundModeField,
 			want: foldedInto(func(s *denonState) { s.Main.SoundMode = "STEREO"; s.Main.seen = true })},
 		{name: "a quick select", line: "MSQUICK2", zone: equipment.MainZone, field: quickField,

@@ -41,11 +41,26 @@ type ListMeta struct {
 // machine's cable. It is cluster-scoped because the machines that feed
 // it belong to the cluster.
 type Receiver struct {
-	APIVersion string         `json:"apiVersion,omitempty"`
-	Kind       string         `json:"kind,omitempty"`
-	Metadata   ObjectMeta     `json:"metadata"`
-	Spec       ReceiverSpec   `json:"spec"`
-	Status     ReceiverStatus `json:"status,omitempty"`
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   ObjectMeta           `json:"metadata"`
+	Spec       ReceiverSpec         `json:"spec"`
+	Status     ReceiverStoredStatus `json:"status,omitempty"`
+}
+
+// session answers the session the operator acts on. The media operator
+// writes status.session under its own field manager, because a status
+// write changes no metadata.generation, and each flag flip would
+// otherwise count as a spec edit. A media operator that writes
+// spec.session instead still drives the receiver: a Receiver whose
+// status holds no session falls back to spec.session. So the two
+// operators can roll in either order, and a session that moves from the
+// spec to the status is the same session and no change.
+func (r *Receiver) session() *ReceiverSession {
+	if r.Status.Session != nil {
+		return r.Status.Session
+	}
+	return r.Spec.Session
 }
 
 type ReceiverList struct {
@@ -54,8 +69,9 @@ type ReceiverList struct {
 }
 
 // The spec names one protocol block, the inputs that liken machines
-// feed, the non-main zones, the session that currently uses the
-// receiver, and the bus topics that configure it.
+// feed, the non-main zones, and the bus topics that configure it.
+// Session is the place an older media operator writes the session;
+// Receiver.session says how the operator reads it.
 type ReceiverSpec struct {
 	Denon   *DenonProtocol   `json:"denon,omitempty"`
 	Wiim    *WiimProtocol    `json:"wiim,omitempty"`
@@ -263,18 +279,38 @@ type ReceiverStatus struct {
 	Denon   *denon.Settings       `json:"denon,omitempty"`
 	Wiim    *wiim.Status          `json:"wiim,omitempty"`
 	Service string                `json:"service,omitempty"`
-	// SettingsGeneration is the metadata.generation whose declared
-	// settings and zone controls the operator has sent, including the
-	// ones the receiver does not report. After a restart the operator
-	// sends those unreported fields again only when the spec's
-	// generation differs from this one.
-	SettingsGeneration int64 `json:"settingsGeneration,omitempty"`
-	// PowerGeneration is the metadata.generation whose spec.power the
-	// operator settled: it sent spec.power, found the receiver already at
-	// it, found no spec.power, or adopted the value it found when it
-	// started.
-	PowerGeneration int64       `json:"powerGeneration,omitempty"`
-	Conditions      []Condition `json:"conditions,omitempty"`
+	// SettledSettings holds a digest of each declared block the operator
+	// has sent, including the fields the receiver does not report, keyed
+	// by the block's path in the spec. After a restart the operator sends
+	// a block's unreported fields again only when the block's digest
+	// differs from this one. The digest covers the block and nothing
+	// else, so a session flag or a label changes none.
+	SettledSettings map[string]string `json:"settledSettings,omitempty"`
+	// SettledPower is the spec.power the operator settled: it sent the
+	// value, found the receiver already at it, or adopted it when it
+	// started. A restart that finds spec.power at this value sends
+	// nothing.
+	SettledPower equipment.Power `json:"settledPower,omitempty"`
+	Conditions   []Condition     `json:"conditions,omitempty"`
+}
+
+// ReceiverStoredStatus is the status as the API server stores it. The
+// operator writes the fields of ReceiverStatus, under its own field
+// manager. The media operator writes Session, under its own field
+// manager. The operator applies a ReceiverStatus, which has no Session
+// field, so its apply never states the session and never removes it.
+//
+// SettingsGeneration and PowerGeneration are the records an earlier
+// operator wrote, keyed on metadata.generation. The operator reads them
+// once, when it starts, and does not write them, so its first status
+// apply removes them. A status that holds SettingsGeneration and no
+// SettledSettings is from that earlier operator, which had sent the
+// declared settings, so the operator adopts the blocks it finds.
+type ReceiverStoredStatus struct {
+	ReceiverStatus
+	Session            *ReceiverSession `json:"session,omitempty"`
+	SettingsGeneration int64            `json:"settingsGeneration,omitempty"`
+	PowerGeneration    int64            `json:"powerGeneration,omitempty"`
 }
 
 // ZoneStatus is one zone in the receiver's own units. Volume and

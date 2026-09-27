@@ -170,6 +170,13 @@ type Driver interface {
 	// carries no sound mode on the zone is an error.
 	SetSoundMode(zone, mode string) error
 
+	// SameSoundMode answers whether a zone that reports one sound mode
+	// runs the mode a person declared. A protocol can report a mode in
+	// other words than the command that selects it, and a compare of the
+	// two words would send the command again to a receiver that already
+	// runs the mode.
+	SameSoundMode(declared, reported string) bool
+
 	// SetSleep sets one zone's sleep timer, in minutes, where zero is
 	// off. An unknown zone or an out-of-range value is an error.
 	SetSleep(zone string, minutes int) error

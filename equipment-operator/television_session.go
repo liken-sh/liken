@@ -71,6 +71,11 @@ type televisionSessions struct {
 	// a live pass still adopts what the first pass adopted. A later event
 	// of the same Player replaces it, because it is newer.
 	retries map[string]func() bool
+	// liftDelay and liftRetry are sessionLiftDelay and sessionLiftRetry
+	// as they stood when the writer was made. A lift's timer reads its
+	// own writer's copy, so a timer that outlives the writer never reads
+	// the package values while something else sets them.
+	liftDelay, liftRetry time.Duration
 }
 
 // pendingLift is one removal that waits.
@@ -84,6 +89,7 @@ func newTelevisionSessions(client *Client) *televisionSessions {
 	return &televisionSessions{
 		client: client, ctx: ctx, cancel: cancel,
 		lifts: map[string]pendingLift{}, shown: map[string]string{}, retries: map[string]func() bool{},
+		liftDelay: sessionLiftDelay, liftRetry: sessionLiftRetry,
 	}
 }
 
@@ -304,7 +310,7 @@ func (t *televisionSessions) lift(player string) {
 	// The session ended, so an event of it that waits for a retry is
 	// moot; the lift has retries of its own.
 	delete(t.retries, player)
-	t.schedule(player, sessionLiftDelay)
+	t.schedule(player, t.liftDelay)
 }
 
 // schedule arms the removal of a Player's session. The caller holds the
@@ -322,7 +328,7 @@ func (t *televisionSessions) schedule(player string, after time.Duration) {
 		}
 		delete(t.lifts, player)
 		if !t.remove(player) {
-			t.schedule(player, sessionLiftRetry)
+			t.schedule(player, t.liftRetry)
 		}
 	})
 	t.lifts[player] = pendingLift{timer: timer, display: t.shown[player]}

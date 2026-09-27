@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"time"
@@ -66,7 +67,7 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 
 // settingsConfirmed builds the condition that names the declared fields
 // the operator stopped sending, because the receiver did not report the
-// declared value after sendLimit sends in this generation. It exists
+// declared value after sendLimit sends at that value. It exists
 // only while such a field exists, and it keeps the moment it appeared.
 func settingsConfirmed(unconfirmed []string, generation int64, previous []Condition, now time.Time) (Condition, bool) {
 	if len(unconfirmed) == 0 {
@@ -140,7 +141,7 @@ func sleepMinutes(minutes int) int {
 
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Service != b.Service || a.Driver != b.Driver || a.SettingsGeneration != b.SettingsGeneration || a.PowerGeneration != b.PowerGeneration || !reflect.DeepEqual(a.Denon, b.Denon) ||
+	if a.Service != b.Service || a.Driver != b.Driver || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
 		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false

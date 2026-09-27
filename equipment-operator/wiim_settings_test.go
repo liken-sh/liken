@@ -127,7 +127,7 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio"), budget: newSendBudget()}
+	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio"), budget: newSendBudget(), settled: newSettledRecord(ReceiverStoredStatus{}, ReceiverSpec{})}
 }
 
 // A restart against a device that already reports every declared value

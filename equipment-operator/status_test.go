@@ -146,6 +146,10 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	unreached.Conditions = []Condition{{Type: reachableConditionType, Status: ConditionFalse}}
 	noConditions := held
 	noConditions.Conditions = nil
+	settledBlock := held
+	settledBlock.SettledSettings = map[string]string{zonesBlock: "0123456789abcdef"}
+	settledPower := held
+	settledPower.SettledPower = equipment.PowerOn
 
 	cases := []struct {
 		name string
@@ -158,6 +162,8 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 		{"the protocol snapshot moved", movedProtocol, false},
 		{"verdict moved", unreached, false},
 		{"condition dropped", noConditions, false},
+		{"a block settled", settledBlock, false},
+		{"a power settled", settledPower, false},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

@@ -97,3 +97,40 @@ func TestAFlipSendsOnlyTheSoundModeThatDiffers(t *testing.T) {
 	})
 	h.equipment.refuseEveryCommand(t, quietPeriod)
 }
+
+// A Denon reports the mode it decodes, in other words than the command
+// that selects its family. A flip that finds the receiver on the
+// session's input, in a mode of the declared family, sends nothing.
+func TestAFlipSendsNoSoundModeTheReceiverRunsInOtherWords(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string
+		reported string
+	}{
+		{"a Dolby report", "dolby digital", "DOLBY AUDIO-DD"},
+		{"a DTS report", "DTS SURROUND", "DTS HD MSTR"},
+		{"a report with spaces at the end", "STEREO", "STEREO  "},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
+			h.powerOn(t)
+			h.soundModes = map[string]string{"GAME": one.declared}
+			handOnTheRemote(t, h.equipment, "SIGAME")
+			h.equipment.volunteer("MS" + one.reported)
+			h.waitUntil(t, func(state equipment.State) bool {
+				zone := mainZone(state)
+				return zone.Input == "GAME" && zone.SoundMode == strings.TrimSpace(one.reported)
+			})
+			held := h.beginIdle(t, "GAME")
+			h.drainCommands()
+
+			held.setFlags(true, false)
+
+			mustDeepEqual(t, waitForLines(t, h.log, "a Play started", 1), []string{
+				"Receiver theater: a Play started on Player theater; sent nothing, because the receiver reports power On, input GAME, and sound mode " + strings.TrimSpace(one.reported),
+			})
+			h.equipment.refuseEveryCommand(t, quietPeriod)
+		})
+	}
+}

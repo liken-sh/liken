@@ -41,6 +41,7 @@ type fakeAPI struct {
 	list         ReceiverList
 	broken       bool
 	statuses     []ReceiverStatus
+	statusBodies [][]byte
 	powersSet    []equipment.Power
 	settingsSet  [][]byte
 	refusing     bool
@@ -130,16 +131,18 @@ func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, _ := io.ReadAll(r.Body)
 	var applied receiverStatusApply
-	_ = json.NewDecoder(r.Body).Decode(&applied)
+	_ = json.Unmarshal(body, &applied)
 	a.mutex.Lock()
 	a.statuses = append(a.statuses, applied.Status)
+	a.statusBodies = append(a.statusBodies, body)
 	a.mutex.Unlock()
 	select {
 	case a.written <- applied.Status:
 	default:
 	}
-	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Status: applied.Status})
+	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Status: ReceiverStoredStatus{ReceiverStatus: applied.Status}})
 }
 
 // recordPower answers the operator's apply on the main resource, which
@@ -207,6 +210,13 @@ func (a *fakeAPI) breakTheList() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.broken = true
+}
+
+// lastStatus answers the last status the operator applied.
+func (a *fakeAPI) lastStatus() ReceiverStatus {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.statuses[len(a.statuses)-1]
 }
 
 func (a *fakeAPI) writeCount() int {
@@ -805,7 +815,12 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 			for _, want := range one.want {
 				fake.waitForCommands(t, want)
 			}
-			waitForObservedZone(t, operator, "theater", one.zone, int(one.volume*2))
+			// The sleep is the last report of the burst, so once it arrives
+			// the receiver has reported every control.
+			waitFor(t, func() bool {
+				zone, _ := operator.units["theater"].driver.State().Zone(one.zone)
+				return zone.Volume == int(one.volume*2) && zone.Sleep == one.sleep
+			})
 
 			mustSucceed(t, operator.pass(t.Context()))
 			fake.refuseAnySet(t, quietPeriod)

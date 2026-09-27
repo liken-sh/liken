@@ -304,8 +304,12 @@ type receiverStatusApply struct {
 // operator's own field manager. Server-side apply keeps the write to
 // the fields the body states, and removes the fields this manager
 // owned and no longer states, so a reading that stops arriving leaves
-// no stale value behind. force settles a conflict in this manager's
-// favour, because nothing else writes a Receiver's status.
+// no stale value behind. The media operator writes status.session
+// under its own field manager, and a ReceiverStatus has no session
+// field, so this apply never states the session, never takes it over
+// with force, and never removes it. force settles a conflict in this
+// manager's favour, because no other writer states the fields a
+// ReceiverStatus holds.
 func ApplyReceiverStatus(c *Client, name string, status ReceiverStatus) (*Receiver, error) {
 	body, err := json.Marshal(&receiverStatusApply{
 		APIVersion: equipmentAPIVersion,
@@ -337,7 +341,7 @@ type receiverPowerApply struct {
 
 // ApplyReceiverPower writes spec.power on the main resource under this
 // operator's own field manager, the way the media operator owns
-// spec.session. Server-side apply keeps the write to the field the body
+// status.session. Server-side apply keeps the write to the field the body
 // states, so a GitOps manifest that does not declare power never
 // touches the value this operator settled on. force settles a conflict
 // in this manager's favour, because nothing else writes a Receiver's

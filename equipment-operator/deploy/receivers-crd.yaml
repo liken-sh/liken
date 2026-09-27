@@ -23,9 +23,9 @@ spec:
       subresources:
         status: {}
       # The default view says what the main zone does and which Player
-      # holds it. kubectl get -o wide adds the columns with priority 1:
-      # the driver, the address, whether a Play stands, and the sound
-      # mode.
+      # holds it, from status.session. kubectl get -o wide adds the
+      # columns with priority 1: the driver, the address, whether a Play
+      # stands, and the sound mode.
       additionalPrinterColumns:
         - name: Power
           type: string
@@ -38,7 +38,7 @@ spec:
           jsonPath: .status.zones.main.volume
         - name: Player
           type: string
-          jsonPath: .spec.session.player
+          jsonPath: .status.session.player
         - name: Reachable
           type: string
           jsonPath: .status.conditions[?(@.type=="Reachable")].status
@@ -55,7 +55,7 @@ spec:
           priority: 1
         - name: Playing
           type: boolean
-          jsonPath: .spec.session.active
+          jsonPath: .status.session.active
           priority: 1
         - name: Sound
           type: string
@@ -69,7 +69,7 @@ spec:
           properties:
             spec:
               type: object
-              description: "How to reach the receiver and how its inputs are wired. The cluster owner writes every field except session. The media operator applies session."
+              description: "How to reach the receiver and how its inputs are wired. The cluster owner writes every field except session. The session belongs in status.session, and spec.session holds the session only for a media operator that still writes it here."
               # One protocol block names the receiver, and this rule
               # holds a Receiver to one of them. A second protocol is
               # one more entry in this list.
@@ -99,7 +99,7 @@ spec:
                       description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
                     settings:
                       type: object
-                      description: "The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times in one spec generation; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a spec change starts the count again. A field the receiver does not report cannot be compared, so the operator sends it once for each spec generation: once when the spec changes it, and after an operator restart only when metadata.generation differs from status.settingsGeneration. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
+                      description: "The receiver's settings, one family per block, in display units. The operator compares each declared field with the value the receiver reports and sends only a field that differs, so a restart against a receiver that already holds the declared values sends nothing, and a change made at the receiver is sent back. It sends one field at most 3 times at one declared value; a field the receiver still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the receiver does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the receiver unchanged. A key written from the settings topic returns here at the leaf, so a declared key and a bus write never own the same field."
                       properties:
                         system:
                           type: object
@@ -268,7 +268,7 @@ spec:
                       description: "The host name or IP address the device answers on, with an optional port. The port is 443 when absent. The address is a hint and never the identity: the operator still matches the uuid. Optional because discovery resolves the UUID to an address on its own; with neither, the receiver is unreachable."
                     settings:
                       type: object
-                      description: "The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times in one spec generation; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a spec change starts the count again. A field the device does not report cannot be compared, so the operator sends it once for each spec generation: once when the spec changes it, and after an operator restart only when metadata.generation differs from status.settingsGeneration. An omitted key leaves the device unchanged. An empty block sends nothing."
+                      description: "The device's own settings, one family per block. The operator compares each declared field with the value the device reports and sends only a field that differs, so a restart against a device that already holds the declared values sends nothing, and a change made at the device is sent back. It sends one field at most 3 times at one declared value; a field the device still does not report at the declared value is then named in the SettingsConfirmed condition, and a new declared value, or a report of the declared value, starts the count again. An edit of another field does not start it again. A field the device does not report cannot be compared, so the operator sends it once for each change of this block: once when the spec changes the block, and after an operator restart only when the block differs from the one status.settledSettings records. An omitted key leaves the device unchanged. An empty block sends nothing."
                       properties:
                         audio:
                           type: object
@@ -351,7 +351,7 @@ spec:
                 session:
                   type: object
                   required: [player, input, volumeTopic]
-                  description: "The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
+                  description: "The Player that currently uses the receiver, as a media operator that does not write status.session writes it. The operator reads status.session first and uses this block only while status.session is absent. A media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
                   properties:
                     player:
                       type: string
@@ -383,7 +383,7 @@ spec:
                 power:
                   type: string
                   enum: ["On", Standby, "Off"]
-                  description: "The power state the operator drives the receiver to. The operator owns this field: it applies each new value once and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it, and a person who turns the receiver on or off by hand is not overruled. A new metadata.generation that leaves this field at the value the operator applied, such as a change to the session, sends nothing. The operator acts only on a change it sees while it runs, including a Receiver created while it runs: it waits until it has read the receiver's own state, and sends the value only when the receiver reports another power. After an operator start, including an upgrade, it adopts the value it finds and sends nothing. A toggle from the session's power topic rewrites it. The Denon cannot tell Standby from Off, so both mean Standby. A WiiM has no standby, so it always reports On. Quote the values On and Off in YAML, as power: \"On\": kubectl reads an unquoted On or Off as a boolean, and the API server refuses it."
+                  description: "The power state the operator drives the receiver to. The operator owns this field: it applies each new value once and never re-asserts it, so a GitOps manifest that omits it leaves the receiver wherever the operator last put it, and a person who turns the receiver on or off by hand is not overruled. An edit of another field, such as a label or the session, sends nothing. The operator acts on a change of this field, including a Receiver created while the operator runs: it waits until it has read the receiver's own state, and sends the value only when the receiver reports another power. After an operator start it adopts the value it finds and sends nothing, unless the value differs from status.settledPower. Such a value is an edit made while the operator was down, and the operator handles it as a change. A status with no settledPower, such as one an earlier operator wrote, adopts. A toggle from the session's power topic rewrites it. The Denon cannot tell Standby from Off, so both mean Standby. A WiiM has no standby, so it always reports On. Quote the values On and Off in YAML, as power: \"On\": kubectl reads an unquoted On or Off as a boolean, and the API server refuses it."
                 settingsTopic:
                   type: string
                   minLength: 1
@@ -396,7 +396,7 @@ spec:
                   description: "The topic the operator subscribes to for the life of the Receiver. A message on it is a one-shot command, {\"command\":\"quick.3\"}, an action that is not a setting. An absent topic subscribes to nothing."
                 zones:
                   type: object
-                  description: "The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control in one spec generation, and a control the zone does not report is sent once for each spec generation, the same way."
+                  description: "The receiver's second and third zones. Only zone2 and zone3 are valid keys, so no other key is a valid input and the driver can serve every zone this schema admits. The main zone has no entry here: spec.power and spec.session drive it. The operator sends only a declared control the zone reports at another value, with the same rules as spec.denon.settings: at most 3 sends of one control at one declared value, and a control the zone does not report is sent once for each change of spec.zones, the same way."
                   properties:
                     zone2:
                       type: object
@@ -494,17 +494,58 @@ spec:
                 service:
                   type: string
                   description: "The Service that represents the receiver on the cluster network after the operator creates it. Empty until then."
+                session:
+                  type: object
+                  required: [player, input, volumeTopic]
+                  description: "The Player that currently uses the receiver. The media operator applies this block with its own field manager while the Player has a screen on this receiver, and removes it afterward. It is status and not spec, so a change of either flag changes no metadata.generation. The operator reads this block first and falls back to spec.session only while this block is absent, and its own status apply never states this block. The session owns the level from the volume topic and marks itself owner on that topic plus /owner. Each time active or awake changes to true, the operator waits until it has read the receiver's own state, and then sends the power, the input, and the input's sound mode, each only when the receiver reports another value. A Denon reports a sound mode in other words than the command that selects its family, so the operator compares the declared mode with the reported one by the command families the driver knows. A session that appears while the operator runs does the same for the flags it starts with. A session that the operator finds in its first pass after a start sends nothing for its flags, because the last operator already acted on them, and only a later change to true sends. The operator does not re-assert those commands, so a person using the receiver's remote can change them."
+                  properties:
+                    player:
+                      type: string
+                      minLength: 3
+                      maxLength: 507
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                      description: "The Player, as namespace/name."
+                    input:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                      description: "The input the Player plays through, by its name in spec.inputs."
+                    volumeTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session exists, and writes the receiver's true level back to it."
+                    powerTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The topic on which the remote's power button publishes a toggle, in full. When present, the operator subscribes to it and flips the receiver's power on a {\"action\":\"toggle\"} message, updating spec.power to match. An absent topic subscribes the session to nothing."
+                    active:
+                      type: boolean
+                      description: "Whether a Play is present on the Player. When this changes to true, the receiver is powered on and its input is selected once, each only when the receiver reports another value. Changing this to false does not send a power or input command. The session still owns the level. The awake field can independently trigger those commands. Absent means false."
+                    awake:
+                      type: boolean
+                      description: "Whether the room's screen is awake. A change to true triggers the same one-shot power and input commands as active, whatever active says. A change to false sends no command to the receiver. Absent means asleep."
+                settledPower:
+                  type: string
+                  enum: ["On", Standby, "Off"]
+                  description: "The spec.power the operator settled: it sent the value, found the receiver already at it, or adopted the value it found when it started. A restart that finds spec.power at this value sends nothing."
+                settledSettings:
+                  type: object
+                  description: "A digest of each declared block the operator has sent, including the fields the receiver does not report, keyed by the block's path in the spec: spec.denon.settings, spec.wiim.settings, and spec.zones. After an operator restart, the operator sends a block's unreported fields again only when the block's digest differs from this one, so a restart sends nothing for a block no one changed, whatever metadata.generation says, and a new Receiver or a block edited while the operator was down sends them once."
+                  additionalProperties:
+                    type: string
                 powerGeneration:
                   type: integer
                   format: int64
-                  description: "The metadata.generation whose spec.power the operator settled: it sent the value, found the receiver already at it, found no value, or adopted the value it found when it started."
+                  description: "The record an earlier operator wrote of the metadata.generation whose spec.power it settled. The operator does not read or write it, and its first status apply removes it."
                 settingsGeneration:
                   type: integer
                   format: int64
-                  description: "The metadata.generation whose declared settings and zone controls the operator has sent, including the fields the receiver does not report. After an operator restart, the operator sends those unreported fields again only when metadata.generation differs from this value, so a restart at the same generation sends nothing, and a new Receiver or a spec edited while the operator was down sends them once."
+                  description: "The record an earlier operator wrote of the metadata.generation whose declared settings it had sent. The operator reads it once, when it starts: a status that holds it and no settledSettings is from that operator, which had sent the declared blocks, so the operator records each declared block as sent and sends nothing for it. The operator does not write it, and its first status apply removes it."
                 conditions:
                   type: array
-                  description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends in this spec generation and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise."
+                  description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

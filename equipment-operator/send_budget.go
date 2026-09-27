@@ -6,9 +6,15 @@ package main
 // receiver. A receiver can also take a command and keep reporting the
 // old value, for example a setting its own menu locks. Without a bound
 // the operator would send that command on every pass for as long as the
-// spec stands. The budget allows sendLimit sends of each field in one
-// spec generation, then holds the field back and names it in the
-// SettingsConfirmed condition. A spec change starts every count again.
+// spec stands. The budget allows sendLimit sends of each field at one
+// declared value, then holds the field back and names it in the
+// SettingsConfirmed condition.
+//
+// A count starts again only when its own field changes: a person
+// declares another value, or the receiver reports the declared value,
+// so the field is no longer pending. An edit of another field does not
+// start it again. metadata.generation would, and every session flag
+// and label edit would then buy a stuck field sendLimit more sends.
 
 import (
 	"encoding/json"
@@ -18,51 +24,66 @@ import (
 	"sync"
 )
 
-// sendLimit is how many times the operator sends one declared field in
-// one spec generation.
+// sendLimit is how many times the operator sends one declared field at
+// one declared value.
 const sendLimit = 3
 
 // sendBudget counts the sends of each declared field, keyed by the
 // field's path in the spec, and records which fields each family held
 // back on its last pass.
 type sendBudget struct {
-	mutex      sync.Mutex
-	generation int64
-	sends      map[string]int
-	held       map[string][]string
+	mutex sync.Mutex
+	sends map[string]sendCount
+	held  map[string][]string
+}
+
+// sendCount is the sends of one field at one declared value, which is
+// held as JSON.
+type sendCount struct {
+	value string
+	count int
 }
 
 func newSendBudget() *sendBudget {
-	return &sendBudget{sends: map[string]int{}, held: map[string][]string{}}
+	return &sendBudget{sends: map[string]sendCount{}, held: map[string][]string{}}
 }
 
 // spend answers pending without the fields that have had sendLimit
-// sends in this generation, and counts one send for each field it
+// sends at their declared value, and counts one send for each field it
 // keeps. family is the path of the block in the spec, such as
-// spec.denon.settings or spec.zones.zone2. The fields it holds back
-// replace the family's earlier record, so a field the receiver now
-// reports at the declared value, which is no longer pending, is no
-// longer named.
-func spend[T any](b *sendBudget, generation int64, family string, pending T) T {
+// spec.denon.settings or spec.zones.zone2. A field of the family that
+// is not pending loses its count. The fields it holds back replace the
+// family's earlier record, so a field the receiver now reports at the
+// declared value is no longer named.
+func spend[T any](b *sendBudget, family string, pending T) T {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	if generation != b.generation {
-		b.generation = generation
-		b.sends = map[string]int{}
-		b.held = map[string][]string{}
-	}
 	raw, _ := json.Marshal(pending)
 	var tree any
 	_ = json.Unmarshal(raw, &tree)
+	counted := map[string]bool{}
 	var held []string
 	for _, leaf := range leaves(tree, nil) {
 		path := family + "." + strings.Join(leaf, ".")
-		if b.sends[path] >= sendLimit {
+		value, _ := json.Marshal(leafValue(tree, leaf))
+		sent := b.sends[path]
+		if sent.value != string(value) {
+			sent = sendCount{value: string(value)}
+		}
+		counted[path] = true
+		if sent.count >= sendLimit {
+			b.sends[path] = sent
 			held = append(held, path)
 			removeLeaf(tree, leaf)
 			continue
 		}
-		b.sends[path]++
+		sent.count++
+		b.sends[path] = sent
+	}
+	for path := range b.sends {
+		if strings.HasPrefix(path, family+".") && !counted[path] {
+			delete(b.sends, path)
+		}
 	}
 	b.held[family] = held
 	var kept T
@@ -97,6 +118,14 @@ func leaves(tree any, prefix []string) [][]string {
 	}
 	sort.Slice(found, func(i, j int) bool { return strings.Join(found[i], ".") < strings.Join(found[j], ".") })
 	return found
+}
+
+// leafValue answers the value at one path of a decoded JSON tree.
+func leafValue(tree any, path []string) any {
+	for _, key := range path {
+		tree = tree.(map[string]any)[key]
+	}
+	return tree
 }
 
 // removeLeaf deletes the value at one path from a decoded JSON tree.

@@ -111,7 +111,7 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 					VolumeTopic: "liken/media/house/theater/volume",
 				},
 			},
-			Status: ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On", Input: "MPLAY", Volume: "-30.5"}}},
+			Status: ReceiverStoredStatus{ReceiverStatus: ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On", Input: "MPLAY", Volume: "-30.5"}}}},
 		},
 	}}
 
@@ -219,7 +219,7 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/theater/status": Receiver{
 			Metadata: ObjectMeta{Name: "theater"},
-			Status:   ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On"}}},
+			Status:   ReceiverStoredStatus{ReceiverStatus: ReceiverStatus{Zones: map[string]ZoneStatus{"main": {Power: "On"}}}},
 		},
 	}}
 	status := ReceiverStatus{
