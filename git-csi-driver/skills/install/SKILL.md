@@ -68,6 +68,35 @@ a flag through a kustomize patch on the container's `args`.
 
 `git-csi-driver --version` prints the version and exits.
 
+## The store's filesystem
+
+The store has to be on a filesystem that survives a reboot. The
+`hostPath` volume creates the store's directory wherever `--store`
+leads. On a `liken` node with no pod-storage partition, that is the
+root overlay, and the root overlay keeps its writes in memory.
+
+The node plugin reads `/proc/self/mountinfo` once at start. It finds
+the mount that holds the store. It refuses the store when that mount
+is `tmpfs`, `ramfs`, or `rootfs`, or when it is an overlay whose upper
+directory is on one of those. It also refuses an overlay whose upper
+directory is on no disk in the pod's own mount table. From inside a
+pod, the root overlay of a `liken` node reads that way. A node with a
+refused store does these things:
+
+* It logs `the node refuses writeable volumes` at the error level, with
+  the reason.
+* It sets `git_csi_store_refuses_writeable` to one.
+* It answers `FailedPrecondition` to the stage of a writeable volume
+  whose directory the store does not have yet. The kubelet writes the
+  reason into the pod's events.
+
+It still serves read-only volumes, because their trees are copies of
+the remote, and a reboot costs one clone again. A writeable volume
+whose tree the store already holds still stages, so its work can push
+before a reboot deletes it. To serve new writeable volumes on that
+node, point `--store` and the `store` `hostPath` in the base at a
+directory on a disk.
+
 The controller pod declares both ports, and the base includes a
 `Service` named `git-csi-driver-webhook` on port 80 in front of the
 webhook port. The [read-only guide](https://git.liken.sh/docs/guides/read-only/#webhooks) says how a

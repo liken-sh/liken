@@ -1,0 +1,5 @@
+432 217 0:134 / / rw,relatime shared:62 - overlay overlay rw,lowerdir=/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18634/fs,upperdir=/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18741/fs,workdir=/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18741/work,uuid=on
+446 432 0:147 / /proc rw,nosuid,nodev,noexec,relatime shared:63 - proc proc rw
+467 432 8:7 /plugins/git.liken.sh /csi rw,relatime shared:71 - ext4 /dev/sda7 rw
+473 432 8:7 /pods /var/lib/kubelet/pods rw,relatime shared:20 - ext4 /dev/sda7 rw
+483 432 0:31 /var/lib/liken/pod-storage/git-csi /var/lib/liken/pod-storage/git-csi rw,relatime shared:75 - overlay overlay rw,lowerdir=/liken-boot/system,upperdir=/liken-boot/upper,workdir=/liken-boot/work,uuid=on

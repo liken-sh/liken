@@ -92,6 +92,9 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		webhookListener = hooks.listener
 	} else {
 		answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
+		// A store the next reboot deletes is reported before the first
+		// call, because the loss shows only at that reboot.
+		answering.checkStore(ctx)
 		// The mounts outlive the driver, so a driver that starts takes back
 		// the volumes its store still records.
 		answering.resume(ctx)

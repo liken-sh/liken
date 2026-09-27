@@ -60,6 +60,14 @@ func (n *node) NodeStageVolume(
 	if kind == readOnlyClaim {
 		return n.stageReadOnly(ctx, request, parsed, holder)
 	}
+	// The check comes after the lookup above, so a writeable volume the
+	// driver resumed still answers the kubelet's stage call. A volume
+	// whose directory the store already holds stages too: its tree can
+	// hold work that has not pushed, and only a stage with the pod's
+	// Secret can push it before the reboot deletes it.
+	if n.storeRefusal != "" && !n.store.holdsVolume(id) {
+		return nil, n.refuseWriteable()
+	}
 
 	directory := n.store.volumeDir(id)
 	if err := os.MkdirAll(directory, 0o700); err != nil {

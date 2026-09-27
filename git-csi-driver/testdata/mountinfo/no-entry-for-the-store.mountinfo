@@ -1,0 +1,3 @@
+1 0 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw
+20 1 0:20 / /var/lib/liken/pod-storage/git-csi-other rw,relatime shared:2 - tmpfs tmpfs rw
+21 1 0:21 / /run rw,nosuid shared:3 - tmpfs tmpfs rw

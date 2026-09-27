@@ -51,6 +51,10 @@ type node struct {
 	// name a file of its own.
 	mounted   func(string) bool
 	mountinfo string
+	// storeRefusal is why the store does not survive a reboot, read
+	// once at start, or empty when it does. A node with a reason stages
+	// no new writeable volume.
+	storeRefusal string
 	// inotify opens the file the watch reads. It is a seam, so a test can
 	// drive a driver whose kernel refused one.
 	inotify func(int) (int, error)

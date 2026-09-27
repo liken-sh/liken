@@ -84,6 +84,11 @@ Nothing is planned. The next work comes out of
   contract: CSI operations as the reconcile layer, volumes mounted,
   fetch duration and failures per repository, and store size. This
   closes the open problem "Monitoring".
+* [14, The store survives a reboot](completed/14-the-store-survives-a-reboot.md).
+  Built on 2026-09-27; the lab drill is owed. The node plugin reads the
+  mount table at start, and a store on `tmpfs`, `ramfs`, or an overlay
+  it cannot place on a disk refuses new writeable volumes and says why.
+  This closes the open problem "The store on the wrong filesystem".
 
 ## Open problems
 
@@ -93,9 +98,6 @@ so the next plan can start from the facts.
 * [Credentials after a restart](open-problems/credentials-after-a-restart.md).
   A writeable volume resumes with no credential, so every push fails
   until its pod restarts.
-* [The store on the wrong filesystem](open-problems/the-store-on-the-wrong-filesystem.md).
-  A node without the pod-storage partition puts the store on the RAM
-  overlay, and nothing says so until the reboot.
 
 ## Rejected
 

@@ -53,6 +53,9 @@ type metrics struct {
 	fetchDuration *prometheus.HistogramVec
 	fetchFailures *prometheus.CounterVec
 	storeBytes    prometheus.Gauge
+	// One when the store does not survive a reboot. storemount.go
+	// says how the node reads that.
+	storeRefuses prometheus.Gauge
 
 	armed   *prometheus.GaugeVec
 	pending *prometheus.GaugeVec
@@ -143,6 +146,11 @@ func newMetrics() *metrics {
 		storeBytes: prometheus.NewGauge(
 			prometheus.GaugeOpts{Name: "git_csi_store_bytes",
 				Help: "Bytes the store's bare repositories and work trees hold on this node."}),
+		// One when the store's filesystem does not survive a reboot.
+		// The node then refuses to stage a new writeable volume.
+		storeRefuses: prometheus.NewGauge(
+			prometheus.GaugeOpts{Name: "git_csi_store_refuses_writeable",
+				Help: "One when the store does not survive a reboot, so the node refuses writeable volumes."}),
 		// One when a class of this driver arms the volume, zero when none
 		// does.
 		armed: prometheus.NewGaugeVec(
@@ -211,7 +219,7 @@ func (m *metrics) registerWebhook() {
 func (m *metrics) registerNodeFacts(byRepo func() map[string]float64) {
 	m.volumes = newVolumesCollector(byRepo)
 	m.registry.MustRegister(m.watchRestarts, m.fetchDuration, m.fetchFailures,
-		m.storeBytes, m.volumes)
+		m.storeBytes, m.storeRefuses, m.volumes)
 }
 
 // reportBuildInfo sets liken_build_info to 1 under this process's

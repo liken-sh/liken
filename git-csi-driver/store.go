@@ -64,6 +64,13 @@ func (s *store) volumeDir(id string) string {
 	return filepath.Join(s.root, "volumes", id)
 }
 
+// holdsVolume reports whether the store already has a directory for
+// the volume.
+func (s *store) holdsVolume(id string) bool {
+	_, err := os.Stat(s.volumeDir(id))
+	return err == nil
+}
+
 // lock takes this repository's lock and returns the release. A fetch
 // and a publish of the same URL never run at once.
 func (r *repository) lock() func() {
