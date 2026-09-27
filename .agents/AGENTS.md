@@ -77,6 +77,33 @@ need detail, use a cluster the project ships: the `dev-cluster/` in
 `liken`, the `lab` fleet of `node-1` through `node-5`, and the test
 clusters named in a repository's own documentation.
 
+## Keep state current with events
+
+An operator that reads the same state again on a timer wakes for
+nothing, loads the API server, and can disturb a device. A TV on a CEC
+bus switched its input every few minutes while an operator scanned the
+bus each minute, and stopped when the operator went silent. So every
+component keeps its view of the world current in the same three steps:
+
+1. Open the watch, subscription, or stream first.
+2. When it is live, read the whole state once, to set the baseline.
+   The subscription keeps the state current after that. The
+   subscription opens before the read, so an event that arrives during
+   the read is not lost.
+3. When the subscription fails, open it again and read the whole
+   state again.
+
+A Kubernetes list and a watch from the list's `resourceVersion` follow
+these steps, with a new list after a `410 Gone`. The same shape fits
+`pw-dump -m`, an MQTT subscription with retained messages, an inotify
+watch followed by one look at the directory, and a CEC receive loop
+followed by one scan of the bus.
+
+A timer is correct only as a clock: a time-to-live, a deadline, or the
+age of a certificate. A timer that reads state again to find a change
+is a defect. If a component needs a long resync as a backstop, a
+comment at the timer gives the failure it covers.
+
 ## Branch names
 
 Every repository works on `main` except `corrosion`. `corrosion` is a
