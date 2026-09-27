@@ -132,6 +132,7 @@ func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 	if err := ForceDeletePod(ctx, o.client, namespace, name); err != nil {
 		return err
 	}
+	o.forgetPod(namespace, name)
 	mounted := storeClaimOf(pod)
 	if mounted == "" {
 		return nil
@@ -150,6 +151,7 @@ func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 	if err != nil || perNode {
 		return err
 	}
+	o.forgetClaim(namespace, mounted)
 	return DeletePersistentVolumeClaim(ctx, o.client, namespace, mounted)
 }
 

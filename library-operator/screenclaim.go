@@ -139,6 +139,7 @@ func (o *operator) deleteScreenClaim(ctx context.Context, player *Player, name s
 	if !screenClaimIsRecoverable(claim, player, name) {
 		return nil
 	}
+	o.forgetClaim(namespace, name)
 	return DeletePersistentVolumeClaim(ctx, o.client, namespace, name)
 }
 
@@ -175,8 +176,10 @@ func (o *operator) recoverUnschedulableScreen(ctx context.Context, player *Playe
 	if err := DeletePod(ctx, o.client, namespace, pod.Metadata.Name); err != nil {
 		return false, err
 	}
+	o.forgetPod(namespace, pod.Metadata.Name)
 	if err := DeletePersistentVolumeClaim(ctx, o.client, namespace, name); err != nil {
 		return true, err
 	}
+	o.forgetClaim(namespace, name)
 	return true, o.deleteScreenClaim(ctx, player, screenArtClaimName(player.Metadata.Name))
 }

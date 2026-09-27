@@ -242,11 +242,6 @@ const (
 // parameter and not two.
 const catalogMemberQuery = "labelSelector=" + memberLabelKey + "%3D" + memberLabelValue
 
-// The same narrowing for the screen pods, which carry a name label of
-// their own. The two selectors keep the two kinds of pod apart, so a list of
-// one never answers with the other.
-const screenPodsQuery = "labelSelector=" + scannerLabelKey + "%3D" + screenLabelValue
-
 func libraryPath(namespace, name string) string {
 	return libraryPrefix + namespace + "/libraries/" + name
 }
@@ -524,18 +519,6 @@ func DeletePersistentVolume(ctx context.Context, c *Client, name string) error {
 func ListCatalogMemberPods(ctx context.Context, c *Client) (*PodList, error) {
 	list := &PodList{}
 	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+catalogMemberQuery, nil, list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
-// ListScreenPods reads this operator's screen pods across every
-// namespace, on the same terms, so the pass knows which screens stand
-// before it deletes one. They reach the catalog EndpointSlice through
-// the member label like every other agent.
-func ListScreenPods(ctx context.Context, c *Client) (*PodList, error) {
-	list := &PodList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+screenPodsQuery, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil

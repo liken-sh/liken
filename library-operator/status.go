@@ -74,7 +74,7 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 		status.RemovedLastSweep = latest.RemovedLastSweep
 		status.LastWalk = latest.LastWalk
 		status.LastChange = latest.LastChange
-		status.Runs = latest.Runs
+		status.Runs = statusRuns(latest.Runs)
 		// The gap counts and the two identity counts are the reporter's own,
 		// carried through as it published them, so the number the operator
 		// schedules on is the number a person reads.

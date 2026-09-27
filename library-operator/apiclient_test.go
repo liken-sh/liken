@@ -358,21 +358,6 @@ func TestListPlayersReadsEveryNamespace(t *testing.T) {
 	}
 }
 
-// A screen pod list is narrowed by the screen pods' own name label, so
-// it never answers with a scanner pod.
-func TestListScreenPodsSelectsTheScreenPodsAlone(t *testing.T) {
-	client, recorded := recordingAPI(t, PodList{Metadata: ListMeta{ResourceVersion: "1200"}})
-
-	if _, err := ListScreenPods(t.Context(), client); err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/pods")
-	if got := recorded.query.Get("labelSelector"); got != "app.kubernetes.io/name=library-media-browser" {
-		t.Errorf("labelSelector = %q, want the screen selector", got)
-	}
-}
-
 func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	written := &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house", ResourceVersion: "1200"},
@@ -544,7 +529,6 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		{name: "CreateJob", call: func(c *Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},
 		{name: "DeleteJob", call: func(c *Client) error { return DeleteJob(t.Context(), c, "house", "movies-cleanup") }},
 		{name: "DeleteCronJob", call: func(c *Client) error { return DeleteCronJob(t.Context(), c, "house", "movies-scan") }},
-		{name: "ListScreenPods", call: func(c *Client) error { _, err := ListScreenPods(t.Context(), c); return err }},
 		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(t.Context(), c, "house", "movies-scanner"); return err }},
 		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(t.Context(), c, &Pod{}); return err }},
 		{name: "DeletePod", call: func(c *Client) error { return DeletePod(t.Context(), c, "house", "movies-scanner") }},

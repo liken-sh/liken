@@ -274,3 +274,61 @@ func TestTheOperatorReadsTheLanguagesTheSchemaAdmits(t *testing.T) {
 		t.Errorf("languages = %v, want the order the owner named", spec.Languages)
 	}
 }
+
+// The API server drops every status field the schema does not name, and
+// it answers a write that then changes nothing with no new version. The
+// operator compares the status it derives against the stored one before
+// it writes, so a field the schema drops makes the two differ on every
+// pass and costs one empty write per pass. So every field the operator
+// derives, with every optional field set, must be one the schema keeps.
+func TestTheSchemaKeepsEveryStatusFieldTheOperatorWrites(t *testing.T) {
+	now := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	seen := scanning()
+	seen.report = &libraryReport{Titles: 1, LastWalk: now, LastChange: now,
+		Gaps: map[string]int{"trickplay": 2},
+		Runs: []libraryRun{{Worker: workerScan, Job: "movies-walk-1", Started: now, Finished: now,
+			Unidentified: 1, Removed: 1, Failure: "a failure", Actor: "agent", Version: 7}}}
+	seen.resolved = []librarySource{{Name: "tmdb", Block: "tmdb", Ready: true, Reason: "Reachable"}}
+	status := deriveLibraryStatus(studioMovies(), seen, now)
+	body, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written map[string]any
+	if err := json.Unmarshal(body, &written); err != nil {
+		t.Fatal(err)
+	}
+	schema := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"status").(map[string]any)
+
+	for _, path := range fieldsTheSchemaDrops(schema, written, "status") {
+		t.Errorf("the schema drops %s", path)
+	}
+}
+
+// The paths in a written value that the schema has no property for. A map
+// the schema types with additionalProperties keeps every key.
+func fieldsTheSchemaDrops(schema map[string]any, written any, path string) []string {
+	var dropped []string
+	switch value := written.(type) {
+	case map[string]any:
+		if _, open := schema["additionalProperties"]; open {
+			return nil
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		for key, inner := range value {
+			field, known := properties[key].(map[string]any)
+			if !known {
+				dropped = append(dropped, path+"."+key)
+				continue
+			}
+			dropped = append(dropped, fieldsTheSchemaDrops(field, inner, path+"."+key)...)
+		}
+	case []any:
+		items, _ := schema["items"].(map[string]any)
+		for _, inner := range value {
+			dropped = append(dropped, fieldsTheSchemaDrops(items, inner, path+"[]")...)
+		}
+	}
+	return dropped
+}

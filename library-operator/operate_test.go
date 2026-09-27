@@ -413,15 +413,14 @@ func TestPassCarriesOnWithNoPlayersToRead(t *testing.T) {
 	}
 }
 
-// A failure to list the pods, to read a Service, or to read a slice is
-// reported and does not stop the pass. Every Library still gets its
+// A failure to read a Service or to read a slice is reported and does
+// not stop the pass. Every Library still gets its
 // status.
 func TestPassCarriesOnPastABrokenCatalogObject(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
 	}{
-		{name: "the screen pods cannot be listed", path: podsAllPath + "?" + screenPodsQuery},
 		{name: "the Service cannot be read",
 			path: servicesPath(testLibraryNamespace) + "/" + catalogServiceName},
 		{name: "the slice cannot be read",

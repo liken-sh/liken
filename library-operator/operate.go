@@ -41,8 +41,22 @@ const (
 const screenController = "library.liken.sh/media-browser"
 
 // BackstopInterval is how often the loop reconciles with nothing to
-// prompt it. The tick recovers a lost watch event, and it is what
-// notices a pod that changed phase while the watch was down.
+// prompt it. The watches and the bus wake the pass for every change to
+// the objects they carry, so the tick covers what they do not:
+//
+//   - The objects the pass reads with no watch on them: a Job's status, a
+//     claim that binds, a volume, a Service, an EndpointSlice, a provider's
+//     Secret, a StorageClass, a node's Ready condition, and the events
+//     about a pod that has not started. Without the tick, a Library whose
+//     claim binds stays Unbound until some other object changes.
+//   - The decisions that fall due with time and no event: a scan schedule,
+//     the backoff of a failed Job and of a cleanup Job, the grace before a
+//     succeeded Job is deleted, the cadence of a provider check, and the
+//     graces on an unschedulable screen and a NotReady node. Without the
+//     tick, each waits for an unrelated wake.
+//
+// A pass that finds nothing changed sends only reads, so the tick costs
+// one pass of reads every ten seconds and no writes.
 const backstopInterval = 10 * time.Second
 
 // PassTimeout bounds every request one pass makes. The pass owns the
@@ -149,6 +163,11 @@ type operator struct {
 	// answer is one pass old at most and the operator watches no
 	// storageclasses.
 	perNodeClasses map[string]bool
+
+	// The claims, volumes, and pods the pass in flight listed, which
+	// passreads.go holds the rule for. It is nil between passes, so a caller
+	// outside a pass reads each object by name.
+	reads *passReads
 
 	// The Prometheus registry and the address it answers on. A nil
 	// metrics or an empty address is the disabled state: run starts no
@@ -462,6 +481,13 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing catalog member pods: %v\n", err)
 		return
 	}
+	reads, err := readPass(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing the claims, volumes, and pods the pass stands: %v\n", err)
+		return
+	}
+	o.reads = reads
+	defer func() { o.reads = nil }()
 	// The providers of every namespace, read once per pass and called only when
 	// providercadence.go says their verdict can have changed. A
 	// cluster that has not applied the CRD serves no such collection, and its
@@ -559,21 +585,15 @@ func (o *operator) pass() {
 		}
 	}
 
-	// The screen pods are read once for every namespace, so the pass
-	// deletes only a pod that stands. A list that fails costs the pass
-	// its deletes and nothing else: a delegated Player is still stood,
-	// and the pod of one that switched away goes on the next pass.
-	screens, err := ListScreenPods(ctx, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing screen pods: %v\n", err)
-		screens = &PodList{}
-	}
+	// The screen pods come from the pass's one list of the pods it stands,
+	// so the pass deletes only a pod that stands.
+	screens := reads.screenPods()
 	for _, namespace := range screenNamespaces(players.Items) {
 		// A screen's catalog claim is sized and classed by the
 		// namespace's one Catalog, and a namespace with none, or with more
 		// than one, stands its screens on an emptyDir.
 		o.reconcileScreens(ctx, namespace, singleCatalog(byNamespace[namespace]).catalog,
-			players.Items, libraries.Items, people.Items, screens.Items, now)
+			players.Items, libraries.Items, people.Items, screens, now)
 	}
 	// The play requests are served last, on the collections this pass
 	// already read. A request is one moment: the pass creates its Play
@@ -596,8 +616,9 @@ func (o *operator) pass() {
 // HandleBusMessage folds one message from the broker onto the place
 // that holds it: a library report onto the desk, a play request onto
 // its queue. It runs on the bus reader's goroutine, so it does nothing
-// beyond the fold, and the wake each fold raises is what carries the
-// message into the next pass.
+// beyond the fold. A fold that changes what the pass reads raises the wake
+// that carries the message into the next pass, and a fold that changes
+// nothing the pass reads raises none.
 func (o *operator) handleBusMessage(topic string, payload []byte) {
 	// A play request is the one message that is not a report. It is
 	// held for the next pass, because creating a Play is a write and

@@ -135,3 +135,17 @@ func TestALibraryKeyNamesTheNamespaceAndTheName(t *testing.T) {
 		t.Errorf("key = %q, want house/movies", got)
 	}
 }
+
+// A reporter republishes every library it knows each time the catalog
+// changes, so an idle library's report arrives again with nothing new in
+// it. That report wakes no pass, because the pass would derive the same
+// status from it.
+func TestAReportThatRepeatsTheHeldOneWakesNoPass(t *testing.T) {
+	desk, wake := reportDesk(t)
+	desk.fold("house", "movies", walkedReport())
+	waitForReportWake(t, wake)
+
+	desk.fold("house", "movies", walkedReport())
+
+	expectNoReportWake(t, wake)
+}

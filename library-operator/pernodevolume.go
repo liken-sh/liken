@@ -100,7 +100,7 @@ func perNodeAccessMode(claim *PersistentVolumeClaim) string {
 func (o *operator) standClaim(ctx context.Context, claim *PersistentVolumeClaim) error {
 	namespace, name := claim.Metadata.Namespace, claim.Metadata.Name
 
-	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
+	_, err := o.readClaim(ctx, namespace, name)
 	if err == nil {
 		return nil
 	}

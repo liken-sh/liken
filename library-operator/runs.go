@@ -47,6 +47,34 @@ type libraryRun struct {
 	Version int64  `json:"version,omitempty"`
 }
 
+// One run as status.runs reports it: the runs row without the write that
+// made it. The actor and the db version are the handoff's own and mean
+// nothing to a person, and the schema does not name them. The API server
+// drops a field its schema does not name, so a status that carried them
+// would differ from the stored one on every pass and be written again
+// each time.
+type libraryStatusRun struct {
+	Worker       string    `json:"worker"`
+	Job          string    `json:"job"`
+	Started      time.Time `json:"started"`
+	Finished     time.Time `json:"finished,omitempty"`
+	Unidentified int       `json:"unidentified,omitempty"`
+	Removed      int       `json:"removed,omitempty"`
+	Failure      string    `json:"failure,omitempty"`
+}
+
+// statusRuns is the reported runs in the shape status.runs holds.
+func statusRuns(runs []libraryRun) []libraryStatusRun {
+	var reported []libraryStatusRun
+	for _, run := range runs {
+		reported = append(reported, libraryStatusRun{
+			Worker: run.Worker, Job: run.Job, Started: run.Started, Finished: run.Finished,
+			Unidentified: run.Unidentified, Removed: run.Removed, Failure: run.Failure,
+		})
+	}
+	return reported
+}
+
 // The read of the whole runs table. It needs no LIMIT, because the
 // table holds one row per library and worker.
 const runsQuery = `SELECT library, worker, job, started, finished, unidentified, removed, failure, actor, version FROM runs`

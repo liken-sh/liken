@@ -100,10 +100,12 @@ func libraryKey(namespace, name string) string {
 // report is a whole observation, so the newest one says everything an
 // older one did.
 //
-// Every fold wakes the loop. A scanner publishes when it finishes a
-// walk and when it applies a change, and neither happens often, so
-// there is nothing here to throttle: a report that arrives is a report
-// worth writing into the resource at once.
+// A report that differs from the one the desk holds wakes the loop at
+// once, because it is a change worth writing into the resource. A report
+// that repeats the held one wakes nothing: the reporter republishes every
+// library it knows each time the catalog changes, so while one library's
+// Job writes, the reports of the idle libraries arrive again each second
+// with nothing new in them.
 //
 // It answers with the runs this report ended: a row that carries a finish
 // the desk's report did not. A desk that held no report answers none, because
@@ -114,7 +116,9 @@ func (r *reports) fold(namespace, name string, report libraryReport) []libraryRu
 	before, held := r.latest[key]
 	r.latest[key] = report
 	r.mutex.Unlock()
-	r.poke()
+	if same, err := sameStatus(before, report); !held || err != nil || !same {
+		r.poke()
+	}
 	if !held {
 		return nil
 	}

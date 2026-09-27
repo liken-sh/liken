@@ -259,6 +259,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.pods[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == claimsAllPath:
+		list := PersistentVolumeClaimList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.claims) {
+			list.Items = append(list.Items, *f.claims[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
 	case strings.Contains(r.URL.Path, "/persistentvolumeclaims/"):
 		f.serveClaim(w, r, name)
 	case r.URL.Path == storageClassesPath:
@@ -575,16 +581,24 @@ func selects(selector string, pod *Pod) bool {
 	return selectsLabels(selector, pod.Metadata.Labels)
 }
 
-// selectsLabels answers a label selector of the two forms the operator
+// selectsLabels answers a label selector of the three forms the operator
 // sends. A key with a value keeps the objects that carry that pair. A key
-// alone keeps the objects that carry the key with any value. An empty
-// selector keeps everything. Terms are separated by commas, and every
-// term must hold.
+// alone keeps the objects that carry the key with any value. A key with
+// "in" and a list of values keeps the objects that carry one of them. An
+// empty selector keeps everything. Terms are separated by commas outside
+// the parentheses, and every term must hold.
 func selectsLabels(selector string, labels map[string]string) bool {
 	if selector == "" {
 		return true
 	}
-	for _, term := range strings.Split(selector, ",") {
+	for _, term := range selectorTerms(selector) {
+		if key, set, isSet := strings.Cut(term, " in "); isSet {
+			values := strings.Split(strings.Trim(set, "()"), ",")
+			if !slices.Contains(values, labels[key]) {
+				return false
+			}
+			continue
+		}
 		key, value, stated := strings.Cut(term, "=")
 		if stated && labels[key] != value {
 			return false
@@ -594,6 +608,27 @@ func selectsLabels(selector string, labels map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// The terms of one selector: the commas inside a set's parentheses belong
+// to the set.
+func selectorTerms(selector string) []string {
+	var terms []string
+	depth, start := 0, 0
+	for index, character := range selector {
+		switch character {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				terms = append(terms, selector[start:index])
+				start = index + 1
+			}
+		}
+	}
+	return append(terms, selector[start:])
 }
 
 // The API server's own behavior: conditional on the stated

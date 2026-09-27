@@ -50,7 +50,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 			library.Metadata.Namespace, library.Metadata.Name, library.Metadata.Generation)
 	}
 
-	bound, err := resolveStorage(ctx, o.client, library)
+	bound, err := o.resolveStorage(ctx, library)
 	if err != nil {
 		return err
 	}
@@ -145,10 +145,10 @@ func libraryStands(bound binding, choice catalogChoice) bool {
 // waiting on a volume, and a volume that has gone are all states to
 // report. Only a request that fails is an error, because then the pass
 // does not know what the storage is.
-func resolveStorage(ctx context.Context, c *Client, library *Library) (binding, error) {
+func (o *operator) resolveStorage(ctx context.Context, library *Library) (binding, error) {
 	namespace, name := library.Metadata.Namespace, library.Spec.Storage.Claim
 
-	claim, err := GetPersistentVolumeClaim(ctx, c, namespace, name)
+	claim, err := o.readClaim(ctx, namespace, name)
 	if errors.Is(err, ErrNotFound) {
 		return binding{
 			reason: reasonClaimNotFound,
@@ -169,7 +169,7 @@ func resolveStorage(ctx context.Context, c *Client, library *Library) (binding, 
 		}, nil
 	}
 
-	volume, err := GetPersistentVolume(ctx, c, claim.Spec.VolumeName)
+	volume, err := o.readVolume(ctx, claim.Spec.VolumeName)
 	if errors.Is(err, ErrNotFound) {
 		return binding{
 			reason: reasonVolumeNotFound,
@@ -232,7 +232,7 @@ func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	}
 	namespace, name := desired.Metadata.Namespace, desired.Metadata.Name
 
-	live, err := GetPod(ctx, o.client, namespace, name)
+	live, err := o.readPod(ctx, namespace, name)
 	if errors.Is(err, ErrNotFound) {
 		created, err := CreatePod(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {
@@ -273,6 +273,7 @@ func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 		if err := DeletePod(ctx, o.client, namespace, name); err != nil {
 			return nil, err
 		}
+		o.forgetPod(namespace, name)
 		return nil, nil
 	}
 	return live, nil

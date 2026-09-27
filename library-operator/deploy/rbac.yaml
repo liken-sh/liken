@@ -127,8 +127,11 @@ rules:
   - apiGroups: [people.liken.sh]
     resources: [people]
     verbs: [get, list, watch, patch]
-  # The media claim each Library names, read by name to learn whether it
-  # is bound and which volume it is bound to. The claims the operator
+  # The media claim each Library names, read to learn whether it is
+  # bound and which volume it is bound to. A pass lists the claims of
+  # every namespace once and reads each claim from that list, because a
+  # Library's claim is a person's and carries no label to select on. A
+  # get reads one claim a recovery is about to delete. The claims the operator
   # provisions: one per Library, which its Jobs mount one at a time,
   # one for each of a Catalog's two stores, which every copy of that
   # store mounts, and two per screen. Each is owned by the object it
@@ -145,7 +148,7 @@ rules:
   # per-node class, where the claim pins no pod to a node.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [get, create, delete]
+    verbs: [get, list, create, delete]
   # The ResourceClaimTemplate each Library that names a render node keeps, one
   # per Library, owned by it. A library Job that runs trickplay names the template and the
   # kubelet mints the claim from it. The delete covers two cases: a Library that
@@ -180,8 +183,10 @@ rules:
   # per-node class, because that driver provisions nothing, and a claim
   # of that class binds only to a volume something wrote first.
   #
-  # The list reads the volumes the operator's own labels name, once per
-  # pass, and the delete takes the ones whose claim is gone. A volume is
+  # One list reads every volume once per pass, for the volume behind each
+  # Library's claim. A second list reads the volumes the operator's own
+  # labels name, after the pass's writes, and the delete takes the ones
+  # whose claim is gone. A volume is
   # cluster-scoped, so no ownerReference ties it to a Catalog, a
   # Library, or a Player, and those labels take an owner's place.
   - apiGroups: [""]
@@ -189,7 +194,8 @@ rules:
     verbs: [get, list, create, delete]
   # The pods this operator stands itself: the catalog pod of each
   # namespace that holds a Catalog, and one screen pod per delegated
-  # Player. Both are created, read back on every pass, and deleted to
+  # Player. Both are created, read back on every pass from one
+  # cluster-scoped list, and deleted to
   # rebuild a stale template; a screen pod is deleted for a second
   # reason, that its Player named another idle controller. The list and
   # watch are cluster-scoped, because a Catalog and a Player live in any

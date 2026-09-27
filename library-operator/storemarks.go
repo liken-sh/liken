@@ -43,16 +43,29 @@ func newStoreMarks(wake chan<- struct{}) *storeMarks {
 // markRecorded folds what the store wrote for one Play. A nil mark
 // drops the entry, because an empty retained payload is how the store
 // says it holds nothing for that Play any more.
+//
+// The store publishes a playing Play's position about once a second.
+// The pass reads two things from the desk: whether a mark stands for a
+// Play, and whether it says ended. So only a change to one of those
+// wakes the loop. A wake on every position would run a whole pass each
+// second for as long as anything plays, and that pass would change
+// nothing.
 func (m *storeMarks) markRecorded(namespace, name string, recorded *playRecorded) {
 	key := libraryKey(namespace, name)
 	m.mutex.Lock()
+	before, held := m.recorded[key]
 	if recorded == nil {
 		delete(m.recorded, key)
 	} else {
 		m.recorded[key] = *recorded
 	}
 	m.mutex.Unlock()
-	poke(m.wake)
+	switch {
+	case recorded == nil && !held:
+	case recorded != nil && held && recorded.Ended == before.Ended:
+	default:
+		poke(m.wake)
+	}
 }
 
 // recordedFor answers what the store wrote for one Play, and false

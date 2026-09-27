@@ -559,3 +559,57 @@ func TestAPlayNoStoreWillRecordIsReleased(t *testing.T) {
 		})
 	}
 }
+
+// The store publishes a Play's position about once a second while it
+// plays. The pass reads only whether a mark stands and whether it says
+// ended, so a mark that moves the position alone wakes no pass. Each case
+// folds one mark onto a desk that holds the first and says whether the
+// second wakes the loop.
+func TestARecordedMarkWakesThePassOnlyWhenWhatThePassReadsChanges(t *testing.T) {
+	playing := &playRecorded{Item: 1, Position: "0:12:00", At: "2026-09-27T10:00:00Z"}
+	cases := []struct {
+		name   string
+		before *playRecorded
+		after  *playRecorded
+		wakes  bool
+	}{
+		{name: "the first mark", before: nil, after: playing, wakes: true},
+		{name: "a later position", before: playing,
+			after: &playRecorded{Item: 1, Position: "0:12:01", At: "2026-09-27T10:00:01Z"}, wakes: false},
+		{name: "the next item", before: playing,
+			after: &playRecorded{Item: 2, Position: "0:00:01", At: "2026-09-27T10:00:01Z"}, wakes: false},
+		{name: "the end", before: playing,
+			after: &playRecorded{Item: 1, Position: "0:12:01", Ended: true}, wakes: true},
+		{name: "the clear", before: playing, after: nil, wakes: true},
+		{name: "a clear of nothing", before: nil, after: nil, wakes: false},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			woken := make(chan struct{}, 1)
+			desk := newStoreMarks(woken)
+			if one.before != nil {
+				desk.markRecorded(testLibraryNamespace, "den-some-film", one.before)
+				<-woken
+			}
+
+			desk.markRecorded(testLibraryNamespace, "den-some-film", one.after)
+
+			if got := woke(woken); got != one.wakes {
+				t.Errorf("woke = %v, want %v", got, one.wakes)
+			}
+		})
+	}
+}
+
+// The desk keeps the newest mark even when it wakes nothing, so the line
+// a release writes names the position the store wrote last.
+func TestADeskThatWakesNothingStillHoldsTheNewestMark(t *testing.T) {
+	desk := newStoreMarks(make(chan struct{}, 1))
+	desk.markRecorded(testLibraryNamespace, "den-some-film", &playRecorded{Item: 1, Position: "0:12:00"})
+	desk.markRecorded(testLibraryNamespace, "den-some-film", &playRecorded{Item: 1, Position: "0:12:01"})
+
+	recorded, _ := desk.recordedFor(testLibraryNamespace, "den-some-film")
+	if recorded.Position != "0:12:01" {
+		t.Errorf("position = %s, want the newest", recorded.Position)
+	}
+}

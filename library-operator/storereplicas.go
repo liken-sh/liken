@@ -97,7 +97,7 @@ func (o *operator) sweepStoreReplicas(ctx context.Context, catalog *NamespaceCat
 func (o *operator) retireStoreReplica(ctx context.Context, namespace string, store durableStore, index int) (bool, error) {
 	name := store.replicaName(index)
 
-	pod, err := GetPod(ctx, o.client, namespace, name)
+	pod, err := o.readPod(ctx, namespace, name)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
@@ -107,6 +107,7 @@ func (o *operator) retireStoreReplica(ctx context.Context, namespace string, sto
 	if pod.Metadata.Labels[storeLabelKey] != store.label {
 		return true, nil
 	}
+	o.forgetPod(namespace, name)
 	return true, DeletePod(ctx, o.client, namespace, name)
 }
 

@@ -378,7 +378,7 @@ type LibraryStatus struct {
 	LastChange       time.Time `json:"lastChange,omitzero"`
 	// One entry per worker, from the reporter: the Job that ran
 	// last for that worker and when it finished.
-	Runs []libraryRun `json:"runs,omitempty"`
+	Runs []libraryStatusRun `json:"runs,omitempty"`
 	// Gaps is one count per fact of the rows that fact has left to fill.
 	// Waiting is the titles whose identity ended in candidates for a person to
 	// choose from, and Unresolved the titles no provider could name. All three

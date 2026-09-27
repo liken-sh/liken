@@ -242,7 +242,7 @@ func sameJellyfinService(live, desired *Service) bool {
 func (o *operator) retireJellyfin(ctx context.Context, catalog *NamespaceCatalog) error {
 	namespace, name := catalog.Metadata.Namespace, jellyfinName(catalog.Metadata.Name)
 
-	pod, err := GetPod(ctx, o.client, namespace, name)
+	pod, err := o.readPod(ctx, namespace, name)
 	switch {
 	case errors.Is(err, ErrNotFound):
 	case err != nil:
@@ -251,6 +251,7 @@ func (o *operator) retireJellyfin(ctx context.Context, catalog *NamespaceCatalog
 		if err := DeletePod(ctx, o.client, namespace, name); err != nil {
 			return err
 		}
+		o.forgetPod(namespace, name)
 	}
 
 	service, err := GetService(ctx, o.client, namespace, name)
