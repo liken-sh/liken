@@ -183,7 +183,6 @@ func TestANamedWatchListsAgainAfterAGone(t *testing.T) {
 	held := &heldValue{}
 	watch := newNamedWatch(testAPIClient(t, watchingAPI(api, events, watched)),
 		"liken-system", "configmaps", "anchor", held.changed, held.removed)
-	watch.retry = time.Millisecond
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -240,7 +239,7 @@ func TestANamedWatchBacksOffARefusal(t *testing.T) {
 		}
 	}
 
-	watch.follow(ctx, "")
+	watch.follow(ctx, "11")
 
 	close(waits)
 	var stepped []time.Duration
@@ -256,8 +255,9 @@ func TestANamedWatchBacksOffARefusal(t *testing.T) {
 	mustMatch(t, strings.Contains(lines[0], "the role names no such object"), true)
 }
 
-// A watch that opens after a refusal says so once, and the wait starts
-// over, because the next failure is a new fault.
+// A watch that opens after a refusal says so once. The watch that
+// opened closes at once, which is a failure of its own, so the wait
+// goes on growing: only a watch that ran a second or longer resets it.
 func TestANamedWatchReportsItsReturn(t *testing.T) {
 	var refusing sync.Mutex
 	refused := true
@@ -284,16 +284,17 @@ func TestANamedWatchReportsItsReturn(t *testing.T) {
 			refused = false
 			refusing.Unlock()
 		}
-		return len(waits) < 4
+		return len(waits) < 3
 	}
-	watch.retry = time.Millisecond
 
-	watch.follow(context.Background(), "")
+	watch.follow(context.Background(), "11")
 
-	mustMatch(t, len(lines), 2)
+	mustMatch(t, len(lines), 3)
 	mustMatch(t, strings.Contains(lines[0], "403 Forbidden"), true)
 	mustMatch(t, lines[1], "watching configmap liken-system/anchor again")
-	mustMatchAll(t, waits, []time.Duration{time.Second, 2 * time.Second, time.Millisecond, time.Millisecond})
+	mustMatch(t, lines[2],
+		"watching configmap liken-system/anchor: the watch closed less than a second after it opened")
+	mustMatchAll(t, waits, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second})
 }
 
 // A stream that ends is opened again from the version of its last
@@ -323,7 +324,7 @@ func TestANamedWatchResumesAnEndedStream(t *testing.T) {
 	held := &heldValue{}
 	watch := newNamedWatch(testAPIClient(t, ending),
 		"liken-system", "configmaps", "anchor", held.changed, held.removed)
-	watch.retry = time.Millisecond
+	watch.backoffStart = time.Millisecond
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()

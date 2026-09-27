@@ -1,325 +1,221 @@
 package main
 
-// A watch is an ordinary GET with watch=true whose response never
-// ends: the API server holds the connection open and writes one JSON
-// event per change, the same protocol liken's own operators speak.
-//
-// This watch carries no object to the loop. Every pass re-lists, so
-// a change here is only a wake, and the loop decides what to read.
+// The collection watches wake the reconcile loop. They carry no object
+// to the loop: every pass lists what it reads, so a change here is
+// only a wake, and the loop decides what to read. watchloop.go holds
+// the recovery they share with the watch on one named object.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 )
 
-// watchRetryPause is how long the watch waits before it re-lists
-// after a dropped stream, and a variable so a test drives a
-// reconnect in milliseconds.
-var watchRetryPause = 2 * time.Second
+// collectionWatch is one collection the loop is woken by: the watch
+// path with its query, the list that sets the version after a 410 or a
+// failure, and what each event does.
+type collectionWatch struct {
+	subject string
+	path    string
+	list    func(c *Client) (string, error)
+	event   func(eventType string, object []byte, wake chan<- struct{}) error
+}
 
-// watchPlays resumes each stream from a resourceVersion, so no
-// change is missed between reconnects. A 410 Gone and a routine
-// stream end recover the same way: list the collection, wake the
-// loop, and watch again from the list's own version.
+// follow runs one collection's watch for the life of the process. A
+// list wakes the loop too, because it can carry a change the watch
+// never delivered, such as one inside the window a 410 lost.
 //
-// The list after every ended stream is what keeps the resume point
-// current, so a bookmark's version matters only when that list
-// itself fails. The loop asks for bookmarks anyway because they cost
-// one line each and make that failure window resumable, where a
-// relist costs one full read of the collection, small here, and the
-// pass the wake triggers.
-//
-// onRestart runs once per reconnect, never on the first connection, so
-// media_watch_restarts_total counts what its name says: a stream the
-// API server closed and this loop opened again. A caller with nothing
-// to count passes nil.
+// onRestart runs before each watch after the first, so
+// media_watch_restarts_total counts what its name says: a watch that
+// ended and that this loop opened again. A caller with nothing to count
+// passes nil.
+func (w collectionWatch) follow(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	loop := watchLoop{
+		subject: w.subject,
+		list: func() (string, error) {
+			version, err := w.list(c)
+			if err != nil {
+				return "", fmt.Errorf("listing %s: %w", w.subject, err)
+			}
+			poke(wake)
+			return version, nil
+		},
+		open: func(ctx context.Context, version string, live func()) watchEnd {
+			return openWatch(ctx, c, w.path, version, live, func(eventType string, object []byte) error {
+				return w.event(eventType, object, wake)
+			})
+		},
+		restarted:    onRestart,
+		backoffStart: watchBackoffStart,
+		backoffMax:   watchBackoffMax,
+		minLife:      watchMinLife,
+		now:          time.Now,
+		pause:        waiting,
+		report:       func(line string) { fmt.Fprintln(os.Stderr, line) },
+	}
+	loop.run(context.Background(), resourceVersion)
+}
+
+// watchQuery asks for a watch with bookmarks, so the version moves
+// while nothing changes and the next watch resumes inside the API
+// server's window.
+const watchQuery = "?watch=true&allowWatchBookmarks=true"
+
+// wakeOnChange wakes the loop on every change. A bookmark moves the
+// resume point and reconciles nothing, so it earns no wake.
+func wakeOnChange(eventType string, _ []byte, wake chan<- struct{}) error {
+	if eventType != "BOOKMARK" {
+		poke(wake)
+	}
+	return nil
+}
+
+// wakeOnPodEnd wakes the loop when k8s removes a playback pod or when
+// one turns Failed, and on nothing else, because a routine update to a
+// running pod needs no pass.
+func wakeOnPodEnd(eventType string, object []byte, wake chan<- struct{}) error {
+	var pod struct {
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(object, &pod); err != nil {
+		return err
+	}
+	switch {
+	case eventType == "DELETED":
+		poke(wake)
+	case eventType == "MODIFIED" && pod.Status.Phase == podFailed:
+		poke(wake)
+	}
+	return nil
+}
+
+// watchPlays wakes the loop on a Play change.
 func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := playsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		// A failed watch is never fatal. The ticker keeps the passes
-		// running while this loop is down, and a relist is the whole
-		// recovery.
-		time.Sleep(watchRetryPause)
-		list, err := ListPlays(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing plays to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	collectionWatch{
+		subject: "plays",
+		path:    playsPath + watchQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListPlays(c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnChange,
+	}.follow(c, resourceVersion, wake, onRestart)
 }
 
-// watchRemotes mirrors watchPlays for the Remote collection: a Remote
-// change is a wake, and the loop reconciles a standing pod for every
-// Remote on the pass that wake triggers. The recovery is the same as
-// watchPlays: a dropped stream or a 410 Gone re-lists the collection,
-// wakes the loop, and resumes the watch from the list's version.
+// watchRemotes wakes the loop on a Remote change, and the loop
+// reconciles a standing pod for every Remote on the pass that wake
+// triggers.
 func watchRemotes(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := remotesAllPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause)
-		list, err := ListAllRemotes(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing remotes to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	collectionWatch{
+		subject: "remotes",
+		path:    remotesAllPath + watchQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListAllRemotes(c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnChange,
+	}.follow(c, resourceVersion, wake, onRestart)
 }
 
-// watchPlayers wakes the loop on a Player change, the way watchPlays
-// and watchRemotes wake it on theirs. The wake carries no object, so
-// the pass it triggers re-reconciles every Play, and a Play whose
-// Player reshaped its pod is recreated then. A dropped stream or a 410
-// Gone recovers the same way: list the collection, wake the loop, and
-// resume the watch from the list's version.
+// watchPlayers wakes the loop on a Player change. The wake carries no
+// object, so the pass it triggers reconciles every Play again, and a
+// Play whose Player reshaped its pod is recreated then.
 func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := playersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause)
-		list, err := ListPlayers(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing players to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	collectionWatch{
+		subject: "players",
+		path:    playersPath + watchQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListPlayers(c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnChange,
+	}.follow(c, resourceVersion, wake, onRestart)
 }
 
-// watchPeripherals wakes the loop on a Peripheral change, the way the
-// other watchers wake it on theirs. A controller that connects,
-// disconnects, or reports a new charge changes its Peripheral, and the
-// pass that wake triggers republishes the Player status the idle screen
-// draws. The recovery is the same as the others: list the collection,
-// wake the loop, and resume from the list's version.
+// watchPeripherals wakes the loop on a Peripheral change. A controller
+// that connects, disconnects, or reports a new charge changes its
+// Peripheral, and the pass that wake triggers republishes the Player
+// status the idle screen draws.
 func watchPeripherals(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := peripheralsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause)
-		list, err := ListPeripherals(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing peripherals to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	collectionWatch{
+		subject: "peripherals",
+		path:    peripheralsPath + watchQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListPeripherals(c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnChange,
+	}.follow(c, resourceVersion, wake, onRestart)
 }
 
 // watchKeymaps wakes the loop on a Keymap change, so the pass it
-// triggers recompiles and republishes every Remote's table, and an edit reaches
-// a running standing pod within one pass rather than one backstop tick.
-// The recovery mirrors the other watchers: a dropped stream or a 410
-// Gone lists the collection, wakes the loop, and resumes the watch from
-// the list's version.
+// triggers compiles and publishes every Remote's table again, and an
+// edit reaches a running standing pod within one pass.
 func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := keymapsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause)
-		list, err := ListKeymaps(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing keymaps to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
-}
-
-// watchMediaPreferences wakes the loop on a MediaPreferences edit, so the
-// resolved fields on a running Play's status refresh within one pass. Recovery
-// mirrors the other watchers.
-func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := mediaPrefsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause)
-		list, err := ListMediaPreferences(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing media preferences to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
-}
-
-// watchPods wakes the loop when k8s removes a playback pod or when one turns
-// Failed, so an eviction or a crash reaches the reconcile at once instead of
-// waiting for the backstop tick. Its recovery matches the other watchers.
-func watchPods(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
-	for first := true; ; first = false {
-		if !first {
-			callRestart(onRestart)
-		}
-		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + playbackPodsQuery +
-			"&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readPodWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause)
-		list, err := ListPlaybackPods(c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing playback pods to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
-}
-
-// callRestart runs a watch's restart callback when it named one. Most
-// callers pass the operator's metrics counter; the tests in
-// watch_test.go pass nil, because they read a restart off the mock
-// server's request channel instead.
-func callRestart(onRestart func()) {
-	if onRestart != nil {
-		onRestart()
-	}
-}
-
-// readPodWatchStream reads one connection's pod events. It wakes the loop on
-// a delete and on a change to the Failed phase, and on nothing else, because
-// a routine update to a running pod needs no pass. The returned version is
-// where the next watch resumes.
-func readPodWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var event struct {
-			Type   string `json:"type"`
-			Object struct {
-				Metadata ObjectMeta `json:"metadata"`
-				Status   struct {
-					Phase string `json:"phase"`
-				} `json:"status"`
-			} `json:"object"`
-		}
-		if err := decoder.Decode(&event); err != nil {
-			return resourceVersion
-		}
-		if event.Type == "ERROR" {
-			return resourceVersion
-		}
-		if event.Object.Metadata.ResourceVersion != "" {
-			resourceVersion = event.Object.Metadata.ResourceVersion
-		}
-		switch event.Type {
-		case "DELETED":
-			poke(wake)
-		case "MODIFIED":
-			if event.Object.Status.Phase == podFailed {
-				poke(wake)
+	collectionWatch{
+		subject: "keymaps",
+		path:    keymapsPath + watchQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListKeymaps(c)
+			if err != nil {
+				return "", err
 			}
-		}
-	}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnChange,
+	}.follow(c, resourceVersion, wake, onRestart)
 }
 
-// readWatchStream reads one connection's worth of events. The
-// returned version is where the next watch resumes.
-func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var event struct {
-			Type   string `json:"type"`
-			Object struct {
-				Metadata ObjectMeta `json:"metadata"`
-			} `json:"object"`
-		}
-		if err := decoder.Decode(&event); err != nil {
-			return resourceVersion
-		}
-		if event.Type == "ERROR" {
-			// Usually a 410 Gone wrapped in an event: the server no
-			// longer holds this resourceVersion. The relist in the
-			// caller is the answer.
-			return resourceVersion
-		}
-		if event.Object.Metadata.ResourceVersion != "" {
-			resourceVersion = event.Object.Metadata.ResourceVersion
-		}
-		if event.Type == "BOOKMARK" {
-			// A bookmark moves the resume point and reconciles
-			// nothing, so it earns no wake.
-			continue
-		}
-		poke(wake)
-	}
+// watchMediaPreferences wakes the loop on a MediaPreferences edit, so
+// the resolved fields on a running Play's status refresh within one
+// pass.
+func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	collectionWatch{
+		subject: "media preferences",
+		path:    mediaPrefsPath + watchQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListMediaPreferences(c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnChange,
+	}.follow(c, resourceVersion, wake, onRestart)
+}
+
+// watchPods wakes the loop when k8s removes a playback pod or when one
+// turns Failed, so an eviction or a crash reaches the reconcile at once
+// instead of waiting for the backstop tick.
+func watchPods(c *Client, resourceVersion string, wake chan<- struct{}, onRestart func()) {
+	collectionWatch{
+		subject: "playback pods",
+		path:    podsAllPath + watchQuery + "&" + playbackPodsQuery,
+		list: func(c *Client) (string, error) {
+			list, err := ListPlaybackPods(c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		},
+		event: wakeOnPodEnd,
+	}.follow(c, resourceVersion, wake, onRestart)
 }
 
 // poke never blocks, and the wake channel buffers exactly one. A

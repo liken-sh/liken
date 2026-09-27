@@ -23,13 +23,14 @@ const (
 	watchQuietSpell = 50 * time.Millisecond
 )
 
-// A reconnect in milliseconds instead of seconds, restored when the
-// test ends.
+// A backoff in milliseconds instead of seconds, restored when the test
+// ends. Every watch counts as one that ran, so a stream that a test
+// ends opens again at once, the way a watch that ran for minutes does.
 func useWatchRetryPause(t *testing.T) {
 	t.Helper()
-	pauseWas := watchRetryPause
-	t.Cleanup(func() { watchRetryPause = pauseWas })
-	watchRetryPause = 5 * time.Millisecond
+	startWas, maxWas, lifeWas := watchBackoffStart, watchBackoffMax, watchMinLife
+	t.Cleanup(func() { watchBackoffStart, watchBackoffMax, watchMinLife = startWas, maxWas, lifeWas })
+	watchBackoffStart, watchBackoffMax, watchMinLife = 5*time.Millisecond, 5*time.Millisecond, 0
 }
 
 // One watch request's answer: a status other than 200, or the event
@@ -137,9 +138,8 @@ func (a *watchAPI) serveList(w http.ResponseWriter, r *http.Request) {
 
 // The server outlives the test on purpose. watchPlays has no stop,
 // so every test ends with its watcher held in a watch request; a
-// server that closed would set that watcher reconnecting, and its
-// next read of watchRetryPause would race the write that restores
-// it.
+// server that closed would set that watcher reconnecting for the rest
+// of the run.
 func startWatch(t *testing.T, api *watchAPI, from string) chan struct{} {
 	t.Helper()
 	server := httptest.NewServer(api.handler())
@@ -281,53 +281,72 @@ func TestAChangedPlayOnTheStreamWakesTheLoopOnce(t *testing.T) {
 }
 
 // A bookmark carries a resourceVersion and nothing to reconcile, so
-// it moves the resume point and wakes nothing. The list after the
-// stream fails here, because a list that answers would give the
-// watcher a newer version and hide what the bookmark did.
+// it moves the resume point and wakes nothing. The next watch opens
+// from it with no list.
 func TestABookmarkMovesTheResumePointAndWakesNothing(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()
-	release := make(chan struct{})
-	api.answersWatches(
-		watchTurn{events: []string{watchEvent("BOOKMARK", "99")}},
-		watchTurn{hold: release},
-	)
-	api.answersLists(
-		listTurn{status: http.StatusInternalServerError},
-		listTurn{version: "150"},
-	)
+	api.answersWatches(watchTurn{events: []string{watchEvent("BOOKMARK", "99")}})
 
 	wake := startWatch(t, api, "42")
 
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "42" {
-		t.Errorf("the first watch resumed from %q, want 42", got)
-	}
-	nextListRequest(t, api)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "99" {
-		t.Errorf("the second watch resumed from %q, want the bookmark's 99", got)
-	}
+	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
+	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "99")
 	expectNoWatchWake(t, wake)
+	expectNoList(t, api)
+}
 
-	// The run ends on a list that answers, which is the one thing in
-	// this test that wakes the loop.
-	close(release)
-	nextListRequest(t, api)
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the third watch resumed from %q, want the list's 150", got)
+// expectNoList fails the test when the watcher lists in a short
+// spell.
+func expectNoList(t *testing.T, api *watchAPI) {
+	t.Helper()
+	select {
+	case path := <-api.listed:
+		t.Fatalf("the watcher listed %s", path)
+	case <-time.After(watchQuietSpell):
 	}
 }
 
-// Both cases end one watch connection without an event, and the
-// recovery is the same: list the collection, resume from its
-// version, and wake the loop for the pass that reads it.
-func TestTheWatcherListsAndWakesAfterAWatchThatCarriedNothing(t *testing.T) {
+// A watch that ends, and a watch the server refuses, open again from
+// the last version delivered. Neither one lists, because the version
+// is still good, and a 410 says when it is not.
+func TestTheWatcherResumesWithNoListAfterAWatchEnds(t *testing.T) {
+	cases := []struct {
+		name  string
+		first watchTurn
+		want  string
+	}{
+		{name: "the stream ends", first: watchTurn{events: []string{watchEvent("MODIFIED", "50")}}, want: "50"},
+		{name: "the server refuses the watch", first: watchTurn{status: http.StatusInternalServerError}, want: "42"},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			useWatchRetryPause(t)
+			api := newWatchAPI()
+			api.answersWatches(each.first)
+
+			startWatch(t, api, "42")
+
+			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
+			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), each.want)
+			expectNoList(t, api)
+		})
+	}
+}
+
+// A 410 and an error event both list the collection, wake the loop for
+// the pass that reads it, and open the next watch from the list's
+// version. So does an event whose object does not decode, because a
+// watch from the same version would deliver it again.
+func TestTheWatcherListsAndWakesAfterAWatchFails(t *testing.T) {
 	cases := []struct {
 		name  string
 		first watchTurn
 	}{
-		{name: "the stream ends", first: watchTurn{}},
-		{name: "the server refuses the watch", first: watchTurn{status: http.StatusInternalServerError}},
+		{name: "a 410 response", first: watchTurn{status: http.StatusGone}},
+		{name: "a 410 event", first: watchTurn{events: []string{`{"type":"ERROR","object":{"code":410}}`}}},
+		{name: "an error event", first: watchTurn{events: []string{`{"type":"ERROR","object":{"code":500}}`}}},
+		{name: "an event that does not decode", first: watchTurn{events: []string{`{"type":"MODIFIED","object":{"metadata":7}}`}}},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -338,28 +357,21 @@ func TestTheWatcherListsAndWakesAfterAWatchThatCarriedNothing(t *testing.T) {
 
 			wake := startWatch(t, api, "42")
 
-			if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "42" {
-				t.Errorf("the first watch resumed from %q, want 42", got)
-			}
-			if got := nextListRequest(t, api); got != playsPath {
-				t.Errorf("the list read %q, want %q", got, playsPath)
-			}
+			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
+			mustMatch(t, nextListRequest(t, api), playsPath)
 			waitForWatchWake(t, wake)
-			if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-				t.Errorf("the second watch resumed from %q, want the list's 150", got)
-			}
+			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "150")
 		})
 	}
 }
 
-// media_watch_restarts_total counts a stream the API server closed and
-// this loop opened again, so the callback runs once per reconnect and
-// not on the loop's first connection.
+// media_watch_restarts_total counts a watch that ended and that this
+// loop opened again, so the callback runs once per reconnect and not
+// on the loop's first connection.
 func TestAWatchRestartCountsEachReconnectAndNotTheFirstConnect(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()
 	api.answersWatches(watchTurn{}, watchTurn{})
-	api.answersLists(listTurn{version: "2"}, listTurn{version: "3"})
 
 	server := httptest.NewServer(api.handler())
 	wake := make(chan struct{}, 1)
@@ -367,14 +379,8 @@ func TestAWatchRestartCountsEachReconnectAndNotTheFirstConnect(t *testing.T) {
 	go watchPlays(NewClient(server.URL, server.Client(), ""), "1", wake, func() { restarts.Add(1) })
 
 	nextWatchRequest(t, api)
-	nextListRequest(t, api)
-	waitForWatchWake(t, wake)
 	nextWatchRequest(t, api)
-	nextListRequest(t, api)
-	waitForWatchWake(t, wake)
 	nextWatchRequest(t, api)
 
-	if got := restarts.Load(); got != 2 {
-		t.Errorf("restarts = %d, want 2", got)
-	}
+	mustMatch(t, restarts.Load(), int32(2))
 }

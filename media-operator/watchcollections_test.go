@@ -69,16 +69,15 @@ func TestEachCollectionWatchReadsItsOwnCollection(t *testing.T) {
 	}
 }
 
-// A stream that ends carries no version, so the watcher lists the
-// collection, wakes the loop for the pass that reads it, and resumes the watch
-// from the list's version. A list that fails first leaves the resume point
-// where it was and the watcher tries again.
-func TestEachCollectionWatchListsAndWakesAfterTheStreamEnds(t *testing.T) {
+// A 410 lists the collection, wakes the loop for the pass that reads
+// it, and resumes the watch from the list's version. A list that fails
+// waits out the backoff, and the watcher lists again.
+func TestEachCollectionWatchListsAndWakesAfterAGone(t *testing.T) {
 	for _, each := range collectionWatchers {
 		t.Run(each.name, func(t *testing.T) {
 			useWatchRetryPause(t)
 			api := newWatchAPI()
-			api.answersWatches(watchTurn{}, watchTurn{})
+			api.answersWatches(watchTurn{status: http.StatusGone})
 			api.answersLists(listTurn{status: http.StatusInternalServerError}, listTurn{version: "150"})
 
 			wake := startCollectionWatch(t, each, api, "42")
@@ -86,9 +85,6 @@ func TestEachCollectionWatchListsAndWakesAfterTheStreamEnds(t *testing.T) {
 			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
 			mustMatch(t, nextWatchPath(t, api), each.watchPath)
 			mustMatch(t, nextListRequest(t, api), each.listPath)
-
-			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
-			mustMatch(t, nextWatchPath(t, api), each.watchPath)
 			mustMatch(t, nextListRequest(t, api), each.listPath)
 
 			waitForWatchWake(t, wake)
@@ -99,15 +95,14 @@ func TestEachCollectionWatchListsAndWakesAfterTheStreamEnds(t *testing.T) {
 }
 
 // media_watch_restarts_total counts a reconnect on every collection
-// watcher the same way, because callRestart is the one path all seven
-// watch loops take to their caller's counter.
+// watcher the same way, because they all run the one loop in
+// watchloop.go.
 func TestEachCollectionWatchCountsOneRestartPerReconnect(t *testing.T) {
 	for _, each := range collectionWatchers {
 		t.Run(each.name, func(t *testing.T) {
 			useWatchRetryPause(t)
 			api := newWatchAPI()
 			api.answersWatches(watchTurn{})
-			api.answersLists(listTurn{version: "150"})
 
 			server := httptest.NewServer(api.handler())
 			wake := make(chan struct{}, 1)
@@ -116,33 +111,27 @@ func TestEachCollectionWatchCountsOneRestartPerReconnect(t *testing.T) {
 				func() { restarts.Add(1) })
 
 			nextWatchRequest(t, api)
-			nextListRequest(t, api)
-			waitForWatchWake(t, wake)
 			nextWatchRequest(t, api)
 
-			if got := restarts.Load(); got != 1 {
-				t.Errorf("restarts = %d, want 1", got)
-			}
+			mustMatch(t, restarts.Load(), int32(1))
 		})
 	}
 }
 
-// A watch the server refuses is the same recovery as a stream that
-// ended: the watcher lists, wakes, and watches again.
+// A watch the server refuses waits out the backoff and opens again
+// from the same version, with no list.
 func TestEachCollectionWatchRecoversFromARefusedWatch(t *testing.T) {
 	for _, each := range collectionWatchers {
 		t.Run(each.name, func(t *testing.T) {
 			useWatchRetryPause(t)
 			api := newWatchAPI()
 			api.answersWatches(watchTurn{status: http.StatusInternalServerError})
-			api.answersLists(listTurn{version: "150"})
 
-			wake := startCollectionWatch(t, each, api, "42")
+			startCollectionWatch(t, each, api, "42")
 
 			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
-			mustMatch(t, nextListRequest(t, api), each.listPath)
-			waitForWatchWake(t, wake)
-			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "150")
+			mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
+			expectNoList(t, api)
 		})
 	}
 }

@@ -63,12 +63,12 @@ type trustStore struct {
 	namespace string
 	names     []string
 
-	// How long an ended watch waits before it opens again, and the
-	// bounds of the wait after a refused one. They are fields so a
-	// test drives the watch in milliseconds.
-	retry        time.Duration
+	// The bounds of the wait after a failed watch, and the shortest
+	// watch that counts as one that ran. They are fields so a test
+	// drives the watch in milliseconds.
 	backoffStart time.Duration
 	backoffMax   time.Duration
+	minLife      time.Duration
 
 	// pause is the wait itself, and report is where a change of state
 	// goes. Both are fields so a test drives the loop with no clock of
@@ -93,9 +93,9 @@ func newTrustStore(client *Client, namespace string, names ...string) *trustStor
 		client:       client,
 		namespace:    namespace,
 		names:        names,
-		retry:        watchRetryPause,
 		backoffStart: watchBackoffStart,
 		backoffMax:   watchBackoffMax,
+		minLife:      watchMinLife,
 		pause:        waiting,
 		report:       func(line string) { fmt.Fprintln(os.Stderr, line) },
 		anchors:      map[string]trustAnchor{},
@@ -153,7 +153,7 @@ func (t *trustStore) follower(name string) *namedWatch {
 			return nil
 		},
 		func() { t.forget(name) })
-	watch.retry = t.retry
+	watch.minLife = t.minLife
 	watch.backoffStart = t.backoffStart
 	watch.backoffMax = t.backoffMax
 	watch.pause = t.pause

@@ -117,7 +117,6 @@ func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
 	watched := make(chan *url.URL, 4)
 	store := newTrustStore(testAPIClient(t, watchingAPI(api, events, watched)), "liken-system",
 		displayCAConfigMapName)
-	store.retry = time.Millisecond
 	mustSucceed(t, store.load())
 
 	ctx, stop := context.WithCancel(context.Background())
