@@ -113,7 +113,10 @@ failed in review at least once:
   fresh list also gets a 410, wait out the backoff. After any other
   error event, wait out a backoff before the list, or a fault that
   lasts makes a tight list loop. An event whose object does not decode
-  counts as an error event.
+  counts as an error event. On any error, close the stream at once: a
+  server holds a watch open for minutes, and a loop that reads the
+  stream to its end loses every event in that time. A 410 that ends a
+  watch which ran a second or longer counts as a first 410.
 - A watch that closes less than a second after it opened is a
   failure, whatever it delivered, so the backoff applies. A watch
   with no version replays every object first, so "no events" does not
