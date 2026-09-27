@@ -40,14 +40,16 @@ type ReceiverList struct {
 	Items    []Receiver `json:"items"`
 }
 
-// The cluster owner states the inputs and the topics. The session is
-// this operator's block.
+// The cluster owner states the inputs and the topics. The equipment
+// operator reads spec.session when the status holds no session, so this
+// operator reads it to adopt it, and releases it once status.session
+// holds the session.
 type ReceiverSpec struct {
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
 	// CommandsTopic is the receiver's own commands topic, where a
 	// controller press asks for the unit's input. The cluster owner
-	// writes it and this operator only reads it, so the session apply
+	// writes it and this operator only reads it, so the spec release
 	// below never sends it.
 	CommandsTopic string `json:"commandsTopic,omitempty"`
 }
@@ -82,9 +84,12 @@ type ReceiverSession struct {
 	PowerTopic  string `json:"powerTopic,omitempty"`
 }
 
+// The session is this operator's block of the status. Every other
+// field is the equipment operator's.
 type ReceiverStatus struct {
 	Power      string              `json:"power,omitempty"`
 	Input      string              `json:"input,omitempty"`
+	Session    *ReceiverSession    `json:"session,omitempty"`
 	Conditions []ReceiverCondition `json:"conditions,omitempty"`
 }
 
@@ -94,14 +99,38 @@ type ReceiverCondition struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// The body of an apply carries the spec alone, and the session alone
-// inside it. The inputs are the cluster owner's and the status is the
-// equipment operator's, so this manager never touches either.
-type receiverApply struct {
+// The body of a session apply carries the status alone, and the
+// session alone inside it. The rest of the status is the equipment
+// operator's, so this manager never touches it.
+type receiverStatusApply struct {
+	APIVersion string                `json:"apiVersion"`
+	Kind       string                `json:"kind"`
+	Metadata   ObjectMeta            `json:"metadata"`
+	Status     receiverSessionStatus `json:"status"`
+}
+
+type receiverSessionStatus struct {
+	Session *ReceiverSession `json:"session,omitempty"`
+}
+
+// The body of the spec release carries an empty spec. The inputs are
+// the cluster owner's, and an apply that states no field releases only
+// the fields this manager owned.
+type receiverSpecApply struct {
 	APIVersion string       `json:"apiVersion"`
 	Kind       string       `json:"kind"`
 	Metadata   ObjectMeta   `json:"metadata"`
 	Spec       ReceiverSpec `json:"spec"`
+}
+
+// standingSession is the session the equipment operator acts on: the
+// one in status, or the one in spec when the status holds none. An
+// equipment operator reads the two in that order.
+func standingSession(receiver *Receiver) *ReceiverSession {
+	if receiver.Status.Session != nil {
+		return receiver.Status.Session
+	}
+	return receiver.Spec.Session
 }
 
 // receivers lists the cluster's Receivers at most once a pass, and only
@@ -223,7 +252,7 @@ func (o *operator) awake(player *Player, receiver *Receiver) bool {
 	case panelDesireOff:
 		return false
 	case "":
-		held := receiver.Spec.Session
+		held := standingSession(receiver)
 		if held != nil && held.Player == player.Metadata.Namespace+"/"+player.Metadata.Name {
 			return held.Awake
 		}
@@ -255,12 +284,12 @@ func (o *operator) applyReceiverSession(player *Player) {
 	o.applySession(player, receiver, input, true, true)
 }
 
-// applySession writes spec.session under this operator's field manager,
-// and only when the session differs from the one this operator last
-// applied. Power and input are one-shots the equipment answers once, so
-// an unchanged session is not sent again. A unit that moved to another
-// Receiver lifts the session on the old one first, so no equipment
-// keeps a session nothing holds.
+// applySession writes status.session under this operator's field
+// manager, and only when the session differs from the one this operator
+// last applied. Power and input are one-shots the equipment answers
+// once, so an unchanged session is not sent again. A unit that moved to
+// another Receiver lifts the session on the old one first, so no
+// equipment keeps a session nothing holds.
 //
 // The tracking compares the whole session, so a Play that starts or
 // ends changes only the active flag, and the session is applied again
@@ -280,21 +309,31 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 		PowerTopic:  playerPowerTopic(o.topicBase, namespace, name),
 	}
 	held, tracked := o.receiverSessions[key]
-	if tracked && held.receiver == receiver.Metadata.Name && held.session == session {
-		return
-	}
-	// A session the Receiver already carries is the one an earlier run
-	// of this operator applied. The equipment acts on power and input
-	// once, so the same session is recorded and not sent again.
-	if !tracked && receiver.Spec.Session != nil && *receiver.Spec.Session == session {
+	standing := standingSession(receiver)
+	statusHolds := receiver.Status.Session != nil
+	switch {
+	case tracked && held.receiver == receiver.Metadata.Name && held.session == session:
+		// The session this run applied still stands, so nothing is sent.
+	case !tracked && standing != nil && *standing == session:
+		// A session the Receiver already carries is the one an earlier
+		// run of this operator applied. The equipment acts on power and
+		// input once, so the same session is recorded and not sent again.
 		o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
-		return
-	}
-	if tracked && held.receiver != receiver.Metadata.Name {
-		err := ApplyReceiverSession(o.client, held.receiver, nil)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "lifting the session on receiver %s: %v\n", held.receiver, err)
+	default:
+		if !o.writeSession(key, receiver, session, held, tracked) {
 			return
+		}
+		statusHolds = true
+	}
+	o.releaseSpecSession(key, receiver, statusHolds)
+}
+
+// writeSession lifts the session a moved unit left on its old Receiver,
+// then applies the new one. It answers whether the new session landed.
+func (o *operator) writeSession(key string, receiver *Receiver, session ReceiverSession, held receiverSession, tracked bool) bool {
+	if tracked && held.receiver != receiver.Metadata.Name {
+		if !o.liftSession(held.receiver) {
+			return false
 		}
 		delete(o.receiverSessions, key)
 		logLine(o.log, "player %s: lifted the session on receiver %s, because the unit moved to receiver %s",
@@ -303,11 +342,60 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	if err := ApplyReceiverSession(o.client, receiver.Metadata.Name, &session); err != nil {
 		fmt.Fprintf(os.Stderr, "applying the session on receiver %s: %v\n",
 			receiver.Metadata.Name, err)
-		return
+		return false
 	}
 	o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
 	logLine(o.log, "player %s: applied the session on receiver %s: input %s, active %t, awake %t",
-		key, receiver.Metadata.Name, input, active, awake)
+		key, receiver.Metadata.Name, session.Input, session.Active, session.Awake)
+	return true
+}
+
+// releaseSpecSession removes a session this operator applied to
+// spec.session, once status.session holds the session. The order
+// matters: an equipment operator falls back to spec.session when the
+// status holds none, so a release before the status write would end the
+// session for a moment.
+//
+// The release is sent at most once a run for each Receiver. The API
+// server removes only a field this manager owns, so a spec.session
+// another manager wrote stays, and a second apply would change nothing.
+func (o *operator) releaseSpecSession(key string, receiver *Receiver, statusHolds bool) {
+	name := receiver.Metadata.Name
+	if receiver.Spec.Session == nil {
+		o.specReleased[name] = true
+		return
+	}
+	if !statusHolds || o.specReleased[name] {
+		return
+	}
+	if err := ReleaseReceiverSpecSession(o.client, name); err != nil {
+		fmt.Fprintf(os.Stderr, "releasing spec.session on receiver %s: %v\n", name, err)
+		return
+	}
+	o.specReleased[name] = true
+	logLine(o.log, "player %s: released spec.session on receiver %s, because status.session holds the session",
+		key, name)
+}
+
+// liftSession removes this operator's session from one Receiver: the
+// spec.session a run that wrote spec left there, then the status. A
+// Receiver that is gone carries no session, so the lift it refuses has
+// already landed. It answers whether the lift landed.
+func (o *operator) liftSession(name string) bool {
+	if !o.specReleased[name] {
+		err := ReleaseReceiverSpecSession(o.client, name)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			fmt.Fprintf(os.Stderr, "releasing spec.session on receiver %s: %v\n", name, err)
+			return false
+		}
+		o.specReleased[name] = true
+	}
+	err := ApplyReceiverSession(o.client, name, nil)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		fmt.Fprintf(os.Stderr, "lifting the session on receiver %s: %v\n", name, err)
+		return false
+	}
+	return true
 }
 
 // retainSessions lifts the session of every unit that no longer matches
@@ -319,9 +407,7 @@ func (o *operator) retainSessions(matched map[string]bool) {
 		if matched[key] {
 			continue
 		}
-		err := ApplyReceiverSession(o.client, held.receiver, nil)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "lifting the session on receiver %s: %v\n", held.receiver, err)
+		if !o.liftSession(held.receiver) {
 			continue
 		}
 		delete(o.receiverSessions, key)

@@ -64,6 +64,9 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 		{name: "apply a receiver session", call: func(c *Client) error {
 			return ApplyReceiverSession(c, "living-room-denon", nil)
 		}},
+		{name: "release a receiver spec session", call: func(c *Client) error {
+			return ReleaseReceiverSpecSession(c, "living-room-denon")
+		}},
 	}
 	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -162,9 +165,10 @@ func TestPutRemoteStatusWritesTheStatusSubresource(t *testing.T) {
 	mustMatch(t, api.requests[0].Path, "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand/status")
 }
 
-// The session apply reaches the Receiver's own path, under this
-// operator's field manager, as an apply patch that carries the session
-// alone. A nil session carries an empty spec, which is the lift.
+// The session apply reaches the Receiver's status subresource, under
+// this operator's field manager, as an apply patch that carries the
+// session alone. A nil session carries an empty status, which is the
+// lift.
 //
 // The active and awake flags are always on the wire, so a session that
 // carries neither still states both as false.
@@ -177,32 +181,48 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 		{
 			name:    "a session the run holds",
 			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, Awake: true, VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"status":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
 		},
 		{
 			name:    "a session at a dark panel",
 			session: &ReceiverSession{Player: "house/theater", Input: "GAME", VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
 		},
 		{
 			name: "the lift",
-			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{}}`,
+			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"status":{}}`,
 		},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			api := &cannedAPI{answers: map[string]any{
-				"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon": Receiver{},
+				"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon/status": Receiver{},
 			}}
 
 			mustSucceed(t, ApplyReceiverSession(testAPIClient(t, api.handler()), "living-room-denon", each.session))
 
 			mustMatch(t, len(api.requests), 1)
 			mustMatch(t, api.requests[0].Method, http.MethodPatch)
-			mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon")
+			mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon/status")
 			mustMatch(t, string(api.requests[0].Body), each.want)
 		})
 	}
+}
+
+// The spec release reaches the Receiver's own path as an apply patch
+// with an empty spec, which releases the spec.session this manager
+// owns and nothing else.
+func TestTheSpecReleaseCarriesAnEmptySpec(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon": Receiver{},
+	}}
+
+	mustSucceed(t, ReleaseReceiverSpecSession(testAPIClient(t, api.handler()), "living-room-denon"))
+
+	mustMatch(t, len(api.requests), 1)
+	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon")
+	mustMatch(t, string(api.requests[0].Body),
+		`{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{}}`)
 }
 
 // The Receivers are read from one cluster-scoped collection.

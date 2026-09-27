@@ -98,10 +98,12 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 			}
 		}
 	case podSucceeded:
-		// The last item ended: mpv exited zero and the pod
-		// succeeded. The numbers stay as the last report left them,
-		// so a finished season still shows which episode ended it
-		// and where.
+		// The last item ended, or a person's exit press quit mpv:
+		// mpv exited zero and the pod succeeded. A compositor that
+		// went away exits compositorLostExit and fails the pod
+		// instead, so the run resumes. The numbers stay as the last
+		// report left them, so a finished season still shows which
+		// episode ended it and where.
 		status.Phase = phaseFinished
 		foldReport(&status, latest)
 	case podFailed:
@@ -171,8 +173,8 @@ func foldReport(status *PlayStatus, latest *playReport) {
 
 // podFailureMessage prefers the container's terminated state,
 // because it carries the exit code, which is the part a person acts
-// on: 1 is the player refusing its input, 137 is the kernel ending a
-// pod over its limit.
+// on: 1 is the player refusing its input, 7 is a compositor that went
+// away, and 137 is the kernel ending a pod over its limit.
 func podFailureMessage(pod *Pod) string {
 	for _, container := range pod.Status.ContainerStatuses {
 		if container.Name != playerContainer || container.State.Terminated == nil {
@@ -180,6 +182,9 @@ func podFailureMessage(pod *Pod) string {
 		}
 		terminated := container.State.Terminated
 		reason := terminated.Reason
+		if terminated.ExitCode == compositorLostExit {
+			reason = "the player lost its compositor"
+		}
 		if reason == "" {
 			reason = "the player exited"
 		}

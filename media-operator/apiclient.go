@@ -553,16 +553,38 @@ func ListReceivers(c *Client) (*ReceiverList, error) {
 	return list, nil
 }
 
-// ApplyReceiverSession writes spec.session and nothing else, under this
-// operator's own field manager. A nil session applies an empty spec,
-// and the API server then removes the block this manager owns. That is
-// how the equipment is released.
+// ApplyReceiverSession writes status.session and nothing else, under
+// this operator's own field manager on the status subresource. A nil
+// session applies an empty status, and the API server then removes the
+// block this manager owns. That is how the equipment is released.
+//
+// The session is status and not spec because a status write changes no
+// metadata.generation. The equipment operator reads a new generation as
+// a new statement of its settings, so a session in spec made every
+// active or awake flip send the settings again.
 func ApplyReceiverSession(c *Client, name string, session *ReceiverSession) error {
-	body, err := json.Marshal(&receiverApply{
+	body, err := json.Marshal(&receiverStatusApply{
 		APIVersion: receiverAPIVersion,
 		Kind:       "Receiver",
 		Metadata:   ObjectMeta{Name: name},
-		Spec:       ReceiverSpec{Session: session},
+		Status:     receiverSessionStatus{Session: session},
+	})
+	if err != nil {
+		return err
+	}
+	path := receiversPath + "/" + name + "/status?fieldManager=" + applyFieldManager
+	return c.requestJSON(http.MethodPatch, path, applyContentType, body, nil)
+}
+
+// ReleaseReceiverSpecSession applies an empty spec under this
+// operator's field manager, and the API server then removes the
+// spec.session this manager owns. A field another manager owns stays,
+// so the apply never removes the cluster owner's inputs or topics.
+func ReleaseReceiverSpecSession(c *Client, name string) error {
+	body, err := json.Marshal(&receiverSpecApply{
+		APIVersion: receiverAPIVersion,
+		Kind:       "Receiver",
+		Metadata:   ObjectMeta{Name: name},
 	})
 	if err != nil {
 		return err

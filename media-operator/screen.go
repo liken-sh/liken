@@ -29,16 +29,19 @@ const monitorIDAttribute = "monitor.liken.sh/id"
 // observed power word that means a lit panel. The panel comes back
 // when the block is deleted, so nothing here writes an on value: the
 // display-operator answers the lift by restoring what it captured.
+// Both are PascalCase, the form of every enum value in a Kubernetes
+// resource.
 const (
-	displayPowerOff = "off"
-	displayPowerOn  = "on"
+	displayPowerOff = "Off"
+	displayPowerOn  = "On"
 )
 
 // samePower compares two Display power words without regard to case.
 // The display-operator reports a word in lowercase or in PascalCase,
-// "on" or "On", depending on its build, and both spellings name one
-// state. An exact compare reads a lit panel as down when the spelling
-// differs.
+// "on" or "On", depending on its build, and a Display's override can
+// hold "off" or "Off" in the same way. Both spellings name one state.
+// An exact compare reads a lit panel as down, or a standing override as
+// one to write again, when the spelling differs.
 func samePower(a, b string) bool {
 	return strings.EqualFold(a, b)
 }
@@ -362,16 +365,45 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 		return ""
 	}
 	if o.panelOverrides[key].desire != desire {
-		if err := ApplyDisplayOverride(o.client, monitor, overrideFor(desire, mode)); err != nil {
-			o.panelFault(key, fmt.Sprintf("overriding display %s: %v", monitor, err))
+		if !o.writeOverride(key, desire, monitor, overrideFor(desire, mode), display) {
 			return panelFromDisplay(display.Status.Observed)
 		}
-		o.panelOverrides[key] = panelOverride{desire: desire, monitor: monitor}
-		logLine(o.log, "player %s: the idle screen asked for panel %s, applied %s to display %s",
-			key, desire, describeOverride(overrideFor(desire, mode)), monitor)
 	}
 	delete(o.panelFaults, key)
 	return panelFromDisplay(display.Status.Observed)
+}
+
+// writeOverride brings the Display's override to the one a new desire
+// asks for, and records the desire. It reads the override the Display
+// carries first, and writes only when that override differs, so an
+// operator that restarts adopts the override its earlier run wrote and
+// the panel sees no second write. It answers whether the Display now
+// carries the override.
+func (o *operator) writeOverride(key, desire, monitor string, want *DisplayOverride, display *Display) bool {
+	if !sameOverride(display.Spec.Override, want) {
+		if err := ApplyDisplayOverride(o.client, monitor, want); err != nil {
+			o.panelFault(key, fmt.Sprintf("overriding display %s: %v", monitor, err))
+			return false
+		}
+		logLine(o.log, "player %s: the idle screen asked for panel %s, applied %s to display %s",
+			key, desire, describeOverride(want), monitor)
+	}
+	o.panelOverrides[key] = panelOverride{desire: desire, monitor: monitor}
+	return true
+}
+
+// sameOverride compares two override blocks, each value without regard
+// to case, for the reason samePower gives. No block and an empty block
+// are the same: each leaves the panel at its resting settings.
+func sameOverride(a, b *DisplayOverride) bool {
+	var left, right DisplayOverride
+	if a != nil {
+		left = *a
+	}
+	if b != nil {
+		right = *b
+	}
+	return samePower(left.Backlight, right.Backlight) && samePower(left.Power, right.Power)
 }
 
 // reconcileScreen answers one unit's screen memory and its Screen

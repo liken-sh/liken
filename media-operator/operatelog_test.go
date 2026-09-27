@@ -478,13 +478,13 @@ func TestAPanelDesireLogsTheOverrideOnce(t *testing.T) {
 	statePanel(media, players, "on", nil)
 
 	mustMatchAll(t, linesAbout(log, "player house/theater"), []string{
-		"player house/theater: the idle screen asked for panel off, applied backlight off to display " + testMonitor,
+		"player house/theater: the idle screen asked for panel off, applied backlight Off to display " + testMonitor,
 		"player house/theater: the idle screen asked for panel on, applied no override to display " + testMonitor,
 	})
 }
 
 func TestDescribeOverrideNamesTheBlock(t *testing.T) {
-	mustMatch(t, describeOverride(&DisplayOverride{Power: displayPowerOff}), "power off")
+	mustMatch(t, describeOverride(&DisplayOverride{Power: displayPowerOff}), "power Off")
 }
 
 // A unit that is gone lifts the override it left, and the line says so.

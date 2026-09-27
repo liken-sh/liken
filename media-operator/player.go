@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -21,6 +22,15 @@ import (
 // the mpv its image carries, and a test points it at a stand-in that
 // needs no display and no sound card.
 var mpvBinary = "mpv"
+
+// compositorLostExit is mpv's exit code when its compositor goes away.
+// mpv answers a closed or broken Wayland connection with the CLOSE_WIN
+// key, and its own binding for that key is a plain quit, which exits
+// zero. A zero exit makes the pod Succeeded, and the operator reads a
+// Succeeded pod as a film that reached its end. The shim binds the key
+// to a quit with this code, so the pod fails, and the operator creates
+// the run again at the last position the run reported.
+const compositorLostExit = 7
 
 // overlayFont is the family the overlay draws in, installed as two OTF
 // files in the player image and named here for mpv's own OSD. The brand
@@ -107,6 +117,10 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		// mpv's own OSD messages draw in the brand family; libass resolves
 		// it through fontconfig against the two OTF files the image installs.
 		"--osd-font=" + overlayFont,
+		// The binding that makes a lost compositor a failed pod, as
+		// compositorLostExit says. memory:// is mpv's inline file, so the
+		// shim writes no file to a root filesystem it may not write to.
+		"--input-conf=memory://CLOSE_WIN quit " + strconv.Itoa(compositorLostExit),
 	}
 	// --quiet is the default because mpv prints its status line about
 	// eight times a second, this process's stdout is the pod log on the

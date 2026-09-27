@@ -151,11 +151,19 @@ func (v volumeState) asPlayVolume() *PlayVolume {
 
 // volumeDesk is the boundary between the bus and the reconcile loop
 // for each unit's level, the way panelDesk is for each unit's panel.
-// It answers the one question the seed asks: whether the broker
-// already holds a state for this unit.
+// It answers the two questions the seed asks: whether the operator
+// holds a state for this unit, and whether the broker's current
+// session holds one too.
 type volumeDesk struct {
 	mutex sync.Mutex
 	state map[string]volumeState
+
+	// delivered names each unit whose level this broker session
+	// carried: a retained value the broker delivered, or a level this
+	// operator published. The broker keeps no retained value across a
+	// restart, so a unit the desk holds and this map does not name is
+	// a level the broker lost.
+	delivered map[string]bool
 
 	// marks holds each unit's owner mark, true while equipment holds
 	// the level. The pod builder reads it, so a pod for an owned unit
@@ -165,7 +173,23 @@ type volumeDesk struct {
 }
 
 func newVolumeDesk() *volumeDesk {
-	return &volumeDesk{state: map[string]volumeState{}, marks: map[string]bool{}}
+	return &volumeDesk{state: map[string]volumeState{}, delivered: map[string]bool{}, marks: map[string]bool{}}
+}
+
+// newSession forgets which levels the last broker session carried. The
+// bus calls it at each connect, before the session delivers anything.
+func (d *volumeDesk) newSession() {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.delivered = map[string]bool{}
+}
+
+// deliveredFor answers whether this broker session carried the unit's
+// level.
+func (d *volumeDesk) deliveredFor(key string) bool {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	return d.delivered[key]
 }
 
 // setState records one unit's state, whether it arrived on the bus
@@ -176,6 +200,7 @@ func (d *volumeDesk) setState(key string, state volumeState) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.state[key] = state.clamped()
+	d.delivered[key] = true
 }
 
 // stateFor returns one unit's state, and whether the desk holds one
@@ -217,6 +242,11 @@ func (d *volumeDesk) retain(live map[string]bool) {
 	for key := range d.marks {
 		if !live[key] {
 			delete(d.marks, key)
+		}
+	}
+	for key := range d.delivered {
+		if !live[key] {
+			delete(d.delivered, key)
 		}
 	}
 }

@@ -109,16 +109,15 @@ func TestThePanelWordFoldsTheObservedState(t *testing.T) {
 	}
 }
 
-// The override this operator writes keeps the lowercase off, whichever
-// spelling the Display reports, so a Display CRD that accepts only the
-// lowercase word still takes the write.
-func TestTheOverrideWritesTheLowercaseOff(t *testing.T) {
+// The override this operator writes is the PascalCase Off, the form of
+// every enum value in a Kubernetes resource.
+func TestTheOverrideWritesThePascalCaseOff(t *testing.T) {
 	cases := []struct {
 		mode string
 		want DisplayOverride
 	}{
-		{mode: offModeBacklight, want: DisplayOverride{Backlight: "off"}},
-		{mode: offModePower, want: DisplayOverride{Power: "off"}},
+		{mode: offModeBacklight, want: DisplayOverride{Backlight: "Off"}},
+		{mode: offModePower, want: DisplayOverride{Power: "Off"}},
 	}
 	for _, one := range cases {
 		t.Run(one.mode, func(t *testing.T) {

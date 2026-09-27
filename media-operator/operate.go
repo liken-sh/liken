@@ -188,6 +188,12 @@ type operator struct {
 	// from. Only the pass goroutine touches it.
 	receiverSessions map[string]receiverSession
 
+	// specReleased names each Receiver whose spec holds no
+	// session of this operator's: one it read with no spec.session, or
+	// one whose spec.session it released this run. Only the pass
+	// goroutine touches it.
+	specReleased map[string]bool
+
 	// volumes is the desk for each unit's level. Unlike the desks
 	// above, it wakes no pass, because the level folds into no status.
 	// The pass reads it for one question alone: whether the broker
@@ -343,6 +349,7 @@ func operate() {
 		panelOverrides:   map[string]panelOverride{},
 		panelFaults:      map[string]string{},
 		receiverSessions: map[string]receiverSession{},
+		specReleased:     map[string]bool{},
 		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]bool{},
 		positionWrites:   map[string]time.Time{},
@@ -360,6 +367,7 @@ func operate() {
 	// restarted, so without this the keymaps and focus marks would stay
 	// missing until a person edited one.
 	onConnect := func(bus *Bus) {
+		media.volumes.newSession()
 		media.busReconnected.Store(true)
 		poke(wake)
 	}
@@ -1158,11 +1166,27 @@ func playOf(status PlayerStatus) string {
 // connect, so after a broker restart the pod restores the level.
 // The pod's reconnect can come later than catchUpGrace, and a seed in
 // that gap would put the film at unity.
+//
+// A broker that restarts alone loses the idle unit's level, and the
+// operator still holds it, so the pass publishes the held level again.
+// Without that, an operator that restarts later finds no level on the
+// broker and seeds unity over the level a person set. A unit whose
+// level equipment owns is left to the equipment, which writes its own
+// level.
 func (o *operator) seedVolume(player *Player, key string, standing bool) {
 	if len(player.Spec.Sinks) == 0 || standing || !o.caughtUp() {
 		return
 	}
-	if _, held := o.volumes.stateFor(key); held {
+	if o.volumes.deliveredFor(key) {
+		return
+	}
+	if state, held := o.volumes.stateFor(key); held {
+		if o.volumes.owned(key) {
+			return
+		}
+		logLine(o.log, "player %s: the broker held no level after the catch-up, published the held %s to %s",
+			key, describeVolume(state), playerVolumeTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name))
+		o.publishVolume(player.Metadata.Namespace, player.Metadata.Name, state)
 		return
 	}
 	logLine(o.log, "player %s: no level on the broker after the catch-up, published %s to %s",

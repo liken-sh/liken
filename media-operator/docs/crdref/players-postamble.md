@@ -72,7 +72,8 @@ player's own default and the cap. A published level outside 0 to 100
 is clamped to the range.
 
 Three writers publish here. The operator writes unity when it seeds
-a unit the broker holds no level for, and it writes a `Play`'s
+a unit the broker holds no level for, it writes the level it holds
+again after a broker restart, and it writes a `Play`'s
 `spec.volume` over the unit's current state before it creates the
 pod. The pod that handles a `volume` or `mute` press writes the next
 state back. That pod is the playback pod's command sidecar during a
@@ -88,7 +89,11 @@ The seed waits out the broker's retained catch-up after each connect,
 and it skips a unit while a `Play` stands on it. The playback pod's
 command sidecar holds the level the room hears, and it publishes that
 level again on each reconnect, so a broker restart does not move a
-playing film to unity.
+playing film to unity. Between films the operator holds the level:
+after a broker restart, it publishes the level it last read for each
+unit the new session delivers none for, unless equipment owns that
+level. An operator and a broker that restart together hold no level,
+so the seed writes unity, and the next `Play` starts there.
 
 Every pod for the unit subscribes and applies what it reads, so the
 unit plays at the one level the topic holds. While the owner mark is

@@ -52,6 +52,7 @@ type fakeCluster struct {
 	// order, the refused ones included.
 	receivers       map[string]*Receiver
 	sessions        []receiverApplied
+	specReleases    []receiverApplied
 	sessionsFail    bool
 	receiversAbsent bool
 
@@ -207,8 +208,10 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
 			f.patchPlay(w, r, name)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/") && name == "status":
+			f.applySession(w, r, path.Base(path.Dir(r.URL.Path)))
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/"):
-			f.applySession(w, r, name)
+			f.releaseSpecSession(w, r, name)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/displays/"):
 			answer(w, f.displays[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/displays/"):
@@ -337,18 +340,42 @@ func (f *fakeCluster) apply(w http.ResponseWriter, r *http.Request, name string)
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// applySession folds one server-side apply onto a Receiver. The session
-// the body carries replaces the one the Receiver holds, and an apply
-// with no session lifts it.
+// applySession folds one server-side apply of the status onto a
+// Receiver. The session the body carries replaces the one the status
+// holds, and an apply with no session lifts it.
 func (f *fakeCluster) applySession(w http.ResponseWriter, r *http.Request, name string) {
 	held, standing := f.receivers[name]
 	if !standing {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	var applied receiverApply
+	var applied receiverStatusApply
 	_ = json.NewDecoder(r.Body).Decode(&applied)
 	f.sessions = append(f.sessions, receiverApplied{
+		name:    name,
+		session: applied.Status.Session,
+		manager: r.URL.Query().Get("fieldManager"),
+	})
+	if f.sessionsFail {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	held.Status.Session = applied.Status.Session
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// releaseSpecSession folds one server-side apply of the spec onto a
+// Receiver. The apply states no session, so the API server removes the
+// spec.session this manager owned.
+func (f *fakeCluster) releaseSpecSession(w http.ResponseWriter, r *http.Request, name string) {
+	held, standing := f.receivers[name]
+	if !standing {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var applied receiverSpecApply
+	_ = json.NewDecoder(r.Body).Decode(&applied)
+	f.specReleases = append(f.specReleases, receiverApplied{
 		name:    name,
 		session: applied.Spec.Session,
 		manager: r.URL.Query().Get("fieldManager"),
@@ -401,6 +428,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		panelOverrides:   map[string]panelOverride{},
 		panelFaults:      map[string]string{},
 		receiverSessions: map[string]receiverSession{},
+		specReleased:     map[string]bool{},
 		volumes:          newVolumeDesk(),
 		endingLabeled:    map[string]bool{},
 		positionWrites:   map[string]time.Time{},

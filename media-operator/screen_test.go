@@ -131,8 +131,11 @@ func screenCluster() *fakeCluster {
 }
 
 // statePanel hands the operator one desire off the bus and
-// runs the pass that acts on it.
+// runs the pass that acts on it. The pass's lookups are dropped first,
+// the way a pass drops them, so the pass reads the Display as the last
+// one left it.
 func statePanel(media *operator, players []Player, desire string, defaults *IdlePolicy) {
+	media.screenCache, media.receiverCache = nil, nil
 	media.handleBusMessage(playerPanelTopic(defaultTopicBase, "house", "theater"),
 		[]byte(`{"desire":"`+desire+`"}`))
 	media.reconcilePlayers(players, nil, "", defaults)

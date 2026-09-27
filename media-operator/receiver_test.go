@@ -346,7 +346,7 @@ func TestAPlayMovesTheActiveFlagAndNeitherEdgeLifts(t *testing.T) {
 
 	mustMatch(t, appliedActive(cluster), "false, true, false")
 	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
-	if cluster.receivers["living-room-denon"].Spec.Session == nil {
+	if cluster.receivers["living-room-denon"].Status.Session == nil {
 		t.Error("the receiver holds no session")
 	}
 }
@@ -417,25 +417,40 @@ func heldSession(awake bool) *ReceiverSession {
 	}
 }
 
+// holdIn places a session in one half of the house Receiver: the status,
+// where this operator writes it, or the spec, where an operator that
+// wrote spec left it.
+type holdIn func(receiver *Receiver, session *ReceiverSession)
+
+func inStatus(receiver *Receiver, session *ReceiverSession) { receiver.Status.Session = session }
+func inSpec(receiver *Receiver, session *ReceiverSession)   { receiver.Spec.Session = session }
+
 // An operator that restarts reads the session its earlier run left on the
 // Receiver. Before the bus delivers the panel desire, and after a desire
 // that agrees with it, the pass sends nothing, so a slow bus never powers
 // the equipment on in a dark room.
+//
+// A session in spec alone is adopted the same way. The status write waits
+// for the next change, because the equipment operator reads spec when the
+// status holds no session.
 func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
 	cases := []struct {
 		name   string
+		hold   holdIn
 		awake  bool
 		desire string
 	}{
-		{name: "a dark room before the desire arrives", awake: false},
-		{name: "a lit room before the desire arrives", awake: true},
-		{name: "a dark room with the off desire", awake: false, desire: panelDesireOff},
-		{name: "a lit room with the on desire", awake: true, desire: panelDesireOn},
+		{name: "a dark room before the desire arrives", hold: inStatus, awake: false},
+		{name: "a lit room before the desire arrives", hold: inStatus, awake: true},
+		{name: "a dark room with the off desire", hold: inStatus, awake: false, desire: panelDesireOff},
+		{name: "a lit room with the on desire", hold: inStatus, awake: true, desire: panelDesireOn},
+		{name: "a dark room held in spec", hold: inSpec, awake: false},
+		{name: "a lit room held in spec with the on desire", hold: inSpec, awake: true, desire: panelDesireOn},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			cluster := receiverCluster()
-			cluster.receivers["living-room-denon"].Spec.Session = heldSession(each.awake)
+			each.hold(cluster.receivers["living-room-denon"], heldSession(each.awake))
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 			if each.desire != "" {
 				statePanelDesire(media, each.desire)
@@ -445,15 +460,97 @@ func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
 			runPlayers(media, []Player{*housePlayer()}, nil)
 
 			mustMatch(t, len(cluster.sessions), 0)
+			mustMatch(t, len(cluster.specReleases), 0)
 		})
 	}
+}
+
+// The session goes to the status subresource, under this operator's field
+// manager, and the spec stays as the cluster owner wrote it.
+func TestTheSessionIsWrittenToTheStatus(t *testing.T) {
+	cluster := receiverCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	runPlayers(media, []Player{*housePlayer()}, standingPlays())
+
+	mustMatch(t, len(cluster.sessions), 1)
+	mustMatch(t, cluster.sessions[0].manager, applyFieldManager)
+	mustMatch(t, countPathRequests(cluster.requests, "PATCH "+receiversPath+"/living-room-denon/status"), 1)
+	mustMatch(t, cluster.receivers["living-room-denon"].Status.Session.Active, true)
+	mustMatch(t, cluster.receivers["living-room-denon"].Spec.Session == nil, true)
+	mustMatch(t, len(cluster.specReleases), 0)
+}
+
+// A spec.session an earlier run left is released once the status holds
+// the session: after a status write, or at once when the status already
+// holds the same session. The release goes under the manager that wrote
+// the spec, and the passes send it once.
+func TestTheOldSpecSessionIsReleasedOnceTheStatusHoldsTheSession(t *testing.T) {
+	cases := []struct {
+		name         string
+		spec         *ReceiverSession
+		status       *ReceiverSession
+		wantSessions int
+	}{
+		{name: "a spec session that differs", spec: playingSession(), wantSessions: 1},
+		{name: "the same session in both halves", spec: heldSession(true), status: heldSession(true)},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := receiverCluster()
+			receiver := cluster.receivers["living-room-denon"]
+			receiver.Spec.Session, receiver.Status.Session = each.spec, each.status
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			runPlayers(media, []Player{*housePlayer()}, nil)
+			runPlayers(media, []Player{*housePlayer()}, nil)
+
+			mustMatch(t, len(cluster.sessions), each.wantSessions)
+			mustMatch(t, appliedReleases(cluster), "living-room-denon: "+applyFieldManager)
+			mustMatch(t, receiver.Spec.Session == nil, true)
+		})
+	}
+}
+
+// A unit that goes away while the old spec.session stands lifts both
+// halves, so an equipment operator that falls back to spec finds no
+// session there either.
+func TestALiftReleasesTheOldSpecSessionToo(t *testing.T) {
+	cluster := receiverCluster()
+	cluster.receivers["living-room-denon"].Spec.Session = heldSession(true)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	runPlayers(media, []Player{*housePlayer()}, nil)
+	runPlayers(media, nil, nil)
+
+	mustMatch(t, appliedReleases(cluster), "living-room-denon: "+applyFieldManager)
+	mustMatch(t, appliedSessions(cluster), "living-room-denon: lift")
+	mustMatch(t, cluster.receivers["living-room-denon"].Spec.Session == nil, true)
+}
+
+// playingSession is a held session whose Play has since ended, so the
+// session this pass states differs from it in the active flag alone.
+func playingSession() *ReceiverSession {
+	session := heldSession(true)
+	session.Active = true
+	return session
+}
+
+// appliedReleases reads every spec release the passes made as one line:
+// the Receiver it named and the field manager it went under.
+func appliedReleases(cluster *fakeCluster) string {
+	releases := make([]string, len(cluster.specReleases))
+	for index, applied := range cluster.specReleases {
+		releases[index] = applied.name + ": " + applied.manager
+	}
+	return strings.Join(releases, ", ")
 }
 
 // A desire that differs from the session the Receiver holds is a person's
 // press or a timer, and it reaches the equipment.
 func TestADesireThatDiffersFromTheHeldSessionIsApplied(t *testing.T) {
 	cluster := receiverCluster()
-	cluster.receivers["living-room-denon"].Spec.Session = heldSession(false)
+	cluster.receivers["living-room-denon"].Status.Session = heldSession(false)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
@@ -501,7 +598,7 @@ func TestAUnitThatIsGoneLiftsItsSession(t *testing.T) {
 	runPlayers(media, nil, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
-	if cluster.receivers["living-room-denon"].Spec.Session != nil {
+	if cluster.receivers["living-room-denon"].Status.Session != nil {
 		t.Error("the receiver still holds a session")
 	}
 }
@@ -523,7 +620,7 @@ func TestAFailedLiftRetriesOnTheNextPass(t *testing.T) {
 	runPlayers(media, nil, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
-	if cluster.receivers["living-room-denon"].Spec.Session != nil {
+	if cluster.receivers["living-room-denon"].Status.Session != nil {
 		t.Error("the receiver still holds a session")
 	}
 }
@@ -583,7 +680,7 @@ func TestTheSessionReachesTheReceiverBeforeThePodIsCreated(t *testing.T) {
 
 	media.pass()
 
-	applied := indexOfRequest(cluster.requests, "PATCH "+receiversPath+"/living-room-denon")
+	applied := indexOfRequest(cluster.requests, "PATCH "+receiversPath+"/living-room-denon/status")
 	created := indexOfRequest(cluster.requests, "POST /api/v1/namespaces/house/pods")
 	if applied < 0 || created < 0 {
 		t.Fatalf("the pass made %v", cluster.requests)
