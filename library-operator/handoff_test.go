@@ -121,6 +121,21 @@ func TestTheConfirmationEndsTheWait(t *testing.T) {
 	}
 }
 
+// A delete of this Job's confirmation carries the cells of the removed
+// row. It is no confirmation, so it leaves the wait standing.
+func TestADeletedConfirmationLeavesTheWaitStanding(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	wait := waitingJob(t, catalog, workerScan, "scan-1")
+
+	wait.note([]string{confirmerColumn}, []any{"movies-catalog-0"}, true)
+
+	select {
+	case <-wait.confirmed:
+		t.Error("a deleted confirmation ended the wait")
+	default:
+	}
+}
+
 // A confirmation of a run that is not this pod's leaves the wait
 // standing, so a Job never reads another worker's handoff, or the handoff
 // of a pod of its own Job that died before it, as its own.

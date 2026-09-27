@@ -242,6 +242,33 @@ func TestAQueryEventTheOperatorCannotReadIsAnError(t *testing.T) {
 	}
 }
 
+// A change event names its kind first, and a delete carries the cells of
+// the row it removed. The decoder marks a delete, so a reader that acts on
+// a live row never reads a removed one as live.
+func TestASubscriptionDeleteReadsAsADelete(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "a snapshot row", line: `{"row":[1,["house/movies"]]}`, want: subscriptionRow},
+		{name: "an insert", line: `{"change":["insert",1,["house/movies"],5]}`, want: subscriptionRow},
+		{name: "an update", line: `{"change":["update",1,["house/movies"],5]}`, want: subscriptionRow},
+		{name: "a delete", line: `{"change":["delete",1,["house/movies"],5]}`, want: subscriptionDelete},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			event, err := decodeSubscriptionEvent([]byte(testCase.line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.kind != testCase.want || len(event.cells) != 1 {
+				t.Errorf("event = %+v, want kind %q with its cells", event, testCase.want)
+			}
+		})
+	}
+}
+
 // A subscription event the operator cannot read is an error, the way a query
 // event is. A change event carries its cells one element later than a row
 // event, because it names the kind of change first.

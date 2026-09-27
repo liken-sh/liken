@@ -141,7 +141,7 @@ func (c *confirmer) follow(ctx context.Context) {
 		reached := false
 		err := c.catalog.subscribe(ctx, confirmerRunsQuery, nil,
 			func() { reached = true },
-			func(columns []string, cells []any) { c.noteRun(ctx, columns, cells) })
+			func(columns []string, cells []any, deleted bool) { c.noteRun(ctx, columns, cells, deleted) })
 		if err != nil && ctx.Err() == nil {
 			c.logf("the run stream ended: %v", err)
 		}
@@ -166,8 +166,9 @@ func (c *confirmer) follow(ctx context.Context) {
 // seconds. No event covers the arrival: the proof is in the cr-sqlite
 // bookkeeping, and a subscription or an update stream follows only the
 // catalog's own tables. So the recheck is a backstop timer. It reads
-// nothing when no run is pending, and a pending run leaves the set when
-// it is confirmed or when a newer run of its row replaces it. A run whose
+// nothing when no run is pending. A pending run leaves the set when it is
+// confirmed, when a newer run of its row replaces it, or when its row is
+// deleted. A confirmed run never enters the set again. A run whose
 // versions never arrive stays until the pod restarts, at up to three small
 // reads of the local copy every two seconds.
 func (c *confirmer) recheckWhilePending(ctx context.Context) {
@@ -190,10 +191,18 @@ func (c *confirmer) recheckWhilePending(ctx context.Context) {
 
 // NoteRun reads one streamed runs row and settles it. A row this
 // image cannot read is skipped, so one row of a shape this operator did not
-// write never costs the confirmer the rest of the table.
-func (c *confirmer) noteRun(ctx context.Context, columns []string, cells []any) {
+// write never costs the confirmer the rest of the table. A delete is
+// never confirmed: a cleanup Job deletes the runs and the confirmations of
+// its library, and a confirmation written for a deleted run would keep the
+// library's key in the catalog after the library is gone. A delete takes
+// the run its row held out of the pending set, because no Job waits on it.
+func (c *confirmer) noteRun(ctx context.Context, columns []string, cells []any, deleted bool) {
 	run, ok := decodeFinishedRun(columns, cells)
 	if !ok {
+		return
+	}
+	if deleted {
+		c.drop(run)
 		return
 	}
 	if !c.settle(ctx, run) {
@@ -297,10 +306,24 @@ func (c *confirmer) mark(key string) {
 // again while it waits, and a retried pod of a Job that timed out writes a
 // run with a write of its own. Without the replacement, the run of every
 // pod that timed out stays pending for the life of this pod.
+//
+// A run that is already confirmed is not held. The recheck can confirm a
+// run while the stream's read of the same run still runs, and the stream's
+// hold then arrives after the confirmation.
 func (c *confirmer) hold(run finishedRun) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	if c.confirmed[run.key()] {
+		return
+	}
 	c.pending[run.row()] = run
+}
+
+// Drop takes the run of one deleted runs row out of the pending set.
+func (c *confirmer) drop(run finishedRun) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	delete(c.pending, run.row())
 }
 
 // Waiting is the runs the recheck reads, copied out from under the

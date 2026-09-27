@@ -94,8 +94,9 @@ func (s *sweeper) runJob(ctx context.Context) error {
 }
 
 // Deletes every row of the library in every table, the runs of
-// every other worker with them, so the only row this library holds after
-// the sweep is the one the Job writes next.
+// every other worker with them, so the only rows this library holds after
+// the sweep are the run the Job writes next and the confirmations that
+// the catalog pods write for that run.
 func (s *sweeper) sweep(ctx context.Context) error {
 	removed, err := s.catalog.SweepLibrary(ctx, s.library)
 	if err != nil {

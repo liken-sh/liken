@@ -153,7 +153,8 @@ func (c *Catalog) countTitles(ctx context.Context, library string) (int, error) 
 const subscriptionsPath = "/v1/subscriptions"
 
 // Posts one statement and calls onRow for every row of the opening
-// snapshot and every change after it, with the column names the stream
+// snapshot and every change after it, with deleted set for a change that
+// removed its row, and with the column names the stream
 // opened with, because the agent's matcher prepends the primary key to
 // the projection and a reader that counts cells would read the wrong one.
 // onReady is called once the snapshot ends. The call returns when the
@@ -162,7 +163,7 @@ const subscriptionsPath = "/v1/subscriptions"
 // A statement with parameters travels as the [sql, [params]] pair
 // the read side sends, because a subscription binds them the same way.
 func (c *Catalog) subscribe(ctx context.Context, sql string, params []any,
-	onReady func(), onRow func(columns []string, cells []any)) error {
+	onReady func(), onRow func(columns []string, cells []any, deleted bool)) error {
 	var statement any = sql
 	if len(params) > 0 {
 		statement = []any{sql, params}
@@ -203,7 +204,9 @@ func (c *Catalog) subscribe(ctx context.Context, sql string, params []any,
 		case subscriptionColumns:
 			columns = event.columns
 		case subscriptionRow:
-			onRow(columns, event.cells)
+			onRow(columns, event.cells, false)
+		case subscriptionDelete:
+			onRow(columns, event.cells, true)
 		case subscriptionEnd:
 			onReady()
 		case subscriptionError:
@@ -213,11 +216,13 @@ func (c *Catalog) subscribe(ctx context.Context, sql string, params []any,
 	return scanner.Err()
 }
 
-// The four events a subscription stream carries that the reader
-// acts on; every other event reads as a skipped one.
+// The events a subscription stream carries that the reader acts on;
+// every other event reads as a skipped one. A delete is a change event of
+// the kind "delete", and it carries the cells of the row it removed.
 const (
 	subscriptionColumns = "columns"
 	subscriptionRow     = "row"
+	subscriptionDelete  = "delete"
 	subscriptionEnd     = "eoq"
 	subscriptionError   = "error"
 )
@@ -232,7 +237,8 @@ type subscriptionEvent struct {
 
 // Reads one streamed subscription event. A row event is
 // [rowid, [cells]] and a change event is [kind, rowid, [cells], id], so
-// both carry their cells and both read as a row here.
+// both carry their cells. An insert and an update read as a row, and a
+// delete reads as a delete, because its cells are a row that is gone.
 func decodeSubscriptionEvent(line []byte) (subscriptionEvent, error) {
 	var event map[string]json.RawMessage
 	if err := json.Unmarshal(line, &event); err != nil {
@@ -273,7 +279,12 @@ func decodeSubscriptionEvent(line []byte) (subscriptionEvent, error) {
 	if err := json.Unmarshal(parts[at], &cells); err != nil {
 		return subscriptionEvent{}, err
 	}
-	return subscriptionEvent{kind: subscriptionRow, cells: cells}, nil
+	kind := subscriptionRow
+	var change string
+	if at == 2 && json.Unmarshal(parts[0], &change) == nil && change == subscriptionDelete {
+		kind = subscriptionDelete
+	}
+	return subscriptionEvent{kind: kind, cells: cells}, nil
 }
 
 // Reads one named column out of a streamed row.

@@ -133,7 +133,64 @@ func TestTheConfirmerWaitsUntilItsCopyHoldsTheVersions(t *testing.T) {
 func streamRun(t *testing.T, work *confirmer, run finishedRun) {
 	t.Helper()
 	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
-		[]any{run.library, run.worker, run.job, run.actor, float64(run.version)})
+		[]any{run.library, run.worker, run.job, run.actor, float64(run.version)}, false)
+}
+
+// A cleanup Job deletes the runs of its library, and the run stream
+// carries each delete with the cells of the removed row. A delete is no
+// run to confirm, so it writes no confirmation that would outlive the
+// library, and it holds nothing for the recheck.
+func TestADeletedRunIsNotConfirmed(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	run := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
+	work := testConfirmer(t, catalog, io.Discard)
+
+	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
+		[]any{"house/departed", workerScan, "scan-1", run.Actor, float64(run.Version)}, true)
+
+	held, err := catalog.confirmedBy(t.Context(), "house/departed", workerScan, "scan-1",
+		testConfirmerPod, run.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held || len(work.waiting()) != 0 {
+		t.Errorf("confirmed = %v, waiting = %v, want no confirmation and nothing held",
+			held, work.waiting())
+	}
+}
+
+// A run the confirmer holds leaves the pending set when its runs row is
+// deleted, because no Job waits on a run whose row is gone.
+func TestADeletedRowTakesItsPendingRun(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	work := testConfirmer(t, catalog, io.Discard)
+	run := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+	streamRun(t, work, run)
+
+	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
+		[]any{run.library, run.worker, run.job, run.actor, float64(run.version)}, true)
+
+	if waiting := work.waiting(); len(waiting) != 0 {
+		t.Errorf("waiting = %+v, want nothing once the row is deleted", waiting)
+	}
+}
+
+// The recheck can confirm a run while the stream's read of the same run
+// still runs. The stream's hold that follows keeps nothing, because the
+// run is already confirmed.
+func TestAConfirmedRunIsNotHeldAgain(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	work := testConfirmer(t, catalog, io.Discard)
+	run := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+	work.mark(run.key())
+
+	work.hold(run)
+
+	if waiting := work.waiting(); len(waiting) != 0 {
+		t.Errorf("waiting = %+v, want nothing for a confirmed run", waiting)
+	}
 }
 
 // A retried pod of a Job that timed out writes the same runs row with

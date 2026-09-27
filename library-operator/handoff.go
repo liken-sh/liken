@@ -160,7 +160,7 @@ func (w *handoffWaiter) follow(ctx context.Context) {
 		_ = w.catalog.subscribe(ctx, confirmationsQuery,
 			[]any{w.library, w.run.Worker, w.run.Job, w.run.Version},
 			func() {},
-			func(columns []string, cells []any) { w.note(columns, cells) })
+			func(columns []string, cells []any, deleted bool) { w.note(columns, cells, deleted) })
 		select {
 		case <-ctx.Done():
 			return
@@ -170,8 +170,13 @@ func (w *handoffWaiter) follow(ctx context.Context) {
 }
 
 // Note ends the wait on a row that names a confirming pod. The
-// query names this run alone, so every row it carries is this Job's.
-func (w *handoffWaiter) note(columns []string, cells []any) {
+// query names this run alone, so every row it carries is this Job's. A
+// delete carries the cells of a confirmation that is gone, which proves
+// nothing.
+func (w *handoffWaiter) note(columns []string, cells []any, deleted bool) {
+	if deleted {
+		return
+	}
 	cell, held := cellNamed(columns, cells, confirmerColumn)
 	if !held {
 		return

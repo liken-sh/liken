@@ -140,7 +140,9 @@ func (c *Catalog) Runs(ctx context.Context) (map[string][]libraryRun, error) {
 // every change after it, and the reporter publishes that library's
 // report again on each one.
 func (c *Catalog) subscribeRuns(ctx context.Context, onReady func(), onLibrary func(library string)) error {
-	return c.subscribe(ctx, runsQuery, nil, onReady, func(columns []string, cells []any) {
+	// A delete names its library too, because the library's report
+	// changes when one of its runs goes.
+	return c.subscribe(ctx, runsQuery, nil, onReady, func(columns []string, cells []any, _ bool) {
 		cell, held := cellNamed(columns, cells, runsLibraryColumn)
 		if !held {
 			return
