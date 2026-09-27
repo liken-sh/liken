@@ -105,9 +105,12 @@ func TestAPressReadSharesAQuestionInFlight(t *testing.T) {
 // The join scan and a TV's introduction ask the TV its power through
 // the same shared read as a press, so a press while either waits on
 // the TV takes their answer and puts no second question on the wire.
-// The TV takes 400 ms to answer each question, so its power question
-// comes last, after 1.2 s of the others, and the press 1.3 s in lands
-// while it waits.
+// The TV takes 400 ms to answer each question. An introduction asks
+// three questions before the power, so the press 1.3 s in lands while
+// the introduction's power question waits. A scan asks four, so its
+// power question starts at 1.6 s, after the press's read began, and
+// the scan shares the press's read. Either order puts one question on
+// the wire.
 
 // slowTV is a TV that is on and takes 400 ms to answer each question.
 func slowTV() cectest.Peer {

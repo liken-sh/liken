@@ -31,9 +31,11 @@ type ScanReport struct {
 // Report Power Status, and the kernel hands the one answer to one
 // waiter, so a caller that reads the TV's power elsewhere too, such as
 // for a press of a remote's power button, routes every read through
-// one reader that shares a read in flight. An error ends the scan or
-// the introduction, as a refused transmit does. A nil reader sends the
-// question like any other.
+// one reader that shares a read in flight. An error from the reader
+// ends the scan or the introduction, as a refused transmit does; the
+// node's reader returns one only when the adapter left, and it handles
+// a refused or unanswered question itself, under its own rules for a
+// missed reply. A nil reader sends the question like any other.
 type PowerReader func() error
 
 // asksTVPower answers whether a question is the power question to the
