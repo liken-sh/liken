@@ -16,11 +16,16 @@ import (
 	"time"
 )
 
-// scriptedWatch is one watch the script answers: how long it stayed
-// open, and how it ended.
+// scriptedWatch is one watch the script answers: how long the API
+// server took to answer, how long the watch stayed open after a 200,
+// and how it ended. goneResponse answers the request itself with 410,
+// so the watch never opens as a stream. Any other opened end answers
+// 200 first.
 type scriptedWatch struct {
-	lived time.Duration
-	end   watchEnd
+	answered     time.Duration
+	lived        time.Duration
+	goneResponse bool
+	end          watchEnd
 }
 
 // runScript runs a loop from the version given over the scripted
@@ -61,7 +66,8 @@ func runScript(t *testing.T, from string, lists []error, watches []scriptedWatch
 			}
 			next := watches[0]
 			watches = watches[1:]
-			if next.end.opened {
+			clock = clock.Add(next.answered)
+			if next.end.opened && !next.goneResponse {
 				live()
 			}
 			clock = clock.Add(next.lived)
@@ -136,6 +142,32 @@ func TestAWatchLoopRecoversEachEnding(t *testing.T) {
 				{lived: time.Minute, end: watchEnd{version: "950", opened: true, gone: true}},
 			},
 			want: []string{"open 42", "list", "open 900", "list", "open 900"},
+		},
+		{
+			name: "a slow 200 that closes at once did not run, so the wait grows",
+			from: "42",
+			watches: []scriptedWatch{
+				{answered: 1500 * time.Millisecond, end: watchEnd{version: "42", opened: true}},
+				{answered: 1500 * time.Millisecond, end: watchEnd{version: "42", opened: true}},
+				{answered: 1500 * time.Millisecond, end: watchEnd{version: "42", opened: true}},
+			},
+			want: []string{"open 42", "pause 1s", "open 42", "pause 2s", "open 42", "pause 4s", "open 42"},
+		},
+		{
+			name: "a slow 410 response never ran, so a second one in a row waits",
+			from: "42",
+			watches: []scriptedWatch{
+				{answered: 1500 * time.Millisecond, goneResponse: true, end: gone},
+				{answered: 1500 * time.Millisecond, goneResponse: true, end: gone},
+				{answered: 1500 * time.Millisecond, goneResponse: true, end: gone},
+				{answered: 1500 * time.Millisecond, goneResponse: true, end: gone},
+			},
+			want: []string{
+				"open 42", "list", "open 900",
+				"pause 1s", "list", "open 900",
+				"pause 2s", "list", "open 900",
+				"pause 4s", "list", "open 900",
+			},
 		},
 		{
 			name:    "an error event waits before the list",

@@ -22,8 +22,9 @@ package main
 //     failure, whatever it delivered, so the backoff applies. A watch
 //     that ran a second or longer resets the backoff, even when it
 //     ended with an error, because the next failure is a new fault. A
-//     410 that ends such a watch counts as a first 410. A watch the
-//     API server never accepted did not run, however long it waited.
+//     410 that ends such a watch counts as a first 410. A watch runs
+//     from the API server's 200. A watch that never got one, a 410
+//     answer included, did not run, however long it waited.
 //
 // An error ends the stream at once: the loop closes the body and does
 // not read to its end. The API server can hold a stream open for
@@ -112,7 +113,12 @@ func (l *watchLoop) run(ctx context.Context, version string) {
 		wait = min(wait*2, l.backoffMax)
 		return true
 	}
+	// accepted is when the API server answered the current watch with
+	// 200, and zero until it does. A watch runs from there: the time a
+	// slow answer takes, and a 410 answer, are not a watch that ran.
+	var accepted time.Time
 	live := func() {
+		accepted = l.now()
 		if fault != "" {
 			l.report(fmt.Sprintf("watching %s again", l.subject))
 			fault = ""
@@ -140,17 +146,19 @@ func (l *watchLoop) run(ctx context.Context, version string) {
 		}
 		first = false
 
-		began := l.now()
+		accepted = time.Time{}
 		end := l.open(ctx, version, live)
 		version = end.version
 		if ctx.Err() != nil {
 			return
 		}
-		// Only a watch the API server accepted can have run. A dial or a
-		// response that times out takes seconds and opens nothing, and
-		// counting it would reset the wait on every attempt against a
-		// dead server.
-		ran := end.opened && l.now().Sub(began) >= l.minLife
+		// Only a watch the API server accepted with 200 can have run, and
+		// it runs from that answer. The seconds before the answer do not
+		// count: a slow 200 that closes at once, a dial or a response that
+		// times out, and a slow 410 would otherwise reset the wait on
+		// every attempt against a server that is slow, down, or keeps
+		// answering 410.
+		ran := !accepted.IsZero() && l.now().Sub(accepted) >= l.minLife
 		if ran {
 			wait = l.backoffStart
 			// A watch that ran was a working watch, so a 410 that ends
