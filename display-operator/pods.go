@@ -62,6 +62,11 @@ type PodMeta struct {
 	Name      string            `json:"name"`
 	Namespace string            `json:"namespace"`
 	Labels    map[string]string `json:"labels,omitempty"`
+	// DeletionTimestamp is set once the API server has begun to
+	// delete the pod. The pod may still run and still report Ready
+	// through its grace period, and a newer pod may already stand in
+	// its place.
+	DeletionTimestamp *string `json:"deletionTimestamp,omitempty"`
 }
 
 // PodStatus is what the kubelet reports about one pod's containers. A

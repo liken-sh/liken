@@ -469,3 +469,62 @@ func TestAWatchRefusedWithGoneListsAgain(t *testing.T) {
 		t.Errorf("the loop listed %d times, want a second listing at once after the 410", lists)
 	}
 }
+
+// countListings runs the named watch for window against a server that
+// lists at version 1 and answers every watch with answer, and counts
+// the listings.
+func countListings(t *testing.T, window time.Duration, answer func(w http.ResponseWriter)) int64 {
+	t.Helper()
+	var lists atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") != "true" {
+			lists.Add(1)
+			fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
+			return
+		}
+		answer(w)
+	}))
+	t.Cleanup(server.Close)
+	ctx, stop := context.WithTimeout(t.Context(), window)
+	defer stop()
+	watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
+		"tracked", "the test ConfigMap", func(*ConfigMap) {})
+	return lists.Load()
+}
+
+// A 410 relists at once only once. A server that answers 410 even to
+// the version of a fresh listing would otherwise turn the loop into a
+// tight loop of listings, so the second 410 in a row waits.
+func TestAGoneAfterAFreshListingWaits(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer func(w http.ResponseWriter)
+	}{
+		{name: "as an event", answer: func(w http.ResponseWriter) {
+			fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
+		}},
+		{name: "as the response", answer: func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusGone)
+			fmt.Fprint(w, `{"kind":"Status","code":410}`)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if lists := countListings(t, 500*time.Millisecond, c.answer); lists != 2 {
+				t.Errorf("the loop listed %d times in half a second, want the first and one at once after the 410", lists)
+			}
+		})
+	}
+}
+
+// An event whose object does not decode would come back at the same
+// version on every reopen, so it counts as an ERROR event: the loop
+// waits, then lists again.
+func TestAnEventThatDoesNotDecodeListsAgain(t *testing.T) {
+	lists := countListings(t, 1500*time.Millisecond, func(w http.ResponseWriter) {
+		fmt.Fprint(w, `{"type":"MODIFIED","object":{"metadata":{"name":"tracked","resourceVersion":"2"},"data":5}}`)
+	})
+	if lists < 2 {
+		t.Errorf("the loop listed %d times, want a second listing after the event that does not decode", lists)
+	}
+}

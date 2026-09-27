@@ -32,55 +32,94 @@ type sidecarPod struct {
 	Ready     bool
 }
 
+// The index holds every sidecar pod by name, and answers per node. A
+// rollout runs two pods on one node for a while, and their events
+// arrive interleaved, so a map keyed by node would let the old pod's
+// late events take the node from the new one.
 type sidecarIndex struct {
 	mu     sync.RWMutex
-	byNode map[string]sidecarPod
+	byName map[string]Pod
 }
 
 func newSidecarIndex() *sidecarIndex {
-	return &sidecarIndex{byNode: map[string]sidecarPod{}}
+	return &sidecarIndex{byName: map[string]Pod{}}
 }
 
 // A request reads this map and never the API server, so a capture
 // costs one call to the node and nothing else.
+//
+// The answer is the node's pod that is not being deleted, a Ready one
+// before one that is not. A pod that is being deleted answers only
+// when the node has no other, because it still runs through its grace
+// period. Pods of equal rank answer by name, so every request gets the
+// same one.
 func (i *sidecarIndex) on(node string) (sidecarPod, bool) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
-	pod, held := i.byNode[node]
-	return pod, held
+	var best *Pod
+	for name := range i.byName {
+		pod := i.byName[name]
+		if pod.Spec.NodeName != node {
+			continue
+		}
+		if best == nil || sidecarRank(pod) > sidecarRank(*best) ||
+			(sidecarRank(pod) == sidecarRank(*best) && pod.Metadata.Name < best.Metadata.Name) {
+			best = &pod
+		}
+	}
+	if best == nil {
+		return sidecarPod{}, false
+	}
+	return sidecarPod{
+		Namespace: best.Metadata.Namespace,
+		Name:      best.Metadata.Name,
+		Node:      best.Spec.NodeName,
+		IP:        best.Status.PodIP,
+		Ready:     best.Status.ready(),
+	}, true
+}
+
+// How strongly a pod answers for its node: not being deleted counts
+// before Ready.
+func sidecarRank(pod Pod) int {
+	rank := 0
+	if pod.Metadata.DeletionTimestamp == nil {
+		rank += 2
+	}
+	if pod.Status.ready() {
+		rank++
+	}
+	return rank
 }
 
 func (i *sidecarIndex) hold(pod Pod) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
 	if pod.Spec.NodeName == "" {
 		return
 	}
-	i.byNode[pod.Spec.NodeName] = sidecarPod{
-		Namespace: pod.Metadata.Namespace,
-		Name:      pod.Metadata.Name,
-		Node:      pod.Spec.NodeName,
-		IP:        pod.Status.PodIP,
-		Ready:     pod.Status.ready(),
-	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.byName[pod.Metadata.Name] = pod
 }
 
 func (i *sidecarIndex) drop(pod Pod) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	held, there := i.byNode[pod.Spec.NodeName]
-	if there && held.Name == pod.Metadata.Name {
-		delete(i.byNode, pod.Spec.NodeName)
-	}
+	delete(i.byName, pod.Metadata.Name)
 }
 
+// The listing is the whole truth. The new map is built first and
+// swapped in under one lock, so a request never reads an index that is
+// half filled.
 func (i *sidecarIndex) replace(pods []Pod) {
-	i.mu.Lock()
-	i.byNode = map[string]sidecarPod{}
-	i.mu.Unlock()
+	byName := make(map[string]Pod, len(pods))
 	for _, pod := range pods {
-		i.hold(pod)
+		if pod.Spec.NodeName != "" {
+			byName[pod.Metadata.Name] = pod
+		}
 	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.byName = byName
 }
 
 // The loop: one listing, then a watch from the listing's version, for

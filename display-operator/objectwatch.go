@@ -62,12 +62,19 @@ func watchNamed[T any](ctx context.Context, c *Client, collection, name string, 
 // that a reset connection ends, resumes at the last version it
 // delivered, and bookmarks move that version while nothing changes. A
 // version the API server no longer holds answers 410 Gone, as the
-// response or as an ERROR event, and the loop lists again at once. Any
-// other ERROR event lists again after a wait.
+// response or as an ERROR event, and the loop lists again at once, and
+// after a wait when the watch that opened from that fresh listing meets
+// 410 again. Any other ERROR event lists again after a wait, and so
+// does an event whose object does not decode, because the reopened
+// watch would meet the same event at the same version.
 func watchList[T any](ctx context.Context, c *Client, path, what string,
 	listed func(items []T), changed func(kind string, held T)) {
 	version := ""
 	delay := objectWatchRetry
+	// Whether the listing the loop holds was taken because of a 410.
+	// A second 410 in a row names a version the API server just gave,
+	// so a listing at once would only meet it again.
+	afterGone := false
 	for ctx.Err() == nil {
 		if version == "" {
 			items, listedAt, err := listAt[T](c, path)
@@ -86,14 +93,21 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 		}
 		if errors.Is(err, errWatchExpired) {
 			version = ""
+			if afterGone {
+				delay = pauseWatch(ctx, delay)
+				continue
+			}
+			afterGone = true
 			delay = objectWatchRetry
 			continue
 		}
+		afterGone = false
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 		}
-		// An ERROR event says the watch cannot go on from its version,
-		// so the loop lists again, after a wait. Any other end, a
+		// An ERROR event, or an event whose object does not decode,
+		// says the watch cannot go on from its version, so the loop
+		// lists again, after a wait. Any other end, a
 		// timeout or a reset connection, leaves the version good, and the
 		// next watch resumes there with no listing.
 		var ended *watchErrorEvent
@@ -157,6 +171,13 @@ func (e *watchErrorEvent) Error() string {
 	return "the watch ended with " + e.status
 }
 
+// undecodable is an event whose object this program cannot read. It
+// counts as an ERROR event, and the error carries the decoder's text
+// and the object word for word.
+func undecodable(object json.RawMessage, err error) *watchErrorEvent {
+	return &watchErrorEvent{status: fmt.Sprintf("an object that does not decode (%v): %s", err, object)}
+}
+
 // One watch connection. It answers the last version it delivered, so
 // the next connection resumes there.
 func streamList[T any](ctx context.Context, c *Client, path, version string, changed func(string, T)) (string, error) {
@@ -190,7 +211,7 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 			} `json:"metadata"`
 		}
 		if err := json.Unmarshal(event.Object, &meta); err != nil {
-			return version, err
+			return version, undecodable(event.Object, err)
 		}
 		switch event.Type {
 		case "ERROR":
@@ -201,7 +222,7 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 		case "ADDED", "MODIFIED", "DELETED":
 			var held T
 			if err := json.Unmarshal(event.Object, &held); err != nil {
-				return version, err
+				return version, undecodable(event.Object, err)
 			}
 			changed(event.Type, held)
 		}

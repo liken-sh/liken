@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -245,5 +246,91 @@ func TestTheSidecarWatchWaitsAfterAShortWatch(t *testing.T) {
 	if lists+len(asked) > 3 {
 		t.Errorf("the loop listed %d times and watched %d times in half a second, want it to wait",
 			lists, len(asked))
+	}
+}
+
+// A sidecar pod by name on node-1, ready or not, and deleting or not.
+func sidecarNamed(name string, ready, deleting bool) Pod {
+	pod := readySidecar("node-1", "10.42.0.7")
+	pod.Metadata.Name = name
+	pod.Status.PodIP = map[string]string{"old": "10.42.0.7", "new": "10.42.0.8"}[name]
+	if !ready {
+		pod.Status.Conditions = []PodCondition{{Type: "Ready", Status: conditionFalse}}
+	}
+	if deleting {
+		stamp := "2026-09-27T12:00:00Z"
+		pod.Metadata.DeletionTimestamp = &stamp
+	}
+	return pod
+}
+
+// A rollout replaces a node's sidecar, and the events of the two pods
+// arrive interleaved. The old pod's late events must not take the node
+// from the new one, so the index answers per node with the pod that is
+// not being deleted, and a Ready pod before one that is not.
+func TestTheIndexAnswersTheNodesCurrentSidecar(t *testing.T) {
+	cases := []struct {
+		name   string
+		events func(index *sidecarIndex)
+		want   string
+		ready  bool
+	}{
+		{name: "the old pod is marked for deletion after the new one is ready", events: func(index *sidecarIndex) {
+			index.hold(sidecarNamed("old", true, false))
+			index.hold(sidecarNamed("new", true, false))
+			index.hold(sidecarNamed("old", true, true))
+		}, want: "new", ready: true},
+		{name: "the old pod is deleted after the new one is ready", events: func(index *sidecarIndex) {
+			index.hold(sidecarNamed("old", true, false))
+			index.hold(sidecarNamed("new", true, false))
+			index.hold(sidecarNamed("old", false, true))
+			index.drop(sidecarNamed("old", false, true))
+		}, want: "new", ready: true},
+		{name: "a ready pod before one that is starting", events: func(index *sidecarIndex) {
+			index.hold(sidecarNamed("old", true, false))
+			index.hold(sidecarNamed("new", false, false))
+		}, want: "old", ready: true},
+		{name: "a starting pod before one that is being deleted", events: func(index *sidecarIndex) {
+			index.hold(sidecarNamed("new", false, false))
+			index.hold(sidecarNamed("old", true, true))
+		}, want: "new", ready: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			index := newSidecarIndex()
+			c.events(index)
+
+			held, there := index.on("node-1")
+			if !there || held.Name != c.want || held.Ready != c.ready {
+				t.Errorf("the index answers %+v (held: %v), want %s with ready=%v", held, there, c.want, c.ready)
+			}
+		})
+	}
+}
+
+// A listing replaces the index in one step, so a capture that reads the
+// index while a listing lands never finds a node the listing names
+// missing.
+func TestAListingNeverEmptiesTheIndexOnTheWay(t *testing.T) {
+	index := newSidecarIndex()
+	pods := []Pod{readySidecar("node-1", "10.42.0.7")}
+	index.replace(pods)
+	var missed atomic.Int64
+	ctx, stop := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer stop()
+	go func() {
+		for ctx.Err() == nil {
+			index.replace(pods)
+		}
+	}()
+
+	for ctx.Err() == nil {
+		if _, held := index.on("node-1"); !held {
+			missed.Add(1)
+		}
+	}
+
+	if n := missed.Load(); n > 0 {
+		t.Errorf("a read found node-1 missing %d times while listings landed", n)
 	}
 }
