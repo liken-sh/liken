@@ -439,6 +439,21 @@ func (f *fakePipeWire) settle() {
 	f.sink.NodeID = f.newNodeID
 }
 
+// changes stands in for the graph feed's signal. While a switch
+// renegotiates, the graph moves, so the signal fires at once and the
+// wait reads again. A graph that does not move never fires it, and
+// the wait runs to its timeout.
+func (f *fakePipeWire) changes() <-chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.switching {
+		return nil
+	}
+	moved := make(chan struct{})
+	close(moved)
+	return moved
+}
+
 func (f *fakePipeWire) writeCodec(_ context.Context, device, codec int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -473,8 +488,8 @@ func codecPlugin(t *testing.T, claim string, pipewire *fakePipeWire) *draPlugin 
 	plugin.graph = pipewire.read
 	plugin.setCodec = pipewire.writeCodec
 	plugin.setVolumes = pipewire.writeVolumes
+	plugin.changes = pipewire.changes
 	plugin.codecTimeout = 200 * time.Millisecond
-	plugin.codecInterval = time.Millisecond
 	return plugin
 }
 
@@ -775,12 +790,9 @@ func TestSpeakerCodecSwitchTakesTheProductionBounds(t *testing.T) {
 	sink.Codec = "aptx"
 	read := staticGraph(speakerGraph(map[string]bluezSink{testSpeakerAddress: sink}))
 
-	change := speakerCodecSwitch(read)
+	change := speakerCodecSwitch(&graphFeed{poll: read})
 	if change.timeout != codecSwitchTimeout {
 		t.Errorf("timeout = %s, want %s", change.timeout, codecSwitchTimeout)
-	}
-	if change.interval != codecSwitchInterval {
-		t.Errorf("interval = %s, want %s", change.interval, codecSwitchInterval)
 	}
 
 	// The graph already reports the codec, so the wait answers with

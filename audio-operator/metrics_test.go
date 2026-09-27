@@ -265,7 +265,7 @@ func TestObservationInvalidLeavesTheEndpointGaugesAtTheirLastValue(t *testing.T)
 	operator := testReconciler(t, slice, graph, "pcmC0D0p")
 	operator.readings = readings
 	operator.control = newEndpointControl(testClient(t, endpointAPI.handler(t)), "liken-1",
-		&preparedClaims{}, operator.graph, readings)
+		&preparedClaims{}, &graphFeed{poll: operator.graph}, readings)
 	operator.control.now = func() time.Time { return factsTime }
 	operator.control.openCard = func(int) (*mixer, error) {
 		return nil, errors.New("this test has no control device")

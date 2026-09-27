@@ -35,7 +35,17 @@ in the operator's log and is never written. An empty `spec` writes
 nothing at all. The operator invents no value: an endpoint with no
 declarations keeps whatever the hardware holds, except that every
 sink starts at unity gain so that no hidden multiplier costs
-resolution before the codec runs.
+resolution before the codec runs. The unity write goes only to a
+node PipeWire builds while the operator runs. After a restart, the
+operator writes nothing to a sink that was there before it started,
+and the sink keeps the level it holds.
+
+An idle node reports no level, and PipeWire announces no write to
+one, so the operator cannot read whether an idle node already holds
+its declared `volume` and `mute`. After a restart, the operator
+treats the declaration as the level an idle node holds and writes
+nothing to it. It compares the declaration with the node's level
+when the node runs, and it writes a changed declaration at once.
 
 `volume`, `mute`, and `controls` apply at once, whether a claim
 holds the endpoint or not. `codec` waits for the claim to end,

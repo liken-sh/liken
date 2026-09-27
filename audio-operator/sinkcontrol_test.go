@@ -363,3 +363,93 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 		t.Fatalf("the write was not tried again: %+v", record)
 	}
 }
+
+// suspendedGraph is the lab graph with the analog jack's node idle:
+// it stands and runs no stream, so it reports no levels.
+func suspendedGraph() pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	idle := graph.Nodes[address]
+	idle.Volumes = nil
+	graph.Nodes[address] = idle
+	return graph
+}
+
+// An operator that starts again finds an idle node it cannot read,
+// under a declaration it may have written before the restart. The
+// start writes nothing to it, and a person's later change of the
+// declaration still reaches it.
+func TestAStartWritesNothingToASuspendedNodeUntilTheDeclarationChanges(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(40)},
+	}
+	ctx := context.Background()
+
+	for range 2 {
+		if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if record.node != nil {
+		t.Fatalf("a start wrote %+v to a suspended node", record.level)
+	}
+
+	api.sinks[testAnalogName].Spec.Volume = pointerTo(25)
+	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
+		t.Fatalf("a changed declaration reached the suspended node as %+v", record)
+	}
+}
+
+// The compare that a start skips on an idle node runs once the node
+// runs and reports its level, so a level that drifted while the
+// operator was down is still corrected.
+func TestASuspendedNodeIsComparedOnceItRuns(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(25)},
+	}
+	ctx := context.Background()
+
+	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.pass(ctx, labEndpoints(), nil, turnedDownGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
+		t.Fatalf("the running node at 40 percent was written %+v", record)
+	}
+}
+
+// A running node that matches the declaration is judged to hold it,
+// so the node takes no write when it goes idle and stops reporting
+// its level.
+func TestARunningNodeThatMatchesTakesNoWriteWhenItGoesIdle(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(40)},
+	}
+	ctx := context.Background()
+
+	for _, graph := range []pwGraph{turnedDownGraph(), suspendedGraph()} {
+		if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if record.node != nil {
+		t.Errorf("a node that matched the declaration was written %+v when it went idle", record.level)
+	}
+}

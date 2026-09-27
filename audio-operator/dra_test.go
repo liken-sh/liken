@@ -54,6 +54,9 @@ func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 		client:    client,
 		endpoints: testInventory(),
 		graph:     staticGraph(graph),
+		// A static graph never moves, so its change signal never
+		// fires.
+		changes: func() <-chan struct{} { return nil },
 		// A claim that states no codec must reach no codec write. The
 		// stand-in fails the test rather than panic, so a prepare that
 		// writes one names itself. The volume write is a stand-in that
@@ -63,9 +66,8 @@ func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 			t.Error("the driver wrote a codec for a claim that stated none")
 			return nil
 		},
-		setVolumes:    func(context.Context, int, []float64) error { return nil },
-		codecTimeout:  200 * time.Millisecond,
-		codecInterval: time.Millisecond,
+		setVolumes:   func(context.Context, int, []float64) error { return nil },
+		codecTimeout: 200 * time.Millisecond,
 	}
 }
 

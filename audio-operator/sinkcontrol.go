@@ -89,7 +89,7 @@ type endpointControl struct {
 // newEndpointControl builds the controller. Every seam takes its real
 // implementation here and a stand-in only in a test.
 func newEndpointControl(client *Client, machine string, claims *preparedClaims,
-	graph func(context.Context) (pwGraph, error), readings *metrics) *endpointControl {
+	feed *graphFeed, readings *metrics) *endpointControl {
 	return &endpointControl{
 		client:      client,
 		machine:     machine,
@@ -98,7 +98,7 @@ func newEndpointControl(client *Client, machine string, claims *preparedClaims,
 		openCard:    openMixer,
 		setLevel:    setNodeLevel,
 		setRoute:    setRouteLevel,
-		switchCodec: speakerCodecSwitch(graph).choose,
+		switchCodec: speakerCodecSwitch(feed).choose,
 		readings:    readings,
 		nodes:       map[string]nodeRecord{},
 		refusals:    map[string]string{},
@@ -106,9 +106,18 @@ func newEndpointControl(client *Client, machine string, claims *preparedClaims,
 }
 
 // nodeRecord is one endpoint's node as the controller last saw it.
+//
+// written is the level this operator last wrote, which status.observed
+// reports for an idle node. held is the declared level the node was
+// last judged to hold: the level this operator wrote, the level the
+// node reported when it matched the declaration, or, for an idle node
+// the first pass found, the declaration itself. A suspended node's
+// declaration is compared with held, so a node that matched the
+// declaration and then went idle takes no write.
 type nodeRecord struct {
 	id      int
 	written *levelWrite
+	held    *levelWrite
 }
 
 // endpoint is one endpoint of one pass: the facts it read, and the
@@ -366,19 +375,31 @@ func (e *endpointControl) recordEndpoint(reading endpoint) {
 
 // actuate writes what the declaration and the endpoint disagree on.
 func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading endpoint) error {
+	name := reading.facts.Name
 	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts))
-	e.report(reading.facts.Name, refusals)
+	e.report(name, refusals)
 	err := e.apply(ctx, reading, writes)
-	if writes.Level != nil {
-		if err != nil {
-			// The node is recorded as seen before the write, and a
-			// level that did not land has to be tried again, so the
-			// failure forgets it and the next pass reads it as a new
-			// node.
-			delete(e.nodes, reading.facts.Name)
-		} else {
-			e.nodes[reading.facts.Name] = nodeRecord{id: reading.facts.Node.ID, written: writes.Level}
+	record, seen := e.nodes[name]
+	switch {
+	case !seen:
+		// The endpoint has no node, so there is nothing to record.
+	case writes.Level != nil && err != nil:
+		// The node is recorded as seen before the write, and a
+		// level that did not land has to be tried again, so the
+		// failure forgets it and the next pass reads it as a new
+		// node.
+		delete(e.nodes, name)
+	case writes.Level != nil:
+		record.written = writes.Level
+		if spec.Volume != nil || spec.Mute != nil {
+			record.held = writes.Level
 		}
+		e.nodes[name] = record
+	case spec.Volume != nil || spec.Mute != nil:
+		// The pass judged the declaration and planned no level write,
+		// so the node holds the declaration, as read or as adopted.
+		record.held = &levelWrite{Volume: spec.Volume, Mute: spec.Mute}
+		e.nodes[name] = record
 	}
 	return err
 }
@@ -394,7 +415,8 @@ func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading
 // level and the operator invents none. A node the first pass finds
 // is not new, because the memory starts empty when the operator
 // starts, and a node that stood before the start can hold a level a
-// person chose, under a claim that plays.
+// person chose, under a claim that plays. The first pass reports it
+// as found, so that a declaration on it is adopted and not written.
 func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
 	if !facts.HasNode {
 		delete(e.nodes, facts.Name)
@@ -403,9 +425,9 @@ func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
 	last, seen := e.nodes[facts.Name]
 	if !seen || last.id != facts.Node.ID {
 		e.nodes[facts.Name] = nodeRecord{id: facts.Node.ID}
-		return nodeMemory{New: e.started}
+		return nodeMemory{New: e.started, Found: !e.started}
 	}
-	return nodeMemory{Written: last.written}
+	return nodeMemory{Held: last.held}
 }
 
 // report prints one line for each run of passes that finds the same

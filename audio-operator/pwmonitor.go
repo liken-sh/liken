@@ -192,6 +192,11 @@ type graphFeed struct {
 	graph pwGraph
 	held  bool
 
+	// moved is the channel changes hands out. The feed closes it when
+	// a graph arrives or the monitor ends, and makes a new one on the
+	// next call to changes. It is nil when no reader holds one.
+	moved chan struct{}
+
 	// poll is the plain read the feed falls back to. It is a field so
 	// that a test drives the feed with no PipeWire behind it.
 	poll func(context.Context) (pwGraph, error)
@@ -210,18 +215,49 @@ func (f *graphFeed) read(ctx context.Context) (pwGraph, error) {
 	return f.poll(ctx)
 }
 
+// changes answers with a channel that closes when the next graph
+// arrives, or when the monitor ends and the next read goes to
+// PipeWire itself. A wait for one change in the graph, such as a
+// codec switch, takes the channel, reads the graph, and waits on the
+// channel only when the graph does not yet show the change. The wait
+// then costs one read for each batch of changes, and no timer.
+//
+// One channel serves every reader until it closes, so any number of
+// waits share one signal.
+func (f *graphFeed) changes() <-chan struct{} {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	if f.moved == nil {
+		f.moved = make(chan struct{})
+	}
+	return f.moved
+}
+
+// announce closes the channel the readers hold. The caller holds the
+// mutex.
+func (f *graphFeed) announce() {
+	if f.moved != nil {
+		close(f.moved)
+		f.moved = nil
+	}
+}
+
 func (f *graphFeed) deliver(graph pwGraph) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.graph, f.held = graph, true
+	f.announce()
 }
 
 // lost says the monitor ended, so the next pass reads PipeWire itself
-// rather than answering from a graph that stopped moving.
+// rather than answering from a graph that stopped moving. It wakes
+// every wait too, so that a wait reads PipeWire once and does not
+// wait on a feed that delivers nothing until it starts again.
 func (f *graphFeed) lost() {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.held = false
+	f.announce()
 }
 
 // follow keeps one pw-dump -m running for the life of the operator,

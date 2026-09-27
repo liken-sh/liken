@@ -235,7 +235,7 @@ func operate() {
 		// reads it, so the two hold one object between them.
 		endpoints: &endpointInventory{},
 		cards:     watchCards(ctx),
-		control:   newEndpointControl(client, nodeName, claims, feed.read, readings),
+		control:   newEndpointControl(client, nodeName, claims, feed, readings),
 	}
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
@@ -264,11 +264,17 @@ func operate() {
 	operator.endpoints.publish(named)
 	waitForNodes(ctx, operator.graph, sinkEndpoints(named), nodeReadyTimeout)
 
+	// The graph feed starts before the plugin serves, so that a codec
+	// switch in the first prepare call wakes on the feed's graphs.
+	// It starts before the first pass for the same reason: a change
+	// the feed carries wakes the loop from the moment it runs.
+	go feed.follow(ctx, wake)
+
 	// The plugin registers with the kubelet only after PipeWire
 	// answers, so the driver appears when it can answer a prepare
 	// call.
 	go func() {
-		if err := serveDRAPlugin(ctx, client, operator.endpoints, claims); err != nil {
+		if err := serveDRAPlugin(ctx, client, operator.endpoints, claims, feed); err != nil {
 			fatal("the DRA plugin is not serving: %v", err)
 		}
 	}()
@@ -278,10 +284,9 @@ func operate() {
 		fatal("watching the jack nodes: %v", err)
 	}
 
-	// The graph feed and the watch on the two collections start
-	// before the first pass, so that a change either one carries wakes
-	// the loop from the moment it runs.
-	go feed.follow(ctx, wake)
+	// The watch on the two collections starts before the first pass,
+	// so that a change it carries wakes the loop from the moment it
+	// runs.
 	watchEndpoints(ctx, client, wake, readings)
 
 	settled := settle(ctx, wakes(ctx, jacks, bluez, operator.cards.Events(), pokes),

@@ -248,6 +248,13 @@ node PipeWire builds while the operator runs. After a restart, the
 operator writes nothing to a sink that was there before it started,
 and the sink keeps the level it holds.
 
+An idle node reports no level, and PipeWire announces no write to
+one, so the operator cannot read whether an idle node already holds
+its declared `volume` and `mute`. After a restart, the operator
+treats the declaration as the level an idle node holds and writes
+nothing to it. It compares the declaration with the node's level
+when the node runs, and it writes a changed declaration at once.
+
 `volume`, `mute`, and `controls` apply at once, whether a claim
 holds the endpoint or not. `codec` waits for the claim to end,
 because a codec switch replaces the speaker's node and interrupts

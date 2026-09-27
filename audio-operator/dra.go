@@ -66,18 +66,19 @@ type draPlugin struct {
 	// it and the reconcile pass reads it, so the two hold one object
 	// between them, the way they hold the inventory.
 	claims *preparedClaims
-	// graph reads PipeWire's graph. It is a field rather than a call
-	// to readGraph, so a test drives a prepare without a PipeWire
-	// behind it.
-	graph func(context.Context) (pwGraph, error)
+	// graph reads PipeWire's graph from the graph feed, the same feed
+	// the reconcile pass reads, so a prepare costs no pw-dump process
+	// while the feed runs. changes is the feed's signal that the next
+	// graph arrived, which the codec wait reads. Both are fields so
+	// that a test drives a prepare without a PipeWire behind it.
+	graph   func(context.Context) (pwGraph, error)
+	changes func() <-chan struct{}
 	// setCodec and setVolumes are the two writes a codec switch makes,
 	// fields for the same reason.
 	setCodec   func(ctx context.Context, device, codec int) error
 	setVolumes func(ctx context.Context, node int, volumes []float64) error
-	// codecTimeout and codecInterval bound the wait for the rebuilt
-	// node.
-	codecTimeout  time.Duration
-	codecInterval time.Duration
+	// codecTimeout bounds the wait for the rebuilt node.
+	codecTimeout time.Duration
 }
 
 // newDRAPlugin builds the plugin the kubelet talks to.
@@ -85,16 +86,16 @@ type draPlugin struct {
 // Every seam takes its real implementation here and a stand-in
 // only in a test, so this is the one place the production graph
 // read and the two writes are named together.
-func newDRAPlugin(client *Client, endpoints *endpointInventory, claims *preparedClaims) *draPlugin {
+func newDRAPlugin(client *Client, endpoints *endpointInventory, claims *preparedClaims, feed *graphFeed) *draPlugin {
 	return &draPlugin{
-		client:        client,
-		endpoints:     endpoints,
-		claims:        claims,
-		graph:         readGraph,
-		setCodec:      setDeviceCodec,
-		setVolumes:    setNodeVolumes,
-		codecTimeout:  codecSwitchTimeout,
-		codecInterval: codecSwitchInterval,
+		client:       client,
+		endpoints:    endpoints,
+		claims:       claims,
+		graph:        feed.read,
+		changes:      feed.changes,
+		setCodec:     setDeviceCodec,
+		setVolumes:   setNodeVolumes,
+		codecTimeout: codecSwitchTimeout,
 	}
 }
 
@@ -130,7 +131,7 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 // registration. The function removes stale sockets from a previous
 // pod first, because a bind to an orphaned socket file fails even
 // when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *Client, endpoints *endpointInventory, claims *preparedClaims) error {
+func serveDRAPlugin(ctx context.Context, client *Client, endpoints *endpointInventory, claims *preparedClaims, feed *graphFeed) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func serveDRAPlugin(ctx context.Context, client *Client, endpoints *endpointInve
 		return fmt.Errorf("the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client, endpoints, claims))
+	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client, endpoints, claims, feed))
 	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")

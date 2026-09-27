@@ -44,14 +44,6 @@ const codecParameter = "codec"
 // prepare, and the kubelet's retry starts a fresh wait.
 const codecSwitchTimeout = 10 * time.Second
 
-// codecSwitchInterval is how often that wait reads the graph again.
-//
-// This wait polls where the rest of the operator is event-driven,
-// because the graph arrives by a pw-dump exec and an exec offers
-// nothing to subscribe to. A quarter second adds little to the
-// second the renegotiation already takes.
-const codecSwitchInterval = 250 * time.Millisecond
-
 // bluezCodec is one codec the device offers: the integer id a write
 // names it by, and the name this operator publishes it as.
 //
@@ -229,13 +221,18 @@ func setDeviceCodec(ctx context.Context, device, codec int) error {
 // codecSwitch is one codec change: a write on the device, and a wait
 // for the rebuilt node to report the codec. The prepare path and the
 // resting declaration both switch a codec, and they share this one
-// implementation. The write and the read are fields so that a test
-// drives them with no PipeWire behind it.
+// implementation. The write, the read, and the change signal are
+// fields so that a test drives them with no PipeWire behind it.
+//
+// changes is the graph feed's signal: a channel that closes when the
+// next graph arrives. The wait reads the graph again only when the
+// channel closes, so a switch costs one read for each batch of
+// changes that pw-dump -m prints, and no read on a timer.
 type codecSwitch struct {
-	write    func(ctx context.Context, device, codec int) error
-	read     func(context.Context) (pwGraph, error)
-	timeout  time.Duration
-	interval time.Duration
+	write   func(ctx context.Context, device, codec int) error
+	read    func(context.Context) (pwGraph, error)
+	changes func() <-chan struct{}
+	timeout time.Duration
 }
 
 // speakerCodecSwitch is the switch the reconciler makes for
@@ -243,12 +240,12 @@ type codecSwitch struct {
 // speaker, because a switch replaces the node and interrupts
 // whatever plays, and a claim's own codec parameter wins while the
 // claim lasts.
-func speakerCodecSwitch(read func(context.Context) (pwGraph, error)) codecSwitch {
+func speakerCodecSwitch(feed *graphFeed) codecSwitch {
 	return codecSwitch{
-		write:    setDeviceCodec,
-		read:     read,
-		timeout:  codecSwitchTimeout,
-		interval: codecSwitchInterval,
+		write:   setDeviceCodec,
+		read:    feed.read,
+		changes: feed.changes,
+		timeout: codecSwitchTimeout,
 	}
 }
 
@@ -420,10 +417,10 @@ func (p *draPlugin) selectCodec(ctx context.Context, address, codec string, sink
 // own seams, which are the production values outside a test.
 func (p *draPlugin) codecSwitch() codecSwitch {
 	return codecSwitch{
-		write:    p.setCodec,
-		read:     p.graph,
-		timeout:  p.codecTimeout,
-		interval: p.codecInterval,
+		write:   p.setCodec,
+		read:    p.graph,
+		changes: p.changes,
+		timeout: p.codecTimeout,
 	}
 }
 
@@ -459,24 +456,31 @@ func (p *draPlugin) awaitCodec(ctx context.Context, address, codec string) (blue
 }
 
 // await reads the graph until the speaker's node reports the codec,
-// or until the timeout passes.
+// or until the timeout passes. It reads once at the start and once
+// each time the graph feed delivers a new graph.
+//
+// The wait takes the change signal before the read. A graph that
+// arrives between the read and the select closes the channel the wait
+// already holds, so the wait reads again and does not sleep through
+// the change.
 func (c codecSwitch) await(ctx context.Context, address, codec string) (bluezSink, error) {
-	deadline := time.Now().Add(c.timeout)
+	deadline := time.NewTimer(c.timeout)
+	defer deadline.Stop()
 	for {
+		changed := c.changes()
 		graph, err := c.read(ctx)
 		if err == nil {
 			if sink, playing := graph.Speakers[address]; playing && sink.Codec == codec {
 				return sink, nil
 			}
 		}
-		if !time.Now().Before(deadline) {
-			return bluezSink{}, fmt.Errorf("speaker %s did not report the codec %s within %s",
-				speakerName(address), codec, c.timeout)
-		}
 		select {
 		case <-ctx.Done():
 			return bluezSink{}, ctx.Err()
-		case <-time.After(c.interval):
+		case <-deadline.C:
+			return bluezSink{}, fmt.Errorf("speaker %s did not report the codec %s within %s",
+				speakerName(address), codec, c.timeout)
+		case <-changed:
 		}
 	}
 }

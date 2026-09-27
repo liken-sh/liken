@@ -252,3 +252,79 @@ func TestGraphFeedReportsAFailedRead(t *testing.T) {
 		t.Fatal("a PipeWire that does not answer read without an error")
 	}
 }
+
+// A wait for one change in the graph holds the feed's signal, and the
+// signal closes when the next graph arrives or when the monitor ends.
+// Both wake the wait: the first with a new graph, the second so that
+// the wait reads PipeWire itself.
+func TestTheFeedSignalsEveryChange(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*graphFeed)
+	}{
+		{"a delivered graph", func(f *graphFeed) { f.deliver(pwGraph{}) }},
+		{"a monitor that ended", func(f *graphFeed) { f.lost() }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			feed := &graphFeed{poll: failingSinks}
+			changed := feed.changes()
+			select {
+			case <-changed:
+				t.Fatal("the signal fired before anything changed")
+			default:
+			}
+			c.change(feed)
+			select {
+			case <-changed:
+			default:
+				t.Fatal("the signal did not fire")
+			}
+			select {
+			case <-feed.changes():
+				t.Error("the next signal fired before the next change")
+			default:
+			}
+		})
+	}
+}
+
+// A codec switch that waits on the feed reads the graph once, then
+// reads it again only when the feed delivers the next graph. No timer
+// makes it read, so a wait for a speaker that takes seconds to
+// renegotiate costs one read for each batch the feed delivers.
+func TestACodecWaitReadsAgainWhenTheFeedDelivers(t *testing.T) {
+	before := currentSink()
+	after := currentSink()
+	after.Codec, after.NodeID = "aptx", 99
+
+	polled := make(chan struct{}, 1)
+	feed := &graphFeed{poll: func(context.Context) (pwGraph, error) {
+		polled <- struct{}{}
+		return speakerGraph(map[string]bluezSink{testSpeakerAddress: before}), nil
+	}}
+	change := codecSwitch{read: feed.read, changes: feed.changes, timeout: 10 * time.Second}
+
+	type answer struct {
+		sink bluezSink
+		err  error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		sink, err := change.await(context.Background(), testSpeakerAddress, "aptx")
+		done <- answer{sink, err}
+	}()
+	<-polled
+	feed.deliver(speakerGraph(map[string]bluezSink{testSpeakerAddress: after}))
+
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.sink.NodeID != 99 {
+		t.Errorf("the wait answered with %+v", got.sink)
+	}
+	if extra := len(polled); extra != 0 {
+		t.Errorf("the wait read PipeWire itself %d more times", extra)
+	}
+}

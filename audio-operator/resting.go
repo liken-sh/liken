@@ -73,13 +73,15 @@ type endpointWrites struct {
 }
 
 // nodeMemory is what the controller remembers about an endpoint's
-// node: whether PipeWire built it since the last pass, and the level
-// this operator last wrote to it, if any. A suspended node reports no
-// level, so the last write is the only thing a declaration on it can
-// be judged against.
+// node: whether PipeWire built it since the last pass, whether the
+// first pass after the operator started found it, and the declared
+// level the node was last judged to hold, if any. A suspended node
+// reports no level, so that judgment is the only thing a declaration
+// on it can be compared with.
 type nodeMemory struct {
-	New     bool
-	Written *levelWrite
+	New   bool
+	Found bool
+	Held  *levelWrite
 }
 
 // plannedWrites is the resting layer's whole decision: what the
@@ -105,17 +107,29 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 	case spec.Volume != nil || spec.Mute != nil:
 		want := levelWrite{Volume: spec.Volume, Mute: spec.Mute}
 		// A suspended node reports no levels at all, so a declared
-		// level on one is judged against the level this operator last
-		// wrote to it: it is written when the node is new, when nothing
-		// was written yet, and when the declaration changed, and not
-		// on every pass, because a write that repeated would raise its
-		// own event and answer it forever.
+		// level on one is compared with the level the node was last
+		// judged to hold. The operator writes it when the node is new,
+		// when no judgment exists, and when the declaration changed. It
+		// does not write it on every pass, because a write that
+		// repeated would raise its own event and answer it forever.
+		//
+		// The first pass after a start writes nothing to a suspended
+		// node. PipeWire 1.4.2 applies a Props write to a suspended
+		// node and announces no change, so the operator cannot read
+		// whether the node already holds the declaration, and a restart
+		// would otherwise write every idle declared level again. The
+		// pass records the declaration as the level the node holds.
+		// The compare runs when the node runs and reports its level,
+		// and a changed declaration is written at once.
 		switch {
 		case known:
 			if (want.Volume != nil && *want.Volume != volume) || (want.Mute != nil && *want.Mute != mute) {
 				writes.Level = &want
 			}
-		case node.New || node.Written == nil || !node.Written.same(want):
+		case node.New:
+			writes.Level = &want
+		case node.Found:
+		case node.Held == nil || !node.Held.same(want):
 			writes.Level = &want
 		}
 	case facts.Direction == directionSink && node.New && known && volume != unityPercent:
