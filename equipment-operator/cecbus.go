@@ -12,7 +12,7 @@ const (
 	// reports what it hears.
 	CECListen CECMode = "Listen"
 	// CECControl claims a logical address as a playback device, scans
-	// the bus, and answers the TV.
+	// the bus once when it joins, and answers the TV.
 	CECControl CECMode = "Control"
 )
 

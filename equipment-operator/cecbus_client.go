@@ -165,7 +165,8 @@ func GetDisplay(c *Client, name string) (*Display, error) {
 }
 
 type DisplayList struct {
-	Items []Display `json:"items"`
+	Metadata ListMeta  `json:"metadata"`
+	Items    []Display `json:"items"`
 }
 
 // ListDisplays reads every Display. A cluster without display-operator

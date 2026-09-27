@@ -2,8 +2,10 @@ package cec
 
 // The directory is what one adapter knows about the other devices on
 // its bus. It learns from two sources: the messages the adapter hears,
-// and the answers to the questions a scan asks. A logical address is
-// the key, because it is the one address every message carries.
+// and the answers to the questions the adapter asks when it joins the
+// bus, when a device announces itself, and before a command. A logical
+// address is the key, because it is the one address every message
+// carries.
 
 import (
 	"slices"
@@ -117,7 +119,67 @@ func (d *Directory) Hear(message Message) (before, after Peer, changed bool) {
 	if opcode, _ := message.Opcode(); opcode == OpReportPowerStatus && !message.IsPoll() {
 		delete(d.missed, message.From)
 	}
-	return before, *peer, !known || *peer != before
+	inferred := d.inferTV(message)
+	return before, *peer, !known || *peer != before || inferred
+}
+
+// inferTV reads what a message states about the TV's power beyond what
+// it states about its sender, and answers whether it changed the power
+// the directory held. The TV's power then follows the bus without a
+// question on a timer. A question on a timer is traffic, and a TV can
+// answer traffic by switching its own input. In Control the kernel
+// passes the adapter only broadcasts and the messages to its own
+// address, and it drops a broadcast Report Power Status for a claim
+// that states CEC 1.4, so these messages are most of what the adapter
+// can hear when a person turns the TV on or off with its own remote:
+//
+//   - A Standby to the TV, or a broadcast Standby, puts the TV in
+//     standby.
+//   - Image View On and Text View On wake the TV. The adapter hears
+//     them only in Listen, because they go to the TV.
+//   - A Routing Change, a Set Stream Path, or a Request Active Source
+//     from the TV comes from a TV that is on: a TV in standby switches
+//     no input and asks for no source.
+//   - An Active Source comes from a TV that shows its own tuner, or
+//     from a source that follows One Touch Play, which wakes the TV
+//     with Image View On first.
+//
+// The directory changes only a TV it holds, because a message about
+// the TV does not show that a TV is on the bus. The caller holds the
+// mutex.
+func (d *Directory) inferTV(message Message) bool {
+	tv, held := d.peers[AddressTV]
+	if !held || message.IsPoll() {
+		return false
+	}
+	opcode, _ := message.Opcode()
+	toTV := message.To == AddressTV
+	fromTV := message.From == AddressTV
+	power := PowerUnknown
+	switch {
+	case opcode == OpStandby && (toTV || message.IsBroadcast()):
+		power = PowerStandby
+	case (opcode == OpImageViewOn || opcode == OpTextViewOn) && toTV:
+		power = PowerOn
+	case fromTV && (opcode == OpRoutingChange || opcode == OpSetStreamPath || opcode == OpRequestActiveSource):
+		power = PowerOn
+	case opcode == OpActiveSource && message.IsBroadcast():
+		power = PowerOn
+	}
+	if power == PowerUnknown || tv.Power == power {
+		return false
+	}
+	tv.Power = power
+	delete(d.missed, AddressTV)
+	return true
+}
+
+// Holds answers whether the directory holds a peer at an address.
+func (d *Directory) Holds(address LogicalAddress) bool {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	_, held := d.peers[address]
+	return held
 }
 
 // Lookup answers the peer at an address, with every fact unknown when

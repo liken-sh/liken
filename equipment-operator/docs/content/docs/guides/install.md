@@ -117,9 +117,14 @@ restart sends nothing for the sessions it finds.
 The remote's power button turns the whole room on or off. The
 `media-operator` publishes a toggle on the session's power topic. When
 the session's input names a `Display` that a `Television` lists, the
-TV's reported power decides what the press does: a TV that is on means
-the press turns the room off, and a TV in standby means the press turns
-the room on. With no `Television`, the receiver's power decides. A
+TV's power decides what the press does: a TV that is on means the press
+turns the room off, and a TV in standby means the press turns the room
+on. The CEC node workload asks the TV for its power at each press,
+because no timer asks the TV between presses, and a TV that a person
+turned off with its own remote may say nothing on the wire. The press
+waits up to 3 seconds for that answer, and it decides from the
+`Television`'s `status.power` when none arrives. With no `Television`,
+the receiver's power decides. A
 press that turns the room off asks the TV for standby over CEC and puts
 the receiver in standby. A WiiM has no standby command, so it stays on,
 and its log line says so. A press that turns the room on wakes the TV,

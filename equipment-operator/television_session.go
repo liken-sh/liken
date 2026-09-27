@@ -256,16 +256,93 @@ func (r *roomTelevision) wake(trigger, display string, television *Television) b
 	return true
 }
 
+// cecPowerReadWait bounds the wait of a power press for the node
+// workload's read of the TV's power. The read is one question that the
+// TV answers within a second, and two writes to the API server.
+var cecPowerReadWait = 3 * time.Second
+
 // television answers the Television that shows the session's input
-// and the power it reports, for a power press that decides whether the
-// room is on. Both are empty when no Television lists the input's
-// Display, and the power is empty when the TV does not answer.
+// and its power, for a power press that decides whether the room is on.
+// Both are empty when no Television lists the input's Display, and the
+// power is empty when the TV does not answer.
+//
+// No timer asks the TV for its power, and a TV that a person turned on
+// or off with its own remote can send nothing an adapter hears, so
+// status.power can be older than the press. When the TV is Reachable,
+// the press asks the node workload for a read through the session's
+// powerReadAt and waits up to cecPowerReadWait for status.powerRead to
+// answer it. A press that gets no answer in time decides from
+// status.power, and the log says so. A TV that is not Reachable gets
+// no read: no adapter in Control reads it, or it does not answer, and
+// status.power is then absent or from what a bus in Listen heard.
 func (r *roomTelevision) television() (string, string) {
-	_, _, television, ok := r.resolve()
-	if !ok || television == nil {
+	t := r.sessions
+	display := r.monitor(r.input)
+	if display == "" {
 		return "", ""
 	}
-	return television.Metadata.Name, television.Status.Power
+	t.mutex.Lock()
+	list, err := t.list()
+	if err != nil {
+		t.mutex.Unlock()
+		fmt.Fprintf(os.Stderr, "listing Televisions for Player %s's power press: %v\n", r.player, err)
+		return "", ""
+	}
+	television := televisionShowing(list.Items, display)
+	if television == nil {
+		t.mutex.Unlock()
+		return "", ""
+	}
+	name, held := television.Metadata.Name, television.Status.Session
+	reachable := conditionOf(television.Status.Conditions, conditionReachable).Status == ConditionTrue
+	if !reachable || held == nil || held.Player != r.player || held.Display != display {
+		t.mutex.Unlock()
+		return name, television.Status.Power
+	}
+	asked := *held
+	asked.PowerReadAt = time.Now().UTC().Format(wakeTimeLayout)
+	err = t.apply(name, &asked)
+	t.mutex.Unlock()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "asking the node workload to read Television %s's power: %v\n", name, err)
+		return name, television.Status.Power
+	}
+	power, answered := t.awaitPowerRead(name, asked.PowerReadAt, list.Metadata.ResourceVersion)
+	if !answered {
+		fmt.Fprintf(os.Stderr, "the node workload did not read Television %s's power within %s, so the power press decides from status.power %q\n",
+			name, cecPowerReadWait, television.Status.Power)
+		return name, television.Status.Power
+	}
+	return name, power
+}
+
+// awaitPowerRead waits until a Television's status.powerRead answers
+// the request at, and answers the power it states. It reads the
+// Television on each event of a watch from resourceVersion, so it
+// waits on the API server's events and not on a timer. It answers
+// false when cecPowerReadWait ends first.
+func (t *televisionSessions) awaitPowerRead(name, at, resourceVersion string) (string, bool) {
+	ctx, cancel := context.WithTimeout(t.ctx, cecPowerReadWait)
+	var watching sync.WaitGroup
+	defer watching.Wait()
+	defer cancel()
+	wake := make(chan struct{}, 1)
+	watching.Go(func() { watchTelevisions(ctx, t.client, resourceVersion, wake, func() {}) })
+	for {
+		if list, err := ListTelevisions(t.client); err == nil {
+			for _, television := range list.Items {
+				read := television.Status.PowerRead
+				if television.Metadata.Name == name && read != nil && read.At == at {
+					return read.Power, true
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", false
+		case <-wake:
+		}
+	}
 }
 
 // standby writes a new standbyAt on the TV that shows the session's

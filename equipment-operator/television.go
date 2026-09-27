@@ -58,6 +58,17 @@ type TelevisionSession struct {
 	Awake     bool   `json:"awake,omitempty"`
 	WokeAt    string `json:"wokeAt,omitempty"`
 	StandbyAt string `json:"standbyAt,omitempty"`
+	// PowerReadAt asks the node workload to read the TV's power once, for
+	// a power press that decides from it. status.powerRead answers it.
+	PowerReadAt string `json:"powerReadAt,omitempty"`
+}
+
+// TelevisionPowerRead is the node workload's answer to one
+// session.powerReadAt: the request it answers, and the power the TV
+// reported then, which is empty when the TV did not answer.
+type TelevisionPowerRead struct {
+	At    string `json:"at"`
+	Power string `json:"power,omitempty"`
 }
 
 // TelevisionCEC names the CECBus the TV is on.
@@ -82,7 +93,9 @@ func (t *Television) bus() string {
 // PowerApplied condition when it applies spec.power. The node workload
 // that speaks for the session's Display writes wokeAt and the
 // WakeApplied condition when it wakes the TV, and standbyAt and the
-// StandbyApplied condition when it puts the TV in standby.
+// StandbyApplied condition when it puts the TV in standby. The node
+// workload that sends the bus's commands also writes powerRead when a
+// power press asks for the TV's power.
 type TelevisionStatus struct {
 	CEC   *TelevisionCECStatus `json:"cec,omitempty"`
 	Power string               `json:"power,omitempty"`
@@ -104,9 +117,11 @@ type TelevisionStatus struct {
 	WokeAt string `json:"wokeAt,omitempty"`
 	// StandbyAt is the session.standbyAt whose standby the node workload
 	// ran, so a restart runs no standby twice.
-	StandbyAt  string              `json:"standbyAt,omitempty"`
-	Displays   []TelevisionDisplay `json:"displays,omitempty"`
-	Conditions []Condition         `json:"conditions,omitempty"`
+	StandbyAt string `json:"standbyAt,omitempty"`
+	// PowerRead answers the last session.powerReadAt.
+	PowerRead  *TelevisionPowerRead `json:"powerRead,omitempty"`
+	Displays   []TelevisionDisplay  `json:"displays,omitempty"`
+	Conditions []Condition          `json:"conditions,omitempty"`
 }
 
 // TelevisionCECStatus is the TV as the bus's scan found it. A fact the

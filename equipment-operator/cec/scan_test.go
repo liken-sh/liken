@@ -90,3 +90,68 @@ func TestAScanKeepsADeviceItCouldNotReach(t *testing.T) {
 		t.Errorf("report %+v, peers %+v", report, peers)
 	}
 }
+
+// A device that announces itself is asked only for the facts its
+// announcement left out, and only once they are missing.
+func TestAnIntroductionAsksOnlyForMissingFacts(t *testing.T) {
+	bus := room()
+	_, device := joined(t, bus)
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+	directory.Observe(cec.ReportPhysicalAddress(5, 0x1000, 5))
+
+	asked, err := cec.Introduce(device, directory, 4, 5)
+	mustSucceed(t, err)
+	again, err := cec.Introduce(device, directory, 4, 5)
+	mustSucceed(t, err)
+
+	want := cec.Peer{Logical: 5, Physical: 0x1000, Type: cec.TypeAudioSystem, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn}
+	if asked != 4 || again != 0 || directory.Lookup(5) != want {
+		t.Errorf("asked %d, then %d; the directory holds %+v", asked, again, directory.Lookup(5))
+	}
+	for _, message := range bus.Sent() {
+		if message.To != 5 {
+			t.Errorf("the introduction sent %v to another device", message)
+		}
+	}
+}
+
+func TestAnIntroductionForgetsADeviceThatLeft(t *testing.T) {
+	bus := room()
+	_, device := joined(t, bus)
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+	directory.Present(9)
+
+	asked, err := cec.Introduce(device, directory, 4, 9)
+
+	mustSucceed(t, err)
+	if asked != 1 || len(directory.Peers()) != 0 {
+		t.Errorf("asked %d; the directory holds %+v", asked, directory.Peers())
+	}
+}
+
+func TestAnIntroductionSkipsNoDevice(t *testing.T) {
+	_, device := joined(t, room())
+
+	for _, address := range []cec.LogicalAddress{4, 15} {
+		asked, err := cec.Introduce(device, cec.NewDirectory(), 4, address)
+		mustSucceed(t, err)
+		if asked != 0 {
+			t.Errorf("address %d: asked %d", address, asked)
+		}
+	}
+}
+
+func TestAnIntroductionStopsWhenTheAdapterLeaves(t *testing.T) {
+	adapter, device := joined(t, room())
+	adapter.Unplug()
+	directory := cec.NewDirectory()
+	directory.Present(5)
+
+	_, err := cec.Introduce(device, directory, 4, 5)
+
+	if !cec.IsGone(err) {
+		t.Errorf("introduce answered %v, want ENODEV", err)
+	}
+}

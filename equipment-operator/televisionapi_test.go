@@ -7,8 +7,9 @@ package main
 // and its own conditions, the Deployment's session apply replaces
 // session, a node workload's power apply replaces powerGeneration and
 // its own conditions, a node workload's wake apply replaces wokeAt and
-// its own conditions, and a node workload's standby apply replaces
-// standbyAt and its own conditions. No apply touches a field another
+// its own conditions, a node workload's standby apply replaces
+// standbyAt and its own conditions, and a node workload's power read
+// apply replaces powerRead. No apply touches a field another
 // manager owns.
 // The conditions are a map keyed by type, so each apply leaves the
 // other writer's conditions in place.
@@ -46,9 +47,11 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 		w.WriteHeader(http.StatusNotFound)
 	case refusing && path == televisionsPath && r.URL.Query().Get("watch") != "true":
 		w.WriteHeader(http.StatusInternalServerError)
+	case path == displaysPath && r.URL.Query().Get("watch") == "true":
+		a.serveWatch(w, r)
 	case path == displaysPath:
 		a.serveJSON(w, func() any {
-			list := DisplayList{}
+			list := DisplayList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
 			for _, name := range sortedKeys(a.displays) {
 				list.Items = append(list.Items, *a.displays[name])
 			}
@@ -134,6 +137,7 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	node := strings.HasPrefix(manager, "equipment-operator-cec-")
 	waking := strings.HasPrefix(manager, "equipment-operator-wake-")
 	standing := strings.HasPrefix(manager, "equipment-operator-standby-")
+	reading := strings.HasPrefix(manager, "equipment-operator-powerread-")
 	if manager == sessionFieldManager {
 		// The fake counts the session writes in flight, and holds each one
 		// for sessionDelay, so a test can see two that overlap.
@@ -185,6 +189,8 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		a.wakeWrites++
 		television.Status.WokeAt = body.Status.WokeAt
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+	case reading:
+		television.Status.PowerRead = body.Status.PowerRead
 	case standing:
 		television.Status.StandbyAt = body.Status.StandbyAt
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)

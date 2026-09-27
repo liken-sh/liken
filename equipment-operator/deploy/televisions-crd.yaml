@@ -127,7 +127,7 @@ spec:
                       description: "The CEC version the TV reports: 1.3a, 1.4, or 2.0."
                 power:
                   type: string
-                  description: "The power status the TV last reported: On, Standby, ToOn, or ToStandby. The adapters in Control ask the TV every 10 seconds with Give Device Power Status, and the adapters also read every Report Power Status the TV sends them. A TV in a deep standby or an eco mode can stop answering. After two questions in a row without an answer, this field is absent and Reachable is False; one missed answer keeps the last power, because a TV that wakes can miss one. The operator does not report Standby for a TV that did not answer."
+                  description: "The power status the TV last reported: On, Standby, ToOn, or ToStandby. No timer asks the TV for its power, because a question on the wire is traffic, and some TVs answer traffic they did not expect by switching their own input. An adapter in Control asks the TV with Give Device Power Status when it joins the bus, before and after each command it sends the TV, and once for each press of the remote's power button. Between those reads the power follows what the bus carries: a Report Power Status the TV sends an adapter, a Standby to the TV or to every device, which means Standby, and a Routing Change, a Set Stream Path, or a Request Active Source from the TV, or an Active Source from any device, which means On. An adapter in Control hears only the broadcasts and the messages to its own address, so a TV that a person turns off or on with its own remote and that sends none of these keeps its old power here until the next read. A press of the remote's power button reads the TV first, so its decision does not depend on this field. A TV in a deep standby or an eco mode can stop answering. After two questions in a row without an answer, this field is absent and Reachable is False; one missed answer keeps the last power, because a TV that wakes can miss one. The operator does not report Standby for a TV that did not answer."
                 activeSource:
                   type: string
                   description: "The physical address of the last Active Source the CECBus carried: the one that the first adapter in spec.adapters with a current entry that reports an Active Source reports. An adapter that has heard none is passed over. CEC has no query for the TV's input. A TV that switches to its own apps, or to an input with no CEC, sends nothing, so this field states the last CEC source, and it does not state what the TV shows."
@@ -160,12 +160,27 @@ spec:
                       type: string
                       format: date-time
                       description: "When the remote's power button turned the room off, with milliseconds. Each new time is one standby of the TV. The operator writes it only for a press of the power button that finds the room on: the TV decides whether the room is on when it reports On or ToOn, and the receiver decides when the room has no Television or the TV does not answer. A Play that ends, a screen that sleeps, a session that ends, and an operator restart write none, because a TV in a living room shows other inputs, such as a streaming player, while the room's player is idle. The same write sets awake to false, and a later wake removes this field. The node workload uses the time only as the name of one standby: it measures a standby's age on its own clock."
+                    powerReadAt:
+                      type: string
+                      format: date-time
+                      description: "When a press of the remote's power button asked for a fresh read of the TV's power, with milliseconds. Each new time is one request. No timer asks the TV for its power, and a TV that a person turns on or off with its own remote can send nothing the adapters hear, so status.power can be older than the press. The operator writes a new time for each press while the Television is Reachable and the session belongs to the pressing Player, and waits up to 3 seconds for status.powerRead to answer it. It then decides from the answer, and from status.power when no answer arrives. The node workload whose adapter sends the bus's commands asks the TV once for each new time. A time that is already here when the node workload starts is older than the wait, and the node workload sends nothing for it. Another write of the session removes the field."
                 wokeAt:
                   type: string
                   description: "The status.session.wokeAt of the last wake the node workload started or settled. The node workload writes it before its first command, as a started mark, so a node workload that restarts during the wake, or after it, sends nothing more for it. The WakeApplied condition states the result."
                 standbyAt:
                   type: string
                   description: "The status.session.standbyAt of the last standby the node workload started or settled. The node workload writes it before its first command, as a started mark, so a node workload that restarts during the standby, or after it, sends nothing more for it. The StandbyApplied condition states the result."
+                powerRead:
+                  type: object
+                  description: "The node workload's answer to the last status.session.powerReadAt. The node workload whose adapter sends the bus's commands writes it under a field manager of its own, after one Give Device Power Status to the TV."
+                  required: [at]
+                  properties:
+                    at:
+                      type: string
+                      description: "The status.session.powerReadAt that this read answers."
+                    power:
+                      type: string
+                      description: "The power status the TV reported: On, Standby, ToOn, or ToStandby. It is absent when the TV did not answer."
                 displays:
                   type: array
                   description: "The Displays whose pictures reach this TV: the Display that each adapter of the CECBus names in spec.adapters[].display, while the bus is in Control and the Display has a physical address from its EDID. The operator derives the list. Each such adapter announces its Display's physical address on this bus, so that Display's picture enters this tree. A Display that no adapter names is not listed, even on a machine the bus names: that machine's other HDMI output can go to another TV, and a physical address does not name its tree."

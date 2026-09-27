@@ -268,6 +268,7 @@ func (a *cecAPI) removeDisplay(name string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	delete(a.displays, name)
+	a.changed()
 }
 
 // nudge wakes every watch with no change, the way an unrelated edit
@@ -285,6 +286,7 @@ func (a *cecAPI) putDisplay(name, node, physicalAddress string) {
 	display.Status.Node = node
 	display.Status.PhysicalAddress = physicalAddress
 	a.displays[name] = display
+	a.changed()
 }
 
 // bus answers a snapshot of one bus, and false when it does not exist.

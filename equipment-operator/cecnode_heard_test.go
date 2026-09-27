@@ -115,11 +115,14 @@ func TestTheNodeLogsEachMessageAPersonNotices(t *testing.T) {
 			"CECBus den: " + tv + " sent Report Power Status ToOn to " + `"Streaming Box" (logical 8)`,
 		}},
 		{"a repeated power", []cec.Message{
-			cec.ReportPowerStatus(0, 8, cec.PowerOn),
-			cec.ReportPowerStatus(0, 8, cec.PowerOn),
+			cec.ReportPowerStatus(0, 8, cec.PowerStandby),
+			cec.ReportPowerStatus(0, 8, cec.PowerStandby),
 		}, []string{
-			"CECBus den: " + tv + " sent Report Power Status On to " + `"Streaming Box" (logical 8)`,
+			"CECBus den: " + tv + " sent Report Power Status Standby to " + `"Streaming Box" (logical 8)`,
 		}},
+		// The fixture's own Active Source already set the TV's power to
+		// On, so a report of On is no news.
+		{"a power the bus already stated", []cec.Message{cec.ReportPowerStatus(0, 8, cec.PowerOn)}, nil},
 		{"a key sent to another device", []cec.Message{cec.NewMessage(0, 8, cec.OpUserControlPressed, 0x41)}, nil},
 		{"traffic between devices", []cec.Message{
 			cec.GiveOSDName(0, 5),

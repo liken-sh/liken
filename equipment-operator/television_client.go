@@ -9,7 +9,8 @@ package main
 // powerGeneration and the PowerApplied condition; and the node workload
 // that speaks for the session's Display, which writes wokeAt and the
 // WakeApplied condition under one manager, and standbyAt and the
-// StandbyApplied condition under another. The conditions are a map
+// StandbyApplied condition under another. The node workload that sends
+// the bus's commands writes powerRead under a manager of its own. The conditions are a map
 // keyed by type, so each writer's apply leaves the other writers'
 // conditions in place. Discovery
 // creates its Television with a create, so it writes no spec field
@@ -176,6 +177,34 @@ func ApplyTelevisionStandby(c *Client, television *Television, machine, standbyA
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
 	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecStandbyFieldManager(machine), body)
+}
+
+// cecPowerReadFieldManager is the field manager of the node workload on
+// one machine for the answer to a power press's read. It is not the
+// machine's power manager, because an apply removes each field its
+// manager owns and does not state, and the answer and the applied
+// generation are written apart.
+func cecPowerReadFieldManager(machine string) string {
+	return "equipment-operator-powerread-" + machine
+}
+
+// ApplyTelevisionPowerRead writes the node workload's answer to one
+// status.session.powerReadAt: the request, and the power the TV
+// reported, empty when it did not answer. The body states the object's
+// uid for the same reason ApplyTelevisionPower does.
+func ApplyTelevisionPowerRead(c *Client, television *Television, machine, at, power string) error {
+	type status struct {
+		PowerRead TelevisionPowerRead `json:"powerRead"`
+	}
+	body := struct {
+		APIVersion string     `json:"apiVersion"`
+		Kind       string     `json:"kind"`
+		Metadata   ObjectMeta `json:"metadata"`
+		Status     status     `json:"status"`
+	}{Status: status{PowerRead: TelevisionPowerRead{At: at, Power: power}}}
+	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
+	body.Metadata.UID = television.Metadata.UID
+	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecPowerReadFieldManager(machine), body)
 }
 
 // sessionFieldManager is the Deployment's field manager for

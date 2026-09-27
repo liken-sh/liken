@@ -6,7 +6,9 @@ playing the TV. Phase 3 built 2026-09-26 and tested against `vivid`,
 with a second `vivid` output playing a streaming player. The hardware
 drills of phases 1 to 3 and phases 4 and 5 are open. The power press
 that turns the TV off was built 2026-09-27 and tested against `vivid`
-and the fakes; see "The power press turns the room off". It depends on `liken` plan 70, which
+and the fakes; see "The power press turns the room off". The adapter
+stopped sending on a timer on 2026-09-27, tested against `vivid` and
+the fakes; see "The adapter sends nothing on a timer". It depends on `liken` plan 70, which
 attaches a USB CEC adapter and publishes it as a device, and on
 display-operator plan 23, which publishes each `Display`'s CEC
 physical address.
@@ -870,6 +872,113 @@ The press now toggles the room, TV included:
 
 The fakes and `vivid` prove the paths. A hardware drill on the room
 that showed the gap is open.
+
+## The adapter sends nothing on a timer
+
+A home cluster showed the problem on 2026-09-27. The bus held a
+TV, an AV receiver, and a streaming player. While
+the adapter was in `Control`, the TV switched its own input three
+times in about 20 minutes. Each time the TV broadcast a Routing
+Change from `1.2.0.0` to `1.0.0.0`, the receiver answered with Routing
+Information `1.2.0.0`, and about 12 seconds later the TV sent Set
+Stream Path `1.2.0.0`. Once it went to the streaming player's path
+instead. With the bus in `Listen`, where the adapter sends nothing,
+the TV switched no input in 20 minutes. The move from `Control` to
+`Listen` itself caused one Routing Change at once. So the adapter's
+own traffic caused the switches. In `Control` the node workload sent
+a full scan every minute, which is a poll to each of 14 logical
+addresses and five questions to each device that answered, and it
+asked the TV for its power every 10 seconds.
+
+The node workload now follows the organization's rule for state it
+keeps current. It subscribes first, reads the state once as a
+baseline, and after that changes what it holds only on the
+subscription's events. When the subscription fails, it subscribes
+and reads again. No timer re-reads a state.
+
+* **The wire.** The subscription is the follower mode, which the
+  handle takes before its claim, so the kernel queues each message the
+  adapter hears from the moment it joins. The baseline is one scan
+  when the adapter joins, which also reads the power of each device.
+  An adapter that leaves ends the process, and the kubelet starts a
+  new one. A claim the kernel takes away, a new physical address, and
+  a change of mode each join again and scan again. A scan the kernel
+  refuses is tried again after 30 seconds, doubling up to 10 minutes,
+  as a join is.
+* **A device that announces itself.** A device that joins after the
+  scan claims an address, and its kernel broadcasts Report Physical
+  Address. When the adapter hears a sender it does not hold, or a
+  Report Physical Address with a new physical address, it asks that
+  device once for the facts the directory does not hold. It sends
+  nothing to the other devices, and nothing more to a device that
+  repeats its broadcast. A device that leaves in silence stays in the
+  list until a question to it goes unacknowledged or the adapter joins
+  again.
+* **The TV's power.** The directory sets the TV's power from the
+  messages that change it: a Standby to the TV or to every device
+  means Standby; Image View On and Text View On, which an adapter
+  hears only in `Listen`, mean On; a Routing Change, a Set Stream Path,
+  or a Request Active Source from the TV means On; an Active Source
+  from any device means On. A Report Power Status that reaches the
+  adapter sets the power as before. In `Control` the kernel passes the
+  adapter only the broadcasts and the messages to its own address,
+  and it drops a broadcast Report Power Status for a claim that states
+  CEC 1.4. So a TV that a person turns off with its own remote and
+  that broadcasts no Standby sends nothing the adapter hears. `status.power` then stays On until the next read:
+  the next command, the next press of the remote's power button, or
+  the next join. A TV turned on with its own remote usually sends a
+  Routing Change or a Request Active Source, and a TV that sends
+  neither stays in Standby the same way.
+* **The power press reads the TV.** The press decides the whole room
+  from the TV's power, so it cannot use a value that can be stale.
+  For a `Television` that is `Reachable`, the session writes a new
+  `status.session.powerReadAt`. The node workload whose adapter sends
+  the bus's commands asks the TV once and writes the answer in
+  `status.powerRead`. The session waits up to 3 seconds, on a watch of
+  the `Television`s, and decides from the answer; with no answer it
+  decides from `status.power` and logs that it did. A request that is
+  already in the status when the node workload starts is older than
+  the wait, and the node workload sends nothing for it. The node
+  workload could decide the toggle itself, but the receiver's half of
+  the press needs the same decision at the same moment, so the read
+  comes back to the session.
+* **The commands.** `spec.power`, the wake, and the standby read the
+  TV before and after their commands, as before. The follower's
+  answers and the commands a person causes are unchanged.
+* **The API.** The watches of `CECBus`es, `Television`s, and
+  `Display`s are the subscriptions, and each pass lists them. The
+  node workload now watches `Display`s, because the adapter announces
+  a `Display`'s physical address, and its role gains `list` and
+  `watch` on them. A watch for a definition installed after the pod
+  starts begins at the first pass that lists it. The backstop pass
+  every 30 seconds is gone. A join that failed is tried at its retry
+  time, and a list or a write the API server refused is tried again
+  after 10 seconds.
+* **The heartbeat.** The node workload still writes its entry every
+  30 seconds, and a heartbeat now writes only the entry and runs no
+  pass. The write goes to the API server and sends nothing on the
+  wire. The `Deployment` treats an entry older than 90 seconds as
+  stale, and that rule needs the heartbeat: an entry that nothing
+  changes would otherwise look like a pod that stopped. A lease or a
+  read of the pod's readiness could replace it later.
+
+The fakes prove that an idle bus hears nothing after the scan over
+many heartbeats and passes, that a device that announces itself is
+asked four questions once and nothing when it announces again, and
+that a press decides correctly from a TV whose power changed with no
+message the adapter heard. On `vivid`, the TV's handle received no
+message from the adapter over 2 seconds of passes and 5-millisecond
+heartbeats after the scan; the kernel passes a follower no poll, so
+the check covers the questions and the commands. On `vivid` a TV's claim sometimes ends at logical address 14
+with no device at 0; the tests' TV claims again until it holds 0. A
+drill on the room that showed the switches is open: the adapter in
+`Control` for an hour, with a count of the TV's Routing Changes, and a
+press of the remote's power button after the TV's own remote turned
+it off.
+
+The `Deployment`'s own `CECBus` and `Receiver` loops still run a
+backstop pass every 30 seconds, and it reads `Display`s without a
+watch. Neither sends on the wire. They are left for a later change.
 
 ## Failure and recovery
 

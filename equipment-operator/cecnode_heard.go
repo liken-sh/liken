@@ -30,8 +30,9 @@ import (
 // Two messages repeat without news. A device reports its power each
 // time a device asks, and many devices ask on a timer, so a Report
 // Power Status writes a line only when it changes the power the
-// directory held; the node workload's own power reads keep the
-// directory current too. User Control Pressed writes a line only when
+// directory held. The directory also sets the TV's power from the
+// messages that change it, such as a broadcast Standby, so a report
+// that confirms such a change writes no line either. User Control Pressed writes a line only when
 // the TV passes a press of its remote to this adapter; a press sent to
 // another device is that device's business.
 //

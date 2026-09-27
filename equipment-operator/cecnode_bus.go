@@ -21,6 +21,7 @@ func (n *cecNode) pass(ctx context.Context) error {
 	list, err := ListCECBuses(n.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
+		n.retryLater()
 		return nil
 	}
 	bus := n.choose(list)
@@ -56,21 +57,24 @@ func (n *cecNode) pass(ctx context.Context) error {
 }
 
 // passTelevisions reads the bus's Television once for each of the
-// Television's intents: its spec.power, its session's wake, and its
-// session's standby. A list that fails leaves each for the next pass,
+// Television's intents: its session's power read, its spec.power, its
+// session's wake, and its session's standby. A list that fails leaves each for the next pass,
 // and cancels nothing, because the Television may still ask for what
 // runs.
 func (n *cecNode) passTelevisions(bus *CECBus) {
 	list, err := ListTelevisions(n.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
+		n.retryLater()
 		n.writePower()
 		n.writeWake()
 		n.writeStandby()
 		return
 	}
 	television := televisionFor(list.Items, bus.Metadata.Name)
-	// The wake and standby passes go first: a new generation of
+	// A power press waits for its read, so the read goes first.
+	n.passPowerRead(bus, television)
+	// The wake and standby passes go next: a new generation of
 	// spec.power stops a wake or a standby in progress there, so no
 	// session command follows the power pass's first command.
 	n.passWake(bus, television)
@@ -103,6 +107,7 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 		for _, own := range discovered {
 			if err := DeleteCECBus(n.client, own.Metadata.Name); err != nil {
 				fmt.Fprintf(os.Stderr, "pruning CECBus %s: %v\n", own.Metadata.Name, err)
+				n.retryLater()
 				continue
 			}
 			fmt.Fprintf(n.log, "deleted the discovered CECBus %s: CECBus %s names machine %s\n", own.Metadata.Name, declared[0].Metadata.Name, n.machine)
@@ -120,6 +125,7 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 	}
 	if err := ApplyDiscoveredCECBus(n.client, n.machine, n.machine); err != nil {
 		fmt.Fprintf(os.Stderr, "creating CECBus %s: %v\n", n.machine, err)
+		n.retryLater()
 		return nil
 	}
 	fmt.Fprintf(n.log, "no CECBus names machine %s; created CECBus %s in %s, which sends nothing on the wire\n", n.machine, n.machine, CECListen)
@@ -132,6 +138,7 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 func (n *cecNode) leave(bus string) {
 	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, nil); err != nil && err != ErrNotFound {
 		fmt.Fprintf(os.Stderr, "removing machine %s from CECBus %s: %v\n", n.machine, bus, err)
+		n.retryLater()
 	}
 	n.mutex.Lock()
 	n.bus = ""
@@ -140,7 +147,7 @@ func (n *cecNode) leave(bus string) {
 }
 
 // idle takes the adapter off the bus while no CECBus names its
-// machine: it stops the scans, clears the logical addresses, and
+// machine: it stops the mode's work, clears the logical addresses, and
 // leaves the follower or monitor mode. No person has allowed the
 // adapter on any bus then, so it must not answer the TV. Only a
 // failure that means the adapter left is returned.

@@ -44,12 +44,21 @@ says who sends it and what answers it. The package uses four:
 
 - **Identity.** Give Physical Address, Give OSD Name, Give Device
   Vendor ID, and Get CEC Version, with their reports. A scan asks each
-  device all four.
+  device all four. `Introduce` asks one device only for the facts the
+  directory does not hold, for a device that announced itself after
+  the scan.
 - **Power.** Give Device Power Status and Report Power Status.
   `ReadPower` asks one device and records the answer in the
   directory. After two questions in a row that a device acknowledges
   and does not answer, the directory forgets the power it held. One
   missed answer keeps it, because a TV that wakes can miss one.
+  Between reads the directory sets the TV's power from the messages
+  that change it: a Standby to the TV or to every device, Image View
+  On and Text View On, a Routing Change, Set Stream Path, or Request
+  Active Source from the TV, and an Active Source from any device.
+  Nothing in this package asks on a timer: a question is traffic, and
+  some TVs answer traffic they did not expect by switching their own
+  input.
 - **One-touch play.** Image View On, Standby, and Active Source.
   `PowerCommand` is the generic command for a TV power state: Image
   View On for On, and Standby directed to the TV alone for Standby.

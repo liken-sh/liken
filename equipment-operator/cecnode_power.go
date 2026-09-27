@@ -195,6 +195,7 @@ func (n *cecNode) writePower() {
 	err := ApplyTelevisionPower(n.client, &record.television, n.machine, record.television.Metadata.Generation, record.condition)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "writing the applied power of Television %s: %v\n", record.television.Metadata.Name, err)
+		n.retryLater()
 	}
 	if err == nil || err == ErrNotFound || err == ErrConflict {
 		n.mutex.Lock()

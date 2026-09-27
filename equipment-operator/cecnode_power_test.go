@@ -254,7 +254,7 @@ func TestTheChangeArrivesAfterTheAPIServerRecovers(t *testing.T) {
 	api.refuseTelevisions(true)
 
 	api.putTelevision(lounge(TelevisionOn))
-	time.Sleep(10 * cecPowerInterval)
+	time.Sleep(4 * cecPowerWindow)
 	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 0)
 	api.refuseTelevisions(false)
 	api.nudge()

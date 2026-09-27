@@ -321,6 +321,7 @@ func (n *cecNode) wakeTV(ctx context.Context, job *wakeJob, own cec.LogicalAddre
 		fmt.Sprintf("the adapter on %s started the wake", n.machine)}, job.television.Metadata.Generation, job.television.Status.Conditions, n.now())
 	if err := ApplyTelevisionWake(n.client, &job.television, n.machine, job.television.Status.Session.WokeAt, mark); err != nil {
 		fmt.Fprintf(os.Stderr, "writing the started mark of Television %s's wake: %v\n", job.television.Metadata.Name, err)
+		n.retryLater()
 		return
 	}
 	job.television.Status.Conditions = []Condition{mark}
@@ -349,6 +350,7 @@ func (n *cecNode) writeWake() {
 	err := ApplyTelevisionWake(n.client, &record.television, n.machine, record.television.Status.Session.WokeAt, record.condition)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "writing the wake of Television %s: %v\n", record.television.Metadata.Name, err)
+		n.retryLater()
 	}
 	if err == nil || err == ErrNotFound || err == ErrConflict {
 		n.mutex.Lock()

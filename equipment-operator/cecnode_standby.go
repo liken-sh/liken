@@ -215,6 +215,7 @@ func (n *cecNode) standbyTV(ctx context.Context, job *standbyJob, own cec.Logica
 		fmt.Sprintf("the adapter on %s started the standby", n.machine)}, job.television.Metadata.Generation, job.television.Status.Conditions, n.now())
 	if err := ApplyTelevisionStandby(n.client, &job.television, n.machine, standbyAt, mark); err != nil {
 		fmt.Fprintf(os.Stderr, "writing the started mark of Television %s's standby: %v\n", job.television.Metadata.Name, err)
+		n.retryLater()
 		return
 	}
 	job.television.Status.Conditions = []Condition{mark}
@@ -248,6 +249,7 @@ func (n *cecNode) writeStandby() {
 	err := ApplyTelevisionStandby(n.client, &record.television, n.machine, record.television.Status.Session.StandbyAt, record.condition)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "writing the standby of Television %s: %v\n", record.television.Metadata.Name, err)
+		n.retryLater()
 	}
 	if err == nil || err == ErrNotFound || err == ErrConflict {
 		n.mutex.Lock()

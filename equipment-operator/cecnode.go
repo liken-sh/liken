@@ -34,17 +34,11 @@ const (
 	cecDeviceVariable = "CEC_DEVICE"
 )
 
-// How often an adapter in Control scans the bus. A scan polls fourteen
-// addresses and asks each device five questions, and one CEC message
-// takes tens of milliseconds, so a scan takes a few seconds of the
-// wire. A minute keeps the list current as devices wake and sleep
-// without filling the wire.
-var cecScanInterval = time.Minute
-
 // How often the node workload writes its entry when nothing changed.
 // The time of each write is the entry's reportedAt, and the Deployment
 // treats an entry as stale once it is three intervals old, so a pod
-// that dies without a word stops counting within a few minutes.
+// that dies without a word stops counting within a few minutes. The
+// write goes to the API server and sends nothing on the CEC wire.
 var cecReportInterval = 30 * time.Second
 
 // findAdapter answers the one CEC node the pod's claim delivered. The
@@ -121,6 +115,8 @@ type cecNode struct {
 	wake   chan struct{}
 	dirty  chan struct{}
 	failed chan error
+	// retryAsk asks the loop for a pass after cecAPIRetry.
+	retryAsk chan struct{}
 
 	mutex sync.Mutex
 	// bus is the CECBus this adapter reports to, and applied is the
@@ -147,9 +143,9 @@ type cecNode struct {
 	// declared is the set of a person's buses that last named the
 	// machine, as the log last stated it.
 	declared string
-	// stopMode ends the work of the mode the adapter runs, the scans,
-	// the power reads, and a power application, and returns once all of
-	// it has stopped. modeContext ends with the mode, and modeWork
+	// stopMode ends the work of the mode the adapter runs, the scan,
+	// the introductions, and a power application, and returns once all
+	// of it has stopped. modeContext ends with the mode, and modeWork
 	// counts the work, so a power application that starts later in the
 	// mode stops with it. Only the loop's goroutine starts or stops the
 	// mode's work.
@@ -163,6 +159,15 @@ type cecNode struct {
 	powered powerMemory
 	woken   wakeMemory
 	standby standbyMemory
+	// powerRead is what the node workload holds about the power reads a
+	// power press asked for.
+	powerRead powerReadMemory
+	// arrivals takes each device the adapter heard arrive in Control to
+	// the mode's work, which asks it for its facts. introduced maps each
+	// device the adapter found or introduced to the physical address it
+	// held then. Both belong to the mode, and startMode makes them anew.
+	arrivals   chan cec.LogicalAddress
+	introduced map[cec.LogicalAddress]cec.PhysicalAddress
 	// lastCommand is when the TV was last sent a power command: by this
 	// adapter, or a Standby by another device that the adapter heard,
 	// such as a receiver that turns the TV off with itself. A TV answers
@@ -192,6 +197,7 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 		log:       os.Stderr,
 		wake:      make(chan struct{}, 1),
 		dirty:     make(chan struct{}, 1),
+		retryAsk:  make(chan struct{}, 1),
 		failed:    make(chan error, 1),
 		stopMode:  func() {},
 		source:    cec.InvalidPhysicalAddress,
@@ -252,7 +258,7 @@ func (n *cecNode) logOpened() {
 
 // logState states a change of the entry's state or message. A report
 // that changes only the devices or the time logs nothing, so the log
-// stays quiet while the adapter scans and reports.
+// stays quiet while the adapter learns the bus and reports.
 func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 	if entry.State == n.logged.State && entry.Message == n.logged.Message {
 		return
@@ -270,6 +276,21 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 }
 
 // loop is run's body: the first lists, the watches, and the passes.
+//
+// The node workload follows one rule for every state it keeps current,
+// on the wire and in the API. It subscribes first, then it reads the
+// state once as a baseline, and after that only the subscription's
+// events change what it holds. It subscribes first so that a change
+// during the read is not lost. When a subscription fails, it subscribes
+// again and reads again. On the wire, the subscription is the follower
+// or monitor mode that makes the kernel pass the adapter what it hears,
+// which the handle takes before it claims an address, and the baseline
+// is the scan when the adapter joins; startMode states the rest. In the
+// API, the subscriptions are the watches of CECBuses, Televisions, and
+// Displays, and the baseline is each pass's list; a watch that drops
+// lists again and wakes the loop. No timer re-reads a state. The
+// timers here are clocks: the heartbeat that keeps reportedAt current,
+// and the retry of a join or an API call that failed.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	var list *CECBusList
 	err := retryThrottled(ctx, func() error {
@@ -283,34 +304,37 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("listing CECBuses: %w", err)
 	}
-	var televisions *TelevisionList
-	err = retryThrottled(ctx, func() error {
-		var err error
-		televisions, err = ListTelevisions(n.client)
-		return err
-	})
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("listing Televisions: %w", err)
-	}
 	started.Go(func() {
 		watchCECBuses(ctx, n.client, list.Metadata.ResourceVersion, n.wake, func() {})
 	})
-	// A change of a Television's spec.power wakes the loop, because the
-	// pass is where the adapter that sends the bus's commands applies it.
-	// A cluster without the Television definition lists no version and
-	// gets no watch; the backstop tick finds a definition installed later.
-	if televisions.Metadata.ResourceVersion != "" {
-		started.Go(func() {
-			watchTelevisions(ctx, n.client, televisions.Metadata.ResourceVersion, n.wake, func() {})
-		})
+	// A change of a Television's spec.power or status.session wakes the
+	// loop, because the pass is where the adapter acts on it. A change of
+	// a Display's physical address wakes it too, because the adapter
+	// announces that address. A cluster without a definition lists no
+	// version and gets no watch yet; watchLater starts it once a pass
+	// lists a version.
+	watches := []*lateWatch{
+		{path: televisionsPath, list: func() (string, error) {
+			listed, err := ListTelevisions(n.client)
+			if err != nil {
+				return "", err
+			}
+			return listed.Metadata.ResourceVersion, nil
+		}},
+		{path: displaysPath, list: func() (string, error) {
+			listed, err := ListDisplays(n.client)
+			if err != nil {
+				return "", err
+			}
+			return listed.Metadata.ResourceVersion, nil
+		}},
 	}
-	backstop := time.NewTicker(backstopInterval)
-	defer backstop.Stop()
+	if err := n.watchLater(ctx, started, watches, true); err != nil {
+		return err
+	}
 	heartbeat := time.NewTicker(cecReportInterval)
 	defer heartbeat.Stop()
+	var retry <-chan time.Time
 	force := true
 	for {
 		if err := n.pass(ctx); err != nil {
@@ -318,18 +342,119 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 		}
 		n.report(force)
 		force = false
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-n.failed:
+		_ = n.watchLater(ctx, started, watches, false)
+		retry = nil
+		if wait, due := n.retryIn(); due {
+			retry = time.After(wait)
+		}
+		if done, err := n.await(ctx, heartbeat.C, retry); done {
 			return err
-		case <-n.wake:
-		case <-n.dirty:
-		case <-backstop.C:
-		case <-heartbeat.C:
-			force = true
 		}
 	}
+}
+
+// await waits for the loop's next pass: an event, or the retry clock. The
+// heartbeat and a request for a retry are handled here and run no
+// pass. done says the node workload ends, with err as its cause.
+func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <-chan time.Time) (bool, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return true, nil
+		case err := <-n.failed:
+			return true, err
+		case <-n.wake:
+			return false, nil
+		case <-n.dirty:
+			return false, nil
+		case <-retry:
+			return false, nil
+		case <-n.retryAsk:
+			if retry == nil {
+				retry = time.After(cecAPIRetry)
+			}
+		case <-heartbeat:
+			// The heartbeat is a clock and reads nothing: it writes the
+			// entry again so its reportedAt stays current, and runs no pass.
+			n.report(true)
+		}
+	}
+}
+
+// lateWatch is one watch the loop starts once its collection lists a
+// version: at once for a cluster with the definition, and at a later
+// pass for a definition installed after the node workload started.
+type lateWatch struct {
+	path    string
+	list    func() (string, error)
+	running bool
+}
+
+// watchLater starts each watch that is not running and whose collection
+// now lists a version. first says the loop is starting, when a list the
+// API server refuses ends the node workload, as the first CECBus list
+// does. A later list that fails is tried again at the next pass.
+func (n *cecNode) watchLater(ctx context.Context, started *sync.WaitGroup, watches []*lateWatch, first bool) error {
+	for _, watch := range watches {
+		if watch.running {
+			continue
+		}
+		var version string
+		err := retryThrottled(ctx, func() error {
+			var err error
+			version, err = watch.list()
+			return err
+		})
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil && first {
+			return fmt.Errorf("listing %s: %w", watch.path, err)
+		}
+		if err != nil || version == "" {
+			continue
+		}
+		watch.running = true
+		path, list := watch.path, watch.list
+		started.Go(func() {
+			watchCollection(ctx, n.client, path, version, n.wake, func() {}, list)
+		})
+	}
+	return nil
+}
+
+// cecAPIRetry is how long the loop waits before it runs a pass again
+// after an API call failed with no event to follow, such as a list the
+// API server refused or a result it did not accept.
+var cecAPIRetry = 10 * time.Second
+
+// retryLater asks the loop for a pass after cecAPIRetry, because an API
+// call failed and no event will follow it. A pass that runs sooner for
+// an event also tries again.
+func (n *cecNode) retryLater() {
+	poke(n.retryAsk)
+}
+
+// retryIn answers how long the loop waits before its next pass when no
+// event arrives, and false when it waits for an event alone: a join
+// that failed is tried again at its retryAt, and a result the API
+// server has not accepted after cecAPIRetry.
+func (n *cecNode) retryIn() (time.Duration, bool) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	unwritten := n.powered.unwritten != nil || n.woken.unwritten != nil || n.standby.unwritten != nil
+	joining := (n.entry.State == AdapterJoining || n.entry.State == AdapterRefused) && n.applied.problem == ""
+	switch {
+	case joining && n.entry.Machine != "":
+		wait := max(n.retryAt.Sub(n.now()), 0)
+		if unwritten {
+			wait = min(wait, cecAPIRetry)
+		}
+		return wait, true
+	case unwritten:
+		return cecAPIRetry, true
+	}
+	return 0, false
 }
 
 // stop takes the adapter off the bus and writes the entry's last
@@ -396,6 +521,7 @@ func (n *cecNode) report(force bool) {
 	stamped.ReportedAt = timestamp(n.now())
 	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, &stamped); err != nil {
 		fmt.Fprintf(os.Stderr, "writing machine %s's entry in CECBus %s: %v\n", n.machine, bus, err)
+		n.retryLater()
 		return
 	}
 	n.mutex.Lock()

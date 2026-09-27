@@ -107,10 +107,11 @@ rules:
     resources: [cecbuses/status]
     verbs: [get, patch]
   # In Control the adapter announces the physical address that
-  # display-operator publishes on the named Display.
+  # display-operator publishes on the named Display. The watch wakes the
+  # pod when that address changes.
   - apiGroups: [display.liken.sh]
     resources: [displays]
-    verbs: [get]
+    verbs: [get, list, watch]
   # The watch wakes the pod when a person changes a Television's
   # spec.power or the Deployment changes its status.session. The pod
   # whose adapter sends the bus's commands applies spec.power and writes
@@ -118,7 +119,9 @@ rules:
   # manager named after the machine. The pod whose adapter speaks for
   # the session's Display runs the wake and writes status.wokeAt and the
   # WakeApplied condition, under a second field manager named after the
-  # machine. It never writes a Television spec.
+  # machine. The pod whose adapter sends the bus's commands answers a
+  # power press's read in status.powerRead, under a third. It never
+  # writes a Television spec.
   - apiGroups: [equipment.liken.sh]
     resources: [televisions]
     verbs: [get, list, watch]

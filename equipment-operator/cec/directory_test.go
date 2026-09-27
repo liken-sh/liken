@@ -177,3 +177,62 @@ func TestLookupAnswersAPeerOrEveryFactUnknown(t *testing.T) {
 		t.Errorf("held %+v, stranger %+v", held, stranger)
 	}
 }
+
+// tvPowerAfter folds one message into a directory that holds the TV at
+// a power and the message's sender, and answers the TV's power after it
+// and whether Hear saw a change.
+func tvPowerAfter(held cec.PowerStatus, message cec.Message) (cec.PowerStatus, bool) {
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+	directory.Observe(cec.ReportPowerStatus(0, 4, held))
+	directory.Present(message.From)
+	_, _, changed := directory.Hear(message)
+	return directory.Lookup(0).Power, changed
+}
+
+// The TV's power follows what the bus carries, so the node workload
+// needs no question on a timer to keep it current.
+func TestTheTVsPowerFollowsWhatTheBusCarries(t *testing.T) {
+	cases := []struct {
+		name    string
+		held    cec.PowerStatus
+		message cec.Message
+		power   cec.PowerStatus
+		changed bool
+	}{
+		{"a broadcast standby", cec.PowerOn, cec.Standby(5, 15), cec.PowerStandby, true},
+		{"the TV's own standby broadcast", cec.PowerOn, cec.Standby(0, 15), cec.PowerStandby, true},
+		{"a standby to the TV", cec.PowerOn, cec.Standby(8, 0), cec.PowerStandby, true},
+		{"a standby to another device", cec.PowerOn, cec.Standby(0, 5), cec.PowerOn, false},
+		{"image view on", cec.PowerStandby, cec.ImageViewOn(8, 0), cec.PowerOn, true},
+		{"text view on", cec.PowerStandby, cec.NewMessage(8, 0, cec.OpTextViewOn), cec.PowerOn, true},
+		{"a routing change from the TV", cec.PowerStandby, cec.NewMessage(0, 15, cec.OpRoutingChange, 0x12, 0x00, 0x10, 0x00), cec.PowerOn, true},
+		{"a set stream path from the TV", cec.PowerStandby, cec.NewMessage(0, 15, cec.OpSetStreamPath, 0x12, 0x00), cec.PowerOn, true},
+		{"a request for the active source from the TV", cec.PowerStandby, cec.NewMessage(0, 15, cec.OpRequestActiveSource), cec.PowerOn, true},
+		{"a routing change from another device", cec.PowerStandby, cec.NewMessage(5, 15, cec.OpRoutingChange, 0x12, 0x00, 0x10, 0x00), cec.PowerStandby, false},
+		{"another source's active source", cec.PowerStandby, cec.ActiveSource(8, 0x1200), cec.PowerOn, true},
+		{"a message that states nothing about the TV", cec.PowerOn, cec.GiveDevicePowerStatus(5, 4), cec.PowerOn, false},
+		{"a standby the TV already reported", cec.PowerStandby, cec.Standby(5, 15), cec.PowerStandby, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			power, changed := tvPowerAfter(c.held, c.message)
+			if power != c.power || changed != c.changed {
+				t.Errorf("after %v the TV reports %v (changed %v), want %v (changed %v)", c.message, power, changed, c.power, c.changed)
+			}
+		})
+	}
+}
+
+// A message about the TV does not show that a TV is on the bus, so the
+// directory adds no TV for it.
+func TestAMessageAboutTheTVAddsNoTV(t *testing.T) {
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+
+	directory.Hear(cec.Standby(5, 15))
+
+	if peers := directory.Peers(); len(peers) != 1 || peers[0].Logical != 5 {
+		t.Errorf("peers = %+v, want the sender alone", peers)
+	}
+}

@@ -1,43 +1,21 @@
 package main
 
 // The node workload's part of a Television: it reads the TV's power
-// on a timer, and it finds which adapter of a bus sends the bus's
-// commands. The power it reads goes into the adapter's entry with the
-// rest of the devices, and the Deployment copies it into the
-// Television. cecnode_power.go applies spec.power.
+// when a command or a power press needs it, and it finds which adapter
+// of a bus sends the bus's commands. The power it reads goes into the
+// adapter's entry with the rest of the devices, and the Deployment
+// copies it into the Television. Between reads, the power follows what
+// the TV and the other devices send on the bus, as cec.Directory
+// states, and no timer asks the TV. cecnode_power.go applies
+// spec.power.
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"slices"
-	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
 )
-
-// How often an adapter in Control asks the TV for its power. One
-// question and its answer take tens of milliseconds of the wire, so a
-// read every ten seconds costs little, and a TV turned on or off with
-// its own remote shows in the status within seconds instead of at the
-// next scan a minute later.
-var cecPowerInterval = 10 * time.Second
-
-// readPower asks the TV for its power every cecPowerInterval until the
-// mode ends. The directory takes the answer, and the entry carries it
-// to the Deployment.
-func (n *cecNode) readPower(ctx context.Context, own cec.LogicalAddress) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(cecPowerInterval):
-		}
-		if _, err := n.askPower(own); err != nil {
-			return
-		}
-	}
-}
 
 // askPower reads the TV's power into the directory, and asks the loop
 // to write the entry when the read changed what the directory holds.
@@ -85,4 +63,69 @@ func (n *cecNode) commands(bus *CECBus) (cec.LogicalAddress, bool) {
 		}
 	}
 	return 0, false
+}
+
+// powerReadMemory is what the node workload holds about the power reads
+// a power press asked for. The node's mutex guards it. listed says the
+// node workload has read the Televisions once, foundAtStart is the
+// request that first read held, and done is the last request the node
+// workload answered or skipped.
+type powerReadMemory struct {
+	listed       bool
+	foundAtStart commandKey
+	done         commandKey
+}
+
+func powerReadKeyOf(television *Television) commandKey {
+	return commandKey{television.Metadata.UID, "power read " + television.Status.Session.PowerReadAt}
+}
+
+// passPowerRead answers a power press's request for the TV's power. The
+// remote's power button toggles the room, and the TV's power decides
+// whether the room is on. No timer keeps that power current, and a TV
+// that a person turned off with its own remote can send nothing the
+// adapter hears. So the Deployment writes a new status.session.powerReadAt
+// for each press and waits a few seconds for the answer. The adapter
+// that sends the bus's commands asks the TV once and writes the answer
+// in status.powerRead, with an empty power when the TV did not answer.
+// A request that is already in the status when the node workload starts
+// is older than the press's wait, so the node workload sends nothing
+// for it.
+func (n *cecNode) passPowerRead(bus *CECBus, television *Television) {
+	session := sessionOf(television)
+	live := session != nil && session.PowerReadAt != ""
+	var key commandKey
+	if live {
+		key = powerReadKeyOf(television)
+	}
+	n.mutex.Lock()
+	first := !n.powerRead.listed
+	n.powerRead.listed = true
+	if first && live {
+		n.powerRead.foundAtStart = key
+	}
+	skip := !live || key == n.powerRead.done || key == n.powerRead.foundAtStart
+	n.mutex.Unlock()
+	answered := live && television.Status.PowerRead != nil && television.Status.PowerRead.At == session.PowerReadAt
+	if skip || answered {
+		return
+	}
+	own, commands := n.commands(bus)
+	if !commands {
+		return
+	}
+	n.mutex.Lock()
+	n.powerRead.done = key
+	n.mutex.Unlock()
+	power, err := n.askPower(own)
+	if err != nil {
+		return
+	}
+	answer := ""
+	if power != cec.PowerUnknown {
+		answer = power.String()
+	}
+	if err := ApplyTelevisionPowerRead(n.client, television, n.machine, session.PowerReadAt, answer); err != nil {
+		fmt.Fprintf(os.Stderr, "writing the power read of Television %s: %v\n", television.Metadata.Name, err)
+	}
 }

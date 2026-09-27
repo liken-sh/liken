@@ -73,15 +73,35 @@ func vividPair(t *testing.T, playsTV bool) (*cec.Device, *cec.Device, cec.Physic
 	return tv, output, address
 }
 
+// claimTV makes a vivid adapter a follower that holds the TV's logical
+// address 0. The kernel claims a TV's address by polling 0, and it
+// takes 14 instead when the poll ends in neither an acknowledgement
+// nor a NACK. On vivid that happens now and then with no adapter
+// holding 0, and a TV at 14 is not the TV any test expects, so the
+// claim is made again, a few times at most.
+func claimTV(t *testing.T, tv *cec.Device) {
+	t.Helper()
+	mustSucceed(t, tv.Follow())
+	for range 3 {
+		// A run that was interrupted leaves its claim in the kernel, which
+		// refuses a new claim on a configured adapter with EBUSY.
+		mustSucceed(t, tv.Release())
+		mustSucceed(t, tv.Claim(cec.Claim{Type: cec.TypeTV, OSDName: "TV"}))
+		held, err := tv.Addresses()
+		mustSucceed(t, err)
+		if slices.Equal(held.Logical, []cec.LogicalAddress{cec.AddressTV}) {
+			return
+		}
+		t.Logf("the TV claimed %v and not 0; claiming again", held.Logical)
+	}
+	t.Fatal("the TV did not claim logical address 0")
+}
+
 // playTV makes a vivid adapter the TV, in standby, answering what a
 // follower owes, until the test ends.
 func playTV(t *testing.T, tv *cec.Device) {
 	t.Helper()
-	mustSucceed(t, tv.Follow())
-	// A run that was interrupted leaves its claim in the kernel, which
-	// refuses a new claim on a configured adapter with EBUSY.
-	mustSucceed(t, tv.Release())
-	mustSucceed(t, tv.Claim(cec.Claim{Type: cec.TypeTV, OSDName: "TV"}))
+	claimTV(t, tv)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -151,9 +171,7 @@ func playWakingTV(t *testing.T, tv *cec.Device) func() []cec.Message {
 	t.Helper()
 	var heardMutex sync.Mutex
 	var heard []cec.Message
-	mustSucceed(t, tv.Follow())
-	mustSucceed(t, tv.Release())
-	mustSucceed(t, tv.Claim(cec.Claim{Type: cec.TypeTV, OSDName: "TV"}))
+	claimTV(t, tv)
 	var mutex sync.Mutex
 	power, settles := cec.PowerStandby, time.Time{}
 	current := func() cec.PowerStatus {

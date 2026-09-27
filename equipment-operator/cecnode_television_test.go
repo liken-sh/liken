@@ -1,7 +1,7 @@
 package main
 
-// The node workload and a Television: the power read on a timer, the
-// command that applies each generation of spec.power once, the
+// The node workload and a Television: the power that follows the bus,
+// the command that applies each generation of spec.power once, the
 // readback that confirms it, and which adapter of a bus sends it.
 // cecnode_test.go holds the adapter fixtures, and cecnode_power_test.go
 // holds the cases where an application meets a change, a failure, or a
@@ -15,14 +15,14 @@ import (
 	"github.com/liken-sh/equipment-operator/cec/cectest"
 )
 
-// fastPower shortens the power timer, the confirmation, and the settle
-// time, so a test that waits on any of them finishes in milliseconds.
+// fastPower shortens the confirmation and the settle time, so a test
+// that waits on either finishes in milliseconds.
 func fastPower(t *testing.T) {
 	t.Helper()
-	interval, every, window, settle := cecPowerInterval, cecPowerReadEvery, cecPowerWindow, cecPowerSettle
-	cecPowerInterval, cecPowerReadEvery, cecPowerWindow, cecPowerSettle = 20*time.Millisecond, 5*time.Millisecond, 50*time.Millisecond, 300*time.Millisecond
+	every, window, settle := cecPowerReadEvery, cecPowerWindow, cecPowerSettle
+	cecPowerReadEvery, cecPowerWindow, cecPowerSettle = 5*time.Millisecond, 50*time.Millisecond, 300*time.Millisecond
 	t.Cleanup(func() {
-		cecPowerInterval, cecPowerReadEvery, cecPowerWindow, cecPowerSettle = interval, every, window, settle
+		cecPowerReadEvery, cecPowerWindow, cecPowerSettle = every, window, settle
 	})
 }
 
@@ -219,37 +219,34 @@ func TestABusInListenSendsNoPowerCommand(t *testing.T) {
 	mustMatch(t, television.Status.PowerGeneration, int64(0))
 }
 
-// The adapter asks the TV for its power on a timer much shorter than
-// the scan's, so a TV turned on with its own remote shows as On within
-// seconds.
-func TestTheAdapterReadsTheTVsPowerOnATimer(t *testing.T) {
-	fastPower(t)
-	wire := roomWithTV(televisionTV(cec.PowerStandby))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+// No timer asks the TV for its power. A TV that a person turns on or
+// off with its own remote shows in the entry through what the TV sends
+// the bus: a broadcast Standby, or a Routing Change of a TV that is on.
+func TestTheTVsPowerFollowsItsBroadcasts(t *testing.T) {
+	cases := []struct {
+		name    string
+		held    cec.PowerStatus
+		message cec.Message
+		power   string
+	}{
+		{"a TV turned off with its own remote", cec.PowerOn, cec.Standby(0, 15), "Standby"},
+		{"a TV turned on with its own remote", cec.PowerStandby, cec.NewMessage(0, 15, cec.OpRoutingChange, 0x12, 0x00, 0x10, 0x00), "On"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wire := roomWithTV(televisionTV(c.held))
+			api := controlling(t, wire, lounge(""))
+			api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+			sent := len(wire.Sent())
 
-	wire.Add(televisionTV(cec.PowerOn))
+			wire.Send(c.message)
 
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
-		return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
-	})
-}
-
-// A TV that stops answering its power status has no power in the
-// entry, because its last answer is no longer true.
-func TestATVThatStopsAnsweringLosesItsPowerInTheEntry(t *testing.T) {
-	fastPower(t)
-	wire := roomWithTV(televisionTV(cec.PowerStandby))
-	api := controlling(t, wire, lounge(""))
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-	mute := televisionTV(cec.PowerStandby)
-	mute.Mute = true
-
-	wire.Add(mute)
-
-	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
-		return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == ""
-	})
+			api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
+				return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == c.power
+			})
+			mustMatch(t, len(wire.Sent()), sent)
+		})
+	}
 }
 
 // A cluster without the Television definition still runs the bus: the

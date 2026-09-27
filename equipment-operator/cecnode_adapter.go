@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,9 @@ func (n *cecNode) desired(bus string, mode CECMode, display string) adapterConfi
 		return want
 	}
 	found, err := GetDisplay(n.client, display)
+	if err != nil {
+		n.retryLater()
+	}
 	switch {
 	case err != nil && n.display.name == display:
 		want.physical = n.display.physical
@@ -139,7 +143,7 @@ func (n *cecNode) apply(ctx context.Context, want adapterConfig) error {
 	}
 	n.mutex.Unlock()
 	if entry.State == AdapterJoined {
-		n.startScans(ctx, cec.LogicalAddress(*entry.LogicalAddress))
+		n.startMode(ctx, cec.LogicalAddress(*entry.LogicalAddress))
 	}
 	n.markDirty()
 	return nil
@@ -345,7 +349,7 @@ func (n *cecNode) syncAddresses(ctx context.Context, want adapterConfig) error {
 		n.mutex.Lock()
 		n.entry, n.retryWait = joinedNow, 0
 		n.mutex.Unlock()
-		n.startScans(ctx, held.Logical[0])
+		n.startMode(ctx, held.Logical[0])
 		n.markDirty()
 	case entry.LogicalAddress != nil && (len(held.Logical) != 1 || int(held.Logical[0]) != *entry.LogicalAddress):
 		n.mutex.Lock()
@@ -369,49 +373,158 @@ func (n *cecNode) adapterError(err error) error {
 // scanFailure starts the message of a scan the kernel refused.
 const scanFailure = "scanning the bus: "
 
-// startScans runs a scan now and then every cecScanInterval, and reads
-// the TV's power every cecPowerInterval, until the mode changes.
-// stopMode waits for a scan or a read in progress to finish, so neither
-// transmits after the handle leaves Control.
-func (n *cecNode) startScans(ctx context.Context, own cec.LogicalAddress) {
+// startMode starts the work of an adapter that joined the bus in
+// Control. It scans the bus once, and after that it asks questions only
+// of a device that announces itself. Nothing in Control transmits on a
+// timer. A timed question is traffic on the wire, and some TVs answer
+// traffic they did not expect by switching their own input, so a timer
+// that asks would change the room with no person's action;
+// plans/09-cec.md records the measurement. This is the node workload's
+// rule for the wire: the handle took the follower mode before the
+// claim, so the kernel queues every message the adapter hears from the
+// moment it joins, and the scan here is the one baseline read. When the
+// subscription fails, the node workload subscribes and scans again: an
+// adapter that leaves ends the process, and the kubelet starts a new
+// one; a claim the kernel takes away, a new physical address, and a
+// change of mode each join again, which runs startMode again. The
+// directory keeps the list current from what the devices
+// broadcast and from the answers they send, and the TV's power follows
+// the messages that change it, as cec.Directory states. stopMode waits
+// for a scan or a question in progress to finish, so neither transmits
+// after the handle leaves Control.
+func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 	ctx, cancel := context.WithCancel(ctx)
 	work := &sync.WaitGroup{}
+	arrivals := make(chan cec.LogicalAddress, cecArrivals)
 	n.stopMode = func() { cancel(); work.Wait() }
 	n.modeContext, n.modeWork = ctx, work
-	work.Go(func() { n.readPower(ctx, own) })
+	n.mutex.Lock()
+	n.arrivals, n.introduced = arrivals, map[cec.LogicalAddress]cec.PhysicalAddress{}
+	n.mutex.Unlock()
 	work.Go(func() {
-		for ctx.Err() == nil {
-			_, err := cec.Scan(n.device, n.directory, own)
-			if err != nil && cec.IsGone(err) {
-				n.fail(err)
-				return
-			}
-			n.mutex.Lock()
-			switch {
-			case err != nil:
-				n.entry.Message = scanFailure + err.Error()
-			case n.entry.State == AdapterJoined || n.entry.State == AdapterScanned:
-				n.entry.State = AdapterScanned
-				// A scan that works clears the failure of the last one, and
-				// leaves any other message in place.
-				if strings.HasPrefix(n.entry.Message, scanFailure) {
-					n.entry.Message = ""
-				}
-			}
-			n.mutex.Unlock()
-			n.markDirty()
+		if !n.joinScan(ctx, own) {
+			return
+		}
+		for {
 			select {
 			case <-ctx.Done():
-			case <-time.After(cecScanInterval):
+				return
+			case address := <-arrivals:
+				if !n.introduce(own, address) {
+					return
+				}
 			}
 		}
 	})
+}
+
+// cecArrivals bounds the devices that wait for their questions. A bus
+// has at most 14 other devices, so a full queue already holds each one.
+const cecArrivals = 16
+
+// joinScan scans the bus once when the adapter joins, and again after a
+// wait only when the kernel refused the scan. The wait doubles from
+// cecRetryFirst up to cecRetryMax, as a join's does. It answers false
+// when the mode ended or the adapter left.
+func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
+	var wait time.Duration
+	for {
+		_, err := cec.Scan(n.device, n.directory, own)
+		if err != nil && cec.IsGone(err) {
+			n.fail(err)
+			return false
+		}
+		n.mutex.Lock()
+		switch {
+		case err != nil:
+			n.entry.Message = scanFailure + err.Error()
+		case n.entry.State == AdapterJoined || n.entry.State == AdapterScanned:
+			n.entry.State = AdapterScanned
+			// A scan that works clears the failure of the last one, and
+			// leaves any other message in place.
+			if strings.HasPrefix(n.entry.Message, scanFailure) {
+				n.entry.Message = ""
+			}
+		}
+		if err == nil {
+			for _, peer := range n.directory.Peers() {
+				n.introduced[peer.Logical] = peer.Physical
+			}
+		}
+		n.mutex.Unlock()
+		n.markDirty()
+		if err == nil {
+			return true
+		}
+		wait = nextRetry(wait)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(wait):
+		}
+	}
+}
+
+// arrived asks the mode's work to introduce the sender of a message it
+// heard in Control, when the sender is new to the adapter or announced
+// a new physical address. A device that joins the bus claims a logical
+// address, and the kernel of that device broadcasts Report Physical
+// Address then, so a device that joins or moves after the scan is heard
+// here. Each device is introduced once for each physical address it
+// announces, so a device that repeats its broadcasts asks nothing more
+// of the adapter. held says whether the directory held the sender
+// before the message.
+func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
+	if message.From == cec.AddressUnregistered {
+		return
+	}
+	opcode, _ := message.Opcode()
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	if n.arrivals == nil {
+		return
+	}
+	introduced, known := n.introduced[message.From]
+	moved := opcode == cec.OpReportPhysicalAddr && after.Physical != introduced
+	if held && known && !moved {
+		return
+	}
+	n.introduced[message.From] = after.Physical
+	select {
+	case n.arrivals <- message.From:
+	default:
+	}
+}
+
+// introduce asks one device that arrived for the facts the directory
+// does not hold yet. It answers false when the adapter left.
+func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
+	before := n.directory.Peers()
+	_, err := cec.Introduce(n.device, n.directory, own, address)
+	if err != nil && cec.IsGone(err) {
+		n.fail(err)
+		return false
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "asking logical address %d for its facts from the adapter on %s: %v\n", address, n.machine, err)
+	}
+	if !n.directory.Holds(address) {
+		// The device left, so a later message from it is a new arrival.
+		n.mutex.Lock()
+		delete(n.introduced, address)
+		n.mutex.Unlock()
+	}
+	if !slices.Equal(before, n.directory.Peers()) {
+		n.markDirty()
+	}
+	return true
 }
 
 // heard is where every message the adapter receives arrives. It
 // updates the directory, logs a message a person notices, and in
 // Control it answers what a follower owes.
 func (n *cecNode) heard(message cec.Message) {
+	held := n.directory.Holds(message.From)
 	before, after, changed := n.directory.Hear(message)
 	if changed {
 		n.markDirty()
@@ -441,6 +554,7 @@ func (n *cecNode) heard(message cec.Message) {
 	if !control {
 		return
 	}
+	n.arrived(message, after, held)
 	// The adapter reports its power as on for as long as its pod runs.
 	// The machine keeps running when the TV goes to standby, so a
 	// Standby broadcast does not change the answer.
