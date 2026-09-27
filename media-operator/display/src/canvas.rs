@@ -234,9 +234,9 @@ impl Scrim {
             .collect()
     }
 
-    /// The scrim as the picture the display draws: one column of pixels, one
-    /// pixel for each row of the output, which the layer stretches across the
-    /// width.
+    /// The scrim as the picture the display draws: a tile [`TILE`] pixels
+    /// wide with one row for each row of the output, which the layer repeats
+    /// across the width.
     ///
     /// The scrim is a picture and not a gradient fill because of what a
     /// gradient costs. The toolkit fills a gradient with a shader that
@@ -252,6 +252,14 @@ impl Scrim {
     /// output, and each row carries the value the bands give at the middle of
     /// that row. The picture's edge at the screen edge lands on a whole pixel,
     /// so the rows line up with the output's own.
+    ///
+    /// Each pixel carries its row's value with noise added before it is
+    /// rounded to a byte, so the rounding lands above the value on some
+    /// pixels and below it on others. Without the noise, every pixel of a row
+    /// rounds the same way, and the falloff shows as flat bands with a step
+    /// between them on an eight-bit screen. The noise is the hash and the
+    /// amplitude of the toolkit's gradient shader, the grain the scrims were
+    /// judged by eye with.
     pub fn picture(&self, canvas: &Canvas, density: f32) -> Option<Picture> {
         let (start, end) = self.span();
         let per_row = canvas.scale() * density;
@@ -278,14 +286,41 @@ impl Scrim {
                     .iter()
                     .find(|band| band.from <= row && row < band.to)
                     .map_or(0.0, |band| band.alpha_at(row));
-                [red, green, blue, (alpha * 255.0).round() as u8]
+                let y = (top * per_row + index as f32 + 0.5) / density;
+                (0..TILE).flat_map(move |column| {
+                    let x = (column as f32 + 0.5) / density;
+                    let level = alpha * 255.0 + DITHER * (2.0 * noise(x, y) - 1.0);
+                    [red, green, blue, level.round().clamp(0.0, 255.0) as u8]
+                })
             })
             .collect();
         Some(Picture {
-            handle: Handle::from_rgba(1, rows as u32, pixels),
+            handle: Handle::from_rgba(TILE, rows as u32, pixels),
             bounds: Rectangle::new(Point::new(0.0, top), Size::new(canvas.width(), height)),
+            tile: TILE as f32 / per_row,
         })
     }
+}
+
+/// How many output pixels wide one scrim tile is. The layer repeats the tile
+/// across the row, and the toolkit draws every repeat in one call, so a
+/// narrow tile costs no more to draw than one picture as wide as the screen.
+/// A tile this wide holds both scrims in 0.6 MB at 1080 rows and in 1.1 MB
+/// at 2160, where a picture as wide as the screen would hold 8 MB and 34 MB
+/// on machines whose graphics share one gigabyte of memory. Each tile also
+/// stays under the size the toolkit uploads within the frame that asks.
+pub const TILE: u32 = 128;
+
+/// How far the noise moves a pixel's value, in steps of one byte: up to this
+/// much above or below. It is the amplitude of the toolkit's gradient shader
+/// in its own units, 0.3 of a step, applied to the alpha the picture stores.
+const DITHER: f32 = 0.3;
+
+/// The noise at one position in logical pixels, from 0 to 1. It is the hash
+/// the toolkit's gradient shader dithers with, so the grain matches that
+/// shader's.
+fn noise(x: f32, y: f32) -> f32 {
+    ((x * 12.9898 + y * 78.233).sin() * 43758.547).fract().abs()
 }
 
 /// The pictures of both scrims, for one canvas and one scale factor. Only the
@@ -306,21 +341,25 @@ impl Scrims {
     }
 }
 
-/// One scrim as the toolkit draws it: the image, and the canvas rectangle it
-/// covers.
+/// One scrim as the toolkit draws it: the tile, the canvas rectangle the
+/// repeats of the tile cover, and the canvas width of one repeat.
 #[derive(Debug, Clone)]
 pub struct Picture {
     pub handle: Handle,
     pub bounds: Rectangle,
+    pub tile: f32,
 }
 
 impl Picture {
-    /// The alpha byte of every row, top to bottom. A test reads the picture
-    /// through this and not through the handle, because a handle takes an id
-    /// of its own on every call.
-    pub fn alphas(&self) -> Vec<u8> {
+    /// The alpha bytes of the tile, one row of [`TILE`] per output row, top
+    /// to bottom. A test reads the picture through this and not through the
+    /// handle, because a handle takes an id of its own on every call.
+    pub fn rows(&self) -> Vec<Vec<u8>> {
         match &self.handle {
-            Handle::Rgba { pixels, .. } => pixels.chunks(4).map(|pixel| pixel[3]).collect(),
+            Handle::Rgba { pixels, .. } => pixels
+                .chunks(4 * TILE as usize)
+                .map(|row| row.chunks(4).map(|pixel| pixel[3]).collect())
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -556,11 +595,78 @@ mod tests {
         assert!(near(75.0, 0.0));
     }
 
-    /// Every row of a scrim's picture carries the value the bands give at
-    /// the middle of the output row it covers, in the shadow colour, and
-    /// nothing past the rows the bands cover.
+    /// The value the bands give at the middle of each output row the picture
+    /// covers, in steps of one byte, and the tile's row for it.
+    fn rows_and_values(scrim: Scrim, density: f32) -> Vec<(Vec<u8>, f32)> {
+        let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
+        let picture = scrim.picture(&canvas, density).expect("a scrim with rows");
+        let bands = scrim.bands(&canvas);
+        picture
+            .rows()
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let at = picture.bounds.y + (index as f32 + 0.5) / density;
+                let value = bands
+                    .iter()
+                    .find(|band| band.from <= at && at < band.to)
+                    .map_or(0.0, |band| band.alpha_at(at));
+                (row, value * 255.0)
+            })
+            .collect()
+    }
+
+    /// Every pixel of a scrim's picture carries the value the bands give at
+    /// the middle of its output row, moved by the noise and rounded, so it
+    /// stays within 0.3 of a step and the rounding of that value. Nothing
+    /// past the rows the bands cover draws.
     #[test]
-    fn each_row_of_the_picture_carries_the_bands_value_for_its_output_row() {
+    fn each_pixel_carries_its_rows_value_within_the_noise() {
+        for (scrim, density) in [
+            (Scrim::top(), 1.0),
+            (Scrim::bottom(), 1.0),
+            (Scrim::top(), 2.0),
+        ] {
+            for (row, value) in rows_and_values(scrim, density) {
+                assert_eq!(row.len(), TILE as usize);
+                for alpha in row {
+                    assert!(
+                        (f32::from(alpha) - value).abs() <= 0.8,
+                        "{alpha} for {value}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A row whose value falls near the middle of two steps rounds up on some
+    /// pixels and down on others, which is the dither that keeps the falloff
+    /// from showing as bands. A row whose value is a whole step rounds the
+    /// same way on every pixel.
+    #[test]
+    fn a_row_between_two_steps_carries_both() {
+        let rows = rows_and_values(Scrim::top(), 1.0);
+        let between: Vec<_> = rows
+            .iter()
+            .filter(|(_, value)| (value.fract() - 0.5).abs() < 0.1)
+            .collect();
+        assert!(!between.is_empty());
+        for (row, value) in between {
+            let mut levels = row.clone();
+            levels.sort_unstable();
+            levels.dedup();
+            assert_eq!(levels.len(), 2, "{value}");
+        }
+        let whole = rows
+            .iter()
+            .find(|(_, value)| value.fract() < 0.05 && *value > 1.0)
+            .expect("a row on a whole step");
+        assert!(whole.0.iter().all(|alpha| *alpha == whole.0[0]));
+    }
+
+    /// The picture is the shadow colour at every pixel.
+    #[test]
+    fn the_picture_is_the_shadow_colour() {
         let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
         for (scrim, density) in [
             (Scrim::top(), 1.0),
@@ -568,33 +674,26 @@ mod tests {
             (Scrim::top(), 2.0),
         ] {
             let picture = scrim.picture(&canvas, density).expect("a scrim with rows");
-            let bands = scrim.bands(&canvas);
-            for (index, alpha) in picture.alphas().into_iter().enumerate() {
-                let row = picture.bounds.y + (index as f32 + 0.5) / density;
-                let expected = bands
-                    .iter()
-                    .find(|band| band.from <= row && row < band.to)
-                    .map_or(0.0, |band| band.alpha_at(row));
-                assert_eq!(alpha, (expected * 255.0).round() as u8, "row {row}");
-            }
             let Handle::Rgba { pixels, .. } = &picture.handle else {
                 panic!("a scrim is RGBA");
             };
-            assert_eq!(&pixels[..3], &[0, 0, 0]);
+            assert!(pixels.chunks(4).all(|pixel| pixel[..3] == [0, 0, 0]));
         }
     }
 
     /// The picture covers the whole width, and it starts at the screen edge
     /// on a whole output pixel, so each of its rows lands on one output row.
     /// A window at twice the scale carries twice the rows over the same
-    /// canvas rows.
+    /// canvas rows, and its tile covers half the canvas width, so each repeat
+    /// still covers [`TILE`] output pixels.
     #[test]
     fn the_picture_lands_on_whole_output_rows_from_the_screen_edge() {
         let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
         let top = Scrim::top().picture(&canvas, 1.0).expect("the top scrim");
         assert_eq!(top.bounds.y, 0.0);
         assert_eq!(top.bounds.width, 1920.0);
-        assert_eq!(top.alphas().len(), 526);
+        assert_eq!(top.rows().len(), 526);
+        assert_eq!(top.tile, TILE as f32);
 
         let bottom = Scrim::bottom()
             .picture(&canvas, 1.0)
@@ -603,8 +702,9 @@ mod tests {
         assert_eq!(bottom.bounds.y.fract(), 0.0);
 
         let doubled = Scrim::top().picture(&canvas, 2.0).expect("the top scrim");
-        assert_eq!(doubled.alphas().len(), 1052);
+        assert_eq!(doubled.rows().len(), 1052);
         assert_eq!(doubled.bounds.height, 526.0);
+        assert_eq!(doubled.tile, TILE as f32 / 2.0);
     }
 
     /// Both scrims of one surface are the pictures its two scrims resolve to,
@@ -617,8 +717,8 @@ mod tests {
             let held = held.expect("a scrim with rows");
             let fresh = scrim.picture(&canvas, 1.0).expect("a scrim with rows");
             assert_eq!(held.bounds, fresh.bounds);
-            assert_eq!(held.alphas(), fresh.alphas());
-            assert!(held.alphas().iter().any(|alpha| *alpha > 0));
+            assert_eq!(held.rows(), fresh.rows());
+            assert!(held.rows().iter().flatten().any(|alpha| *alpha > 0));
         }
     }
 

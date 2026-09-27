@@ -1191,7 +1191,7 @@ mod tests {
                 .scrims
                 .top
                 .as_ref()
-                .map_or(0, |picture| picture.alphas().len())
+                .map_or(0, |picture| picture.rows().len())
         };
         let single = rows(&display);
 
