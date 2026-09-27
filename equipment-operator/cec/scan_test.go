@@ -12,7 +12,7 @@ func TestAScanFindsEveryDeviceAndItsFacts(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.SetOwn(4)
 
-	report, err := cec.Scan(device, directory, 4)
+	report, err := cec.Scan(device, directory, 4, nil)
 
 	mustSucceed(t, err)
 	want := []cec.Peer{
@@ -30,7 +30,7 @@ func TestAScanForgetsADeviceThatLeft(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.Present(9)
 
-	_, err := cec.Scan(device, directory, 4)
+	_, err := cec.Scan(device, directory, 4, nil)
 
 	mustSucceed(t, err)
 	for _, peer := range directory.Peers() {
@@ -48,7 +48,7 @@ func TestAMuteDeviceIsPresentWithNoFacts(t *testing.T) {
 	_, device := joined(t, bus)
 	directory := cec.NewDirectory()
 
-	_, err := cec.Scan(device, directory, 4)
+	_, err := cec.Scan(device, directory, 4, nil)
 
 	mustSucceed(t, err)
 	peers := directory.Peers()
@@ -61,7 +61,7 @@ func TestAScanStopsWhenTheAdapterLeaves(t *testing.T) {
 	adapter, device := joined(t, room())
 	adapter.Unplug()
 
-	_, err := cec.Scan(device, cec.NewDirectory(), 4)
+	_, err := cec.Scan(device, cec.NewDirectory(), 4, nil)
 
 	if !cec.IsGone(err) {
 		t.Errorf("scan answered %v, want ENODEV", err)
@@ -76,13 +76,13 @@ func TestAScanKeepsADeviceItCouldNotReach(t *testing.T) {
 	_, device := joined(t, bus)
 	directory := cec.NewDirectory()
 	directory.SetOwn(4)
-	_, err := cec.Scan(device, directory, 4)
+	_, err := cec.Scan(device, directory, 4, nil)
 	mustSucceed(t, err)
 	disturbed := television
 	disturbed.Garbled = true
 	bus.Add(disturbed)
 
-	report, err := cec.Scan(device, directory, 4)
+	report, err := cec.Scan(device, directory, 4, nil)
 
 	mustSucceed(t, err)
 	peers := directory.Peers()
@@ -100,9 +100,9 @@ func TestAnIntroductionAsksOnlyForMissingFacts(t *testing.T) {
 	directory.SetOwn(4)
 	directory.Observe(cec.ReportPhysicalAddress(5, 0x1000, 5))
 
-	asked, err := cec.Introduce(device, directory, 4, 5)
+	asked, err := cec.Introduce(device, directory, 4, 5, nil)
 	mustSucceed(t, err)
-	again, err := cec.Introduce(device, directory, 4, 5)
+	again, err := cec.Introduce(device, directory, 4, 5, nil)
 	mustSucceed(t, err)
 
 	want := cec.Peer{Logical: 5, Physical: 0x1000, Type: cec.TypeAudioSystem, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn}
@@ -123,7 +123,7 @@ func TestAnIntroductionForgetsADeviceThatLeft(t *testing.T) {
 	directory.SetOwn(4)
 	directory.Present(9)
 
-	asked, err := cec.Introduce(device, directory, 4, 9)
+	asked, err := cec.Introduce(device, directory, 4, 9, nil)
 
 	mustSucceed(t, err)
 	if asked != 1 || len(directory.Peers()) != 0 {
@@ -135,7 +135,7 @@ func TestAnIntroductionSkipsNoDevice(t *testing.T) {
 	_, device := joined(t, room())
 
 	for _, address := range []cec.LogicalAddress{4, 15} {
-		asked, err := cec.Introduce(device, cec.NewDirectory(), 4, address)
+		asked, err := cec.Introduce(device, cec.NewDirectory(), 4, address, nil)
 		mustSucceed(t, err)
 		if asked != 0 {
 			t.Errorf("address %d: asked %d", address, asked)
@@ -149,9 +149,48 @@ func TestAnIntroductionStopsWhenTheAdapterLeaves(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.Present(5)
 
-	_, err := cec.Introduce(device, directory, 4, 5)
+	_, err := cec.Introduce(device, directory, 4, 5, nil)
 
 	if !cec.IsGone(err) {
 		t.Errorf("introduce answered %v, want ENODEV", err)
+	}
+}
+
+// A caller that serializes its reads of the TV's power hands the scan
+// and the introduction a reader, and they ask the TV its power through
+// it, once, and never with a question of their own.
+func TestTheTVsPowerGoesThroughTheReader(t *testing.T) {
+	cases := []struct {
+		name string
+		ask  func(device *cec.Device, directory *cec.Directory, read cec.PowerReader) error
+	}{
+		{"a scan", func(device *cec.Device, directory *cec.Directory, read cec.PowerReader) error {
+			_, err := cec.Scan(device, directory, 4, read)
+			return err
+		}},
+		{"an introduction", func(device *cec.Device, directory *cec.Directory, read cec.PowerReader) error {
+			_, err := cec.Introduce(device, directory, 4, cec.AddressTV, read)
+			return err
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bus := room()
+			_, device := joined(t, bus)
+			directory := cec.NewDirectory()
+			directory.SetOwn(4)
+			reads := 0
+
+			mustSucceed(t, c.ask(device, directory, func() error { reads++; return nil }))
+
+			if reads != 1 {
+				t.Errorf("the reader ran %d times", reads)
+			}
+			for _, message := range bus.Sent() {
+				if opcode, _ := message.Opcode(); message.To == cec.AddressTV && opcode == cec.OpGiveDevicePowerStatus {
+					t.Errorf("the %s sent %v itself", c.name, message)
+				}
+			}
+		})
 	}
 }

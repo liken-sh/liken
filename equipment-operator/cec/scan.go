@@ -25,6 +25,23 @@ type ScanReport struct {
 	Acked int
 }
 
+// PowerReader asks the TV its power in place of a scan's or an
+// introduction's own question, and records the answer in the
+// directory. Two power questions to the TV at once each wait for a
+// Report Power Status, and the kernel hands the one answer to one
+// waiter, so a caller that reads the TV's power elsewhere too, such as
+// for a press of a remote's power button, routes every read through
+// one reader that shares a read in flight. An error ends the scan or
+// the introduction, as a refused transmit does. A nil reader sends the
+// question like any other.
+type PowerReader func() error
+
+// asksTVPower answers whether a question is the power question to the
+// TV that a reader takes in place of the scan.
+func asksTVPower(reply Opcode, address LogicalAddress, read PowerReader) bool {
+	return read != nil && address == AddressTV && reply == OpReportPowerStatus
+}
+
 // questions are the requests a scan sends to each device, the opcode
 // of each answer, and whether the directory already holds the fact the
 // answer states.
@@ -49,8 +66,9 @@ var questions = []struct {
 // device that does not answer one question keeps what the directory
 // held, because a device in deep standby can acknowledge a poll and
 // still leave a request unanswered. An error means the kernel refused a
-// call, and the scan stops there.
-func Scan(device *Device, directory *Directory, own LogicalAddress) (ScanReport, error) {
+// call, and the scan stops there. tvPower, when it is not nil, asks
+// the TV its power in place of the scan's own question.
+func Scan(device *Device, directory *Directory, own LogicalAddress, tvPower PowerReader) (ScanReport, error) {
 	report := ScanReport{}
 	for address := AddressTV; address < AddressUnregistered; address++ {
 		if address == own {
@@ -70,6 +88,12 @@ func Scan(device *Device, directory *Directory, own LogicalAddress) (ScanReport,
 		report.Acked++
 		directory.Present(address)
 		for _, question := range questions {
+			if asksTVPower(question.reply, address, tvPower) {
+				if err := tvPower(); err != nil {
+					return report, err
+				}
+				continue
+			}
 			result, err := device.Transmit(question.build(own, address), question.reply, replyTimeout)
 			if err != nil {
 				return report, err
@@ -91,8 +115,9 @@ func Scan(device *Device, directory *Directory, own LogicalAddress) (ScanReport,
 // directory already holds. A NACK means the device left, and the
 // directory forgets it. A question that goes unanswered keeps what the
 // directory held, as in a scan. An error means the kernel refused a
-// call.
-func Introduce(device *Device, directory *Directory, own, address LogicalAddress) (int, error) {
+// call. tvPower, when it is not nil, asks the TV its power in place of
+// the introduction's own question.
+func Introduce(device *Device, directory *Directory, own, address LogicalAddress, tvPower PowerReader) (int, error) {
 	asked := 0
 	if address == own || address == AddressUnregistered {
 		return asked, nil
@@ -102,6 +127,12 @@ func Introduce(device *Device, directory *Directory, own, address LogicalAddress
 			continue
 		}
 		asked++
+		if asksTVPower(question.reply, address, tvPower) {
+			if err := tvPower(); err != nil {
+				return asked, err
+			}
+			continue
+		}
 		result, err := device.Transmit(question.build(own, address), question.reply, replyTimeout)
 		if err != nil {
 			return asked, err

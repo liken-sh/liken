@@ -101,3 +101,56 @@ func TestAPressReadSharesAQuestionInFlight(t *testing.T) {
 	mustMatch(t, television.Status.PowerRead.Power, "On")
 	mustMatch(t, powerQuestions(wire)-before, 1)
 }
+
+// The join scan and a TV's introduction ask the TV its power through
+// the same shared read as a press, so a press while either waits on
+// the TV takes their answer and puts no second question on the wire.
+// The TV takes 400 ms to answer each question, so its power question
+// comes last, after 1.2 s of the others, and the press 1.3 s in lands
+// while it waits.
+
+// slowTV is a TV that is on and takes 400 ms to answer each question.
+func slowTV() cectest.Peer {
+	tv := televisionTV(cec.PowerOn)
+	tv.Slow = 400 * time.Millisecond
+	return tv
+}
+
+// roomWithAReceiver is a bus with the receiver and no TV yet.
+func roomWithAReceiver() *cectest.Bus {
+	wire := cectest.NewBus()
+	wire.Add(cectest.Peer{Logical: 5, Physical: 0x1000, PrimaryType: 5, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn})
+	return wire
+}
+
+// pressWhileTheTVAnswers presses 1.3 s in, and checks that the press
+// read On from the one power question on the wire.
+func pressWhileTheTVAnswers(t *testing.T, wire *cectest.Bus, api *cecAPI) {
+	t.Helper()
+	time.Sleep(1300 * time.Millisecond)
+
+	askPowerRead(t, api, "2026-09-27T18:04:05.123Z")
+
+	television := api.waitForTelevisionWithin(t, "lounge", 3*time.Second, func(television Television) bool { return television.Status.PowerRead != nil })
+	mustMatch(t, television.Status.PowerRead.Power, "On")
+	settle()
+	mustMatch(t, powerQuestions(wire), 1)
+}
+
+func TestAPressSharesTheJoinScansQuestion(t *testing.T) {
+	wire := roomWithAReceiver()
+	wire.Add(slowTV())
+	api := controlling(t, wire, lounge(""))
+
+	pressWhileTheTVAnswers(t, wire, api)
+}
+
+func TestAPressSharesAnIntroductionsQuestion(t *testing.T) {
+	wire := roomWithAReceiver()
+	api := controlling(t, wire, lounge(""))
+	entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	wire.Add(slowTV())
+	wire.Send(cec.SetOSDName(0, cec.LogicalAddress(*entry.LogicalAddress), "TV"))
+
+	pressWhileTheTVAnswers(t, wire, api)
+}

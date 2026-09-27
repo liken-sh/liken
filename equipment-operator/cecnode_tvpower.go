@@ -31,8 +31,9 @@ type tvPowerCall struct {
 // would time out and report no power. A power press that decides from
 // that would turn a room on instead of off. So every reader of the
 // TV's power, the press, spec.power, the wake, and the announcement,
-// comes through here, and a reader that arrives while a read is in
-// flight waits for that read and takes its answer.
+// comes through here, as do the join scan and an introduction through
+// tvPowerReader, and a reader that arrives while a read is in flight
+// waits for that read and takes its answer.
 func (n *cecNode) askPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
 	flight := &n.tvPowerRead
 	flight.mutex.Lock()
@@ -53,6 +54,17 @@ func (n *cecNode) askPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
 	flight.mutex.Unlock()
 	close(call.done)
 	return call.power, call.err
+}
+
+// tvPowerReader is the reader the join scan and an introduction ask the
+// TV its power through, so their question is the same shared read as
+// a press's, and a press while either waits on the TV takes their
+// answer. askPower returns an error only when the adapter left.
+func (n *cecNode) tvPowerReader(own cec.LogicalAddress) cec.PowerReader {
+	return func() error {
+		_, err := n.askPower(own)
+		return err
+	}
 }
 
 // askTVPower asks the TV for its power, and nothing else, when it

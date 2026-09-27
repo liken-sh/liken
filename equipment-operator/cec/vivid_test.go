@@ -103,7 +103,7 @@ func TestVividAScanFindsTheTVAndAnotherSource(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.SetOwn(own)
 
-	report, err := cec.Scan(bus.outputs[0], directory, own)
+	report, err := cec.Scan(bus.outputs[0], directory, own, nil)
 
 	mustSucceed(t, err)
 	peers := directory.Peers()

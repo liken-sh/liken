@@ -435,7 +435,7 @@ const cecArrivals = 16
 func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
 	var wait time.Duration
 	for {
-		_, err := cec.Scan(n.device, n.directory, own)
+		_, err := cec.Scan(n.device, n.directory, own, n.tvPowerReader(own))
 		if err != nil && cec.IsGone(err) {
 			n.fail(err)
 			return false
@@ -507,7 +507,7 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 // does not hold yet. It answers false when the adapter left.
 func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
 	before := n.directory.Peers()
-	_, err := cec.Introduce(n.device, n.directory, own, address)
+	_, err := cec.Introduce(n.device, n.directory, own, address, n.tvPowerReader(own))
 	if err != nil && cec.IsGone(err) {
 		n.fail(err)
 		return false

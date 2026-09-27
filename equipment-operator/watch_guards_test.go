@@ -174,61 +174,71 @@ func whats(requests []watchRequest) string {
 	return strings.Join(names, ", ")
 }
 
+// pace is the least and the most time a request may follow the answer
+// before it.
+type pace struct {
+	least, most time.Duration
+}
+
+// The paces a request follows at: at once, after the first backoff,
+// and after the doubled one.
+var (
+	now     = pace{0, atOnce}
+	first   = pace{testBackoff, 2 * testBackoff}
+	doubled = pace{2 * testBackoff, 4 * testBackoff}
+)
+
 // Each case is a script and the requests the loop must send for it, and
-// for each request after the first, whether it follows at once or after
-// a backoff.
+// for each request after the first, the pace it follows at.
 func TestTheWatchLoopGuards(t *testing.T) {
 	cases := []struct {
 		name     string
 		steps    []watchStep
 		requests string
-		backoff  []bool
+		paces    []pace
 	}{
 		{"a watch that closes resumes from its last version, with a bookmark's too",
 			[]watchStep{{http.StatusOK, []string{event("ADDED", "7"), event("BOOKMARK", "9")}, long, 0, 0}},
-			"watch 1, watch 9", []bool{false}},
+			"watch 1, watch 9", []pace{now}},
 		{"a 410 response lists at once",
 			[]watchStep{{http.StatusGone, nil, 0, 0, 0}},
-			"watch 1, list, watch L1", []bool{false, false}},
+			"watch 1, list, watch L1", []pace{now, now}},
 		{"a 410 event lists at once",
 			[]watchStep{{http.StatusOK, []string{statusEvent(410)}, 0, 0, 0}},
-			"watch 1, list, watch L1", []bool{false, false}},
+			"watch 1, list, watch L1", []pace{now, now}},
 		{"a second 410 from the fresh list waits before it lists",
 			[]watchStep{{http.StatusGone, nil, 0, 0, 0}, {http.StatusGone, nil, 0, 0, 0}},
-			"watch 1, list, watch L1, list, watch L2", []bool{false, false, true, false}},
+			"watch 1, list, watch L1, list, watch L2", []pace{now, now, first, now}},
 		{"another error event waits before it lists",
 			[]watchStep{{http.StatusOK, []string{statusEvent(500)}, 0, 0, 0}},
-			"watch 1, list, watch L1", []bool{true, false}},
+			"watch 1, list, watch L1", []pace{first, now}},
 		{"an event that does not decode waits before it lists",
 			[]watchStep{{http.StatusOK, []string{`{"type":"MODIFIED","object":`}, 0, 0, 0}},
-			"watch 1, list, watch L1", []bool{true, false}},
+			"watch 1, list, watch L1", []pace{first, now}},
 		{"an error response waits before it lists",
 			[]watchStep{{http.StatusInternalServerError, nil, 0, 0, 0}},
-			"watch 1, list, watch L1", []bool{true, false}},
+			"watch 1, list, watch L1", []pace{first, now}},
 		{"a 410 that ends a watch which ran long counts as a first 410",
 			[]watchStep{{http.StatusGone, nil, 0, 0, 0}, {http.StatusOK, []string{statusEvent(410)}, 0, long, 0}},
-			"watch 1, list, watch L1, list, watch L2", []bool{false, false, false, false}},
+			"watch 1, list, watch L1, list, watch L2", []pace{now, now, now, now}},
 		{"a watch that closes at once waits, and resumes from its version",
 			[]watchStep{{http.StatusOK, []string{event("MODIFIED", "7")}, 0, 0, 0}},
-			"watch 1, watch 7", []bool{true}},
+			"watch 1, watch 7", []pace{first}},
 		{"a watch that lived long resets the backoff even when it ends in an error",
-			[]watchStep{{http.StatusOK, nil, 0, 0, 0}, {http.StatusOK, nil, 0, 0, 0}, {http.StatusOK, []string{statusEvent(500)}, long, 0, 0}},
-			"watch 1, watch 1, watch 1, list, watch L1", []bool{true, true, true, false}},
+			[]watchStep{{http.StatusOK, nil, 0, 0, 0}, {http.StatusOK, nil, 0, 0, 0}, {http.StatusOK, []string{statusEvent(500)}, 0, long, 0}},
+			"watch 1, watch 1, watch 1, list, watch L1", []pace{first, doubled, first, now}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			script := runScriptedWatch(t, c.steps...)
 
-			requests := script.requestsSeen(t, len(c.backoff)+1)
+			requests := script.requestsSeen(t, len(c.paces)+1)
 
 			mustMatch(t, whats(requests), c.requests)
-			for index, waited := range c.backoff {
+			for index, want := range c.paces {
 				between := gap(requests, index+1)
-				if waited && between < testBackoff {
-					t.Errorf("request %d (%s) came %s after the one before, inside the backoff", index+1, requests[index+1].what, between)
-				}
-				if !waited && between >= atOnce {
-					t.Errorf("request %d (%s) came %s after the one before, not at once", index+1, requests[index+1].what, between)
+				if between < want.least || between >= want.most {
+					t.Errorf("request %d (%s) came %s after the answer before it, want from %s to %s", index+1, requests[index+1].what, between, want.least, want.most)
 				}
 			}
 		})
