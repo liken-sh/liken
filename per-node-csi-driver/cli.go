@@ -65,7 +65,8 @@ type config struct {
 	metrics  string
 	// sweepEvery is the interval between two passes that look for a copy
 	// no PersistentVolume names. A deletion wakes a pass at once, so the
-	// tick catches what the watch missed.
+	// tick retries a removal that failed and removes a copy whose pod
+	// held it when its PersistentVolume was deleted.
 	sweepEvery time.Duration
 }
 

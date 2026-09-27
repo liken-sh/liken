@@ -63,6 +63,13 @@ func (s *sweeping) follow(ctx context.Context) {
 		return
 	}
 
+	// The ticker is a backstop for two failures that no event follows.
+	// A removeCopy that fails leaves the copy, and nothing wakes a pass
+	// to try it again. A copy that a pod still holds when its
+	// PersistentVolume is deleted stays, and the unpublish that later
+	// drops the hold does not wake a pass. A watch that closes is not
+	// one of the two: the reflector lists again and hands every
+	// deletion it missed to the delete handler.
 	ticker := time.NewTicker(s.every)
 	defer ticker.Stop()
 	s.sweep(ctx, handlesOf(informer.GetStore().List()))
@@ -102,8 +109,8 @@ func (s *sweeping) watchDeletes(
 
 // watchErrors counts a restart every time the reflector's list and
 // watch call ends and it opens the watch again, whether the API server
-// closed it or refused it. The pass on the tick still finds every
-// orphan and every deletion the watch missed, so a handler the
+// closed it or refused it. The list after the restart hands each
+// deletion the watch missed to the delete handler, so a handler the
 // informer refuses costs a metric and nothing more.
 func (s *sweeping) watchErrors(informer cache.SharedIndexInformer) {
 	if err := informer.SetWatchErrorHandler(s.handleWatchError); err != nil {

@@ -50,5 +50,5 @@ through a kustomize patch on the container's `args`.
 | `--node-id` | none | The node's name, which the base takes from the pod's `spec.nodeName`. Required. |
 | `--store` | `/var/lib/liken/pod-storage/per-node` | Where the node plugin keeps its copies and its holds. On `liken` this is the pod-storage partition. |
 | `--metrics` | `:9200` | Where the node plugin serves its Prometheus metrics. An empty value serves none. |
-| `--sweep-every` | `10m` | How often the driver looks for a copy that no `PersistentVolume` names. The driver acts on a deletion at once, and this pass finds what the watch missed. |
+| `--sweep-every` | `10m` | How often the driver looks for a copy that no `PersistentVolume` names. The driver acts on a deletion at once. This pass tries a failed removal again, and removes a copy that a pod held when its `PersistentVolume` was deleted. |
 | `--version` | none | Print the version and exit. |
