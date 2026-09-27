@@ -72,6 +72,9 @@ subjects:
 # audio-capture-server holds the capture container's leaf, and
 # audio-api-ca publishes the CA certificate alone, so a client reads
 # the trust anchor with an ordinary get and never touches a Secret.
+# The API watches audio-capture-server so it mints the leaf again when
+# the Secret changes or is deleted. A list or a watch that selects the
+# name with metadata.name is what lets that rule carry a resourceNames.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -84,6 +87,10 @@ rules:
     resources: [secrets]
     verbs: [get, update]
     resourceNames: [audio-api-tls, audio-capture-server]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [list, watch]
+    resourceNames: [audio-capture-server]
   - apiGroups: [""]
     resources: [configmaps]
     verbs: [get, update]
@@ -112,9 +119,11 @@ metadata:
   # The API server publishes the cluster's client certificate
   # authority in the ConfigMap extension-apiserver-authentication in
   # kube-system, and the API reads it to verify a caller's client
-  # certificate. extension-apiserver-authentication-reader is the
-  # built-in Role that grants a get on that one object, and it is the
-  # Role every extension API server binds for the same read.
+  # certificate, and watches it so a rotated authority takes effect
+  # with no restart. extension-apiserver-authentication-reader is the
+  # built-in Role that grants get, list, and watch on that one object,
+  # and it is the Role every extension API server binds for the same
+  # read.
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io

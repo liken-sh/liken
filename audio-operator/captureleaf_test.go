@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,6 +30,93 @@ func writeLeaf(t *testing.T, directory string) {
 		if err := os.WriteFile(filepath.Join(directory, name), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// publishLeaf puts a signed leaf into a directory the way the kubelet
+// updates a Secret volume: the files go into a new directory, a
+// symlink ..data_tmp names it, and a rename moves that symlink onto
+// ..data. The visible names are symlinks through ..data, so the rename
+// swaps every file at once.
+func publishLeaf(t *testing.T, directory string, generation int) {
+	t.Helper()
+	payload := fmt.Sprintf("..generation_%d", generation)
+	if err := os.Mkdir(filepath.Join(directory, payload), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLeaf(t, filepath.Join(directory, payload))
+	staged := filepath.Join(directory, "..data_tmp")
+	if err := os.Symlink(payload, staged); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(staged, filepath.Join(directory, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{tlsCertFile, tlsKeyFile, tlsCABundle} {
+		visible := filepath.Join(directory, name)
+		if _, err := os.Lstat(visible); err == nil {
+			continue
+		}
+		if err := os.Symlink(filepath.Join("..data", name), visible); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// watchLeaf runs the watch until the test ends, with a fallback of an
+// hour, so only the kubelet's swap can bring a change in time. Every
+// read is reported on the channel.
+func watchLeaf(t *testing.T, directory string) (*leaf, chan struct{}) {
+	t.Helper()
+	held := newLeaf(directory)
+	held.rereadAfter = time.Hour
+	reads := make(chan struct{}, 64)
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		close(done)
+		<-finished
+	})
+	go func() {
+		defer close(finished)
+		held.watchWith(done, func(_ bool, err error) {
+			if err != nil {
+				t.Error(err)
+			}
+			reads <- struct{}{}
+		}, func(err error) { t.Error(err) })
+	}()
+	return held, reads
+}
+
+// readsUntil waits on each read until the leaf has been loaded from
+// the files the given number of times. One update of the volume can
+// wake more than one read, so the test counts loads, not reads.
+func readsUntil(t *testing.T, held *leaf, reads chan struct{}, loads int) {
+	t.Helper()
+	for held.reloaded() < loads {
+		next(t, reads, fmt.Sprintf("read for load %d of the files", loads))
+	}
+}
+
+func TestTheLeafIsReadWhenTheKubeletSwapsTheVolume(t *testing.T) {
+	directory := t.TempDir()
+	held, reads := watchLeaf(t, directory)
+	next(t, reads, "first read")
+	if held.loaded() {
+		t.Fatal("an empty volume read as a leaf")
+	}
+
+	publishLeaf(t, directory, 1)
+	readsUntil(t, held, reads, 1)
+	first, _ := held.certificate(nil)
+
+	publishLeaf(t, directory, 2)
+	readsUntil(t, held, reads, 2)
+	second, _ := held.certificate(nil)
+
+	if string(first.Certificate[0]) == string(second.Certificate[0]) {
+		t.Error("the new leaf was not served")
 	}
 }
 

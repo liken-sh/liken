@@ -41,14 +41,20 @@ import (
 const captureTLSDirVariable = "CAPTURE_TLS_DIR"
 
 // captureTLSDir is where the leaf lands when nothing names another
-// path. The three file names are the kubernetes.io/tls shape's own,
-// and leafPollPeriod is how often the directory is read.
+// path. The three file names are the kubernetes.io/tls shape's own.
+//
+// leafFallback is the longest the container goes without reading the
+// directory. The kubelet's swap of the volume starts every read that
+// matters, so the fallback reads only when the inotify watch could not
+// start: a node whose fs.inotify.max_user_instances is used up refuses
+// a new watch, and the container then still takes a new leaf within
+// this bound.
 const (
-	captureTLSDir  = "/var/run/audio-capture-tls"
-	tlsCertFile    = "tls.crt"
-	tlsKeyFile     = "tls.key"
-	tlsCABundle    = "ca.crt"
-	leafPollPeriod = 10 * time.Second
+	captureTLSDir = "/var/run/audio-capture-tls"
+	tlsCertFile   = "tls.crt"
+	tlsKeyFile    = "tls.key"
+	tlsCABundle   = "ca.crt"
+	leafFallback  = 10 * time.Minute
 )
 
 // ErrNoCertificate is what /readyz reports before the Secret arrives,
@@ -58,14 +64,19 @@ var ErrNoCertificate = errors.New("the capture container holds no server certifi
 
 // leaf holds the certificate and reloads it when the files change.
 //
-// The reload watches the file rather than the API server. The kubelet
-// refreshes a Secret volume on its own period, so the file is the
-// event, and watching it needs no grant on the Secret.
+// The reload watches the volume rather than the API server. The
+// kubelet updates a Secret volume on its own sync period after the
+// Secret changes, so the volume's swap is the event, and watching the
+// volume needs no grant on the Secret.
 type leaf struct {
 	directory string
 
 	// now is a field so a test drives the reload on its own clock.
 	now func() time.Time
+
+	// rereadAfter is a field so a test sets it to an hour, and only
+	// the volume's swap can start a read in time.
+	rereadAfter time.Duration
 
 	mu       sync.RWMutex
 	held     *tls.Certificate
@@ -75,7 +86,7 @@ type leaf struct {
 }
 
 func newLeaf(directory string) *leaf {
-	return &leaf{directory: directory, now: time.Now}
+	return &leaf{directory: directory, now: time.Now, rereadAfter: leafFallback}
 }
 
 // certificate is what the TLS listener calls on every handshake. The
@@ -189,27 +200,42 @@ func (l *leaf) stamp() (string, bool) {
 	return stamp + hex.EncodeToString(sum[:]), true
 }
 
-// watch reads the files now and on every tick, until the run ends.
-//
-// This is a poll and not an inotify watch. The file arrives once and
-// changes about once a year, one poll costs two stat calls and one
-// read, and the kubelet delivers a Secret update as a symlink swap
-// that an inotify watch on the file itself would miss, so the watch
-// would need this same poll behind it.
+// watch reads the files now and on every swap of the volume, until
+// the run ends, and reports each read on the capture metrics.
 func (l *leaf) watch(done <-chan struct{}, readings *captureMetrics, complain func(error)) {
-	tick := time.NewTicker(leafPollPeriod)
-	defer tick.Stop()
-	for {
-		if err := l.reload(); err != nil {
+	l.watchWith(done, func(ready bool, err error) {
+		if err != nil {
 			complain(err)
 			readings.failed(failureCertificate)
 		}
-		readings.readiness(l.loaded())
+		readings.readiness(ready)
+	}, complain)
+}
+
+// watchWith is watch with the report of each read as a function, so a
+// test sees every read. complain carries a watch that could not start,
+// which is not a failure of the certificate.
+//
+// The watch is armed before each read, so a swap that lands during
+// the read starts one more read and is not lost.
+func (l *leaf) watchWith(done <-chan struct{}, report func(ready bool, err error), complain func(error)) {
+	swaps := newVolumeSwaps(l.directory, tlsCertFile, tlsKeyFile)
+	defer swaps.close()
+	fallback := time.NewTimer(l.rereadAfter)
+	defer fallback.Stop()
+	for {
+		if err := swaps.arm(); err != nil {
+			complain(fmt.Errorf("watching %s for the kubelet's updates: %w", l.directory, err))
+		}
+		err := l.reload()
+		report(l.loaded(), err)
 		select {
 		case <-done:
 			return
-		case <-tick.C:
+		case <-swaps.swapped:
+		case <-fallback.C:
 		}
+		fallback.Reset(l.rereadAfter)
 	}
 }
 

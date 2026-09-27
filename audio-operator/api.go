@@ -44,17 +44,10 @@ const apiService = "audio-api"
 
 // certificateCheck is how often the API looks at the lives of the
 // certificates it holds and mints a leaf again when one is nearing its
-// end. A year of life needs no closer watch than this.
+// end. The certificates are in memory, and no object changes when one
+// nears its end, so this is a clock and not a watch. A year of life
+// needs no closer look than this.
 const certificateCheck = time.Hour
-
-// secretCheck is how often the API looks for the Secret the capture
-// containers mount. A get on one object is cheap, and an owner who
-// deletes the Secret gets it back within a minute rather than waiting
-// out the hour above: every node's capture is down until it returns.
-//
-// The same pass reads the cluster's client certificate authority
-// again, which costs one more get of one object.
-const secretCheck = time.Minute
 
 // apiServer is the whole of this mode's state.
 type apiServer struct {
@@ -109,14 +102,17 @@ func serveAPI() {
 	go server.keepCertificates(ctx, held)
 
 	// The cluster's client authority is read before the listener
-	// starts, and again on every minute pass. A read that fails is
-	// reported and never fatal: an API that cannot read the ConfigMap
-	// still answers every caller that sends a Bearer token, and the
-	// next pass loads the authority once the grant or the API server
-	// is back.
+	// starts, so the first handshake verifies against it, and again on
+	// every change the watch reports. A read that fails is reported and
+	// never fatal: an API that cannot read the ConfigMap still answers
+	// every caller that sends a Bearer token, and the watch loads the
+	// authority once the grant or the API server is back.
 	if err := server.anchors.load(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 	}
+	server.followCertificateObjects(ctx, func(err error) {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+	})
 
 	go watchPods(ctx, client, namespace, server.pods, func(err error) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -176,33 +172,13 @@ func newAPIServer(client *Client, namespace string) *apiServer {
 
 // keepCertificates mints a leaf again when under a third of its life
 // remains, and reports the nearest expiry on every pass.
-//
-// The two ticks answer two different failures. The hourly one is the
-// lifetime check, which reads certificates already in memory. The
-// minute one is for a Secret that left: a capture container with no
-// leaf serves a certificate no client trusts, so every tap on its node
-// is a 503 until the Secret is back.
-//
-// The minute pass also reads the cluster's client certificate
-// authority again, so a rotation of that authority takes effect with
-// no restart.
 func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 	lifetimes := time.NewTicker(certificateCheck)
 	defer lifetimes.Stop()
-	secrets := time.NewTicker(secretCheck)
-	defer secrets.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-secrets.C:
-			if err := s.certs.keepCaptureLeaf(); err != nil {
-				fmt.Fprintf(os.Stderr, "keeping the capture container's leaf: %v\n", err)
-			}
-			if err := s.anchors.load(s.client); err != nil {
-				fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
-			}
-			continue
 		case <-lifetimes.C:
 		}
 		leaf, err := s.certs.ensure()
@@ -213,6 +189,34 @@ func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 		held.set(leaf)
 		s.readings.certificateExpiry(s.certs.nearestExpiry())
 	}
+}
+
+// followCertificateObjects watches the two objects whose changes the
+// API acts on at once, not on the hourly pass.
+//
+// The first is the Secret the capture containers mount. A capture
+// container with no leaf serves a certificate no client trusts, so
+// every tap on its node is a 503 until the Secret is back. A change or
+// a delete of the Secret runs the capture leaf check, which mints the
+// leaf again when the Secret is gone, is expiring, or holds a leaf
+// another CA signed, and writes nothing when the Secret is in order.
+//
+// The second is the ConfigMap that holds the cluster's client
+// certificate authority, so a rotation of that authority takes effect
+// with no restart.
+func (s *apiServer) followCertificateObjects(ctx context.Context, complain func(error)) {
+	followObject(ctx, s.client, "Secret", secretsPath(s.certs.namespace), captureTLSSecret,
+		func() {
+			if err := s.certs.keepCaptureLeaf(); err != nil {
+				complain(fmt.Errorf("keeping the capture container's leaf: %w", err))
+			}
+		}, complain)
+	followObject(ctx, s.client, "ConfigMap", configMapsPath(clientCANamespace), clientCAConfigMap,
+		func() {
+			if err := s.anchors.load(s.client); err != nil {
+				complain(fmt.Errorf("reading the cluster's client authority: %w", err))
+			}
+		}, complain)
 }
 
 // servedLeaf is the certificate the public listener serves, swapped in

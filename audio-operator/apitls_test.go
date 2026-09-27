@@ -95,6 +95,13 @@ func (s *objectStore) certificates() *certificates {
 	return newCertificates(NewClient(s.server.URL, s.server.Client(), ""), "liken-system", apiService)
 }
 
+func (s *objectStore) holdsSecret(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, found := s.secrets[name]
+	return found
+}
+
 func (s *objectStore) secretData(t *testing.T, name string) map[string][]byte {
 	t.Helper()
 	s.mu.Lock()
@@ -369,11 +376,11 @@ func TestPEMThatIsNotACertificateIsARefusal(t *testing.T) {
 	}
 }
 
-// A Secret an owner deleted has to come back within a minute, not
-// within the hour the lifetime check runs on: a capture container with
-// no leaf serves a certificate no client trusts, so every tap on its
-// node is a 503 until it returns.
-func TestADeletedCaptureSecretIsMintedAgainByTheMinuteCheck(t *testing.T) {
+// A Secret an owner deleted has to come back when the watch reports
+// the delete, not on the hourly lifetime check: a capture container
+// with no leaf serves a certificate no client trusts, so every tap on
+// its node is a 503 until it returns.
+func TestADeletedCaptureSecretIsMintedAgainByTheLeafCheck(t *testing.T) {
 	store := newObjectStore(t)
 	certs := store.certificates()
 	if _, err := certs.ensure(); err != nil {
@@ -389,7 +396,7 @@ func TestADeletedCaptureSecretIsMintedAgainByTheMinuteCheck(t *testing.T) {
 	store.mu.Unlock()
 
 	if err := certs.keepCaptureLeaf(); err != nil {
-		t.Fatalf("the minute check: %v", err)
+		t.Fatalf("the capture leaf check: %v", err)
 	}
 	next, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
 	if err != nil {

@@ -69,6 +69,12 @@ type certificates struct {
 	mu        sync.RWMutex
 	authority authority
 	public    keyPair
+
+	// pass lets one pass run at a time. The hourly pass and the watch
+	// on the capture Secret run on two goroutines, and both read the
+	// Secret and write it back. Two passes at once would each mint a
+	// leaf, and adopt writes the held pair with no lock.
+	pass sync.Mutex
 }
 
 func newCertificates(client *Client, namespace, service string) *certificates {
@@ -78,6 +84,8 @@ func newCertificates(client *Client, namespace, service string) *certificates {
 // ensure reads the Secret, mints what is absent, and writes back what
 // changed. It returns the public leaf the API serves.
 func (c *certificates) ensure() (tls.Certificate, error) {
+	c.pass.Lock()
+	defer c.pass.Unlock()
 	held, err := c.readSecret(apiTLSSecret)
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -212,11 +220,14 @@ func (c *certificates) publishAnchor() error {
 	return c.updateConfigMap(apiCAConfigMap, map[string]string{tlsCABundle: anchor})
 }
 
-// keepCaptureLeaf is the minute check: it reads the Secret the capture
-// containers mount and mints the leaf again when it is gone, when it
-// is expiring, or when another CA signed it. It writes nothing when
-// the Secret is in order, so the cost of a pass is one get.
+// keepCaptureLeaf runs on every change the watch on the Secret
+// reports. It reads the Secret the capture containers mount, and mints
+// the leaf again when it is gone, when it is expiring, or when another
+// CA signed it. It writes nothing when the Secret is in order, so the
+// cost of a pass is one get.
 func (c *certificates) keepCaptureLeaf() error {
+	c.pass.Lock()
+	defer c.pass.Unlock()
 	return c.publishCaptureLeaf()
 }
 

@@ -47,8 +47,8 @@ Kubernetes API server reads a client certificate, so the credentials
 in your kubeconfig identify you here the same way they identify you
 to `kubectl`. The API reads the authority from the `ConfigMap`
 `extension-apiserver-authentication` in `kube-system`, which is where
-the API server publishes it, and reads it again every minute. A
-rotated authority takes effect with no restart. A certificate from
+the API server publishes it, and watches it for changes. A rotated
+authority takes effect with no restart. A certificate from
 any other authority ends the TLS handshake.
 
 ### Bearer token

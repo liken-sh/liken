@@ -41,9 +41,14 @@ var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 // same difference for "something else wrote this object first", which
 // is normal under optimistic concurrency, and the caller handles it
 // by reading the object again.
+//
+// ErrGone marks a watch whose resource version is older than the
+// window the API server keeps. The caller handles it by listing again,
+// which reads the present state and a version the server still holds.
 var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict: something else wrote this object first")
+	ErrGone     = errors.New("gone: the resource version is too old to watch from")
 )
 
 type Client struct {
@@ -181,6 +186,9 @@ func (c *Client) Watch(ctx context.Context, path string) (io.ReadCloser, error) 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		drain(resp.Body)
+		if resp.StatusCode == http.StatusGone {
+			return nil, fmt.Errorf("%w: GET %s: %s", ErrGone, path, message)
+		}
 		return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, message)
 	}
 	return resp.Body, nil
