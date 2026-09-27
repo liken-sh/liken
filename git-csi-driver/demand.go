@@ -161,6 +161,18 @@ func (d *demanding) keepListed(listed []corev1.PersistentVolume) {
 	}
 }
 
+// fetching marks the last demand the node read for the handle as acted
+// on, because the stage that is about to fetch answers it. A webhook
+// never removes its annotation, so without the mark every first stage
+// of a volume pulls again right after its own fetch.
+func (d *demanding) fetching(handle string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if asked, found := d.seen[handle]; found {
+		d.acted[handle] = asked
+	}
+}
+
 // arrived acts on the last demand the node read for a volume a stage
 // just added to the node. The watch sends no event for that demand
 // again, so without this read the volume keeps its old commit until

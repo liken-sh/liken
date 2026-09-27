@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -194,14 +196,36 @@ func TestADemandReadWhileTheVolumeStagesIsActedOnWhenTheStageEnds(t *testing.T) 
 	answering, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 
-	// The watch sends the demand after the stage fetched and before the
-	// stage adds the volume to the node, so the volume is not staged
-	// yet when the node reads it.
-	answering.demands.read(t.Context(),
-		annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z"))
+	// The stage lists the PersistentVolumes to find the claim, after it
+	// starts and before it adds the volume to the node. The watch sends
+	// the demand at that moment, so the volume is not staged yet when
+	// the node reads it.
+	var once sync.Once
+	cluster(t, answering).PrependReactor("list", "persistentvolumes",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			once.Do(func() {
+				answering.demands.read(t.Context(),
+					annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z"))
+			})
+			return false, nil, nil
+		})
 	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
 
 	waitForCondition(t, held, ", demanded ")
+}
+
+func TestAnOldDemandIsNotActedOnWhenTheVolumeStages(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+
+	// A webhook never removes its annotation, so the node reads an old
+	// value before it stages the volume. The stage's own fetch is newer
+	// than that demand.
+	answering.demands.read(t.Context(),
+		annotated(csiVolume("franchises", driverName), "2026-09-01T09:00:00Z"))
+	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+
+	noDemand(t, held)
 }
 
 // scriptedVolumeWatches answers every watch on PersistentVolumes with

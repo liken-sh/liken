@@ -47,6 +47,12 @@ func (n *node) stageReadOnly(
 		context:     request.GetVolumeContext(),
 		targets:     map[string]podReference{},
 	}
+	// The stage's fetch answers every demand the node has read so far.
+	// The mark comes before the claim lookup and the fetch, so a demand
+	// read after it still differs, and the node acts on it when the
+	// stage ends.
+	n.demands.fetching(id)
+
 	// The claim is found before the fetch, so a stage the remote refuses
 	// reports on the claim. The claim is the only object a stage call
 	// names.
