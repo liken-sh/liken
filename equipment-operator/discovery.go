@@ -27,6 +27,18 @@ var discover = wiim.Discover
 // misses a device, so a run repeats its search across the window; an
 // amp does not move, so runs are far apart. Both are variables so a
 // test holds them still.
+//
+// The wait is a backstop, and it is the only evidence discovery has.
+// A search finds an amp that joined and an address that moved, and a
+// run of searches that miss an amp is the proof that it left. An amp
+// that loses power or its network sends no goodbye. A 20-minute capture
+// of both groups on a LAN with three amps heard no SSDP NOTIFY from any
+// of them, and no mDNS record except the answers to a query. So a
+// listener alone would never learn that an amp left, and would learn a
+// new address only if the amp announced it. One run sends two mDNS
+// queries and two SSDP searches over the window. The amps answer the
+// mDNS query on the group, and every UPnP media renderer on the LAN
+// answers each search.
 var (
 	discoveryWindow   = 4 * time.Second
 	discoveryInterval = 30 * time.Second
@@ -102,24 +114,30 @@ func (d *discovery) run(ctx context.Context) {
 // once is one search window and the Receiver reconcile that follows. A
 // search that ctx cut short did not run its full window, so it is no
 // evidence that an amp it missed left, and the operator does not count
-// it.
+// it. The Receiver loop reads only the addresses from discovery, so a
+// search wakes it only when an address appeared, moved, or went. A
+// Receiver that the reconcile creates or deletes wakes the loop through
+// its watch.
 func (d *discovery) once(ctx context.Context) {
 	found := discover(ctx, discoveryWindow)
 	if ctx.Err() != nil {
 		return
 	}
-	d.store(found)
+	moved := d.store(found)
 	if err := d.reconcile(); err != nil {
 		fmt.Fprintf(os.Stderr, "reconciling discovered receivers: %v\n", err)
 	}
-	d.wake()
+	if moved {
+		d.wake()
+	}
 }
 
 // store folds one full search into the devices the operator holds. An
 // amp the search found takes its address and clears its misses. An amp
 // the search missed keeps the address it had, and is forgotten once it
-// has missed discoveryMisses searches.
-func (d *discovery) store(found []wiim.Device) {
+// has missed discoveryMisses searches. It answers whether an address
+// appeared, moved, or went.
+func (d *discovery) store(found []wiim.Device) bool {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	now := d.now()
@@ -128,7 +146,11 @@ func (d *discovery) store(found []wiim.Device) {
 		d.firstSearch = now
 	}
 	d.lastSearch = now
+	moved := false
 	for _, device := range found {
+		if d.devices[device.UUID].Address != device.Address {
+			moved = true
+		}
 		d.devices[device.UUID] = device
 		d.foundIn[device.UUID] = d.searches
 		delete(d.missedSince, device.UUID)
@@ -142,8 +164,10 @@ func (d *discovery) store(found []wiim.Device) {
 		}
 		if d.searches-d.foundIn[uuid] >= discoveryMisses {
 			delete(d.devices, uuid)
+			moved = true
 		}
 	}
+	return moved
 }
 
 // missed answers how many full searches in a row have missed one amp,

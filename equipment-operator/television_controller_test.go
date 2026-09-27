@@ -112,8 +112,8 @@ func TestTheDeploymentWritesWhatTheBusFound(t *testing.T) {
 	})
 }
 
-// A pass that finds nothing changed writes nothing, so the Deployment's
-// backstop tick costs the API server no write.
+// A pass that finds nothing changed writes nothing, so a tick of the
+// Deployment's clock costs the API server no write.
 func TestAnUnchangedTelevisionIsNotWrittenAgain(t *testing.T) {
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
@@ -146,7 +146,7 @@ func TestATVThatStopsAnsweringLosesItsPower(t *testing.T) {
 }
 
 // The Deployment's loop wakes on a new Television and writes its
-// status with no wait for the backstop.
+// status with no wait for the clock.
 func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
 	api := startCECAPI(t)
 	api.putBus(scannedBus("den", tvDevice))
@@ -162,6 +162,57 @@ func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
 	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
 
 	api.waitForTelevision(t, "lounge", func(television Television) bool { return television.Status.Power == "Standby" })
+}
+
+// runDeploymentLoop runs the Deployment's CECBus loop until the test
+// ends.
+func runDeploymentLoop(t *testing.T, api *cecAPI) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		newCECBusController(api.client).run(ctx, newMetrics("test"))
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+// A Display that moves to another physical address reaches its
+// Television at once, because the loop watches the Displays. The move
+// wakes no other watch, so the test fails if the loop waits for its
+// clock.
+func TestTheDeploymentLoopFollowsADisplaysAddress(t *testing.T) {
+	api := startCECAPI(t)
+	api.putBus(scannedBus("den", tvDevice, receiverDevice))
+	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+	runDeploymentLoop(t, api)
+	api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+
+	api.moveDisplay("acm-0001-receiver", "1.4.0.0")
+
+	api.waitForTelevision(t, "lounge", func(television Television) bool {
+		return len(television.Status.Displays) == 1 && television.Status.Displays[0].PhysicalAddress == "1.4.0.0"
+	})
+}
+
+// A Receiver whose spec starts to name a Display's machine appears as
+// the Display's path at once, because the loop watches the Receivers'
+// specs.
+func TestTheDeploymentLoopFollowsAReceiversSpec(t *testing.T) {
+	api := startCECAPI(t)
+	api.putBus(scannedBus("den", tvDevice, receiverDevice))
+	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+	api.putReceiver(wiredReceiver("den", "node-2", "acm-0001-receiver"))
+	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+	runDeploymentLoop(t, api)
+	api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+
+	api.editReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
+
+	api.waitForTelevision(t, "lounge", func(television Television) bool {
+		return len(television.Status.Displays) == 1 && television.Status.Displays[0].Via != nil
+	})
 }
 
 // A read that fails skips the Television pass, because a status

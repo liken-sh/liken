@@ -472,8 +472,13 @@ func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
 // Address then, so a device that joins or moves after the scan is heard
 // here. Each device is introduced once for each physical address it
 // announces, so a device that repeats its broadcasts asks nothing more
-// of the adapter. held says whether the directory held the sender
-// before the message.
+// of the adapter. A device whose power the directory does not know is
+// introduced again when it announces itself with Report Physical
+// Address or Device Vendor ID, as a TV does when it wakes: a TV in a
+// deep standby can answer no power at the scan, and its power would
+// otherwise stay unknown until a power press asks. The question goes
+// out only after the device's own broadcast, never on a timer. held
+// says whether the directory held the sender before the message.
 func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	if message.From == cec.AddressUnregistered {
 		return
@@ -486,7 +491,9 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	}
 	introduced, known := n.introduced[message.From]
 	moved := opcode == cec.OpReportPhysicalAddr && after.Physical != introduced
-	if held && known && !moved {
+	announced := opcode == cec.OpReportPhysicalAddr || opcode == cec.OpDeviceVendorID
+	unknown := announced && after.Power == cec.PowerUnknown
+	if held && known && !moved && !unknown {
 		return
 	}
 	n.introduced[message.From] = after.Physical

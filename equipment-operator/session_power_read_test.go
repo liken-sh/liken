@@ -18,12 +18,26 @@ import (
 // for a TV that answers: it lists the Display of input GAME, reports a
 // power that may be stale, and is Reachable.
 func answering(api *cecAPI, stale string) {
+	answeringAs(api, stale, answers)
+}
+
+// answers and noPower are the Reachable conditions the Deployment
+// derives for a TV that answers its power status, and for one that
+// acknowledges its address and gave no power: a TV that did not answer
+// at the join scan, or two reads in a row.
+var (
+	answers = Condition{Type: conditionReachable, Status: ConditionTrue, Reason: reasonAnswers}
+	noPower = Condition{Type: conditionReachable, Status: ConditionFalse, Reason: reasonNoPower}
+)
+
+// answeringAs is answering with the Reachable condition a test names.
+func answeringAs(api *cecAPI, stale string, reachable Condition) {
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
 	television := api.televisions["lounge"]
 	television.Status.Displays = []TelevisionDisplay{{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0"}}
 	television.Status.Power = stale
-	television.Status.Conditions = []Condition{{Type: conditionReachable, Status: ConditionTrue, Reason: reasonAnswers}}
+	television.Status.Conditions = []Condition{reachable}
 	api.changed()
 }
 
@@ -41,19 +55,25 @@ func theaterRoom(t *testing.T, api *cecAPI, h *sessionHarness) roomEvents {
 
 // A TV whose power changed by its own remote with no message the
 // adapter heard still decides the press correctly, because the press
-// reads the TV first.
+// reads the TV first. A TV with no known power is read too: it gave
+// none at the join scan or on two reads, and it can be on, so the
+// receiver in standby must not decide that the room is off.
 func TestAPowerPressReadsTheTVsPowerFirst(t *testing.T) {
 	cases := []struct {
-		name   string
-		actual cec.PowerStatus
-		stale  string
-		line   string
-		asked  func(TelevisionSession) bool
+		name      string
+		actual    cec.PowerStatus
+		stale     string
+		reachable Condition
+		line      string
+		asked     func(TelevisionSession) bool
 	}{
-		{"a TV turned off by its own remote", cec.PowerStandby, "On",
+		{"a TV turned off by its own remote", cec.PowerStandby, "On", answers,
 			"Receiver theater: the power topic asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
 			func(session TelevisionSession) bool { return session.WokeAt != "" && session.Awake }},
-		{"a TV turned on by its own remote", cec.PowerOn, "Standby",
+		{"a TV turned on by its own remote", cec.PowerOn, "Standby", answers,
+			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
+			func(session TelevisionSession) bool { return session.StandbyAt != "" }},
+		{"a TV that is on with no known power", cec.PowerOn, "", noPower,
 			"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
 			func(session TelevisionSession) bool { return session.StandbyAt != "" }},
 	}
@@ -63,7 +83,7 @@ func TestAPowerPressReadsTheTVsPowerFirst(t *testing.T) {
 			wire := roomWithTV(televisionTV(c.actual))
 			api := controlling(t, wire, lounge(""))
 			api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
-			answering(api, c.stale)
+			answeringAs(api, c.stale, c.reachable)
 			h := newSessionHarness(t)
 			h.powerTopic = testPowerTopic
 			h.room = theaterRoom(t, api, h)

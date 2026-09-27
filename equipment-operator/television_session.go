@@ -268,13 +268,17 @@ var cecPowerReadWait = 3 * time.Second
 //
 // No timer asks the TV for its power, and a TV that a person turned on
 // or off with its own remote can send nothing an adapter hears, so
-// status.power can be older than the press. When the TV is Reachable,
-// the press asks the node workload for a read through the session's
-// powerReadAt and waits up to cecPowerReadWait for status.powerRead to
-// answer it. A press that gets no answer in time decides from
-// status.power, and the log says so. A TV that is not Reachable gets
-// no read: no adapter in Control reads it, or it does not answer, and
-// status.power is then absent or from what a bus in Listen heard.
+// status.power can be older than the press. When an adapter in Control
+// finds the TV, the press asks the node workload for a read through
+// the session's powerReadAt and waits up to cecPowerReadWait for
+// status.powerRead to answer it. That includes a TV that is not
+// Reachable because it gave no power, at the join scan or on two reads
+// in a row: status.power is then empty and stays empty until something
+// asks again, and a TV that is on would otherwise let a receiver in
+// standby decide that the room is off. A press that gets no answer in
+// time decides from status.power, and the log says so. A TV that no
+// adapter in Control finds gets no read, and status.power is then
+// absent or from what a bus in Listen heard.
 func (r *roomTelevision) television() (string, string) {
 	t := r.sessions
 	display := r.monitor(r.input)
@@ -294,8 +298,7 @@ func (r *roomTelevision) television() (string, string) {
 		return "", ""
 	}
 	name, held := television.Metadata.Name, television.Status.Session
-	reachable := conditionOf(television.Status.Conditions, conditionReachable).Status == ConditionTrue
-	if !reachable || held == nil || held.Player != r.player || held.Display != display {
+	if !readable(television) || held == nil || held.Player != r.player || held.Display != display {
 		t.mutex.Unlock()
 		return name, television.Status.Power
 	}
@@ -314,6 +317,14 @@ func (r *roomTelevision) television() (string, string) {
 		return name, television.Status.Power
 	}
 	return name, power
+}
+
+// readable answers whether an adapter in Control finds the TV, so a
+// read of its power reaches it: the TV is Reachable, or it acknowledges
+// its address and gave no power.
+func readable(television *Television) bool {
+	reachable := conditionOf(television.Status.Conditions, conditionReachable)
+	return reachable.Status == ConditionTrue || reachable.Reason == reasonNoPower
 }
 
 // awaitPowerRead waits until a Television's status.powerRead answers

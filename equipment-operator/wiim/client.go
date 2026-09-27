@@ -23,6 +23,18 @@ import (
 // These bound one request and the wait between polls. A failed poll
 // backs off from the healthy interval, because a device that is down
 // should be asked less often than one that answers, not more.
+//
+// The poll runs while the event subscriptions are live, because it is
+// the only path for most of what the status reports. The events carry
+// the volume, the mute, and the transport state. The input, the track
+// and its format, the equalizer, the timers, the presets, the
+// Bluetooth pairings, and the controls have no push, and a person
+// changes each of them in the WiiM app. getPlayerStatus carries the
+// input with the volume and the mute, so a live subscription removes
+// no read. getStatusEx is also how the client finds the amp gone: a
+// subscription stays live on the operator's side until its renewal,
+// which is up to 25 minutes away. One poll is 27 GET requests, each a
+// read that changes nothing on the amp.
 var (
 	requestTimeout = 8 * time.Second
 	pollInterval   = 10 * time.Second

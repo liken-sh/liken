@@ -352,3 +352,44 @@ func TestDiscoveryCountsOnlyFullSearches(t *testing.T) {
 		})
 	}
 }
+
+// The Receiver loop reads only the addresses from discovery, so a
+// search wakes it only when an address appeared, moved, or went.
+func TestDiscoveryWakesTheLoopOnlyWhenAnAddressMoves(t *testing.T) {
+	here := wiim.Device{UUID: firstUUID, Address: "192.0.2.1"}
+	there := wiim.Device{UUID: firstUUID, Address: "192.0.2.2"}
+	cases := []struct {
+		name     string
+		searches [][]wiim.Device
+		wakes    int64
+	}{
+		{"a new amp", [][]wiim.Device{{here}}, 1},
+		{"the same amp at the same address", [][]wiim.Device{{here}, {here}, {here}}, 1},
+		{"an amp at a new address", [][]wiim.Device{{here}, {there}}, 2},
+		{"an amp that one search missed", [][]wiim.Device{{here}, nil}, 1},
+		{"an amp that enough searches missed", [][]wiim.Device{{here}, nil, nil, nil}, 2},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			api, client := startDiscoveryAPI(t)
+			api.list = receiversWith(wiimReceiver("den", firstUUID))
+			searches := one.searches
+			restore := discover
+			t.Cleanup(func() { discover = restore })
+			discover = func(context.Context, time.Duration) []wiim.Device {
+				found := searches[0]
+				searches = searches[1:]
+				return found
+			}
+			var wakes atomic.Int64
+			held := newDiscovery(client, func() { wakes.Add(1) })
+			held.log = &logBuffer{}
+
+			for range one.searches {
+				held.once(t.Context())
+			}
+
+			mustMatch(t, wakes.Load(), one.wakes)
+		})
+	}
+}

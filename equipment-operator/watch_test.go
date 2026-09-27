@@ -43,6 +43,60 @@ func TestReadWatchStreamMovesTheResumeVersion(t *testing.T) {
 	}
 }
 
+// A watch with a key wakes the loop only for an event that moves the
+// part of an object the loop reads.
+func TestAKeyedWatchWakesOnlyForWhatTheLoopReads(t *testing.T) {
+	const (
+		first     = `{"type":"ADDED","object":{"metadata":{"name":"den","generation":1,"resourceVersion":"10"}}}`
+		statusOne = `{"type":"MODIFIED","object":{"metadata":{"name":"den","generation":1,"resourceVersion":"11"},"status":{"volume":20}}}`
+		specTwo   = `{"type":"MODIFIED","object":{"metadata":{"name":"den","generation":2,"resourceVersion":"12"}}}`
+		gone      = `{"type":"DELETED","object":{"metadata":{"name":"den","generation":2,"resourceVersion":"13"}}}`
+	)
+	cases := []struct {
+		name  string
+		seen  []string
+		event string
+		wakes int
+	}{
+		{"a new object wakes the loop", nil, first, 1},
+		{"a status write wakes nothing", []string{first}, statusOne, 0},
+		{"a spec change wakes the loop", []string{first}, specTwo, 1},
+		{"a delete wakes the loop", []string{first}, gone, 1},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			memory := newWatchMemory(generationKey)
+			wake := make(chan struct{}, 1)
+			memory.read(watchStream(one.seen...), "1", wake)
+			drainPokes(wake)
+
+			memory.read(watchStream(one.event), "1", wake)
+
+			mustMatch(t, len(wake), one.wakes)
+		})
+	}
+}
+
+// A Display wakes the loop when its node or physical address moves, and
+// for no other write.
+func TestTheDisplayKeyIsTheNodeAndTheAddress(t *testing.T) {
+	cases := []struct {
+		name   string
+		before string
+		after  string
+		moved  bool
+	}{
+		{"the same address", `{"status":{"node":"node-1","physicalAddress":"1.0.0.0","mode":"a"}}`, `{"status":{"node":"node-1","physicalAddress":"1.0.0.0","mode":"b"}}`, false},
+		{"a new address", `{"status":{"node":"node-1","physicalAddress":"1.0.0.0"}}`, `{"status":{"node":"node-1","physicalAddress":"2.0.0.0"}}`, true},
+		{"a new node", `{"status":{"node":"node-1","physicalAddress":"1.0.0.0"}}`, `{"status":{"node":"node-2","physicalAddress":"1.0.0.0"}}`, true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, displayKey([]byte(one.before)) != displayKey([]byte(one.after)), one.moved)
+		})
+	}
+}
+
 // startWatch shortens watchRetryPause for the length of one test, and
 // restores it only after the watch goroutine has stopped reading it.
 func startWatch(t *testing.T, api *fakeAPI, resourceVersion string, wake chan struct{}) {

@@ -976,9 +976,13 @@ drill on the room that showed the switches is open: the adapter in
 press of the remote's power button after the TV's own remote turned
 it off.
 
-The `Deployment`'s own `CECBus` and `Receiver` loops still run a
-backstop pass every 30 seconds, and it reads `Display`s without a
-watch. Neither sends on the wire. They are left for a later change.
+The `Deployment`'s `CECBus` loop watches the `Display`s and the
+`Receiver`s' specs too, so a change to either reaches a `Television`
+at once. Its 30-second tick is a clock: it finds an entry gone stale,
+tries a refused write again, and opens the watch of a definition
+installed later. The `Receiver` loop keeps its 30-second backstop for
+the failures that no event follows, such as a refused list or write.
+Neither sends on the wire.
 
 ## Failure and recovery
 

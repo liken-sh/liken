@@ -38,7 +38,7 @@ type cecAPI struct {
 	wakeWrites         int
 	sessionWrites      int
 	version            int
-	watchers           []chan string
+	watchers           []fakeWatcher
 	deleted            []string
 	client             *Client
 	// refusing makes every list and every status write fail with a
@@ -90,6 +90,12 @@ func startCECAPI(t *testing.T) *cecAPI {
 	return api
 }
 
+// fakeWatcher is one open watch and the collection it watches.
+type fakeWatcher struct {
+	path   string
+	events chan string
+}
+
 // changed bumps the collection's version and wakes every watch. The
 // caller holds the mutex.
 func (a *cecAPI) changed() {
@@ -97,7 +103,34 @@ func (a *cecAPI) changed() {
 	event := fmt.Sprintf(`{"type":"MODIFIED","object":{"metadata":{"resourceVersion":"%d"}}}`, a.version)
 	for _, watcher := range a.watchers {
 		select {
-		case watcher <- event:
+		case watcher.events <- event:
+		default:
+		}
+	}
+}
+
+// changedIn bumps the version and sends one object's event to the
+// watches of its own collection alone, the way the API server does.
+// The caller holds the mutex.
+func (a *cecAPI) changedIn(path, name string, object any) {
+	a.version++
+	encoded, _ := json.Marshal(object)
+	var fields map[string]any
+	_ = json.Unmarshal(encoded, &fields)
+	meta, _ := fields["metadata"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["name"] = name
+	meta["resourceVersion"] = fmt.Sprint(a.version)
+	fields["metadata"] = meta
+	body, _ := json.Marshal(map[string]any{"type": "MODIFIED", "object": fields})
+	for _, watcher := range a.watchers {
+		if watcher.path != path {
+			continue
+		}
+		select {
+		case watcher.events <- string(body):
 		default:
 		}
 	}
@@ -163,7 +196,7 @@ func (a *cecAPI) serveList(w http.ResponseWriter) {
 func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	events := make(chan string, 16)
 	a.mutex.Lock()
-	a.watchers = append(a.watchers, events)
+	a.watchers = append(a.watchers, fakeWatcher{path: r.URL.Path, events: events})
 	// A watch resumes from the version its list gave it, as on a real
 	// API server, so a change made between the list and the watch still
 	// reaches the loop.
@@ -277,6 +310,15 @@ func (a *cecAPI) nudge() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.changed()
+}
+
+// moveDisplay gives a Display a new physical address, and tells only
+// the watches of the Displays.
+func (a *cecAPI) moveDisplay(name, physicalAddress string) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.displays[name].Status.PhysicalAddress = physicalAddress
+	a.changedIn(displaysPath, name, a.displays[name])
 }
 
 func (a *cecAPI) putDisplay(name, node, physicalAddress string) {

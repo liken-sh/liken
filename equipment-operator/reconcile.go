@@ -1,8 +1,9 @@
 package main
 
-// The operator's loop: level-triggered, woken by a watch, with a ticker
-// as the backstop. A pass reads the whole collection, so a lost event
-// costs at most one tick and a restarted operator starts correct.
+// The operator's loop: level-triggered, woken by the Receiver watch and
+// by discovery, with a ticker as the backstop for the failures no event
+// follows. A pass reads the whole collection, so a restarted operator
+// starts correct.
 // One client per Receiver holds the receiver's connection for as long
 // as the Receiver stands. A debounced writer folds the burst of lines
 // that follows one change into a single status write.
@@ -28,7 +29,16 @@ import (
 	"github.com/liken-sh/equipment-operator/wiim"
 )
 
-// How often the loop reconciles with nothing to prompt it.
+// How often the loop reconciles with nothing to prompt it. It is a
+// backstop, and no state reaches the loop through it alone: a change to
+// a Receiver's spec or status wakes the loop through the watch, and a
+// discovered address wakes it through discovery. The tick covers the
+// failures that no event follows: a list the API server refused, a
+// Television's status.session write it refused, a declared setting
+// whose send failed, and a setting the receiver took and still reports
+// at another value, which the send budget allows a few more sends. Each
+// tick costs one list of the Receivers and sends nothing to a receiver
+// that already matches its spec.
 const backstopInterval = 30 * time.Second
 
 // How long a burst of lines is collected before one status write.
@@ -1056,7 +1066,7 @@ func (u *receiverUnit) startDriver(receiver *Receiver, address string, report fu
 }
 
 // run reconciles once before any event arrives, then on every wake and
-// every backstop tick, until ctx ends.
+// every tick of backstopInterval, until ctx ends.
 func (c *controller) run(ctx context.Context) {
 	go c.discovery.run(ctx)
 	ticker := time.NewTicker(backstopInterval)

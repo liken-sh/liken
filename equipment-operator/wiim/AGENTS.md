@@ -1,8 +1,7 @@
 # Working on wiim
 
-This directory holds the WiiM protocol driver, once a plan calls for
-it. No code exists here yet. This file collects what a driver needs to
-know and where that came from.
+This directory holds the WiiM protocol driver. This file collects what
+the driver needs to know and where that came from.
 
 ## The verdict: the LAN alone operates it
 
@@ -96,9 +95,9 @@ Three other interfaces are open on the same LAN:
 
 The driver subscribes to the device's GENA events, so a change made
 at the device reaches the state in under a second. The poll stays, at
-ten seconds, for the settings and the identity that push does not
-reach, and it carries the evented fields when a subscription is not
-live.
+ten seconds, for the input, the track, the settings, and the identity
+that push does not reach, and it carries the evented fields when a
+subscription is not live.
 
 The MediaRenderer description is on port 49152. It names the event
 URLs `/upnp/event/rendercontrol1` for RenderingControl and

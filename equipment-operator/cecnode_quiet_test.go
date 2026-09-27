@@ -86,6 +86,33 @@ func TestADeviceThatAnnouncesItselfIsAskedOnce(t *testing.T) {
 	mustMatch(t, len(wire.Sent())-asked, others)
 }
 
+// A TV that gave no power at the join scan, such as one in a deep
+// standby, announces itself when it wakes. The adapter asks it for its
+// power then, because an unknown power would otherwise stay unknown
+// until a press asks. An announcement from a TV whose power is known
+// asks nothing.
+func TestATVWithNoKnownPowerIsAskedWhenItAnnouncesItself(t *testing.T) {
+	wire := roomWithTV(televisionTV(cec.PowerUnknown))
+	api := controlling(t, wire, lounge(""))
+	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	wire.Add(televisionTV(cec.PowerOn))
+	scanned := len(sentTo(wire, 0))
+
+	wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
+
+	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
+		return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
+	})
+	asked := len(sentTo(wire, 0))
+	mustMatch(t, asked-scanned, 1)
+
+	wire.Send(cec.ReportPhysicalAddress(0, 0x0000, 0))
+	wire.Send(cec.ActiveSource(0, 0x0000))
+	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.ActiveSource == "0.0.0.0" })
+
+	mustMatch(t, len(sentTo(wire, 0)), asked)
+}
+
 // askPowerRead writes a power press's request on the lounge
 // Television's session, as the Deployment does.
 func askPowerRead(t *testing.T, api *cecAPI, at string) {

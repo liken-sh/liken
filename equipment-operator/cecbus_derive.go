@@ -38,8 +38,8 @@ const (
 // stop trusting it. The node workload writes its entry every
 // cecReportInterval, and a pod that dies writes nothing more, so an
 // entry older than three intervals belongs to a pod that is gone. The
-// Deployment's backstop tick derives every bus again, because a pod
-// that dies sends no event.
+// Deployment's cecBusClock derives every bus again, because a pod that
+// dies sends no event.
 var staleAfter = 3 * cecReportInterval
 
 // verdict is one condition before it carries its generation and its

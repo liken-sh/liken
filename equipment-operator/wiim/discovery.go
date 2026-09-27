@@ -8,6 +8,7 @@ package wiim
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sort"
 	"strings"
@@ -29,12 +30,20 @@ var (
 // once misses a device; the window lets the repeats fill the gap.
 var queryInterval = time.Second
 
-// The per-attempt read windows. A responder answers within a second,
-// and the repeats re-send when it does not. They are variables so a
-// test holds the wait short.
+// ssdpMX is the MX an M-SEARCH states: the longest a renderer may wait,
+// at a random point, before it answers. One second is the least UPnP
+// allows. A short MX is a deliberate choice: it keeps two rounds of
+// both searches inside the discovery window, and the renderers on a
+// home LAN are few, so their answers need little spreading.
+const ssdpMX = 1
+
+// The per-attempt read windows. An mDNS responder answers a shared
+// record within 120 ms. An SSDP renderer answers at any point up to
+// ssdpMX, so its read stays open that long and a margin more for the
+// network. They are variables so a test holds the wait short.
 var (
 	mdnsReadTimeout = 250 * time.Millisecond
-	ssdpReadTimeout = 250 * time.Millisecond
+	ssdpReadTimeout = ssdpMX*time.Second + 250*time.Millisecond
 )
 
 // Device is one WiiM found on the local network.
@@ -143,9 +152,12 @@ func browseMDNS(ctx context.Context, devices map[string]Device) {
 }
 
 // mdnsQuery is one PTR question for the LinkPlay service. The
-// unicast-response bit in the question class tells the responders to
+// unicast-response bit in the question class asks the responders to
 // answer the socket that sent the query rather than the mDNS group, so
-// a plain UDP read receives the answers.
+// a plain UDP read receives the answers. RFC 6762 lets a responder
+// answer on the group anyway when it has not sent the record there
+// lately, and a capture of three WiiM amps showed each answer to this
+// query on the group, where every host on the LAN receives it.
 func mdnsQuery() []byte {
 	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{})
 	_ = builder.StartQuestions()
@@ -259,7 +271,7 @@ func assembleMDNS(instances map[string]*mdnsInstance) []Device {
 
 // ssdpRequest is the M-SEARCH a device answers. The ST names the
 // MediaRenderer service, which every LinkPlay device carries.
-var ssdpRequest = []byte("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
+var ssdpRequest = []byte(fmt.Sprintf("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: %d\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n", ssdpMX))
 
 // searchSSDP sends one M-SEARCH and reads the answers until the read
 // window closes, merging every device it can parse into the set.
@@ -274,7 +286,13 @@ func searchSSDP(ctx context.Context, devices map[string]Device) {
 		return
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(ssdpReadTimeout))
+	// The read ends at the discovery window's end too, so a search late
+	// in the window does not hold the caller past it.
+	deadline := time.Now().Add(ssdpReadTimeout)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
+	}
+	_ = conn.SetReadDeadline(deadline)
 	buffer := make([]byte, 2048)
 	for {
 		n, _, err := conn.ReadFrom(buffer)

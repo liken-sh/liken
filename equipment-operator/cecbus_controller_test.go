@@ -171,9 +171,9 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 	}
 }
 
-// A pod that dies writes nothing more, so the backstop tick is what
-// finds its entry stale.
-func TestTheBackstopFindsAnEntryGoneStale(t *testing.T) {
+// A pod that dies writes nothing more, so the clock is what finds its
+// entry stale.
+func TestTheClockFindsAnEntryGoneStale(t *testing.T) {
 	api := startCECAPI(t)
 	api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
 	controller := newCECBusController(api.client)

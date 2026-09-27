@@ -1,12 +1,13 @@
 package main
 
 // The Deployment's loop over CECBus and Television objects. It has
-// the Receiver loop's shape: level-triggered, woken by a watch on each
-// kind, with a ticker as the backstop. Each pass derives every bus's
-// device list and conditions from the adapters' reports, then every
-// Television's status from those buses, and writes only what changed.
-// A change to a Display or a Receiver sends no event to this loop, so
-// the backstop tick carries it to a Television's status.
+// the Receiver loop's shape: level-triggered, and woken by a watch on
+// each kind a pass reads: the CECBuses, the Televisions, the Displays,
+// and the Receivers' specs. Each pass derives every bus's device list
+// and conditions from the adapters' reports, then every Television's
+// status from those buses, and writes only what changed. A clock also
+// runs a pass, because an adapter's report goes stale with age and no
+// event says so.
 
 import (
 	"context"
@@ -17,6 +18,16 @@ import (
 	"sync"
 	"time"
 )
+
+// cecBusClock is how often the loop runs a pass with no event. It is a
+// clock and not a backstop for a watch. An adapter's entry goes stale
+// staleAfter after its reportedAt, and the pod of a node workload that
+// dies writes nothing that wakes the loop, so only a clock finds the
+// stale entry. The same tick tries again a status write the API server
+// refused, and opens the watch of a Television or Display definition
+// installed after the operator started. Every object a pass reads has
+// a watch, so no change to one waits for the tick.
+var cecBusClock = 30 * time.Second
 
 // cecBusRetry is how long the loop waits before it lists again after
 // a failed list, such as on a cluster where the CECBus definition is
@@ -61,12 +72,11 @@ func (c *cecBusController) pass() error {
 	return nil
 }
 
-// run lists until the collection answers, starts the watch from that
-// list's version, and then passes on every wake and every backstop
-// tick until ctx ends.
+// run lists until the CECBus collection answers, starts the watches,
+// and then passes on every wake and every tick of cecBusClock until
+// ctx ends.
 func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	var list *CECBusList
-	var televisions *TelevisionList
 	for ctx.Err() == nil {
 		var err error
 		err = retryThrottled(ctx, func() error {
@@ -74,10 +84,6 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 			list, err = ListCECBuses(c.client)
 			if err != nil {
 				return fmt.Errorf("listing CECBuses: %w", err)
-			}
-			televisions, err = ListTelevisions(c.client)
-			if err != nil {
-				return fmt.Errorf("listing Televisions: %w", err)
 			}
 			return nil
 		})
@@ -95,24 +101,42 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 	if list == nil {
 		return
 	}
-	// run returns only after both watches stop, so nothing it started
+	// run returns only after every watch stops, so nothing it started
 	// outlives it.
 	var watching sync.WaitGroup
+	defer watching.Wait()
 	watching.Go(func() {
 		watchCECBuses(ctx, c.client, list.Metadata.ResourceVersion, c.wake, readings.cecBusWatchRestarted)
 	})
-	// A cluster without the Television definition lists no version and
-	// gets no Television watch; the backstop tick finds a definition
-	// installed later.
-	if televisions.Metadata.ResourceVersion != "" {
-		watching.Go(func() {
-			watchTelevisions(ctx, c.client, televisions.Metadata.ResourceVersion, c.wake, readings.televisionWatchRestarted)
-		})
+	follows := []*follow{
+		{watch: watchTelevisions, restarted: readings.televisionWatchRestarted, list: func() (string, error) {
+			listed, err := ListTelevisions(c.client)
+			if err != nil {
+				return "", err
+			}
+			return listed.Metadata.ResourceVersion, nil
+		}},
+		{watch: watchDisplays, restarted: readings.displayWatchRestarted, list: func() (string, error) {
+			listed, err := ListDisplays(c.client)
+			if err != nil {
+				return "", err
+			}
+			return listed.Metadata.ResourceVersion, nil
+		}},
+		{watch: watchReceiverSpecs, restarted: readings.watchRestarted, list: func() (string, error) {
+			listed, err := ListReceivers(c.client)
+			if err != nil {
+				return "", err
+			}
+			return listed.Metadata.ResourceVersion, nil
+		}},
 	}
-	defer watching.Wait()
-	ticker := time.NewTicker(backstopInterval)
+	ticker := time.NewTicker(cecBusClock)
 	defer ticker.Stop()
 	for {
+		// Each watch opens before the pass reads its kind, so a change
+		// made during the pass wakes the next one.
+		c.startFollows(ctx, &watching, follows)
 		if err := c.pass(); err != nil {
 			fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
 		}
@@ -122,5 +146,32 @@ func (c *cecBusController) run(ctx context.Context, readings *metrics) {
 		case <-c.wake:
 		case <-ticker.C:
 		}
+	}
+}
+
+// follow is one watch the loop opens once its kind lists a version: at
+// once on a cluster with the definition, and at a later pass for a
+// definition installed after the operator started.
+type follow struct {
+	watch     func(context.Context, *Client, string, chan<- struct{}, func())
+	restarted func()
+	list      func() (string, error)
+	running   bool
+}
+
+// startFollows opens each watch that is not open and whose kind lists
+// a version now. A list that fails, or a kind with no definition,
+// leaves the watch closed until the next pass.
+func (c *cecBusController) startFollows(ctx context.Context, watching *sync.WaitGroup, follows []*follow) {
+	for _, one := range follows {
+		if one.running {
+			continue
+		}
+		version, err := one.list()
+		if err != nil || version == "" {
+			continue
+		}
+		one.running = true
+		watching.Go(func() { one.watch(ctx, c.client, version, c.wake, one.restarted) })
 	}
 }

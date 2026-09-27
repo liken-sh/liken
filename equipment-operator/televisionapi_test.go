@@ -57,6 +57,8 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 			}
 			return list
 		})
+	case path == receiversPath && r.URL.Query().Get("watch") == "true":
+		a.serveWatch(w, r)
 	case path == receiversPath:
 		a.serveJSON(w, func() any {
 			list := ReceiverList{Metadata: ListMeta{ResourceVersion: fmt.Sprint(a.version)}}
@@ -297,6 +299,16 @@ func (a *cecAPI) putReceiver(receiver Receiver) {
 	defer a.mutex.Unlock()
 	a.receivers[receiver.Metadata.Name] = receiver
 	a.changed()
+}
+
+// editReceiver changes a Receiver's spec, moves its generation the way
+// the API server does, and tells only the watches of the Receivers.
+func (a *cecAPI) editReceiver(receiver Receiver) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	receiver.Metadata.Generation = a.receivers[receiver.Metadata.Name].Metadata.Generation + 1
+	a.receivers[receiver.Metadata.Name] = receiver
+	a.changedIn(receiversPath, receiver.Metadata.Name, receiver)
 }
 
 // writes answers how many status writes each writer made to the

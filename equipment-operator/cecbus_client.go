@@ -164,6 +164,51 @@ func GetDisplay(c *Client, name string) (*Display, error) {
 	return display, nil
 }
 
+// watchDisplays wakes a loop when a Display appears, goes, or moves to
+// another node or physical address, which is all a Television reads of
+// it. display-operator writes other status fields of a Display, and
+// those writes wake nothing.
+func watchDisplays(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, restarted func()) {
+	watchCollectionBy(ctx, client, displaysPath, resourceVersion, wake, restarted, func() (string, error) {
+		list, err := ListDisplays(client)
+		if err != nil {
+			return "", err
+		}
+		return list.Metadata.ResourceVersion, nil
+	}, displayKey)
+}
+
+// displayKey is the part of a Display that a Television reads.
+func displayKey(object json.RawMessage) string {
+	var display Display
+	_ = json.Unmarshal(object, &display)
+	return display.Status.Node + " " + display.Status.PhysicalAddress
+}
+
+// watchReceiverSpecs wakes a loop when a Receiver appears, goes, or
+// changes its spec. A Television reads a Receiver's spec.inputs and no
+// status, and a Receiver's status moves with every volume step, so a
+// status write wakes nothing.
+func watchReceiverSpecs(ctx context.Context, client *Client, resourceVersion string, wake chan<- struct{}, restarted func()) {
+	watchCollectionBy(ctx, client, receiversPath, resourceVersion, wake, restarted, func() (string, error) {
+		list, err := ListReceivers(client)
+		if err != nil {
+			return "", err
+		}
+		return list.Metadata.ResourceVersion, nil
+	}, generationKey)
+}
+
+// generationKey is an object's metadata.generation, which the API
+// server moves on each spec change and on no status change.
+func generationKey(object json.RawMessage) string {
+	var meta struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	_ = json.Unmarshal(object, &meta)
+	return fmt.Sprint(meta.Metadata.Generation)
+}
+
 type DisplayList struct {
 	Metadata ListMeta  `json:"metadata"`
 	Items    []Display `json:"items"`

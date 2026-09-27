@@ -24,9 +24,16 @@ import (
 // selects the input anyway.
 var sessionPowerWait = 10 * time.Second
 
-// How often the adopt looks again for what it needs. The spec that
-// states the ceiling can land after the session starts, so an adopt
-// that cannot map a level yet waits and does not give up.
+// How often the adopt looks again for a ceiling. The adopt waits on
+// channels for the receiver's first volume and for the broker, and
+// ticks only after both, while no ceiling maps the volume to a level:
+// no spec.volume.max is declared, and the receiver reports no stable
+// limit, as a Denon does not. A spec that states the ceiling can land
+// after the session starts, so the adopt waits and does not give up.
+// Each tick reads the session's own memory, the declared rule and the
+// driver's last state, and sends nothing to the receiver or the API
+// server. For a Denon with no spec.volume.max the tick runs for the
+// whole session, which costs two reads of memory a second.
 var sessionAdoptRetry = 500 * time.Millisecond
 
 // How long a stop waits for the cleared owner mark to reach the broker

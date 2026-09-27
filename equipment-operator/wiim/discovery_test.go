@@ -8,6 +8,7 @@ package wiim
 import (
 	"context"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -248,6 +249,36 @@ func TestSearchSSDPReadsALoopbackResponder(t *testing.T) {
 	mustMatch(t, len(got), 1)
 	mustMatch(t, got[0].UUID, "FF98F2F7AABBCCDDEEFF0011")
 	mustMatch(t, got[0].Address, "192.0.2.10")
+}
+
+// A renderer may wait any time up to the MX the M-SEARCH states before
+// it answers, so the read stays open that long. The responder waits
+// almost the whole MX it reads from the request.
+func TestSearchSSDPWaitsTheWholeMX(t *testing.T) {
+	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	orig := ssdpGroup
+	ssdpGroup = conn.LocalAddr().(*net.UDPAddr)
+	t.Cleanup(func() { ssdpGroup = orig })
+
+	response := []byte("HTTP/1.1 200 OK\r\n" +
+		"LOCATION: http://192.0.2.10:49152/device.xml\r\n" +
+		"USN: uuid:ff98f2f7-aabb-ccdd-eeff-0011ff98f2f7::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
+	go func() {
+		buffer := make([]byte, 2048)
+		n, addr, _ := conn.ReadFrom(buffer)
+		mx, _ := strconv.Atoi(httpHeaders(buffer[:n])["mx"])
+		time.Sleep(time.Duration(mx)*time.Second - 100*time.Millisecond)
+		_, _ = conn.WriteTo(response, addr)
+	}()
+
+	devices := map[string]Device{}
+	searchSSDP(context.Background(), devices)
+
+	mustMatch(t, len(devices), 1)
 }
 
 // The mDNS send and read path works against a loopback responder the

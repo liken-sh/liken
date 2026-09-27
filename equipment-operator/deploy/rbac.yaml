@@ -62,10 +62,11 @@ rules:
     resources: [televisions/status]
     verbs: [get, patch]
   # A Television lists the Displays whose pictures reach it, from the
-  # physical address display-operator publishes on each Display.
+  # physical address display-operator publishes on each Display. The
+  # watch wakes the CECBus loop when that address moves.
   - apiGroups: [display.liken.sh]
     resources: [displays]
-    verbs: [get, list]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
