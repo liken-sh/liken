@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -76,6 +77,7 @@ func (n *node) NodeStageVolume(
 		kind:        writeableVolume,
 		context:     request.GetVolumeContext(),
 	}
+	arriving.answerDemandsBefore(time.Now())
 	if err := n.stageTree(ctx, arriving, repo); err != nil {
 		return nil, err
 	}
@@ -88,6 +90,7 @@ func (n *node) NodeStageVolume(
 	n.staged[id] = arriving
 	n.arm(arriving)
 	n.mu.Unlock()
+	n.demands.arrived(ctx, id)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 

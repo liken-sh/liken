@@ -116,13 +116,19 @@ three values.
 | `on-demand` | No timer. The volume pulls only when something demands it. |
 | A duration such as `5m` | The volume pulls at least that often, and it pulls when something demands it. |
 
-A demand is an annotation on the `PersistentVolume`. Any value the
-driver has not acted on yet is a demand, and by convention the value is
-the current time:
+A demand is an annotation on the `PersistentVolume`. The value is the
+time of the demand in RFC 3339, and the webhook writes the same form:
 
 ```console
 kubectl annotate pv franchises git.liken.sh/pull-requested-at="$(date -u +%FT%TZ)" --overwrite
 ```
+
+A node pulls for a demand only when its time is later than the start
+of the volume's last fetch on that node, less one minute. The annotation
+stays on the `PersistentVolume` after the pull, and a node that stages
+the volume later does not pull again for it, because its own fetch is
+newer. The minute covers a writer whose clock runs behind the node's
+clock. A value that is not a time is logged and does nothing.
 
 The node that holds the volume pulls at once, and every volume of the
 same URL on that node updates with it. Twenty demands inside

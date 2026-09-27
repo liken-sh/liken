@@ -33,6 +33,16 @@ func demandPull(t *testing.T, answering *node, name, at string) {
 	}
 }
 
+// oldDemand is a demand stamped long before any test stages a volume:
+// the value a webhook leaves behind, because it never removes it.
+const oldDemand = "2026-09-01T09:00:00Z"
+
+// demandAt is a demand stamped the offset from now, in the form the
+// webhook writes.
+func demandAt(offset time.Duration) string {
+	return time.Now().Add(offset).UTC().Format(time.RFC3339)
+}
+
 // waitForCommit waits until the volume's tree stands on the commit,
 // and fails at the deadline.
 func waitForCommit(t *testing.T, held *volume, want string) {
@@ -93,7 +103,7 @@ func TestAnAnnotationOnThePersistentVolumePullsTheTree(t *testing.T) {
 	watchDemands(t, answering)
 
 	want := commitFiles(t, source, map[string]string{"a.txt": "two"})
-	demandPull(t, answering, "franchises", "2026-09-06T14:31:07Z")
+	demandPull(t, answering, "franchises", demandAt(0))
 
 	waitForCommit(t, held, want)
 	if got := readTree(t, held.tree); !sameTree(got, map[string]string{"a.txt": "two"}) {
@@ -112,8 +122,8 @@ func TestAVolumeThatPullsNeverTakesNoDemand(t *testing.T) {
 
 	commitFiles(t, pinned, map[string]string{"a.txt": "two"})
 	want := commitFiles(t, moved, map[string]string{"b.txt": "two"})
-	demandPull(t, answering, "pinned", "2026-09-06T14:31:07Z")
-	demandPull(t, answering, "moving", "2026-09-06T14:31:07Z")
+	demandPull(t, answering, "pinned", demandAt(0))
+	demandPull(t, answering, "moving", demandAt(0))
 
 	// The volume that pulled is the evidence that the demand on the
 	// pinned volume was read and did nothing.
@@ -133,7 +143,7 @@ func TestADemandOnAPinnedVolumeMovesNoVolumeOfTheSameRepository(t *testing.T) {
 	watchDemands(t, answering)
 
 	want := commitFiles(t, source, map[string]string{"a.txt": "two"})
-	demandPull(t, answering, "pinned", "2026-09-06T14:31:07Z")
+	demandPull(t, answering, "pinned", demandAt(0))
 
 	// The watch reads the demand on the pinned volume, and the volume
 	// that shares the repository has to keep the commit it staged.
@@ -145,7 +155,7 @@ func TestADemandOnAPinnedVolumeMovesNoVolumeOfTheSameRepository(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	demandPull(t, answering, "moving", "2026-09-06T14:31:08Z")
+	demandPull(t, answering, "moving", demandAt(2*time.Second))
 	waitForCommit(t, moving, want)
 	if commit, _ := pinned.condition(); commit != standing {
 		t.Errorf("the pinned volume moved to %s, want %s", commit, standing)
@@ -172,7 +182,7 @@ func TestADemandOnAWriteableVolumeDoesNothingAndSaysSoOnce(t *testing.T) {
 	standing, _ := held.condition()
 	watchDemands(t, answering)
 
-	demandPull(t, answering, "config", "2026-09-06T14:31:07Z")
+	demandPull(t, answering, "config", demandAt(0))
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -205,7 +215,7 @@ func TestADemandReadWhileTheVolumeStagesIsActedOnWhenTheStageEnds(t *testing.T) 
 		func(k8stesting.Action) (bool, runtime.Object, error) {
 			once.Do(func() {
 				answering.demands.read(t.Context(),
-					annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z"))
+					annotated(csiVolume("franchises", driverName), demandAt(0)))
 			})
 			return false, nil, nil
 		})
@@ -222,7 +232,7 @@ func TestAnOldDemandIsNotActedOnWhenTheVolumeStages(t *testing.T) {
 	// value before it stages the volume. The stage's own fetch is newer
 	// than that demand.
 	answering.demands.read(t.Context(),
-		annotated(csiVolume("franchises", driverName), "2026-09-01T09:00:00Z"))
+		annotated(csiVolume("franchises", driverName), oldDemand))
 	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
 
 	noDemand(t, held)
@@ -258,7 +268,9 @@ func TestADeletedPersistentVolumeTakesItsDemandAway(t *testing.T) {
 	watchDemands(t, answering)
 	sent := <-opened
 
-	demanded := annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z")
+	// The demand is newer than the stage, so only its delete keeps the
+	// stage from acting on it.
+	demanded := annotated(csiVolume("franchises", driverName), demandAt(0))
 	sent.Modify(demanded)
 	sent.Delete(demanded)
 	sent.Delete(&corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "local"}})
@@ -277,7 +289,7 @@ func TestAListThatNoLongerHoldsAPersistentVolumeTakesItsDemandAway(t *testing.T)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	volumes := cluster(t, answering).CoreV1().PersistentVolumes()
 	if _, err := volumes.Create(t.Context(),
-		annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z"),
+		annotated(csiVolume("franchises", driverName), demandAt(0)),
 		metav1.CreateOptions{}); err != nil {
 		t.Fatalf("writing the PersistentVolume: %v", err)
 	}
@@ -300,8 +312,8 @@ func TestAListThatNoLongerHoldsAPersistentVolumeTakesItsDemandAway(t *testing.T)
 // writeableDemand is a demand on the writeable volume config. A
 // writeable volume logs each demand it acts on and pulls nothing, so the
 // log counts the demands the node acted on.
-func writeableDemand() *corev1.PersistentVolume {
-	return annotated(csiVolume("config", driverName), "2026-09-06T14:31:07Z")
+func writeableDemand(at string) *corev1.PersistentVolume {
+	return annotated(csiVolume("config", driverName), at)
 }
 
 // bookmarked sends a bookmark on the watch. The send blocks until the
@@ -313,7 +325,7 @@ func bookmarked(sent *watch.FakeWatcher) {
 	})
 }
 
-func TestARecreatedPersistentVolumeWithTheSameDemandIsActedOnAgain(t *testing.T) {
+func TestARecreatedPersistentVolumeWithTheSameDemandIsNotActedOnAgain(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		delete func(t *testing.T, answering *node, sent *watch.FakeWatcher, opened chan *watch.FakeWatcher) *watch.FakeWatcher
@@ -321,7 +333,7 @@ func TestARecreatedPersistentVolumeWithTheSameDemandIsActedOnAgain(t *testing.T)
 		{
 			name: "a delete the watch sends",
 			delete: func(t *testing.T, _ *node, sent *watch.FakeWatcher, _ chan *watch.FakeWatcher) *watch.FakeWatcher {
-				sent.Delete(writeableDemand())
+				sent.Delete(writeableDemand(oldDemand))
 				return sent
 			},
 		},
@@ -347,13 +359,17 @@ func TestARecreatedPersistentVolumeWithTheSameDemandIsActedOnAgain(t *testing.T)
 			watchDemands(t, answering)
 			sent := <-opened
 
-			sent.Modify(writeableDemand())
+			// The node answered the demand before the delete, so the same
+			// time on a PersistentVolume created again asks for nothing
+			// new.
+			at := demandAt(0)
+			sent.Modify(writeableDemand(at))
 			sent = c.delete(t, answering, sent, opened)
-			sent.Add(writeableDemand())
+			sent.Add(writeableDemand(at))
 			bookmarked(sent)
 
-			if got := strings.Count(logs.String(), "the demand did nothing"); got != 2 {
-				t.Errorf("the log says the demand did nothing %d times, want 2 (%q)", got, logs)
+			if got := strings.Count(logs.String(), "the demand did nothing"); got != 1 {
+				t.Errorf("the log says the demand did nothing %d times, want 1 (%q)", got, logs)
 			}
 		})
 	}
@@ -369,8 +385,9 @@ func TestARelistActsOnceOnADemandItAlreadyActedOn(t *testing.T) {
 	watchDemands(t, answering)
 	sent := <-opened
 
-	demandPull(t, answering, "config", "2026-09-06T14:31:07Z")
-	sent.Modify(writeableDemand())
+	at := demandAt(0)
+	demandPull(t, answering, "config", at)
+	sent.Modify(writeableDemand(at))
 	sent.Action(watch.Error, gone().Object)
 	bookmarked(<-opened)
 
@@ -385,7 +402,7 @@ func TestTheSameDemandReadTwiceIsActedOnOnce(t *testing.T) {
 	source := bareRemote(t, map[string]string{"a.txt": "one"})
 	boundVolume(t, answering, "config", "")
 	stagedWriteable(t, answering, "config", fileURL(source))
-	demanded := annotated(csiVolume("config", driverName), "2026-09-06T14:31:07Z")
+	demanded := annotated(csiVolume("config", driverName), demandAt(0))
 
 	answering.demands.read(t.Context(), demanded)
 	answering.demands.read(t.Context(), demanded)
@@ -415,13 +432,12 @@ func TestABurstOfDemandsCostsOnePullPerInterval(t *testing.T) {
 	watchDemands(t, answering)
 
 	first := commitFiles(t, source, map[string]string{"a.txt": "two"})
-	demandPull(t, answering, "franchises", "2026-09-06T14:31:07Z")
+	demandPull(t, answering, "franchises", demandAt(0))
 	waitForCommit(t, held, first)
 
 	second := commitFiles(t, source, map[string]string{"a.txt": "three"})
 	for demand := range 20 {
-		demandPull(t, answering, "franchises",
-			time.Unix(int64(demand), 0).UTC().Format(time.RFC3339))
+		demandPull(t, answering, "franchises", demandAt(time.Duration(demand+2)*time.Second))
 	}
 
 	waitForCommit(t, held, second)

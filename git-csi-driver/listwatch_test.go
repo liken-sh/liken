@@ -332,7 +332,7 @@ func TestADemandWrittenBetweenTheListAndTheWatchPullsTheTree(t *testing.T) {
 					return
 				}
 				stored, _ := client.Tracker().Get(resource, "", "franchises")
-				demanded := annotated(stored.(*corev1.PersistentVolume).DeepCopy(), "2026-09-06T14:31:07Z")
+				demanded := annotated(stored.(*corev1.PersistentVolume).DeepCopy(), demandAt(0))
 				err = client.Tracker().Update(resource, demanded, "")
 			})
 			return handled, listed, err

@@ -16,10 +16,29 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// demandAnnotation is where a demand is written. Any value the node
-// has not acted on yet is a demand. A timestamp is the convention,
-// because it is what a person reads in kubectl describe.
+// demandAnnotation is where a demand is written. The value is the time
+// of the demand in RFC 3339, the form kubectl describe shows a person,
+// and the form the webhook writes.
 const demandAnnotation = "git.liken.sh/pull-requested-at"
+
+// demandSkew is how far the writer's clock may run behind this node's
+// clock before the node misses a demand.
+//
+// A demand's time comes from the clock of whatever wrote it: the
+// controller's node for a webhook, or a person's computer for kubectl.
+// The node compares that time with its own clock. A fetch that starts
+// at time F answers every demand stamped at or before F minus the skew,
+// and the node pulls for every later one.
+//
+// A writer whose clock runs behind by less than the skew stamps a new
+// demand earlier than it happened. The demand is still later than F
+// minus the skew, so the node pulls. A writer whose clock runs ahead
+// stamps a demand later than it happened, and the node pulls for it.
+// The cost of either error is one extra pull. A demand the node misses
+// leaves the volume on an old commit until the next demand, so the
+// skew is generous: a minute is far wider than the clock drift between
+// machines that keep time with NTP.
+const demandSkew = time.Minute
 
 // persistentVolumeKind is what git_csi_watch_restarts_total names the
 // node's one watch on PersistentVolumes.
@@ -38,13 +57,11 @@ type demanding struct {
 	logger *slog.Logger
 	retry  time.Duration
 
-	// acted is the annotation value the node last acted on, by volume
-	// handle. A value that differs from it is a demand. seen is the
-	// last value the node read, by handle, whether or not this node
-	// staged the handle.
-	mu    sync.Mutex
-	acted map[string]string
-	seen  map[string]string
+	// seen is the last demand the node read, by volume handle, whether
+	// or not this node staged the handle. A stage reads it when it adds
+	// the volume to the node.
+	mu   sync.Mutex
+	seen map[string]time.Time
 }
 
 func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Logger) *demanding {
@@ -53,8 +70,7 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 		client: client,
 		logger: logger,
 		retry:  defaultRetry,
-		acted:  map[string]string{},
-		seen:   map[string]string{},
+		seen:   map[string]time.Time{},
 	}
 }
 
@@ -78,12 +94,11 @@ func (d *demanding) follow(ctx context.Context) {
 			// The list is the whole state, so a value for a volume it
 			// no longer holds belongs to a deleted PersistentVolume.
 			d.mu.Lock()
-			d.seen = map[string]string{}
+			d.seen = map[string]time.Time{}
 			d.mu.Unlock()
 			for i := range held.Items {
 				d.read(ctx, &held.Items[i])
 			}
-			d.keepListed(held.Items)
 			return held.ResourceVersion, nil
 		},
 		watch: volumes.Watch,
@@ -108,10 +123,15 @@ func (d *demanding) follow(ctx context.Context) {
 
 // read acts on one PersistentVolume. It acts only when the volume is
 // this driver's, only when this node staged the handle, and only when
-// the annotation carries a value the node has not acted on. It records
-// the value for a handle this node has not staged, because a stage
-// fetches before it adds the volume to the node, and a demand that
-// arrives between the two is read again when the stage ends.
+// the demand is later than what the volume's last fetch answered. It
+// records the demand for a handle this node has not staged, because a
+// stage fetches before it adds the volume to the node, and a demand
+// that arrives between the two is read again when the stage ends.
+//
+// The time decides, not the order of reads. A webhook never removes
+// its annotation, so the list, the watch, a stage, and a restart all
+// read old demands, in any order, and the volume's own fetches already
+// answer them.
 func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
 	source := held.Spec.CSI
 	if source == nil || source.Driver != driverName {
@@ -121,79 +141,51 @@ func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
 	if asked == "" {
 		return
 	}
+	at, err := time.Parse(time.RFC3339, asked)
+	if err != nil {
+		d.logger.WarnContext(ctx, "the demand is not a time",
+			"volume", held.Name, "value", asked, "error", err)
+		return
+	}
 	d.mu.Lock()
-	d.seen[source.VolumeHandle] = asked
+	d.seen[source.VolumeHandle] = at
 	d.mu.Unlock()
-	d.actOn(ctx, source.VolumeHandle, asked)
+	d.actOn(ctx, source.VolumeHandle, at)
 }
 
-// forget drops the values the node read and acted on for a deleted
-// PersistentVolume. The maps then hold one entry for each
-// PersistentVolume that exists, not for every one the driver ever read,
-// and a PersistentVolume created again with the same handle and the
-// same value is a new demand.
+// forget drops the demand the node read for a deleted PersistentVolume,
+// so seen holds one entry for each PersistentVolume that exists, not
+// for every one the driver ever read.
 func (d *demanding) forget(held *corev1.PersistentVolume) {
 	if held.Spec.CSI == nil {
 		return
 	}
 	d.mu.Lock()
 	delete(d.seen, held.Spec.CSI.VolumeHandle)
-	delete(d.acted, held.Spec.CSI.VolumeHandle)
 	d.mu.Unlock()
-}
-
-// keepListed drops the acted value of every handle the list does not
-// hold. A handle the list holds keeps its value, so a list does not act
-// again on a demand the node already acted on.
-func (d *demanding) keepListed(listed []corev1.PersistentVolume) {
-	present := map[string]bool{}
-	for i := range listed {
-		if source := listed[i].Spec.CSI; source != nil {
-			present[source.VolumeHandle] = true
-		}
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for handle := range d.acted {
-		if !present[handle] {
-			delete(d.acted, handle)
-		}
-	}
-}
-
-// fetching marks the last demand the node read for the handle as acted
-// on, because the stage that is about to fetch answers it. A webhook
-// never removes its annotation, so without the mark every first stage
-// of a volume pulls again right after its own fetch.
-func (d *demanding) fetching(handle string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if asked, found := d.seen[handle]; found {
-		d.acted[handle] = asked
-	}
 }
 
 // arrived acts on the last demand the node read for a volume a stage
 // just added to the node. The watch sends no event for that demand
-// again, so without this read the volume keeps its old commit until
-// the annotation changes.
+// again, so without this read a demand that arrived during the stage
+// leaves the volume on its old commit until the next demand.
 func (d *demanding) arrived(ctx context.Context, handle string) {
 	d.mu.Lock()
-	asked, found := d.seen[handle]
+	at, found := d.seen[handle]
 	d.mu.Unlock()
 	if found {
-		d.actOn(ctx, handle, asked)
+		d.actOn(ctx, handle, at)
 	}
 }
 
-// actOn carries the demand to the volume the handle names, once per
-// value, when this node staged the handle.
-func (d *demanding) actOn(ctx context.Context, handle, asked string) {
+// actOn carries the demand to the volume the handle names, when this
+// node staged the handle and no fetch answered the demand yet.
+func (d *demanding) actOn(ctx context.Context, handle string, at time.Time) {
 	staged := d.node.stagedVolume(handle)
 	if staged == nil {
 		return
 	}
-	if !d.acting(handle, asked) {
+	if !staged.takeDemand(at, time.Now()) {
 		return
 	}
 	if staged.writeable() {
@@ -205,18 +197,6 @@ func (d *demanding) actOn(ctx context.Context, handle, asked string) {
 		return
 	}
 	d.node.demand(staged)
-}
-
-// acting reports whether the value differs from the one the node last
-// acted on for the handle, and records it as acted on.
-func (d *demanding) acting(handle, asked string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.acted[handle] == asked {
-		return false
-	}
-	d.acted[handle] = asked
-	return true
 }
 
 // demand carries a demand to the volume's loop. A volume with pull

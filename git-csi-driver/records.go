@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // recordFile is the file each volume's directory carries beside its
@@ -202,6 +203,10 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string, mo
 		n.record(ctx, resumed)
 	}
 	n.noteHealth(ctx, resumed)
+	// The restart pulls every read-only volume that follows its ref,
+	// and a writeable tree belongs to the application, so the restart
+	// answers every demand stamped before it.
+	resumed.answerDemandsBefore(time.Now())
 
 	n.mu.Lock()
 	defer n.mu.Unlock()

@@ -179,6 +179,7 @@ func (f *follower) tick(ctx context.Context) {
 	f.answered(now)
 	for _, held := range f.snapshot() {
 		held.reportPulled(now)
+		held.answerDemandsBefore(now)
 		f.refresh(ctx, held)
 	}
 }
