@@ -496,9 +496,9 @@ impl Screen {
     /// Fold one key event. The checks run in this order. The cycle key
     /// asks the operator to move the mark and does nothing else. A power
     /// key, on a unit whose screen is wired through a Receiver, reaches the
-    /// equipment and never the client: it publishes the toggle, and it
-    /// wakes a screen that had gone dark so the room lights with the
-    /// equipment. A sleeping screen wakes on any other press, so a person
+    /// equipment and never the client: it publishes the toggle and nothing
+    /// else, and the shade and the panel desire stand as they were. A
+    /// sleeping screen wakes on any other press, so a person
     /// gets the screen back with whatever control they touched, and that
     /// press does nothing else. A level key, while the unit plays nothing,
     /// publishes the unit's next level. Every other key, while the unit
@@ -544,6 +544,7 @@ impl Screen {
         let mut forwarded = None;
         let mut publish = None;
         let mut line = None;
+        let mut power = false;
         if self.idle && press.down() && press.key == keys::CYCLE {
             publish = self.cycle(index);
             line = Some(match &publish {
@@ -556,17 +557,20 @@ impl Screen {
         } else if self.idle && keys::power(&press.key) && !self.power_topic.is_empty() {
             // A room with a receiver answers the power key itself, so the
             // key never reaches the client and the shade never operates:
-            // power turns the equipment, and nothing else. The press
-            // publishes the toggle, and a screen that had gone dark wakes
-            // on the same press so the room lights as the equipment turns
-            // on. A held key that repeated would flip the equipment on and
-            // off under the hand, so only the press publishes. A unit with
-            // no receiver falls through to the ordinary rules below, and
-            // the client keeps its shade.
-            if self.asleep {
-                self.asleep = false;
-                moment = Some(Moment::Wake);
-            }
+            // power turns the equipment, and nothing else. Only the
+            // equipment operator knows whether the press turns the room off
+            // or on, because it reads the TV's power. A wake here would
+            // state the on desire, the session would turn awake, and the
+            // equipment operator would wake the TV and the receiver and
+            // cancel the standby the same press asked for. So the press
+            // leaves the shade and the desire as they were. A press that
+            // turns the room on wakes the TV through the equipment
+            // operator, and the next press wakes this screen the way any
+            // press does. A held key that repeated would flip the equipment
+            // on and off under the hand, so only the press publishes. A unit
+            // with no receiver falls through to the ordinary rules below,
+            // and the client keeps its shade.
+            power = true;
             if press.down() {
                 publish = Some(Publish {
                     topic: self.power_topic.clone(),
@@ -607,7 +611,8 @@ impl Screen {
         let mut desire = self.shade(moment, &mut effects);
         // A client that read no desire does not know whether the panel is
         // dark. A press is a person in the room, so it states the on desire.
-        if self.desire.is_none() && down {
+        // A power press states none, for the reason its branch gives.
+        if self.desire.is_none() && down && !power {
             desire = self.desire(panel::ON, &mut effects);
         }
         if let Some(line) = line {

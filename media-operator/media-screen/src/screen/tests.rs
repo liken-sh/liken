@@ -599,15 +599,7 @@ fn a_power_press_publishes_the_toggle_and_reaches_no_client() {
         let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
 
         assert!(moments(effects.clone()).is_empty(), "{name}");
-        assert_eq!(
-            publishes(effects),
-            [Publish {
-                topic: POWER.into(),
-                payload: br#"{"action":"toggle"}"#.to_vec(),
-                retained: false,
-            }],
-            "{name}"
-        );
+        assert_eq!(publishes(effects), only_the_toggle(), "{name}");
     }
 }
 
@@ -638,27 +630,75 @@ fn a_power_press_on_a_unit_with_no_receiver_reaches_the_client() {
     }
 }
 
+/// The toggle a power press publishes, and nothing beside it.
+fn only_the_toggle() -> Vec<Publish> {
+    vec![Publish {
+        topic: POWER.into(),
+        payload: br#"{"action":"toggle"}"#.to_vec(),
+        retained: false,
+    }]
+}
+
+// The equipment operator reads the toggle and decides whether the room goes
+// off or on. A shade that woke on the same press would state the on desire,
+// the session would turn awake, and that wake would cancel the standby the
+// press asked for. So the shade and the desire stand as they were.
 #[test]
-fn a_power_press_on_a_sleeping_screen_wakes_it_and_publishes_the_toggle() {
+fn a_power_press_on_a_sleeping_screen_publishes_only_the_toggle() {
     let now = Instant::now();
-    for name in keys::POWER {
-        let mut screen = idling(&powered(), now);
-        screen.asleep = true;
+    for desire in [crate::panel::ON, crate::panel::OFF] {
+        for name in keys::POWER {
+            let mut screen = idling(&powered(), now);
+            screen.asleep = true;
+            screen.desire = Some(desire);
 
-        let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
+            let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
 
-        assert_eq!(moments(effects.clone()), [Moment::Wake], "{name}");
-        assert_eq!(
-            publishes(effects),
-            [Publish {
-                topic: POWER.into(),
-                payload: br#"{"action":"toggle"}"#.to_vec(),
-                retained: false,
-            }],
-            "{name}"
-        );
-        assert!(!screen.asleep, "{name}");
+            assert!(moments(effects.clone()).is_empty(), "{name} {desire}");
+            assert_eq!(publishes(effects), only_the_toggle(), "{name} {desire}");
+            assert!(screen.asleep, "{name} {desire}");
+            assert_eq!(screen.desire, Some(desire), "{name} {desire}");
+        }
     }
+}
+
+#[test]
+fn a_power_press_states_no_desire_when_none_was_read() {
+    let now = Instant::now();
+    let mut screen = idling(&powered(), now);
+    screen.desire = None;
+
+    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
+
+    assert_eq!(publishes(effects), only_the_toggle());
+    assert_eq!(screen.desire, None);
+}
+
+// A power press that turns the room on leaves the screen asleep, and the
+// next press wakes it the way any press wakes a sleeping screen.
+#[test]
+fn the_press_after_a_power_press_wakes_a_sleeping_screen() {
+    let now = Instant::now();
+    let mut screen = idling(&powered(), now);
+    screen.asleep = true;
+    screen.desire = Some(crate::panel::OFF);
+    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
+
+    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_ENTER", 1), false, now);
+
+    assert_eq!(moments(effects.clone()), [Moment::Wake]);
+    assert_eq!(
+        publishes(effects),
+        [Publish {
+            topic: PANEL.into(),
+            payload: crate::panel::Desire {
+                desire: crate::panel::ON
+            }
+            .payload(),
+            retained: true,
+        }]
+    );
+    assert!(!screen.asleep);
 }
 
 #[test]

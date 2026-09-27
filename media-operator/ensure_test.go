@@ -24,6 +24,28 @@ func TestAPressAsksTheUnitsReceiverForItsInput(t *testing.T) {
 	mustMatch(t, string(published.payload), `{"command":"input.ensure"}`)
 }
 
+// A power press asks nothing of the receiver. The power key is the
+// room's toggle, and the equipment operator answers it on the unit's
+// power topic; an input ask beside it would make the receiver select
+// the input, and power it on, while the toggle puts the room to
+// standby. The key is the name the standing pod publishes after the
+// Keymap's fold, so a button a Keymap maps to KEY_POWER asks nothing
+// either.
+func TestAPowerPressAsksNothingOfTheReceiver(t *testing.T) {
+	for _, key := range []string{"KEY_POWER", "KEY_POWER2", "KEY_SLEEP"} {
+		t.Run(key, func(t *testing.T) {
+			media, broker := focusBrokerOperator(t)
+			media.focus.setMark(controllerKey("media", "living-room-remote"), "living-room")
+			media.ensure.set(playerKey("media", "living-room"), "liken/equipment/living-room-denon/commands")
+
+			media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "living-room-remote"),
+				[]byte(`{"key":"`+key+`","value":1}`))
+
+			mustPublishNothingYet(t, broker, media.bus)
+		})
+	}
+}
+
 // A repeat and a release carry the same topic and begin no press, so one
 // held control asks once.
 func TestARepeatAndAReleaseAskNothing(t *testing.T) {
