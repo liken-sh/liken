@@ -14,17 +14,21 @@ package main
 // of them wakes.
 //
 // The operator reads no jack's input node, because the control device
-// reports every jack too. ALSA gives each jack it senses a control
-// element and reports each plug on it, and the pass reads the jack's
-// state from that element. The input node is a kernel option on top
-// of the element, so a card with the node has the element, and a
-// kernel built without the option still has the element.
+// reports the jacks the operator reads. The HDA and USB audio drivers
+// give each jack they sense a control element and report each plug on
+// it, and the pass reads the jack's state from that element. An ASoC
+// machine driver that creates a jack with no pins gives it an input
+// node and no element. The pass cannot read that jack's state, so an
+// event on its input node would start a pass that finds nothing new.
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
 	"os"
+	"regexp"
+	"slices"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -170,32 +174,65 @@ func readControlEvents(ctx context.Context, card int, device *os.File) <-chan co
 	return events
 }
 
-// cardWatchers keeps one event reader per card the inventory holds,
+// cardWatchers keeps one event reader per card the claim delivered,
 // and carries what they all report onto one channel.
 //
-// The set follows the inventory because a USB card that a person
-// plugs in appears between two passes, and its own control device is
-// the only thing that reports the knob on its front. A card that
-// leaves takes its reader with it: a reader of a device node that is
-// gone reports one error and stops, and the next pass that lists the
-// card again opens it again.
+// Each pass opens the readers before it reads a card, so a change
+// that lands during the read is an event and not a loss. The set
+// follows the delivered control nodes because a USB card that a
+// person plugs in appears between two passes, and its own control
+// device is the only thing that reports the knob on its front. A card
+// that leaves takes its reader with it: a reader of a device node
+// that is gone reports one error and stops. A reader that stops on
+// its own wakes the loop, and that pass opens the card again before
+// it reads it.
 type cardWatchers struct {
 	ctx    context.Context
 	events chan controlEvent
+	wake   func()
 
 	mutex    sync.Mutex
-	watching map[int]context.CancelFunc
+	watching map[int]*cardReader
 	refused  map[int]bool
 }
 
-func watchCards(ctx context.Context) *cardWatchers {
+// cardReader is one card's open reader. The relay holds the pointer,
+// so a relay that ends removes its own reader and never a newer one
+// that a later pass opened for the same card number.
+type cardReader struct{ stop context.CancelFunc }
+
+func watchCards(ctx context.Context, wake func()) *cardWatchers {
 	return &cardWatchers{
 		ctx:      ctx,
 		events:   make(chan controlEvent, 16),
-		watching: map[int]context.CancelFunc{},
+		wake:     wake,
+		watching: map[int]*cardReader{},
 		refused:  map[int]bool{},
 	}
 }
+
+// controlCards lists the cards whose control nodes the claim
+// delivered. A pass subscribes to these before it reads any card, so
+// it cannot use what the read found.
+func controlCards() []int {
+	entries, err := os.ReadDir(sndDir)
+	if err != nil {
+		return nil
+	}
+	var cards []int
+	for _, entry := range entries {
+		match := controlNodePattern.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+		card, _ := strconv.Atoi(match[1])
+		cards = append(cards, card)
+	}
+	slices.Sort(cards)
+	return cards
+}
+
+var controlNodePattern = regexp.MustCompile(`^controlC(\d+)$`)
 
 // Events is where every card's changes arrive.
 func (w *cardWatchers) Events() <-chan controlEvent {
@@ -218,9 +255,9 @@ func (w *cardWatchers) follow(cards []int) {
 	for _, card := range cards {
 		wanted[card] = true
 	}
-	for card, stop := range w.watching {
+	for card, reader := range w.watching {
 		if !wanted[card] {
-			stop()
+			reader.stop()
 			delete(w.watching, card)
 		}
 	}
@@ -248,19 +285,27 @@ func (w *cardWatchers) start(card int) {
 		return
 	}
 	delete(w.refused, card)
-	w.watching[card] = stop
-	go w.relay(card, events)
+	reader := &cardReader{stop: stop}
+	w.watching[card] = reader
+	go w.relay(card, reader, events)
 }
 
 // relay carries one card's events onto the shared channel, and forgets
 // the card when its reader ends, so that a later pass opens it again.
-func (w *cardWatchers) relay(card int, events <-chan controlEvent) {
+func (w *cardWatchers) relay(card int, reader *cardReader, events <-chan controlEvent) {
 	defer func() {
 		w.mutex.Lock()
-		defer w.mutex.Unlock()
-		if stop, watching := w.watching[card]; watching {
-			stop()
+		endedAlone := w.watching[card] == reader
+		if endedAlone {
+			reader.stop()
 			delete(w.watching, card)
+		}
+		w.mutex.Unlock()
+		// A reader that follow did not stop ended on its own, and a
+		// change on the card from now until the next pass reaches no
+		// one. The wake runs that pass at once.
+		if endedAlone && w.ctx.Err() == nil {
+			w.wake()
 		}
 	}()
 	for event := range events {

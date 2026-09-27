@@ -235,8 +235,11 @@ serial is often 20 characters or more, so on a machine with a longer
 name the serial form can pass that. Then the name holds the first
 eight hex digits of the serial's SHA-256 in place of the serial, and
 keeps the rest. The hash is stable and differs for each serial, so
-two identical dongles on one machine still get two names. To compute
-it by hand:
+two identical dongles on one machine still get two names. The
+operator tests each name alone, and `-capture` adds eight
+characters. So a dongle whose `Sink` name is 56 to 63 characters
+keeps the serial in the `Sink` name and holds the hash in the
+`Source` name. To compute the hash by hand:
 
 ```sh
 printf %s ABCDEF0123456789ABCDEF0 | sha256sum | cut -c1-8

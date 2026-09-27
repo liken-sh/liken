@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 )
 
 // operatorSelector is the label the DaemonSet's pods carry.
@@ -34,15 +35,26 @@ type capturePod struct {
 	Node  string
 	IP    string
 	Ready bool
+
+	// Created and Leaving decide which pod the index holds while a
+	// DaemonSet replaces one: a pod that is being deleted or has
+	// ended is Leaving.
+	Created time.Time
+	Leaving bool
 }
 
 // pod is the part of a Kubernetes Pod this API reads.
 type pod struct {
-	Metadata EndpointMeta `json:"metadata"`
-	Spec     struct {
+	Metadata struct {
+		Name              string     `json:"name"`
+		CreationTimestamp time.Time  `json:"creationTimestamp"`
+		DeletionTimestamp *time.Time `json:"deletionTimestamp,omitempty"`
+	} `json:"metadata"`
+	Spec struct {
 		NodeName string `json:"nodeName"`
 	} `json:"spec"`
 	Status struct {
+		Phase             string `json:"phase"`
 		PodIP             string `json:"podIP"`
 		ContainerStatuses []struct {
 			Name  string `json:"name"`
@@ -56,12 +68,17 @@ type pod struct {
 // Ready false rather than dropped, so the 503 can say which it was.
 func (p pod) capture() capturePod {
 	found := capturePod{
-		Name: p.Metadata.Name,
-		Node: p.Spec.NodeName,
-		IP:   p.Status.PodIP,
+		Name:    p.Metadata.Name,
+		Node:    p.Spec.NodeName,
+		IP:      p.Status.PodIP,
+		Created: p.Metadata.CreationTimestamp,
+		Leaving: p.Metadata.DeletionTimestamp != nil ||
+			p.Status.Phase == "Succeeded" || p.Status.Phase == "Failed",
 	}
 	for _, container := range p.Status.ContainerStatuses {
-		if container.Name == captureContainer && container.Ready && found.IP != "" {
+		// A pod that is leaving is about to stop, and a tap sent to it
+		// would be cut short, so it answers no tap.
+		if container.Name == captureContainer && container.Ready && found.IP != "" && !found.Leaving {
 			found.Ready = true
 		}
 	}
@@ -94,7 +111,10 @@ func (index *podIndex) replace(pods []pod) {
 		if held.Spec.NodeName == "" {
 			continue
 		}
-		next[held.Spec.NodeName] = held.capture()
+		incoming := held.capture()
+		if current, found := next[incoming.Node]; !found || supersedes(incoming, current) {
+			next[incoming.Node] = incoming
+		}
 	}
 	index.mu.Lock()
 	index.byNode = next
@@ -109,10 +129,39 @@ func (index *podIndex) apply(kind string, held pod) {
 	index.mu.Lock()
 	defer index.mu.Unlock()
 	if kind == "DELETED" {
-		delete(index.byNode, held.Spec.NodeName)
+		// A DaemonSet can start a node's new pod before the old pod's
+		// final DELETED event arrives. That event names the old pod,
+		// and removing the node on it would drop the new pod until
+		// the new pod next changes, which may be never.
+		if current, found := index.byNode[held.Spec.NodeName]; found && current.Name == held.Metadata.Name {
+			delete(index.byNode, held.Spec.NodeName)
+		}
 		return
 	}
-	index.byNode[held.Spec.NodeName] = held.capture()
+	incoming := held.capture()
+	if current, found := index.byNode[incoming.Node]; !found || supersedes(incoming, current) {
+		index.byNode[incoming.Node] = incoming
+	}
+}
+
+// supersedes answers whether incoming takes the place of the pod the
+// index holds for the same node. An update to the held pod always
+// does. While a DaemonSet replaces a pod, the old pod and its
+// replacement are both on the node, and the old pod's late updates can
+// arrive after the replacement's last one. So another pod takes the
+// place only when it is not leaving and the held pod is leaving or
+// older.
+func supersedes(incoming, current capturePod) bool {
+	switch {
+	case incoming.Name == current.Name:
+		return true
+	case incoming.Leaving:
+		return false
+	case current.Leaving:
+		return true
+	default:
+		return incoming.Created.After(current.Created)
+	}
 }
 
 // watchPods lists the operator's pods once and follows the changes

@@ -162,3 +162,108 @@ func TestThePodWatchResumesFromTheLastEvent(t *testing.T) {
 		t.Errorf("the index holds %+v, %v for node-1", held, found)
 	}
 }
+
+// A DaemonSet can start a node's new pod before the old pod's final
+// DELETED event arrives. That event names the old pod, so it leaves
+// the new pod in the index, and only a delete of the held pod removes
+// it.
+func TestADeleteRemovesOnlyThePodItNames(t *testing.T) {
+	old := samplePod("node-1")
+	replacement := samplePod("node-1")
+	replacement.Metadata.Name = "audio-operator-x7k2p"
+	replacement.Status.PodIP = "10.42.0.9"
+
+	cases := []struct {
+		name    string
+		deleted pod
+		held    bool
+	}{
+		{"the old pod's late delete", old, true},
+		{"the held pod's delete", replacement, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			index := newPodIndex()
+			index.apply("ADDED", replacement)
+			index.apply("DELETED", c.deleted)
+			if _, found := index.on("node-1"); found != c.held {
+				t.Errorf("the index holds a pod for node-1: %v, want %v", found, c.held)
+			}
+		})
+	}
+}
+
+// operatorPod is the node-1 pod named name, created at the minute
+// given, and in the state that leaving names: "" for a running pod,
+// "deleting" for one with a deletion timestamp, and "Failed" or
+// "Succeeded" for a terminal phase.
+func operatorPod(name string, minute int, leaving string) pod {
+	held := samplePod("node-1")
+	held.Metadata.Name = name
+	held.Metadata.CreationTimestamp = time.Date(2026, 9, 27, 12, minute, 0, 0, time.UTC)
+	switch leaving {
+	case "":
+	case "deleting":
+		deleted := held.Metadata.CreationTimestamp.Add(time.Hour)
+		held.Metadata.DeletionTimestamp = &deleted
+	default:
+		held.Status.Phase = leaving
+	}
+	return held
+}
+
+// Two pods can be on one node while a DaemonSet replaces one. An event
+// for the other pod replaces the held one only when it is the newer
+// pod, and a pod that is leaving never replaces a running one. An
+// event for the held pod itself always replaces it.
+func TestAnEventForAnotherPodOnTheNodeReplacesOnlyWithTheNewerPod(t *testing.T) {
+	cases := []struct {
+		name  string
+		held  pod
+		event pod
+		want  string
+	}{
+		{"the old pod's late update while it is deleted",
+			operatorPod("new", 5, ""), operatorPod("old", 1, "deleting"), "new"},
+		{"the old pod's late update once it failed",
+			operatorPod("new", 5, ""), operatorPod("old", 1, "Failed"), "new"},
+		{"a newer pod while the held one is deleted",
+			operatorPod("old", 1, "deleting"), operatorPod("new", 5, ""), "new"},
+		{"an older running pod",
+			operatorPod("new", 5, ""), operatorPod("old", 1, ""), "new"},
+		{"a newer running pod",
+			operatorPod("old", 1, ""), operatorPod("new", 5, ""), "new"},
+		{"the held pod itself going away",
+			operatorPod("new", 5, ""), operatorPod("new", 5, "deleting"), "new"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			index := newPodIndex()
+			index.apply("ADDED", c.held)
+			index.apply("MODIFIED", c.event)
+			if held, _ := index.on("node-1"); held.Name != c.want {
+				t.Errorf("the index holds %q, want %q", held.Name, c.want)
+			}
+		})
+	}
+}
+
+// A list taken while a DaemonSet replaces a pod holds both, in any
+// order, and the index keeps the running one.
+func TestAListWithTwoPodsOnANodeHoldsTheRunningOne(t *testing.T) {
+	index := newPodIndex()
+	index.replace([]pod{operatorPod("new", 5, ""), operatorPod("old", 1, "deleting")})
+	if held, _ := index.on("node-1"); held.Name != "new" {
+		t.Errorf("the index holds %q, want new", held.Name)
+	}
+}
+
+// A pod that is leaving answers no tap, even when it is the only pod
+// the index holds for its node.
+func TestAPodThatIsLeavingIsNotReady(t *testing.T) {
+	index := newPodIndex()
+	index.apply("MODIFIED", operatorPod("old", 1, "deleting"))
+	if held, _ := index.on("node-1"); held.Ready {
+		t.Error("a pod being deleted was read as ready")
+	}
+}

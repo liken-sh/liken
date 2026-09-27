@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"slices"
 	"testing"
 	"time"
 	"unsafe"
@@ -140,5 +141,49 @@ func TestWatchControlsOnTheLocalCard(t *testing.T) {
 	case <-events:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the channel stayed open five seconds after the context ended")
+	}
+}
+
+// The pass subscribes to every card the claim delivered before it
+// reads any of them, so the card list comes from the control nodes
+// and not from what the read found.
+func TestControlCardsListsTheDeliveredControlNodes(t *testing.T) {
+	deliveredNodes(t, "controlC2", "controlC0", "pcmC0D0p", "pcmC2D3p", "timer")
+	if got := controlCards(); !slices.Equal(got, []int{0, 2}) {
+		t.Errorf("controlCards = %v, want [0 2]", got)
+	}
+}
+
+// A reader that stops on its own wakes the loop, so the next pass
+// opens the card again and reads what changed while nothing watched.
+// A reader that follow stopped, for a card that left, wakes nothing.
+func TestAReaderThatStopsOnItsOwnWakesTheLoop(t *testing.T) {
+	cases := []struct {
+		name     string
+		followed bool
+		wakes    int
+	}{
+		{"the reader ended on an error", true, 1},
+		{"follow stopped the reader", false, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wakes := 0
+			watchers := watchCards(t.Context(), func() { wakes++ })
+			reader := &cardReader{stop: func() {}}
+			if c.followed {
+				watchers.watching[3] = reader
+			}
+			ended := make(chan controlEvent)
+			close(ended)
+			watchers.relay(3, reader, ended)
+
+			if wakes != c.wakes {
+				t.Errorf("the relay woke the loop %d times, want %d", wakes, c.wakes)
+			}
+			if _, watching := watchers.watching[3]; watching {
+				t.Error("the stopped card is still watched")
+			}
+		})
 	}
 }

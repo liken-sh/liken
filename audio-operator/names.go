@@ -25,7 +25,10 @@ package main
 // and keeps the machine, the vendor, the product, and the PCM id. The
 // hash is stable, so the name is too, and two serials give two
 // hashes, so two identical dongles on one machine still get two
-// names. Any other name past 63 characters is refused rather than
+// names. The test is on each name alone, and the capture suffix adds
+// eight characters, so a dongle whose playback name is 56 to 63
+// characters keeps the serial on its Sink and holds the hash on its
+// Source. Any other name past 63 characters is refused rather than
 // shortened. The ALSA address, card0-pcm3, survives only as the
 // PipeWire node name.
 //

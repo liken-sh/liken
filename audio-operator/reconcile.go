@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"time"
 )
@@ -166,6 +165,11 @@ func (r *reconciler) awaitPipeWire(ctx context.Context, timeout time.Duration) e
 // either one would taint every output, evict every consumer, and in
 // the empty case retract devices that prepared claims still name.
 func (r *reconciler) reconcile(ctx context.Context) error {
+	// The event readers open before the read, so a change that lands
+	// while the pass reads the card wakes the next pass. A card that
+	// arrived since the last pass reports its own changes from here
+	// on, and a card whose reader stopped is open again.
+	r.cards.follow(controlCards())
 	outputs, err := readEndpoints()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the card's outputs: %v\n", err)
@@ -210,9 +214,6 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	r.reportRefusals(refused)
 	r.endpoints.publish(endpoints)
 	refreshCDISpecs(r.endpoints, graph)
-	// The event readers follow the inventory, so a card that arrived
-	// this pass reports its own changes from here on.
-	r.cards.follow(cardNumbers(endpoints))
 
 	speakers := r.pairedSpeakers()
 	r.publish(ctx, sliceDevices(endpoints, speakers, graph))
@@ -228,19 +229,6 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// cardNumbers names the cards an inventory holds, in order and once
-// each.
-func cardNumbers(endpoints []alsaEndpoint) []int {
-	cards := make([]int, 0, len(endpoints))
-	for _, endpoint := range endpoints {
-		if !slices.Contains(cards, endpoint.Card) {
-			cards = append(cards, endpoint.Card)
-		}
-	}
-	slices.Sort(cards)
-	return cards
 }
 
 // reportRefusals names the endpoints this pass could not name, once

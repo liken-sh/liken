@@ -62,13 +62,12 @@ const (
 	// backstopInterval is how often the loop reconciles with no event
 	// to prompt it. It is a backstop for the changes that no event
 	// source reports: a change on a card whose control device would
-	// not open as an event source, a change on a card whose event
-	// reader stopped on an error until the next pass opens it again,
-	// and a slice or status write that failed on the last pass, which
-	// no event repeats. A jack, an ELD, and a control all report on
-	// the card's control device, and the graph feed delivers every
-	// change in PipeWire's graph, a renamed node included, so none of
-	// them needs the tick.
+	// not open as an event source, and a slice or status write that
+	// failed on the last pass, which no event repeats. A jack with a
+	// control element, an ELD, and a control all report on the card's
+	// control device, and a reader of it that stops wakes the loop. The
+	// graph feed delivers every change in PipeWire's graph, a renamed
+	// node included. So none of them needs the tick.
 	backstopInterval = 60 * time.Second
 
 	// maxSinkFailures is how many graph reads may fail in a row before
@@ -208,7 +207,8 @@ func operate() {
 	}
 
 	// The one wake every watcher that carries no event of its own
-	// pokes: the graph feed and the watch on the two collections.
+	// pokes: the graph feed, the watch on the two collections, and a
+	// card's event reader that stopped.
 	pokes := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -239,7 +239,7 @@ func operate() {
 		// The reconcile pass fills the inventory and the DRA plugin
 		// reads it, so the two hold one object between them.
 		endpoints: &endpointInventory{},
-		cards:     watchCards(ctx),
+		cards:     watchCards(ctx, wake),
 		control:   newEndpointControl(client, nodeName, claims, feed, readings),
 	}
 
@@ -267,11 +267,6 @@ func operate() {
 	// resolves its device rather than reporting a name this driver
 	// does publish as one it does not.
 	operator.endpoints.publish(named)
-	// The cards' control devices open as event sources before the
-	// first pass reads them, so a monitor that a person plugs in
-	// while the pass runs wakes a second pass. The pass follows the
-	// same cards again and opens nothing twice.
-	operator.cards.follow(cardNumbers(named))
 	waitForNodes(ctx, operator.graph, sinkEndpoints(named), nodeReadyTimeout)
 
 	// The graph feed starts before the plugin serves, so that a codec

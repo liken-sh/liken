@@ -127,6 +127,15 @@ func TestAUSBNamePastALabelHoldsAHashOfTheSerial(t *testing.T) {
 			want:    "node-100-usb-046d-0a44-" + serialHash("ABCDEF0123456789ABCDEF0") + "-usb-audio-capture",
 		},
 		{
+			// The capture suffix adds eight characters, so a playback
+			// name of 56 to 63 characters keeps the serial while the
+			// capture name of the same dongle holds the hash.
+			name:    "the playback side of the dongle whose capture name holds the hash",
+			machine: "node-100",
+			serial:  "ABCDEF0123456789ABCDEF0",
+			want:    "node-100-usb-046d-0a44-abcdef0123456789abcdef0-usb-audio",
+		},
+		{
 			name:    "a longer machine's playback side",
 			machine: "studio-screen-12",
 			serial:  "ABCDEF0123456789ABCDEF0",
