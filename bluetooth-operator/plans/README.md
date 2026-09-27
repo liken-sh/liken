@@ -63,6 +63,9 @@ considered and why.
 * [The restore set is tested on one BR/EDR device only](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
   The adapter's own `identity` file does not travel, and no LE device
   has been through a restore.
+* [An Adapter or Peripheral edit waits for the backstop](open-problems/an-adapter-or-peripheral-edit-waits-for-the-backstop.md).
+  The operator does not watch those two kinds, so an edit or an unpair
+  acts on the next pass, at most 60 seconds later.
 * [The operator serves one adapter](open-problems/the-operator-serves-one-adapter.md).
   The bond store and controller discovery are written for one adapter,
   so a node with two adapters serves only the one the claim took.
