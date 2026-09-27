@@ -337,7 +337,7 @@ func shapedPlayer(screen bool, sinks int, playing bool) *Player {
 		Metadata: ObjectMeta{Namespace: testAPINamespace, Name: testAPIPlayer, UID: "player-uid"},
 	}
 	if screen {
-		player.Status.Screen = &PlayerScreenStatus{Node: "stick1", Monitor: testAPIMonitor}
+		player.Status.Screen = &PlayerScreenStatus{Node: "screen-1", Monitor: testAPIMonitor}
 	}
 	if playing {
 		player.Status.Activity = playerPlaying

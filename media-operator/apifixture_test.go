@@ -307,7 +307,7 @@ func playingPlayer() *Player {
 		Status: PlayerStatus{
 			Activity: playerPlaying,
 			Play:     "movie",
-			Screen:   &PlayerScreenStatus{Node: "stick1", Monitor: testAPIMonitor},
+			Screen:   &PlayerScreenStatus{Node: "screen-1", Monitor: testAPIMonitor},
 			Sinks:    []PlayerSinkStatus{{Request: "audio0", Name: testAPISink}},
 		},
 	}

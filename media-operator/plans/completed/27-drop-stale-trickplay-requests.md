@@ -1,6 +1,6 @@
 # 27, Drop stale trickplay requests
 
-Built, and drilled on `liken-1` and in the house on 2026-09-08 in
+Built, and drilled on `liken-1` and on a home cluster on 2026-09-08 in
 release 2026.09.08-001. A scrub sent the bridge a queue of tile
 requests it could not keep up with, and the display kept drawing tiles
 after the hand lifted.

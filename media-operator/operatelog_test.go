@@ -451,11 +451,11 @@ func TestAUnitThatMovesReceiverLogsTheLiftAndTheApply(t *testing.T) {
 	cluster := receiverCluster()
 	cluster.receivers["den-denon"] = &Receiver{
 		Metadata: ObjectMeta{Name: "den-denon"},
-		Spec:     ReceiverSpec{Inputs: []ReceiverInput{{Name: "MPLAY", Machine: "nuc6", Monitor: testMonitor}}},
+		Spec:     ReceiverSpec{Inputs: []ReceiverInput{{Name: "MPLAY", Machine: "node-6", Monitor: testMonitor}}},
 	}
 	media, log := loggingOperator(t, cluster)
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
-	cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "nuc6"
+	cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "node-6"
 	cluster.receivers["den-denon"].Spec.Inputs[0].Machine = testNode
 
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())

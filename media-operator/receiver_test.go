@@ -18,7 +18,7 @@ func houseReceiver() *Receiver {
 	return &Receiver{
 		Metadata: ObjectMeta{Name: "den-receiver"},
 		Spec: ReceiverSpec{Inputs: []ReceiverInput{
-			{Name: "CBL/SAT", Machine: "nuc6", Monitor: testMonitor},
+			{Name: "CBL/SAT", Machine: "node-6", Monitor: testMonitor},
 			{Name: "GAME", Machine: testNode, Monitor: testMonitor},
 		}},
 		Status: ReceiverStatus{
@@ -49,7 +49,7 @@ func TestAnInputMatchesTheMachineAndTheMonitorTogether(t *testing.T) {
 		want    string
 	}{
 		{name: "both values name the input", node: testNode, monitor: testMonitor, want: "GAME"},
-		{name: "another machine on the same monitor", node: "nuc7", monitor: testMonitor},
+		{name: "another machine on the same monitor", node: "node-7", monitor: testMonitor},
 		{name: "the same machine on another monitor", node: testNode, monitor: "HDMI-1"},
 	}
 	for _, each := range cases {
@@ -745,13 +745,13 @@ func TestAUnitThatMovesToAnotherReceiverLiftsTheOldSessionFirst(t *testing.T) {
 			cluster := receiverCluster()
 			cluster.receivers["den-denon"] = &Receiver{
 				Metadata: ObjectMeta{Name: "den-denon"},
-				Spec:     ReceiverSpec{Inputs: []ReceiverInput{{Name: "MPLAY", Machine: "nuc6", Monitor: testMonitor}}},
+				Spec:     ReceiverSpec{Inputs: []ReceiverInput{{Name: "MPLAY", Machine: "node-6", Monitor: testMonitor}}},
 			}
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 
 			runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
-			cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "nuc6"
+			cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "node-6"
 			cluster.receivers["den-denon"].Spec.Inputs[0].Machine = testNode
 			cluster.sessionsFail = each.liftFails
 			runPlayers(media, []Player{*housePlayer()}, standingPlays())

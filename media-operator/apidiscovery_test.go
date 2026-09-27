@@ -108,7 +108,7 @@ func TestTheInfoDocumentAnswersTheStreamCount(t *testing.T) {
 	mustMatch(t, document.Namespace, testAPINamespace)
 	mustMatch(t, document.Name, testAPIPlayer)
 	mustMatch(t, document.Display.Name, testAPIMonitor)
-	mustMatch(t, document.Display.Node, "stick1")
+	mustMatch(t, document.Display.Node, "screen-1")
 	mustMatch(t, document.Playing, true)
 	mustMatch(t, document.Streams, 3)
 	mustMatch(t, len(document.Sinks), 2)

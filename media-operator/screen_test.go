@@ -16,7 +16,7 @@ const testMonitor = "DP-1"
 
 // The machine the display driver publishes that screen from, which is
 // the machine a Receiver input names.
-const testNode = "nuc5"
+const testNode = "node-5"
 
 // The idle claim as the scheduler left it: the draw request
 // allocated against one device in the display driver's pool.
@@ -28,7 +28,7 @@ func allocatedIdleClaim() *ResourceClaim {
 				Results: []DeviceRequestAllocationResult{{
 					Request: idleDrawRequest,
 					Driver:  "display.liken.sh",
-					Pool:    "nuc5",
+					Pool:    "node-5",
 					Device:  "card0-dp-1-draw",
 				}},
 			},
@@ -41,10 +41,10 @@ func allocatedIdleClaim() *ResourceClaim {
 // attributes, the monitor id among them.
 func monitorSlice() ResourceSlice {
 	return ResourceSlice{
-		Metadata: ObjectMeta{Name: "nuc5-display"},
+		Metadata: ObjectMeta{Name: "node-5-display"},
 		Spec: ResourceSliceSpec{
 			Driver:   "display.liken.sh",
-			Pool:     ResourceSlicePool{Name: "nuc5"},
+			Pool:     ResourceSlicePool{Name: "node-5"},
 			NodeName: testNode,
 			Devices: []ResourceSliceItem{{
 				Name:       "card0-dp-1-draw",
@@ -603,7 +603,7 @@ func allocatedDrawDevice() DeviceRequestAllocationResult {
 	return DeviceRequestAllocationResult{
 		Request: idleDrawRequest,
 		Driver:  "display.liken.sh",
-		Pool:    "nuc5",
+		Pool:    "node-5",
 		Device:  "card0-dp-1-draw",
 	}
 }
@@ -614,7 +614,7 @@ func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
 	otherDriver := monitorSlice()
 	otherDriver.Spec.Driver = "gpu.liken.sh"
 	otherPool := monitorSlice()
-	otherPool.Spec.Pool.Name = "nuc6"
+	otherPool.Spec.Pool.Name = "node-6"
 	otherDevice := monitorSlice()
 	otherDevice.Spec.Devices[0].Name = "card0-hdmi-1-draw"
 

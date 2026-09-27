@@ -71,7 +71,7 @@ This plan requires display-operator plan 17 on a cluster before it
 rolls there. Under kiosk-shell a client that passes no app-id lands on
 whichever output weston enumerated first, and an idle client that maps
 no fresh surface stays hidden after a film. display-operator
-2026.09.10-001 rolled to the testbed and to the house first, and this
+2026.09.10-001 rolled to the testbed and to a home cluster first, and this
 operator's 2026.09.10-001 followed the same evening.
 
 ## What was considered and set aside

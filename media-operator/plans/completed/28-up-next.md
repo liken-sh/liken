@@ -160,7 +160,7 @@ its own `Play`.
 **A presentation block on `next`.** The card could carry the same
 typed presentation an item carries, and the display could spell the
 lines. The browser already spells those lines on its own cards, and
-Chris wants the card to mirror the browser. Three strings keep one
+The maintainer wants the card to mirror the browser. Three strings keep one
 speller.
 
 **An operator-to-pod stop verb.** A `stop` action on the `Play`'s
@@ -185,7 +185,7 @@ answered with a play request in the same second, the next `Play` was
 Pending at five seconds, and the old `Play` was gone and the new one
 Running at eight seconds. The store held the old `Play` with its ended
 mark at 607 of 712 seconds, and the new one running under its own
-season and episode. Chris drilled the film chain from the remote, and
+season and episode. The maintainer drilled the film chain from the remote, and
 three findings from that drill are in the display: the first select
 opens the card, the chip is measured by the face's own advances, and
 the card's fill is darker. The first series drill also found rumqttc's

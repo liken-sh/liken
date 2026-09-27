@@ -130,8 +130,8 @@ unmaps its window when it has nothing to draw.
 values `lua` and `iced`, defaulting to `lua` until the port reaches
 parity. It picks the pod shape: the Lua shape passes `--script` to
 mpv and runs two containers; the iced shape drops `--script` and runs
-three. The testbed runs `iced` while the house runs `lua`. When Chris
-signs off the last screen, the default flips, and the last step of
+three. The testbed runs `iced` while a home cluster runs `lua`. When the
+maintainer signs off the last screen, the default flips, and the last step of
 this plan removes the Lua display and the knob.
 
 **Nothing left behind.** The port ends with no Lua display in the
@@ -225,7 +225,7 @@ harness, beside the same state of the port under the compositor, with
 the same film at the same position: idle, summoned, each focus stop,
 each chooser open, a scan with a trickplay tile, the up-next chip and
 card, the volume row, and the music screen with its cover. The port is
-done when Chris finds no difference he wants kept.
+done when the maintainer finds no difference to keep.
 
 ## What the lab measured
 

@@ -740,7 +740,7 @@ would have to become proxied bodies, and it cuts every stream at its
 exempts only a hardcoded set of verbs and subresources (`watch`,
 `proxy`, `log`, `exec`, `attach`, `portforward`), and `?timeout=`
 can only shorten the deadline, so staying under the limit would mean
-a `proxy` or `watch` segment in every path. Chris ruled the duration
+a `proxy` or `watch` segment in every path. The maintainer ruled the duration
 limit and that path showstoppers, and the three hand-rolled front
 doors stay.
 
