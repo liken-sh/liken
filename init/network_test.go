@@ -205,7 +205,7 @@ func TestWritingResolvConfReplacesTheWholeFileAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second := withNameserver(joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"), "192.168.1.1")
+	second := withNameserver(joinedRadio("wlan0", "homenet", "192.168.1.20/24"), "192.168.1.1")
 	if err := writeResolvConf([]*connection{first, second}); err != nil {
 		t.Fatal(err)
 	}

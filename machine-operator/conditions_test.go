@@ -422,7 +422,7 @@ func wiredAndWireless(w *machine.WirelessStatus) []machine.InterfaceStatus {
 
 func TestWirelessConditionJoined(t *testing.T) {
 	c := wirelessCondition(wiredAndWireless(&machine.WirelessStatus{
-		SSID: "stonypoint", State: machine.WirelessConnected,
+		SSID: "homenet", State: machine.WirelessConnected,
 	}))
 	if c.Type != "WirelessJoined" || c.Status != api.ConditionTrue || c.Reason != "AllJoined" {
 		t.Errorf("got %+v", c)
@@ -434,13 +434,13 @@ func TestWirelessConditionCarriesTheSupplicantsReason(t *testing.T) {
 	// wrong passphrase and an access point that is switched off look
 	// the same to the kernel, and only this message tells them apart.
 	c := wirelessCondition(wiredAndWireless(&machine.WirelessStatus{
-		SSID: "stonypoint", State: machine.WirelessWrongKey,
+		SSID: "homenet", State: machine.WirelessWrongKey,
 		Message: "the access point refused the passphrase (WRONG_KEY); fix it on the install media",
 	}))
 	if c.Status != api.ConditionFalse || c.Reason != "NotJoined" {
 		t.Errorf("got %+v", c)
 	}
-	for _, want := range []string{"wlan0", "stonypoint", "WRONG_KEY"} {
+	for _, want := range []string{"wlan0", "homenet", "WRONG_KEY"} {
 		if !strings.Contains(c.Message, want) {
 			t.Errorf("the message must carry %q: %q", want, c.Message)
 		}
@@ -449,7 +449,7 @@ func TestWirelessConditionCarriesTheSupplicantsReason(t *testing.T) {
 
 func TestWirelessConditionFallsBackToTheStateWhenNothingSaidWhy(t *testing.T) {
 	c := wirelessCondition(wiredAndWireless(&machine.WirelessStatus{
-		SSID: "stonypoint", State: machine.WirelessAssociating,
+		SSID: "homenet", State: machine.WirelessAssociating,
 	}))
 	if c.Status != api.ConditionFalse || !strings.Contains(c.Message, "Associating") {
 		t.Errorf("got %+v", c)

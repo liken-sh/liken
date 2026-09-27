@@ -151,12 +151,12 @@ func everythingSet() *MachineStatus {
 				// with no address at all, whose only fact is why.
 				{
 					Name: "wlan0", MAC: "04:4a:2c:11:22:33", Address: "192.168.1.11/24", Method: MethodStatic,
-					Wireless: &WirelessStatus{SSID: "stonypoint", State: WirelessConnected},
+					Wireless: &WirelessStatus{SSID: "homenet", State: WirelessConnected},
 				},
 				{
 					Name: "wlan1", MAC: "04:4a:2c:11:22:34",
 					Wireless: &WirelessStatus{
-						SSID: "stonypoint-5", State: WirelessWrongKey,
+						SSID: "homenet-5", State: WirelessWrongKey,
 						Message: "the access point refused the passphrase (WRONG_KEY)",
 					},
 				},
@@ -279,7 +279,7 @@ func everythingSet() *MachineStatus {
 				},
 				{
 					Name: "wlan0", Address: "192.168.1.11/24",
-					Wireless: &WirelessSpec{SSID: "stonypoint", Security: WirelessWPAPSK},
+					Wireless: &WirelessSpec{SSID: "homenet", Security: WirelessWPAPSK},
 				},
 			}},
 			Rejection:            &Rejection{Hash: "r1", Reason: "bad spec", RejectedAt: rejected},
@@ -418,7 +418,7 @@ func TestBootNetworkTellsAnEmptySpecFromAnAbsentRecord(t *testing.T) {
 func TestBootNetworkDropsAWirelessRecordThatIsNoLongerDeclared(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	wireless := &NetworkSpec{Interfaces: []InterfaceSpec{
-		{Name: "wlan0", Wireless: &WirelessSpec{SSID: "stonypoint", Security: WirelessOpen}},
+		{Name: "wlan0", Wireless: &WirelessSpec{SSID: "homenet", Security: WirelessOpen}},
 	}}
 	if err := tree.WriteBootNetwork(wireless); err != nil {
 		t.Fatal(err)

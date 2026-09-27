@@ -240,7 +240,7 @@ func driftLabWireless() NetworkSpec {
 	spec := driftLabNetwork()
 	spec.Interfaces = append(spec.Interfaces, InterfaceSpec{
 		Name: "wlan0", Address: "10.10.0.2/24",
-		Wireless: &WirelessSpec{SSID: "stonypoint", Security: WirelessWPAPSK},
+		Wireless: &WirelessSpec{SSID: "homenet", Security: WirelessWPAPSK},
 	})
 	return spec
 }
@@ -255,9 +255,9 @@ func TestNetworkDriftSeesNoDriftInTheSameWirelessSpec(t *testing.T) {
 func TestNetworkDriftSeesAChangedSSID(t *testing.T) {
 	actuated := driftLabWireless()
 	desired := driftLabWireless()
-	desired.Interfaces[2].Wireless.SSID = "stonypoint-guest"
+	desired.Interfaces[2].Wireless.SSID = "homenet-guest"
 	diffs := NetworkDrift(desired, &actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "wireless stonypoint-guest (wpa-psk) declared, stonypoint (wpa-psk) actuated") {
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "wireless homenet-guest (wpa-psk) declared, homenet (wpa-psk) actuated") {
 		t.Errorf("expected an SSID diff: %v", diffs)
 	}
 }
@@ -267,7 +267,7 @@ func TestNetworkDriftSeesAChangedSecurity(t *testing.T) {
 	desired := driftLabWireless()
 	desired.Interfaces[2].Wireless.Security = WirelessOpen
 	diffs := NetworkDrift(desired, &actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "stonypoint (open) declared, stonypoint (wpa-psk) actuated") {
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "homenet (open) declared, homenet (wpa-psk) actuated") {
 		t.Errorf("expected a security diff: %v", diffs)
 	}
 }
@@ -288,7 +288,7 @@ func TestNetworkDriftSeesARadioAddedToAWiredInterface(t *testing.T) {
 	actuated := driftLabWireless()
 	actuated.Interfaces[2].Wireless = nil
 	diffs := NetworkDrift(driftLabWireless(), &actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "stonypoint (wpa-psk) declared, (none) actuated") {
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "homenet (wpa-psk) declared, (none) actuated") {
 		t.Errorf("expected an added-wireless diff: %v", diffs)
 	}
 }
@@ -298,7 +298,7 @@ func TestNetworkDriftSeesARadioRemoved(t *testing.T) {
 	desired := driftLabWireless()
 	desired.Interfaces[2].Wireless = nil
 	diffs := NetworkDrift(desired, &actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "wireless (none) declared, stonypoint (wpa-psk) actuated") {
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "wireless (none) declared, homenet (wpa-psk) actuated") {
 		t.Errorf("expected a removed-wireless diff: %v", diffs)
 	}
 }

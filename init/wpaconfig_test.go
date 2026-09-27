@@ -43,9 +43,9 @@ func writePassphrase(t *testing.T, dir, ssid, passphrase string) {
 
 func TestPassphraseComesFromTheImageWhenNothingIsStaged(t *testing.T) {
 	stateRoot := passphraseFiles(t)
-	writePassphrase(t, imagePassphraseDir, "stonypoint", "correcthorse\n")
+	writePassphrase(t, imagePassphraseDir, "homenet", "correcthorse\n")
 
-	got, source, err := readPassphrase(stateRoot, "stonypoint")
+	got, source, err := readPassphrase(stateRoot, "homenet")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +62,10 @@ func TestTheStagedPassphraseWinsOverTheImages(t *testing.T) {
 	// Nothing writes the staged copy today; rotation becomes a writer
 	// of it, not a change to this order.
 	stateRoot := passphraseFiles(t)
-	writePassphrase(t, imagePassphraseDir, "stonypoint", "theoldone")
-	writePassphrase(t, stagedPassphraseDir(stateRoot), "stonypoint", "thenewone")
+	writePassphrase(t, imagePassphraseDir, "homenet", "theoldone")
+	writePassphrase(t, stagedPassphraseDir(stateRoot), "homenet", "thenewone")
 
-	got, source, err := readPassphrase(stateRoot, "stonypoint")
+	got, source, err := readPassphrase(stateRoot, "homenet")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +80,11 @@ func TestTheStagedPassphraseWinsOverTheImages(t *testing.T) {
 func TestAMissingPassphraseNamesWhereOneBelongs(t *testing.T) {
 	// The machine has no shell, so the message is the whole diagnosis.
 	stateRoot := passphraseFiles(t)
-	_, _, err := readPassphrase(stateRoot, "stonypoint")
+	_, _, err := readPassphrase(stateRoot, "homenet")
 	if err == nil {
 		t.Fatal("a network with no passphrase file must refuse")
 	}
-	for _, want := range []string{"stonypoint", imagePassphraseDir} {
+	for _, want := range []string{"homenet", imagePassphraseDir} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error must carry %q: %v", want, err)
 		}
@@ -116,7 +116,7 @@ func TestCheckPassphraseRefusesWhatNoAccessPointCouldHold(t *testing.T) {
 		"a tab":         "pass\tword",
 		"a byte over 7": "passw\xffrd",
 	} {
-		if err := checkPassphrase("stonypoint", passphrase); err == nil {
+		if err := checkPassphrase("homenet", passphrase); err == nil {
 			t.Errorf("%s: expected a refusal", name)
 		}
 	}
@@ -130,7 +130,7 @@ func TestCheckPassphraseAcceptsEveryPrintableCharacter(t *testing.T) {
 		`say "hello"`, `back\slash`, "hash#mark", "with space", "8charact",
 		strings.Repeat("x", 63),
 	} {
-		if err := checkPassphrase("stonypoint", passphrase); err != nil {
+		if err := checkPassphrase("homenet", passphrase); err != nil {
 			t.Errorf("%q: %v", passphrase, err)
 		}
 	}
@@ -153,18 +153,18 @@ func wpaPSK(ssid string) machine.WirelessSpec {
 
 func TestWirelessConfigJoinsWPA2AndWPA3AtOnce(t *testing.T) {
 	stateRoot := passphraseFiles(t)
-	writePassphrase(t, imagePassphraseDir, "stonypoint", "correcthorse\n")
+	writePassphrase(t, imagePassphraseDir, "homenet", "correcthorse\n")
 
-	got, err := wirelessConfig(wpaPSK("stonypoint"), stateRoot, "/run/liken/wireless/wlan0/ctrl")
+	got, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/run/liken/wireless/wlan0/ctrl")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"ctrl_interface=/run/liken/wireless/wlan0/ctrl\n",
-		"\tssid=73746f6e79706f696e74\n",
+		"\tssid=686f6d656e6574\n",
 		"\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE\n",
 		"\tieee80211w=1\n",
-		"\tpsk=" + derivePMK("stonypoint", "correcthorse") + "\n",
+		"\tpsk=" + derivePMK("homenet", "correcthorse") + "\n",
 		"\tsae_password=636f7272656374686f727365\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -216,13 +216,13 @@ func TestWirelessConfigCountsTheLinesItMeansTo(t *testing.T) {
 	// A passphrase that could write a line of its own would show up
 	// here as an extra line, whatever it said.
 	stateRoot := passphraseFiles(t)
-	writePassphrase(t, imagePassphraseDir, "stonypoint", "aaaaaaaa")
-	plain, err := wirelessConfig(wpaPSK("stonypoint"), stateRoot, "/ctrl")
+	writePassphrase(t, imagePassphraseDir, "homenet", "aaaaaaaa")
+	plain, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	writePassphrase(t, imagePassphraseDir, "stonypoint", `a" b`+"\n\tkey_mgmt=NONE")
-	injected, cerr := wirelessConfig(wpaPSK("stonypoint"), stateRoot, "/ctrl")
+	writePassphrase(t, imagePassphraseDir, "homenet", `a" b`+"\n\tkey_mgmt=NONE")
+	injected, cerr := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl")
 	if cerr == nil {
 		t.Fatalf("a passphrase holding a newline must be refused:\n%s", injected)
 	}
@@ -233,15 +233,15 @@ func TestWirelessConfigCountsTheLinesItMeansTo(t *testing.T) {
 
 func TestWirelessConfigRefusesAPassphraseItCannotRender(t *testing.T) {
 	stateRoot := passphraseFiles(t)
-	writePassphrase(t, imagePassphraseDir, "stonypoint", "short\n")
-	if _, err := wirelessConfig(wpaPSK("stonypoint"), stateRoot, "/ctrl"); err == nil {
+	writePassphrase(t, imagePassphraseDir, "homenet", "short\n")
+	if _, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl"); err == nil {
 		t.Fatal("a passphrase WPA2 cannot hold must be refused")
 	}
 }
 
 func TestWirelessConfigRefusesWhenNoPassphraseFileExists(t *testing.T) {
 	stateRoot := passphraseFiles(t)
-	if _, err := wirelessConfig(wpaPSK("stonypoint"), stateRoot, "/ctrl"); err == nil {
+	if _, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl"); err == nil {
 		t.Fatal("a wpa-psk network with no passphrase must be refused")
 	}
 }
@@ -250,7 +250,7 @@ func TestWirelessConfigDefaultsToWPAPSKWhenTheSpecSaysNothing(t *testing.T) {
 	// An unset security field means wpa-psk, the common case, so an
 	// unset field must reach the passphrase and not the open path.
 	stateRoot := passphraseFiles(t)
-	if _, err := wirelessConfig(machine.WirelessSpec{SSID: "stonypoint"}, stateRoot, "/ctrl"); err == nil {
+	if _, err := wirelessConfig(machine.WirelessSpec{SSID: "homenet"}, stateRoot, "/ctrl"); err == nil {
 		t.Fatal("an unset security field means wpa-psk, which needs a passphrase")
 	}
 }
@@ -267,7 +267,7 @@ func TestWirelessConfigDumpsForTheVendoredSupplicant(t *testing.T) {
 	}
 	stateRoot := passphraseFiles(t)
 	for name, spec := range map[string]machine.WirelessSpec{
-		"psk":     wpaPSK("stonypoint"),
+		"psk":     wpaPSK("homenet"),
 		"open":    {SSID: "guest", Security: machine.WirelessOpen},
 		"awkward": wpaPSK(`a "b" #c`),
 		"unicode": wpaPSK("café ☕"),

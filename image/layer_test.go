@@ -295,11 +295,11 @@ func TestLayerCarriesAPassphrase(t *testing.T) {
 	// A passphrase is the same class of secret as the token, so it
 	// travels with the identity and lands at the token's mode.
 	entries := builtLayerFrom(t,
-		fixtureWirelessManifests(t, "stonypoint", machine.WirelessWPAPSK),
-		fixtureIdentity(t, map[string]string{"stonypoint": "swordfish1"}))
-	e, ok := entries["etc/liken/psk/stonypoint"]
+		fixtureWirelessManifests(t, "homenet", machine.WirelessWPAPSK),
+		fixtureIdentity(t, map[string]string{"homenet": "swordfish1"}))
+	e, ok := entries["etc/liken/psk/homenet"]
 	if !ok {
-		t.Fatal("the layer carries no passphrase for stonypoint")
+		t.Fatal("the layer carries no passphrase for homenet")
 	}
 	if string(e.data) != "swordfish1" {
 		t.Errorf("passphrase content: %q", e.data)
@@ -318,14 +318,14 @@ func TestLayerRefusesAWirelessMachineWithNoPassphrase(t *testing.T) {
 	}
 	for name, security := range cases {
 		t.Run(name, func(t *testing.T) {
-			manifests := fixtureWirelessManifests(t, "stonypoint", security)
+			manifests := fixtureWirelessManifests(t, "homenet", security)
 			identityDir := fixtureIdentity(t, nil)
 			out := filepath.Join(t.TempDir(), "deployment.cpio")
 			err := Layer(manifests, identityDir, out)
 			if err == nil {
 				t.Fatal("the layer packed a wireless machine with no passphrase")
 			}
-			want := filepath.Join(identityDir, "psk", "stonypoint")
+			want := filepath.Join(identityDir, "psk", "homenet")
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("the error should name %s, got %v", want, err)
 			}
@@ -343,7 +343,7 @@ func TestLayerRefusesAWirelessMachineWithNoPassphrase(t *testing.T) {
 func TestLayerCarriesNoPassphraseFile(t *testing.T) {
 	cases := map[string]string{
 		"a deployment with no wireless interface": fixtureManifests(t),
-		"an open network":                         fixtureWirelessManifests(t, "stonypoint-guest", machine.WirelessOpen),
+		"an open network":                         fixtureWirelessManifests(t, "homenet-guest", machine.WirelessOpen),
 	}
 	for name, manifests := range cases {
 		t.Run(name, func(t *testing.T) {

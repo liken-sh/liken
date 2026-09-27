@@ -257,12 +257,12 @@ func TestDecideConvergenceStagesAWirelessEdit(t *testing.T) {
 	// path a nameserver edit takes.
 	m := labMachine()
 	m.Spec.Network.Interfaces = append(m.Spec.Network.Interfaces, machine.InterfaceSpec{
-		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "stonypoint-guest"},
+		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "homenet-guest"},
 	})
 	facts := labFacts()
 	boot := labNetwork()
 	boot.Interfaces = append(boot.Interfaces, machine.InterfaceSpec{
-		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "stonypoint"},
+		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "homenet"},
 	})
 	facts.Boot.Network = &boot
 	conv := decideConvergence(m, facts, nil, "", turnStandalone)
@@ -272,7 +272,7 @@ func TestDecideConvergenceStagesAWirelessEdit(t *testing.T) {
 	if !conv.stage || conv.requestLoad {
 		t.Errorf("a wireless edit stages and waits for a reboot: %+v", conv)
 	}
-	if !strings.Contains(conv.condition.Message, "stonypoint-guest") {
+	if !strings.Contains(conv.condition.Message, "homenet-guest") {
 		t.Errorf("the message should carry the diff: %q", conv.condition.Message)
 	}
 }

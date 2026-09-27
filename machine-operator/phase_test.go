@@ -248,7 +248,7 @@ func healthyBesides(wireless api.Condition) []api.Condition {
 func oneRadio(state machine.WirelessState) []machine.InterfaceStatus {
 	return []machine.InterfaceStatus{
 		{Name: "eth0", Address: "10.10.0.5/24"},
-		{Name: "wlan0", Wireless: &machine.WirelessStatus{SSID: "stonypoint", State: state}},
+		{Name: "wlan0", Wireless: &machine.WirelessStatus{SSID: "homenet", State: state}},
 	}
 }
 

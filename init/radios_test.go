@@ -179,12 +179,12 @@ func TestARoutedMachineJoinsItsRadioInTheBackground(t *testing.T) {
 	// the proof that nothing in the boot path waited.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
-		"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
 	s.hold = make(chan struct{})
 
 	conns, pass := s.passes(routesVia("eth0")).run(
-		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "stonypoint")}, labCluster())
+		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")}, labCluster())
 
 	if pass == nil {
 		t.Fatal("a routed machine must background its radio")
@@ -212,10 +212,10 @@ func TestAnUnroutedRadioOnlyMachineJoinsInTheForeground(t *testing.T) {
 	// the join's address must be on the connections the boot goes on
 	// with.
 	s := scripted(map[string]*connection{
-		"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
 	conns, pass := s.passes(routesNowhere()).run(
-		[]machine.InterfaceSpec{declaredRadio("wlan0", "stonypoint")}, labCluster())
+		[]machine.InterfaceSpec{declaredRadio("wlan0", "homenet")}, labCluster())
 
 	if pass != nil {
 		t.Error("a foreground pass leaves nothing running behind the boot")
@@ -235,12 +235,12 @@ func TestAnUnroutedRadioOnlyMachineStillParks(t *testing.T) {
 	// path holds the boot, the reason reaches the console, and a
 	// join during the hold gets the radio addressed.
 	console := heldConsole(t)
-	refused := refusedRadio("wlan0", "stonypoint")
+	refused := refusedRadio("wlan0", "homenet")
 	refused.radio.control = stubControl()
 	pushEvent(t, refused.radio.control, "<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0]")
 
 	s := scripted(map[string]*connection{"wlan0": refused})
-	s.passes(routesNowhere()).run([]machine.InterfaceSpec{declaredRadio("wlan0", "stonypoint")}, labCluster())
+	s.passes(routesNowhere()).run([]machine.InterfaceSpec{declaredRadio("wlan0", "homenet")}, labCluster())
 
 	if _, _, _, readdress := s.asked(); readdress != 1 {
 		t.Errorf("a radio that joined during the park must be addressed: %d", readdress)
@@ -249,7 +249,7 @@ func TestAnUnroutedRadioOnlyMachineStillParks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(held), "cannot join stonypoint") {
+	if !strings.Contains(string(held), "cannot join homenet") {
 		t.Errorf("the console must carry the reason: %q", held)
 	}
 }
@@ -261,7 +261,7 @@ func TestABackgroundRadioThatCannotBeReachedStillReports(t *testing.T) {
 	// forever.
 	s := scripted(map[string]*connection{"eth0": addressed("eth0", "10.10.0.5/24")})
 	conns, pass := s.passes(routesVia("eth0")).run(
-		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "stonypoint")}, labCluster())
+		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")}, labCluster())
 	if pass == nil {
 		t.Fatal("a routed machine must background its radio")
 	}
@@ -281,10 +281,10 @@ func TestANodeCIDRThatOnlyTheRadioAnswersHoldsTheBoot(t *testing.T) {
 	// this machine waits for the radio in the foreground.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "192.168.9.5/24"),
-		"wlan0": joinedRadio("wlan0", "stonypoint", "10.10.0.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "10.10.0.20/24"),
 	})
 	conns, pass := s.passes(routesVia("eth0")).run(
-		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "stonypoint")},
+		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")},
 		clusterAt(labEndpoint, "10.10.0.0/24"))
 
 	if pass != nil {
@@ -303,10 +303,10 @@ func TestANodeCIDRAWiredPortAnswersBackgroundsTheRadio(t *testing.T) {
 	// radio is additional and the boot goes on without it.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
-		"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
 	_, pass := s.passes(routesVia("eth0")).run(
-		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "stonypoint")},
+		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")},
 		clusterAt(labEndpoint, "10.10.0.0/24"))
 
 	if pass == nil {
@@ -321,10 +321,10 @@ func TestAClusterWithNoNodeCIDRBackgroundsOnTheRouteAlone(t *testing.T) {
 	// alone, exactly as it did before the node address joined the gate.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "192.168.9.5/24"),
-		"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
 	_, pass := s.passes(routesVia("eth0")).run(
-		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "stonypoint")},
+		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")},
 		clusterAt(labEndpoint, ""))
 
 	if pass == nil {
@@ -339,14 +339,14 @@ func TestTheGateOnAnEndpointNothingCanResolve(t *testing.T) {
 	// question answers yes, and the node address decides on its own.
 	for name, endpoint := range map[string]string{
 		"a machine alone": "",
-		"a DNS name":      "https://cluster.stonypoint.example:6443",
+		"a DNS name":      "https://cluster.homenet.example:6443",
 	} {
 		s := scripted(map[string]*connection{
 			"eth0":  addressed("eth0", "10.10.0.5/24"),
-			"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+			"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 		})
 		_, pass := s.passes(routesNowhere()).run(
-			[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "stonypoint")},
+			[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")},
 			clusterAt(endpoint, "10.10.0.0/24"))
 
 		if pass == nil {
@@ -363,11 +363,11 @@ func TestAStuckRaiseStopsTheRadiosBehindIt(t *testing.T) {
 	// must stop, and every radio it never tried must say so.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
-		"wlan0": stuckRadio("wlan0", "stonypoint"),
-		"wlan1": joinedRadio("wlan1", "stonypoint", "192.168.1.21/24"),
+		"wlan0": stuckRadio("wlan0", "homenet"),
+		"wlan1": joinedRadio("wlan1", "homenet", "192.168.1.21/24"),
 	})
 	conns, pass := s.passes(routesVia("eth0")).run([]machine.InterfaceSpec{
-		wired("eth0"), declaredRadio("wlan0", "stonypoint"), declaredRadio("wlan1", "stonypoint"),
+		wired("eth0"), declaredRadio("wlan0", "homenet"), declaredRadio("wlan1", "homenet"),
 	}, labCluster())
 	if pass == nil {
 		t.Fatal("a routed machine must background its radios")
@@ -406,11 +406,11 @@ func TestTheVerdictComponentEndsAfterAStuckRaise(t *testing.T) {
 	aimResolvConf(t)
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
-		"wlan0": stuckRadio("wlan0", "stonypoint"),
-		"wlan1": joinedRadio("wlan1", "stonypoint", "192.168.1.21/24"),
+		"wlan0": stuckRadio("wlan0", "homenet"),
+		"wlan1": joinedRadio("wlan1", "homenet", "192.168.1.21/24"),
 	})
 	_, pass := s.passes(routesVia("eth0")).run([]machine.InterfaceSpec{
-		wired("eth0"), declaredRadio("wlan0", "stonypoint"), declaredRadio("wlan1", "stonypoint"),
+		wired("eth0"), declaredRadio("wlan0", "homenet"), declaredRadio("wlan1", "homenet"),
 	}, labCluster())
 
 	done := make(chan error, 1)
@@ -434,9 +434,9 @@ func TestTheRadioComponentJoinsEachRadioOnlyOnce(t *testing.T) {
 	// send a second verdict nothing is counting. The component must
 	// do nothing the second time.
 	s := scripted(map[string]*connection{
-		"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
-	radios := []machine.InterfaceSpec{declaredRadio("wlan0", "stonypoint")}
+	radios := []machine.InterfaceSpec{declaredRadio("wlan0", "homenet")}
 	pass := &radioPass{settled: make(chan *connection, 4), pending: 1}
 	component := s.passes(routesVia("eth0")).joinRadios(pass, radios)
 
@@ -459,11 +459,11 @@ func TestTheConnectionsComeBackInSpecOrder(t *testing.T) {
 	// resolv.conf keeps the first three nameservers in interface
 	// order, and the facts summarize the first addressed interface. A
 	// radio the spec named first must appear first, in both passes.
-	interfaces := []machine.InterfaceSpec{declaredRadio("wlan0", "stonypoint"), wired("eth0")}
+	interfaces := []machine.InterfaceSpec{declaredRadio("wlan0", "homenet"), wired("eth0")}
 
 	background := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
-		"wlan0": joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
 	conns, pass := background.passes(routesVia("eth0")).run(interfaces, labCluster())
 	if pass == nil {
@@ -479,7 +479,7 @@ func TestTheConnectionsComeBackInSpecOrder(t *testing.T) {
 
 	foreground := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "192.168.9.5/24"),
-		"wlan0": joinedRadio("wlan0", "stonypoint", "10.10.0.20/24"),
+		"wlan0": joinedRadio("wlan0", "homenet", "10.10.0.20/24"),
 	})
 	conns, pass = foreground.passes(routesNowhere()).run(interfaces, labCluster())
 	if pass != nil {
@@ -518,7 +518,7 @@ func TestARaiseThatDoesNotReturnGetsItsOwnState(t *testing.T) {
 	// the stuck thread cannot be stopped, and the message is what a
 	// person reads in kubectl get machine.
 	stalledRaise(t)
-	conn, err := bringUpRadio(declaredRadio("wlan0", "stonypoint"),
+	conn, err := bringUpRadio(declaredRadio("wlan0", "homenet"),
 		[]interfaceIdentity{{name: "wlan0"}}, 10*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -552,7 +552,7 @@ func TestARaiseThatFailsOutrightIsAnError(t *testing.T) {
 	}
 	t.Cleanup(func() { linkSetUp, linkByName = origSetUp, origByName })
 
-	if _, err := bringUpRadio(declaredRadio("wlan0", "stonypoint"),
+	if _, err := bringUpRadio(declaredRadio("wlan0", "homenet"),
 		[]interfaceIdentity{{name: "wlan0"}}, time.Second); err == nil {
 		t.Fatal("expected the kernel's refusal to surface")
 	}
@@ -587,7 +587,7 @@ func TestARadioThatJoinedButCouldNotBeAddressedKeepsItsJoin(t *testing.T) {
 	}
 	t.Cleanup(func() { joinRadio = orig })
 
-	ifc := declaredRadio("wlan0", "stonypoint")
+	ifc := declaredRadio("wlan0", "homenet")
 	ifc.Address = "not-a-cidr"
 	conn, err := bringUpRadio(ifc, []interfaceIdentity{{name: "wlan0"}}, time.Second)
 	if err != nil {
@@ -634,12 +634,12 @@ func TestALateRadioReachesTheFactsTreeAndResolvConf(t *testing.T) {
 	pass := &radioPass{
 		conns: []*connection{
 			withNameserver(addressed("eth0", "10.10.0.5/24"), "10.10.0.1"),
-			pendingRadio(declaredRadio("wlan0", "stonypoint")),
+			pendingRadio(declaredRadio("wlan0", "homenet")),
 		},
 		settled: make(chan *connection, 1),
 		pending: 1,
 	}
-	pass.settled <- withNameserver(joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"), "192.168.1.1")
+	pass.settled <- withNameserver(joinedRadio("wlan0", "homenet", "192.168.1.20/24"), "192.168.1.1")
 
 	if err := publishRadioVerdicts(pass, tree, nil)(context.Background()); err != nil {
 		t.Fatal(err)

@@ -98,7 +98,7 @@ func TestConnectingSettlesTheJoin(t *testing.T) {
 }
 
 func TestARefusedPassphraseSettlesTheJoinAndNamesTheFix(t *testing.T) {
-	event, _ := parseWPAEvent(`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="stonypoint" auth_failures=1 duration=10 reason=WRONG_KEY`)
+	event, _ := parseWPAEvent(`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=1 duration=10 reason=WRONG_KEY`)
 	state, message, settled := judgeWirelessEvent(event)
 	if !settled || state != machine.WirelessWrongKey {
 		t.Fatalf("state = %q, settled = %v", state, settled)
@@ -111,7 +111,7 @@ func TestARefusedPassphraseSettlesTheJoinAndNamesTheFix(t *testing.T) {
 }
 
 func TestAConfigurationWithNoKeySettlesTheJoin(t *testing.T) {
-	event, _ := parseWPAEvent(`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="stonypoint" auth_failures=1 duration=10 reason=NO_PSK_AVAILABLE`)
+	event, _ := parseWPAEvent(`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=1 duration=10 reason=NO_PSK_AVAILABLE`)
 	if _, _, settled := judgeWirelessEvent(event); !settled {
 		t.Error("a network the supplicant has no key for is a decision, not a wait")
 	}
@@ -125,7 +125,7 @@ func TestAbsenceNeverSettlesTheJoin(t *testing.T) {
 		"<3>CTRL-EVENT-SCAN-RESULTS ",
 		"<3>CTRL-EVENT-NETWORK-NOT-FOUND ",
 		"<3>CTRL-EVENT-DISCONNECTED bssid=04:4a:2c:11:22:33 reason=3 locally_generated=1",
-		`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="stonypoint" auth_failures=4 duration=60 reason=CONN_FAILED`,
+		`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=4 duration=60 reason=CONN_FAILED`,
 		"<3>CTRL-EVENT-ASSOC-REJECT bssid=04:4a:2c:11:22:33 status_code=16 timeout=ASSOC",
 		"<3>CTRL-EVENT-AUTH-REJECT 04:4a:2c:11:22:33 auth_type=3 auth_transaction=1 status_code=1",
 	} {

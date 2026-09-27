@@ -25,7 +25,7 @@ type ssidCase struct {
 // half, which both copies of the rule enforce, and the control-byte
 // half, which only Validate enforces.
 var ssidCases = []ssidCase{
-	{name: "a plain name", ssid: "stonypoint", valid: true, matches: true},
+	{name: "a plain name", ssid: "homenet", valid: true, matches: true},
 	{name: "spaces and punctuation", ssid: "Stony Point 5G!", valid: true, matches: true},
 	{name: "a dot inside", ssid: "home.arpa", valid: true, matches: true},
 	{name: "a leading dot", ssid: ".hidden", valid: true, matches: true},
@@ -117,7 +117,7 @@ func TestNetworkValidateCountsAnSSIDInOctetsNotCharacters(t *testing.T) {
 func TestNetworkValidateAcceptsBothSecurityValues(t *testing.T) {
 	for _, security := range []WirelessSecurity{WirelessWPAPSK, WirelessOpen, ""} {
 		t.Run(string(security), func(t *testing.T) {
-			if err := wirelessSpec("stonypoint", security).Validate(); err != nil {
+			if err := wirelessSpec("homenet", security).Validate(); err != nil {
 				t.Error(err)
 			}
 		})
@@ -128,7 +128,7 @@ func TestNetworkValidateRejectsAnUnknownSecurityValue(t *testing.T) {
 	// The API server refuses a value outside the enum, but a
 	// manifest from a stick reaches init without that check, so the
 	// Go copy of the rule must refuse it too.
-	err := wirelessSpec("stonypoint", "wep").Validate()
+	err := wirelessSpec("homenet", "wep").Validate()
 	if err == nil {
 		t.Fatal("an unknown security value must be refused")
 	}
@@ -154,7 +154,7 @@ func TestSecurityOrDefaultResolvesTheUnsetValue(t *testing.T) {
 	}
 	for declared, want := range cases {
 		t.Run(string(declared), func(t *testing.T) {
-			got := WirelessSpec{SSID: "stonypoint", Security: declared}.SecurityOrDefault()
+			got := WirelessSpec{SSID: "homenet", Security: declared}.SecurityOrDefault()
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
 			}
@@ -175,7 +175,7 @@ spec:
       - name: wlan0
         address: 10.10.0.7/24
         wireless:
-          ssid: stonypoint
+          ssid: homenet
           security: wpa-psk
 `)
 	m, err := Load(path)
@@ -190,7 +190,7 @@ spec:
 	if wireless == nil {
 		t.Fatalf("wlan0 declared a wireless network: %+v", interfaces[1])
 	}
-	if wireless.SSID != "stonypoint" || wireless.Security != WirelessWPAPSK {
+	if wireless.SSID != "homenet" || wireless.Security != WirelessWPAPSK {
 		t.Errorf("wlan0 wireless: got %+v", wireless)
 	}
 }
@@ -210,7 +210,7 @@ spec:
     interfaces:
       - name: wlan0
         wireless:
-          ssid: stonypoint
+          ssid: homenet
           passphrase: hunter2
 `)
 	if _, err := Load(path); err == nil {
