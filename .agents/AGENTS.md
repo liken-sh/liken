@@ -109,8 +109,11 @@ failed in review at least once:
   `resourceVersion` it delivered, with `allowWatchBookmarks=true` so
   that the version moves while nothing changes. Do not list again.
 - List again at once only on a `410 Gone`, as a response or as an
-  `ERROR` event. After any other error event, wait out a backoff
-  before the list, or a fault that lasts makes a tight list loop.
+  `ERROR` event, and only once: if the watch that opens from that
+  fresh list also gets a 410, wait out the backoff. After any other
+  error event, wait out a backoff before the list, or a fault that
+  lasts makes a tight list loop. An event whose object does not decode
+  counts as an error event.
 - A watch that closes less than a second after it opened is a
   failure, whatever it delivered, so the backoff applies. A watch
   with no version replays every object first, so "no events" does not
