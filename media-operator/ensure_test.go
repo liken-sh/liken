@@ -14,13 +14,13 @@ import (
 func TestAPressAsksTheUnitsReceiverForItsInput(t *testing.T) {
 	media, broker := focusBrokerOperator(t)
 	media.focus.setMark(controllerKey("media", "living-room-remote"), "living-room")
-	media.ensure.set(playerKey("media", "living-room"), "liken/equipment/living-room-denon/commands")
+	media.ensure.set(playerKey("media", "living-room"), "liken/equipment/den-receiver/commands")
 
 	media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "living-room-remote"),
 		[]byte(`{"key":"KEY_VOLUMEUP","value":1}`))
 
 	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, "liken/equipment/living-room-denon/commands")
+	mustMatch(t, published.topic, "liken/equipment/den-receiver/commands")
 	mustMatch(t, string(published.payload), `{"command":"input.ensure"}`)
 }
 
@@ -36,7 +36,7 @@ func TestAPowerPressAsksNothingOfTheReceiver(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			media, broker := focusBrokerOperator(t)
 			media.focus.setMark(controllerKey("media", "living-room-remote"), "living-room")
-			media.ensure.set(playerKey("media", "living-room"), "liken/equipment/living-room-denon/commands")
+			media.ensure.set(playerKey("media", "living-room"), "liken/equipment/den-receiver/commands")
 
 			media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "living-room-remote"),
 				[]byte(`{"key":"`+key+`","value":1}`))
@@ -51,7 +51,7 @@ func TestAPowerPressAsksNothingOfTheReceiver(t *testing.T) {
 func TestARepeatAndAReleaseAskNothing(t *testing.T) {
 	media, broker := focusBrokerOperator(t)
 	media.focus.setMark(controllerKey("media", "living-room-remote"), "living-room")
-	media.ensure.set(playerKey("media", "living-room"), "liken/equipment/living-room-denon/commands")
+	media.ensure.set(playerKey("media", "living-room"), "liken/equipment/den-receiver/commands")
 	topic := remoteEventsTopic(defaultTopicBase, "media", "living-room-remote")
 
 	media.handleBusMessage(topic, []byte(`{"key":"KEY_VOLUMEUP","value":2}`))
@@ -65,7 +65,7 @@ func TestARepeatAndAReleaseAskNothing(t *testing.T) {
 func TestAPressWithAMarkOnAnotherUnitAsksNothing(t *testing.T) {
 	media, broker := focusBrokerOperator(t)
 	media.focus.setMark(controllerKey("media", "living-room-remote"), "studio")
-	media.ensure.set(playerKey("media", "living-room"), "liken/equipment/living-room-denon/commands")
+	media.ensure.set(playerKey("media", "living-room"), "liken/equipment/den-receiver/commands")
 
 	media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "media", "living-room-remote"),
 		[]byte(`{"key":"KEY_VOLUMEUP","value":1}`))
@@ -90,14 +90,14 @@ func TestAPressOnAUnitWithNoReceiverAsksNothing(t *testing.T) {
 // stops matching drops the entry.
 func TestThePassRecordsTheReceiversCommandsTopic(t *testing.T) {
 	cluster := receiverCluster()
-	cluster.receivers["living-room-denon"].Spec.CommandsTopic = "liken/equipment/living-room-denon/commands"
+	cluster.receivers["den-receiver"].Spec.CommandsTopic = "liken/equipment/den-receiver/commands"
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
 	commands, held := media.ensure.commandsFor(playerKey("house", "theater"))
 	mustMatch(t, held, true)
-	mustMatch(t, commands, "liken/equipment/living-room-denon/commands")
+	mustMatch(t, commands, "liken/equipment/den-receiver/commands")
 
 	cluster.receiversAbsent = true
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())

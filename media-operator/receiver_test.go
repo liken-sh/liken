@@ -16,7 +16,7 @@ import (
 // read.
 func houseReceiver() *Receiver {
 	return &Receiver{
-		Metadata: ObjectMeta{Name: "living-room-denon"},
+		Metadata: ObjectMeta{Name: "den-receiver"},
 		Spec: ReceiverSpec{Inputs: []ReceiverInput{
 			{Name: "CBL/SAT", Machine: "nuc6", Monitor: testMonitor},
 			{Name: "GAME", Machine: testNode, Monitor: testMonitor},
@@ -35,7 +35,7 @@ func houseReceiver() *Receiver {
 // Receiver input.
 func receiverCluster() *fakeCluster {
 	cluster := screenCluster()
-	cluster.receivers["living-room-denon"] = houseReceiver()
+	cluster.receivers["den-receiver"] = houseReceiver()
 	return cluster
 }
 
@@ -83,7 +83,7 @@ func TestTheReceiversAreListedOnceAPass(t *testing.T) {
 	receiver, input, matched := lookup.matchFor(testNode, testMonitor)
 
 	mustMatch(t, matched, true)
-	mustMatch(t, receiver.Metadata.Name, "living-room-denon")
+	mustMatch(t, receiver.Metadata.Name, "den-receiver")
 	mustMatch(t, input, "GAME")
 
 	_, _, matched = lookup.matchFor(testNode, testMonitor)
@@ -228,7 +228,7 @@ func TestAnIdleUnitReportsItsReceiverAndHoldsAnIdleSession(t *testing.T) {
 	if status == nil {
 		t.Fatal("the status named no receiver")
 	}
-	mustMatch(t, status.Name, "living-room-denon")
+	mustMatch(t, status.Name, "den-receiver")
 	mustMatch(t, status.Input, "GAME")
 	mustMatch(t, status.Reachable, "True")
 	mustMatch(t, len(cluster.sessions), 1)
@@ -320,7 +320,7 @@ func TestAStandingPlayHoldsOneSessionOnTheReceiver(t *testing.T) {
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
 	mustMatch(t, len(cluster.sessions), 1)
-	mustMatch(t, cluster.sessions[0].name, "living-room-denon")
+	mustMatch(t, cluster.sessions[0].name, "den-receiver")
 	mustMatch(t, cluster.sessions[0].manager, applyFieldManager)
 	mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
 		Player:      "house/theater",
@@ -330,7 +330,7 @@ func TestAStandingPlayHoldsOneSessionOnTheReceiver(t *testing.T) {
 		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
 		PowerTopic:  playerPowerTopic(defaultTopicBase, "house", "theater"),
 	})
-	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
+	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "den-receiver")
 }
 
 // A Play that starts flips the active flag, and the end of that Play
@@ -345,8 +345,8 @@ func TestAPlayMovesTheActiveFlagAndNeitherEdgeLifts(t *testing.T) {
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
 	mustMatch(t, appliedActive(cluster), "false, true, false")
-	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
-	if cluster.receivers["living-room-denon"].Status.Session == nil {
+	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "den-receiver")
+	if cluster.receivers["den-receiver"].Status.Session == nil {
 		t.Error("the receiver holds no session")
 	}
 }
@@ -452,7 +452,7 @@ func TestARestartAgainstTheHeldSessionAppliesNothing(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			cluster := receiverCluster()
-			each.hold(cluster.receivers["living-room-denon"], heldSession(each.awake))
+			each.hold(cluster.receivers["den-receiver"], heldSession(each.awake))
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 			if each.desire != "" {
 				statePanelDesire(media, each.desire)
@@ -480,9 +480,9 @@ func TestTheSessionIsWrittenToTheStatus(t *testing.T) {
 
 	mustMatch(t, len(cluster.sessions), 1)
 	mustMatch(t, cluster.sessions[0].manager, applyFieldManager)
-	mustMatch(t, countPathRequests(cluster.requests, "PATCH "+receiversPath+"/living-room-denon/status"), 1)
-	mustMatch(t, cluster.receivers["living-room-denon"].Status.Session.Active, true)
-	mustMatch(t, cluster.receivers["living-room-denon"].Spec.Session == nil, true)
+	mustMatch(t, countPathRequests(cluster.requests, "PATCH "+receiversPath+"/den-receiver/status"), 1)
+	mustMatch(t, cluster.receivers["den-receiver"].Status.Session.Active, true)
+	mustMatch(t, cluster.receivers["den-receiver"].Spec.Session == nil, true)
 	mustMatch(t, len(cluster.specReleases), 0)
 }
 
@@ -503,7 +503,7 @@ func TestTheOldSpecSessionIsReleasedOnceTheStatusHoldsTheSession(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			cluster := receiverCluster()
-			receiver := cluster.receivers["living-room-denon"]
+			receiver := cluster.receivers["den-receiver"]
 			receiver.Spec.Session, receiver.Status.Session = each.spec, each.status
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 
@@ -511,7 +511,7 @@ func TestTheOldSpecSessionIsReleasedOnceTheStatusHoldsTheSession(t *testing.T) {
 			runPlayers(media, []Player{*housePlayer()}, nil)
 
 			mustMatch(t, len(cluster.sessions), each.wantSessions)
-			mustMatch(t, appliedReleases(cluster), "living-room-denon: "+applyFieldManager)
+			mustMatch(t, appliedReleases(cluster), "den-receiver: "+applyFieldManager)
 			mustMatch(t, receiver.Spec.Session == nil, true)
 		})
 	}
@@ -522,15 +522,15 @@ func TestTheOldSpecSessionIsReleasedOnceTheStatusHoldsTheSession(t *testing.T) {
 // finds no session there either.
 func TestALiftReleasesTheOldSpecSessionToo(t *testing.T) {
 	cluster := receiverCluster()
-	cluster.receivers["living-room-denon"].Spec.Session = heldSession(true)
+	cluster.receivers["den-receiver"].Spec.Session = heldSession(true)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
 	runPlayers(media, nil, nil)
 
-	mustMatch(t, appliedReleases(cluster), "living-room-denon: "+applyFieldManager)
-	mustMatch(t, appliedSessions(cluster), "living-room-denon: GAME, living-room-denon: lift")
-	mustMatch(t, cluster.receivers["living-room-denon"].Spec.Session == nil, true)
+	mustMatch(t, appliedReleases(cluster), "den-receiver: "+applyFieldManager)
+	mustMatch(t, appliedSessions(cluster), "den-receiver: GAME, den-receiver: lift")
+	mustMatch(t, cluster.receivers["den-receiver"].Spec.Session == nil, true)
 }
 
 // playingSession is a held session whose Play has since ended, so the
@@ -555,7 +555,7 @@ func appliedReleases(cluster *fakeCluster) string {
 // press or a timer, and it reaches the equipment.
 func TestADesireThatDiffersFromTheHeldSessionIsApplied(t *testing.T) {
 	cluster := receiverCluster()
-	cluster.receivers["living-room-denon"].Status.Session = heldSession(false)
+	cluster.receivers["den-receiver"].Status.Session = heldSession(false)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
@@ -603,7 +603,7 @@ func TestAUnitThatIsGoneLiftsItsSession(t *testing.T) {
 	runPlayers(media, nil, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
-	if cluster.receivers["living-room-denon"].Status.Session != nil {
+	if cluster.receivers["den-receiver"].Status.Session != nil {
 		t.Error("the receiver still holds a session")
 	}
 }
@@ -619,13 +619,13 @@ func TestAFailedLiftRetriesOnTheNextPass(t *testing.T) {
 	cluster.sessionsFail = true
 	runPlayers(media, nil, nil)
 
-	mustMatch(t, media.receiverSessions[key].receiver, "living-room-denon")
+	mustMatch(t, media.receiverSessions[key].receiver, "den-receiver")
 
 	cluster.sessionsFail = false
 	runPlayers(media, nil, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
-	if cluster.receivers["living-room-denon"].Status.Session != nil {
+	if cluster.receivers["den-receiver"].Status.Session != nil {
 		t.Error("the receiver still holds a session")
 	}
 }
@@ -637,7 +637,7 @@ func TestALiftOnAReceiverThatIsGoneDropsTheEntry(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
-	delete(cluster.receivers, "living-room-denon")
+	delete(cluster.receivers, "den-receiver")
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
@@ -658,7 +658,7 @@ func TestAFailedSessionApplyIsSentAgain(t *testing.T) {
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
 	mustMatch(t, len(cluster.sessions), 2)
-	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
+	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "den-receiver")
 }
 
 // A session that changed is applied again, because the input the unit
@@ -668,7 +668,7 @@ func TestASessionThatChangedIsAppliedAgain(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
-	cluster.receivers["living-room-denon"].Spec.Inputs[1].Name = "MPLAY"
+	cluster.receivers["den-receiver"].Spec.Inputs[1].Name = "MPLAY"
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
 	mustMatch(t, len(cluster.sessions), 2)
@@ -685,7 +685,7 @@ func TestTheSessionReachesTheReceiverBeforeThePodIsCreated(t *testing.T) {
 
 	media.pass()
 
-	applied := indexOfRequest(cluster.requests, "PATCH "+receiversPath+"/living-room-denon/status")
+	applied := indexOfRequest(cluster.requests, "PATCH "+receiversPath+"/den-receiver/status")
 	created := indexOfRequest(cluster.requests, "POST /api/v1/namespaces/house/pods")
 	if applied < 0 || created < 0 {
 		t.Fatalf("the pass made %v", cluster.requests)
@@ -730,14 +730,14 @@ func TestAUnitThatMovesToAnotherReceiverLiftsTheOldSessionFirst(t *testing.T) {
 	}{
 		{
 			name:        "the move lands",
-			wantApplies: "living-room-denon: GAME, living-room-denon: lift, den-denon: MPLAY",
+			wantApplies: "den-receiver: GAME, den-receiver: lift, den-denon: MPLAY",
 			wantTracked: "den-denon",
 		},
 		{
 			name:        "the lift fails",
 			liftFails:   true,
-			wantApplies: "living-room-denon: GAME, living-room-denon: lift",
-			wantTracked: "living-room-denon",
+			wantApplies: "den-receiver: GAME, den-receiver: lift",
+			wantTracked: "den-receiver",
 		},
 	}
 	for _, each := range cases {
@@ -751,7 +751,7 @@ func TestAUnitThatMovesToAnotherReceiverLiftsTheOldSessionFirst(t *testing.T) {
 
 			runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
-			cluster.receivers["living-room-denon"].Spec.Inputs[1].Machine = "nuc6"
+			cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "nuc6"
 			cluster.receivers["den-denon"].Spec.Inputs[0].Machine = testNode
 			cluster.sessionsFail = each.liftFails
 			runPlayers(media, []Player{*housePlayer()}, standingPlays())

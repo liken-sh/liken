@@ -442,8 +442,8 @@ func TestAReceiverSessionLogsItsApplyAndItsLift(t *testing.T) {
 	runPlayers(media, nil, nil)
 
 	mustMatchAll(t, linesAbout(log, "player house/theater"), []string{
-		"player house/theater: applied the session on receiver living-room-denon: input GAME, active true, awake true",
-		"player house/theater: lifted the session on receiver living-room-denon, because the unit matches no receiver input now",
+		"player house/theater: applied the session on receiver den-receiver: input GAME, active true, awake true",
+		"player house/theater: lifted the session on receiver den-receiver, because the unit matches no receiver input now",
 	})
 }
 
@@ -455,13 +455,13 @@ func TestAUnitThatMovesReceiverLogsTheLiftAndTheApply(t *testing.T) {
 	}
 	media, log := loggingOperator(t, cluster)
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
-	cluster.receivers["living-room-denon"].Spec.Inputs[1].Machine = "nuc6"
+	cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "nuc6"
 	cluster.receivers["den-denon"].Spec.Inputs[0].Machine = testNode
 
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 
 	mustMatchAll(t, linesAbout(log, "player house/theater")[1:], []string{
-		"player house/theater: lifted the session on receiver living-room-denon, because the unit moved to receiver den-denon",
+		"player house/theater: lifted the session on receiver den-receiver, because the unit moved to receiver den-denon",
 		"player house/theater: applied the session on receiver den-denon: input MPLAY, active true, awake true",
 	})
 }

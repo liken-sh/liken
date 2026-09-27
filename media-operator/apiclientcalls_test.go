@@ -62,10 +62,10 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 		}},
 		{name: "list receivers", call: func(c *Client) error { _, err := ListReceivers(c); return err }},
 		{name: "apply a receiver session", call: func(c *Client) error {
-			return ApplyReceiverSession(c, "living-room-denon", nil)
+			return ApplyReceiverSession(c, "den-receiver", nil)
 		}},
 		{name: "release a receiver spec session", call: func(c *Client) error {
-			return ReleaseReceiverSpecSession(c, "living-room-denon")
+			return ReleaseReceiverSpecSession(c, "den-receiver")
 		}},
 	}
 	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,29 +181,29 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 		{
 			name:    "a session the run holds",
 			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, Awake: true, VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"status":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
 		},
 		{
 			name:    "a session at a dark panel",
 			session: &ReceiverSession{Player: "house/theater", Input: "GAME", VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
 		},
 		{
 			name: "the lift",
-			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"status":{}}`,
+			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{}}`,
 		},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			api := &cannedAPI{answers: map[string]any{
-				"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon/status": Receiver{},
+				"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/den-receiver/status": Receiver{},
 			}}
 
-			mustSucceed(t, ApplyReceiverSession(testAPIClient(t, api.handler()), "living-room-denon", each.session))
+			mustSucceed(t, ApplyReceiverSession(testAPIClient(t, api.handler()), "den-receiver", each.session))
 
 			mustMatch(t, len(api.requests), 1)
 			mustMatch(t, api.requests[0].Method, http.MethodPatch)
-			mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon/status")
+			mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/den-receiver/status")
 			mustMatch(t, string(api.requests[0].Body), each.want)
 		})
 	}
@@ -214,15 +214,15 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 // owns and nothing else.
 func TestTheSpecReleaseCarriesAnEmptySpec(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
-		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon": Receiver{},
+		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/den-receiver": Receiver{},
 	}}
 
-	mustSucceed(t, ReleaseReceiverSpecSession(testAPIClient(t, api.handler()), "living-room-denon"))
+	mustSucceed(t, ReleaseReceiverSpecSession(testAPIClient(t, api.handler()), "den-receiver"))
 
 	mustMatch(t, len(api.requests), 1)
-	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon")
+	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/den-receiver")
 	mustMatch(t, string(api.requests[0].Body),
-		`{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{}}`)
+		`{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"spec":{}}`)
 }
 
 // The Receivers are read from one cluster-scoped collection.
