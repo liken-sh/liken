@@ -191,14 +191,14 @@ both offer is one card with two reasons, and its press opens the series
 page on that episode; a film only a franchise offers opens the franchise
 page on that member.
 
-The drill runs on the house against the backfilled store: a person
+The drill runs on a home cluster against the backfilled store: a person
 alone sees none of a group's threads, and a group sees its own.
 
 ### The drill
 
 The five nights are unit tests of the walk, and the browser-level tests
 cover the cards, the collapse, the presses, the circles, and the empty
-audience. The store's rows were read out of the house through the
+audience. The store's rows were read out of that cluster through the
 progress agent's query API into a file on the workstation, and the
 browser ran headless against that file and a catalog of the same
 libraries, once per audience. A person with many plays saw

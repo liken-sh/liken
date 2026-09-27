@@ -38,7 +38,7 @@ on 2026-09-08.
   `LastPlayedDate`, and an administrator may name any user.
   `GET /Users` lists the users with their ids.
 * A tick is 100 nanoseconds. Ten million ticks are one second.
-* The house's Jellyfin users are the Authentik users, and their user
+* On a home cluster, the Jellyfin users are the single sign-on users, and their user
   names are the `Person` names. No map is needed today. A field on
   the `Person` waits for the first name that differs.
 
@@ -172,7 +172,7 @@ user-data write was not checked; the drop makes the answer moot.
   answers the four endpoints from fixtures.
 * The progress pod's tests for the `outside` record and the tie
   rule.
-* A drill on the house: play a film on a phone, watch the
+* A drill on a home cluster: play a film on a phone, watch the
   television's continue row move; play on the television, watch
   Jellyfin's resume move.
 

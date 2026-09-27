@@ -92,7 +92,7 @@ seven maps plan 59 left behind.
 | a 1080p short, disc source | 23 min | 1 min 50 s |
 | two standard-definition shorts | 25 and 23 min | under 30 s each |
 
-The software path on the house tiled a two-hour feature in about
+The software path on a home cluster tiled a two-hour feature in about
 twenty minutes at half a core. The GPU path here ran with no CPU cap
 and drew about one core, because every decoded frame still comes back
 to memory before the frame-rate filter drops it. Keeping the frames on

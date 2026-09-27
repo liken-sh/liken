@@ -7,7 +7,8 @@ resolution. The same build stops the browser drawing under a film.
 
 ## The problem
 
-The first house `Player` drove a 4K television, and two things showed.
+The first `Player` on a home cluster drove a 4K television, and two
+things showed.
 
 The browser drew at half size. Display-operator plan 15 answers the
 layout: Weston states `scale=2` on the output, and iced lays the
@@ -69,7 +70,7 @@ and the browser ignored it.
   its own time to map a window, and the first frame on a fresh surface
   is the slow one, so a return started at the `Present`, or at the
   window's creation, ran out before the first frame anyone saw. That is
-  why the return was never seen on the house `Player`, and then seen
+  why the return was never seen on a home cluster's `Player`, and then seen
   only as a jump.
 - **The mark fades in place, and the head draws the curtain's logo.**
   The loading state's mark fades in under the centre and fades out
@@ -79,7 +80,7 @@ and the browser ignored it.
   decodes its logo at the curtain's centre size and draws it scaled
   down into its own box, so the head and the state draw one decode,
   and the state never falls back to the title's text while a second
-  decode lands. That fallback was the flicker on the house `Player`:
+  decode lands. That fallback was the flicker on a home cluster's `Player`:
   the logo, then the name in type, then the logo again.
 - **The memory budget follows the window.** The store's in-memory
   budget is computed from the window's physical size on every resize,

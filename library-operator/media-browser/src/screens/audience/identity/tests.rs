@@ -38,7 +38,7 @@ fn den() -> Unit {
     Unit::of(&Status {
         display_name: "The Den".into(),
         components: vec![
-            part("Living Room TV"),
+            part("Den TV"),
             part("Soundbar"),
             controller("Remote", true, 72, true),
             controller("Gamepad", false, 18, false),
@@ -74,7 +74,7 @@ fn the_parts_stack_upward_one_step_apart_in_the_order_the_status_lists_them() {
     assert_eq!(
         tops,
         vec![
-            (990.0 - 3.0 * ITEM_STEP, "Living Room TV"),
+            (990.0 - 3.0 * ITEM_STEP, "Den TV"),
             (990.0 - 2.0 * ITEM_STEP, "Soundbar"),
             (990.0 - ITEM_STEP, "Remote"),
             (990.0, "Gamepad"),
@@ -117,7 +117,7 @@ fn a_unit_with_no_parts_is_a_name_on_the_bottom_margin() {
 #[test]
 fn a_unit_with_no_name_draws_nothing() {
     let unit = Unit::of(&Status {
-        components: vec![part("Living Room TV")],
+        components: vec![part("Den TV")],
         ..Status::default()
     });
 

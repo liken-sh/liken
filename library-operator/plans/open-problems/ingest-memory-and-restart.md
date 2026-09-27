@@ -36,13 +36,13 @@ claim synced the whole namespace.
 
 - On `liken-1`, the first walk of the movies peaked at 384Mi for the
   agent and did not restart it.
-- On the house cluster, with a limit of 512Mi, the agent of the first
+- On a home cluster, with a limit of 512Mi, the agent of the first
   `series` walk was OOM-killed three times, and the agent of the first
   `movies` walk twice. Each restart continued the sync from the
   `state.db` on the claim, and both walks completed: the movies in 4 min
   21 s. After the sync the agent used about 190Mi.
 
-So a first sync on a claim of the house cluster needs more than 512Mi,
+So a first sync on a claim of that cluster needs more than 512Mi,
 and at that limit it completes only because the claim keeps what each
 restart synced. The agent of a Library's `Job` has a limit of 1Gi
 (`libraryJobAgentMemoryLimit` in `pod.go`). No first sync has run at

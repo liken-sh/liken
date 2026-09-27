@@ -131,7 +131,7 @@ URL).
 
 ## The drill
 
-On the house, with `status.jellyfin` absent:
+On a home cluster, with `status.jellyfin` absent:
 
 1. Roll the release. Watch the Job stand and finish.
 2. Read the Catalog's status: `backfill: Finished` with a time.

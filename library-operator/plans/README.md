@@ -55,7 +55,7 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   problem](open-problems/the-power-keys-browser-half-is-not-proved.md),
   because plan 54 retired the re-present path the plan named.
 * [49, Remote keys for people and home](completed/49-remote-keys-for-people-and-home.md).
-  Built in release 2026.09.07-005 and running on the house and on
+  Built in release 2026.09.07-005 and running on a home cluster and on
   `liken-1` since 2026-09-08. The compose key raises the person
   picker, the WWW key goes home, and page up and down are named for a
   later choice.
@@ -160,7 +160,7 @@ Plan 32 covers a separate part of the system from the enrichment work.
   store with Jellyfin's dates. Found and fixed the series read that
   answered 400 without a user.
 * [47, Progress to Jellyfin over the bus](completed/47-progress-to-jellyfin-over-the-bus.md).
-  Built, and drilled on the house on 2026-09-08 in release
+  Built, and drilled on a home cluster on 2026-09-08 in release
   2026.09.07-006: a film paused on a phone showed at the same
   position in the store, and a Play on the television moved
   Jellyfin's resume point for the same person. The Webhook plugin
@@ -234,7 +234,7 @@ Plan 32 covers a separate part of the system from the enrichment work.
 * [54, The browser returns on the status
   edge](completed/54-the-browser-returns-on-the-status-edge.md). Built
   and drilled on `liken-1` on 2026-09-10 in release 2026.09.10-002, and
-  on the house the same evening. Under ivi-shell the browser's window is
+  on a home cluster the same evening. Under ivi-shell the browser's window is
   visible again the moment a film's surface goes, so the fresh window on
   re-present and the app-id are gone. A film deleted from under the
   browser left it on the screen with no restart, and the browser drew
@@ -255,7 +255,7 @@ Plan 32 covers a separate part of the system from the enrichment work.
   own extraction leaves.
 * [55, Browser dimming during playback](completed/55-browser-dimming-during-playback.md).
   Built and drilled on `liken-1` on 2026-09-10 in release
-  2026.09.10-002, and on the house the same evening. The browser dims
+  2026.09.10-002, and on a home cluster the same evening. The browser dims
   its whole frame to an eighth of full over 1.2 s from the `Player`
   status's move off `Idle`, and lifts it back to full over 0.3 s on the
   move to `Idle`, so the film fades in over a dimmed page and out over a
@@ -364,19 +364,19 @@ that took a hearing-impaired flag for Hindi.
   and classed with the catalog claim. The cached art survived a pod
   restart, and a deleted claim came back fresh on the next pass.
 * [43, Durable and ephemeral claims](completed/43-durable-and-ephemeral-claims.md).
-  Built in 2026.09.06-002 and drilled on `liken-1` and the house on
+  Built in 2026.09.06-002 and drilled on `liken-1` and a home cluster on
   2026-09-07. `spec.progress` sizes and classes the progress claim,
   and `spec.libraries` classes a `Library`'s two working copies, so a
   cluster keeps its two central stores on a durable class and every
   copy on a node-local one. Each field defaults to `spec.storage`.
 * [41, The people on the screen](completed/41-the-people-on-the-screen.md).
-  Built in 435db0f and on the house since 2026-09-07. A second agent
+  Built in 435db0f and on a home cluster since 2026-09-07. A second agent
   on every screen pod, the person picker, the continue row, and the
   progress marks on pages and walls. Still owed from its build: how
   the `Person` list reaches a pod, the `watch` message over the bus,
   a history page, and bars on series and episode wall cards.
 * [44, Copies on per-node volumes](completed/44-copies-on-per-node-volumes.md).
-  Built with `per-node-csi-driver` 2026.09.07-001 and on the house
+  Built with `per-node-csi-driver` 2026.09.07-001 and on a home cluster
   since 2026-09-07. Every copy of a store binds to a `per-node`
   volume the operator writes up front.
 * [45, The browser at 4K](completed/45-the-browser-at-4k.md). Built

@@ -1,7 +1,7 @@
 # 54, The browser returns on the status edge
 
 Built, and drilled on `liken-1` on 2026-09-10 in release 2026.09.10-002,
-which rolled to the house the same evening. The browser maps no fresh
+which rolled to a home cluster the same evening. The browser maps no fresh
 window when a `Play` ends and passes no app-id to the compositor.
 display-operator's
 [plan 17](https://github.com/liken-sh/display-operator/blob/main/plans/completed/17-a-layout-for-every-screen.md)

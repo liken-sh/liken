@@ -12,7 +12,7 @@ shrinks without help within minutes of a large delete. A Job's agent
 runs for seconds to a few minutes, so its copy almost never shrinks.
 The orphan sweep in the
 liken fork of Corrosion (release 2026.09.17-001) showed the size of the problem.
-Every Job copy on the house cluster had about a million orphaned rows
+Every Job copy on a home cluster had about a million orphaned rows
 in `__corro_buffered_changes`, about 200 to 365 MB per copy. The sweep
 now deletes them at each agent start. The pages those rows used stay on
 each Job copy's freelist. On 2026-09-17, a manual pass ran

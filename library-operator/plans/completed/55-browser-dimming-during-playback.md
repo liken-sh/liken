@@ -1,7 +1,7 @@
 # 55, Browser dimming during playback
 
 Built, and drilled on `liken-1` on 2026-09-10 in release 2026.09.10-002,
-which rolled to the house the same evening. The browser dims its whole
+which rolled to a home cluster the same evening. The browser dims its whole
 frame when the `Player` status leaves `Idle` and restores it when the
 status returns to `Idle`, in step with the curtain it already draws.
 This is library-operator's part of the theater transition: display-operator's

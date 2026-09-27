@@ -8,7 +8,7 @@ the projection. Completed 2026-09-08.
 
 Plan 14 defined a `Watch` as one set of people on one item, and had
 the browser create one whenever it asked who was watching. Nothing
-ever created one. The house cluster held zero, and the browser's
+ever created one. A home cluster held zero, and the browser's
 `watch` message stayed on plan 41's owed list. Meanwhile the record
 it was meant to hold already exists without it: a `Play` names its
 people through owner references, the store's `play_people` rows carry

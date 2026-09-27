@@ -5,7 +5,7 @@ compose key, which today goes to the home page, and the WWW key,
 which passes through and no screen takes. This plan gives the compose
 key to the person picker and the WWW key to the home page, and it
 names what the page-up and page-down keys could do. Built in release
-2026.09.07-005 and running on the house and on `liken-1` since
+2026.09.07-005 and running on a home cluster and on `liken-1` since
 2026-09-08.
 
 ## The problem
@@ -25,7 +25,7 @@ no use for the focus cycle.
   contacts button.
 * The living room's `Keymap` binds the compose key to
   `KEY_ADDRESSBOOK` and the WWW key to `KEY_HOMEPAGE`. That is one
-  edit in the house repository and no change to the media operator.
+  edit in the cluster's GitOps repository and no change to the media operator.
 * Page up and page down stay unbound in this plan. Two uses fit them
   and the design should pick one: on a wall, jump one rail stop, the
   way the jump rail already moves by era, season, year, or letter;
