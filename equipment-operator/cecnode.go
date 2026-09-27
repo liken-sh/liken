@@ -176,6 +176,9 @@ type cecNode struct {
 	// unknown. Both belong to the mode, and startMode makes them anew.
 	tvPowerAsk     chan struct{}
 	tvPowerAskedAt *cec.PhysicalAddress
+	// tvPowerRead is the read of the TV's power in flight, which every
+	// reader shares; askPower holds the rule.
+	tvPowerRead tvPowerFlight
 	// lastCommand is when the TV was last sent a power command: by this
 	// adapter, or a Standby by another device that the adapter heard,
 	// such as a receiver that turns the TV off with itself. A TV answers
@@ -296,7 +299,8 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 // is the scan when the adapter joins; startMode states the rest. In the
 // API, the subscriptions are the watches of CECBuses, Televisions, and
 // Displays, and the baseline is each pass's list; a watch that drops
-// lists again and wakes the loop. No timer re-reads a state. The
+// opens again from its last version, and lists again only after a 410
+// or an error, as watchCollection states. No timer re-reads a state. The
 // timers here are clocks: the heartbeat that keeps reportedAt current,
 // and the retry of a join or an API call that failed.
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {

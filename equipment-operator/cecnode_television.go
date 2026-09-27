@@ -17,13 +17,13 @@ import (
 	"github.com/liken-sh/equipment-operator/cec"
 )
 
-// askPower reads the TV's power into the directory, and asks the loop
+// readPower reads the TV's power into the directory, and asks the loop
 // to write the entry when the read changed what the directory holds.
 // Each wake of the loop runs a pass, which reads the API server, so a
 // read that changes nothing does not wake it. An error that means the
 // adapter left ends the node workload; any other error is logged, and
-// the answer is unknown.
-func (n *cecNode) askPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
+// the answer is unknown. askPower is the one caller.
+func (n *cecNode) readPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
 	before := n.directory.Peers()
 	power, err := cec.ReadPower(n.device, n.directory, own, cec.AddressTV)
 	if err != nil && cec.IsGone(err) {

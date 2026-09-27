@@ -97,13 +97,13 @@ func TestTheDisplayKeyIsTheNodeAndTheAddress(t *testing.T) {
 	}
 }
 
-// startWatch shortens watchRetryPause for the length of one test, and
+// startWatch shortens watchBackoffFirst for the length of one test, and
 // restores it only after the watch goroutine has stopped reading it.
 func startWatch(t *testing.T, api *fakeAPI, resourceVersion string, wake chan struct{}) {
 	t.Helper()
-	was := watchRetryPause
-	t.Cleanup(func() { watchRetryPause = was })
-	watchRetryPause = 5 * time.Millisecond
+	was := watchBackoffFirst
+	t.Cleanup(func() { watchBackoffFirst = was })
+	watchBackoffFirst = 5 * time.Millisecond
 
 	stopped := make(chan struct{})
 	go func() {
@@ -140,21 +140,6 @@ func TestAnEventOnTheStreamWakesTheLoop(t *testing.T) {
 
 	mustMatch(t, waitForString(t, api.watched), "1")
 	waitForWake(t, wake)
-}
-
-// A stream that ends re-lists, wakes the loop, and resumes the next
-// watch from the version the list carried.
-func TestAnEndedStreamRelistsAndResumesFromTheListsVersion(t *testing.T) {
-	api := startFakeAPI(t)
-	api.setReceivers()
-	api.queueWatchEvents(true)
-	wake := make(chan struct{}, 1)
-
-	startWatch(t, api, "0", wake)
-
-	mustMatch(t, waitForString(t, api.watched), "0")
-	waitForWake(t, wake)
-	mustMatch(t, waitForString(t, api.watched), "1")
 }
 
 // A list that fails after a stream ends is not fatal. The watch tries

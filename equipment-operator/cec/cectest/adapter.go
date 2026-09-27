@@ -383,6 +383,13 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 	if peer, isPeer := a.bus.peers[message.To]; isPeer {
 		reply, aborted, ok := peer.answer(message)
 		a.bus.peers[message.To] = peer.asked(message)
+		if ok && peer.Slow > 0 {
+			// The wire is free while the peer prepares its answer, so
+			// another transmit, a receive, or an ioctl goes on meanwhile.
+			a.bus.mutex.Unlock()
+			time.Sleep(peer.Slow)
+			a.bus.mutex.Lock()
+		}
 		if aborted {
 			raw.RxStatus = cec.RxStatusFeatureAbort | cec.RxStatusOK
 			return nil

@@ -79,12 +79,11 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 	}
 }
 
-// A watch that ends is opened again from a fresh list, and each
-// reopening is counted.
+// A watch that ends is opened again, and each reopening is counted.
 func TestTheDeploymentsWatchesReopen(t *testing.T) {
-	was := watchRetryPause
-	watchRetryPause = time.Millisecond
-	t.Cleanup(func() { watchRetryPause = was })
+	was := watchBackoffFirst
+	watchBackoffFirst = time.Millisecond
+	t.Cleanup(func() { watchBackoffFirst = was })
 	type watcher func(context.Context, *Client, string, chan<- struct{}, func())
 	cases := []struct {
 		name  string

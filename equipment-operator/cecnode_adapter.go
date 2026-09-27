@@ -416,7 +416,7 @@ func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 					return
 				}
 			case <-tvPowerAsk:
-				if _, err := n.askPower(own); err != nil {
+				if !n.answerTVPowerAsk(own) {
 					return
 				}
 			}
@@ -503,38 +503,6 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	}
 }
 
-// askTVPower asks the TV for its power, and nothing else, when it
-// announces itself with Report Physical Address or Device Vendor ID
-// while the directory does not know its power. A TV in a deep standby
-// can answer no power at the scan and announce itself when it wakes,
-// and its power would otherwise stay unknown until a power press asks.
-// The bound is hard, because a question is traffic, and a TV can answer
-// traffic by switching its input: only the TV, only its power, one
-// question for a burst of announcements, and no second question at the
-// same physical address while the power stays unknown, such as for a
-// TV that refuses Give Device Power Status. A known power clears the
-// mark, so a TV that later loses its power again is asked once more.
-// The question goes out only after the TV's own broadcast, never on a
-// timer. The caller holds the mutex.
-func (n *cecNode) askTVPower(message cec.Message, opcode cec.Opcode, after cec.Peer) {
-	if message.From != cec.AddressTV || n.tvPowerAsk == nil {
-		return
-	}
-	if after.Power != cec.PowerUnknown {
-		n.tvPowerAskedAt = nil
-		return
-	}
-	if opcode != cec.OpReportPhysicalAddr && opcode != cec.OpDeviceVendorID {
-		return
-	}
-	if n.tvPowerAskedAt != nil && *n.tvPowerAskedAt == after.Physical {
-		return
-	}
-	physical := after.Physical
-	n.tvPowerAskedAt = &physical
-	poke(n.tvPowerAsk)
-}
-
 // introduce asks one device that arrived for the facts the directory
 // does not hold yet. It answers false when the adapter left.
 func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
@@ -556,6 +524,7 @@ func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
 	if !slices.Equal(before, n.directory.Peers()) {
 		n.markDirty()
 	}
+	n.noteTVPower()
 	return true
 }
 
@@ -568,6 +537,7 @@ func (n *cecNode) heard(message cec.Message) {
 	if changed {
 		n.markDirty()
 	}
+	n.noteTVPower()
 	opcode, _ := message.Opcode()
 	if opcode == cec.OpActiveSource && len(message.Operands()) >= 2 {
 		operands := message.Operands()

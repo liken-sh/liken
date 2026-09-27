@@ -57,6 +57,10 @@ type Peer struct {
 	// program does when the claim arrives after its own.
 	Grabs     int
 	GrabAfter time.Duration
+	// Slow is how long the peer takes to answer each question. The
+	// asking transmit waits that long, and the rest of the bus goes on
+	// meanwhile, so a test can act while a question waits.
+	Slow time.Duration
 
 	// towards is the state a transition ends in, and remaining is how
 	// many power questions the transition still answers. old is the
