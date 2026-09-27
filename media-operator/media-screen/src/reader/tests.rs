@@ -79,6 +79,7 @@ fn reader_reading(wiring: Wiring, client_topics: &[String]) -> (Reader, Threads)
         client,
         sender,
         waker: Arc::default(),
+        alarm: Arc::default(),
     };
     (
         Reader {
@@ -379,19 +380,69 @@ fn the_reconnect_wait_doubles_up_to_the_ceiling() {
     assert_eq!(waits, [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs));
 }
 
+/// A clock on a thread of its own over `threads`.
+fn clocking(threads: &Threads) -> std::thread::JoinHandle<()> {
+    let running = threads.clone();
+    std::thread::spawn(move || clock(&running))
+}
+
+/// How long the armed window stays armed, polled until it disarms or until
+/// `limit` passes, so a clock that never fires fails the test and does not
+/// hang it.
+fn armed_for(reader: &Reader, limit: Duration) -> Duration {
+    let start = Instant::now();
+    while start.elapsed() < limit
+        && reader
+            .screen
+            .lock()
+            .expect("the lock is free")
+            .next_deadline()
+            .is_some()
+    {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    start.elapsed()
+}
+
 #[test]
-fn the_clock_sleeps_to_the_armed_window_and_never_longer_than_a_tick() {
-    let now = Instant::now();
-    assert_eq!(
-        wait(Some(now + Duration::from_millis(200)), now),
-        Duration::from_millis(200)
-    );
-    assert_eq!(wait(Some(now + Duration::from_secs(600)), now), TICK);
-    assert_eq!(wait(None, now), TICK);
-    assert_eq!(
-        wait(Some(now), now + Duration::from_secs(1)),
-        Duration::ZERO
-    );
+fn a_window_another_thread_armed_runs_out_on_time() {
+    // The quiet window is an hour, so the clock starts a wait of an hour. The
+    // client's own request for the shade then arms the off window 50 ms out,
+    // and only a ring can end the clock's wait that soon.
+    let (reader, threads) = reader_over(Wiring {
+        fade_after: Duration::from_secs(3600),
+        off_after: Duration::from_secs(3600) + Duration::from_millis(50),
+        ..wiring()
+    });
+    idling(&reader);
+    let thread = clocking(&threads);
+    std::thread::sleep(Duration::from_millis(50));
+
+    reader.sleep();
+
+    // The off window ran out and disarmed. The margin is far above a
+    // scheduler delay, and far below the hour the clock started to wait.
+    assert!(armed_for(&reader, Duration::from_secs(2)) < Duration::from_millis(500));
+    drop(reader);
+    thread.join().expect("the clock ends");
+}
+
+#[test]
+fn a_clock_with_nothing_armed_ends_when_the_client_drops_its_reader() {
+    // The unit's status never arrived, so no window is armed and the clock
+    // waits with no timeout. The drop is what ends it.
+    let (reader, threads) = reader();
+    let (ended, ends) = mpsc::channel();
+    let running = threads.clone();
+    std::thread::spawn(move || {
+        clock(&running);
+        ended.send(()).expect("the test waits for the end");
+    });
+    std::thread::sleep(Duration::from_millis(50));
+
+    drop(reader);
+
+    assert_eq!(ends.recv_timeout(Duration::from_secs(2)), Ok(()));
 }
 
 #[test]
@@ -404,8 +455,7 @@ fn the_clock_runs_the_windows_and_ends_with_the_client() {
     });
     idling(&reader);
 
-    let running = threads.clone();
-    let thread = std::thread::spawn(move || clock(&running));
+    let thread = clocking(&threads);
     while reader.drain().is_empty() {
         std::thread::sleep(Duration::from_millis(10));
     }

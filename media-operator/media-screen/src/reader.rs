@@ -22,6 +22,10 @@ use rumqttc::{
 use crate::screen::{Effect, Moment, Publish, Screen};
 use crate::wiring::Wiring;
 
+mod alarm;
+
+use alarm::Alarm;
+
 /// The port a broker answers on when the address names none.
 const DEFAULT_PORT: u16 = 1883;
 
@@ -43,13 +47,6 @@ const MAX_PACKET_SIZE: usize = 256 * 1024;
 /// bounds `media-operator`'s own bus client uses.
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
-
-/// The longest the clock sleeps between two reads of the armed window. The
-/// client asks for the shade on its own thread, and that request arms the off
-/// window, so the clock reads the deadline again on this cadence rather than
-/// sleeping out the window it started on. One wake a second is the rate the
-/// idle screen already redraws its clock at.
-const TICK: Duration = Duration::from_secs(1);
 
 /// The capacity of `rumqttc`'s outbound request queue, which carries the
 /// subscribes and every publish the rules ask for. The inbound path to the
@@ -139,6 +136,7 @@ impl Reader {
             client,
             sender,
             waker: Arc::default(),
+            alarm: Arc::default(),
         };
 
         // The connection thread never leaves its loop, so the two windows run
@@ -171,7 +169,9 @@ impl Bus for Reader {
     /// The shade comes back through [`Bus::drain`] the way every other moment
     /// does, so the client folds one stream.
     fn sleep(&self) {
-        let effects = fold(&self.screen, |screen| screen.sleep(Instant::now()));
+        let effects = fold(&self.screen, &self.threads.alarm, |screen| {
+            screen.sleep(Instant::now())
+        });
         perform(&self.threads, effects);
     }
 
@@ -200,14 +200,25 @@ impl Bus for Reader {
     }
 }
 
+/// The reader thread ends on its next event after the drop, because it finds
+/// the rules gone. The clock can sleep with no timeout, so the drop closes its
+/// alarm to end it.
+impl Drop for Reader {
+    fn drop(&mut self) {
+        self.threads.alarm.close();
+    }
+}
+
 /// What each thread of this crate holds: the rules, the connection to publish
-/// on, the channel to the client, and the slot its waker arrives in.
+/// on, the channel to the client, the slot the client loop's waker arrives in,
+/// and the alarm that wakes the clock thread.
 #[derive(Clone)]
 struct Threads {
     screen: Weak<Mutex<Screen>>,
     client: Broker,
     sender: mpsc::Sender<Moment>,
     waker: WakerSlot,
+    alarm: Arc<Alarm>,
 }
 
 impl Threads {
@@ -242,7 +253,7 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                 crate::metrics::bus_connected(true);
                 backoff = RECONNECT_MIN;
-                fold(&screen, |screen| {
+                fold(&screen, &threads.alarm, |screen| {
                     let effects = screen.connected();
                     let filters = screen.filters().into_iter().map(|path| SubscribeFilter {
                         path,
@@ -255,14 +266,16 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
                     effects
                 })
             }
-            Ok(Event::Incoming(Packet::Publish(message))) => fold(&screen, |screen| {
-                screen.deliver(
-                    &message.topic,
-                    &message.payload,
-                    message.retain,
-                    Instant::now(),
-                )
-            }),
+            Ok(Event::Incoming(Packet::Publish(message))) => {
+                fold(&screen, &threads.alarm, |screen| {
+                    screen.deliver(
+                        &message.topic,
+                        &message.payload,
+                        message.retain,
+                        Instant::now(),
+                    )
+                })
+            }
             Err(error) => {
                 crate::metrics::bus_connected(false);
                 // The client reconnects on its own, so the line is the record
@@ -283,26 +296,36 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
 }
 
 /// The clock thread, which is the two windows. It sleeps to the armed
-/// deadline and no longer than [`TICK`], so a deadline another thread armed
-/// is read within the second.
+/// deadline, or with no timeout while nothing is armed, so a screen at rest
+/// wakes this thread for nothing. A fold on another thread that arms a
+/// window, or moves one earlier, rings the alarm, and the clock reads the
+/// deadline again.
 fn clock(threads: &Threads) {
     loop {
         let Some(screen) = threads.screen() else {
             return;
         };
+        // The ring count is read before the deadline, so a window armed
+        // between this read and the wait still ends the wait.
+        let seen = threads.alarm.seen();
         let deadline = screen
             .lock()
             .expect("no thread panics with the lock")
             .next_deadline();
-        // The rules are released before the sleep, so the reader thread and
-        // the client both reach them while this one waits.
+        // The clock gives up the rules before the wait, so the reader thread
+        // and the client both lock them while this one waits, and a dropped
+        // reader frees them.
         drop(screen);
-        std::thread::sleep(wait(deadline, Instant::now()));
+        if !threads.alarm.wait(seen, deadline) {
+            return;
+        }
 
         let Some(screen) = threads.screen() else {
             return;
         };
-        let effects = fold(&screen, |screen| screen.tick(Instant::now()));
+        let effects = fold(&screen, &threads.alarm, |screen| {
+            screen.tick(Instant::now())
+        });
         if !perform(threads, effects) {
             return;
         }
@@ -315,23 +338,32 @@ fn next_backoff(backoff: Duration) -> Duration {
     (backoff * 2).min(RECONNECT_MAX)
 }
 
-/// How long the clock sleeps: to the armed deadline, and never longer than
-/// one tick, so a window another thread armed is read on the next pass.
-fn wait(deadline: Option<Instant>, now: Instant) -> Duration {
-    match deadline {
-        Some(at) => at.saturating_duration_since(now).min(TICK),
-        None => TICK,
-    }
-}
-
 /// Run one fold under the lock and print the lines it wrote, one per
 /// operation a person caused, before the lock is released, so two threads'
 /// lines never interleave out of the order the rules ran them in.
-fn fold(screen: &Mutex<Screen>, rule: impl FnOnce(&mut Screen) -> Vec<Effect>) -> Vec<Effect> {
+///
+/// A fold that arms a window, or moves the armed one earlier, rings the
+/// clock's alarm. A window that moved later or disarmed rings nothing: the
+/// clock wakes at the earlier moment it already waits for, finds the window
+/// not yet due, and waits again. So a press, which restarts the quiet window
+/// later, does not wake the clock.
+fn fold(
+    screen: &Mutex<Screen>,
+    alarm: &Alarm,
+    rule: impl FnOnce(&mut Screen) -> Vec<Effect>,
+) -> Vec<Effect> {
     let mut screen = screen.lock().expect("no thread panics with the lock");
+    let before = screen.next_deadline();
     let effects = rule(&mut screen);
     for line in screen.take_lines() {
         eprintln!("media-screen: {line}");
+    }
+    let earlier = screen
+        .next_deadline()
+        .is_some_and(|at| before.is_none_or(|then| at < then));
+    drop(screen);
+    if earlier {
+        alarm.ring();
     }
     effects
 }
