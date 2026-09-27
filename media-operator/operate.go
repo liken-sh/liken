@@ -66,8 +66,29 @@ const (
 )
 
 // backstopInterval is how often the loop reconciles with nothing to
-// prompt it. The tick is what recovers a lost watch event, a pod that
-// changed phase, and a Player that appeared after its Play.
+// prompt it. The tick is a clock and a backstop.
+//
+// As a clock, it ends three waits that no event ends: a playing
+// position that only advanced reaches the Play's status, a Finished
+// Play goes when its window passes, and the first level or focus mark
+// of a new broker session goes out when catchUpGrace ends. Each of
+// them is a moment, and nothing in the cluster announces a moment.
+//
+// As a backstop, it covers the objects the operator reads and does
+// not watch: each Display the panel and the Screen condition read,
+// the Receivers, the ResourceSlices that name a unit's monitor, the
+// ResourceClaims and their allocations, and the standing idle and
+// remote pods, which the pods watch does not select. A monitor that
+// goes dark, a receiver that changes input, or a claim that the
+// scheduler allocates reaches the status on the next tick. The watches
+// on Plays, Players, Remotes, Keymaps, MediaPreferences, Peripherals,
+// and playback pods wake the pass at once, so the tick adds no delay
+// for them.
+//
+// A pass costs one list each of Plays, Players, Remotes, Keymaps,
+// Peripherals, ResourceSlices, and Receivers, and a few GETs for each
+// unit: its claims, its pods, and its Display. On a cluster of a few
+// units that is a few requests a second.
 const backstopInterval = 10 * time.Second
 
 // positionWriteInterval bounds how often a bare position advance reaches
@@ -799,7 +820,8 @@ func (o *operator) caughtUp() bool {
 // so a retry after a failed status write deletes nothing twice.
 //
 // The deletion follows the pass cadence, so a Play goes at most one
-// backstopInterval, ten seconds, after its window ends.
+// backstopInterval, ten seconds, after its window ends. Nothing else
+// wakes the pass when the window ends.
 func (o *operator) retire(play *Play) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	now := time.Now()

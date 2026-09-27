@@ -46,9 +46,18 @@ import (
 var inputNodePattern = "/dev/input/event*"
 
 // nodePollDelay is how long the reader waits between two scans of
-// /dev/input while no node is there to read. A pod that starts before its
-// claim is prepared finds an empty directory, which is ordinary, so the
-// reader scans again every two seconds until the nodes appear.
+// /dev/input while no node answers. The scan is a backstop, and an
+// inotify watch cannot replace it. The claim's CDI spec lists device
+// nodes, and the container runtime creates them in the container's own
+// /dev when the container starts. So the files in /dev/input never change while
+// the container runs, and an inotify watch on the directory reports
+// nothing. What changes is the kernel device behind a node: a node
+// that answers ENODEV while the bluetooth-operator restores its relay
+// answers again when the relay's virtual device is back. A kernel
+// uevent announces that device, but a scan globs one directory and
+// tries a few opens, which costs almost nothing, and it runs only
+// while no node answers. So the reader does not hold a uevent socket
+// to save it.
 var nodePollDelay = 2 * time.Second
 
 // reader holds the standing pod's bus client, the topics it publishes,
@@ -245,9 +254,9 @@ func nodeLabels(nodes []openNode) string {
 	return strings.Join(labels, ", ")
 }
 
-// awaitNodes polls for a node the mode keeps. The nodes appear when the
-// claim is prepared, which can be minutes after this pod schedules, so an
-// empty directory is ordinary and only ctx ends the wait.
+// awaitNodes polls for a node the mode keeps. A node that does not
+// answer now can answer later, when the device behind it comes back, so
+// only ctx ends the wait. nodePollDelay says why the wait polls.
 func (r *reader) awaitNodes(ctx context.Context) ([]openNode, error) {
 	for {
 		nodes := r.matchingNodes()
@@ -314,7 +323,7 @@ func (r *reader) restrictNode(descriptor int) error {
 }
 
 // logVerdicts writes one line per node, and only when the picture
-// changed, because the two-second scan of an empty directory would
+// changed, because the two-second scan while no node answers would
 // otherwise repeat the same report forever.
 func (r *reader) logVerdicts(verdicts []string) {
 	if slices.Equal(verdicts, r.verdicts) {
