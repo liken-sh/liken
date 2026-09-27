@@ -145,7 +145,13 @@ func (w *watch) start(ctx context.Context) {
 // run is the reader loop. It blocks in poll over the inotify descriptor
 // and the cancel pipe. A ready inotify descriptor means events to
 // drain; a ready cancel pipe means the context is done and the loop
-// returns. It closes the descriptors it owns as it leaves.
+// returns. A poll error or a drain error also ends the loop, but for
+// good: the reader does not retry, and it never wakes the channel
+// again, so a caller sees silence rather than a signal that the watch
+// died. None of WatchDir, WatchDirMask, or WatchFactsTree add a backstop
+// for that case; a caller that must not miss a change if it happens
+// needs its own, the way logs/tail.go pairs its watch with a timer. It
+// closes the descriptors it owns as it leaves.
 func (w *watch) run() {
 	defer unix.Close(w.fd)
 	defer unix.Close(w.cancelR)

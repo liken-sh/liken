@@ -2,11 +2,43 @@ package hardware
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// TestRecvErrorLostAUevent proves the decision the reader loop makes
+// about a Recvfrom error, without a real netlink socket. EAGAIN and
+// EINTR leave nothing unread, so they report no loss. ENOBUFS is the
+// case this decision exists for: the kernel dropped datagrams before
+// the call ever ran. Every other error gets the same answer as ENOBUFS,
+// because the reasoning is the same for any of them: poll reported the
+// socket ready, and the call still returned no datagram. A wrapped
+// ENOBUFS proves the check sees through fmt.Errorf's %w, the same way
+// Go's os and net packages wrap a syscall error before it reaches a
+// caller.
+func TestRecvErrorLostAUevent(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"EAGAIN", unix.EAGAIN, false},
+		{"EINTR", unix.EINTR, false},
+		{"ENOBUFS", unix.ENOBUFS, true},
+		{"wrapped ENOBUFS", fmt.Errorf("recvfrom: %w", unix.ENOBUFS), true},
+		{"an unrelated error", unix.EBADF, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := recvErrorLostAUevent(tc.err); got != tc.want {
+				t.Errorf("recvErrorLostAUevent(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestHardwareChanged(t *testing.T) {
 	cases := []struct {
@@ -112,6 +144,29 @@ func TestReadUeventsSignalsOnChange(t *testing.T) {
 
 	unix.Close(cancelW)
 	unix.Close(peer)
+}
+
+// TestReadUeventsWakesOnALostDatagram proves the reader wakes the
+// channel when Recvfrom returns an error that is neither EAGAIN nor
+// EINTR. This test needs a descriptor number the process never opened,
+// not merely one it closed: a just-closed number can be handed back out
+// to something else in the runtime before the reader gets to it, which
+// would make the descriptor valid again by the time poll runs. A number
+// far past anything this process could have allocated has no such race;
+// poll reports it ready with POLLNVAL, and Recvfrom on it always fails
+// with EBADF. The reader cannot tell this apart from the error that
+// matters, ENOBUFS, so it takes the same path either way: the datagram
+// is gone, and it wakes the sysfs walk instead of waiting for an
+// unrelated later uevent to trigger it.
+func TestReadUeventsWakesOnALostDatagram(t *testing.T) {
+	const neverOpenedFd = 1 << 20
+	cancelR, cancelW := cancelPipe(t)
+	notify := make(chan struct{}, 1)
+	go readUevents(neverOpenedFd, cancelR, notify)
+
+	awaitSignal(t, notify)
+
+	unix.Close(cancelW)
 }
 
 // TestReadUeventsIgnoresUnchanged proves a change datagram wakes

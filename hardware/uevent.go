@@ -105,19 +105,48 @@ func readUevents(fd, cancelR int, notify chan<- struct{}) {
 		}
 		size, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
-			// EAGAIN means the poll woke without a datagram to read. Any
-			// other error left this datagram unread. Wait for the next
-			// event either way; the sysfs walk still reads the whole
-			// state, so a missed datagram costs at most one re-walk.
+			if recvErrorLostAUevent(err) {
+				// ENOBUFS means the kernel's receive buffer overflowed and
+				// it dropped datagrams before this call ever ran; any other
+				// error here is one this reader has no known cause for on
+				// this socket, and either way poll reported the socket
+				// ready and this call still returned no datagram. Hardware
+				// may have changed with the loss, so wake the sysfs walk
+				// now rather than wait for an unrelated later uevent to
+				// trigger it by accident.
+				wake(notify)
+			}
+			// EAGAIN means the poll woke without a datagram to read, and
+			// EINTR means a signal interrupted the read before it took
+			// anything. Neither one loses a datagram, so wait for the
+			// next event with no wake.
 			continue
 		}
 		if !hardwareChanged(buf[:size]) {
 			continue
 		}
-		select {
-		case notify <- struct{}{}:
-		default:
-		}
+		wake(notify)
+	}
+}
+
+// recvErrorLostAUevent reports whether a Recvfrom error on the uevent
+// socket left a datagram unread. EAGAIN means poll woke with nothing
+// queued, and EINTR means a signal interrupted the call before it read
+// anything; neither one loses a datagram. Every other error does, most
+// often ENOBUFS: poll reported the socket ready, and the call still did
+// not return a datagram.
+func recvErrorLostAUevent(err error) bool {
+	return !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EINTR)
+}
+
+// wake does one non-blocking send on the notify channel. The channel
+// holds one pending wake, so a send while one is already queued is
+// dropped: the walk that drains the channel reads the whole state, so
+// coalescing loses nothing.
+func wake(notify chan<- struct{}) {
+	select {
+	case notify <- struct{}{}:
+	default:
 	}
 }
 
