@@ -84,7 +84,7 @@ is a bug, not a reason to raise the guest's memory.
 
 ## Considered and set aside
 
-- **gitea in the lab cluster.** It is the shape the house cluster has,
+- **gitea in the lab cluster.** It is the shape a home cluster has,
   but it costs a database and a second image on a 1 GiB guest, and
   `git daemon` exercises the same driver code.
 - **A stock distribution with k3s.** Lighter, but the driver's store
