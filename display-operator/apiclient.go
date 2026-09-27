@@ -40,10 +40,13 @@ var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 // the caller handles it by creating the object. ErrConflict marks the
 // same difference for "something else wrote this object first", which
 // is normal under optimistic concurrency, and the caller handles it
-// by reading the object again.
+// by reading the object again. ErrGone marks a watch refused because
+// the resource version it asked for is older than any the API server
+// holds, and the caller handles it by listing again.
 var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict: something else wrote this object first")
+	ErrGone     = errors.New("the resource version is gone")
 )
 
 type Client struct {
@@ -181,6 +184,9 @@ func (c *Client) Watch(ctx context.Context, path string) (io.ReadCloser, error) 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		drain(resp.Body)
+		if resp.StatusCode == http.StatusGone {
+			return nil, fmt.Errorf("GET %s: %s: %s: %w", path, resp.Status, message, ErrGone)
+		}
 		return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, message)
 	}
 	return resp.Body, nil

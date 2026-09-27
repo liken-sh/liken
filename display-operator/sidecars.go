@@ -10,12 +10,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"sync"
-	"time"
 )
 
 // The pods the API watches: the display-operator DaemonSet's pods in
@@ -87,62 +83,17 @@ func (i *sidecarIndex) replace(pods []Pod) {
 	}
 }
 
-// How long the loop waits before it lists and watches again. Each
-// session starts with a listing, so the wait costs no lost event.
-const sidecarWatchRetry = 5 * time.Second
-
-// The loop: one listing, then one watch, and a listing again
-// whenever the watch ends, so a missed event costs one reconnection
-// and never a stale answer.
+// The loop: one listing, then a watch from the listing's version, for
+// as long as the API runs. The listing replaces the whole index, and
+// each event after it moves one pod.
 func (i *sidecarIndex) run(ctx context.Context, c *Client, namespace string) {
-	for ctx.Err() == nil {
-		if err := i.session(ctx, c, namespace); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "watching the capture sidecars in %s: %v\n", namespace, err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(sidecarWatchRetry):
-		}
-	}
-}
-
-// The listing is the whole truth and the watch is the news. The
-// watch starts at the version the listing answered with, so no event
-// between the two is missed.
-func (i *sidecarIndex) session(ctx context.Context, c *Client, namespace string) error {
 	path := fmt.Sprintf("/api/v1/namespaces/%s/pods?labelSelector=%s", namespace, sidecarSelector)
-	list, err := get[PodList](c, path)
-	if err != nil {
-		return err
-	}
-	i.replace(list.Items)
-
-	stream := fmt.Sprintf("%s&watch=true&resourceVersion=%s&timeoutSeconds=%d",
-		path, list.Metadata.ResourceVersion, int(displayWatchTimeout.Seconds()))
-	body, err := c.Watch(ctx, stream)
-	if err != nil {
-		return err
-	}
-	defer drain(body)
-
-	events := json.NewDecoder(body)
-	for {
-		var event struct {
-			Type   string `json:"type"`
-			Object Pod    `json:"object"`
-		}
-		if err := events.Decode(&event); err != nil {
-			if err == io.EOF {
-				return nil
+	watchList(ctx, c, path, "the capture sidecars in "+namespace, i.replace,
+		func(kind string, pod Pod) {
+			if kind == "DELETED" {
+				i.drop(pod)
+				return
 			}
-			return err
-		}
-		switch event.Type {
-		case "ADDED", "MODIFIED":
-			i.hold(event.Object)
-		case "DELETED":
-			i.drop(event.Object)
-		}
-	}
+			i.hold(pod)
+		})
 }

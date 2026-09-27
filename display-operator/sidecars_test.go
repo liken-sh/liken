@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // A pod is held under the node it runs on, because a capture goes to
@@ -97,8 +99,8 @@ func TestAListingReplacesWhatTheIndexHeld(t *testing.T) {
 	}
 }
 
-// One session is a listing and then a watch, and the watch's events
-// move the index with no second listing.
+// The loop lists and then watches from the listing's version, and the
+// watch's events move the index.
 func TestTheIndexFollowsTheWatch(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -122,14 +124,126 @@ func TestTheIndexFollowsTheWatch(t *testing.T) {
 	defer api.Close()
 
 	index := newSidecarIndex()
-	if err := index.session(context.Background(), NewClient(api.URL, api.Client(), ""), sidecarNamespace); err != nil {
-		t.Fatal(err)
-	}
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	go index.run(ctx, NewClient(api.URL, api.Client(), ""), sidecarNamespace)
 
-	if pod, held := index.on("node-2"); !held || pod.IP != "10.42.1.3" {
-		t.Errorf("the watch's new pod is %+v, want the one the event named", pod)
+	eventually(t, "the watch's new pod", func() bool {
+		pod, held := index.on("node-2")
+		return held && pod.IP == "10.42.1.3"
+	})
+	eventually(t, "the watch's deletion", func() bool {
+		_, held := index.on("node-1")
+		return !held
+	})
+}
+
+// sidecarAPI serves the capture sidecars' listing at version 41 and
+// answers each watch with the next of answers, counting the listings
+// and recording the version each watch asked for. A watch past the
+// last answer is held open until the loop ends.
+type sidecarAPI struct {
+	mu      sync.Mutex
+	lists   int
+	asked   []string
+	answers []func(w http.ResponseWriter)
+}
+
+func (a *sidecarAPI) serve(t *testing.T) *Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") != "true" {
+			a.mu.Lock()
+			a.lists++
+			a.mu.Unlock()
+			fmt.Fprint(w, `{"metadata":{"resourceVersion":"41"},"items":[]}`)
+			return
+		}
+		a.mu.Lock()
+		a.asked = append(a.asked, r.URL.Query().Get("resourceVersion"))
+		n := len(a.asked)
+		a.mu.Unlock()
+		if n > len(a.answers) {
+			<-r.Context().Done()
+			return
+		}
+		a.answers[n-1](w)
+	}))
+	t.Cleanup(server.Close)
+	return NewClient(server.URL, server.Client(), "")
+}
+
+func (a *sidecarAPI) run(t *testing.T, window time.Duration) (int, []string) {
+	t.Helper()
+	client := a.serve(t)
+	ctx, stop := context.WithTimeout(t.Context(), window)
+	defer stop()
+	newSidecarIndex().run(ctx, client, sidecarNamespace)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lists, append([]string(nil), a.asked...)
+}
+
+const sidecarAddedAt42 = `{"type":"ADDED","object":{"metadata":{"name":"display-operator-b","namespace":"liken-system","resourceVersion":"42"},"spec":{"nodeName":"node-2"}}}`
+
+// A watch that lived a second and ended resumes at the last version it
+// delivered, with no second listing, whether the API server ended it
+// cleanly or the connection was reset.
+func TestTheSidecarWatchResumesWhereItEnded(t *testing.T) {
+	cases := []struct {
+		name  string
+		reset bool
+	}{
+		{name: "ended cleanly"},
+		{name: "reset", reset: true},
 	}
-	if _, held := index.on("node-1"); held {
-		t.Error("the watch's deletion left the pod in the index")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &sidecarAPI{answers: []func(w http.ResponseWriter){func(w http.ResponseWriter) {
+				fmt.Fprint(w, sidecarAddedAt42)
+				w.(http.Flusher).Flush()
+				time.Sleep(1100 * time.Millisecond)
+				if c.reset {
+					if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+						_ = conn.Close()
+					}
+				}
+			}}}
+
+			lists, asked := api.run(t, 1600*time.Millisecond)
+
+			if lists != 1 || len(asked) != 2 || asked[1] != "42" {
+				t.Errorf("the loop listed %d times and watched from %v, want one listing and a second watch from 42",
+					lists, asked)
+			}
+		})
+	}
+}
+
+// A 410 Gone means the version is too old, so the loop lists again at
+// once and watches from the new listing.
+func TestTheSidecarWatchListsAgainOnGone(t *testing.T) {
+	api := &sidecarAPI{answers: []func(w http.ResponseWriter){func(w http.ResponseWriter) {
+		fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
+	}}}
+
+	lists, _ := api.run(t, 300*time.Millisecond)
+
+	if lists != 2 {
+		t.Errorf("the loop listed %d times, want a second listing at once after the 410", lists)
+	}
+}
+
+// A watch that lived under a second is a failure, whatever it
+// delivered, so the loop waits before the next one.
+func TestTheSidecarWatchWaitsAfterAShortWatch(t *testing.T) {
+	answer := func(w http.ResponseWriter) { fmt.Fprint(w, sidecarAddedAt42) }
+	api := &sidecarAPI{answers: []func(w http.ResponseWriter){answer, answer, answer, answer, answer}}
+
+	lists, asked := api.run(t, 500*time.Millisecond)
+
+	if lists+len(asked) > 3 {
+		t.Errorf("the loop listed %d times and watched %d times in half a second, want it to wait",
+			lists, len(asked))
 	}
 }

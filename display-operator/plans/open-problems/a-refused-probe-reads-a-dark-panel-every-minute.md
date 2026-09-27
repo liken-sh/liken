@@ -18,20 +18,29 @@ connector while asleep. A panel that answered once is not probed again
 while the same monitor stays on the connector, so a panel that answered
 and then went to sleep is not affected.
 
+A second read has the same gap. The poll reads a panel only while
+its last power value reads on, and `lit` counts a panel with no power
+value as lit. A panel that answers DDC/CI and carries no power
+control has no power value, so the poll reads its core controls every
+10 s while it is dark. The operator has no DDC way to tell that such a
+panel is dark.
+
 ## The cost
 
 A probe of a silent panel sends the capability request three times
 and the first core control's request three times, with the reply wait
 doubling from 40 ms on each attempt. That is six requests and under a
 second of bus time per panel, once a minute, for as long as the panel
-stays dark. Nothing measured the power or the bus cost on a real
-panel.
+stays dark. The poll of a panel with no power control is one request
+per core control it carries, every 10 s, for as long as it answers.
+Nothing measured the power or the bus cost on a real panel.
 
 ## The risk
 
 A DDC read is a wake stimulus on some panels. That is why the poll
 has its guard. A panel that sleeps and refuses DDC while it sleeps
-gets six requests a minute. If one of those requests wakes it, the
+gets six requests a minute, and a dark panel with no power control
+gets the poll six times a minute. If one of those requests wakes it, the
 panel lights with no workload asking for it, and a screen the media
 layer darkened comes back. A panel that does not wake may still leave
 its deepest standby to answer on the bus. Neither effect was observed
@@ -54,5 +63,11 @@ on the lab panels, and neither was tested for.
 5. Put a field on the `Display` that asks for a probe, so the person
    who turned DDC/CI on asks for the read once.
 
-Options 2 and 5 together remove every read with no cause. Option 4 is
+For the poll of a panel with no power control, options 1 and 3 apply
+as they stand. A further option is to stop the poll for a panel with
+no power value while the kernel reports its connector's DPMS state as
+off, which covers a panel the compositor put to sleep and not one a
+person turned off at its button.
+
+Options 2 and 5 together remove every probe with no cause. Option 4 is
 the smallest change.

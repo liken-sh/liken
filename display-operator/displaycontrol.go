@@ -7,9 +7,12 @@ package main
 // on the wire to a panel that already holds its declaration.
 //
 // A DDC read wakes some panels, so every read has a cause. The poll is
-// the one read with no cause of its own: it reads a lit panel once per
-// poll window, and never a panel whose last power value reads standby
-// or off. Every other read follows a cause:
+// the one read with no cause of its own. It reads a responsive panel
+// once per poll window, and never a panel whose last power value is
+// anything but on: standby, suspend, off, or hard off. A panel with no
+// power value, which is every panel that carries no power control,
+// counts as lit, so the poll reads it every window even while it is
+// dark. Every other read follows a cause:
 //
 //   - the probe of a monitor the operator has not seen on its
 //     connector, in any power state (panels.go);

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -347,24 +348,80 @@ func TestAWatchThatTimesOutResumes(t *testing.T) {
 	}
 }
 
-// A watch that the API server, or a proxy in front of it, closes at
-// once with no event is a failure and not a timeout. The loop waits
-// before it opens the next one, so a server that always closes at
-// once gets a few requests and not a tight loop of them.
-func TestAWatchThatClosesAtOnceWaitsBeforeTheNext(t *testing.T) {
+// A watch that lived under a second is a failure, whatever it
+// delivered, and the loop waits before it opens the next one. So a
+// server or a proxy that ends every watch at once gets a few requests
+// and not a tight loop of them. An ERROR event other than 410 Gone
+// waits too, before the listing that follows it.
+func TestAShortWatchWaitsBeforeTheNext(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+	}{
+		{name: "delivered an event", answer: `{"type":"MODIFIED","object":{"metadata":{"name":"tracked","resourceVersion":"%d"}}}`},
+		{name: "closed empty", answer: ""},
+		{name: "an error event", answer: `{"type":"ERROR","object":{"kind":"Status","code":500,"metadata":{"resourceVersion":"%d"}}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var requests atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := requests.Add(1)
+				if r.URL.Query().Get("watch") != "true" {
+					fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
+					return
+				}
+				if c.answer != "" {
+					fmt.Fprintf(w, c.answer, n+1)
+				}
+			}))
+			t.Cleanup(server.Close)
+			ctx, stop := context.WithTimeout(t.Context(), 500*time.Millisecond)
+			defer stop()
+
+			watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
+				"tracked", "the test ConfigMap", func(*ConfigMap) {})
+
+			if got := requests.Load(); got > 3 {
+				t.Errorf("the loop sent %d requests in half a second, want it to wait between watches", got)
+			}
+		})
+	}
+}
+
+// A watch that lived a second or more ran. When it ends with a
+// connection reset, as a load balancer ends a long connection, the next
+// watch opens at once and resumes at the last version it delivered,
+// with no new listing and no wait.
+func TestAWatchThatLivedResumesAtOnceAfterAReset(t *testing.T) {
 	var mu sync.Mutex
-	watches := 0
+	var lists int
+	var asked []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("watch") != "true" {
+			mu.Lock()
+			lists++
+			mu.Unlock()
 			fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
 			return
 		}
 		mu.Lock()
-		watches++
+		asked = append(asked, r.URL.Query().Get("resourceVersion"))
+		first := len(asked) == 1
 		mu.Unlock()
+		if !first {
+			<-r.Context().Done()
+			return
+		}
+		fmt.Fprint(w, `{"type":"ADDED","object":{"metadata":{"name":"tracked","resourceVersion":"2"}}}`)
+		w.(http.Flusher).Flush()
+		time.Sleep(1100 * time.Millisecond)
+		if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+			_ = conn.Close()
+		}
 	}))
 	t.Cleanup(server.Close)
-	ctx, stop := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	ctx, stop := context.WithTimeout(t.Context(), 1600*time.Millisecond)
 	defer stop()
 
 	watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
@@ -372,7 +429,43 @@ func TestAWatchThatClosesAtOnceWaitsBeforeTheNext(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if watches > 2 {
-		t.Errorf("the loop opened %d watches in half a second, want it to wait between them", watches)
+	if lists != 1 || len(asked) != 2 || asked[1] != "2" {
+		t.Errorf("the loop listed %d times and watched from %v, want one listing and a second watch from 2",
+			lists, asked)
+	}
+}
+
+// A watch the API server answers with 410 Gone as the response, and
+// not as an event, names a version it no longer holds. Resuming there
+// would ask for the same version forever, so the loop lists again at
+// once.
+func TestAWatchRefusedWithGoneListsAgain(t *testing.T) {
+	var mu sync.Mutex
+	var lists int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Query().Get("watch") != "true" {
+			lists++
+			fmt.Fprintf(w, `{"metadata":{"resourceVersion":"%d"},"items":[]}`, lists)
+			return
+		}
+		if r.URL.Query().Get("resourceVersion") == "1" {
+			w.WriteHeader(http.StatusGone)
+			fmt.Fprint(w, `{"kind":"Status","code":410}`)
+			return
+		}
+	}))
+	t.Cleanup(server.Close)
+	ctx, stop := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer stop()
+
+	watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
+		"tracked", "the test ConfigMap", func(*ConfigMap) {})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if lists != 2 {
+		t.Errorf("the loop listed %d times, want a second listing at once after the 410", lists)
 	}
 }

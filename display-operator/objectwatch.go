@@ -1,16 +1,17 @@
 package main
 
-// Some objects this operator reads are one named object that changes
-// rarely and matters the moment it changes: a Secret that holds a
-// certificate, and the ConfigMap that holds the cluster's client
-// authority. A read on a clock would find each change up to one
-// period late and cost a request every period in between. A watch on
-// the one object costs nothing while the object stands, and delivers
-// a change as it lands.
+// Some objects this operator reads change rarely and matter the moment
+// they change: a Secret that holds a certificate, the ConfigMap that
+// holds the cluster's client authority, and display-api's capture
+// sidecar pods. A read on a clock would find each change up to one
+// period late and cost a request every period in between. A watch
+// costs nothing while the objects stand, and delivers a change as it
+// lands.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -29,51 +30,91 @@ const (
 
 // watchNamed calls seen with the object each time it changes, and with
 // nil when the object does not exist. It runs until the context ends.
+// The field selector names the object, which is also how RBAC matches a
+// list and a watch against a rule's resourceNames.
+func watchNamed[T any](ctx context.Context, c *Client, collection, name string, what string, seen func(held *T)) {
+	path := collection + "?fieldSelector=" + url.QueryEscape("metadata.name="+name)
+	watchList(ctx, c, path, what,
+		func(items []T) {
+			if len(items) == 0 {
+				seen(nil)
+				return
+			}
+			seen(&items[0])
+		},
+		func(kind string, held T) {
+			if kind == "DELETED" {
+				seen(nil)
+				return
+			}
+			seen(&held)
+		})
+}
+
+// watchList keeps listed and changed current with the objects at path,
+// until the context ends. listed gets every object a listing answers,
+// and changed gets each ADDED, MODIFIED, or DELETED event after it, with
+// its object. The path carries its own query, a selector at least.
 //
 // A listing gives the whole truth and a resource version, and the
 // watch that follows starts at that version, so no change between the
-// two is missed. A watch that the API server ends on its timeout
-// resumes at the last version it delivered. A version the API server
-// no longer holds answers 410 Gone, and the loop lists again. The
-// field selector names the object, which is also how RBAC matches a
-// list and a watch against a rule's resourceNames.
-func watchNamed[T any](ctx context.Context, c *Client, collection, name string, what string, seen func(held *T)) {
-	selector := "fieldSelector=" + url.QueryEscape("metadata.name="+name)
+// two is missed. A watch that the API server ends on its timeout, or
+// that a reset connection ends, resumes at the last version it
+// delivered, and bookmarks move that version while nothing changes. A
+// version the API server no longer holds answers 410 Gone, as the
+// response or as an ERROR event, and the loop lists again at once. Any
+// other ERROR event lists again after a wait.
+func watchList[T any](ctx context.Context, c *Client, path, what string,
+	listed func(items []T), changed func(kind string, held T)) {
 	version := ""
 	delay := objectWatchRetry
 	for ctx.Err() == nil {
 		if version == "" {
-			listed, err := listNamed[T](c, collection+"?"+selector)
+			items, listedAt, err := listAt[T](c, path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "listing %s: %v\n", what, err)
 				delay = pauseWatch(ctx, delay)
 				continue
 			}
-			version = listed.version
-			seen(listed.held)
+			version = listedAt
+			listed(items)
 		}
 		opened := time.Now()
-		next, err := streamNamed(ctx, c, collection+"?"+selector, version, seen)
-		switch {
-		case ctx.Err() != nil:
+		next, err := streamList(ctx, c, path, version, changed)
+		if ctx.Err() != nil {
 			return
-		case err == errWatchExpired:
-			version = ""
-			delay = objectWatchRetry
-		case err != nil:
-			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
-			version = ""
-			delay = pauseWatch(ctx, delay)
-		case next == version && time.Since(opened) < objectWatchRetry:
-			// A watch that ended in under a second with no event is
-			// a server or a proxy that closes each watch at once, not a
-			// timeout. Its version still stands, so the loop resumes
-			// there, and the wait keeps it from a tight loop of requests.
-			delay = pauseWatch(ctx, delay)
-		default:
-			version = next
-			delay = objectWatchRetry
 		}
+		if errors.Is(err, errWatchExpired) {
+			version = ""
+			delay = objectWatchRetry
+			continue
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
+		}
+		// An ERROR event says the watch cannot go on from its version,
+		// so the loop lists again, after a wait. Any other end, a
+		// timeout or a reset connection, leaves the version good, and the
+		// next watch resumes there with no listing.
+		var ended *watchErrorEvent
+		if errors.As(err, &ended) {
+			version = ""
+		} else {
+			version = next
+		}
+		// The lifetime decides the wait, not what the watch delivered.
+		// A watch that lived a second or more ran, so a load balancer
+		// that resets a long connection costs one reopen and not a wait
+		// that climbs toward a minute. A shorter one is a server or a
+		// proxy that ends each watch at once, and the wait keeps the loop
+		// from a tight loop of requests.
+		if time.Since(opened) >= objectWatchRetry {
+			delay = objectWatchRetry
+			if version != "" {
+				continue
+			}
+		}
+		delay = pauseWatch(ctx, delay)
 	}
 }
 
@@ -86,14 +127,8 @@ func pauseWatch(ctx context.Context, delay time.Duration) time.Duration {
 	return nextDialDelay(delay, objectWatchLimit)
 }
 
-// What a listing of one name answers: the object, or nil when the
-// list is empty, and the version the watch starts at.
-type namedListing[T any] struct {
-	held    *T
-	version string
-}
-
-func listNamed[T any](c *Client, path string) (namedListing[T], error) {
+// One listing: every object, and the version the watch starts at.
+func listAt[T any](c *Client, path string) ([]T, string, error) {
 	list, err := get[struct {
 		Metadata struct {
 			ResourceVersion string `json:"resourceVersion"`
@@ -101,13 +136,9 @@ func listNamed[T any](c *Client, path string) (namedListing[T], error) {
 		Items []T `json:"items"`
 	}](c, path)
 	if err != nil {
-		return namedListing[T]{}, err
+		return nil, "", err
 	}
-	listing := namedListing[T]{version: list.Metadata.ResourceVersion}
-	if len(list.Items) > 0 {
-		listing.held = &list.Items[0]
-	}
-	return listing, nil
+	return list.Items, list.Metadata.ResourceVersion, nil
 }
 
 // errWatchExpired is the API server's 410 Gone: the version the watch
@@ -115,12 +146,26 @@ func listNamed[T any](c *Client, path string) (namedListing[T], error) {
 // a version to start from.
 var errWatchExpired = fmt.Errorf("the watch's resource version expired")
 
+// watchErrorEvent is an ERROR event other than 410 Gone. The API
+// server ends the watch with it, and the error carries its Status
+// object word for word.
+type watchErrorEvent struct {
+	status string
+}
+
+func (e *watchErrorEvent) Error() string {
+	return "the watch ended with " + e.status
+}
+
 // One watch connection. It answers the last version it delivered, so
 // the next connection resumes there.
-func streamNamed[T any](ctx context.Context, c *Client, path, version string, seen func(*T)) (string, error) {
+func streamList[T any](ctx context.Context, c *Client, path, version string, changed func(string, T)) (string, error) {
 	stream := fmt.Sprintf("%s&watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
 		path, url.QueryEscape(version), int(displayWatchTimeout.Seconds()))
 	body, err := c.Watch(ctx, stream)
+	if errors.Is(err, ErrGone) {
+		return version, errWatchExpired
+	}
 	if err != nil {
 		return version, err
 	}
@@ -152,17 +197,18 @@ func streamNamed[T any](ctx context.Context, c *Client, path, version string, se
 			if meta.Code == 410 {
 				return version, errWatchExpired
 			}
-			return version, fmt.Errorf("the watch ended with %s", event.Object)
-		case "BOOKMARK":
-		case "DELETED":
-			seen(nil)
-		default:
-			held := new(T)
-			if err := json.Unmarshal(event.Object, held); err != nil {
+			return version, &watchErrorEvent{status: string(event.Object)}
+		case "ADDED", "MODIFIED", "DELETED":
+			var held T
+			if err := json.Unmarshal(event.Object, &held); err != nil {
 				return version, err
 			}
-			seen(held)
+			changed(event.Type, held)
 		}
-		version = meta.Metadata.ResourceVersion
+		// An event with no version leaves the last one standing, so
+		// the next watch still resumes and does not list again.
+		if meta.Metadata.ResourceVersion != "" {
+			version = meta.Metadata.ResourceVersion
+		}
 	}
 }

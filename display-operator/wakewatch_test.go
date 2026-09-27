@@ -42,14 +42,13 @@ func TestEachWakeWatchOpensAWatchOnItsCollection(t *testing.T) {
 // and over while the API server is down.
 func TestAWakeWatchWakesOnItsOpenAndOnEveryEvent(t *testing.T) {
 	cases := []struct {
-		name    string
-		status  int
-		events  int
-		wakes   int
-		fails   bool
-		answers bool
+		name   string
+		status int
+		events int
+		wakes  int
+		fails  bool
 	}{
-		{name: "two events", status: http.StatusOK, events: 2, wakes: 3, answers: true},
+		{name: "two events", status: http.StatusOK, events: 2, wakes: 3},
 		{name: "no event", status: http.StatusOK, events: 0, wakes: 1},
 		{name: "refused", status: http.StatusInternalServerError, wakes: 0, fails: true},
 	}
@@ -63,57 +62,92 @@ func TestAWakeWatchWakesOnItsOpenAndOnEveryEvent(t *testing.T) {
 			}))
 
 			wakes := 0
-			delivered, err := streamWakes(t.Context(), client, displaysWatchPath(), func() { wakes++ })
+			err := streamWakes(t.Context(), client, displaysWatchPath(), func() { wakes++ })
 			if (err != nil) != c.fails {
 				t.Fatalf("the watch answered %v, want a failure: %v", err, c.fails)
 			}
 			if wakes != c.wakes {
 				t.Errorf("the watch woke the loop %d times, want %d", wakes, c.wakes)
 			}
-			if delivered != c.answers {
-				t.Errorf("the watch reported delivered=%v, want %v", delivered, c.answers)
+		})
+	}
+}
+
+// How many watches the loop opens against a server that answers each
+// one the same way. Each watch opens with a replay of every object, so
+// events say nothing about whether a watch ran: its lifetime does. A
+// watch that lived under a second is a failure, whether it replayed
+// objects, closed empty, or was refused, and the loop backs off before
+// the next one instead of asking in a tight loop.
+func TestTheWakeWatchBacksOffAfterAShortWatch(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		events int
+	}{
+		{name: "replayed the objects", status: http.StatusOK, events: 3},
+		{name: "closed empty", status: http.StatusOK, events: 0},
+		{name: "refused", status: http.StatusInternalServerError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			opens := countOpens(t, 500*time.Millisecond, func(w http.ResponseWriter) {
+				w.WriteHeader(c.status)
+				for i := range c.events {
+					fmt.Fprintf(w, `{"type":"ADDED","object":{"metadata":{"name":"panel-%d"}}}`, i)
+				}
+			})
+			if opens < 1 || opens > 2 {
+				t.Errorf("the loop opened %d watches in half a second, want one or two", opens)
 			}
 		})
 	}
 }
 
-// How many watches the loop opens in half a second against a server
-// that answers each one the same way. A watch that delivered events
-// ran as it should, and the next one opens at once, because the open's
-// wake covers whatever changed in between. A watch that the server
-// refused, or closed at once with no event, is a failure, and the loop
-// backs off before the next one instead of asking in a tight loop.
-func TestTheWakeWatchReopensAtOnceOnlyAfterAWatchThatRan(t *testing.T) {
+// A watch that lived a second or more ran, and the next one opens at
+// once, because the open's wake covers whatever changed in between.
+// That holds for a connection that ended with an error too: a load
+// balancer that resets a long connection every few minutes must not
+// push the reopen toward a minute.
+func TestTheWakeWatchReopensAtOnceAfterAWatchThatLived(t *testing.T) {
 	cases := []struct {
-		name    string
-		status  int
-		events  int
-		atMost  int64
-		atLeast int64
+		name  string
+		reset bool
 	}{
-		{name: "delivered an event", status: http.StatusOK, events: 1, atLeast: 3, atMost: 1 << 30},
-		{name: "closed at once", status: http.StatusOK, events: 0, atLeast: 1, atMost: 2},
-		{name: "refused", status: http.StatusInternalServerError, atLeast: 1, atMost: 2},
+		{name: "ended cleanly"},
+		{name: "ended with a reset", reset: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			var opens atomic.Int64
-			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				opens.Add(1)
-				w.WriteHeader(c.status)
-				for i := range c.events {
-					fmt.Fprintf(w, `{"type":"MODIFIED","object":{"metadata":{"name":"panel-%d"}}}`, i)
+			opens := countOpens(t, 3*time.Second, func(w http.ResponseWriter) {
+				fmt.Fprint(w, `{"type":"ADDED","object":{"metadata":{"name":"panel-0"}}}`)
+				w.(http.Flusher).Flush()
+				time.Sleep(1100 * time.Millisecond)
+				if c.reset {
+					conn, _, err := http.NewResponseController(w).Hijack()
+					if err == nil {
+						_ = conn.Close()
+					}
 				}
-			}))
-			ctx, stop := context.WithTimeout(t.Context(), 500*time.Millisecond)
-			defer stop()
-
-			watchWakes(ctx, client, kindDisplay, "displays", displaysWatchPath(), func() {}, nil)
-
-			if got := opens.Load(); got < c.atLeast || got > c.atMost {
-				t.Errorf("the loop opened %d watches in half a second, want between %d and %d",
-					got, c.atLeast, c.atMost)
+			})
+			if opens < 3 {
+				t.Errorf("the loop opened %d watches in three seconds, want three: one per lifetime", opens)
 			}
 		})
 	}
+}
+
+// countOpens runs the Display watch against a server that answers each
+// watch with answer, for the time given, and counts the watches opened.
+func countOpens(t *testing.T, window time.Duration, answer func(w http.ResponseWriter)) int64 {
+	t.Helper()
+	var opens atomic.Int64
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opens.Add(1)
+		answer(w)
+	}))
+	ctx, stop := context.WithTimeout(t.Context(), window)
+	defer stop()
+	watchWakes(ctx, client, kindDisplay, "displays", displaysWatchPath(), func() {}, nil)
+	return opens.Load()
 }
