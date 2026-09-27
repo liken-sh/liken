@@ -2,12 +2,13 @@
 //! 1080 rows tall and as wide as the surface's own ratio makes it, and every
 //! value that moves with the position snaps to a whole output pixel.
 
-use iced::widget::canvas::{Frame, Path, gradient};
-use iced::{Color, Point, Size};
+use iced::advanced::image::Handle;
+use iced::{Point, Rectangle, Size};
 
 use crate::theme;
 
 pub mod brush;
+pub mod raster;
 pub mod shape;
 
 pub use brush::{Anchor, Brush, ELLIPSIS, Line, clip, forget_measurements, measure};
@@ -116,7 +117,7 @@ const EDGE_SIGMA_PER_BLUR: f32 = 0.85;
 /// one family whatever reach each one states.
 const EDGE_SIGMA_LIMIT: f32 = 85.0;
 
-/// How many stops one gradient carries. The toolkit takes eight.
+/// How many stops one band carries, the number the toolkit's gradient takes.
 const STOPS: usize = 8;
 
 /// How far past the fading edge the scrim is drawn at all. Beyond three
@@ -209,13 +210,13 @@ impl Scrim {
         }
     }
 
-    /// The gradient bands the scrim is drawn as, at full strength. The
-    /// band splits in two at the rectangle's inner edge, because eight stops
-    /// over the whole span would leave the profile up to two parts in a
-    /// hundred off the blurred shape's own, and eight over each half hold it
-    /// inside seven parts in a thousand, which is under two steps of an
-    /// eight-bit channel. The split lands on a whole output pixel, so the two
-    /// fills meet with no row drawn twice.
+    /// The gradient bands the scrim's profile is resolved into, at full
+    /// strength. The band splits in two at the rectangle's inner edge,
+    /// because eight stops over the whole span would leave the profile up to
+    /// two parts in a hundred off the blurred shape's own, and eight over each
+    /// half hold it inside seven parts in a thousand, which is under two steps
+    /// of an eight-bit channel. The split lands on a whole output pixel, so the
+    /// two bands meet with no row counted twice.
     pub fn bands(&self, canvas: &Canvas) -> Vec<Band> {
         let (start, end) = self.span();
         let split = canvas.snap(self.half());
@@ -232,27 +233,100 @@ impl Scrim {
             })
             .collect()
     }
+
+    /// The scrim as the picture the display draws: one column of pixels, one
+    /// pixel for each row of the output, which the layer stretches across the
+    /// width.
+    ///
+    /// The scrim is a picture and not a gradient fill because of what a
+    /// gradient costs. The toolkit fills a gradient with a shader that
+    /// searches an array of its stops for every pixel it covers, and the two
+    /// scrims cover about half the screen. Measured on Intel graphics at 3840
+    /// by 2160, the two gradients took two thirds of the GPU time of a frame
+    /// with the OSD up. A picture costs one texture read per pixel. So the
+    /// profile is resolved here, once per surface, and the frame only draws
+    /// it.
+    ///
+    /// `density` is the window's scale factor, the output pixels one logical
+    /// pixel covers. A row of the picture then covers exactly one row of the
+    /// output, and each row carries the value the bands give at the middle of
+    /// that row. The picture's edge at the screen edge lands on a whole pixel,
+    /// so the rows line up with the output's own.
+    pub fn picture(&self, canvas: &Canvas, density: f32) -> Option<Picture> {
+        let (start, end) = self.span();
+        let per_row = canvas.scale() * density;
+        let rows = ((end - start) * per_row).ceil();
+        if !rows.is_finite() || rows < 1.0 {
+            return None;
+        }
+        let height = rows / per_row;
+        let top = match self.edge {
+            Edge::Top => start,
+            Edge::Bottom => end - height,
+        };
+        let bands = self.bands(canvas);
+        let [red, green, blue] = [
+            theme::color::SHADOW.r,
+            theme::color::SHADOW.g,
+            theme::color::SHADOW.b,
+        ]
+        .map(|channel| (channel * 255.0).round() as u8);
+        let pixels: Vec<u8> = (0..rows as u32)
+            .flat_map(|index| {
+                let row = top + (index as f32 + 0.5) / per_row;
+                let alpha = bands
+                    .iter()
+                    .find(|band| band.from <= row && row < band.to)
+                    .map_or(0.0, |band| band.alpha_at(row));
+                [red, green, blue, (alpha * 255.0).round() as u8]
+            })
+            .collect();
+        Some(Picture {
+            handle: Handle::from_rgba(1, rows as u32, pixels),
+            bounds: Rectangle::new(Point::new(0.0, top), Size::new(canvas.width(), height)),
+        })
+    }
 }
 
-/// The bands of both scrims, for one canvas. Each stop is a pair of
-/// Gaussians, and only the fade changes between two frames, so the profile is
-/// evaluated once per surface and the fade multiplies it at draw time.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// The pictures of both scrims, for one canvas and one scale factor. Only the
+/// fade changes between two frames, and the picture takes the fade as its
+/// opacity, so the pictures are resolved once per surface.
+#[derive(Debug, Clone, Default)]
 pub struct Scrims {
-    pub top: Vec<Band>,
-    pub bottom: Vec<Band>,
+    pub top: Option<Picture>,
+    pub bottom: Option<Picture>,
 }
 
 impl Scrims {
-    pub fn for_canvas(canvas: &Canvas) -> Self {
+    pub fn for_canvas(canvas: &Canvas, density: f32) -> Self {
         Self {
-            top: Scrim::top().bands(canvas),
-            bottom: Scrim::bottom().bands(canvas),
+            top: Scrim::top().picture(canvas, density),
+            bottom: Scrim::bottom().picture(canvas, density),
         }
     }
 }
 
-/// One gradient the scrim draws as: the rows it covers, and the fraction of
+/// One scrim as the toolkit draws it: the image, and the canvas rectangle it
+/// covers.
+#[derive(Debug, Clone)]
+pub struct Picture {
+    pub handle: Handle,
+    pub bounds: Rectangle,
+}
+
+impl Picture {
+    /// The alpha byte of every row, top to bottom. A test reads the picture
+    /// through this and not through the handle, because a handle takes an id
+    /// of its own on every call.
+    pub fn alphas(&self) -> Vec<u8> {
+        match &self.handle {
+            Handle::Rgba { pixels, .. } => pixels.chunks(4).map(|pixel| pixel[3]).collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// One gradient band of the scrim: the rows it covers, and the fraction of
 /// the ground it covers at each of its evenly spaced stops.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Band {
@@ -262,24 +336,18 @@ pub struct Band {
 }
 
 impl Band {
-    /// The colour one stop draws, at one fade factor.
-    pub fn color(&self, stop: usize, fade: f32) -> Color {
-        theme::faded(theme::at(theme::color::SHADOW, self.stops[stop]), fade)
-    }
-
-    /// Draw the band at one fade factor, in canvas units.
-    pub fn draw(&self, frame: &mut Frame, canvas: &Canvas, fade: f32) {
-        let mut ramp = gradient::Linear::new(Point::new(0.0, self.from), Point::new(0.0, self.to));
-        for stop in 0..STOPS {
-            ramp = ramp.add_stop(stop as f32 / (STOPS - 1) as f32, self.color(stop, fade));
-        }
-        frame.fill(
-            &Path::rectangle(
-                Point::new(0.0, self.from),
-                Size::new(canvas.width(), self.to - self.from),
-            ),
-            ramp,
-        );
+    /// The fraction of the ground the band covers at one canvas row, eased
+    /// from one stop to the next with a smoothstep and not a straight line.
+    /// That is the ease the toolkit's gradient shader applies between two
+    /// stops, and the scrims were judged by eye as that shader draws them, so
+    /// the picture keeps the same ease.
+    pub fn alpha_at(&self, row: f32) -> f32 {
+        let last = STOPS - 1;
+        let place = ((row - self.from) / (self.to - self.from)).clamp(0.0, 1.0) * last as f32;
+        let low = (place.floor() as usize).min(last - 1);
+        let between = place - low as f32;
+        let eased = between * between * (3.0 - 2.0 * between);
+        self.stops[low] + (self.stops[low + 1] - self.stops[low]) * eased
     }
 }
 
@@ -469,36 +537,96 @@ mod tests {
         }
     }
 
-    /// The bands carry the profile at full strength, and the fade scales
-    /// every stop as the band draws, so a scrim at a fade of nothing covers
-    /// nothing.
+    /// Between two stops the band eases with a smoothstep, the curve the
+    /// toolkit's gradient shader drew, so it reads each stop at the stop, the
+    /// mean of two stops halfway between them, and less than a straight line
+    /// a quarter of the way.
     #[test]
-    fn the_fade_scales_every_stop_as_the_band_draws() {
-        let canvas = Canvas::default();
-        for band in Scrim::top().bands(&canvas) {
-            for stop in 0..STOPS {
-                assert!((band.color(stop, 1.0).a - band.stops[stop]).abs() < 1e-6);
-                assert!((band.color(stop, 0.5).a - band.stops[stop] / 2.0).abs() < 1e-6);
-                assert_eq!(band.color(stop, 0.0).a, 0.0);
-                assert_eq!(band.color(stop, 1.0).r, theme::color::SHADOW.r);
+    fn a_band_eases_between_its_stops_the_way_the_gradient_drew() {
+        let band = Band {
+            from: 0.0,
+            to: 70.0,
+            stops: [0.8, 0.8, 0.6, 0.4, 0.2, 0.1, 0.0, 0.0],
+        };
+        let near = |row: f32, alpha: f32| (band.alpha_at(row) - alpha).abs() < 1e-5;
+        assert!(near(20.0, 0.6));
+        assert!(near(25.0, 0.5));
+        assert!(near(22.5, 0.6 - 0.2 * 0.156_25));
+        assert!(near(-5.0, 0.8));
+        assert!(near(75.0, 0.0));
+    }
+
+    /// Every row of a scrim's picture carries the value the bands give at
+    /// the middle of the output row it covers, in the shadow colour, and
+    /// nothing past the rows the bands cover.
+    #[test]
+    fn each_row_of_the_picture_carries_the_bands_value_for_its_output_row() {
+        let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
+        for (scrim, density) in [
+            (Scrim::top(), 1.0),
+            (Scrim::bottom(), 1.0),
+            (Scrim::top(), 2.0),
+        ] {
+            let picture = scrim.picture(&canvas, density).expect("a scrim with rows");
+            let bands = scrim.bands(&canvas);
+            for (index, alpha) in picture.alphas().into_iter().enumerate() {
+                let row = picture.bounds.y + (index as f32 + 0.5) / density;
+                let expected = bands
+                    .iter()
+                    .find(|band| band.from <= row && row < band.to)
+                    .map_or(0.0, |band| band.alpha_at(row));
+                assert_eq!(alpha, (expected * 255.0).round() as u8, "row {row}");
             }
+            let Handle::Rgba { pixels, .. } = &picture.handle else {
+                panic!("a scrim is RGBA");
+            };
+            assert_eq!(&pixels[..3], &[0, 0, 0]);
         }
     }
 
-    /// Both scrims carry the same bands for one surface, however many times
-    /// they are asked for.
+    /// The picture covers the whole width, and it starts at the screen edge
+    /// on a whole output pixel, so each of its rows lands on one output row.
+    /// A window at twice the scale carries twice the rows over the same
+    /// canvas rows.
     #[test]
-    fn the_scrims_of_one_surface_are_the_bands_it_draws() {
+    fn the_picture_lands_on_whole_output_rows_from_the_screen_edge() {
         let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
-        let scrims = Scrims::for_canvas(&canvas);
-        assert_eq!(scrims.top, Scrim::top().bands(&canvas));
-        assert_eq!(scrims.bottom, Scrim::bottom().bands(&canvas));
-        assert!(
-            scrims
-                .top
-                .iter()
-                .any(|band| band.stops.iter().any(|alpha| *alpha > 0.0))
-        );
+        let top = Scrim::top().picture(&canvas, 1.0).expect("the top scrim");
+        assert_eq!(top.bounds.y, 0.0);
+        assert_eq!(top.bounds.width, 1920.0);
+        assert_eq!(top.alphas().len(), 526);
+
+        let bottom = Scrim::bottom()
+            .picture(&canvas, 1.0)
+            .expect("the bottom scrim");
+        assert_eq!(bottom.bounds.y + bottom.bounds.height, 1080.0);
+        assert_eq!(bottom.bounds.y.fract(), 0.0);
+
+        let doubled = Scrim::top().picture(&canvas, 2.0).expect("the top scrim");
+        assert_eq!(doubled.alphas().len(), 1052);
+        assert_eq!(doubled.bounds.height, 526.0);
+    }
+
+    /// Both scrims of one surface are the pictures its two scrims resolve to,
+    /// however many times they are asked for.
+    #[test]
+    fn the_scrims_of_one_surface_are_its_two_pictures() {
+        let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
+        let scrims = Scrims::for_canvas(&canvas, 1.0);
+        for (held, scrim) in [(scrims.top, Scrim::top()), (scrims.bottom, Scrim::bottom())] {
+            let held = held.expect("a scrim with rows");
+            let fresh = scrim.picture(&canvas, 1.0).expect("a scrim with rows");
+            assert_eq!(held.bounds, fresh.bounds);
+            assert_eq!(held.alphas(), fresh.alphas());
+            assert!(held.alphas().iter().any(|alpha| *alpha > 0));
+        }
+    }
+
+    /// A scale of nothing would divide every row of the picture away, so it
+    /// makes no picture.
+    #[test]
+    fn a_scale_of_nothing_makes_no_picture() {
+        assert!(Scrim::top().picture(&Canvas::default(), 0.0).is_none());
     }
 
     /// A band with no rows in it is left out, so a scrim whose plateau falls

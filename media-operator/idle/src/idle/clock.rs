@@ -27,14 +27,18 @@ pub fn draw(frame: &mut Frame, layout: &Layout, _unit: &Unit, _at: f64, light: f
 
 /// The second the clock next changes, for [`super::Idle::next_frame`].
 ///
-/// The reading turns at a minute, and the answer is the next whole second.
-/// The harness counts its clock from the first frame, and the wall clock's
-/// minute lands anywhere inside that second, so a screen that woke once a
-/// minute would draw the new minute up to a second late. The second is also
-/// the backstop on every wait: a bus delivery wakes the loop itself, and
-/// this bound is what still reads the broker if that wake ever fails.
-pub fn next_frame(at: f64) -> f64 {
-    at.floor() + 1.0
+/// The reading shows hours and minutes, so it changes when the wall clock's
+/// minute turns and at no other time. `into_minute` is how far the wall clock
+/// is into its minute at `at`, and the answer is the second on the screen's
+/// own clock where that minute ends, so a settled screen draws once a
+/// minute. A frame every second would draw 59 identical frames a minute, and
+/// each one wakes the GPU on a machine with nothing else to do.
+///
+/// The harness wakes more often than this to read the bus, and a wake with
+/// nothing due draws nothing. `harness::timeline::BACKSTOP` states that
+/// bound.
+pub fn next_frame(at: f64, into_minute: f64) -> f64 {
+    at + 60.0 - into_minute.clamp(0.0, 60.0)
 }
 
 #[cfg(test)]
@@ -43,10 +47,10 @@ mod tests {
     use iced_winit::core::Size;
 
     #[test]
-    fn the_next_frame_is_the_next_whole_second() {
-        assert_eq!(next_frame(0.0), 1.0);
-        assert_eq!(next_frame(0.25), 1.0);
-        assert_eq!(next_frame(11.75), 12.0);
+    fn the_next_frame_is_where_the_wall_clocks_minute_turns() {
+        assert_eq!(next_frame(0.0, 0.0), 60.0);
+        assert_eq!(next_frame(0.25, 45.25), 15.0);
+        assert_eq!(next_frame(11.75, 59.5), 12.25);
     }
 
     #[test]

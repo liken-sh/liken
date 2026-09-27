@@ -45,6 +45,10 @@ pub struct Client {
     /// The second of the frame being drawn. The view is a function of it, so
     /// the tick records it and every element reads it.
     at: f64,
+    /// How far the wall clock is into its minute. The clock reads it to name
+    /// the second its reading turns. It is a field so a test states the wall
+    /// clock instead of reading the real one.
+    wall: fn() -> f64,
 }
 
 impl Client {
@@ -65,6 +69,7 @@ impl Client {
             bus: bus.map(|reader| Box::new(reader) as Box<dyn Bus>),
             keys,
             at: 0.0,
+            wall: crate::clock::into_minute,
         }
     }
 
@@ -81,6 +86,7 @@ impl Client {
             unit: &self.unit,
             at: self.at,
             preview: self.keys.is_some(),
+            into_minute: (self.wall)(),
         }
     }
 
@@ -147,7 +153,7 @@ impl Screen for Client {
     }
 
     /// Hand the loop's waker to the reader, so a press on a controller shows
-    /// on the next frame rather than at the clock's next second.
+    /// on the next frame rather than on the harness's next backstop wake.
     fn wake_by(&mut self, wake: media_screen::Waker) {
         if let Some(bus) = &self.bus {
             bus.wake_on_delivery(wake);
@@ -179,9 +185,10 @@ impl Screen for Client {
 
     /// The second the screen next changes. The elements answer it, and the
     /// bus does not: a delivery wakes the loop itself through the waker, and
-    /// the reader drains in `pump` on every wake. The clock's next second is
-    /// the backstop bound on each wait, so the broker is still read at least
-    /// once a second if the wake ever fails.
+    /// the reader drains in `pump` on every wake. The harness bounds every
+    /// wait by its backstop, so the broker is still read at least once a
+    /// second if the wake ever fails, and a settled screen still draws only
+    /// when the clock's minute turns.
     fn next_frame(&self, at: f64) -> Option<f64> {
         self.screen().next_frame(at)
     }
@@ -261,13 +268,14 @@ mod tests {
     }
 
     #[test]
-    fn a_settled_client_still_asks_for_a_frame_every_second() {
+    fn a_settled_client_asks_for_a_frame_when_the_minute_turns() {
         let mut client = seeded();
+        client.wall = || 50.0;
         client.tick(7.25);
 
-        // The clock's next second bounds every wait, so a client that named
-        // no second would leave the loop with no timer to pump the bus on.
-        assert_eq!(client.next_frame(7.25), Some(8.0));
+        // The clock names the turn of the wall clock's minute, ten seconds
+        // on, and nothing else on a settled screen names a second before it.
+        assert_eq!(client.next_frame(7.25), Some(17.25));
     }
 
     #[test]
@@ -319,8 +327,9 @@ mod tests {
     #[test]
     fn the_clock_moves_without_the_bus() {
         let mut client = seeded();
+        client.wall = || 59.0;
         client.tick(3.5);
-        assert_eq!(client.next_frame(3.5), Some(4.0));
+        assert_eq!(client.next_frame(3.5), Some(4.5));
     }
 
     #[test]

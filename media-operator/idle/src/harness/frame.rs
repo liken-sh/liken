@@ -23,6 +23,16 @@ use super::{QUIT, Ready, Screen};
 pub const STEP: f64 = 1.0 / 60.0;
 
 impl<S: Screen> Ready<S> {
+    /// Hand one key from the keyboard to the screen, at the second it
+    /// arrived. A press lands between frames, and the screen folds it at the
+    /// second its clock reads, so the clock moves to now first.
+    pub(crate) fn keyboard(&mut self, name: &str) -> bool {
+        if let Some(start) = self.start {
+            self.screen.tick(start.elapsed().as_secs_f64());
+        }
+        self.press(name)
+    }
+
     /// Hand one key to the screen. The answer is true when the key ends the
     /// run. Both the keyboard and the script arrive here, so the key that
     /// ends a run is decided once for the two of them.
@@ -68,6 +78,12 @@ impl<S: Screen> Ready<S> {
 
         self.drawn = at;
 
+        // The clock moves before the script's keys, so a key folds at this
+        // frame's second. A settled screen draws once a minute, and a key
+        // stamped with the second of the frame before it would start its
+        // motion up to a minute in the past, with every ease already over.
+        self.screen.tick(at);
+
         for key in self.timeline.due(at) {
             if self.press(&key) {
                 self.stop(event_loop);
@@ -75,7 +91,6 @@ impl<S: Screen> Ready<S> {
             }
         }
 
-        self.screen.tick(at);
         #[cfg(feature = "measure")]
         if let Some(stats) = &mut self.stats {
             stats.sample_rss(at);
@@ -242,10 +257,14 @@ impl<S: Screen> Ready<S> {
                 event_loop.set_control_flow(ControlFlow::Poll);
                 self.graphics.window.request_redraw();
             }
+            // The loop wakes at the backstop on the way to a frame that is
+            // far off, and that wake pumps the sources and draws nothing
+            // unless a fold made the glass stale. The screen's second stays
+            // held, so the frame it names is drawn when the clock reaches it.
             Wake::At(next) => {
                 self.scheduled = screen_next;
                 event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    start + std::time::Duration::from_secs_f64(next),
+                    start + std::time::Duration::from_secs_f64(timeline::sleep_until(at, next)),
                 ));
             }
             Wake::Never => event_loop.set_control_flow(ControlFlow::Wait),

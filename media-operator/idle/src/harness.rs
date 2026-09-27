@@ -343,7 +343,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state.is_pressed()
                     && let Some(name) = key_name(&event.logical_key)
-                    && ready.press(&name)
+                    && ready.keyboard(&name)
                 {
                     ready.stop(event_loop);
                     return;

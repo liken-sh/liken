@@ -54,6 +54,8 @@ pub enum Message {
     Minute,
     /// The surface the compositor configured, as the window reports it.
     Resized(Size),
+    /// The window's scale factor, the output pixels one logical pixel covers.
+    Rescaled(f32),
     /// The idle window ran out. The count says which summon armed it, so a
     /// window a later summon replaced dismisses nothing.
     Hide(u64),
@@ -134,7 +136,10 @@ pub struct Display {
     /// The surface the compositor configured, which the window reports and
     /// every decode and every snap reads.
     canvas: Canvas,
-    /// The scrims for that surface, resolved once per size.
+    /// The window's scale factor, which the scrims and the shapes read to
+    /// draw at output pixels.
+    density: f32,
+    /// The scrims for that surface, resolved once per size and scale factor.
     scrims: Scrims,
     /// What the socket reader needs to tell whether one position push moves
     /// anything on screen.
@@ -186,7 +191,8 @@ impl Display {
             started: Instant::now(),
             signature: None,
             canvas,
-            scrims: Scrims::for_canvas(&canvas),
+            density: 1.0,
+            scrims: Scrims::for_canvas(&canvas, 1.0),
             watching,
             below: canvas::Cache::new(),
             above: canvas::Cache::new(),
@@ -224,6 +230,7 @@ impl Display {
             // nothing else moves on a minute.
             Message::Minute => self.redraw_below(),
             Message::Resized(size) => self.on_resize(size),
+            Message::Rescaled(density) => self.on_rescale(density),
             Message::Hide(at) if self.idle.expired(at) => {
                 // A held key whose display hid is a hold that ended.
                 let ended = self.record.settle();
@@ -266,7 +273,20 @@ impl Display {
             return;
         }
         self.canvas = canvas;
-        self.scrims = Scrims::for_canvas(&canvas);
+        self.scrims = Scrims::for_canvas(&canvas, self.density);
+        self.redraw();
+    }
+
+    /// The window moved to an output with another scale factor, or learned
+    /// its first one. The scrims are resolved again, so each of their rows
+    /// still covers one output row. A factor of nothing or less would divide
+    /// every row away, so it changes nothing.
+    fn on_rescale(&mut self, density: f32) {
+        if density.is_nan() || density <= 0.0 || density == self.density {
+            return;
+        }
+        self.density = density;
+        self.scrims = Scrims::for_canvas(&self.canvas, density);
         self.redraw();
     }
 
@@ -543,7 +563,9 @@ impl Display {
             logo.draw(brush, art::logo_at(&canvas));
         }
         if !head.is_empty() || !reading.is_empty() {
-            brush.scrim(&self.scrims.top);
+            if let Some(top) = &self.scrims.top {
+                brush.scrim(top);
+            }
             for line in head.into_iter().chain(reading) {
                 brush.text(line);
             }
@@ -566,7 +588,9 @@ impl Display {
         if bar.is_some() || !counter.is_empty() || !strip.is_empty() {
             // The bottom scrim backs the scrubber and the strip, drawn before
             // them so their text is on top.
-            brush.scrim(&self.scrims.bottom);
+            if let Some(bottom) = &self.scrims.bottom {
+                brush.scrim(bottom);
+            }
             if let Some(bar) = bar.as_ref() {
                 self.scrubber.draw(brush, bar);
             }
@@ -672,6 +696,12 @@ impl Display {
         let mut running = vec![
             mpv,
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
+            iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Window(iced::window::Event::Rescaled(density)) => {
+                    Some(Message::Rescaled(density))
+                }
+                _ => None,
+            }),
         ];
         if self.fading() {
             running.push(iced::time::every(theme::FADE_TICK).map(|_| Message::Tick));
@@ -894,11 +924,12 @@ impl canvas::Program<Message> for Layer<'_> {
         };
         vec![cache.draw(renderer, bounds.size(), |frame| {
             frame.scale(canvas.scale());
-            let mut brush = Brush::new(frame, canvas, fade);
+            let mut brush = Brush::new(frame, canvas, fade, self.display.density);
             match now {
                 Some(now) => self.display.paint_below(&mut brush, &now),
                 None => self.display.paint_above(&mut brush),
             }
+            brush.finish();
         })]
     }
 }
@@ -922,6 +953,7 @@ pub fn run(ipc: Ipc) -> iced::Result {
                 iced::window::oldest().and_then(|id| {
                     iced::window::enable_mouse_passthrough(id)
                         .chain(iced::window::size(id).map(Message::Resized))
+                        .chain(iced::window::scale_factor(id).map(Message::Rescaled))
                 }),
             )
         },
@@ -949,6 +981,12 @@ pub fn run(ipc: Ipc) -> iced::Result {
     .font(liken_iced::font::ITALIC_OTF)
     .default_font(liken_iced::font::REGULAR)
     .title("liken display")
+    // Every shape reaches the frame as a picture the brush rasterized with
+    // its edges antialiased, so the frame holds no mesh to multisample.
+    // With this on, the toolkit renders each layer that holds a mesh into a
+    // multisampled target the size of the whole window, and the window
+    // covers the whole screen.
+    .antialiasing(false)
     .run()
 }
 
@@ -1132,17 +1170,36 @@ mod tests {
     #[tokio::test]
     async fn a_resize_resolves_the_scrims_for_the_new_surface() {
         let (mut display, _) = display();
-        let bands = display.scrims.clone();
-        assert!(
-            bands
-                .top
-                .iter()
-                .any(|band| band.stops.iter().any(|alpha| *alpha > 0.0))
-        );
+        let bounds =
+            |display: &Display| display.scrims.bottom.as_ref().map(|picture| picture.bounds);
+        let before = bounds(&display);
+        assert!(before.is_some());
 
         let _ = display.update(Message::Resized(Size::new(1280.0, 720.0)));
         assert_eq!(display.canvas, Canvas::for_output(Size::new(1280.0, 720.0)));
-        assert_ne!(display.scrims, bands);
+        assert_ne!(bounds(&display), before);
+    }
+
+    /// A window at twice the scale resolves each scrim at twice the rows, so
+    /// every row still covers one output row, and a factor of nothing changes
+    /// nothing.
+    #[tokio::test]
+    async fn a_rescale_resolves_the_scrims_at_the_new_density() {
+        let (mut display, _) = display();
+        let rows = |display: &Display| {
+            display
+                .scrims
+                .top
+                .as_ref()
+                .map_or(0, |picture| picture.alphas().len())
+        };
+        let single = rows(&display);
+
+        let _ = display.update(Message::Rescaled(2.0));
+        assert_eq!(rows(&display), single * 2);
+
+        let _ = display.update(Message::Rescaled(0.0));
+        assert_eq!(rows(&display), single * 2);
     }
 
     /// A frame of playback that moves nothing redraws nothing, and a whole

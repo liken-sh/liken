@@ -90,3 +90,13 @@ tokio = { version = "=1.48.0", default-features = false, features = [
 # with the same crate; this one turns tls on, because a logo the Play
 # names is a URL on the internet, and leaves the rest of the defaults off.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+# tiny-skia rasterizes every shape the display draws, with its edges
+# antialiased, into a picture the frame draws. The toolkit's own
+# antialiasing multisamples a target the size of the whole window for
+# every layer that holds a shape, and a picture costs one texture read per
+# pixel it covers. winit already builds this version with these features
+# for its window decorations, so the build compiles nothing new.
+tiny-skia = { version = "=0.11.4", default-features = false, features = [
+    "std",
+    "simd",
+] }

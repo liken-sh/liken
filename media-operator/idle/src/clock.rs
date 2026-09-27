@@ -7,8 +7,8 @@
 // states a zone, so the clock shows the household's own hour. A pod with no
 // zone reads UTC.
 
-/// A wall-clock reading, to the minute. The screen redraws once a second so the
-/// minute turns.
+/// A wall-clock reading, to the minute. The screen redraws when the minute
+/// turns, and at no other time for the clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Time {
     pub hour: u8,
@@ -22,6 +22,14 @@ pub fn now() -> Time {
         hour: now.hour() as u8,
         minute: now.minute() as u8,
     }
+}
+
+/// How far the wall clock is into its current minute, in seconds with the
+/// fraction. The screen's clock counts from its first frame and not from the
+/// wall clock, so this is what tells it when the next minute turns.
+pub fn into_minute() -> f64 {
+    let now = jiff::Zoned::now();
+    f64::from(now.second()) + f64::from(now.subsec_nanosecond()) / 1e9
 }
 
 impl Time {
@@ -55,6 +63,12 @@ mod tests {
     fn the_morning_reads_the_same_way() {
         assert_eq!(at(9, 30), "9:30 am");
         assert_eq!(at(11, 59), "11:59 am");
+    }
+
+    #[test]
+    fn the_wall_clock_is_always_inside_its_minute() {
+        let into = into_minute();
+        assert!((0.0..60.0).contains(&into), "{into}");
     }
 
     #[test]

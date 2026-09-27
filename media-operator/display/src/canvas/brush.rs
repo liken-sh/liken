@@ -10,10 +10,11 @@ use iced::advanced::graphics::text::Paragraph;
 use iced::advanced::image::{FilterMethod, Handle, Image};
 use iced::advanced::text::{self, LineHeight, Paragraph as _, Shaping, Wrapping};
 use iced::alignment::Vertical;
-use iced::widget::canvas::{Fill, Frame, Path, Stroke, Style, Text};
+use iced::widget::canvas::{Frame, Path, Text};
 use iced::{Color, Pixels, Point, Rectangle, Size};
 
-use super::{Band, Canvas, shape};
+use super::raster::{Paint, raster};
+use super::{Canvas, Picture, shape};
 use crate::theme;
 
 /// Where a line's position falls on the line, in the ASS anchors the display
@@ -187,18 +188,41 @@ fn cut(content: &str, size: f32, room: f32) -> String {
 // The frame, the canvas, and the fade, as the modules draw through them.
 // Every module draws with a brush and none touches the frame, so the
 // mapping to output pixels and the fade apply once, here.
+//
+// A brush draws every shape as a picture that `raster` makes, so the frame
+// holds pictures and text and no mesh, and the toolkit runs no
+// multisampled pass for it. A decoded picture, such as the logo or the
+// tile, lands over every shape in its layer, whatever order the calls come
+// in: the brush draws each shape and each scrim as the call arrives, holds
+// the decoded pictures back, and draws them after every shape when the
+// layer is finished.
 pub struct Brush<'a> {
     frame: &'a mut Frame,
     canvas: Canvas,
     fade: f32,
+    /// The window's scale factor, which the rasters and the scrims read to
+    /// draw at output pixels.
+    density: f32,
+    /// The decoded pictures this layer draws after its shapes.
+    pictures: Vec<(Rectangle, Image)>,
 }
 
 impl<'a> Brush<'a> {
-    pub fn new(frame: &'a mut Frame, canvas: Canvas, fade: f32) -> Self {
+    pub fn new(frame: &'a mut Frame, canvas: Canvas, fade: f32, density: f32) -> Self {
         Self {
             frame,
             canvas,
             fade,
+            density,
+            pictures: Vec::new(),
+        }
+    }
+
+    /// Draw the decoded pictures the layer held back, over every shape it
+    /// drew. A layer that is not finished draws no picture.
+    pub fn finish(self) {
+        for (bounds, picture) in self.pictures {
+            self.frame.draw_image(bounds, picture);
         }
     }
 
@@ -208,14 +232,14 @@ impl<'a> Brush<'a> {
         self.canvas
     }
 
-    // One scrim, as the bands the canvas resolved it into. It draws a
-    // gradient of its own rather than a fill of one color, because a blurred
-    // shape is a gradient once it is drawn.
-    pub fn scrim(&mut self, bands: &[Band]) {
-        let (canvas, fade) = (self.canvas, self.fade);
-        for band in bands {
-            band.draw(self.frame, &canvas, fade);
-        }
+    // One scrim, as the picture the canvas resolved it into. It draws as the
+    // call arrives, the way a shape does and a decoded picture does not, so
+    // the shapes drawn after it land over it and so does every line of text.
+    // It takes the brush's fade and no filtering, so each of its rows lands on
+    // the output row it was resolved for.
+    pub fn scrim(&mut self, scrim: &Picture) {
+        self.frame
+            .draw_image(scrim.bounds, picture(&scrim.handle, self.fade));
     }
 
     // How far the fade has moved, from 0 clear to 1 full.
@@ -231,23 +255,27 @@ impl<'a> Brush<'a> {
             frame: &mut *self.frame,
             canvas: self.canvas,
             fade,
+            density: self.density,
+            pictures: Vec::new(),
         };
         draw(&mut inner);
+        let held = inner.pictures;
+        self.pictures.extend(held);
     }
 
     pub fn rect(&mut self, shape: Rectangle, color: Color) {
-        self.frame.fill_rectangle(
-            Point::new(shape.x, shape.y),
-            Size::new(shape.width, shape.height),
-            theme::faded(color, self.fade),
+        self.paint(
+            &Path::rectangle(
+                Point::new(shape.x, shape.y),
+                Size::new(shape.width, shape.height),
+            ),
+            Paint::Fill,
+            color,
         );
     }
 
     pub fn rounded(&mut self, shape: Rectangle, radius: f32, color: Color) {
-        self.frame.fill(
-            &shape::rounded(shape, radius),
-            theme::faded(color, self.fade),
-        );
+        self.paint(&shape::rounded(shape, radius), Paint::Fill, color);
     }
 
     // One hexagon inside its own border. The border draws first and the fill
@@ -262,17 +290,13 @@ impl<'a> Brush<'a> {
     ) {
         if border > 0.0 {
             let (outline, grown) = shape::outside_hexagon(at, radius, border);
-            self.frame.stroke(
+            self.paint(
                 &shape::hexagon(outline, grown),
-                Stroke {
-                    width: border,
-                    style: Style::Solid(theme::faded(border_color, self.fade)),
-                    ..Stroke::default()
-                },
+                Paint::Stroke(border),
+                border_color,
             );
         }
-        self.frame
-            .fill(&shape::hexagon(at, radius), theme::faded(color, self.fade));
+        self.paint(&shape::hexagon(at, radius), Paint::Fill, color);
     }
 
     /// A menu panel: a faint dark fill inside a solid green border, so a
@@ -282,23 +306,15 @@ impl<'a> Brush<'a> {
     // The panel fades with everything else.
     pub fn panel(&mut self, shape: Rectangle) {
         let (outline, radius) = shape::outside_rounded(shape, PANEL_RADIUS, PANEL_BORDER);
-        self.frame.stroke(
+        self.paint(
             &shape::rounded(outline, radius),
-            Stroke {
-                width: PANEL_BORDER,
-                style: Style::Solid(theme::faded(
-                    theme::at(theme::color::fill(), theme::alpha::OPAQUE),
-                    self.fade,
-                )),
-                ..Stroke::default()
-            },
+            Paint::Stroke(PANEL_BORDER),
+            theme::at(theme::color::fill(), theme::alpha::OPAQUE),
         );
-        self.frame.fill(
+        self.paint(
             &shape::rounded(shape, PANEL_RADIUS),
-            Fill::from(theme::faded(
-                theme::at(theme::color::SHADOW, theme::alpha::PANEL),
-                self.fade,
-            )),
+            Paint::Fill,
+            theme::at(theme::color::SHADOW, theme::alpha::PANEL),
         );
     }
 
@@ -306,7 +322,7 @@ impl<'a> Brush<'a> {
     /// cover, such as the volume glyph. The path is already where it stands,
     /// and the mark takes the same fade every other shape takes.
     pub fn shape(&mut self, path: &Path, color: Color) {
-        self.frame.fill(path, theme::faded(color, self.fade));
+        self.paint(path, Paint::Fill, color);
     }
 
     /// The same mark inside a border, so a mark over another mark in the same
@@ -314,15 +330,28 @@ impl<'a> Brush<'a> {
     /// the toolkit centers a stroke on its path, so the stroke runs at twice
     /// the width and the fill covers the half that falls inside.
     pub fn bordered(&mut self, path: &Path, color: Color, border: f32, border_color: Color) {
-        self.frame.stroke(
-            path,
-            Stroke {
-                width: border * 2.0,
-                style: Style::Solid(theme::faded(border_color, self.fade)),
-                ..Stroke::default()
-            },
-        );
+        self.paint(path, Paint::Stroke(border * 2.0), border_color);
         self.shape(path, color);
+    }
+
+    // One shape in one colour, as the bands of its raster. The raster holds
+    // the colour at full strength, and the colour's alpha and the fade scale
+    // the bands as they draw, which is the alpha a mesh in the same colour
+    // would have covered its pixels with.
+    fn paint(&mut self, path: &Path, paint: Paint, color: Color) {
+        let alpha = color.a * self.fade;
+        if alpha <= 0.0 {
+            return;
+        }
+        for band in raster(path, paint, color, self.canvas.scale(), self.density) {
+            self.frame.draw_image(
+                band.bounds,
+                Image::new(band.handle)
+                    .filter_method(FilterMethod::Nearest)
+                    .opacity(alpha)
+                    .snap(true),
+            );
+        }
     }
 
     // One decoded picture over the ground it covers. The display decodes every
@@ -336,10 +365,11 @@ impl<'a> Brush<'a> {
     // with the OSD down, and it draws at a fade of its own.
     //
     // A picture draws over every shape in its layer and under every line of
-    // text, whatever order the calls come in, because the renderer draws one
-    // layer in four passes: quads, then meshes, then images, then text.
+    // text, whatever order the calls come in: the brush holds it back until
+    // the layer is finished, and the renderer draws every line of text after
+    // every picture.
     pub fn image(&mut self, bounds: Rectangle, handle: &Handle) {
-        self.frame.draw_image(bounds, picture(handle, self.fade));
+        self.pictures.push((bounds, picture(handle, self.fade)));
     }
 
     /// One line of text. The scrim holds the contrast, so a line draws flat,

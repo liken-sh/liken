@@ -101,6 +101,9 @@ pub struct Idle<'a> {
     /// Whether the preview keys are bound, which only a workstation does. The
     /// legend draws under it, so a cluster's idle screen never carries one.
     pub preview: bool,
+    /// How far the wall clock is into its minute, in seconds, which tells the
+    /// clock when its reading next turns.
+    pub into_minute: f64,
 }
 
 impl Idle<'_> {
@@ -113,19 +116,18 @@ impl Idle<'_> {
     /// drawing, so a change to an ease changes the schedule with it. Most of
     /// them ease or they are still: an ease asks to draw now, and a settled
     /// element states nothing. The clock and the volume row are the two that
-    /// name a second ahead.
+    /// name a second ahead, and the clock's is the turn of the minute.
     ///
     /// Two of the elements `draw` lists answer through another. The activity
     /// line takes its opacity from the energy, and the preview legend draws
     /// one fixed run of text.
     ///
-    /// The clock always names one, so this is never `None`. That matters
-    /// because the client drains the broker in `tick`, and `tick` runs on a
-    /// frame: a screen that answered `None` would sleep until an event that
-    /// only a frame could read.
+    /// The clock always names one, so this is never `None`. The harness
+    /// sleeps toward it and wakes on its own backstop in between to read the
+    /// bus.
     pub fn next_frame(&self, at: f64) -> Option<f64> {
         [
-            Some(clock::next_frame(at)),
+            Some(clock::next_frame(at, self.into_minute)),
             mark::next_frame(self.unit, at),
             energy::next_frame(self.unit, at),
             shade::next_frame(self.unit, at),
@@ -198,20 +200,22 @@ mod tests {
         assert_eq!(tall.mark_span(), tall.width / 3.0);
     }
 
-    /// The screen one unit draws, with no preview keys bound.
-    fn screen(unit: &Unit) -> Idle<'_> {
+    /// The screen one unit draws, with no preview keys bound, when the wall
+    /// clock is `into_minute` seconds into its minute.
+    fn screen(unit: &Unit, into_minute: f64) -> Idle<'_> {
         Idle {
             unit,
             at: 0.0,
             preview: false,
+            into_minute,
         }
     }
 
     #[test]
-    fn a_settled_screen_draws_once_a_second_for_the_clock() {
+    fn a_settled_screen_draws_when_the_minute_turns() {
         let unit = Unit::default();
-        assert_eq!(screen(&unit).next_frame(0.0), Some(1.0));
-        assert_eq!(screen(&unit).next_frame(11.75), Some(12.0));
+        assert_eq!(screen(&unit, 30.0).next_frame(0.0), Some(30.0));
+        assert_eq!(screen(&unit, 59.5).next_frame(11.75), Some(12.25));
     }
 
     #[test]
@@ -220,13 +224,14 @@ mod tests {
         unit.fold(Moment::Sleep, 10.0);
 
         // The shade eases for four seconds, and a second at or before `at`
-        // asks the harness to draw now.
-        assert_eq!(screen(&unit).next_frame(10.5), Some(10.5));
-        assert_eq!(screen(&unit).next_frame(14.5), Some(15.0));
+        // asks the harness to draw now. Once it settles, the clock's minute
+        // is the next change.
+        assert_eq!(screen(&unit, 0.0).next_frame(10.5), Some(10.5));
+        assert_eq!(screen(&unit, 50.0).next_frame(14.5), Some(24.5));
     }
 
     #[test]
-    fn the_volume_rows_hold_never_outruns_the_clock() {
+    fn the_screen_takes_the_nearer_of_the_volume_row_and_the_clock() {
         let mut unit = Unit::default();
         unit.fold(
             Moment::Level {
@@ -240,8 +245,10 @@ mod tests {
         );
 
         // The row names 14.0, the second it starts to leave, and the clock
-        // names the second after `at`. The screen takes the nearer of the two.
-        assert_eq!(screen(&unit).next_frame(11.5), Some(12.0));
+        // names the turn of its minute. The screen takes the nearer of the
+        // two.
+        assert_eq!(screen(&unit, 59.0).next_frame(11.5), Some(12.5));
+        assert_eq!(screen(&unit, 10.0).next_frame(11.5), Some(14.0));
     }
 
     #[test]

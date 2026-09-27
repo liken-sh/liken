@@ -57,12 +57,21 @@ impl Timeline {
     }
 }
 
+/// The longest the loop sleeps between two reads of the screen's sources, in
+/// seconds. A delivery from the bus wakes the loop through the waker the
+/// screen holds, and this bound is what still reads the broker if that wake
+/// ever fails. A wake at the bound with nothing due draws no frame, so a
+/// screen that changes once a minute still draws once a minute.
+pub const BACKSTOP: f64 = 1.0;
+
 /// What the loop does until it draws again.
 #[derive(Debug, PartialEq)]
 pub enum Wake {
     /// Draw now, and take the next pass of the loop as soon as it comes.
     Now,
-    /// Draw at this second on the screen's clock, and sleep until then.
+    /// Draw at this second on the screen's clock. The loop sleeps toward it
+    /// no longer than [`sleep_until`] allows, and reads the sources on each
+    /// wake on the way.
     At(f64),
     /// Draw when an event arrives, and on nothing else.
     Never,
@@ -90,6 +99,12 @@ pub fn wake(immediate: bool, at: f64, next: Option<f64>) -> Wake {
         Some(_) => Wake::Now,
         None => Wake::Never,
     }
+}
+
+/// The second the loop sleeps until on its way to a frame due at `next`:
+/// that second, or one [`BACKSTOP`] after `at`, whichever comes first.
+pub fn sleep_until(at: f64, next: f64) -> f64 {
+    next.min(at + BACKSTOP)
 }
 
 #[cfg(test)]
@@ -169,6 +184,12 @@ mod tests {
     fn a_screen_that_has_changed_draws_now() {
         assert_eq!(wake(false, 4.0, Some(4.0)), Wake::Now);
         assert_eq!(wake(false, 4.0, Some(3.5)), Wake::Now);
+    }
+
+    #[test]
+    fn a_frame_far_off_sleeps_no_longer_than_the_backstop() {
+        assert_eq!(sleep_until(4.0, 60.0), 4.0 + BACKSTOP);
+        assert_eq!(sleep_until(4.0, 4.5), 4.5);
     }
 
     #[test]
