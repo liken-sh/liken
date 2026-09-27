@@ -252,7 +252,11 @@ func TestAReadOnlyClaimReportsOnEveryPodAndOnTheClaim(t *testing.T) {
 	if err := os.RemoveAll(source); err != nil {
 		t.Fatalf("removing the forge: %v", err)
 	}
-	loop := followerOf(answering, url)
+	// The node's own loop, because a loop records the health only of a
+	// volume it holds.
+	answering.mu.Lock()
+	loop := answering.loopOf(held)
+	answering.mu.Unlock()
 	loop.refresh(t.Context(), held)
 
 	pods, claims := 0, 0

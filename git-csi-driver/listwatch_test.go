@@ -285,6 +285,25 @@ func TestTheLoopWaitsWhereTheWatchGuardsSay(t *testing.T) {
 	}
 }
 
+func TestA410AfterAWatchThatRanASecondListsAtOnce(t *testing.T) {
+	s := &script{answers: []func() (watch.Interface, error){
+		refusedWatch(apierrors.NewResourceExpired("too old resource version")),
+		// The watch on the fresh list runs longer than a second before
+		// its 410, so that 410 is a first one again.
+		func() (watch.Interface, error) {
+			sent := watch.NewFake()
+			time.AfterFunc(1100*time.Millisecond, func() { sent.Action(watch.Error, gone().Object) })
+			return sent, nil
+		},
+	}}
+	heldFor(t, scripted(io.Discard, newMetrics(), s), 1500*time.Millisecond)
+
+	if s.lists != 3 || len(s.watches) != 3 {
+		t.Errorf("the loop listed %d times and watched %d times, want 3 and 3",
+			s.lists, len(s.watches))
+	}
+}
+
 func TestAWatchThatRanASecondResumesAtOnce(t *testing.T) {
 	s := &script{answers: []func() (watch.Interface, error){
 		func() (watch.Interface, error) {

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -91,9 +92,13 @@ func (f *follower) add(mounting *volume) {
 	f.nudge()
 }
 
+// remove takes the volume off the loop, and off the demands that wait
+// for a pass. A pass after this never counts, notes, or wants the
+// volume again, so a series the unstage deletes stays deleted.
 func (f *follower) remove(published *volume) int {
 	f.mu.Lock()
 	delete(f.volumes, published.id)
+	delete(f.wanted, published.id)
 	left := len(f.volumes)
 	f.mu.Unlock()
 	f.nudge()
@@ -203,19 +208,36 @@ func (f *follower) tick(ctx context.Context) bool {
 			held.answerDemandsBefore(now)
 			continue
 		}
-		if wanted[held.id] != nil {
-			f.want(held)
+		if wanted[held.id] != nil && f.wantAgain(held) {
 			failed = true
 		}
 	}
 	return failed
 }
 
-// want records a volume a demand named that no fetch has answered.
-func (f *follower) want(held *volume) {
+// wantAgain puts a volume whose demanded fetch failed back on the
+// demands that wait for a pass, and reports whether it did. A volume
+// the node removed during the fetch is not put back.
+func (f *follower) wantAgain(held *volume) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.volumes[held.id] != held {
+		return false
+	}
 	f.wanted[held.id] = held
+	return true
+}
+
+// noteHealth records the volume's health, only while the volume is on
+// the loop. The check and the note hold the loop's lock, so an unstage
+// that removes the volume either comes after the note and deletes the
+// series, or comes before and the note does not write it.
+func (f *follower) noteHealth(ctx context.Context, held *volume) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.volumes[held.id] == held {
+		f.node.noteHealth(ctx, held)
+	}
 }
 
 // settle sets the retry after a pass. A pass whose demanded fetch
@@ -229,7 +251,18 @@ func (f *follower) settle(failed bool, retry *time.Timer) {
 		return
 	}
 	f.backoff = min(max(2*f.backoff, f.node.demandMin), maxDemandRetry)
-	retry.Reset(f.backoff)
+	retry.Reset(jittered(f.backoff))
+}
+
+// jittered is the backoff plus a random part of up to half of it.
+// Every node that fetches a repository fails when its remote does, and
+// the same doubling would retry them all at the same moment when it
+// comes back.
+func jittered(backoff time.Duration) time.Duration {
+	if backoff < 2 {
+		return backoff
+	}
+	return backoff + rand.N(backoff/2)
 }
 
 func (f *follower) snapshot() []*volume {
@@ -250,7 +283,7 @@ func (f *follower) snapshot() []*volume {
 // the gauge and the log take the answer here, once, rather than at each
 // of them.
 func (f *follower) refresh(ctx context.Context, held *volume) bool {
-	defer f.node.noteHealth(ctx, held)
+	defer f.noteHealth(ctx, held)
 	env, remove, err := held.credentials.use(held.directory)
 	if err != nil {
 		f.trouble(ctx, held, err.Error())

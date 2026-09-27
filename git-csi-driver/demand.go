@@ -224,10 +224,22 @@ func (n *node) loopOf(held *volume) *follower {
 // channel has one slot and the send never blocks, so a burst of demands
 // never waits on a loop that is fetching.
 func (f *follower) demand(held *volume) {
-	held.reportDemanded(time.Now())
 	f.mu.Lock()
+	if f.volumes[held.id] != held {
+		// The unstage took the volume off the loop after the node
+		// found it.
+		f.mu.Unlock()
+		return
+	}
+	if f.wanted[held.id] == nil {
+		// One count for each volume a pass takes a demand for. Further
+		// demands before that pass, and the passes that fetch again
+		// after a failure, add no count.
+		f.node.readings.demanded(held)
+	}
 	f.wanted[held.id] = held
 	f.mu.Unlock()
+	held.reportDemanded(time.Now())
 	select {
 	case f.demanded <- struct{}{}:
 	default:
@@ -246,18 +258,14 @@ func (f *follower) demandWait(now time.Time) time.Duration {
 	return f.node.demandMin - now.Sub(f.lastPull)
 }
 
-// answered records when the pass ran and counts one demanded pull for
-// every volume a demand named since the last pass, and returns those
-// volumes.
+// answered records when the pass ran, and takes and returns the
+// volumes a demand named since the last pass.
 func (f *follower) answered(at time.Time) map[string]*volume {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	wanted := f.wanted
 	f.wanted = map[string]*volume{}
 	f.lastPull = at
-	f.mu.Unlock()
-	for _, held := range wanted {
-		f.node.readings.demanded(held)
-	}
 	return wanted
 }
 

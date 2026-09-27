@@ -413,8 +413,13 @@ func TestTheSameDemandReadTwiceIsActedOnOnce(t *testing.T) {
 }
 
 func TestADemandOnALoopThatIsAlreadyWokenWaitsForThatPass(t *testing.T) {
-	loop := &follower{demanded: make(chan struct{}, 1), wanted: map[string]*volume{}}
 	held := &volume{id: "franchises"}
+	loop := &follower{
+		node:     &node{},
+		demanded: make(chan struct{}, 1),
+		volumes:  map[string]*volume{held.id: held},
+		wanted:   map[string]*volume{},
+	}
 
 	loop.demand(held)
 	loop.demand(held)
