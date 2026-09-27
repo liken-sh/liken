@@ -113,12 +113,12 @@ spec:
                   properties:
                     backlight:
                       type: string
-                      enum: ["off"]
-                      description: "Hold the panel dark at brightness zero."
+                      enum: ["off", "Off"]
+                      description: "Hold the panel dark at brightness zero. Both spellings of off hold the panel the same way."
                     power:
                       type: string
-                      enum: ["off"]
-                      description: "Hold the panel powered down. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes."
+                      enum: ["off", "Off"]
+                      description: "Hold the panel powered down. Both spellings of off hold the panel the same way. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes."
                   x-kubernetes-validations:
                     - rule: "!(has(self.backlight) && has(self.power))"
                       message: "An override states backlight or power, and not both."

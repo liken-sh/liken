@@ -280,7 +280,9 @@ when the panel holds another value, and reads it back. A readback
 that disagrees fails the claim, because a panel acknowledges a write
 whether it applies the value or not.
 
-`power` takes two values. `on` powers the panel on at prepare and
+`power` takes two values, each in two spellings: `on` or `On`, and
+`onWhileClaimed` or `OnWhileClaimed`. The two spellings of a value
+have the same meaning. `on` powers the panel on at prepare and
 never touches it again. `onWhileClaimed` also powers the panel back
 down 30 seconds after the claim ends, for a claimant that owns the
 screen outright. A `Deployment` that replaces its pod ends one claim

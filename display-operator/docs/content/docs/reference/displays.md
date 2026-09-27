@@ -77,8 +77,8 @@ A temporary layer above the resting settings. When a writer adds this block, the
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specoverride--backlight"></span>`backlight` | string | no | Hold the panel dark at brightness zero. One of: `off`. |
-| <span id="specoverride--power"></span>`power` | string | no | Hold the panel powered down. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes. One of: `off`. |
+| <span id="specoverride--backlight"></span>`backlight` | string | no | Hold the panel dark at brightness zero. Both spellings of off hold the panel the same way. One of: `off`, `Off`. |
+| <span id="specoverride--power"></span>`power` | string | no | Hold the panel powered down. Both spellings of off hold the panel the same way. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes. One of: `off`, `Off`. |
 
 ## status
 

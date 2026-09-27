@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -49,6 +50,14 @@ const (
 // The one value each override field takes. The block states
 // what the panel is held at, and its absence is what lifts it.
 const overrideOff = "off"
+
+// Whether an override field states off. The CRD accepts the value in
+// two spellings, "off" and "Off", because an override can hold either
+// one, depending on the build of the writer that made it. Both hold
+// the panel the same way.
+func overrideStatesOff(value string) bool {
+	return strings.EqualFold(value, overrideOff)
+}
 
 type Display struct {
 	APIVersion string        `json:"apiVersion,omitempty"`
@@ -247,10 +256,10 @@ func (s DisplaySpec) override() (string, bool) {
 	if s.Override == nil {
 		return "", false
 	}
-	if s.Override.Power == overrideOff {
+	if overrideStatesOff(s.Override.Power) {
 		return powerControl, true
 	}
-	if s.Override.Backlight == overrideOff {
+	if overrideStatesOff(s.Override.Backlight) {
 		return brightnessControl, true
 	}
 	return "", false

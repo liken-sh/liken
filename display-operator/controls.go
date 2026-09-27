@@ -79,6 +79,17 @@ const (
 	powerOnWhileClaimed = "onWhileClaimed"
 )
 
+// Each power value has two spellings, the lowercase word and its
+// PascalCase form. A claim can hold either one, depending on the build
+// of the writer that made it, so the parse maps both to the lowercase
+// word, and the code after it and the power record file see one value.
+var powerSpellings = map[string]string{
+	powerOn:             powerOn,
+	"On":                powerOn,
+	powerOnWhileClaimed: powerOnWhileClaimed,
+	"OnWhileClaimed":    powerOnWhileClaimed,
+}
+
 // The power record's value for a panel whose onWhileClaimed claim
 // ended and whose standby waits out the grace period. It is a value
 // of the record file only, and no claim states it.
@@ -284,11 +295,13 @@ func controlParameters(raw json.RawMessage) (requestedControls, error) {
 				return requestedControls{}, fmt.Errorf(
 					"the claim's %s parameter is not a string: %s", powerParameter, value)
 			}
-			if power != powerOn && power != powerOnWhileClaimed {
-				return requestedControls{}, fmt.Errorf("the claim's %s parameter is %q, and this driver takes %q or %q",
+			value, known := powerSpellings[power]
+			if !known {
+				return requestedControls{}, fmt.Errorf(
+					"the claim's %s parameter is %q, and this driver takes %q or %q, each also with a capital first letter",
 					powerParameter, power, powerOn, powerOnWhileClaimed)
 			}
-			stated.Power = power
+			stated.Power = value
 		}
 	}
 	return stated, nil
