@@ -31,6 +31,9 @@ type scriptedStarts struct {
 	failures int
 	pids     chan int
 	signals  *signals
+	// exitAtOnce makes each started process exit the moment it
+	// starts, and the reaper collect it, before anything awaits it.
+	exitAtOnce bool
 }
 
 // scriptStarts installs the stand-in and fails the given number of
@@ -51,7 +54,11 @@ func scriptStarts(t *testing.T, failures int) *scriptedStarts {
 		// instead of sending them.
 		pid := 1_000_000 + s.attempts
 		s.pids <- pid
-		return s.process(pid), nil
+		proc := s.process(pid)
+		if s.exitAtOnce {
+			deaths.record(pid, 0)
+		}
+		return proc, nil
 	}
 	t.Cleanup(func() { startSupplicant = orig })
 	return s
@@ -402,4 +409,34 @@ func TestStopSupplicantEndsARealProcessThroughItsHandle(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the stop did not end the process")
 	}
+}
+
+func TestASupplicantThatNeverAttachesIsStoppedAndAwaited(t *testing.T) {
+	// The supplicant exits at once and never creates its control
+	// socket. The start marked its pid as expected, so a death nobody
+	// awaits would stay parked for the boot, and a later child that reuses the pid,
+	// k3s in the worst case, would read it at once as its own death.
+	aimWirelessRunDir(t)
+	orig := wpaSocketPatience
+	wpaSocketPatience = time.Millisecond
+	t.Cleanup(func() { wpaSocketPatience = orig })
+	starts := scriptStarts(t, 0)
+	starts.exitAtOnce = true
+
+	if _, err := superviseSupplicant("wlan0", "/run/liken/wireless/wlan0/wpa_supplicant.conf"); err == nil {
+		t.Fatal("a supplicant that never attached must be refused")
+	}
+	pid := starts.started(t)
+
+	// The next child with the same pid must wait for its own death.
+	deaths.expect(pid)
+	got := make(chan unix.WaitStatus, 1)
+	go func() { got <- deaths.await(pid) }()
+	select {
+	case status := <-got:
+		t.Fatalf("a later child with pid %d read the dead supplicant's status %v", pid, status)
+	case <-time.After(50 * time.Millisecond):
+	}
+	deaths.record(pid, 0)
+	<-got
 }

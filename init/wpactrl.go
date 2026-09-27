@@ -29,8 +29,9 @@ const wpaMessageMax = 4096
 // creates its socket after it starts, so the process id comes back
 // before the path exists. This is a race with a starting process on
 // this machine, not a network wait, which is why the allowance is
-// short.
-const wpaSocketPatience = 10 * time.Second
+// short. It is a variable so a test can prove the refusal without
+// waiting out the real allowance.
+var wpaSocketPatience = 10 * time.Second
 
 // wpaEvent is one message the supplicant pushed to an attached client.
 type wpaEvent struct {

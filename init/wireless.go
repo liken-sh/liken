@@ -264,6 +264,13 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 	}
 	control, err := attachWPAControl(filepath.Join(dir, ifname))
 	if err != nil {
+		// A supplicant that never attached is not supervised, so it is
+		// stopped here and its death awaited. The start marked its pid
+		// as expected, and a death that nothing awaits stays parked in
+		// the registry. A later child that reuses the pid, k3s in the
+		// worst case, would then read that status at once as its own
+		// death.
+		endSupplicant(ifname, proc)
 		return nil, fmt.Errorf("attaching to the supplicant on %s: %w", ifname, err)
 	}
 
@@ -278,9 +285,7 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 	// uses, and the caller reports the refusal.
 	if !registerSupplicant(p) {
 		control.close()
-		died := make(chan unix.WaitStatus, 1)
-		go func() { died <- deaths.await(proc.pid) }()
-		stopSupplicant(ifname, proc, died)
+		endSupplicant(ifname, proc)
 		return nil, fmt.Errorf("the machine is stopping its supplicants; the one on %s was stopped again", ifname)
 	}
 	plane.start("the supplicant on "+ifname, func(ctx context.Context) error {
@@ -288,6 +293,14 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 		return nil
 	})
 	return control, nil
+}
+
+// endSupplicant stops a supplicant that no supervision loop holds,
+// and awaits its death, so the registry keeps nothing for its pid.
+func endSupplicant(ifname string, proc runningSupplicant) {
+	died := make(chan unix.WaitStatus, 1)
+	go func() { died <- deaths.await(proc.pid) }()
+	stopSupplicant(ifname, proc, died)
 }
 
 // supplicantOutcome is why one wait inside the supervision loop ended.
