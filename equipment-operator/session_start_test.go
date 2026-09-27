@@ -67,9 +67,9 @@ func TestALineDuringTheSessionStartReachesTheSession(t *testing.T) {
 	unit.driver = &staleDriver{Client: real, deliver: func() {
 		unit.observe(equipment.Event{State: real.State()})
 	}}
-	t.Cleanup(func() { unit.setSession(context.Background(), nil, false) })
+	t.Cleanup(func() { unit.setSession(context.Background(), nil, "") })
 
-	unit.setSession(t.Context(), playingReceiver(amp.address(), ReceiverVolume{Max: 69.5}).Spec.Session, false)
+	unit.setSession(t.Context(), playingReceiver(amp.address(), ReceiverVolume{Max: 69.5}).Spec.Session, "")
 
 	amp.waitForCommands(t, "SIGAME")
 }

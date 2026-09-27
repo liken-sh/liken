@@ -273,13 +273,14 @@ func (s *session) stop() {
 }
 
 // handOver closes the connection and leaves the owner mark on the
-// broker, for an operator that shuts down. The next operator starts the
-// same session and publishes the same mark, so the playback pods leave
-// the level alone through the restart. The bus closes with DISCONNECT,
-// so the broker drops the will; an operator that dies sends none, and
-// the will clears the mark.
+// broker, for an operator that shuts down or a unit that a new wiring
+// replaces. The next operator, or the new unit, starts the same session
+// and publishes the same mark, so the playback pods leave the level
+// alone through the change. The bus closes with DISCONNECT, so the
+// broker drops the will; an operator that dies sends none, and the will
+// clears the mark.
 func (s *session) handOver() {
-	s.log.printf("kept the owner mark on %s for the next operator", ownerTopic(s.spec.VolumeTopic))
+	s.log.printf("kept the owner mark on %s for the session that takes over", ownerTopic(s.spec.VolumeTopic))
 	s.cancel()
 }
 

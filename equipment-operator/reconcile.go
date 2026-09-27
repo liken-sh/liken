@@ -163,10 +163,12 @@ func (u *receiverUnit) write() {
 // session that stands, which keeps its broker connection and its
 // adopted level.
 //
-// adopting says that the operator found the session when it started, in
-// its first pass, and the session then adopts its flags and sends the
-// receiver nothing for them.
-func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, adopting bool) {
+// adopted is empty for a session the operator sees appear while it
+// runs. Otherwise it names why the session was already standing: the
+// operator found it in its first pass, or the unit a new wiring
+// replaced handed it over. Such a session adopts its flags and sends
+// the receiver nothing for them, and the line ends with adopted.
+func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, adopted string) {
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
@@ -190,9 +192,9 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 		u.readings.setClaimed(u.name, false)
 		return
 	}
-	adopted := ""
+	adopting := adopted != ""
 	if adopting {
-		adopted = "; the operator found it when it started, so it sends nothing for these flags"
+		adopted = "; " + adopted + ", so it sends nothing for these flags"
 	}
 	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t%s",
 		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake, adopted)
@@ -784,6 +786,19 @@ func (u *receiverUnit) applyPower(power equipment.Power) {
 	poke(u.dirty)
 }
 
+// standingSession answers the session that stands, with the flags it
+// holds now, and nil when none stands.
+func (u *receiverUnit) standingSession() *ReceiverSession {
+	u.mutex.Lock()
+	defer u.mutex.Unlock()
+	if u.session == nil {
+		return nil
+	}
+	spec := u.session.spec
+	spec.Active, spec.Awake = u.session.active.Load(), u.session.awake.Load()
+	return &spec
+}
+
 // player names the Player whose session stands, and an empty string
 // when none stands.
 func (u *receiverUnit) player() string {
@@ -919,13 +934,18 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
 	var replaced *receiverUnit
+	var carried *ReceiverSession
 	if held && (unit.address != c.resolvedAddress(&receiver.Spec) ||
 		unit.settingsTopic != receiver.Spec.SettingsTopic ||
 		unit.commandsTopic != receiver.Spec.CommandsTopic) {
-		// A new wiring is not a new session: the lift lets the session the
-		// new unit starts return to the same TV without a wake.
+		// A new wiring is not a new session. The old unit hands its session
+		// over and keeps the owner mark on the broker, and the new unit
+		// starts the same session, with the flags it held, as one that
+		// stands. The lift lets that session return to the same TV without
+		// a wake.
 		player := unit.player()
-		unit.stop()
+		carried = unit.standingSession()
+		unit.shutdown()
 		delete(c.units, name)
 		held, replaced = false, unit
 		if player != "" {
@@ -938,6 +958,9 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 		switch {
 		case replaced != nil:
 			unit.carryPower(replaced)
+			if carried != nil {
+				unit.setSession(ctx, carried, "the unit that held it before the wiring changed handed it over")
+			}
 		case !c.live:
 			unit.resumePower(receiver.Status, receiver.Spec.Power)
 		}
@@ -955,7 +978,11 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	if unit.setZones(receiver.Spec.Zones) {
 		unit.recordSettled(zonesBlock, receiver.Spec.Zones)
 	}
-	unit.setSession(ctx, receiver.session(), !c.live)
+	adopted := ""
+	if !c.live {
+		adopted = "the operator found it when it started"
+	}
+	unit.setSession(ctx, receiver.session(), adopted)
 }
 
 // protocolAddress is the address the receiver's protocol block declares.
