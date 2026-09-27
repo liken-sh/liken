@@ -941,6 +941,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             (logical.1 as f32 * scale).round() as u32,
         );
         self.store.get_mut().scaled(physical, scale);
+        views::ramp::density(scale);
     }
 
     // The source, the art store, the home page's reader, and the bus

@@ -25,10 +25,6 @@ pub(super) mod read;
 /// of quiet turns a burst into one build.
 pub const QUIET: Duration = Duration::from_secs(2);
 
-// How often a waiting thread reads the stop flag, so a dropped source
-// ends the thread within this long.
-const STOP_POLL: Duration = Duration::from_millis(50);
-
 /// The index as the frame reads it and the build thread replaces it. The
 /// frame's source and its `reader()` are two sources over one replica,
 /// and both hold one shelf so one build serves both.
@@ -99,10 +95,15 @@ fn read(database: &Path) -> Option<Index> {
 // Wait for a change past the last build, then for the quiet period. The
 // answer is the revision the next build covers, or nothing when the
 // source stopped.
+//
+// The thread sleeps on the signal alone. A change and a stop both notify
+// it, so it wakes for the event it waits for and at no other time. A
+// timed poll of the stop flag woke it twenty times a second on a screen
+// at rest, for a flag that changes once in the life of the process.
 fn wait(shared: &Shared, built: u64, quiet: Duration) -> Option<u64> {
     let mut revision = shared.revision.lock().unwrap();
     while !shared.stopping() && *revision <= built {
-        revision = shared.signal.wait_timeout(revision, STOP_POLL).unwrap().0;
+        revision = shared.signal.wait(revision).unwrap();
     }
     // Every further change moves the deadline out again, so a scan that
     // signals every few hundred milliseconds gets one build at its end.
@@ -118,7 +119,7 @@ fn wait(shared: &Shared, built: u64, quiet: Duration) -> Option<u64> {
         }
         revision = shared
             .signal
-            .wait_timeout(revision, (deadline - now).min(STOP_POLL))
+            .wait_timeout(revision, deadline - now)
             .unwrap()
             .0;
         if *revision != mark {

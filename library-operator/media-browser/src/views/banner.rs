@@ -79,9 +79,11 @@ pub fn indicator(region: Rectangle, index: usize) -> Rectangle {
     )
 }
 
-/// The under layer: the backdrop over the frame, and the slot color
-/// until it lands. The backdrop is decoded at the frame's size, so a
-/// title costs one decode and never a page's.
+/// The under layer: the backdrop over the frame, the slot color until it
+/// lands, and the scrim over both. The backdrop is decoded at the frame's
+/// size, so a title costs one decode and never a page's. The scrim is a
+/// ramp, which draws over every mesh of its layer, so it is here under
+/// the indicators and the mark and not on the over layer with them.
 pub fn backdrop<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
     store: &mut A,
@@ -93,6 +95,7 @@ pub fn backdrop<A: Art>(
         Some(image) => paint(frame, &image, region, Tone::Full),
         None => frame.fill_rectangle(region.position(), extent(region), look::slot()),
     }
+    layers::scrim(frame, region);
 }
 
 /// One banner to draw over its backdrop: the current title's words, the
@@ -124,11 +127,10 @@ pub struct Banner<'a> {
     pub region: Rectangle,
 }
 
-/// The over layer: the scrim, the head, the facts, the tagline, the
-/// indicators, and the mark while focused.
+/// The over layer: the head, the facts, the tagline, the indicators, and
+/// the mark while focused.
 pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: &Banner<'_>) {
     let region = banner.region;
-    layers::scrim(frame, region);
 
     let column = region.width * COLUMN;
     let mut stack = Stack::new(Point::new(region.x + INSET, region.y + TOP), GAP);

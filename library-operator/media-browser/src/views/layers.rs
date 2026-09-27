@@ -9,8 +9,9 @@ use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
 use iced_widget::{Stack, canvas};
-use iced_winit::core::{Color, Element, Length, Point, Rectangle, Theme, mouse};
+use iced_winit::core::{Color, Element, Length, Rectangle, Theme, mouse};
 
+use super::ramp::{self, Axis};
 use super::{Tone, area, curtain, extent, paint};
 use crate::art::Art;
 use crate::look;
@@ -216,24 +217,28 @@ impl canvas::Program<Infallible, Theme, Renderer> for Lights {
 
 /// One panel of shade over these bounds, dark at the left and clear
 /// toward the right. One function draws every scrim, because a page and
-/// the home page's banner shade their art the same way.
+/// the home page's banner shade their art the same way. The shade is a
+/// ramp, so it draws over every mesh of its layer, and it covers only
+/// the share of the bounds where it is not yet clear.
 pub fn scrim(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle) {
-    frame.fill_rectangle(
-        bounds.position(),
-        extent(bounds),
-        canvas::gradient::Linear::new(
-            Point::new(bounds.x, bounds.y),
-            Point::new(bounds.x + bounds.width * CLEARS_AT, bounds.y),
-        )
-        .add_stop(0.0, look::shade())
-        .add_stop(HOLDS_TO, look::shade())
-        .add_stop(1.0, look::CLEAR),
+    ramp::fill(
+        frame,
+        area(bounds.x, bounds.y, bounds.width * CLEARS_AT, bounds.height),
+        Axis::Across,
+        &[
+            (0.0, look::shade()),
+            (HOLDS_TO, look::shade()),
+            (1.0, look::CLEAR),
+        ],
     );
 }
 
 // The middle layer: one panel of shade that clears toward the right, so
 // every line of the page reads over the art whatever the art holds, and
-// the ground under the page's own art where the page has one.
+// the ground under the page's own art where the page has one. The ground
+// and its fade are ramps like the scrim, because the renderer draws the
+// images of a layer in the order the canvas drew them, and a mesh under
+// them all would put the ground under the scrim.
 struct Scrim {
     ground: Ground,
 }
@@ -252,17 +257,18 @@ impl canvas::Program<Infallible, Theme, Renderer> for Scrim {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         scrim(&mut frame, bounds);
         if let (Some(fade), Some(ground)) = (self.ground.fade(bounds), self.ground.of(bounds)) {
-            frame.fill_rectangle(
-                fade.position(),
-                extent(fade),
-                canvas::gradient::Linear::new(
-                    Point::new(fade.x, fade.y),
-                    Point::new(fade.x, fade.y + fade.height),
-                )
-                .add_stop(0.0, look::CLEAR)
-                .add_stop(1.0, look::ground()),
+            ramp::fill(
+                &mut frame,
+                fade,
+                Axis::Down,
+                &[(0.0, look::CLEAR), (1.0, look::ground())],
             );
-            frame.fill_rectangle(ground.position(), extent(ground), look::ground());
+            ramp::fill(
+                &mut frame,
+                ground,
+                Axis::Down,
+                &[(0.0, look::ground()), (1.0, look::ground())],
+            );
         }
         vec![frame.into_geometry()]
     }

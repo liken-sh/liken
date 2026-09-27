@@ -291,10 +291,11 @@ impl Home {
         }
     }
 
-    /// The view, in three layers: the banner's backdrop, the rows over it,
-    /// and the band over both. A mesh draws under every image of its layer,
-    /// so the banner's scrim needs the backdrop on a layer of its own, and
-    /// the band needs a layer of its own so a row that scrolled up under
+    /// The view, in three layers: the banner's backdrop and scrim, the rows
+    /// over them, and the band over all. A mesh draws under every image of
+    /// its layer, and the scrim is an image, so the backdrop and the scrim
+    /// take a layer of their own under the banner's indicators and mark.
+    /// The band needs a layer of its own so a row that scrolled up under
     /// it never shows through.
     pub fn view<'a, A: Art>(
         &'a self,
@@ -331,8 +332,8 @@ impl Home {
     }
 }
 
-// The under layer: the banner's backdrop alone, clipped under the
-// band.
+// The under layer: the banner's backdrop and its scrim, clipped under
+// the band.
 struct Ground<'a, A> {
     home: &'a Home,
     store: &'a RefCell<A>,

@@ -8,6 +8,9 @@
 //
 // A jump rail of rotated bars at the left of a long wall is one more.
 //
+// A shade that changes along one axis, such as a scrim, is a ramp: a
+// picture one pixel thick that the renderer stretches across its bounds.
+//
 // The text field a person types a search into, and the grid of letters
 // a remote with no keyboard picks from, are two more.
 //
@@ -35,6 +38,7 @@ pub mod layers;
 pub mod people;
 pub mod progress;
 pub mod rail;
+pub mod ramp;
 pub mod ratings;
 pub mod screen;
 pub mod scroll;

@@ -9,7 +9,7 @@
 // again: it is a mesh, so a mark drawn beside the backdrop would be
 // painted under it, and it takes a layer of its own over the art.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
@@ -50,10 +50,10 @@ const NAME: f32 = 0.7;
 // how dark it is at the centre, and how many rings it is built from.
 //
 // The canvas fills a shape in one colour and has no radial gradient, so
-// the pool is a stack of ellipses, each a little smaller and each a
-// little darker, and the shade deepens toward the centre in steps too
-// small to see. The middle sits a little under the logo's foot, because
-// the mark under the logo is taller than the gap over it.
+// the pool is a set of rings, each a little smaller and each a little
+// darker, and the shade deepens toward the centre in steps too small to
+// see. The middle sits a little under the logo's foot, because the mark
+// under the logo is taller than the gap over it.
 const POOL_CENTRE: f32 = 0.5;
 const POOL_WIDTH: f32 = 0.40;
 const POOL_HEIGHT: f32 = 0.42;
@@ -110,6 +110,18 @@ impl<A> Copy for Layer<'_, A> {}
 // and the mark sits under the logo where the two never overlap.
 pub struct Front<'a, A>(pub Layer<'a, A>);
 
+/// The pool as the front layer last drew it, kept for the next frame. The
+/// state holds for seconds at the full depth while the film starts, and
+/// the mark pulses on every frame of it, so the front draws sixty frames
+/// a second. The pool changes only with the share of the way away and the
+/// size of the frame, so the frames of the hold draw it from here and do
+/// not tessellate its rings again.
+#[derive(Default)]
+pub struct Pool {
+    cache: canvas::Cache<Renderer>,
+    away: Cell<f32>,
+}
+
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Layer<'_, A> {
     type State = ();
 
@@ -158,11 +170,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Layer<'_, A> {
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
-    type State = ();
+    type State = Pool;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -172,8 +184,17 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
         let layer = self.0;
         let away = layer.away();
 
+        // The pool is the first geometry of the layer, so its rings draw
+        // under the mark's meshes. The cache draws again by itself when
+        // the size changes.
+        if state.away.replace(away) != away {
+            state.cache.clear();
+        }
+        let shade = state
+            .cache
+            .draw(renderer, bounds.size(), |frame| pool(frame, bounds, away));
+
         let store = &mut *layer.store.borrow_mut();
-        pool(&mut frame, bounds, away);
 
         // The mark stays in its place under the centre and fades in and
         // out there, at the state's own share, while the logo slides past
@@ -214,7 +235,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
             )),
         }
 
-        vec![frame.into_geometry()]
+        vec![shade, frame.into_geometry()]
     }
 }
 
@@ -271,21 +292,47 @@ fn pool(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, away: f32) {
     }
     let centre = Point::new(bounds.center_x(), bounds.y + bounds.height * POOL_CENTRE);
     let radii = Vector::new(bounds.width * POOL_WIDTH, bounds.height * POOL_HEIGHT);
-    // Each ring adds the same share, so the shade at the centre, where
-    // every ring lies, is the whole of it.
-    let ring = Color {
-        a: 1.0 - (1.0 - POOL_SHADE * away).powf(1.0 / POOL_RINGS as f32),
-        ..look::BACKGROUND
-    };
-    let unit = canvas::Path::circle(Point::ORIGIN, 1.0);
-    for step in 0..POOL_RINGS {
-        let share = 1.0 - step as f32 / POOL_RINGS as f32;
-        frame.with_save(|frame| {
-            frame.translate(Vector::new(centre.x, centre.y));
-            frame.scale_nonuniform(Vector::new(radii.x * share, radii.y * share));
-            frame.fill(&unit, ring);
-        });
-    }
+    frame.with_save(|frame| {
+        frame.translate(Vector::new(centre.x, centre.y));
+        frame.scale_nonuniform(radii);
+        for step in 0..POOL_RINGS {
+            frame.fill(
+                &ring(step),
+                canvas::Fill {
+                    style: canvas::Style::Solid(Color {
+                        a: pool_shade(step + 1, away),
+                        ..look::BACKGROUND
+                    }),
+                    rule: canvas::fill::Rule::EvenOdd,
+                },
+            );
+        }
+    });
+}
+
+// One ring of the pool on the unit circle: the band from this step's
+// edge in to the next step's edge, and the whole middle for the last
+// step. Each pixel of the pool lies in one ring, so the pool blends each
+// pixel once. A stack of whole ellipses blended the middle once for
+// every ring, about eight whole frames of pixels on each frame of the
+// curtain.
+fn ring(step: u32) -> canvas::Path {
+    let edge = |step: u32| 1.0 - step as f32 / POOL_RINGS as f32;
+    canvas::Path::new(|path| {
+        path.circle(Point::ORIGIN, edge(step));
+        if step + 1 < POOL_RINGS {
+            path.circle(Point::ORIGIN, edge(step + 1));
+        }
+    })
+}
+
+// The alpha of the pool at a pixel that lies inside this many of its
+// ellipses. Each ellipse darkens by the same share, so the shade at the
+// centre, inside every one, is the whole of the pool's depth at this
+// share of the way away. One fill at this alpha is the same shade as
+// that many fills one over another.
+fn pool_shade(depth: u32, away: f32) -> f32 {
+    1.0 - (1.0 - POOL_SHADE * away).powf(depth as f32 / POOL_RINGS as f32)
 }
 
 /// The size the logo is decoded at for a frame of these bounds: the box
@@ -329,6 +376,34 @@ mod tests {
 
     fn to() -> Rectangle {
         area(760.0, 340.0, 640.0, 160.0)
+    }
+
+    // One fill at the pool's alpha for a depth matches that many fills of
+    // one ring's alpha, one over another, at every depth and every share
+    // of the way away.
+    #[test]
+    fn one_fill_of_a_depth_is_that_many_rings_one_over_another() {
+        for (depth, away) in [
+            (1, 1.0),
+            (2, 1.0),
+            (24, 1.0),
+            (48, 1.0),
+            (7, 0.25),
+            (30, 0.6),
+        ] {
+            let stacked = 1.0 - (1.0 - pool_shade(1, away)).powi(depth as i32);
+            assert!(
+                (pool_shade(depth, away) - stacked).abs() < 1e-5,
+                "depth {depth} at {away}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_centre_of_the_pool_is_its_whole_depth() {
+        assert!((pool_shade(POOL_RINGS, 1.0) - POOL_SHADE).abs() < 1e-6);
+        assert!((pool_shade(POOL_RINGS, 0.5) - POOL_SHADE / 2.0).abs() < 1e-6);
+        assert_eq!(pool_shade(POOL_RINGS, 0.0), 0.0);
     }
 
     #[test]

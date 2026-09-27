@@ -19,14 +19,15 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const BACKOFF_FLOOR: Duration = Duration::from_millis(250);
 const BACKOFF_CEILING: Duration = Duration::from_secs(5);
-const STOP_POLL: Duration = Duration::from_millis(50);
 
 // The one changed flag and the one waker that all three streams share
 // with the source, plus the revision and the signal the search index's
 // build thread waits on. The browser clears `changed` when it re-reads,
 // so the build thread cannot share that flag without one side losing a
 // change. A count of changes lets the build thread compare against the
-// revision it last built, and the condvar wakes it on each change.
+// revision it last built, and the condvar wakes it on each change. A
+// stream that backs off sleeps on the same signal, so a halt ends its
+// pause too.
 pub(super) struct Shared {
     pub changed: AtomicBool,
     // The progress store's own flag, apart from the catalog's, because a
@@ -58,9 +59,18 @@ impl Shared {
     }
 
     // Raise the stop flag and wake every waiting thread, so a dropped
-    // source ends its build thread now instead of at the next poll.
+    // source ends its build thread and its backing-off streams now. A
+    // waiting thread reads the flag and then sleeps with the revision
+    // lock held between the two, so the notify waits for that lock. Without it, a halt that lands
+    // between the read and the sleep wakes nobody, and the thread sleeps
+    // on with no change to come.
     pub(super) fn halt(&self) {
         self.stop.store(true, Ordering::Release);
+        drop(
+            self.revision
+                .lock()
+                .unwrap_or_else(|held| held.into_inner()),
+        );
         self.signal.notify_all();
     }
 
@@ -145,12 +155,26 @@ fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, change: Change) -> bo
     true
 }
 
-// The pause polls the stop flag, so a dropped source ends a
-// backing-off thread within one poll interval.
+// The pause sleeps on the signal a halt raises, so a dropped source ends
+// a backing-off thread at once, and a thread that waits out its backoff
+// wakes at its end and not before. A change on another stream raises the
+// same signal, and the thread sleeps again until its deadline.
 fn pause(shared: &Shared, backoff: Duration) {
     let deadline = Instant::now() + backoff;
-    while !shared.stopping() && Instant::now() < deadline {
-        thread::sleep(STOP_POLL);
+    let mut revision = shared
+        .revision
+        .lock()
+        .unwrap_or_else(|held| held.into_inner());
+    while !shared.stopping() {
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        revision = shared
+            .signal
+            .wait_timeout(revision, deadline - now)
+            .unwrap_or_else(|held| held.into_inner())
+            .0;
     }
 }
 

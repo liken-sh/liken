@@ -203,3 +203,37 @@ fn a_dropped_stream_reconnects_and_marks_everything_changed() {
     assert!(reconnected, "requests seen: {:?}", agent.requests());
     assert!(within(DEADLINE, || source.changed().catalog()));
 }
+
+#[test]
+fn a_pause_lasts_its_backoff() {
+    let shared = super::Shared::default();
+    let started = Instant::now();
+    super::pause(&shared, Duration::from_millis(120));
+    assert!(started.elapsed() >= Duration::from_millis(120));
+}
+
+#[test]
+fn a_change_on_another_stream_does_not_cut_a_pause_short() {
+    let shared = Arc::new(super::Shared::default());
+    let marking = shared.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(30));
+        marking.mark(Change::Catalog);
+    });
+    let started = Instant::now();
+    super::pause(&shared, Duration::from_millis(150));
+    assert!(started.elapsed() >= Duration::from_millis(150));
+}
+
+#[test]
+fn a_halt_ends_a_pause_at_once() {
+    let shared = Arc::new(super::Shared::default());
+    let stopping = shared.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(30));
+        stopping.halt();
+    });
+    let started = Instant::now();
+    super::pause(&shared, DEADLINE);
+    assert!(started.elapsed() < DEADLINE / 4);
+}
