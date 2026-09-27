@@ -214,7 +214,7 @@ func labPluginWithModule(t *testing.T, results []AllocatedDevice, config string)
 		served:         compositor.serving,
 		republish:      compositor.republish,
 		switchTimeout:  200 * time.Millisecond,
-		switchInterval: time.Millisecond,
+		switchFallback: time.Millisecond,
 	}
 	module := newFakeModule(t, moduleScript{})
 	plugin.layout = servedLayoutLink(t, module)

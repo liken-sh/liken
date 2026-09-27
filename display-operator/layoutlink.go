@@ -59,11 +59,12 @@ const layoutProtocolVersion = 1
 // than this means the compositor is not running its loop.
 const layoutReplyTimeout = 2 * time.Second
 
-// layoutDialInterval is how long the link waits before it dials
-// again, and layoutDialLimit is the longest that wait grows to. The
-// compositor restarts on every mode change, so the first retry is
-// quick, and a module that never comes back costs one dial every few
-// seconds.
+// layoutDialInterval is the first wait before the link dials again,
+// and layoutDialLimit is the longest that wait grows to. The socket's
+// arrival ends a wait early, so these bound only the dials that no
+// arrival starts: the dial into a socket that is bound and not yet
+// listening, and a module that answers the dial and fails the
+// handshake.
 const (
 	layoutDialInterval = 250 * time.Millisecond
 	layoutDialLimit    = 4 * time.Second
@@ -116,8 +117,9 @@ type layoutLink struct {
 	// The bounds of a wait on the module and of the wait between two
 	// dials. They are fields so a test drives the whole link inside
 	// one short test.
-	reply time.Duration
-	dial  time.Duration
+	reply     time.Duration
+	dial      time.Duration
+	dialLimit time.Duration
 
 	// Writes serializes the writes to the socket. It is a second lock
 	// so that a write which blocks in the kernel never holds the lock
@@ -146,6 +148,7 @@ func newLayoutLink(socketPath string) *layoutLink {
 		reports:    make(chan struct{}, 1),
 		reply:      layoutReplyTimeout,
 		dial:       layoutDialInterval,
+		dialLimit:  layoutDialLimit,
 		reason:     "the link has not connected yet",
 		waiting:    map[int]chan layoutReply{},
 		outputs:    map[string]layoutOutput{},
@@ -301,22 +304,25 @@ func (l *layoutLink) write(socket net.Conn, line string) error {
 }
 
 // run keeps one connection to the module for as long as the operator
-// runs. A connection that served resets the wait, and a dial that
-// found nothing doubles it, so a compositor that is restarting is
-// picked up in a quarter second and a module that is gone costs one
-// dial every few seconds.
+// runs. The module's socket goes with every compositor restart, so the
+// link dials the moment the new socket arrives (arrivals.go). A
+// connection that served resets the fallback wait, and a dial that
+// found nothing doubles it, so a module that is gone costs one dial
+// every few seconds.
 func (l *layoutLink) run(ctx context.Context) {
+	watch := newArrivals(l.socketPath)
+	defer watch.close()
 	wait := l.dial
 	for {
+		watch.ready()
 		if l.connection(ctx) {
 			wait = l.dial
 		} else {
-			wait = min(2*wait, layoutDialLimit)
+			wait = nextDialDelay(wait, l.dialLimit)
 		}
-		select {
-		case <-ctx.Done():
+		watch.wait(ctx, wait)
+		if ctx.Err() != nil {
 			return
-		case <-time.After(wait):
 		}
 	}
 }

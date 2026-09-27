@@ -64,12 +64,19 @@ type fakeModule struct {
 
 func newFakeModule(t *testing.T, script moduleScript) *fakeModule {
 	t.Helper()
+	return fakeModuleOn(t, filepath.Join(t.TempDir(), "layout.sock"), script)
+}
+
+// fakeModuleOn is the same module on a path the caller names, which is
+// how a test starts the module after the link.
+func fakeModuleOn(t *testing.T, path string, script moduleScript) *fakeModule {
+	t.Helper()
 	if script.hello == "" {
 		script.hello = moduleHelloLine
 	}
 	module := &fakeModule{
 		t:       t,
-		path:    filepath.Join(t.TempDir(), "layout.sock"),
+		path:    path,
 		script:  script,
 		arrived: make(chan struct{}, 8),
 	}
@@ -188,6 +195,22 @@ func servedLayoutLink(t *testing.T, module *fakeModule) *layoutLink {
 	module.accepted()
 	waitUntil(t, "the link serves", link.moduleServing)
 	return link
+}
+
+// The link starts before the module, and its fallback timer is far
+// longer than the test. The module's socket arrives, and the link dials
+// it on the arrival.
+func TestTheLinkDialsWhenTheModulesSocketArrives(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "layout.sock")
+	link := newLayoutLink(path)
+	link.dial, link.dialLimit = time.Hour, time.Hour
+	go link.run(t.Context())
+	time.Sleep(50 * time.Millisecond)
+
+	module := fakeModuleOn(t, path, moduleScript{})
+
+	module.accepted()
+	waitUntil(t, "the link serves", link.moduleServing)
 }
 
 // waitUntil polls one state the link reaches on a goroutine of its

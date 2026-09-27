@@ -98,6 +98,16 @@ const outputDoneVersion uint32 = 2
 // header from allocating whatever its four bytes happen to state.
 const maxWaylandMessage = 4096
 
+// The first wait between two dials, and the longest that wait grows
+// to. The socket's arrival ends a wait early, so these bound only the
+// dials that no arrival starts: the dial into a socket that is bound
+// and not yet listening, and every dial while the runtime directory
+// has no watch.
+const (
+	compositorDialInterval = 250 * time.Millisecond
+	compositorDialLimit    = 4 * time.Second
+)
+
 var errShortMessage = errors.New("a Wayland message ended inside an argument")
 
 // The arguments of one message, read in order. Every read
@@ -274,6 +284,10 @@ type outputWatch struct {
 	names   map[uint32]string
 	modes   map[string]string
 	session uint64
+	// Changed closes when the answer changes, and a new channel takes
+	// its place. A mode switch waits on it for the compositor that
+	// follows the restart.
+	changed chan struct{}
 }
 
 func newOutputWatch(socketPath string, moved func(recreated bool)) *outputWatch {
@@ -284,7 +298,14 @@ func newOutputWatch(socketPath string, moved func(recreated bool)) *outputWatch 
 		retryLimit: compositorDialLimit,
 		names:      map[uint32]string{},
 		modes:      map[string]string{},
+		changed:    make(chan struct{}),
 	}
+}
+
+// Wake every reader that waits on the answer. The caller holds mu.
+func (w *outputWatch) announce() {
+	close(w.changed)
+	w.changed = make(chan struct{})
 }
 
 // What the compositor reports it serves: the mode on each
@@ -295,12 +316,16 @@ func newOutputWatch(socketPath string, moved func(recreated bool)) *outputWatch 
 type servedOutputs struct {
 	session uint64
 	modes   map[string]string
+	// Changed closes when the answer moves on from this one. It is nil
+	// when the source raises no such event, and a reader then looks
+	// again on its fallback timer.
+	changed <-chan struct{}
 }
 
 func (w *outputWatch) served() servedOutputs {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return servedOutputs{session: w.session, modes: maps.Clone(w.modes)}
+	return servedOutputs{session: w.session, modes: maps.Clone(w.modes), changed: w.changed}
 }
 
 func (w *outputWatch) name(global uint32, connector string) {
@@ -322,6 +347,7 @@ func (w *outputWatch) serves(global uint32, mode string) {
 		return
 	}
 	w.modes[connector] = mode
+	w.announce()
 }
 
 func (w *outputWatch) forget(global uint32) {
@@ -329,6 +355,7 @@ func (w *outputWatch) forget(global uint32) {
 	defer w.mu.Unlock()
 	delete(w.modes, w.names[global])
 	delete(w.names, global)
+	w.announce()
 }
 
 // A dead compositor serves nothing. Its answers empty the
@@ -339,6 +366,7 @@ func (w *outputWatch) closed() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.names, w.modes = map[uint32]string{}, map[string]string{}
+	w.announce()
 }
 
 // A new connection starts from nothing. Everything the ended
@@ -349,6 +377,7 @@ func (w *outputWatch) opened() {
 	defer w.mu.Unlock()
 	w.names, w.modes = map[uint32]string{}, map[string]string{}
 	w.session++
+	w.announce()
 }
 
 // Weston states a mode as its size in pixels and its refresh
@@ -378,21 +407,16 @@ func westonRefresh(refreshMilliHertz uint32) uint32 {
 // lives, and the wait between sessions is the price of a compositor
 // that is restarting. A mode switch waits for the connection that
 // follows the restart, so the loop dials the moment the new socket
-// arrives (socketwait.go). Nothing here reports a failure, because a
+// arrives (arrivals.go). Nothing here reports a failure, because a
 // session ends every time the operator restarts the compositor
 // itself, and a log line for every planned restart would say
 // nothing.
 func (w *outputWatch) run(ctx context.Context) {
-	var watch *arrivals
-	defer func() { watch.close() }()
+	watch := newArrivals(w.socketPath)
+	defer watch.close()
 	delay := w.retry
 	for {
-		// The runtime directory can appear after the operator starts,
-		// so a watch that could not start is tried again each round.
-		if watch == nil {
-			watch, _ = watchArrivals(w.socketPath)
-		}
-		watch.drain()
+		watch.ready()
 		session := w.served().session
 		_ = w.connection(ctx)
 		w.closed()

@@ -57,11 +57,11 @@ const preferredMode = "preferred"
 // retry starts a fresh wait.
 const modeSwitchTimeout = 10 * time.Second
 
-// ModeSwitchInterval is how often that wait reads the socket
-// and the card again. Neither a compositor's return nor a mode change
-// raises an event a program can wait on, so the wait polls, and a
-// quarter second adds little to the second the restart already takes.
-const modeSwitchInterval = 250 * time.Millisecond
+// ModeSwitchFallback bounds each wait inside that wait. The output
+// watch reports each change to what the compositor serves, and the
+// report ends a wait early, so this bounds only the look that no
+// report starts: a source of served modes that raises no report.
+const modeSwitchFallback = time.Second
 
 // errModeDeclined marks a switch whose restart ran and whose
 // compositor serves another mode. A caller that reads it knows a
@@ -490,24 +490,29 @@ func (p *draPlugin) rewriteConfig(record map[string]string) error {
 // connection is also a compositor a consumer can connect to, so the
 // socket needs no separate check.
 func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, before uint64) error {
-	deadline := time.Now().Add(p.switchTimeout)
+	deadline := time.NewTimer(p.switchTimeout)
+	defer deadline.Stop()
 	for {
 		served := p.compositorOutputs()
 		if served.session > before && modeMatches(mode, served.modes[connector]) {
 			return nil
 		}
-		if !time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			served = p.compositorOutputs()
+			if served.session > before && modeMatches(mode, served.modes[connector]) {
+				return nil
+			}
 			// The failure names the connector, the mode the
 			// claim stated, the budget it had, and the mode the
 			// compositor serves instead, because a person reads
 			// this line to learn which of the two the screen runs.
 			return fmt.Errorf("%s did not report the mode %s within %s; it reports %s",
 				connector, mode, p.switchTimeout, reportedMode(served.modes[connector]))
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(p.switchInterval):
+		case <-served.changed:
+		case <-time.After(p.switchFallback):
 		}
 	}
 }

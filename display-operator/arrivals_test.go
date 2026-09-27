@@ -1,7 +1,8 @@
 package main
 
-// The output watch waits for the compositor's socket to appear, and
-// does not dial on a fixed short interval while the socket is missing.
+// A wait for a file ends when the kernel reports that the file
+// arrived, and not on a fixed short interval while the file is
+// missing.
 
 import (
 	"context"
@@ -15,10 +16,7 @@ import (
 // compositor uses.
 func arrivalsIn(t *testing.T, dir string) *arrivals {
 	t.Helper()
-	watch, err := watchArrivals(filepath.Join(dir, socketName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	watch := newArrivals(filepath.Join(dir, socketName))
 	t.Cleanup(watch.close)
 	return watch
 }
@@ -73,9 +71,9 @@ func TestAnotherFileDoesNotEndTheWait(t *testing.T) {
 	}
 }
 
-// An arrival before the drain is old news: the dial after the drain
-// already sees the socket.
-func TestTheDrainForgetsAnEarlierArrival(t *testing.T) {
+// An arrival before ready is old news: the dial after ready already
+// sees the socket.
+func TestReadyForgetsAnEarlierArrival(t *testing.T) {
 	dir := t.TempDir()
 	watch := arrivalsIn(t, dir)
 	listenOnSocket(t, filepath.Join(dir, socketName))
@@ -88,10 +86,10 @@ func TestTheDrainForgetsAnEarlierArrival(t *testing.T) {
 	listenOnSocket(t, filepath.Join(dir, socketName))
 	time.Sleep(50 * time.Millisecond)
 
-	watch.drain()
+	watch.ready()
 
 	if watch.wait(t.Context(), 50*time.Millisecond) {
-		t.Error("the wait ended on an arrival from before the drain")
+		t.Error("the wait ended on an arrival from before ready")
 	}
 }
 
@@ -105,9 +103,51 @@ func TestTheWaitEndsWithItsContext(t *testing.T) {
 	}
 }
 
-func TestAWatchOnAMissingDirectoryFails(t *testing.T) {
-	if _, err := watchArrivals(filepath.Join(t.TempDir(), "missing", socketName)); err == nil {
-		t.Error("the watch started on a directory that does not exist")
+// The directory does not exist when the watch starts, so the first
+// wait lasts its fallback. Ready starts the watch once the directory
+// exists, and the file's arrival ends the next wait.
+func TestTheWatchStartsWhenItsDirectoryArrives(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime")
+	watch := arrivalsIn(t, dir)
+	if watch.wait(t.Context(), 50*time.Millisecond) {
+		t.Fatal("the wait woke with no directory to watch")
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	watch.ready()
+	listenOnSocket(t, filepath.Join(dir, socketName))
+
+	if !watch.wait(t.Context(), time.Minute) {
+		t.Error("the wait ended on its fallback timer, and the socket arrived")
+	}
+}
+
+// The watched directory is removed and made again. The removal wakes
+// the waiter, ready watches the new directory, and the socket's
+// arrival in it ends the next wait.
+func TestTheWatchFollowsADirectoryMadeAgain(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	watch := arrivalsIn(t, dir)
+
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !watch.wait(t.Context(), time.Minute) {
+		t.Fatal("the removal of the directory did not wake the wait")
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	watch.ready()
+	listenOnSocket(t, filepath.Join(dir, socketName))
+
+	if !watch.wait(t.Context(), time.Minute) {
+		t.Error("the wait ended on its fallback timer, and the socket arrived in the new directory")
 	}
 }
 

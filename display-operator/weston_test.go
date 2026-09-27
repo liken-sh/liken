@@ -188,7 +188,7 @@ func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
 
 	declare()
 
-	if err := waitForFile(context.Background(), westonConfigPath, filePollInterval); err != nil {
+	if err := waitForFile(context.Background(), westonConfigPath, 100*time.Millisecond); err != nil {
 		t.Fatalf("the compositor role waited on %s: %v", westonConfigPath, err)
 	}
 	written, err := os.ReadFile(path)
@@ -394,20 +394,38 @@ func TestWestonEnvironmentSetsWhatTheCompositorNeeds(t *testing.T) {
 	}
 }
 
+// The timeout is shorter than the fallback timer, so only the file's
+// arrival can end the wait in time.
 func TestWaitForFileReturnsWhenItAppears(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston.ini")
 	go func() {
-		time.Sleep(2 * filePollInterval)
+		time.Sleep(50 * time.Millisecond)
 		_ = os.WriteFile(path, nil, 0o644)
 	}()
 
-	if err := waitForFile(context.Background(), path, time.Second); err != nil {
+	if err := waitForFile(context.Background(), path, fileWaitFallback/2); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The file's directory is a volume that is not there yet. The wait
+// looks again on its fallback timer and finds the file.
+func TestWaitForFileReturnsWhenItsDirectoryAppearsLater(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "weston")
+	path := filepath.Join(dir, "weston.ini")
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = os.Mkdir(dir, 0o755)
+		_ = os.WriteFile(path, nil, 0o644)
+	}()
+
+	if err := waitForFile(context.Background(), path, 3*fileWaitFallback); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestWaitForFileGivesUp(t *testing.T) {
-	err := waitForFile(context.Background(), filepath.Join(t.TempDir(), "weston.ini"), 2*filePollInterval)
+	err := waitForFile(context.Background(), filepath.Join(t.TempDir(), "weston.ini"), 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("the wait succeeded with no file")
 	}

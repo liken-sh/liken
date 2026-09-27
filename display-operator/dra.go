@@ -117,7 +117,7 @@ type draPlugin struct {
 	// The bounds of the wait for the socket and the mode to come
 	// back.
 	switchTimeout  time.Duration
-	switchInterval time.Duration
+	switchFallback time.Duration
 	// ModeSwitches serializes the whole switch. The record is
 	// one file for every connector, and two prepares that rewrote it at
 	// once would restart the compositor twice for one config.
@@ -169,7 +169,7 @@ func newDRAPlugin(client *Client, card, socketDir string, layout *layoutLink) *d
 		endCompositor:  func() error { return endCompositor(procRoot) },
 		killCompositor: func() error { return killCompositor(procRoot) },
 		switchTimeout:  modeSwitchTimeout,
-		switchInterval: modeSwitchInterval,
+		switchFallback: modeSwitchFallback,
 		releaseGrace:   powerReleaseGrace,
 	}
 }

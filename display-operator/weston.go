@@ -64,14 +64,11 @@ const westonBinary = "/usr/bin/weston"
 // retry.
 const configWaitTimeout = 30 * time.Second
 
-// filePollInterval is how often waitForFile checks for the file. A
-// new file raises no event that a program can wait on without
-// another dependency.
-//
-// The compositor role's wait for its config is this interval's one
-// reader, and that wait ends within a tick or two, because the
-// declare container exits before this one starts.
-const filePollInterval = 100 * time.Millisecond
+// fileWaitFallback bounds each wait in waitForFile. The file's
+// arrival ends a wait early, so this bounds only the look that no
+// arrival starts, which is every look while the file's directory does
+// not exist yet.
+const fileWaitFallback = time.Second
 
 // socketDialTimeout is how long a check waits for the compositor to
 // accept the connection. Accepting a client is the first thing an
@@ -82,7 +79,9 @@ const socketDialTimeout = 500 * time.Millisecond
 // socketWatchInterval is how often the operator probes the
 // compositor's socket. One exchange a second costs the compositor
 // what any Wayland tool costs it, and the watch runs for the life of
-// the pod, so it stays gentle where the config wait is quick.
+// the pod, so it stays gentle. It is a probe and not a wait for the
+// socket: a compositor can hold its socket and answer nothing, and
+// only an exchange finds that.
 const socketWatchInterval = 1 * time.Second
 
 // declareMode and compositorMode are the arguments that select the
@@ -526,25 +525,25 @@ func westonEnvironment(environ []string, socketDir string) []string {
 }
 
 // waitForFile blocks until the file exists, until the context ends, or
-// until the timeout runs out.
-//
-// A new file raises no event a program can wait on without another
-// dependency, so this is a bounded poll on one path, and the startup
-// ordering already makes it short.
+// until the timeout runs out. It looks when the kernel reports that the
+// file arrived (arrivals.go), and the startup ordering makes the first
+// look the usual answer.
 func waitForFile(ctx context.Context, path string, timeout time.Duration) error {
-	deadline := time.After(timeout)
-	tick := time.NewTicker(filePollInterval)
-	defer tick.Stop()
+	watch := newArrivals(path)
+	defer watch.close()
+	bounded, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	for {
+		watch.ready()
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline:
+		watch.wait(bounded, fileWaitFallback)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if bounded.Err() != nil {
 			return fmt.Errorf("nothing created %s within %s", path, timeout)
-		case <-tick.C:
 		}
 	}
 }

@@ -588,12 +588,13 @@ func TestAnOlderCompositorsOutputsAreTrackedWithNoName(t *testing.T) {
 // The plugin's mode readback, reading the compositor this
 // bench serves. The budget is short so a test that must reach the
 // timeout reaches it at once, the way the plugin's other tests
-// shorten it.
+// shorten it. The fallback timer is longer than any test, so a
+// readback that ends in time ended on the watch's report.
 func readbackPlugin(watch *outputWatch) *draPlugin {
 	return &draPlugin{
 		served:         watch.served,
 		switchTimeout:  500 * time.Millisecond,
-		switchInterval: 2 * time.Millisecond,
+		switchFallback: time.Hour,
 	}
 }
 
@@ -656,6 +657,32 @@ func TestTheReadbackTakesAModeStatedInALaterBatch(t *testing.T) {
 	server.restate(session, 1, [][]uint32{{1, 1920, 1080, 60000}, {2, 3840, 1600, 59997}})
 	if err := readbackPlugin(bench.watch).awaitMode(t.Context(), "HDMI-A-1", "1920x1080@60", 0); err != nil {
 		t.Errorf("the readback refused the mode a later batch stated: %v", err)
+	}
+}
+
+// The readback is waiting when the compositor states the mode, and
+// the watch's report ends the wait. Neither the budget nor the
+// fallback timer could end it inside the test's bound.
+func TestTheReadbackEndsOnTheWatchsReport(t *testing.T) {
+	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
+	bench := newWatchBench(t, server)
+	session := server.client()
+	bench.awaitMode("HDMI-A-1", "3840x1600@60")
+	plugin := readbackPlugin(bench.watch)
+	plugin.switchTimeout = time.Hour
+	answer := make(chan error, 1)
+	go func() { answer <- plugin.awaitMode(t.Context(), "HDMI-A-1", "1920x1080@60", 0) }()
+	time.Sleep(50 * time.Millisecond)
+
+	server.restate(session, 1, [][]uint32{{1, 1920, 1080, 60000}, {2, 3840, 1600, 59997}})
+
+	select {
+	case err := <-answer:
+		if err != nil {
+			t.Errorf("the readback refused the mode the report stated: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the readback did not end on the watch's report")
 	}
 }
 

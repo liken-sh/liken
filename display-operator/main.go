@@ -569,10 +569,13 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 // watchSocket wakes the loop when a compositor starts answering on the
 // socket and when it stops.
 //
-// A compositor that comes or goes raises no event a program can
-// wait on, so the watch probes on a tick, and the change from one
-// reading to the next is the whole signal. The pass it wakes is what
-// taints or frees the screens.
+// The watch probes on a tick, and the change from one reading to the
+// next is the whole signal. The socket's arrival is an event, and the
+// output watch and the layout link wait on it (arrivals.go). A
+// compositor that holds its socket and stops answering raises no
+// event: only an exchange that gets no answer finds it, so this watch
+// probes on a clock. The pass it wakes is what taints or frees the
+// screens.
 //
 // The watch also repairs a compositor that accepts on its socket and
 // answers nothing. It is the one reader that probes on a clock, so it
