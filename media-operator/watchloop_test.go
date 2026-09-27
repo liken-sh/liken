@@ -129,6 +129,15 @@ func TestAWatchLoopRecoversEachEnding(t *testing.T) {
 			want: []string{"open 42", "list", "open 900", "open 901", "list", "open 900"},
 		},
 		{
+			name: "a 410 that ends a watch that ran a second or longer counts as a first 410",
+			from: "42",
+			watches: []scriptedWatch{
+				{end: gone},
+				{lived: time.Minute, end: watchEnd{version: "950", opened: true, gone: true}},
+			},
+			want: []string{"open 42", "list", "open 900", "list", "open 900"},
+		},
+		{
 			name:    "an error event waits before the list",
 			from:    "42",
 			watches: []scriptedWatch{{end: watchEnd{version: "42", opened: true, failed: true, reason: "a bad event"}}},
@@ -149,6 +158,16 @@ func TestAWatchLoopRecoversEachEnding(t *testing.T) {
 				{lived: time.Minute, end: watchEnd{version: "60", opened: true, failed: true, reason: "a bad event"}},
 			},
 			want: []string{"open 42", "pause 1s", "open 42", "pause 2s", "open 42", "pause 1s", "list", "open 900"},
+		},
+		{
+			name: "a watch that never opened does not reset the wait, however long it took",
+			from: "42",
+			watches: []scriptedWatch{
+				{lived: 10 * time.Second, end: watchEnd{version: "42", reason: "timeout awaiting response headers"}},
+				{lived: 10 * time.Second, end: watchEnd{version: "42", reason: "timeout awaiting response headers"}},
+				{lived: 10 * time.Second, end: watchEnd{version: "42", reason: "timeout awaiting response headers"}},
+			},
+			want: []string{"open 42", "pause 1s", "open 42", "pause 2s", "open 42", "pause 4s", "open 42"},
 		},
 		{
 			name:  "a loop with no version lists first, and a failed list waits",

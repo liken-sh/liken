@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -333,4 +334,42 @@ func TestANamedWatchResumesAnEndedStream(t *testing.T) {
 	mustMatch(t, (<-watched).Query().Get("resourceVersion"), "20")
 	mustMatch(t, (<-watched).Query().Get("resourceVersion"), "21")
 	mustMatch(t, held.is("latest")(), true)
+}
+
+// An object the owner cannot use is the owner's report, and the watch
+// still opens from the list's version. A list that failed on it would
+// list again on a growing wait and never watch, so the next version,
+// which can be valid, would not arrive.
+func TestANamedWatchOpensAfterAReadTheOwnerCannotUse(t *testing.T) {
+	api := newCoreAPI()
+	api.seed(t, "configmaps/anchor", valueConfigMap("unusable", "16"))
+	events := make(chan string)
+	defer close(events)
+	watched := make(chan *url.URL, 1)
+	watch := newNamedWatch(testAPIClient(t, watchingAPI(api, events, watched)),
+		"liken-system", "configmaps", "anchor",
+		func(json.RawMessage) error { return errors.New("the value is unusable") }, func() {})
+	lines := make(chan string, 4)
+	watch.report = func(line string) { lines <- line }
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go watch.follow(ctx, "")
+
+	mustMatch(t, within(t, watched).Query().Get("resourceVersion"), "900")
+	mustMatch(t, within(t, lines), "reading configmap liken-system/anchor: the value is unusable")
+}
+
+// within receives one value with a deadline, so a watch that never
+// arrives fails the test instead of holding it.
+func within[T any](t *testing.T, values <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(watchTimeout):
+		t.Fatal("nothing arrived")
+		var zero T
+		return zero
+	}
 }

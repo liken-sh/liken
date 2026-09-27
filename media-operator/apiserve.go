@@ -426,9 +426,10 @@ func reviewCertificate(server *apiServer, keeper *certificateKeeper, metrics *ap
 // deleted Secret is minted again at once, because the listener cannot
 // serve without a pair.
 //
-// The watch starts with no resourceVersion, so its first event is the
-// Secret as it is now. The keeper's own writes return as events too,
-// and each one costs one read that changes nothing.
+// The watch starts with no resourceVersion, so it lists the Secret
+// first and hands it to the owner as it is now, then watches from the
+// list's version. The keeper's own writes return as events too, and
+// each one costs one read that changes nothing.
 func watchServingPair(client *Client, namespace string, server *apiServer, keeper *certificateKeeper,
 	metrics *apiMetrics) *namedWatch {
 	refresh := func() error { return refreshCertificate(server, keeper, metrics) }

@@ -308,8 +308,10 @@ func TestADeletedConfigMapKeepsThePool(t *testing.T) {
 	mustMatch(t, len(lines), 1)
 }
 
-// A ConfigMap that carries no usable authority answers an error too.
-func TestAConfigMapWithNoAuthorityAnswersAnError(t *testing.T) {
+// A ConfigMap that carries no usable authority is reported, and the
+// read still answers the list's version, so the watch opens and a later
+// valid authority arrives. The pool stays empty.
+func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 	rows := []struct {
 		name  string
 		caPEM string
@@ -322,10 +324,15 @@ func TestAConfigMapWithNoAuthorityAnswersAnError(t *testing.T) {
 			api := newCoreAPI()
 			publishAuthority(t, api, row.caPEM)
 			anchors := &clientAnchors{}
+			watch := watchClientAnchors(testAPIClient(t, api.handler()), anchors)
+			var lines []string
+			watch.report = func(line string) { lines = append(lines, line) }
 
-			_, err := watchClientAnchors(testAPIClient(t, api.handler()), anchors).read()
+			version, err := watch.read()
 
-			mustFail(t, err)
+			mustSucceed(t, err)
+			mustMatch(t, version, "900")
+			mustMatch(t, len(lines), 1)
 		})
 	}
 }

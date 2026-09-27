@@ -21,7 +21,13 @@ package main
 //   - A watch that closed less than a second after it opened is a
 //     failure, whatever it delivered, so the backoff applies. A watch
 //     that ran a second or longer resets the backoff, even when it
-//     ended with an error, because the next failure is a new fault.
+//     ended with an error, because the next failure is a new fault. A
+//     410 that ends such a watch counts as a first 410. A watch the
+//     API server never accepted did not run, however long it waited.
+//
+// An error ends the stream at once: the loop closes the body and does
+// not read to its end. The API server can hold a stream open for
+// minutes after an error, and every change in that time would be lost.
 
 import (
 	"context"
@@ -140,9 +146,16 @@ func (l *watchLoop) run(ctx context.Context, version string) {
 		if ctx.Err() != nil {
 			return
 		}
-		ran := l.now().Sub(began) >= l.minLife
+		// Only a watch the API server accepted can have run. A dial or a
+		// response that times out takes seconds and opens nothing, and
+		// counting it would reset the wait on every attempt against a
+		// dead server.
+		ran := end.opened && l.now().Sub(began) >= l.minLife
 		if ran {
 			wait = l.backoffStart
+			// A watch that ran was a working watch, so a 410 that ends
+			// it is a first 410 and lists at once.
+			relistedForGone = false
 		}
 
 		if end.gone {

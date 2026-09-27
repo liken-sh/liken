@@ -98,7 +98,10 @@ func (w *namedWatch) collectionPath() string {
 // read lists the collection under the object's name once, hands the
 // object to its owner, and answers the list's resourceVersion for the
 // watch to start from. An absent object is not an error: removed runs,
-// and the watch starts from the list's version all the same.
+// and the watch starts from the list's version all the same. An object
+// the owner cannot use is not an error either, for the reason deliver
+// gives: it is reported, and the watch starts from the list's version,
+// so the next version of the object arrives.
 func (w *namedWatch) read() (string, error) {
 	query := url.Values{"fieldSelector": {"metadata.name=" + w.name}}
 	var list struct {
@@ -113,9 +116,7 @@ func (w *namedWatch) read() (string, error) {
 		w.removed()
 		return version, nil
 	}
-	if err := w.changed(list.Items[0]); err != nil {
-		return version, fmt.Errorf("reading %s: %w", w.subject(), err)
-	}
+	w.deliver("ADDED", list.Items[0])
 	return version, nil
 }
 

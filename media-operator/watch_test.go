@@ -384,3 +384,22 @@ func TestAWatchRestartCountsEachReconnectAndNotTheFirstConnect(t *testing.T) {
 
 	mustMatch(t, restarts.Load(), int32(2))
 }
+
+// A bad event ends the watch at once, while the server still holds the
+// stream open. A loop that read the stream to its end would wait for
+// the server to close it, and every change in that time would be lost.
+func TestABadEventClosesTheStreamTheServerHoldsOpen(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{
+		events: []string{`{"type":"MODIFIED","object":{"metadata":7}}`},
+		hold:   api.parked,
+	})
+	api.answersLists(listTurn{version: "150"})
+
+	startWatch(t, api, "42")
+
+	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "42")
+	mustMatch(t, nextListRequest(t, api), playsPath)
+	mustMatch(t, nextWatchRequest(t, api).Get("resourceVersion"), "150")
+}
