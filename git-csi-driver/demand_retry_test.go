@@ -64,8 +64,8 @@ func TestTheRetryWaitIsSpreadOverHalfTheBackoff(t *testing.T) {
 	waits := map[time.Duration]bool{}
 	for range 50 {
 		wait := jittered(backoff)
-		if wait < backoff || wait >= backoff+backoff/2 {
-			t.Fatalf("the wait is %s, want at least %s and under %s", wait, backoff, backoff+backoff/2)
+		if wait <= backoff/2 || wait > backoff {
+			t.Fatalf("the wait is %s, want over %s and at most %s", wait, backoff/2, backoff)
 		}
 		waits[wait] = true
 	}

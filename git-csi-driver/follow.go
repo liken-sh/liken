@@ -254,15 +254,16 @@ func (f *follower) settle(failed bool, retry *time.Timer) {
 	retry.Reset(jittered(f.backoff))
 }
 
-// jittered is the backoff plus a random part of up to half of it.
+// jittered is the backoff less a random part of up to half of it.
 // Every node that fetches a repository fails when its remote does, and
 // the same doubling would retry them all at the same moment when it
-// comes back.
+// comes back. The jitter comes off the backoff, not on top of it, so
+// the wait never passes maxDemandRetry.
 func jittered(backoff time.Duration) time.Duration {
 	if backoff < 2 {
 		return backoff
 	}
-	return backoff + rand.N(backoff/2)
+	return backoff - rand.N(backoff/2)
 }
 
 func (f *follower) snapshot() []*volume {
