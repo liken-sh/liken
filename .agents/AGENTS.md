@@ -102,29 +102,13 @@ and then the changes, so each open costs as much as a list. Start a
 watch from a version, and open it again from the last version it
 delivered.
 
-A watch loop written by hand needs three guards, and each one has
-failed in review at least once:
-
-- When a watch closes, open the next one from the last
-  `resourceVersion` it delivered, with `allowWatchBookmarks=true` so
-  that the version moves while nothing changes. Do not list again.
-- List again at once only on a `410 Gone`, as a response or as an
-  `ERROR` event, and only once: if the watch that opens from that
-  fresh list also gets a 410, wait out the backoff. After any other
-  error event, wait out a backoff before the list, or a fault that
-  lasts makes a tight list loop. An event whose object does not decode
-  counts as an error event. On any error, close the stream at once: a
-  server holds a watch open for minutes, and a loop that reads the
-  stream to its end loses every event in that time. A 410 that ends a
-  watch which ran a second or longer counts as a first 410.
-- A watch that closes less than a second after it opened is a
-  failure, whatever it delivered, so the backoff applies. A watch
-  with no version replays every object first, so "no events" does not
-  identify a short watch. A watch that ran for a second or longer
-  resets the backoff, even when it ended with an error. Measure a
-  watch's life from when the server accepted it, not from when the
-  request began: a watch the server never accepted did not run, so a
-  slow dial or a slow refusal must not reset the backoff.
+A watch loop written by hand needs three guards: resume from the last
+version instead of listing, list again only for a 410 and only once,
+and decide the wait by how long the server kept the watch open. Each
+guard has failed in review. The `operators` skill under
+`.agents/skills` holds the guards in full, the scenarios a watch loop
+must pass in a test, and the open plan for one shared loop. Load it
+before you write or review an operator's watch, pass, or timer.
 
 Every other source has no version to resume from, so the subscription
 must open before the read. The same shape fits `pw-dump -m`, an MQTT
