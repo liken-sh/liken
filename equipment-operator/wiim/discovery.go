@@ -33,8 +33,8 @@ var queryInterval = time.Second
 // ssdpMX is the MX an M-SEARCH states: the longest a renderer may wait,
 // at a random point, before it answers. One second is the least UPnP
 // allows. A short MX is a deliberate choice: it keeps two rounds of
-// both searches inside the discovery window, and the renderers on a
-// home LAN are few, so their answers need little spreading.
+// both searches inside the discovery window, and a LAN that holds a few
+// renderers needs little spreading of their answers.
 const ssdpMX = 1
 
 // The per-attempt read windows. An mDNS responder answers a shared
@@ -156,8 +156,8 @@ func browseMDNS(ctx context.Context, devices map[string]Device) {
 // answer the socket that sent the query rather than the mDNS group, so
 // a plain UDP read receives the answers. RFC 6762 lets a responder
 // answer on the group anyway when it has not sent the record there
-// lately, and a capture of three WiiM amps showed each answer to this
-// query on the group, where every host on the LAN receives it.
+// lately, and the amps answered this query on the group, where every
+// host on the LAN receives it.
 func mdnsQuery() []byte {
 	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{})
 	_ = builder.StartQuestions()

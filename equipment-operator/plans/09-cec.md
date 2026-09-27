@@ -911,9 +911,15 @@ and reads again. No timer re-reads a state.
   Report Physical Address with a new physical address, it asks that
   device once for the facts the directory does not hold. It sends
   nothing to the other devices, and nothing more to a device that
-  repeats its broadcast. A device that leaves in silence stays in the
-  list until a question to it goes unacknowledged or the adapter joins
-  again.
+  repeats its broadcast, with one exception. A TV whose power the
+  directory does not know, such as one in a deep standby at the scan,
+  is asked for its power alone when it broadcasts Report Physical
+  Address or Device Vendor ID, as a TV does when it wakes. A burst of
+  announcements queues one question, and a TV whose power stays
+  unknown, such as one that refuses Give Device Power Status, is not
+  asked again at the same physical address. A device that leaves in
+  silence stays in the list until a question to it goes
+  unacknowledged or the adapter joins again.
 * **The TV's power.** The directory sets the TV's power from the
   messages that change it: a Standby to the TV or to every device
   means Standby; Image View On and Text View On, which an adapter
@@ -931,8 +937,12 @@ and reads again. No timer re-reads a state.
   neither stays in Standby the same way.
 * **The power press reads the TV.** The press decides the whole room
   from the TV's power, so it cannot use a value that can be stale.
-  For a `Television` that is `Reachable`, the session writes a new
-  `status.session.powerReadAt`. The node workload whose adapter sends
+  For a `Television` whose TV an adapter in `Control` finds, the
+  session writes a new `status.session.powerReadAt`. That is a
+  `Television` that is `Reachable`, or one that is not `Reachable`
+  with the reason `NoPower`: its `status.power` is empty after the TV
+  gave no power at the join scan or on two reads, and such a TV can be
+  on. The node workload whose adapter sends
   the bus's commands asks the TV once and writes the answer in
   `status.powerRead`. The session waits up to 3 seconds, on a watch of
   the `Television`s, and decides from the answer; with no answer it
@@ -964,8 +974,9 @@ and reads again. No timer re-reads a state.
 
 The fakes prove that an idle bus hears nothing after the scan over
 many heartbeats and passes, that a device that announces itself is
-asked four questions once and nothing when it announces again, and
-that a press decides correctly from a TV whose power changed with no
+asked four questions once and nothing when it announces again, that
+a TV whose power stays unknown is asked one question over five pairs
+of announcements and a player none, and that a press decides correctly from a TV whose power changed with no
 message the adapter heard. On `vivid`, the TV's handle received no
 message from the adapter over 2 seconds of passes and 5-millisecond
 heartbeats after the scan; the kernel passes a follower no poll, so

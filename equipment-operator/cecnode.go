@@ -168,6 +168,14 @@ type cecNode struct {
 	// held then. Both belong to the mode, and startMode makes them anew.
 	arrivals   chan cec.LogicalAddress
 	introduced map[cec.LogicalAddress]cec.PhysicalAddress
+	// tvPowerAsk takes one request to ask the TV for its power after it
+	// announced itself with no known power, and holds at most one, so a
+	// burst of announcements queues one question. tvPowerAskedAt is the
+	// physical address the TV announced for the last such question; the
+	// TV is not asked again at that address while its power stays
+	// unknown. Both belong to the mode, and startMode makes them anew.
+	tvPowerAsk     chan struct{}
+	tvPowerAskedAt *cec.PhysicalAddress
 	// lastCommand is when the TV was last sent a power command: by this
 	// adapter, or a Standby by another device that the adapter heard,
 	// such as a receiver that turns the TV off with itself. A TV answers

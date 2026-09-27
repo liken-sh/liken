@@ -396,10 +396,12 @@ func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 	ctx, cancel := context.WithCancel(ctx)
 	work := &sync.WaitGroup{}
 	arrivals := make(chan cec.LogicalAddress, cecArrivals)
+	tvPowerAsk := make(chan struct{}, 1)
 	n.stopMode = func() { cancel(); work.Wait() }
 	n.modeContext, n.modeWork = ctx, work
 	n.mutex.Lock()
 	n.arrivals, n.introduced = arrivals, map[cec.LogicalAddress]cec.PhysicalAddress{}
+	n.tvPowerAsk, n.tvPowerAskedAt = tvPowerAsk, nil
 	n.mutex.Unlock()
 	work.Go(func() {
 		if !n.joinScan(ctx, own) {
@@ -411,6 +413,10 @@ func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 				return
 			case address := <-arrivals:
 				if !n.introduce(own, address) {
+					return
+				}
+			case <-tvPowerAsk:
+				if _, err := n.askPower(own); err != nil {
 					return
 				}
 			}
@@ -472,13 +478,8 @@ func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
 // Address then, so a device that joins or moves after the scan is heard
 // here. Each device is introduced once for each physical address it
 // announces, so a device that repeats its broadcasts asks nothing more
-// of the adapter. A device whose power the directory does not know is
-// introduced again when it announces itself with Report Physical
-// Address or Device Vendor ID, as a TV does when it wakes: a TV in a
-// deep standby can answer no power at the scan, and its power would
-// otherwise stay unknown until a power press asks. The question goes
-// out only after the device's own broadcast, never on a timer. held
-// says whether the directory held the sender before the message.
+// of the adapter. The TV has one exception, in askTVPower. held says
+// whether the directory held the sender before the message.
 func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	if message.From == cec.AddressUnregistered {
 		return
@@ -489,11 +490,10 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	if n.arrivals == nil {
 		return
 	}
+	n.askTVPower(message, opcode, after)
 	introduced, known := n.introduced[message.From]
 	moved := opcode == cec.OpReportPhysicalAddr && after.Physical != introduced
-	announced := opcode == cec.OpReportPhysicalAddr || opcode == cec.OpDeviceVendorID
-	unknown := announced && after.Power == cec.PowerUnknown
-	if held && known && !moved && !unknown {
+	if held && known && !moved {
 		return
 	}
 	n.introduced[message.From] = after.Physical
@@ -501,6 +501,38 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	case n.arrivals <- message.From:
 	default:
 	}
+}
+
+// askTVPower asks the TV for its power, and nothing else, when it
+// announces itself with Report Physical Address or Device Vendor ID
+// while the directory does not know its power. A TV in a deep standby
+// can answer no power at the scan and announce itself when it wakes,
+// and its power would otherwise stay unknown until a power press asks.
+// The bound is hard, because a question is traffic, and a TV can answer
+// traffic by switching its input: only the TV, only its power, one
+// question for a burst of announcements, and no second question at the
+// same physical address while the power stays unknown, such as for a
+// TV that refuses Give Device Power Status. A known power clears the
+// mark, so a TV that later loses its power again is asked once more.
+// The question goes out only after the TV's own broadcast, never on a
+// timer. The caller holds the mutex.
+func (n *cecNode) askTVPower(message cec.Message, opcode cec.Opcode, after cec.Peer) {
+	if message.From != cec.AddressTV || n.tvPowerAsk == nil {
+		return
+	}
+	if after.Power != cec.PowerUnknown {
+		n.tvPowerAskedAt = nil
+		return
+	}
+	if opcode != cec.OpReportPhysicalAddr && opcode != cec.OpDeviceVendorID {
+		return
+	}
+	if n.tvPowerAskedAt != nil && *n.tvPowerAskedAt == after.Physical {
+		return
+	}
+	physical := after.Physical
+	n.tvPowerAskedAt = &physical
+	poke(n.tvPowerAsk)
 }
 
 // introduce asks one device that arrived for the facts the directory

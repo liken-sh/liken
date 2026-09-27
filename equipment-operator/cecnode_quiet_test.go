@@ -113,6 +113,44 @@ func TestATVWithNoKnownPowerIsAskedWhenItAnnouncesItself(t *testing.T) {
 	mustMatch(t, len(sentTo(wire, 0)), asked)
 }
 
+// A device whose power stays unknown, such as a TV that refuses Give
+// Device Power Status, can repeat its announcements. Each question is
+// traffic a TV can answer by switching its input, so the adapter asks
+// only the TV, only for its power, and once for each physical address
+// while the power stays unknown. A player whose power is unknown is
+// asked nothing.
+func TestAnAnnouncingDeviceWithNoKnownPowerIsAskedAtMostOnce(t *testing.T) {
+	cases := []struct {
+		name     string
+		device   cectest.Peer
+		physical cec.PhysicalAddress
+		asked    int
+	}{
+		{"the TV", televisionTV(cec.PowerUnknown), 0x0000, 1},
+		{"a player", cectest.Peer{Logical: 8, Physical: 0x1500, PrimaryType: 4, OSDName: "Streamer", Vendor: 0x001a11, Version: cec.Version14, Power: cec.PowerUnknown}, 0x1500, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wire := roomWithTV(televisionTV(cec.PowerUnknown))
+			wire.Add(c.device)
+			api := controlling(t, wire, lounge(""))
+			api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+			scanned := len(sentTo(wire, c.device.Logical))
+
+			for range 5 {
+				wire.Send(cec.ReportPhysicalAddress(c.device.Logical, c.physical, c.device.PrimaryType))
+				wire.Send(cec.DeviceVendorID(c.device.Logical, c.device.Vendor))
+			}
+			// No message states that the adapter is done, and an Active
+			// Source would tell the directory that the TV is on, so the
+			// test waits a fixed time for questions that must not come.
+			time.Sleep(200 * time.Millisecond)
+
+			mustMatch(t, len(sentTo(wire, c.device.Logical))-scanned, c.asked)
+		})
+	}
+}
+
 // askPowerRead writes a power press's request on the lounge
 // Television's session, as the Deployment does.
 func askPowerRead(t *testing.T, api *cecAPI, at string) {

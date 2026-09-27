@@ -31,9 +31,9 @@ var discover = wiim.Discover
 // The wait is a backstop, and it is the only evidence discovery has.
 // A search finds an amp that joined and an address that moved, and a
 // run of searches that miss an amp is the proof that it left. An amp
-// that loses power or its network sends no goodbye. A 20-minute capture
-// of both groups on a LAN with three amps heard no SSDP NOTIFY from any
-// of them, and no mDNS record except the answers to a query. So a
+// that loses power or its network sends no goodbye. A passive capture
+// of both groups heard no SSDP NOTIFY and no unsolicited mDNS record
+// from the amps, only their answers to a query. So a
 // listener alone would never learn that an amp left, and would learn a
 // new address only if the amp announced it. One run sends two mDNS
 // queries and two SSDP searches over the window. The amps answer the
