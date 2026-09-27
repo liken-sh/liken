@@ -114,10 +114,11 @@ func followObject(ctx context.Context, client *Client, kind, collection, name st
 // again.
 //
 // Every other failure waits out the backoff, and each failure in a row
-// doubles it. A watch that closed within shortLife of its open is a
-// failure, even when it ended cleanly. A watch that lived longer
-// resets the backoff, even when it ended on an error, and one that
-// ended cleanly opens again at once.
+// doubles it. A watch's life starts when the server accepts it. A
+// watch the server refused, or one that closed within shortLife of
+// being accepted, is a failure, even when it ended cleanly. A watch
+// that lived longer resets the backoff, even when it ended on an
+// error, and one that ended cleanly opens again at once.
 func (w *objectWatch) run(ctx context.Context) {
 	version := ""
 	delay := w.retry
@@ -140,9 +141,11 @@ func (w *objectWatch) run(ctx context.Context) {
 			w.restarted()
 		}
 		opened = true
-		started := time.Now()
-		last, err := w.follow(ctx, version)
-		lived := time.Since(started) >= w.shortLife
+		last, accepted, err := w.follow(ctx, version)
+		// The life starts when the server accepted the watch. A slow
+		// dial or a slow refusal is a watch that never ran, and
+		// counting its wait as life would reset the backoff.
+		lived := !accepted.IsZero() && time.Since(accepted) >= w.shortLife
 		if ctx.Err() != nil {
 			return
 		}
@@ -240,15 +243,19 @@ func (w *objectWatch) list() (string, error) {
 // version on and runs nothing. An ERROR event carries a Status: code
 // 410 is ErrGone, and any other code is a failure with the API
 // server's own message.
-func (w *objectWatch) follow(ctx context.Context, version string) (string, error) {
+//
+// accepted is when the server's 200 arrived, and zero when the server
+// refused the watch.
+func (w *objectWatch) follow(ctx context.Context, version string) (last string, accepted time.Time, err error) {
 	ctx, cancel := context.WithTimeout(ctx, objectWatchTimeout+time.Minute)
 	defer cancel()
 	body, err := w.client.Watch(ctx, fmt.Sprintf(
 		"%s?%s&watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
 		w.collection, w.query(), url.QueryEscape(version), int(objectWatchTimeout.Seconds())))
 	if err != nil {
-		return version, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
+		return version, time.Time{}, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
 	}
+	accepted = time.Now()
 	// The cancel comes before the drain. A watch this side leaves early
 	// is a stream the server still holds open, and a drain on it would
 	// read until the server's own timeout.
@@ -272,9 +279,9 @@ func (w *objectWatch) follow(ctx context.Context, version string) (string, error
 		}
 		if err := events.Decode(&event); err != nil {
 			if err == io.EOF {
-				return version, nil
+				return version, accepted, nil
 			}
-			return version, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
+			return version, accepted, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
 		}
 		// An event whose object does not decode, or carries no
 		// version, leaves no version to open the next watch from. The
@@ -282,26 +289,26 @@ func (w *objectWatch) follow(ctx context.Context, version string) (string, error
 		// backoff, so a watch never opens again at the same version to
 		// read the same event.
 		if err := json.Unmarshal(event.Raw, &event.Object); err != nil {
-			return "", fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
+			return "", accepted, fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
 		}
 		switch event.Type {
 		case "ERROR":
 			if event.Object.Code == http.StatusGone {
-				return version, fmt.Errorf("%w: %s", ErrGone, event.Object.Message)
+				return version, accepted, fmt.Errorf("%w: %s", ErrGone, event.Object.Message)
 			}
 			// Any other error event lists again after the backoff,
 			// because the watch says nothing about the version it
 			// stopped at.
-			return "", fmt.Errorf("watching the %s %s: %d: %s",
+			return "", accepted, fmt.Errorf("watching the %s %s: %d: %s",
 				w.kind, w.selector, event.Object.Code, event.Object.Message)
 		case "BOOKMARK":
 			if event.Object.Metadata.ResourceVersion == "" {
-				return "", fmt.Errorf("reading an event on the %s %s: a bookmark with no version", w.kind, w.selector)
+				return "", accepted, fmt.Errorf("reading an event on the %s %s: a bookmark with no version", w.kind, w.selector)
 			}
 			version = event.Object.Metadata.ResourceVersion
 		default:
 			if event.Object.Metadata.ResourceVersion == "" {
-				return "", fmt.Errorf("reading an event on the %s %s: a %s event with no version",
+				return "", accepted, fmt.Errorf("reading an event on the %s %s: a %s event with no version",
 					w.kind, w.selector, event.Type)
 			}
 			version = event.Object.Metadata.ResourceVersion
@@ -310,7 +317,7 @@ func (w *objectWatch) follow(ctx context.Context, version string) (string, error
 				// short of it, so the empty version sends the loop
 				// back to a list, which reads the whole state again.
 				if err := w.keep.apply(event.Type, event.Raw); err != nil {
-					return "", fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
+					return "", accepted, fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
 				}
 			}
 			w.notify()

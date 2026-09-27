@@ -27,6 +27,10 @@ type oneObject struct {
 	// that many watch opens with a 410 before answering normally.
 	failLists   int
 	goneWatches int
+	// refuseWatches answers every watch open with a 500 after
+	// refusalDelay, the way a slow or overloaded API server refuses.
+	refuseWatches bool
+	refusalDelay  time.Duration
 
 	events  chan string
 	listed  chan string
@@ -63,6 +67,7 @@ func (f *oneObject) serve(w http.ResponseWriter, r *http.Request) {
 		f.goneWatches--
 	}
 	version := f.version
+	refusing, refusalDelay := watching && f.refuseWatches, f.refusalDelay
 	f.mu.Unlock()
 
 	if !watching {
@@ -75,6 +80,11 @@ func (f *oneObject) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.watched <- r.URL.RawQuery
+	if refusing {
+		time.Sleep(refusalDelay)
+		http.Error(w, "etcdserver: too many requests", http.StatusInternalServerError)
+		return
+	}
 	if gone {
 		http.Error(w, "too old resource version: 10 (42)", http.StatusGone)
 		return
@@ -407,5 +417,24 @@ func TestAWatchsLifetimeDecidesTheBackoff(t *testing.T) {
 				t.Errorf("waits = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// A watch's life starts when the server accepts it, not when the
+// request began. A refusal that takes longer than the short life is
+// still a watch that never ran, so the backoff grows.
+func TestASlowRefusalStillGrowsTheBackoff(t *testing.T) {
+	fake := newOneObject(t)
+	fake.refuseWatches = true
+	fake.refusalDelay = 50 * time.Millisecond
+	_, _, waited := fake.followWith(t, func(w *objectWatch) { w.shortLife = 10 * time.Millisecond })
+
+	var got []time.Duration
+	for range 3 {
+		got = append(got, next(t, waited, "wait after a refused watch"))
+	}
+	want := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
+	if !slices.Equal(got, want) {
+		t.Errorf("waits = %v, want %v", got, want)
 	}
 }
