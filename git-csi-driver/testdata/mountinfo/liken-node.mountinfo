@@ -1,9 +1,0 @@
-432 217 0:134 / / rw,relatime shared:62 - overlay overlay rw,lowerdir=/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18634/fs:/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18465/fs,upperdir=/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18741/fs,workdir=/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/18741/work,uuid=on
-446 432 0:147 / /proc rw,nosuid,nodev,noexec,relatime shared:63 - proc proc rw
-448 432 0:149 / /dev rw,nosuid shared:64 - tmpfs tmpfs rw,size=65536k,mode=755,inode64
-472 448 0:58 / /dev/shm rw,relatime shared:68 - tmpfs shm rw,size=65536k,inode64
-257 432 0:106 / /sys rw,nosuid,nodev,noexec,relatime shared:69 - sysfs sysfs rw
-467 432 8:7 /plugins/git.liken.sh /csi rw,relatime shared:71 - ext4 /dev/sda7 rw
-473 432 8:7 /pods /var/lib/kubelet/pods rw,relatime shared:20 - ext4 /dev/sda7 rw
-483 432 8:6 /git-csi /var/lib/liken/pod-storage/git-csi rw,relatime shared:75 - ext4 /dev/sda6 rw
-534 432 0:44 / /var/run/secrets/kubernetes.io/serviceaccount ro,relatime shared:76 - tmpfs tmpfs rw,size=196608k,inode64,noswap

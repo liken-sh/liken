@@ -186,8 +186,3 @@ with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,
 `git_csi_push_failures_total`, `git_csi_skipped_files`, and
 `git_csi_diverged`, labeled by namespace and claim.
-
-A node whose store does not survive a reboot refuses to stage a
-writeable volume, and the pod's events name the reason. The
-[install guide](https://git.liken.sh/docs/guides/install/#the-stores-filesystem) says what the node
-plugin checks.

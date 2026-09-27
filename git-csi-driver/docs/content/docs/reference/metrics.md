@@ -22,7 +22,6 @@ components:
 | git-csi-driver | `git_csi_fetch_duration_seconds{repo}` | histogram | the forge is slow |
 | git-csi-driver | `git_csi_fetch_failures_total{repo}` | counter | the forge is down |
 | git-csi-driver | `git_csi_store_bytes` | gauge | growth on the wrong filesystem |
-| git-csi-driver | `git_csi_store_refuses_writeable` | gauge | one when the store does not survive a reboot, so the node refuses writeable volumes |
 | git-csi-driver | `git_csi_armed{namespace, claim}` | gauge | one when a class of the driver arms the volume, zero when none does |
 | git-csi-driver | `git_csi_pending_paths{namespace, claim}` | gauge | paths the last scan found that the driver has not committed |
 | git-csi-driver | `git_csi_unpushed_commits{namespace, claim}` | gauge | commits the work tree holds that the remote does not |

@@ -84,11 +84,6 @@ Nothing is planned. The next work comes out of
   contract: CSI operations as the reconcile layer, volumes mounted,
   fetch duration and failures per repository, and store size. This
   closes the open problem "Monitoring".
-* [14, The store survives a reboot](completed/14-the-store-survives-a-reboot.md).
-  Built on 2026-09-27; the lab drill is owed. The node plugin reads the
-  mount table at start, and a store on `tmpfs`, `ramfs`, or an overlay
-  it cannot place on a disk refuses new writeable volumes and says why.
-  This closes the open problem "The store on the wrong filesystem".
 
 ## Open problems
 
@@ -105,3 +100,7 @@ so the next plan can start from the facts.
   1.13 removed it, the kubelet reads it only behind an alpha gate k3s
   leaves off, and no kubelet calls its replacement yet. The driver
   reports through events and the `git_csi_volume_abnormal` gauge.
+* [The store on the wrong filesystem](rejected/the-store-on-the-wrong-filesystem.md).
+  A store in memory is a valid choice: a read-only tree can be cloned
+  again, and a writeable tree may last only as long as the node's
+  uptime. Where the store lives is the cluster owner's choice.

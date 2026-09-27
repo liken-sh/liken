@@ -1,3 +1,0 @@
-1 0 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw
-40 1 8:6 / /var/lib/liken/pod-storage rw,relatime shared:20 - ext4 /dev/sda6 rw
-41 40 0:41 / /var/lib/liken/pod-storage rw,relatime shared:21 - tmpfs tmpfs rw,inode64

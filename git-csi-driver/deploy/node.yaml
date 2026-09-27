@@ -134,10 +134,6 @@ spec:
         # writeable volume. On liken, /var/lib/liken/pod-storage is the
         # partition that holds pod volumes, so the store is a tenant of
         # the same disk as every other volume on the node.
-        # A node with no such partition puts the directory on its root
-        # filesystem. The plugin reads the mount table at start, and
-        # refuses new writeable volumes unless the table shows that the
-        # store survives a reboot. The install guide gives the rule.
         - name: store
           hostPath:
             path: /var/lib/liken/pod-storage/git-csi

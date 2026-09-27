@@ -522,23 +522,17 @@ func TestTimeFetchObservesTheDurationAndCountsAFailure(t *testing.T) {
 // storeBytesOf is what git_csi_store_bytes reads.
 func storeBytesOf(t *testing.T, readings *metrics) float64 {
 	t.Helper()
-	return nodeGaugeOf(t, readings, "git_csi_store_bytes")
-}
-
-// nodeGaugeOf is what a gauge with no labels reads, as a scrape reads it.
-func nodeGaugeOf(t *testing.T, readings *metrics, name string) float64 {
-	t.Helper()
 	families, err := readings.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
 	for _, family := range families {
-		if family.GetName() != name {
+		if family.GetName() != "git_csi_store_bytes" {
 			continue
 		}
 		return family.GetMetric()[0].GetGauge().GetValue()
 	}
-	t.Fatalf("%s is not on the registry", name)
+	t.Fatal("git_csi_store_bytes is not on the registry")
 	return 0
 }
 

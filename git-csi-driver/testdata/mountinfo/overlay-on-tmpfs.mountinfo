@@ -1,3 +1,0 @@
-1 0 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw
-30 1 0:30 / /run/writes rw,nosuid shared:10 - tmpfs tmpfs rw,size=524288k,mode=755,inode64
-31 1 0:31 / /var/lib/liken rw,relatime shared:11 - overlay overlay rw,lowerdir=/usr/lib/liken,upperdir=/run/writes/upper,workdir=/run/writes/work,uuid=on
