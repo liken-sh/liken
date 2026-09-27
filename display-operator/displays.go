@@ -481,9 +481,11 @@ func watchDisplays(ctx context.Context, c *Client, wake func(), readings *metric
 	}
 }
 
-// One watch connection. It starts at the present, because an
-// event carries nothing the pass uses and a missed event costs one
-// backstop tick.
+// One watch connection. It starts at the present and wakes the loop
+// once as it opens. The pass that the wake starts reads every object
+// after the watch is live, so a change made between two connections is
+// found by that read, and no event is lost. An event carries nothing
+// the pass uses, so the watch needs no resource version to resume from.
 func streamDisplays(ctx context.Context, c *Client, wake func()) error {
 	path := fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", DisplaysPath, int(displayWatchTimeout.Seconds()))
 	body, err := c.Watch(ctx, path)
@@ -491,6 +493,7 @@ func streamDisplays(ctx context.Context, c *Client, wake func()) error {
 		return err
 	}
 	defer drain(body)
+	wake()
 
 	events := json.NewDecoder(body)
 	for {

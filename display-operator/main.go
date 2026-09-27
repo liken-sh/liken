@@ -57,9 +57,16 @@ const (
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. The kernel drops uevent datagrams when its socket
-	// buffer fills, and a dropped datagram costs one edge, so this
-	// tick is what recovers the state after one.
+	// to prompt it. A uevent loss that the socket reports wakes the loop
+	// at once (uevents.go), and a write that fails schedules one retry.
+	// This tick covers what neither one reaches: a write that failed
+	// twice, and a change that no reader reported.
+	//
+	// The Display loop uses the same interval as two windows for state
+	// that raises no event. A panel whose DDC/CI a person turned on at
+	// its own menu raises no uevent, so a refused probe is asked again
+	// once per window. The sweep for resources whose panel left runs
+	// once per window when the panels on the node did not change.
 	backstopInterval = 60 * time.Second
 
 	// writeRetryDelay is how long the loop waits before it writes a
@@ -574,8 +581,11 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 // output watch and the layout link wait on it (arrivals.go). A
 // compositor that holds its socket and stops answering raises no
 // event: only an exchange that gets no answer finds it, so this watch
-// probes on a clock. The pass it wakes is what taints or frees the
-// screens.
+// probes on a clock. A compositor that exits closes its socket, and a
+// pidfd or the standing output watch could report that as an event,
+// but the probe that finds a freeze finds an exit in the same second,
+// so one clock covers both. The pass it wakes is what taints or frees
+// the screens.
 //
 // The watch also repairs a compositor that accepts on its socket and
 // answers nothing. It is the one reader that probes on a clock, so it

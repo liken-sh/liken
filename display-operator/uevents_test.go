@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // datagram builds one uevent datagram the way the kernel frames it:
@@ -99,6 +102,33 @@ func TestDRMEventFrom(t *testing.T) {
 			}
 			if ok && event.DevPath != cardPath {
 				t.Errorf("devpath = %q", event.DevPath)
+			}
+		})
+	}
+}
+
+// A receive error that left a datagram unread becomes one event, so
+// the loop reads the whole of sysfs at once. EAGAIN and EINTR lose
+// nothing, so they wake nothing.
+func TestAReceiveErrorThatLostADatagramWakesTheLoop(t *testing.T) {
+	cases := []struct {
+		err   error
+		wakes bool
+	}{
+		{unix.ENOBUFS, true},
+		{fmt.Errorf("receiving: %w", unix.ENOBUFS), true},
+		{unix.EBADF, true},
+		{unix.EAGAIN, false},
+		{unix.EINTR, false},
+	}
+	for _, c := range cases {
+		t.Run(c.err.Error(), func(t *testing.T) {
+			event, wakes := lostUevents(c.err)
+			if wakes != c.wakes {
+				t.Fatalf("the error %v woke the loop: %v, want %v", c.err, wakes, c.wakes)
+			}
+			if wakes && !strings.Contains(event.DevPath, c.err.Error()) {
+				t.Errorf("the event says %+v, want it to carry the error %q", event, c.err)
 			}
 		})
 	}

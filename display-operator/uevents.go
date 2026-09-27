@@ -33,10 +33,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// drmEvent reports that something changed on the drm subsystem.
-// Action is the kernel's word, and DevPath names the card or the
-// connector the kernel attached the event to. Neither holds the new
-// state, so both exist for the log line alone.
+// drmEvent reports that something changed on the drm subsystem, or
+// that the socket lost events that may have said so. Action is the
+// kernel's word, and DevPath names the card or the connector the
+// kernel attached the event to. For a loss, Action is "lost events"
+// and DevPath holds the socket's error. Neither holds the new state,
+// so both exist for the log line alone.
 type drmEvent struct {
 	Action  string
 	DevPath string
@@ -150,19 +152,42 @@ func readUevents(fd, cancelRead int, events chan<- drmEvent) {
 		}
 		size, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
-			// EAGAIN means the poll woke with no datagram to read. Any
-			// other error left this datagram unread. A missed datagram
-			// costs one late reconcile at worst, because the backstop
-			// tick in main.go re-reads sysfs anyway.
+			// A lost datagram may have been a hotplug, so the loss wakes
+			// the loop, and the pass reads the whole of sysfs now and not
+			// on the next unrelated event or the backstop tick.
+			if event, lost := lostUevents(err); lost {
+				sendDRMEvent(events, event)
+			}
 			continue
 		}
 		event, ok := drmEventFrom(buf[:size])
 		if !ok {
 			continue
 		}
-		select {
-		case events <- event:
-		default:
-		}
+		sendDRMEvent(events, event)
+	}
+}
+
+// lostUevents turns a receive error into an event when the error left
+// a datagram unread. ENOBUFS is the usual one: the kernel's receive
+// buffer overflowed and it dropped datagrams before this read ran.
+// EAGAIN means the poll woke with no datagram to read, and EINTR means
+// a signal interrupted the read before it took anything, so neither one
+// loses a datagram. Every other error counts as a loss, because the
+// poll said the socket was ready and the read returned no datagram.
+func lostUevents(err error) (drmEvent, bool) {
+	if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
+		return drmEvent{}, false
+	}
+	return drmEvent{Action: "lost events", DevPath: "the uevent socket answered " + err.Error()}, true
+}
+
+// sendDRMEvent offers one event without blocking. A full channel
+// drops it, because every consumer re-reads the whole of sysfs on the
+// events already queued.
+func sendDRMEvent(events chan<- drmEvent, event drmEvent) {
+	select {
+	case events <- event:
+	default:
 	}
 }

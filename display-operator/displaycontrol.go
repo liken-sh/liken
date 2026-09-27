@@ -3,9 +3,10 @@ package main
 // The controller behind the Display resource. It creates one
 // resource per probed monitor, writes the whole of status,
 // reconciles the resting spec on divergence, and obeys an override
-// only after the capture is durable in status. A pass that finds
-// nothing diverged reads no panel and writes no byte on the wire,
-// because a DDC read wakes some panels.
+// only after the capture is durable in status. A pass writes no byte
+// on the wire to a panel that already holds its declaration. It reads
+// a panel only when the panel is lit and its poll window has passed,
+// because a DDC read wakes some panels and a dark panel must stay dark.
 
 import (
 	"context"
@@ -136,8 +137,12 @@ func (d *displayControl) wake() {
 }
 
 // The loop. The watch wakes it on a spec that changed, the
-// slice publisher wakes it on hardware that moved, and the tick is the
-// backstop that covers a dropped watch.
+// slice publisher wakes it on hardware that moved, and a restore wakes
+// it when it ends. The tick is a clock, not a backstop: it opens the
+// poll window, which is how a value a person changed at a lit panel's
+// own buttons is found, because DDC/CI sends the host no event. A tick
+// reads each present Display from the API server, and it reads a panel
+// only through the poll's guards.
 func (d *displayControl) run(ctx context.Context) {
 	tick := time.NewTicker(d.tick)
 	defer tick.Stop()

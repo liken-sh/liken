@@ -52,6 +52,7 @@ func watchNamed[T any](ctx context.Context, c *Client, collection, name string, 
 			version = listed.version
 			seen(listed.held)
 		}
+		opened := time.Now()
 		next, err := streamNamed(ctx, c, collection+"?"+selector, version, seen)
 		switch {
 		case ctx.Err() != nil:
@@ -62,6 +63,12 @@ func watchNamed[T any](ctx context.Context, c *Client, collection, name string, 
 		case err != nil:
 			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 			version = ""
+			delay = pauseWatch(ctx, delay)
+		case next == version && time.Since(opened) < objectWatchRetry:
+			// A watch that ended in under a second with no event is
+			// a server or a proxy that closes each watch at once, not a
+			// timeout. Its version still stands, so the loop resumes
+			// there, and the wait keeps it from a tight loop of requests.
 			delay = pauseWatch(ctx, delay)
 		default:
 			version = next

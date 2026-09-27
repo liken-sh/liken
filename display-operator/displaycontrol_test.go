@@ -1150,8 +1150,40 @@ func TestTheWatchWakesOnEveryEvent(t *testing.T) {
 	if err := streamDisplays(t.Context(), client, func() { wakes++ }); err != nil {
 		t.Fatal(err)
 	}
-	if wakes != events {
-		t.Errorf("the watch woke the loop %d times, want %d", wakes, events)
+	if wakes != events+1 {
+		t.Errorf("the watch woke the loop %d times, want %d", wakes, events+1)
+	}
+}
+
+// The open is a wake of its own. The pass it starts reads everything
+// after the watch is live, so a change made while no connection stood
+// is found at once and not on the backstop tick.
+func TestTheWatchWakesOnceWhenItOpens(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	wakes := 0
+	if err := streamDisplays(t.Context(), client, func() { wakes++ }); err != nil {
+		t.Fatal(err)
+	}
+	if wakes != 1 {
+		t.Errorf("the watch woke the loop %d times, want one wake for the open", wakes)
+	}
+}
+
+// A watch the API server refuses is not live, and it wakes nothing:
+// a pass on every retry would read the resources every few seconds
+// while the API server is down.
+func TestTheWatchWakesNothingWhenRefused(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	wakes := 0
+	if err := streamDisplays(t.Context(), client, func() { wakes++ }); err == nil {
+		t.Fatal("the refused watch answered no error")
+	}
+	if wakes != 0 {
+		t.Errorf("the refused watch woke the loop %d times, want none", wakes)
 	}
 }
 

@@ -346,3 +346,33 @@ func TestAWatchThatTimesOutResumes(t *testing.T) {
 		t.Errorf("the watches asked for versions %v, want the second to resume at 2", got)
 	}
 }
+
+// A watch that the API server, or a proxy in front of it, closes at
+// once with no event is a failure and not a timeout. The loop waits
+// before it opens the next one, so a server that always closes at
+// once gets a few requests and not a tight loop of them.
+func TestAWatchThatClosesAtOnceWaitsBeforeTheNext(t *testing.T) {
+	var mu sync.Mutex
+	watches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") != "true" {
+			fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
+			return
+		}
+		mu.Lock()
+		watches++
+		mu.Unlock()
+	}))
+	t.Cleanup(server.Close)
+	ctx, stop := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer stop()
+
+	watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
+		"tracked", "the test ConfigMap", func(*ConfigMap) {})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if watches > 2 {
+		t.Errorf("the loop opened %d watches in half a second, want it to wait between them", watches)
+	}
+}
