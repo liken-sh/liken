@@ -347,19 +347,6 @@ func TestControlDeviceCarriesTheOutputsTaints(t *testing.T) {
 	}
 }
 
-func TestCompositorDownTaintsTheControlDeviceToo(t *testing.T) {
-	// The pass that finds no compositor taints every device it
-	// publishes, and the control device is in that list.
-	devices := compositorDown(sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true})}))
-
-	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control", "hdmi-a-1-draw"}) {
-		t.Fatalf("devices = %v", got)
-	}
-	if len(devices[1].Taints) != 1 || devices[1].Taints[0].Effect != "NoExecute" {
-		t.Errorf("taints = %+v", devices[1].Taints)
-	}
-}
-
 func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 	devices := sliceDevices(testOutputs(t))
 	dark := devices[0]
@@ -508,7 +495,8 @@ func TestSliceDevicesLeavesAConnectorThatGainedItsMonitorClear(t *testing.T) {
 	}
 }
 
-// The pod that dies taints every device as its compositor exits. That
+// The pod that dies taints every output and draw device as its
+// compositor exits. That
 // slice stays in the API until the next pod's first reconcile, after
 // the socket appears, publishes the devices untainted again. dp-1
 // stays tainted through that reconcile, because sysfs still reports
@@ -546,8 +534,9 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 }
 
 // The operator publishes this form on every pass that finds no
-// compositor answering, and every device carries the one NoExecute
-// taint, because no output on this node can serve a client.
+// compositor answering. This fixture publishes no control device, so
+// every device carries the one NoExecute taint, because no output on
+// this node can serve a Wayland client.
 func TestCompositorDownTaintsEveryOutput(t *testing.T) {
 	devices := compositorDown(sliceDevices(testOutputs(t)))
 

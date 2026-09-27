@@ -597,9 +597,11 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 	readings.recordObservation("compositor", serving, now)
 	readings.recordCompositorServing(serving)
 	if !serving {
-		// No compositor holds the screens, so every output says it
-		// serves nobody, and the NoExecute taint is what ends the
-		// clients whose connections died with the socket.
+		// No compositor holds the screens, so every output and draw
+		// device says it serves nobody, and the NoExecute taint is what
+		// ends the clients whose connections died with the socket. A
+		// control device keeps its own taints, because the i2c bus it
+		// delivers needs no compositor.
 		devices = compositorDown(devices)
 	}
 	return EnsureResourceSlice(client, nodeName, owner, devices)

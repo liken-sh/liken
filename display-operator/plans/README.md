@@ -269,6 +269,12 @@ say why it is built the way it is.
   holds no master, and the operator restarts it once with the reason
   `masterless`. Answers and replaces the open problem "The compositor
   can start without DRM master".
+* [25, A control claim needs no compositor](completed/25-a-control-claim-needs-no-compositor.md).
+  Built on 2026-09-27. A claim that holds only control devices
+  prepares while no compositor runs, and `compositorDown` leaves
+  control devices untainted, because DDC/CI needs no compositor.
+  Answers and replaces the open problem "A control claim waits for the
+  compositor".
 
 ## Open problems
 
@@ -288,10 +294,6 @@ decided yet what work they become.
 * [The compositor drives one card](open-problems/the-compositor-drives-one-card.md).
   One Weston binds one DRM device, so a node with two graphics cards
   serves only the card the claim took.
-* [A control claim waits for the compositor](open-problems/a-control-claim-waits-for-the-compositor.md).
-  DDC/CI runs to the panel with no compositor, but `prepareClaim` and a
-  second gate hold every claim on Weston's socket, so a control-only pod
-  waits for a compositor it does not need.
 * [A stuck mode prepare restarts the compositor without bound](open-problems/a-stuck-mode-prepare-restarts-the-compositor-without-bound.md).
   A claim stating a mode the panel will not sync loops the kubelet's
   prepare retries through compositor restarts until the whole card

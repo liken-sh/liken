@@ -278,23 +278,6 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		return &drav1.NodePrepareResourceResponse{Error: message}
 	}
 
-	// The delivery is the compositor's socket, so a claim prepared
-	// while the compositor is restarting would hand a client a path
-	// with nothing behind it. The kubelet holds the pod in
-	// ContainerCreating and asks again, and the retry is the wait.
-	socketPath := filepath.Join(p.socketDir, socketName)
-	if live := probeCompositor(socketPath); !live.serving {
-		return fail("no compositor is serving %s right now (%s: %s)", socketPath, live.reason, live.detail)
-	}
-	// The module is the other half of the delivery: it opens the
-	// claim's own socket in that same directory. A prepare that ran
-	// with no module serving would name a socket in the CDI spec that
-	// nothing listens on, and the client would fail to connect with
-	// nothing to read that said why.
-	if !p.layout.moduleServing() {
-		return fail("the layout module is not serving %s right now", layoutSocketPath)
-	}
-
 	allocated, err := GetResourceClaim(p.client, claim.Namespace, claim.Name)
 	if err != nil {
 		return fail("reading the claim: %v", err)
@@ -345,6 +328,7 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 
 	var specDevices []cdiDevice
 	var devices []*drav1.Device
+	waylandChecked := false
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
 			// This is another driver's allocation in the same claim.
@@ -361,6 +345,18 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		draw := false
 		if base, isDraw := outputOfDraw(result.Device); isDraw {
 			device, draw = base, true
+		}
+		// An output result and a draw result deliver a Wayland socket,
+		// so each one waits for the compositor. A control result
+		// delivers the i2c node, which reaches the panel with no
+		// compositor running, so it does not wait. The check comes
+		// before any result writes to the panel or opens a socket, so
+		// a claim that waits changes nothing on this pass.
+		if !control && !waylandChecked {
+			if err := p.waylandServing(); err != nil {
+				return fail("%v", err)
+			}
+			waylandChecked = true
 		}
 		output, onThisCard := onCard[device]
 		if !onThisCard {
@@ -389,10 +385,10 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// module places its surfaces on. It sets no mode and no
 			// panel power: the output device owns the mode, and many
 			// claims share the draw device, so a mode or a power write
-			// from one would act on a screen the others hold. The two
-			// gates at the top of this function are the wait for the
-			// compositor and the module, which a draw client needs as
-			// much as an output client.
+			// from one would act on a screen the others hold. A draw
+			// client needs the compositor and the module as much as an
+			// output client, so the same check at the top of the loop
+			// is its wait.
 			if err := p.layout.Listen(sockets[device], output.Connector); err != nil {
 				return fail("%v", err)
 			}
@@ -469,6 +465,30 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		}
 	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
+}
+
+// waylandServing answers whether the two halves of a Wayland
+// delivery serve now, and why not when they do not.
+//
+// The first half is the compositor's socket. A claim prepared while
+// the compositor is restarting would hand a client a path with nothing
+// behind it. The kubelet holds the pod in ContainerCreating and asks
+// again, and the retry is the wait.
+//
+// The second half is the layout module, which opens the claim's own
+// socket in the same directory. A prepare that ran with no module
+// serving would name a socket in the CDI spec that nothing listens on,
+// and the client would fail to connect with nothing to read that said
+// why.
+func (p *draPlugin) waylandServing() error {
+	socketPath := filepath.Join(p.socketDir, socketName)
+	if live := probeCompositor(socketPath); !live.serving {
+		return fmt.Errorf("no compositor is serving %s right now (%s: %s)", socketPath, live.reason, live.detail)
+	}
+	if !p.layout.moduleServing() {
+		return fmt.Errorf("the layout module is not serving %s right now", layoutSocketPath)
+	}
+	return nil
 }
 
 // ControlTakesNoParameters refuses a claim whose parameters resolved

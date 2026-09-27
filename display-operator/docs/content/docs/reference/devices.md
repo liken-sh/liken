@@ -393,10 +393,14 @@ lands once at the claim's prepare, and a holder that dims the panel
 restores the value it last read from the panel, so the two writers
 never pull in opposite directions.
 
-The control device carries the output device's taints, whatever they
-are, so it is never claimable while the screen beside it can serve
-nobody. That includes the compositor-down case: a control claim today
-waits for the compositor even though the wire does not need one.
+The control device exists only while a monitor is connected. It
+takes the `disconnected` taint when a different monitor replaced the
+one the connector carried, the same as the output beside it. It does
+not take the taint when no compositor answers, because the i2c bus
+reaches the panel with no compositor running. A claim that holds only control devices prepares while the
+compositor restarts, and its pod keeps running through the restart.
+A claim that also holds an output or a draw device waits for the
+compositor, because those devices deliver a Wayland socket.
 
 ## The taint
 
@@ -412,6 +416,8 @@ right now. It appears in two cases:
   moment before the compositor's container is up and every restart
   of that container. The kubelet restarts a dead compositor alone,
   and the taint lifts on the pass that finds the socket answering.
+  This case taints the output and draw devices only. A control
+  device delivers an i2c node, which needs no compositor.
 
 A connector that carried a monitor and then went dark is not one of
 them. It keeps that monitor for as long as it stays dark, and the

@@ -274,9 +274,12 @@ func sliceDevices(outputs []Output) []SliceDevice {
 // with a matchAttribute constraint on monitor.liken.sh/id, and the
 // constraint compares an attribute both devices publish.
 //
-// The taints are the output device's own, whatever they are, so a
-// control device is never claimable while the screen beside it can
-// serve nobody.
+// The taints are the ones sliceDevices gives the output for its
+// monitor: a control device exists only while a monitor is connected,
+// so it is tainted when a different monitor replaced the one the
+// connector carried, and never claimable while the screen beside it
+// serves nobody for that reason. compositorDown adds no taint to it,
+// because the i2c bus reaches the panel with no compositor running.
 func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
 	if !output.Connected || (!output.Controls.Brightness && !output.Controls.Power) {
 		return SliceDevice{}, false
@@ -377,28 +380,40 @@ func unservableTaints() []DeviceTaint {
 	}
 }
 
-// compositorDown taints every device, whatever is plugged in.
+// compositorDown taints every output device and every draw device,
+// whatever is plugged in, and leaves each control device with the
+// taints it already carries.
 //
 // The operator publishes this form on every pass that finds no
 // compositor answering on the socket, which covers the start before
 // the compositor's container creates it and every restart of that
 // container after.
 //
-// No compositor holds the screens, so no output can serve a client.
-// The first reconcile after the socket appears removes the taint from
-// every screen that has a monitor. If the compositor never starts, the
-// taint stays, and a claim parks instead of taking a screen that no
-// compositor drives.
+// No compositor holds the screens, so no output can serve a Wayland
+// client. The first reconcile after the socket appears removes the
+// taint from every screen that has a monitor. If the compositor never
+// starts, the taint stays, and a claim parks instead of taking a
+// screen that no compositor drives.
 //
 // This write is also what ends the clients that were drawing. Each
 // one already lost its Wayland connection when the compositor died,
 // and the restarted compositor serves the same devices again, so a
 // slice that never changed would raise no event and nothing else
 // would ever evict them.
+//
+// A control device's holder has no Wayland connection to lose. It
+// drives the panel on the connector's i2c bus, and that bus reaches
+// the panel whether or not a compositor runs. A taint here would end
+// that pod on every compositor restart for no reason, and would keep a
+// control-only claim unallocated on a machine where no compositor
+// starts.
 func compositorDown(devices []SliceDevice) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
 		out[i] = device
+		if _, control := outputOfControl(device.Name); control {
+			continue
+		}
 		out[i].Taints = unservableTaints()
 	}
 	return out
