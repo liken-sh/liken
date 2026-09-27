@@ -23,12 +23,12 @@ type panelDesire struct {
 
 // panelFromDisplay is the Player status word for what the
 // display-operator last observed on the panel. The power word is one
-// of on, standby, suspend, off, and hardOff, and every one but on is
-// a panel held down, so all four read Off. A Display that observed
-// nothing yet folds to no panel field at all.
+// of on, standby, suspend, off, and hardOff, in either spelling, and
+// every one but on is a panel held down, so all four read Off. A
+// Display that observed nothing yet folds to no panel field at all.
 func panelFromDisplay(observed DisplayObserved) string {
 	switch {
-	case observed.Power != "" && observed.Power != displayPowerOn:
+	case observed.Power != "" && !samePower(observed.Power, displayPowerOn):
 		return panelOff
 	case observed.Brightness != nil && *observed.Brightness == 0:
 		return panelBacklightOff

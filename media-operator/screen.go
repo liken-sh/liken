@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,15 @@ const (
 	displayPowerOff = "off"
 	displayPowerOn  = "on"
 )
+
+// samePower compares two Display power words without regard to case.
+// The display-operator reports a word in lowercase or in PascalCase,
+// "on" or "On", depending on its build, and both spellings name one
+// state. An exact compare reads a lit panel as down when the spelling
+// differs.
+func samePower(a, b string) bool {
+	return strings.EqualFold(a, b)
+}
 
 // The field manager this operator applies under. Server-side
 // apply keeps it to the one block this operator states, so the cluster

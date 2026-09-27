@@ -55,7 +55,9 @@ func TestThePanelDeskDropsADeletedPlayer(t *testing.T) {
 // The display-operator observes five power words, and its
 // override writes whichever of off, hardOff, and standby the panel
 // declares. Every word but on is a panel held down, so every one of
-// them reads Off.
+// them reads Off. The display-operator spells each word in lowercase
+// or in PascalCase, depending on its build, so both spellings fold to
+// the same status word.
 func TestThePanelWordReadsEveryPowerDownWord(t *testing.T) {
 	cases := []struct {
 		power string
@@ -66,6 +68,11 @@ func TestThePanelWordReadsEveryPowerDownWord(t *testing.T) {
 		{power: "suspend", want: panelOff},
 		{power: "off", want: panelOff},
 		{power: "hardOff", want: panelOff},
+		{power: "On", want: panelOn},
+		{power: "Standby", want: panelOff},
+		{power: "Suspend", want: panelOff},
+		{power: "Off", want: panelOff},
+		{power: "HardOff", want: panelOff},
 	}
 	for _, one := range cases {
 		t.Run(one.power, func(t *testing.T) {
@@ -98,6 +105,24 @@ func TestThePanelWordFoldsTheObservedState(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			mustMatch(t, panelFromDisplay(one.observed), one.want)
+		})
+	}
+}
+
+// The override this operator writes keeps the lowercase off, whichever
+// spelling the Display reports, so a Display CRD that accepts only the
+// lowercase word still takes the write.
+func TestTheOverrideWritesTheLowercaseOff(t *testing.T) {
+	cases := []struct {
+		mode string
+		want DisplayOverride
+	}{
+		{mode: offModeBacklight, want: DisplayOverride{Backlight: "off"}},
+		{mode: offModePower, want: DisplayOverride{Power: "off"}},
+	}
+	for _, one := range cases {
+		t.Run(one.mode, func(t *testing.T) {
+			mustMatch(t, *overrideFor(panelDesireOff, one.mode), one.want)
 		})
 	}
 }
