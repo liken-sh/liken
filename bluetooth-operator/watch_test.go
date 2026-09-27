@@ -197,3 +197,32 @@ func TestTheWatchDeliversTheListAndEachChange(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// A watch that the API server closes at once with no events is a
+// failure, not a stream that ran to its timeout. Without the backoff
+// the watcher opens the next watch at once, and a server that answers
+// every watch that way takes thousands of requests each second.
+func TestAnEmptyShortWatchWaitsBeforeTheNextOne(t *testing.T) {
+	empty := make([][]string, 100)
+	for index := range empty {
+		empty[index] = []string{}
+	}
+	server := newWatchServer("/things", "[]", empty...)
+	client := testClient(t, server)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		listThenWatch(ctx, client, "/things", "the things",
+			func([]ObjectMeta) {}, func(string, ObjectMeta) {})
+	}()
+
+	server.awaitWatches(t, 1)
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	<-done
+
+	if _, versions := server.seen(); len(versions) != 1 {
+		t.Fatalf("the watcher opened %d watches in 300 ms, want 1", len(versions))
+	}
+}

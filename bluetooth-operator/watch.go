@@ -35,12 +35,23 @@ const (
 	// lost. A watch with no end would keep one connection through every
 	// network fault between here and the API server.
 	watchTimeout = 290 * time.Second
+
+	// shortWatch is the shortest time a watch with no events may last
+	// and still count as a stream that ended normally. A server that
+	// answers a watch and closes it at once is failing, and a watcher
+	// that reopened such a stream with no wait would send thousands of
+	// requests each second. client-go's reflector makes the same test.
+	shortWatch = time.Second
 )
 
 // errWatchExpired is the API server's 410 Gone: the version the watch
 // asked for is older than any version the API server keeps. Only a new
 // list gives a version to start from.
 var errWatchExpired = errors.New("the watch's resource version expired")
+
+// errShortWatch is a watch that the API server closed within
+// shortWatch and before it sent an event.
+var errShortWatch = errors.New("the watch closed with no events in under a second")
 
 // listThenWatch keeps one collection current until the context ends.
 // It calls listed with the whole collection after each list, and
@@ -49,7 +60,8 @@ var errWatchExpired = errors.New("the watch's resource version expired")
 // A stream that the API server closes at watchTimeout resumes at the
 // last version it delivered, with no new list. A 410 Gone lists again
 // at once. Any other failure lists again after a wait, because a
-// failed watch may have lost events, and only a list recovers them.
+// failed watch may have lost events, and only a list recovers them. A
+// stream that closed within shortWatch with no events is a failure.
 func listThenWatch[T any](ctx context.Context, c *Client, collection, what string, listed func([]T), changed func(event string, object T)) {
 	version := ""
 	delay := watchRetry
@@ -111,6 +123,8 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 	}
 	defer drain(body)
 
+	opened := time.Now()
+	delivered := false
 	events := json.NewDecoder(body)
 	for {
 		var event struct {
@@ -119,6 +133,9 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 		}
 		if err := events.Decode(&event); err != nil {
 			if errors.Is(err, io.EOF) {
+				if !delivered && time.Since(opened) < shortWatch {
+					return version, errShortWatch
+				}
 				return version, nil
 			}
 			return version, err
@@ -130,6 +147,7 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 		if err := json.Unmarshal(event.Object, &meta); err != nil {
 			return version, err
 		}
+		delivered = true
 		switch event.Type {
 		case "ERROR":
 			if meta.Code == 410 {
