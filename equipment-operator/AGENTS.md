@@ -49,6 +49,15 @@ whose adapter sends the bus's commands applies each generation of
 `cecnode_television.go`. Both use the types in `television.go` and
 the API calls in `television_client.go`.
 
+The TV wake crosses both workloads. A `Receiver` session tells its
+room each wake and each sleep through `roomEvents` in `session.go`.
+The `Deployment` matches the session's input to the `Television`
+that lists the input's `Display`, and writes that `Television`'s
+`status.session`, in `television_session.go`. The node workload whose
+adapter speaks for that `Display` runs the wake in
+`cecnode_wake.go`, and claims and guards the active source in
+`cecnode_source.go`.
+
 ## Errors include their source's text
 
 An error that wraps a tool, a daemon socket, a bus answer, or a provider

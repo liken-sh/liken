@@ -72,6 +72,9 @@ type session struct {
 	// to the spec, wired to the unit that owns the receiver. It is nil in
 	// a test that never toggles.
 	applyPower func(power equipment.Power)
+	// room hears each wake and each sleep of the room, so the TV of the
+	// room wakes with the receiver. It is nil in a test with no TV.
+	room roomEvents
 
 	reachedOnce sync.Once
 	reached     chan struct{}
@@ -107,7 +110,18 @@ type session struct {
 // Power and input go out once for a session that starts with either
 // flag on, and once only when both are on at the start. A session that
 // starts with both off owns the level and sends the equipment nothing.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power)) *session {
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
+	s := newSession(ctx, receiver, spec, driver, readings, log, busAddress, scale, inputSoundMode, applyPower, room)
+	s.start(spec.Active, spec.Awake)
+	return s
+}
+
+// newSession builds a session that reads nothing and sends nothing
+// yet. The unit holds it before start, so every line the receiver sends
+// from start on reaches it. A line that reached no session could be the
+// one that says the receiver is reachable, and a session that missed it
+// would never run its one-shot.
+func newSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	if inputSoundMode == nil {
 		inputSoundMode = func(string) string { return "" }
@@ -123,13 +137,12 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 		scale:          scale,
 		inputSoundMode: inputSoundMode,
 		applyPower:     applyPower,
+		room:           room,
 		powered:        make(chan struct{}),
 		reached:        make(chan struct{}),
 		complete:       make(chan struct{}),
 		connected:      make(chan struct{}),
 	}
-	s.mark(driver.State())
-
 	// The will clears the mark, so an operator that dies hands the level
 	// back to the pods that were leaving it alone.
 	will := &busWill{Topic: ownerTopic(spec.VolumeTopic), Retained: true}
@@ -141,10 +154,29 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 	if spec.PowerTopic != "" {
 		s.bus.Subscribe(spec.PowerTopic)
 	}
-	go s.bus.Run(ctx)
-	go s.adopt(ctx)
-	s.setFlags(spec.Active, spec.Awake)
 	return s
+}
+
+// start reads the receiver's state as it stands, opens the broker
+// connection, and runs the one-shots the flags ask for.
+func (s *session) start(active, awake bool) {
+	s.mark(s.driver.State())
+	go s.bus.Run(s.ctx)
+	go s.adopt(s.ctx)
+	s.flags(active, awake, true)
+}
+
+// roomEvents is how a session tells the TV of its room what it did to
+// the receiver. opened reports a session that starts, with whether its
+// flags hold the room awake and the words that name them; the room
+// decides whether the start is a change a person caused. woke reports a
+// wake the session saw happen: a flag that turns on, or the remote's
+// power button that turns the receiver on. slept reports a toggle to
+// standby, or both flags turning off.
+type roomEvents interface {
+	opened(awake bool, trigger string)
+	woke(trigger string)
+	slept()
 }
 
 // setFlags takes both flags as the media operator wrote them: active
@@ -154,10 +186,35 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, dr
 // wakes under a standing Play selects the input again, which is what a
 // person who reached for the receiver's own power button needs.
 func (s *session) setFlags(active, awake bool) {
+	s.flags(active, awake, false)
+}
+
+// flags is setFlags, with opening for the session's first call. Both
+// flags going off puts the room to sleep for its TV, and sends the
+// receiver nothing.
+func (s *session) flags(active, awake, opening bool) {
+	before := s.active.Load() || s.awake.Load()
 	played := s.raise(&s.active, active)
 	woke := s.raise(&s.awake, awake)
+	// The room hears the flags here, in the order they change, and not
+	// from the one-shot, which runs later on its own goroutine: a sleep
+	// that follows at once must reach the TV after the wake, or the TV
+	// would wake in a room that is going dark. The TV is reached over
+	// another path than the receiver, so its wake does not wait for the
+	// receiver to answer. The room decides whether the flags a session
+	// starts with are a change a person caused.
+	words := s.flagWords(played, woke)
+	switch {
+	case s.room == nil:
+	case opening:
+		s.room.opened(active || awake, words)
+	case played || woke:
+		s.room.woke(words)
+	case before && !active && !awake:
+		s.room.slept()
+	}
 	if played || woke {
-		go s.selectInput(s.ctx, s.flagWords(played, woke))
+		go s.selectInput(s.ctx, words)
 	}
 }
 
@@ -522,7 +579,13 @@ func (s *session) togglePower(payload []byte) {
 		if s.applyPower != nil {
 			s.applyPower(equipment.PowerStandby)
 		}
+		if s.room != nil {
+			s.room.slept()
+		}
 		return
+	}
+	if s.room != nil {
+		s.room.woke(trigger)
 	}
 	s.selectInputLocked(s.ctx, trigger)
 	if s.applyPower != nil {

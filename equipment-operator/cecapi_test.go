@@ -35,6 +35,8 @@ type cecAPI struct {
 	deletedTelevisions []string
 	derivedWrites      int
 	powerWrites        int
+	wakeWrites         int
+	sessionWrites      int
 	version            int
 	watchers           []chan string
 	deleted            []string
@@ -49,6 +51,15 @@ type cecAPI struct {
 	// with not found, the way a cluster without the definition does.
 	refusingPowerWrites    bool
 	noTelevisionDefinition bool
+	// noSessionWrites refuses the Deployment's status.session writes.
+	noSessionWrites bool
+	// refusingWakeWrites refuses the node workloads' wake writes.
+	refusingWakeWrites bool
+	// sessionDelay holds each session write, and sessionInFlight and
+	// sessionMostAtOnce count the session writes that overlap.
+	sessionDelay      time.Duration
+	sessionInFlight   int
+	sessionMostAtOnce int
 	// uids numbers the Televisions the fake creates, and created names
 	// each one a writer created with a POST.
 	uids    int

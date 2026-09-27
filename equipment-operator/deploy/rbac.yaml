@@ -46,14 +46,15 @@ rules:
   - apiGroups: [equipment.liken.sh]
     resources: [cecbuses/status]
     verbs: [get, patch]
-  # The Televisions. The Deployment writes each one's derived status:
-  # the TV's facts and power from its CECBus, the Displays that reach
-  # it, and the Reachable and InCharge conditions. create is for the
-  # Television it makes, under the bus's name, for a TV that a CECBus
-  # in Control finds and no Television names. delete removes that
-  # Television when another Television names the same bus. It deletes
-  # only a Television that carries the discovered label and has its
-  # bus's name. It never writes a Television spec.
+  # The Televisions. The Deployment writes each one's status: the TV's
+  # facts and power from its CECBus, the last active source, the
+  # Displays that reach it, the Reachable and InCharge conditions, and
+  # the Receiver session that uses the TV. create is for the Television
+  # it makes, under the bus's name, for a TV that a CECBus in Control
+  # finds and no Television names. delete removes that Television when
+  # another Television names the same bus. It deletes only a Television
+  # that carries the discovered label and has its bus's name. It never
+  # writes a Television spec.
   - apiGroups: [equipment.liken.sh]
     resources: [televisions]
     verbs: [get, list, watch, create, delete]
@@ -111,10 +112,13 @@ rules:
     resources: [displays]
     verbs: [get]
   # The watch wakes the pod when a person changes a Television's
-  # spec.power. The pod whose adapter sends the bus's commands applies
-  # the change and writes status.powerGeneration and the PowerApplied
-  # condition, under a field manager named after the machine. It never
-  # writes a Television spec.
+  # spec.power or the Deployment changes its status.session. The pod
+  # whose adapter sends the bus's commands applies spec.power and writes
+  # status.powerGeneration and the PowerApplied condition, under a field
+  # manager named after the machine. The pod whose adapter speaks for
+  # the session's Display runs the wake and writes status.wokeAt and the
+  # WakeApplied condition, under a second field manager named after the
+  # machine. It never writes a Television spec.
   - apiGroups: [equipment.liken.sh]
     resources: [televisions]
     verbs: [get, list, watch]

@@ -116,6 +116,9 @@ spec:
                       osdName:
                         type: string
                         description: "The OSD name the adapter announces in Control: its bus's name, cut to 14 characters."
+                      activeSource:
+                        type: string
+                        description: "The physical address of the last Active Source the adapter heard or sent, in the dotted form 1.3.0.0. Active Source is a broadcast, so an adapter hears it in Listen and in Control. The kernel does not pass an adapter its own transmission, so the node workload records the Active Source its own adapter sends."
                       message:
                         type: string
                         description: "Why the adapter is not where its mode asks, in the words of the call that failed."

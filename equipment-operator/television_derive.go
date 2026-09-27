@@ -18,11 +18,12 @@ import (
 
 // televisionDerived is what the Deployment writes for one Television.
 type televisionDerived struct {
-	cec       *TelevisionCECStatus
-	power     string
-	displays  []TelevisionDisplay
-	reachable Condition
-	inCharge  Condition
+	cec          *TelevisionCECStatus
+	power        string
+	activeSource string
+	displays     []TelevisionDisplay
+	reachable    Condition
+	inCharge     Condition
 }
 
 // deriveTelevision answers one Television's derived status. inCharge
@@ -46,6 +47,7 @@ func deriveTelevision(television *Television, inCharge string, bus *CECBus, disp
 	}
 	if bus != nil {
 		derived.displays = televisionDisplays(bus, displays, receivers)
+		derived.activeSource = activeSourceOf(bus, now)
 	}
 	verdict := televisionReachable(name, bus, tv)
 	derived.reachable = stampCondition(conditionReachable, verdict, television.Metadata.Generation, television.Status.Conditions, now)
@@ -106,6 +108,23 @@ func televisionReachable(name string, bus *CECBus, tv *CECDevice) verdict {
 			"the TV acknowledges logical address 0 on CECBus %s and does not answer Give Device Power Status; a TV in a deep standby or an eco mode can stop answering, and the operator cannot wake it then", name)}
 	}
 	return verdict{ConditionTrue, reasonAnswers, fmt.Sprintf("the TV answers Give Device Power Status on CECBus %s", name)}
+}
+
+// activeSourceOf answers the physical address of the last Active Source
+// a bus carried: the one that the first adapter in spec.adapters with a
+// current entry that reports an Active Source reports. An adapter that
+// has heard none, such as one that just joined, is passed over. Every
+// adapter on one wire hears the same broadcasts, and an adapter that
+// sent the Active Source records its own, so the adapters agree, and
+// the order only makes the choice stable.
+func activeSourceOf(bus *CECBus, now time.Time) string {
+	entries := reportedEntries(bus, now)
+	for _, adapter := range bus.Spec.Adapters {
+		if entry, current := entries.current[adapter.Machine]; current && entry.ActiveSource != "" {
+			return entry.ActiveSource
+		}
+	}
+	return ""
 }
 
 // conditionOf finds one condition by type, and an empty condition when

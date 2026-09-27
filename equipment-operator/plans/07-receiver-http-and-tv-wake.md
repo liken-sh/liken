@@ -1,6 +1,6 @@
 # The receiver's HTTP interface and the TV wake
 
-Plan 07. The findings are collected. The TV wake is designed in plan 09, and the HTTP driver design is not written.
+Plan 07. The findings are collected. The TV wake is designed in plan 09 and built in its phase 3 on 2026-09-26, and its hardware drill is open. The HTTP driver design is not written.
 
 ## The problem
 
@@ -46,7 +46,9 @@ A TV wakes only when a device connected to it originates CEC. The
 `liken` machines have no CEC on their HDMI ports, so the wake needs a
 CEC adapter. [Plan 09](09-cec.md) designs that node-attached
 component: the `CECBus`, the `Television`, and the wake job that runs
-when a `Receiver`'s session wakes.
+when a `Receiver`'s session wakes. Its phase 3 builds the wake: a
+press of the remote's power button that turns the receiver on also
+wakes the TV and makes the machine's `Display` the active source.
 
 This plan still decides how the driver uses the HTTP interface above,
 and which of its controls the driver takes.
@@ -66,5 +68,7 @@ and which of its controls the driver takes.
 
 ## Verification
 
-Not run. The plan is proved when a press of the remote's power button
-leaves the receiver on the session's input and the TV on.
+Not run on hardware. Plan 09's phase 3 is tested against the kernel's
+`vivid` driver. The plan is proved when a press of the remote's power
+button leaves the receiver on the session's input and the TV on, which
+is plan 09's drill 4.

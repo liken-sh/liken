@@ -3,8 +3,11 @@ package main
 // The fake API server's Television, Receiver, and Display collections.
 // A status apply keeps each writer's fields apart the way server-side
 // apply does for the fields these writers state: the Deployment's
-// apply replaces cec, power, displays, and its own conditions, and a
-// node workload's apply replaces powerGeneration and its own conditions.
+// apply replaces cec, power, activeSource, displays, and its own
+// conditions, the Deployment's session apply replaces session, a node
+// workload's power apply replaces powerGeneration and its own
+// conditions, and a node workload's wake apply replaces wokeAt and its
+// own conditions. No apply touches a field another manager owns.
 // The conditions are a map keyed by type, so each apply leaves the
 // other writer's conditions in place.
 
@@ -92,7 +95,7 @@ func (a *cecAPI) store(television Television) {
 	a.uids++
 	television.Metadata.UID = fmt.Sprintf("uid-%d", a.uids)
 	television.Metadata.Generation = 1
-	television.Status = TelevisionStatus{}
+	television.Status = TelevisionStatus{Session: television.Status.Session}
 	a.televisions[television.Metadata.Name] = &television
 }
 
@@ -118,6 +121,22 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	manager := r.URL.Query().Get("fieldManager")
 	node := strings.HasPrefix(manager, "equipment-operator-cec-")
+	waking := strings.HasPrefix(manager, "equipment-operator-wake-")
+	if manager == sessionFieldManager {
+		// The fake counts the session writes in flight, and holds each one
+		// for sessionDelay, so a test can see two that overlap.
+		a.mutex.Lock()
+		a.sessionInFlight++
+		a.sessionMostAtOnce = max(a.sessionMostAtOnce, a.sessionInFlight)
+		delay := a.sessionDelay
+		a.mutex.Unlock()
+		time.Sleep(delay)
+		defer func() {
+			a.mutex.Lock()
+			a.sessionInFlight--
+			a.mutex.Unlock()
+		}()
+	}
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	television, held := a.televisions[name]
@@ -132,6 +151,17 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		// An apply that states a uid is a precondition on it.
 		w.WriteHeader(http.StatusConflict)
 		return
+	case waking && a.refusingWakeWrites:
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	case manager == sessionFieldManager && a.noSessionWrites:
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	case manager == sessionFieldManager:
+		// A status write is no spec edit, so the generation stays, as on
+		// a real API server.
+		a.sessionWrites++
+		television.Status.Session = body.Status.Session
 	case node && a.refusingPowerWrites:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -139,10 +169,15 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		a.powerWrites++
 		television.Status.PowerGeneration = body.Status.PowerGeneration
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+	case waking:
+		a.wakeWrites++
+		television.Status.WokeAt = body.Status.WokeAt
+		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
 	default:
 		a.derivedWrites++
 		television.Status.CEC = body.Status.CEC
 		television.Status.Power = body.Status.Power
+		television.Status.ActiveSource = body.Status.ActiveSource
 		television.Status.Displays = body.Status.Displays
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
 	}
@@ -170,7 +205,10 @@ func copyTelevision(television *Television) Television {
 // putTelevision stores a Television as a person declares it. A new
 // name is a new object with a new uid. An existing object keeps its
 // uid, status, and labels the person does not state, and a changed
-// spec is a new generation, as on a real API server.
+// spec is a new generation, as on a real API server. A status.session
+// the object states is the Deployment's write in the same step, a
+// shortcut for a test that sets a session; a session it does not state
+// stays as it is, as a person's apply of the spec leaves it.
 func (a *cecAPI) putTelevision(television Television) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -184,6 +222,9 @@ func (a *cecAPI) putTelevision(television Television) {
 		held.Metadata.Generation++
 	}
 	held.Spec = television.Spec
+	if television.Status.Session != nil {
+		held.Status.Session = television.Status.Session
+	}
 	for key, value := range television.Metadata.Labels {
 		if held.Metadata.Labels == nil {
 			held.Metadata.Labels = map[string]string{}
@@ -270,4 +311,12 @@ func (a *cecAPI) waitForTelevisionWithin(t *testing.T, name string, within time.
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// refuseWakeWrites makes the node workloads' wake writes fail with a
+// 500, or answer again.
+func (a *cecAPI) refuseWakeWrites(refusing bool) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.refusingWakeWrites = refusing
 }

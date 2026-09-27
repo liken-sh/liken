@@ -14,6 +14,7 @@ package cectest
 
 import (
 	"sync"
+	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
 )
@@ -49,6 +50,13 @@ type Peer struct {
 	// old state for about 2 seconds after Image View On, so a program
 	// that reads the power right after a command reads the past.
 	Lag int
+	// Grabs is how many times the peer takes the input for itself after
+	// another device broadcasts Active Source, the way a streaming
+	// player that wakes with the room claims Active Source. GrabAfter is
+	// how long it waits before each claim, so a test shows what a
+	// program does when the claim arrives after its own.
+	Grabs     int
+	GrabAfter time.Duration
 
 	// towards is the state a transition ends in, and remaining is how
 	// many power questions the transition still answers. old is the
@@ -185,6 +193,9 @@ func (b *Bus) obey(message cec.Message) {
 	switch {
 	case message.IsPoll():
 		return
+	case opcode == cec.OpActiveSource:
+		b.grab(message)
+		return
 	case opcode == cec.OpImageViewOn || opcode == cec.OpTextViewOn:
 		want = cec.PowerOn
 	case opcode == cec.OpStandby:
@@ -198,6 +209,22 @@ func (b *Bus) obey(message cec.Message) {
 			continue
 		}
 		b.peers[address] = peer.command(want)
+	}
+}
+
+// grab schedules the Active Source of each peer that takes the input
+// after another device's Active Source. The claim goes out later and
+// on its own goroutine, as a device's own message does. The caller
+// holds the mutex.
+func (b *Bus) grab(message cec.Message) {
+	for address, peer := range b.peers {
+		if peer.Grabs == 0 || address == message.From {
+			continue
+		}
+		peer.Grabs--
+		b.peers[address] = peer
+		claim := cec.ActiveSource(peer.Logical, peer.Physical)
+		time.AfterFunc(peer.GrabAfter, func() { b.Send(claim) })
 	}
 }
 

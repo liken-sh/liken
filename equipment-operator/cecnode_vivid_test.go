@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -144,9 +145,12 @@ func lockVivid(t *testing.T) {
 // power commands, until the test ends. Image View On moves it to ToOn,
 // and a second later to On, because a TV takes time to wake and
 // reports the transition while it does. Standby moves it the same way
-// to Standby.
-func playWakingTV(t *testing.T, tv *cec.Device) {
+// to Standby. It answers a read of every message the TV heard, polls
+// aside, in order.
+func playWakingTV(t *testing.T, tv *cec.Device) func() []cec.Message {
 	t.Helper()
+	var heardMutex sync.Mutex
+	var heard []cec.Message
 	mustSucceed(t, tv.Follow())
 	mustSucceed(t, tv.Release())
 	mustSucceed(t, tv.Claim(cec.Claim{Type: cec.TypeTV, OSDName: "TV"}))
@@ -175,6 +179,11 @@ func playWakingTV(t *testing.T, tv *cec.Device) {
 		defer close(done)
 		_ = cec.Read(ctx, tv, func(message cec.Message) {
 			opcode, _ := message.Opcode()
+			if !message.IsPoll() {
+				heardMutex.Lock()
+				heard = append(heard, message)
+				heardMutex.Unlock()
+			}
 			switch {
 			case message.IsPoll():
 			case opcode == cec.OpImageViewOn && message.To == cec.AddressTV:
@@ -190,6 +199,11 @@ func playWakingTV(t *testing.T, tv *cec.Device) {
 		}, func(cec.Event) {})
 	}()
 	t.Cleanup(func() { cancel(); <-done })
+	return func() []cec.Message {
+		heardMutex.Lock()
+		defer heardMutex.Unlock()
+		return slices.Clone(heard)
+	}
 }
 
 // vividPowerTime bounds one application of spec.power on vivid: the

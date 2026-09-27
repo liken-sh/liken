@@ -102,7 +102,10 @@ func digit(on bool) string {
 }
 
 // waitingWiim starts a client, waits until its first poll reaches the
-// device, and hands back the unit the controller would own.
+// device and its first survey of the device's settings ends, and hands
+// back the unit the controller would own. The unit applies no declared
+// setting before the survey, so a test that waited only for the poll
+// could apply before it and see nothing sent.
 func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 	t.Helper()
 	client := wiim.NewClient(amp.server.Listener.Addr().String(), nil)
@@ -117,7 +120,7 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 		<-done
 	})
 	deadline := time.After(testTimeout)
-	for client.State().Reachable != equipment.ConditionTrue {
+	for client.State().Reachable != equipment.ConditionTrue || !client.Surveyed() {
 		select {
 		case <-deadline:
 			t.Fatal("the client never reached the fake amp")

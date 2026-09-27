@@ -85,11 +85,11 @@ func replacedBy(televisions []Television, name string) string {
 
 // televisionUnchanged answers whether the status already holds what
 // the Deployment derived. Only the Deployment's own fields count: the
-// node workload's powerGeneration and PowerApplied are not its to
-// write.
+// node workloads' fields and conditions are not its to write.
 func televisionUnchanged(status TelevisionStatus, derived televisionDerived) bool {
 	return reflect.DeepEqual(status.CEC, derived.cec) &&
 		status.Power == derived.power &&
+		status.ActiveSource == derived.activeSource &&
 		reflect.DeepEqual(status.Displays, derived.displays) &&
 		reflect.DeepEqual(conditionOf(status.Conditions, conditionReachable), derived.reachable) &&
 		reflect.DeepEqual(conditionOf(status.Conditions, conditionInCharge), derived.inCharge)

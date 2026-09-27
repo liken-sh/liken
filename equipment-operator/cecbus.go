@@ -94,7 +94,11 @@ type CECAdapterStatus struct {
 	LogicalAddress  *int            `json:"logicalAddress,omitempty"`
 	OSDName         string          `json:"osdName,omitempty"`
 	Devices         []CECDevice     `json:"devices,omitempty"`
-	Message         string          `json:"message,omitempty"`
+	// ActiveSource is the physical address of the last Active Source
+	// the adapter heard or sent. The kernel does not pass an adapter its
+	// own transmissions, so the node workload records its own.
+	ActiveSource string `json:"activeSource,omitempty"`
+	Message      string `json:"message,omitempty"`
 	// ReportedAt is when the node workload last wrote the entry. It
 	// writes the entry on a steady interval even when nothing changed,
 	// so an old time means the pod stopped without a word.

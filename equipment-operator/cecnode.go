@@ -157,8 +157,20 @@ type cecNode struct {
 	modeContext context.Context
 	modeWork    *sync.WaitGroup
 	// powered is what the node workload holds about its applications of
-	// a Television's spec.power.
+	// a Television's spec.power, and woken what it holds about its
+	// wakes of a Television's session.
 	powered powerMemory
+	woken   wakeMemory
+	// lastCommand is when the TV was last sent a power command: by this
+	// adapter, or a Standby by another device that the adapter heard,
+	// such as a receiver that turns the TV off with itself. A TV answers
+	// its old state for a while after either.
+	lastCommand time.Time
+	// source is the physical address of the last Active Source the
+	// adapter heard or sent, and sources wakes a wake that watches for
+	// another source's claim.
+	source  cec.PhysicalAddress
+	sources chan struct{}
 }
 
 // newCECNode reads the adapter's capabilities, which every later
@@ -180,6 +192,8 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 		dirty:     make(chan struct{}, 1),
 		failed:    make(chan error, 1),
 		stopMode:  func() {},
+		source:    cec.InvalidPhysicalAddress,
+		sources:   make(chan struct{}, 1),
 	}, nil
 }
 
@@ -364,6 +378,11 @@ func (n *cecNode) report(force bool) {
 		return
 	}
 	entry.Devices = devicesOf(n.directory.Peers())
+	n.mutex.Lock()
+	if n.source != cec.InvalidPhysicalAddress {
+		entry.ActiveSource = n.source.String()
+	}
+	n.mutex.Unlock()
 	if note != "" {
 		entry.Message = joinMessages(note, entry.Message)
 	}

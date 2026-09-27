@@ -82,6 +82,9 @@ type sessionHarness struct {
 	// applyPower records the power a toggle settled on, wired to the API
 	// in a test that asserts the PATCH.
 	applyPower func(power equipment.Power)
+	// room hears the session's wakes and sleeps, in a test that asserts
+	// them.
+	room roomEvents
 
 	rules sync.Mutex
 	rule  ReceiverVolume
@@ -176,7 +179,7 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, PowerTopic: h.powerTopic, Active: active, Awake: awake}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.brokers.address(), h.volumeRule, h.inputSoundMode, h.applyPower)
+	started := startSession(t.Context(), "theater", spec, h.denon, h.readings, h.lines, h.brokers.address(), h.volumeRule, h.inputSoundMode, h.applyPower, h.room)
 	h.holder.set(started)
 	return started
 }
@@ -311,7 +314,7 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
 	startSession(t.Context(), "theater", spec, denon.NewClient("127.0.0.1:1", nil), nil, newReceiverLog(io.Discard, "theater"), listener.Addr().String(),
-		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil)
+		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} }, nil, nil, nil)
 
 	will := connectWill(t, waitForFrame(t, frames))
 	mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))

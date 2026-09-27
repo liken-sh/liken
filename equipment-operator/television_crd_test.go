@@ -19,6 +19,14 @@ func televisionObject(spec map[string]any) map[string]any {
 	}
 }
 
+// withSession is a Television on the den bus with the status.session
+// the Deployment writes.
+func withSession(session map[string]any) map[string]any {
+	object := televisionObject(map[string]any{"cec": map[string]any{"bus": "den"}})
+	object["status"] = map[string]any{"session": session}
+	return object
+}
+
 func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
 	onBus := map[string]any{"bus": "den"}
 	cases := []struct {
@@ -33,6 +41,11 @@ func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
 		{"no protocol block", televisionObject(map[string]any{"power": "On"}), true},
 		{"a cec block with no bus", televisionObject(map[string]any{"cec": map[string]any{}}), true},
 		{"a cec block with an empty bus", televisionObject(map[string]any{"cec": map[string]any{"bus": ""}}), true},
+		{"a session the operator writes", withSession(map[string]any{
+			"player": "media/den", "display": "acm-0001-receiver", "awake": true, "wokeAt": "2026-09-26T18:04:05.123Z"}), false},
+		{"a session with no display", withSession(map[string]any{"player": "media/den"}), true},
+		{"a session whose wokeAt is not a time", withSession(map[string]any{
+			"player": "media/den", "display": "acm-0001-receiver", "wokeAt": "soon"}), true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

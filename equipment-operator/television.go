@@ -39,6 +39,22 @@ type TelevisionSpec struct {
 	Power TelevisionPower `json:"power,omitempty"`
 }
 
+// TelevisionSession is a Receiver's session as the TV sees it: the
+// Player, the Display the session's input shows, whether the session
+// holds the room awake, and when it last woke the room. The node
+// workload runs one wake for each wokeAt, so a wake is a new time and
+// not a change of awake: a session wakes the room again while it is
+// awake when a person presses the remote's power button, and the TV
+// must wake with the receiver then too. It is status and not spec,
+// because no person asks for it: the Deployment writes it from the
+// Receiver's session, and a status write changes no generation.
+type TelevisionSession struct {
+	Player  string `json:"player"`
+	Display string `json:"display"`
+	Awake   bool   `json:"awake,omitempty"`
+	WokeAt  string `json:"wokeAt,omitempty"`
+}
+
 // TelevisionCEC names the CECBus the TV is on.
 type TelevisionCEC struct {
 	Bus string `json:"bus"`
@@ -53,21 +69,32 @@ func (t *Television) bus() string {
 	return t.Spec.CEC.Bus
 }
 
-// TelevisionStatus has two writers. The Deployment derives cec, power,
-// displays, and the Reachable and InCharge conditions from the CECBus,
-// the Displays, and the Receivers. The node workload that sends the
-// bus's commands writes powerGeneration and the PowerApplied condition
-// when it applies spec.power.
+// TelevisionStatus has three writers. The Deployment derives cec,
+// power, activeSource, displays, and the Reachable and InCharge
+// conditions from the CECBus, the Displays, and the Receivers, and it
+// writes session under a field manager of its own. The node workload
+// that sends the bus's commands writes powerGeneration and the
+// PowerApplied condition when it applies spec.power. The node workload
+// that speaks for the session's Display writes wokeAt and the
+// WakeApplied condition when it wakes the TV.
 type TelevisionStatus struct {
 	CEC   *TelevisionCECStatus `json:"cec,omitempty"`
 	Power string               `json:"power,omitempty"`
+	// ActiveSource is the physical address of the last Active Source
+	// the bus carried.
+	ActiveSource string `json:"activeSource,omitempty"`
 	// PowerGeneration is the metadata.generation whose spec.power the
 	// node workload applied. Every spec edit is a new generation, so the
 	// node workload applies each edit once, and a restart applies none
 	// twice.
-	PowerGeneration int64               `json:"powerGeneration,omitempty"`
-	Displays        []TelevisionDisplay `json:"displays,omitempty"`
-	Conditions      []Condition         `json:"conditions,omitempty"`
+	PowerGeneration int64 `json:"powerGeneration,omitempty"`
+	// Session is the Receiver session that uses this TV.
+	Session *TelevisionSession `json:"session,omitempty"`
+	// WokeAt is the session.wokeAt whose wake the node workload ran, so
+	// a restart runs no wake twice.
+	WokeAt     string              `json:"wokeAt,omitempty"`
+	Displays   []TelevisionDisplay `json:"displays,omitempty"`
+	Conditions []Condition         `json:"conditions,omitempty"`
 }
 
 // TelevisionCECStatus is the TV as the bus's scan found it. A fact the
@@ -95,11 +122,13 @@ type EquipmentRef struct {
 }
 
 // The Television conditions and their reasons. The Deployment writes
-// Reachable and InCharge; the node workload writes PowerApplied.
+// Reachable and InCharge; the node workloads write PowerApplied and
+// WakeApplied.
 const (
 	conditionReachable    = "Reachable"
 	conditionInCharge     = "InCharge"
 	conditionPowerApplied = "PowerApplied"
+	conditionWakeApplied  = "WakeApplied"
 
 	reasonInCharge        = "InCharge"
 	reasonAnotherInCharge = "AnotherInCharge"
@@ -111,6 +140,10 @@ const (
 	reasonNoPower     = "NoPowerStatus"
 	reasonConfirmed   = "Confirmed"
 	reasonUnconfirmed = "Unconfirmed"
+	reasonTaken       = "SourceTaken"
+	reasonTooLate     = "TooLate"
+	reasonSuperseded  = "Superseded"
+	reasonWaking      = "Waking"
 )
 
 // discovered answers whether discovery owns this Television: it

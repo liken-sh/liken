@@ -2,8 +2,9 @@
 
 Plan 09. Phase 1 built 2026-09-26 and tested against `vivid`. Phase 2
 built 2026-09-26 and tested against `vivid`, with `cec-follower`
-playing the TV. The hardware drills of both phases and phases 3 to 5
-are open. It depends on `liken` plan 70, which
+playing the TV. Phase 3 built 2026-09-26 and tested against `vivid`,
+with a second `vivid` output playing a streaming player. The hardware
+drills of phases 1 to 3 and phases 4 and 5 are open. It depends on `liken` plan 70, which
 attaches a USB CEC adapter and publishes it as a device, and on
 display-operator plan 23, which publishes each `Display`'s CEC
 physical address.
@@ -289,8 +290,9 @@ uses the same rule for a WiiM `Receiver`.
 **Two adapters on one bus.** The adapters coordinate through the
 spec. Scans and power reads merge in the `Deployment`. A command goes
 out from one adapter only: the first adapter in `spec.adapters` that
-holds a logical address. The exception is Active Source, which goes
-out from the adapter that speaks for the `Display` being shown.
+holds a logical address. The exception is the wake: its Image View On
+and its Active Source go out from the adapter that speaks for the
+`Display` being shown.
 
 ### The `Television`
 
@@ -317,6 +319,13 @@ status:
     cecVersion: "1.4"
   power: Standby
   activeSource: 1.3.0.0
+  powerGeneration: 1
+  session:
+    player: media/den
+    display: acm-0001-receiver
+    awake: true
+    wokeAt: "2026-09-26T18:04:05.123Z"
+  wokeAt: "2026-09-26T18:04:05.123Z"
   displays:
   - name: acm-0001-receiver
     physicalAddress: 1.3.0.0
@@ -325,6 +334,9 @@ status:
       name: den
   conditions:
   - type: Reachable
+  - type: InCharge
+  - type: PowerApplied
+  - type: WakeApplied
 ```
 
 **The name is the role.** A bus has at most one TV, and the TV is
@@ -377,15 +389,18 @@ TV. `via` names the
 `Television`. A TV with no CEC has no tree to read. A declared list
 for that case is left for later.
 
-**The session.** A `Television` has a `spec.session` with the same
-`player` and `awake` fields a `Receiver`'s session has, and a
-`display`. The `Deployment` writes it under its own field manager.
-When a `Receiver`'s session wakes, the `Deployment` takes the
-session's input, reads the input's `monitor`, which is a `Display`,
-and finds the `Television` whose `status.displays` lists that
-`Display`. It sets that `Television`'s `session.awake`. A change of
-`awake` from false to true runs the wake job on the node pod: it
-wakes the TV and makes the session's `Display` the active source.
+**The session.** A `Television` has a `status.session` with the same
+`player` and `awake` fields a `Receiver`'s session has, a `display`,
+and a `wokeAt`. The `Deployment` writes it under its own field
+manager. It is status and not spec, because no person asks for it,
+and a status write changes no `metadata.generation`, so it asks
+nothing of `spec.power`. When a `Receiver`'s session wakes the room, the `Deployment`
+takes the session's input, reads the input's `monitor`, which is a
+`Display`, and finds the `Television` whose `status.displays` lists
+that `Display`. It sets that `Television`'s `session.awake` and a new
+`session.wokeAt`. Each new `wokeAt` runs the wake job once on the node
+pod that speaks for the `Display`: it wakes the TV and makes the
+session's `Display` the active source.
 A TV connected directly to a machine, with no receiver, has no
 `Receiver` session to follow. media-operator writing the
 `Television`'s session for that case is left for later.
@@ -645,6 +660,168 @@ Phase 2 settled these questions that the design left open:
 * **`status.activeSource`** is not built. The session match of
   phase 3 is its first reader.
 
+## What phase 3 found
+
+Phase 3 ran against the kernel's `vivid` driver on 2026-09-26. The
+node workload woke a TV that the test plays on vivid's capture
+adapter, and a second vivid output played a streaming player that
+claims Active Source once after another device's claim. The TV heard
+`8->0 04`, `8->f 82 10 00`, `4->f 82 20 00`, and `8->f 82 10 00`: Image
+View On, the node workload's Active Source for its output at `1.0.0.0`,
+the player's claim for `2.0.0.0`, and the node workload's claim again,
+760 ms after the first. The test shortens the 2-second settle before a
+claim again to 500 ms, so the time is the settle and the player's own
+delay. Four findings correct or add to the text above:
+
+* **The session is status.** The first draft of phase 3 put the
+  session in `spec.session`, as the design said. The API server counts
+  every spec edit as a generation, whoever writes it, so each wake
+  would have been a new generation of `spec.power`: a TV a person
+  turned off with its own remote would come back on at the next Play,
+  and a `spec.power` of Standby would put the TV back in standby as
+  the wake woke it. The wake request is not a person's intent, so it
+  moved to `status.session`. A status write changes no generation, so
+  the key of phase 2 stands. The `Deployment` applies the session to
+  the status subresource under the field manager
+  `equipment-operator-session`, apart from the manager of its derived
+  status, so neither of its writes removes the other's fields. A
+  person's apply of the spec never reaches a status field.
+* **A wake is a time, not a change of `awake`.** A person presses the
+  remote's power button to turn the room on while the session is
+  already awake: the screen stays up for a while after the receiver
+  goes to standby. The receiver's session turns the receiver on then,
+  and `awake` does not change. So the session carries `wokeAt`, the
+  time of the wake, and the node workload runs one wake for each new
+  time. `awake` still states whether the session holds the room awake,
+  and when it goes false, a wake in progress stops.
+* **A wake is a change the operator sees happen.** The operator acts on
+  a change of intent it observes while it runs, never on what it finds
+  when it starts. So a wake is a flag of a standing session that turns
+  on, when a Play starts or the screen wakes, a toggle that turns the
+  receiver on, or a session that appears with a flag already on, such
+  as a Play on a Player with no standing session. In its first pass
+  after a start the operator adopts each session it finds into
+  `status.session` with the `wokeAt` already there, and wakes nothing.
+  A session of the same `Player` and `Display` that returns while its
+  removal waits is the same session, such as one the media operator
+  lifted for a moment while an idle pod restarts, and is adopted the
+  same way. A new address for a `Receiver` starts a new unit, so the
+  operator lifts the old unit's session, and the new unit's session
+  returns within the lift. The first draft woke the TV at every
+  session's start, and a review found that a deploy would have woken
+  every room with a standing session, and that a brief lift would have
+  woken the TV unasked. The
+  session tells the room in the order the flags change, before the
+  one-shot's own goroutine runs, because a test found that a sleep
+  right after a wake could otherwise reach the TV first.
+* **Two node writers need two field managers.** An apply removes each
+  field its manager owns and does not state. The power and the wake
+  are written apart, and often by two machines, so the node workload
+  writes the wake under a second manager named after the machine,
+  `equipment-operator-wake-<machine>`.
+
+Phase 3 settled these questions that the design left open:
+
+* **Who sends the wake.** The adapter that speaks for the session's
+  `Display` sends both Image View On and Active Source: the first
+  adapter in `spec.adapters` that names the `Display` and holds a
+  logical address. Active Source must come from that adapter, because
+  it states its sender's physical address. One-touch play is one
+  source's sequence, so its Image View On comes from the same adapter,
+  and the wake is still one intent with one sender.
+* **The order.** The wake reads the TV's power and sends Image View On
+  by the rules of `spec.power`, from its own budget of three commands.
+  It sends Active Source once the TV reports On, or once the power
+  application ends without it, because a TV that does not answer its
+  power can still take the input.
+* **The bound on the second Active Source.** After its first Active
+  Source, the adapter listens for 30 seconds. When another source
+  claims the input, it waits 2 seconds, so the claiming device's burst
+  of messages ends, and sends Active Source again, at most twice. After
+  the 30 seconds, and after the second, a claim stands, so a person
+  who switches the input on purpose is not fought. CEC gives no way to
+  tell a person's switch from a device's, so the bound is time and
+  count alone. The TV's Routing Change is not read as a person's
+  switch, because a TV can send one when it wakes.
+* **What confirms the wake.** The last Active Source on the bus when
+  the guard ends. `WakeApplied` is `True` when the TV reported On and
+  that Active Source is the `Display`'s own. It is `False` with the
+  reason `Unconfirmed` when the TV did not report On, at the command or
+  at the end of the guard, `SourceTaken` when another source holds the
+  input, `Refused` when the adapter could not send, `Stopped` for a wake
+  that stopped before its end, `Superseded` for a wake that a new
+  generation of `spec.power` or another adapter's Active Source ended,
+  and `TooLate` for a wake it did not run. While a wake runs, the
+  condition is `Unknown` with the reason `Waking`.
+* **A late wake.** A wake that has not started 2 minutes after the
+  node workload first saw it sends nothing, and it is recorded as
+  `TooLate`, such as one that waited that long for `spec.power` or for
+  the adapter to join. The node workload measures the time on its own
+  clock, from when it first saw the `wokeAt`, and not from the
+  `Deployment`'s time in `wokeAt`, because the two machines' clocks can
+  differ.
+* **A restart.** Both workloads start with nothing sent. A `wokeAt`
+  that is in the status when the node workload starts is what it
+  finds, so it sends nothing for it and logs one line that says so.
+  Before its first command a wake writes its `wokeAt` in
+  `status.wokeAt` as a started mark, under the wake's field manager,
+  so a wake a pod roll, an unplug, or a change of mode stops is never
+  run again: its Image View On and its Active Source each come from a
+  budget of one wake. A wake that stops records `Stopped`.
+* **A lift.** When a `Receiver` session ends, its `Receiver` is
+  deleted, or its `Receiver`'s address changes, the `Deployment`
+  removes the TV's `status.session` 60 seconds later, unless a session
+  of the same `Player` starts first.
+  A removal the API server refuses is tried again every 10 seconds. A
+  `Deployment` that stops removes nothing, because the next one adopts
+  the same sessions.
+* **One writer of `status.session`.** Each write of a session reads the
+  `Television` and applies what it read with one change, so a sleep
+  from the reconcile pass and a wake from the remote's power button at
+  once could undo each other. One mutex in the `Deployment` takes them
+  one at a time.
+* **A Standby the adapter hears.** A receiver that goes to standby
+  sends the TV Standby, and the TV can still answer On for a while
+  after it. So a Standby to the TV that the adapter heard in the last
+  15 seconds counts as a recent command, the same as its own: the wake
+  sends Image View On without a read first. The wake also reads the
+  TV's power at the end of the guard, and a TV that is not On then is
+  `Unconfirmed`.
+* **Two adapters.** An Active Source from another adapter of the bus is
+  a later wake of the same bus, so the adapter that guards ends its
+  guard at once, with the reason `Superseded`, and claims nothing more.
+  The next pass also stops a wake whose `Display` this adapter no
+  longer speaks for.
+* **The lines.** A wake writes a line when it starts, a line when it
+  ends, and a line when it waits behind `spec.power`.
+* **A sleep.** A toggle that puts the receiver in standby, and a
+  session whose Play and screen both go off, set `awake` to false. The
+  wake in progress stops, and the adapter sends the TV nothing: the
+  receiver's own CEC link turns the TV off with it.
+* **`spec.power` and a wake at the same moment.** `spec.power` goes
+  first. A wake does not start while a generation of `spec.power` is
+  not applied yet, because the two would send the TV opposite commands
+  at once; it starts when `status.powerGeneration` catches up, if the
+  wake is still less than 2 minutes old. A generation that arrives
+  while a wake runs is a person's edit, newer than the wake, so it
+  stops the wake for good, with the reason `Superseded`, and the
+  adapter sends nothing more for that wake. The rule reads
+  `status.powerGeneration`, which every node workload sees, so it holds
+  when the adapter that sends `spec.power` is on another machine. The
+  node workload runs the wake's pass before the power pass, so a wake
+  stops before the new generation's first command.
+* **Which `Television`.** The `Television` in charge of the bus whose
+  `status.displays` lists the `Display`. A room with no `Television`
+  that lists the `Display` gets no write and no log line. A session
+  that starts on another `Display` leaves the TV that showed the old
+  one at once.
+* **`status.activeSource`.** Each adapter reports the last Active
+  Source it heard or sent in its entry, in `Listen` as well as in
+  `Control`. The kernel does not pass an adapter its own transmission,
+  so the node workload records its own. The `Deployment` copies the
+  one the first adapter in `spec.adapters` with a current entry
+  reports.
+
 ## Failure and recovery
 
 **The receiver in standby.** The adapter is connected to a receiver's
@@ -690,6 +867,9 @@ Each one states what it saw, in this order:
    adapters.
 4. `Television` `Reachable` and `status.power`: the TV answers, and
    what it reports.
+5. `Television` `status.session`, `status.wokeAt`, and `WakeApplied`:
+   the session reached the TV, the adapter ran the wake, and what the
+   bus reported at the end of it.
 
 ## Testing
 

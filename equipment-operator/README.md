@@ -51,10 +51,10 @@ spec:
 A `Television` is the TV at the root of that tree. When a `CECBus` in
 `Control` finds a TV, the operator creates a `Television` with the
 bus's name. To adopt it, apply your own `Television` under that name.
-The `Television` reports the TV's power and the `Display` objects whose
-pictures reach it. Each edit of the spec wakes the TV or puts it in
-standby once, as `spec.power` asks, and the operator reads the power
-back to confirm it:
+The `Television` reports the TV's power, the last active source, and
+the `Display` objects whose pictures reach it. Each edit of the spec
+wakes the TV or puts it in standby once, as `spec.power` asks, and the
+operator reads the power back to confirm it:
 
 ```yaml
 apiVersion: equipment.liken.sh/v1alpha1
@@ -69,6 +69,18 @@ spec:
 
 Quote `"On"`, because `kubectl` reads an unquoted `On` as the boolean
 `true`.
+
+When a `Receiver`'s session wakes the room on an input whose monitor
+is a `Display` that a `Television` lists, the TV wakes with the
+receiver. A session wakes the room when a Play starts on it, when its
+screen wakes, when the remote's power button turns the receiver on, or
+when it appears with a Play or its screen already on. The sessions the
+operator finds when it starts wake nothing. The adapter that speaks for that `Display` sends the TV
+Image View On and then Active Source, so the TV and the receiver show
+the machine. For 30 seconds after, it takes the input back from
+another source that claims it, at most twice. `status.session` holds
+the session, `status.wokeAt` and the `WakeApplied` condition report
+what the wake did, and an edit of `spec.power` goes before a wake.
 
 The manual is at [equipment.liken.sh](https://equipment.liken.sh/).
 `plans/README.md` indexes the plans. `make test` runs every check CI

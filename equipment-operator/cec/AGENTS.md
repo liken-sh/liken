@@ -53,8 +53,11 @@ says who sends it and what answers it. The package uses four:
 - **One-touch play.** Image View On, Standby, and Active Source.
   `PowerCommand` is the generic command for a TV power state: Image
   View On for On, and Standby directed to the TV alone for Standby.
-  The package builds Active Source; the wake job of a later phase
-  sends it.
+  The node workload's wake sends Image View On and then Active Source
+  for its `Display`'s physical address, and reads every Active Source
+  the bus carries. `cectest` has a peer that claims Active Source
+  after another device's claim, the way a streaming player did in the
+  first drill.
 - **Remote control.** User Control Pressed and Released. The kernel
   turns them into key events on the adapter's input device when the
   claim sets passthrough, and this package never reads them.
@@ -124,7 +127,10 @@ sudo modprobe -r vivid
 
 With no follower on vivid's TV adapter, the kernel's CEC core answers
 Give Device Power Status with a Feature Abort, before and after an
-Image View On, so something must play the TV. Each `Vivid` test plays the TV itself on the capture adapter. The
+Image View On, so something must play the TV. Each `Vivid` test plays the TV itself on the capture adapter. The wake's test also plays a
+streaming player on a second output, which claims Active Source once
+after the node workload's claim, and it skips when only one output is
+connected. The
 test that wakes the TV can leave the TV to `cec-follower` from
 v4l-utils instead, which is an independent implementation of a TV's
 power states: after Image View On it reports Standby for about 2

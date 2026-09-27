@@ -51,8 +51,28 @@ func (n *cecNode) pass(ctx context.Context) error {
 	if err := n.syncAddresses(ctx, want); err != nil {
 		return err
 	}
-	n.passTelevision(bus)
+	n.passTelevisions(bus)
 	return nil
+}
+
+// passTelevisions reads the bus's Television once for both of the
+// Television's intents: its spec.power and its session's wake. A list
+// that fails leaves both for the next pass, and cancels nothing,
+// because the Television may still ask for what runs.
+func (n *cecNode) passTelevisions(bus *CECBus) {
+	list, err := ListTelevisions(n.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
+		n.writePower()
+		n.writeWake()
+		return
+	}
+	television := televisionFor(list.Items, bus.Metadata.Name)
+	// The wake pass goes first: a new generation of spec.power stops a
+	// wake in progress there, so no Active Source follows the power
+	// pass's first command.
+	n.passWake(bus, television)
+	n.passTelevision(bus, television)
 }
 
 // choose answers the CECBus this machine's adapter belongs to. A
@@ -137,6 +157,7 @@ func (n *cecNode) idle() error {
 	}
 	n.directory.Reset()
 	n.mutex.Lock()
+	n.source = cec.InvalidPhysicalAddress
 	n.applied, n.entry, n.retryAt, n.retryWait = adapterConfig{}, CECAdapterStatus{}, n.now(), 0
 	n.mutex.Unlock()
 	return nil

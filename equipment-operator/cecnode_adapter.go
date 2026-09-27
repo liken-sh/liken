@@ -110,6 +110,9 @@ func (n *cecNode) apply(ctx context.Context, want adapterConfig) error {
 	n.stopMode()
 	if !same {
 		n.directory.Reset()
+		n.mutex.Lock()
+		n.source = cec.InvalidPhysicalAddress
+		n.mutex.Unlock()
 	}
 	var entry CECAdapterStatus
 	var err error
@@ -374,6 +377,19 @@ func (n *cecNode) heard(message cec.Message) {
 	before, after, changed := n.directory.Hear(message)
 	if changed {
 		n.markDirty()
+	}
+	opcode, _ := message.Opcode()
+	if opcode == cec.OpActiveSource && len(message.Operands()) >= 2 {
+		operands := message.Operands()
+		n.noteSource(cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1]))
+	}
+	// A Standby that reaches the TV is a recent command, so the next wake
+	// sends Image View On without trusting a power read that can still
+	// answer On.
+	if opcode == cec.OpStandby && !message.IsPoll() && (message.To == cec.AddressTV || message.IsBroadcast()) {
+		n.mutex.Lock()
+		n.lastCommand = time.Now()
+		n.mutex.Unlock()
 	}
 	n.mutex.Lock()
 	bus := n.bus

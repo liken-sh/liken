@@ -1,15 +1,17 @@
 package main
 
-// The API calls for Television. Each status write is a server-side
-// apply that states only the fields its writer owns. Three writers
-// share one Television: the person who writes the spec, the
-// Deployment, which writes the facts it derives from the CECBus and
-// the Reachable and InCharge conditions, and the node workload that
-// sends the bus's commands, which writes powerGeneration and the
-// PowerApplied condition. The conditions are a map keyed by type, so
-// each writer's apply leaves the other writer's conditions in place.
-// Discovery creates its Television with a create, so it writes no spec
-// field after that.
+// The API calls for Television. Each write is a server-side apply
+// that states only the fields its writer owns. Four writers share one
+// Television: the person who writes the spec; the Deployment, which
+// writes the facts it derives from the CECBus, the Reachable and
+// InCharge conditions, and, under a manager of its own, the session;
+// the node workload that sends the bus's commands, which writes
+// powerGeneration and the PowerApplied condition; and the node workload
+// that speaks for the session's Display, which writes wokeAt and the
+// WakeApplied condition. The conditions are a map keyed by type, so each writer's
+// apply leaves the other writers' conditions in place. Discovery
+// creates its Television with a create, so it writes no spec field
+// after that.
 
 import (
 	"context"
@@ -77,17 +79,18 @@ func televisionApply(name string) (string, string, ObjectMeta) {
 // one.
 func ApplyTelevisionDerived(c *Client, name string, derived televisionDerived) error {
 	type status struct {
-		CEC        *TelevisionCECStatus `json:"cec,omitempty"`
-		Power      string               `json:"power,omitempty"`
-		Displays   []TelevisionDisplay  `json:"displays,omitempty"`
-		Conditions []Condition          `json:"conditions"`
+		CEC          *TelevisionCECStatus `json:"cec,omitempty"`
+		Power        string               `json:"power,omitempty"`
+		ActiveSource string               `json:"activeSource,omitempty"`
+		Displays     []TelevisionDisplay  `json:"displays,omitempty"`
+		Conditions   []Condition          `json:"conditions"`
 	}
 	body := struct {
 		APIVersion string     `json:"apiVersion"`
 		Kind       string     `json:"kind"`
 		Metadata   ObjectMeta `json:"metadata"`
 		Status     status     `json:"status"`
-	}{Status: status{CEC: derived.cec, Power: derived.power, Displays: derived.displays, Conditions: []Condition{derived.reachable, derived.inCharge}}}
+	}{Status: status{CEC: derived.cec, Power: derived.power, ActiveSource: derived.activeSource, Displays: derived.displays, Conditions: []Condition{derived.reachable, derived.inCharge}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(name)
 	return applyTelevision(c, televisionPath(name)+"/status", fieldManager, body)
 }
@@ -114,6 +117,62 @@ func ApplyTelevisionPower(c *Client, television *Television, machine string, gen
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
 	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecFieldManager(machine), body)
+}
+
+// cecWakeFieldManager is the field manager of the node workload on one
+// machine for the wake. It is not the machine's power manager, because
+// an apply removes each field its manager owns and does not state, and
+// the power and the wake are written apart, often by two machines.
+func cecWakeFieldManager(machine string) string {
+	return "equipment-operator-wake-" + machine
+}
+
+// ApplyTelevisionWake writes what the node workload's wake did: the
+// status.session.wokeAt it ran and the WakeApplied condition. The body
+// states the object's uid for the same reason ApplyTelevisionPower
+// does.
+func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt string, condition Condition) error {
+	type status struct {
+		WokeAt     string      `json:"wokeAt"`
+		Conditions []Condition `json:"conditions"`
+	}
+	body := struct {
+		APIVersion string     `json:"apiVersion"`
+		Kind       string     `json:"kind"`
+		Metadata   ObjectMeta `json:"metadata"`
+		Status     status     `json:"status"`
+	}{Status: status{WokeAt: wokeAt, Conditions: []Condition{condition}}}
+	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
+	body.Metadata.UID = television.Metadata.UID
+	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecWakeFieldManager(machine), body)
+}
+
+// sessionFieldManager is the Deployment's field manager for
+// status.session. The Deployment's derived status is written under
+// fieldManager, and an apply removes each field its manager owns and
+// does not state, so the session has a manager of its own: a write of
+// the derived status never removes the session, and a write of the
+// session never removes the derived status. The node workloads' fields
+// have managers of their own too. A person's apply of the spec reaches
+// no status field, because the status subresource splits the two.
+const sessionFieldManager = "equipment-operator-session"
+
+// ApplyTelevisionSession writes the Deployment's status.session. A nil
+// session removes the field, because the apply then states no field
+// its manager owns. A status write changes no generation, so the node
+// workload's spec.power key does not move.
+func ApplyTelevisionSession(c *Client, name string, session *TelevisionSession) error {
+	type status struct {
+		Session *TelevisionSession `json:"session,omitempty"`
+	}
+	body := struct {
+		APIVersion string     `json:"apiVersion"`
+		Kind       string     `json:"kind"`
+		Metadata   ObjectMeta `json:"metadata"`
+		Status     status     `json:"status"`
+	}{Status: status{Session: session}}
+	body.APIVersion, body.Kind, body.Metadata = televisionApply(name)
+	return applyTelevision(c, televisionPath(name)+"/status", sessionFieldManager, body)
 }
 
 // CreateDiscoveredTelevision creates the Television the Deployment

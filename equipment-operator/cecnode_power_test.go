@@ -282,3 +282,24 @@ func TestTheTelevisionNotInChargeWaits(t *testing.T) {
 	appliedAt(t, api, "den", 1)
 	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
 }
+
+// The Deployment writes status.session, and a status write is no spec
+// edit, so it asks nothing of the TV's power: a TV a person turned off
+// with its own remote stays off.
+func TestASessionWriteAppliesNoPower(t *testing.T) {
+	fastPower(t)
+	wire := roomWithTV(televisionTV(cec.PowerStandby))
+	api := controlling(t, wire, lounge(TelevisionOn))
+	appliedAt(t, api, "lounge", 1)
+	wire.Add(televisionTV(cec.PowerStandby))
+
+	asleep := wokeNow()
+	asleep.Awake = false
+	mustSucceed(t, ApplyTelevisionSession(api.client, "lounge", asleep))
+	time.Sleep(4 * cecPowerWindow)
+
+	television, _ := api.television("lounge")
+	mustMatch(t, television.Metadata.Generation, int64(1))
+	mustDeepEqual(t, television.Status.Session, asleep)
+	mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
+}

@@ -82,8 +82,11 @@ type receiverUnit struct {
 
 	mutex   sync.Mutex
 	session *session
-	applied ReceiverStatus
-	written bool
+	// sessions writes the status.session of the TV the session shows,
+	// and is nil in a test that builds a unit with no TV.
+	sessions *televisionSessions
+	applied  ReceiverStatus
+	written  bool
 }
 
 // observe is where every line the receiver sends reaches the operator.
@@ -176,6 +179,7 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		u.mutex.Unlock()
 		held.stop()
 		u.log.printf("the session for Player %s ended", held.spec.Player)
+		u.sessions.lift(held.spec.Player)
 	}
 	if spec == nil {
 		u.readings.setClaimed(u.name, false)
@@ -183,10 +187,11 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 	}
 	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t",
 		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake)
-	started := startSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower)
+	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower, u.roomFor(spec))
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
+	started.start(spec.Active, spec.Awake)
 	u.readings.setClaimed(u.name, true)
 }
 
@@ -235,6 +240,31 @@ func (u *receiverUnit) volumeRule() ReceiverVolume {
 func (u *receiverUnit) setInputs(inputs []ReceiverInput) {
 	held := slices.Clone(inputs)
 	u.inputs.Store(&held)
+}
+
+// roomFor answers the link a session uses to tell its TV what it did,
+// and nil for a unit that writes no TV session.
+func (u *receiverUnit) roomFor(spec *ReceiverSession) roomEvents {
+	if u.sessions == nil {
+		return nil
+	}
+	return u.sessions.room(u.log, spec.Player, spec.Input, u.inputMonitor)
+}
+
+// inputMonitor answers the monitor one declared input names, which is
+// the Display whose picture the input carries, and an empty string when
+// the input is not declared.
+func (u *receiverUnit) inputMonitor(input string) string {
+	held := u.inputs.Load()
+	if held == nil {
+		return ""
+	}
+	for _, one := range *held {
+		if one.Name == input {
+			return one.Monitor
+		}
+	}
+	return ""
 }
 
 // inputSoundMode answers the sound mode one declared input names, and
@@ -702,6 +732,17 @@ func (u *receiverUnit) applyPower(power equipment.Power) {
 	u.power.Store(&power)
 }
 
+// player names the Player whose session stands, and an empty string
+// when none stands.
+func (u *receiverUnit) player() string {
+	u.mutex.Lock()
+	defer u.mutex.Unlock()
+	if u.session == nil {
+		return ""
+	}
+	return u.session.spec.Player
+}
+
 // stop lifts the session and closes the connection, which is what a
 // deleted Receiver leaves behind. The metrics scoped to this receiver
 // go with it, so a Receiver that is gone stops being reported.
@@ -726,6 +767,9 @@ type controller struct {
 	readings   *metrics
 	discovery  *discovery
 	units      map[string]*receiverUnit
+	// sessions writes every Television's status.session for the units'
+	// sessions.
+	sessions *televisionSessions
 	// log takes the lines a person reads to follow the receivers, the
 	// way the node workload's log does for its adapter.
 	log io.Writer
@@ -739,6 +783,7 @@ func newController(client *Client, busAddress string, readings *metrics) *contro
 		now:        time.Now,
 		readings:   readings,
 		units:      map[string]*receiverUnit{},
+		sessions:   newTelevisionSessions(client),
 		log:        os.Stderr,
 	}
 	// Discovery wakes the same loop a watch event does, so a Receiver it
@@ -779,10 +824,20 @@ func (c *controller) doPass(ctx context.Context) error {
 		c.reconcile(ctx, receiver)
 	}
 
+	// The first pass adopts what it finds. From its end on, a session
+	// that appears is a change a person caused.
+	defer c.sessions.markLive()
 	for name, unit := range c.units {
 		if !live[name] {
+			// A deleted Receiver ends its session for good, so its TV's
+			// session goes too. A stop at shutdown lifts none, because the
+			// next operator takes the same session over.
+			player := unit.player()
 			unit.stop()
 			delete(c.units, name)
+			if player != "" {
+				c.sessions.lift(player)
+			}
 		}
 	}
 	return nil
@@ -797,9 +852,15 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	if held && (unit.address != c.resolvedAddress(&receiver.Spec) ||
 		unit.settingsTopic != receiver.Spec.SettingsTopic ||
 		unit.commandsTopic != receiver.Spec.CommandsTopic) {
+		// A new wiring is not a new session: the lift lets the session the
+		// new unit starts return to the same TV without a wake.
+		player := unit.player()
 		unit.stop()
 		delete(c.units, name)
 		held = false
+		if player != "" {
+			c.sessions.lift(player)
+		}
 	}
 	if !held {
 		unit = c.start(ctx, receiver)
@@ -849,6 +910,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		settingsTopic: receiver.Spec.SettingsTopic,
 		commandsTopic: receiver.Spec.CommandsTopic,
 		client:        c.client,
+		sessions:      c.sessions,
 		busAddress:    c.busAddress,
 		now:           c.now,
 		readings:      c.readings,
@@ -913,6 +975,7 @@ func (c *controller) run(ctx context.Context) {
 }
 
 func (c *controller) stopAll() {
+	c.sessions.stop()
 	for name, unit := range c.units {
 		unit.stop()
 		delete(c.units, name)
