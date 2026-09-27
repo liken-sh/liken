@@ -295,6 +295,11 @@ decided yet what work they become.
   node and connector alternate every pass. The name cannot gain the
   serial alone, because it is also the pairing identity that the ELD
   must match.
+* [The compositor can start without DRM master](open-problems/the-compositor-can-start-without-drm-master.md).
+  After a reboot, a compositor came up without master: every commit
+  failed with `Permission denied`, the panel showed the console, and
+  the liveness probe passed, because it proves only that the
+  compositor answers its clients.
 * [An external layout engine](open-problems/an-external-layout-engine.md).
   Plan 17 decides every placement in one function. The seam where a
   different engine would go is the `Service`, `EndpointSlice`, and
