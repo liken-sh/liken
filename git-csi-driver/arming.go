@@ -13,13 +13,13 @@ import (
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
-// defaultResync is how long the driver waits before it reads the claim
-// again. It covers a watch that ended and a claim that arrived after
-// the volume did.
-const defaultResync = 30 * time.Second
+// persistentVolumeClaimKind is what git_csi_watch_restarts_total names
+// the watch on each writeable volume's claim.
+const persistentVolumeClaimKind = "PersistentVolumeClaim"
 
 // claimReference is the claim a PersistentVolume is bound to. It labels
 // the volume's metrics and takes its Events.
@@ -34,11 +34,11 @@ type arming struct {
 	node   *node
 	client kubernetes.Interface
 	logger *slog.Logger
-	resync time.Duration
+	retry  time.Duration
 }
 
 func newArming(answering *node, client kubernetes.Interface, logger *slog.Logger) *arming {
-	return &arming{node: answering, client: client, logger: logger, resync: defaultResync}
+	return &arming{node: answering, client: client, logger: logger, retry: defaultRetry}
 }
 
 // arm starts the loop that reads the volume's claim. The caller holds
@@ -64,62 +64,66 @@ func (n *node) disarm(staged *volume) {
 	n.readings.forget(staged)
 }
 
-// follow reads the claim, then waits for the claim to change or for the
-// resync, until the driver stops.
+// follow finds the claim, then lists it and watches it until the
+// driver stops. The list and the watch select the claim by name, so a
+// claim that does not exist yet costs one list, and its creation
+// arrives as an event.
 func (a *arming) follow(ctx context.Context, staged *volume) {
-	for ctx.Err() == nil {
-		a.pass(ctx, staged)
+	claim, found := a.find(ctx, staged)
+	if !found {
+		return
 	}
+	claims := a.client.CoreV1().PersistentVolumeClaims(claim.namespace)
+	selector := "metadata.name=" + claim.name
+	(&listWatch{
+		kind: persistentVolumeClaimKind,
+		list: func(ctx context.Context) (string, error) {
+			held, err := claims.List(ctx, metav1.ListOptions{FieldSelector: selector})
+			if err != nil {
+				return "", err
+			}
+			for i := range held.Items {
+				if err := a.read(ctx, staged, claim, &held.Items[i]); err != nil {
+					return "", err
+				}
+			}
+			return held.ResourceVersion, nil
+		},
+		watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = selector
+			return claims.Watch(ctx, options)
+		},
+		act: func(ctx context.Context, event watch.Event) error {
+			// A deleted claim arms nothing new. A bookmark is a claim
+			// with no name, and read passes over it.
+			held, isClaim := event.Object.(*corev1.PersistentVolumeClaim)
+			if !isClaim || event.Type == watch.Deleted {
+				return nil
+			}
+			return a.read(ctx, staged, claim, held)
+		},
+		retry:    a.retry,
+		logger:   a.logger,
+		readings: a.node.readings,
+	}).follow(ctx)
 }
 
-// pass finds the claim, reads the class, and holds a watch open until
-// the claim changes or the resync says to start again.
-func (a *arming) pass(ctx context.Context, staged *volume) {
-	claim, err := a.claimOf(ctx, staged.id)
-	if err != nil {
+// find reads the claim the volume is bound to, and reads it again
+// after the retry while the read fails. The kubelet stages a volume
+// only after its PersistentVolume is bound, so the read fails only
+// when the API server refuses the list or the PersistentVolume is
+// gone. It reports false when the driver stops first.
+func (a *arming) find(ctx context.Context, staged *volume) (claimReference, bool) {
+	for ctx.Err() == nil {
+		claim, err := a.claimOf(ctx, staged.id)
+		if err == nil {
+			return claim, true
+		}
 		a.logger.WarnContext(ctx, "the claim was not found",
 			"volume", staged.id, "error", err)
-		a.rest(ctx)
-		return
+		waitOut(ctx, a.retry)
 	}
-	a.read(ctx, staged, claim)
-
-	watching, err := a.client.CoreV1().PersistentVolumeClaims(claim.namespace).
-		Watch(ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + claim.name})
-	if err != nil {
-		a.logger.WarnContext(ctx, "the claim is not watched",
-			"claim", claim.namespace+"/"+claim.name, "error", err)
-		a.rest(ctx)
-		return
-	}
-	defer watching.Stop()
-
-	resync := time.NewTimer(a.resync)
-	defer resync.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-resync.C:
-			return
-		case _, open := <-watching.ResultChan():
-			if !open {
-				return
-			}
-			a.read(ctx, staged, claim)
-		}
-	}
-}
-
-// rest waits out the resync after a read that failed, so a claim that
-// is not there yet costs one call per resync.
-func (a *arming) rest(ctx context.Context) {
-	timer := time.NewTimer(a.resync)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
+	return claimReference{}, false
 }
 
 // claimOf finds the claim through the PersistentVolume that carries the
@@ -147,16 +151,18 @@ func (a *arming) claimOf(ctx context.Context, handle string) (claimReference, er
 }
 
 // read takes the class the claim names and arms the volume when that
-// class belongs to this driver.
-func (a *arming) read(ctx context.Context, staged *volume, claim claimReference) {
-	held, err := a.client.CoreV1().PersistentVolumeClaims(claim.namespace).
-		Get(ctx, claim.name, metav1.GetOptions{})
-	if err != nil {
-		a.logger.WarnContext(ctx, "the claim was not read",
-			"claim", claim.namespace+"/"+claim.name, "error", err)
-		return
+// class belongs to this driver. A class the node could not read is an
+// error, so the loop reads the claim and the class again after the
+// retry. A class that arrives after the claim names it sends no event
+// on the claim, and that read is what finds it.
+func (a *arming) read(
+	ctx context.Context, staged *volume, claim claimReference, held *corev1.PersistentVolumeClaim,
+) error {
+	// The list and the watch select the claim by name, and this check
+	// keeps any other claim from arming the volume all the same.
+	if held.Name != claim.name {
+		return nil
 	}
-
 	name := className(held)
 	var rules *policy
 	invalid := ""
@@ -165,8 +171,7 @@ func (a *arming) read(ctx context.Context, staged *volume, claim claimReference)
 			Get(ctx, name, metav1.GetOptions{})
 		switch {
 		case err != nil:
-			a.logger.WarnContext(ctx, "the class was not read",
-				"class", name, "error", err)
+			return fmt.Errorf("the class %s was not read: %w", name, err)
 		case class.DriverName != driverName:
 			// A class of another driver says nothing about this
 			// volume, so it arms nothing and is not a failure.
@@ -184,6 +189,7 @@ func (a *arming) read(ctx context.Context, staged *volume, claim claimReference)
 		}
 	}
 	a.node.armed(ctx, staged, claim, name, rules, invalid)
+	return nil
 }
 
 // className is the class in force: the one the claim's status carries,

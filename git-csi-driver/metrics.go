@@ -121,12 +121,16 @@ func newMetrics() *metrics {
 		callErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_reconcile_errors_total",
 				Help: "CSI calls that answered an error."}, callLabels),
-		// A watch the API closes and the node reopens is one restart.
-		// Only the node plugin watches PersistentVolumes, so only its
-		// registry moves this past zero.
+		// Every watch the node opens again after one ended is one
+		// restart, by the kind it watches. The API server closes a
+		// healthy watch after its request timeout, so each watch
+		// restarts about once or twice an hour. A rate well above that
+		// is a watch that fails. Only the node plugin watches
+		// PersistentVolumes and claims, so only its registry moves this
+		// past zero.
 		watchRestarts: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_watch_restarts_total",
-				Help: "Watches the API closed that the driver reopened."}, callLabels),
+				Help: "Watches the driver opened again after one ended."}, callLabels),
 		// Layer 3, plan 13: what the plan's table asks for. volumes is
 		// wired to the node's own map of what is mounted in
 		// registerNodeFacts, once a node exists to read.
@@ -200,8 +204,8 @@ func (m *metrics) registerWebhook() {
 
 // registerNodeFacts puts plan 13's layer 3 on the registry, and the
 // watch restart counter beside it: the facts only the node plugin has,
-// because only it fetches, holds a store, or watches a
-// PersistentVolume. byRepo answers what volumesByRepo reads live off
+// because only it fetches, holds a store, or watches
+// PersistentVolumes and claims. byRepo answers what volumesByRepo reads live off
 // the node, so git_csi_volumes never drifts from its own accounting of
 // what is mounted.
 func (m *metrics) registerNodeFacts(byRepo func() map[string]float64) {

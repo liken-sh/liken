@@ -56,6 +56,20 @@ func boundVolume(t *testing.T, answering *node, handle, class string) {
 	}
 }
 
+// nameClass names the class on the claim that boundVolume wrote.
+func nameClass(t *testing.T, answering *node, class string) {
+	t.Helper()
+	claims := cluster(t, answering).CoreV1().PersistentVolumeClaims("home")
+	claim, err := claims.Get(t.Context(), "config", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("reading the claim: %v", err)
+	}
+	claim.Spec.VolumeAttributesClassName = &class
+	if _, err := claims.Update(t.Context(), claim, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("naming the class on the claim: %v", err)
+	}
+}
+
 // attributesClass writes a VolumeAttributesClass of the driver it names.
 func attributesClass(t *testing.T, answering *node, name, driver string) {
 	t.Helper()
@@ -298,92 +312,110 @@ func volumeNamed(id string) *volume {
 	}
 }
 
-func TestTheArmingReportsWhatItCannotRead(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		class string
-		says  string
-	}{
-		{name: "a claim that is not there", says: "the claim was not read"},
-		{name: "a class that is not there", class: "gone", says: "the class was not read"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			logs := &logbook{}
-			answering, _ := testNode(t, logs)
-			if c.class != "" {
-				boundVolume(t, answering, "config", c.class)
-			}
-			answering.arms.read(t.Context(), volumeNamed("config"),
-				claimReference{namespace: "home", name: "config"})
-			if !strings.Contains(logs.String(), c.says) {
-				t.Errorf("the log is %q, want %q in it", logs, c.says)
-			}
-		})
-	}
-}
-
-func TestThePassRestsWhenTheClusterRefusesTheWatch(t *testing.T) {
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	boundVolume(t, answering, "config", "")
-	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, nil, errors.New("the api server said no")
-		})
-
-	answering.arms.pass(t.Context(), volumeNamed("config"))
-	if !strings.Contains(logs.String(), "the claim is not watched") {
-		t.Errorf("the log is %q, want the refused watch in it", logs)
-	}
-}
-
-func TestThePassRestsWhenThereIsNoClaim(t *testing.T) {
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	answering.arms.pass(t.Context(), volumeNamed("config"))
-	if !strings.Contains(logs.String(), "the claim was not found") {
-		t.Errorf("the log is %q, want the missing claim in it", logs)
-	}
-}
-
-func TestThePassEndsWhenTheWatchEnds(t *testing.T) {
+func TestAClassTheNodeCannotReadIsAnError(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
-	answering.arms.resync = 30 * time.Second
-	boundVolume(t, answering, "config", "")
-	ended := watch.NewFake()
-	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, ended, nil
-		})
+	gone := "gone"
+	claim := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
+		Spec:       corev1.PersistentVolumeClaimSpec{VolumeAttributesClassName: &gone},
+	}
 
+	err := answering.arms.read(t.Context(), volumeNamed("config"),
+		claimReference{namespace: "home", name: "config"}, claim)
+	if err == nil || !strings.Contains(err.Error(), "the class gone was not read") {
+		t.Errorf("read answered %v, want the class that was not read", err)
+	}
+}
+
+func TestAClaimOfAnotherNameArmsNothing(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	held := volumeNamed("config")
+	other := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "other"},
+	}
+
+	if err := answering.arms.read(t.Context(), held,
+		claimReference{namespace: "home", name: "config"}, other); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if claim, _, _ := held.reading(); claim.name != "" {
+		t.Errorf("a claim of another name armed the volume for %+v", claim)
+	}
+}
+
+// followArming runs the volume's arming loop until the test ends, and
+// returns the channel that closes when the loop does.
+func followArming(t *testing.T, answering *node, ctx context.Context, held *volume) <-chan struct{} {
+	t.Helper()
 	over := make(chan struct{})
 	go func() {
 		defer close(over)
-		answering.arms.pass(t.Context(), volumeNamed("config"))
+		answering.arms.follow(ctx, held)
 	}()
-	ended.Stop()
-	select {
-	case <-over:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the pass did not end when the watch did")
-	}
+	return over
 }
 
-func TestThePassEndsWithTheDriver(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.arms.resync = 30 * time.Second
-	boundVolume(t, answering, "config", "")
-	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, watch.NewFake(), nil
-		})
-
+func TestTheLoopReadsTheClaimAgainWhileThereIsNone(t *testing.T) {
+	logs := &logbook{}
+	answering, _ := testNode(t, logs)
 	ctx, stop := context.WithCancel(t.Context())
-	over := make(chan struct{})
-	go func() {
-		defer close(over)
-		answering.arms.follow(ctx, volumeNamed("config"))
-	}()
+	over := followArming(t, answering, ctx, volumeNamed("config"))
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) && strings.Count(logs.String(), "the claim was not found") < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop()
+	<-over
+	if got := strings.Count(logs.String(), "the claim was not found"); got < 2 {
+		t.Errorf("the log says the claim was not found %d times, want at least 2 (%q)", got, logs)
+	}
+}
+
+func TestAClaimThatArrivesAfterTheVolumeArmsIt(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	boundVolume(t, answering, "config", "config-eager")
+	attributesClass(t, answering, "config-eager", driverName)
+	claims := cluster(t, answering).CoreV1().PersistentVolumeClaims("home")
+	claim, err := claims.Get(t.Context(), "config", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("reading the claim: %v", err)
+	}
+	if err := claims.Delete(t.Context(), "config", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("deleting the claim: %v", err)
+	}
+	// The retry is long, so only the watch can carry the new claim.
+	answering.arms.retry = 30 * time.Second
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	time.Sleep(100 * time.Millisecond)
+
+	claim.ResourceVersion = ""
+	if _, err := claims.Create(t.Context(), claim, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("writing the claim: %v", err)
+	}
+
+	waitForArmed(t, published, true)
+}
+
+func TestAClassThatArrivesAfterTheClaimNamesItArmsTheVolume(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	boundVolume(t, answering, "config", "config-eager")
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	time.Sleep(100 * time.Millisecond)
+
+	attributesClass(t, answering, "config-eager", driverName)
+
+	waitForArmed(t, published, true)
+}
+
+func TestTheArmingLoopEndsWithTheDriver(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	boundVolume(t, answering, "config", "")
+	ctx, stop := context.WithCancel(t.Context())
+	over := followArming(t, answering, ctx, volumeNamed("config"))
+
 	stop()
 	select {
 	case <-over:
@@ -392,35 +424,111 @@ func TestThePassEndsWithTheDriver(t *testing.T) {
 	}
 }
 
+func TestADeletedClaimLeavesTheVolumeArmed(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	sent := watch.NewFake()
+	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
+		func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, sent, nil
+		})
+	held := armedVolume(t, answering, "config",
+		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+
+	// The deleted claim names no class, so acting on it would unarm the
+	// volume. The send blocks until the loop reads the event, so the
+	// bookmark after it returns only once the loop has read the delete.
+	sent.Delete(&corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
+	})
+	sent.Action(watch.Bookmark, &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{ResourceVersion: "250"},
+	})
+
+	if _, armed, _ := held.reading(); !armed {
+		t.Error("a deleted claim unarmed the volume")
+	}
+}
+
+func TestAListTheAPIServerRefusesIsLogged(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		resource string
+		follow   func(ctx context.Context, answering *node)
+		kind     string
+	}{
+		{
+			name:     "the PersistentVolumes",
+			resource: "persistentvolumes",
+			follow:   func(ctx context.Context, answering *node) { answering.demands.follow(ctx) },
+			kind:     persistentVolumeKind,
+		},
+		{
+			name:     "a claim",
+			resource: "persistentvolumeclaims",
+			follow: func(ctx context.Context, answering *node) {
+				answering.arms.follow(ctx, volumeNamed("config"))
+			},
+			kind: persistentVolumeClaimKind,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := &logbook{}
+			answering, _ := testNode(t, logs)
+			boundVolume(t, answering, "config", "")
+			cluster(t, answering).PrependReactor("list", c.resource,
+				func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, errors.New("the api server said no")
+				})
+			ctx, stop := context.WithCancel(t.Context())
+			over := make(chan struct{})
+			go func() {
+				defer close(over)
+				c.follow(ctx, answering)
+			}()
+
+			want := `msg="the list failed" kind=` + c.kind
+			deadline := time.Now().Add(30 * time.Second)
+			for time.Now().Before(deadline) && !strings.Contains(logs.String(), want) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			stop()
+			<-over
+			if !strings.Contains(logs.String(), want) {
+				t.Errorf("the log is %q, want %q in it", logs, want)
+			}
+		})
+	}
+}
+
+// waitForEvents waits until the node has posted the number of Events
+// for the reason, and returns what it posted by the deadline. The
+// volume reports its state before the node posts the Events, so a test
+// that reads the Events waits for them, not for the state.
+func waitForEvents(t *testing.T, answering *node, reason string, want int) []corev1.Event {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if posted := eventsWithReason(t, answering, reason); len(posted) >= want {
+			return posted
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return eventsWithReason(t, answering, reason)
+}
+
 func TestTheLoopReadsTheClaimAgainWhenItChanges(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
-	// The resync is long, so the watch is what carries the change here.
-	answering.arms.resync = 30 * time.Second
+	// The retry is long, so the watch is what carries the change here.
+	answering.arms.retry = 30 * time.Second
 	boundVolume(t, answering, "config", "")
 	attributesClass(t, answering, "config-eager", driverName)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 	waitForClaim(t, published)
 
-	claim, err := cluster(t, answering).CoreV1().PersistentVolumeClaims("home").
-		Get(t.Context(), "config", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading the claim: %v", err)
-	}
-	class := "config-eager"
-	claim.Spec.VolumeAttributesClassName = &class
-	if _, err := cluster(t, answering).CoreV1().PersistentVolumeClaims("home").
-		Update(t.Context(), claim, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("naming the class on the claim: %v", err)
-	}
+	nameClass(t, answering, "config-eager")
 
-	waitForArmed(t, published, true)
-	armed := []corev1.Event{}
-	for _, posted := range eventsOf(t, answering) {
-		if posted.Reason == reasonArmed {
-			armed = append(armed, posted)
-		}
-	}
+	armed := waitForEvents(t, answering, reasonArmed, 2)
 	if len(armed) != 2 {
 		t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", armed)
 	}
@@ -487,48 +595,22 @@ func TestAClassTheDriverCannotReadArmsNothing(t *testing.T) {
 	held := armedVolume(t, answering, "config",
 		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
 
-	classes := cluster(t, answering).StorageV1().VolumeAttributesClasses()
-	class, err := classes.Get(t.Context(), "config-eager", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading the class: %v", err)
-	}
-	class.Parameters = map[string]string{quiesceParameter: "1s"}
-	if _, err := classes.Update(t.Context(), class, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("changing the class: %v", err)
-	}
+	// A class's parameters are immutable, so a claim takes new rules by
+	// naming another class.
+	armingClass(t, answering, "config-broken", map[string]string{quiesceParameter: "1s"})
+	nameClass(t, answering, "config-broken")
 
 	waitForArmed(t, held, false)
-	want := "the class config-eager is not valid: push.quiesce: 1s is shorter than 5s"
+	want := "the class config-broken is not valid: push.quiesce: 1s is shorter than 5s"
 	waitForCondition(t, held, want)
 	if held.policyNow() != nil {
 		t.Error("a class the driver cannot read left the volume armed")
 	}
-	unarmed := eventsWithReason(t, answering, reasonUnarmed)
+	unarmed := waitForEvents(t, answering, reasonUnarmed, 2)
 	if len(unarmed) != 2 {
 		t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
 	}
 	if unarmed[0].Message != "unarmed: "+want {
 		t.Errorf("the event says %q, want %q", unarmed[0].Message, "unarmed: "+want)
-	}
-}
-
-func TestThePassStartsAgainOnTheResync(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.arms.resync = 10 * time.Millisecond
-	boundVolume(t, answering, "config", "")
-	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, watch.NewFake(), nil
-		})
-
-	over := make(chan struct{})
-	go func() {
-		defer close(over)
-		answering.arms.pass(t.Context(), volumeNamed("config"))
-	}()
-	select {
-	case <-over:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the pass did not start again on the resync")
 	}
 }

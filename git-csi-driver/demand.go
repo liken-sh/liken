@@ -1,8 +1,8 @@
 package main
 
 // demand.go is the channel that pulls a read-only volume from outside
-// the node: the annotation on the PersistentVolume, the one watch that
-// reads it, and the interval that bounds a burst of demands.
+// the node: the annotation on the PersistentVolume, the one list and
+// watch that read it, and the interval that bounds a burst of demands.
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -21,7 +22,7 @@ import (
 const demandAnnotation = "git.liken.sh/pull-requested-at"
 
 // persistentVolumeKind is what git_csi_watch_restarts_total names the
-// one watch this driver holds.
+// node's one watch on PersistentVolumes.
 const persistentVolumeKind = "PersistentVolume"
 
 // defaultDemandMin is the default --demand-min-interval. It bounds a
@@ -35,7 +36,7 @@ type demanding struct {
 	node   *node
 	client kubernetes.Interface
 	logger *slog.Logger
-	resync time.Duration
+	retry  time.Duration
 
 	// acted is the annotation value the node last acted on, by volume
 	// handle. A value that differs from it is a demand.
@@ -48,81 +49,46 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 		node:   answering,
 		client: client,
 		logger: logger,
-		resync: defaultResync,
+		retry:  defaultRetry,
 		acted:  map[string]string{},
 	}
 }
 
-// follow holds the watch for the driver's whole run. A driver outside
-// a cluster holds no client, so it reads no demand. Every pass after
-// the first is a watch the API closed, or the resync timer, reopened,
-// which is what git_csi_watch_restarts_total counts.
+// follow holds the list and the watch for the driver's whole run. A
+// driver outside a cluster holds no client, so it reads no demand. The
+// list reads every PersistentVolume once, which catches a demand
+// written while no watch was open, and the watch carries every demand
+// after it.
 func (d *demanding) follow(ctx context.Context) {
 	if d.client == nil {
 		return
 	}
-	first := true
-	for ctx.Err() == nil {
-		if !first {
-			d.node.readings.watchRestarted(persistentVolumeKind)
-		}
-		first = false
-		d.pass(ctx)
-	}
-}
-
-// pass reads every PersistentVolume, then holds a watch open until it
-// closes or the resync says to read them all again. The list is what
-// catches a demand written while no watch was open.
-func (d *demanding) pass(ctx context.Context) {
-	volumes, err := d.client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		// A list the API server refuses costs one call per resync.
-		d.logger.WarnContext(ctx, "the volumes were not listed", "error", err)
-		d.rest(ctx)
-		return
-	}
-	for i := range volumes.Items {
-		d.read(ctx, &volumes.Items[i])
-	}
-
-	watching, err := d.client.CoreV1().PersistentVolumes().Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		d.logger.WarnContext(ctx, "the volumes are not watched", "error", err)
-		d.rest(ctx)
-		return
-	}
-	defer watching.Stop()
-
-	resync := time.NewTimer(d.resync)
-	defer resync.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-resync.C:
-			return
-		case event, open := <-watching.ResultChan():
-			if !open {
-				return
+	volumes := d.client.CoreV1().PersistentVolumes()
+	(&listWatch{
+		kind: persistentVolumeKind,
+		list: func(ctx context.Context) (string, error) {
+			held, err := volumes.List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return "", err
 			}
-			held, isVolume := event.Object.(*corev1.PersistentVolume)
-			if !isVolume {
-				continue
+			for i := range held.Items {
+				d.read(ctx, &held.Items[i])
 			}
-			d.read(ctx, held)
-		}
-	}
-}
-
-// rest waits out the resync after a call that failed.
-func (d *demanding) rest(ctx context.Context) {
-	timer := time.NewTimer(d.resync)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
+			return held.ResourceVersion, nil
+		},
+		watch: volumes.Watch,
+		act: func(ctx context.Context, event watch.Event) error {
+			// A bookmark is a PersistentVolume with no spec, so read
+			// passes over it.
+			if held, isVolume := event.Object.(*corev1.PersistentVolume); isVolume {
+				d.read(ctx, held)
+			}
+			return nil
+		},
+		retry:    d.retry,
+		logger:   d.logger,
+		readings: d.node.readings,
+	}).follow(ctx)
 }
 
 // read acts on one PersistentVolume. It acts only when the volume is

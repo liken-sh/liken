@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -10,7 +9,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -135,10 +133,9 @@ func TestADemandOnAPinnedVolumeMovesNoVolumeOfTheSameRepository(t *testing.T) {
 	want := commitFiles(t, source, map[string]string{"a.txt": "two"})
 	demandPull(t, answering, "pinned", "2026-09-06T14:31:07Z")
 
-	// The watch reads the demand on the pinned volume on every pass,
-	// and the volume that shares the repository has to keep the commit
-	// it staged through all of them.
-	deadline := time.Now().Add(20 * answering.demands.resync)
+	// The watch reads the demand on the pinned volume, and the volume
+	// that shares the repository has to keep the commit it staged.
+	deadline := time.Now().Add(400 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if commit, _ := moving.condition(); commit != standing {
 			t.Fatalf("a demand on the pinned volume moved %s to %s", moving.id, commit)
@@ -182,14 +179,42 @@ func TestADemandOnAWriteableVolumeDoesNothingAndSaysSoOnce(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	// The watch reads the volume again on every resync, and one demand
-	// is acted on once.
-	time.Sleep(10 * answering.demands.resync)
+	// A watch that resumes can send the same volume again, and one
+	// demand is acted on once.
+	time.Sleep(200 * time.Millisecond)
 	if got := strings.Count(logs.String(), "the demand did nothing"); got != 1 {
 		t.Errorf("the log says the demand did nothing %d times, want 1 (%q)", got, logs)
 	}
 	if commit, _ := held.condition(); commit != standing {
 		t.Errorf("the writeable volume moved to %s, want %s", commit, standing)
+	}
+}
+
+func TestTheSameDemandReadTwiceIsActedOnOnce(t *testing.T) {
+	logs := &logbook{}
+	answering, _ := testNode(t, logs)
+	source := bareRemote(t, map[string]string{"a.txt": "one"})
+	boundVolume(t, answering, "config", "")
+	stagedWriteable(t, answering, "config", fileURL(source))
+	demanded := annotated(csiVolume("config", driverName), "2026-09-06T14:31:07Z")
+
+	answering.demands.read(t.Context(), demanded)
+	answering.demands.read(t.Context(), demanded)
+
+	if got := strings.Count(logs.String(), "the demand did nothing"); got != 1 {
+		t.Errorf("the log says the demand did nothing %d times, want 1 (%q)", got, logs)
+	}
+}
+
+func TestADemandOnALoopThatIsAlreadyWokenWaitsForThatPass(t *testing.T) {
+	loop := &follower{demanded: make(chan struct{}, 1), wanted: map[string]*volume{}}
+	held := &volume{id: "franchises"}
+
+	loop.demand(held)
+	loop.demand(held)
+
+	if got := len(loop.demanded); got != 1 {
+		t.Errorf("the loop holds %d wakes, want 1", got)
 	}
 }
 
@@ -335,94 +360,8 @@ func TestADemandTheNodeCannotActOnDoesNothing(t *testing.T) {
 	}
 }
 
-func TestTheDemandPassRestsWhenTheClusterRefusesTheVolumes(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, answering *node)
-		says  string
-	}{
-		{
-			name: "a list it refuses",
-			stand: func(t *testing.T, answering *node) {
-				cluster(t, answering).PrependReactor("list", "persistentvolumes",
-					func(k8stesting.Action) (bool, runtime.Object, error) {
-						return true, nil, errors.New("the api server said no")
-					})
-			},
-			says: "the volumes were not listed",
-		},
-		{
-			name: "a watch it refuses",
-			stand: func(t *testing.T, answering *node) {
-				cluster(t, answering).PrependWatchReactor("persistentvolumes",
-					func(k8stesting.Action) (bool, watch.Interface, error) {
-						return true, nil, errors.New("the api server said no")
-					})
-			},
-			says: "the volumes are not watched",
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			logs := &logbook{}
-			answering, _ := testNode(t, logs)
-			c.stand(t, answering)
-
-			answering.demands.pass(t.Context())
-			if !strings.Contains(logs.String(), c.says) {
-				t.Errorf("the log is %q, want %q in it", logs, c.says)
-			}
-		})
-	}
-}
-
-func TestTheDemandPassEndsWhenTheWatchEnds(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.demands.resync = 30 * time.Second
-	ended := watch.NewFake()
-	cluster(t, answering).PrependWatchReactor("persistentvolumes",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, ended, nil
-		})
-
-	over := make(chan struct{})
-	go func() {
-		defer close(over)
-		answering.demands.pass(t.Context())
-	}()
-	// An object of another kind reaches the channel, and the pass reads
-	// past it.
-	ended.Add(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "reader"}})
-	ended.Stop()
-	select {
-	case <-over:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the pass did not end when the watch did")
-	}
-}
-
-func TestTheDemandPassStartsAgainOnTheResync(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.demands.resync = 10 * time.Millisecond
-	cluster(t, answering).PrependWatchReactor("persistentvolumes",
-		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, watch.NewFake(), nil
-		})
-
-	over := make(chan struct{})
-	go func() {
-		defer close(over)
-		answering.demands.pass(t.Context())
-	}()
-	select {
-	case <-over:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the pass did not start again on the resync")
-	}
-}
-
 func TestTheDemandWatchEndsWithTheDriver(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
-	answering.demands.resync = 30 * time.Second
 	cluster(t, answering).PrependWatchReactor("persistentvolumes",
 		func(k8stesting.Action) (bool, watch.Interface, error) {
 			return true, watch.NewFake(), nil
@@ -472,10 +411,13 @@ func watchRestartsOf(t *testing.T, readings *metrics, kind string) (float64, boo
 
 func TestARestartedWatchCountsOnGitCSIWatchRestartsTotal(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
-	answering.demands.resync = 10 * time.Millisecond
+	// Every watch the API server answers closes at once, so the node
+	// opens it again.
 	cluster(t, answering).PrependWatchReactor("persistentvolumes",
 		func(k8stesting.Action) (bool, watch.Interface, error) {
-			return true, watch.NewFake(), nil
+			closed := watch.NewFake()
+			closed.Stop()
+			return true, closed, nil
 		})
 
 	ctx, stop := context.WithCancel(t.Context())

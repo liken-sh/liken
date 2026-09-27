@@ -12,7 +12,6 @@ import (
 
 	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // logbook is a log a test reads while the driver's own loops write it.
@@ -234,15 +233,10 @@ func TestTheClassSetsTheQuiesceWithNoRemount(t *testing.T) {
 		t.Errorf("the watch rests for %s, want 5s", got)
 	}
 
-	classes := cluster(t, answering).StorageV1().VolumeAttributesClasses()
-	class, err := classes.Get(t.Context(), "config-eager", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading the class: %v", err)
-	}
-	class.Parameters = map[string]string{quiesceParameter: "10s"}
-	if _, err := classes.Update(t.Context(), class, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("changing the class: %v", err)
-	}
+	// A class's parameters are immutable, so a claim takes a new
+	// quiesce by naming another class.
+	armingClass(t, answering, "config-calm", map[string]string{quiesceParameter: "10s"})
+	nameClass(t, answering, "config-calm")
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
