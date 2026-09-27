@@ -135,14 +135,27 @@ func pauseWatch(ctx context.Context, delay time.Duration) time.Duration {
 // Bookmarks are on. A bookmark carries only a newer version, and it
 // lets a quiet collection resume at a version the API server still
 // keeps, instead of one old enough to answer 410 Gone.
+//
+// The watch has a context of its own, and the function cancels it
+// before it closes the body. A watch can fail while the API server
+// still holds the stream open, after an error event or an object that
+// does not decode. The server holds that stream until timeoutSeconds,
+// and a close that read the rest of it first would wait minutes before
+// the next list, and miss every change in that time. The cancel ends
+// the request, so the body closes at once.
 func streamChanges[T any](ctx context.Context, c *Client, collection, version string, changed func(string, T)) (string, error) {
 	path := fmt.Sprintf("%s?watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
 		collection, url.QueryEscape(version), int(watchTimeout.Seconds()))
+	ctx, cancel := context.WithCancel(ctx)
 	body, err := c.Watch(ctx, path)
 	if err != nil {
+		cancel()
 		return version, err
 	}
-	defer drain(body)
+	defer func() {
+		cancel()
+		drain(body)
+	}()
 
 	events := json.NewDecoder(body)
 	for {

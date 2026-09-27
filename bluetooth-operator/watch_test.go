@@ -322,3 +322,37 @@ func TestAWatchThatRanResetsTheBackoff(t *testing.T) {
 			gap, shortWatch+200*time.Millisecond+watchRetry)
 	}
 }
+
+// A watch that fails while the API server still holds its stream open
+// closes the stream at once. A real server holds a stream open until
+// timeoutSeconds, which is minutes, and a watcher that read the rest of
+// that stream before it listed again would miss every change until
+// then.
+func TestAFailedWatchThatStaysOpenListsAgainAfterTheBackoff(t *testing.T) {
+	cases := []struct {
+		name  string
+		event string
+	}{
+		{
+			name:  "an object that does not decode",
+			event: `{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":42}}`,
+		},
+		{
+			name:  "an error event",
+			event: `{"type":"ERROR","object":{"kind":"Status","code":500}}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			server := newWatchServer("/things", "[]", []string{c.event, holdOpen}, []string{holdOpen})
+			stop := runWatcher(t, server)
+			defer stop()
+
+			server.awaitWatches(t, 2)
+
+			if lists, _ := server.seen(); lists != 2 {
+				t.Fatalf("the watcher listed %d times, want 2", lists)
+			}
+		})
+	}
+}
