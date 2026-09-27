@@ -59,20 +59,42 @@ func TestARetryIsNotCountedAsADemandedPull(t *testing.T) {
 	}
 }
 
-func TestTheRetryWaitIsSpreadOverHalfTheBackoff(t *testing.T) {
-	backoff := 10 * time.Second
-	waits := map[time.Duration]bool{}
-	for range 50 {
-		wait := jittered(backoff)
-		if wait <= backoff/2 || wait > backoff {
-			t.Fatalf("the wait is %s, want over %s and at most %s", wait, backoff/2, backoff)
-		}
-		waits[wait] = true
+func TestTheRetryWaitIsSpreadAboveTheFloor(t *testing.T) {
+	for _, c := range []struct {
+		backoff, floor, lowest time.Duration
+	}{
+		{backoff: 10 * time.Second, floor: 0, lowest: 5 * time.Second},
+		{backoff: 40 * time.Second, floor: 10 * time.Second, lowest: 20 * time.Second},
+		{backoff: 40 * time.Second, floor: 30 * time.Second, lowest: 30 * time.Second},
+	} {
+		t.Run(c.backoff.String()+" over "+c.floor.String(), func(t *testing.T) {
+			waits := map[time.Duration]bool{}
+			for range 50 {
+				wait := jittered(c.backoff, c.floor)
+				if wait < c.lowest || wait > c.backoff {
+					t.Fatalf("the wait is %s, want %s to %s", wait, c.lowest, c.backoff)
+				}
+				waits[wait] = true
+			}
+			// Nodes that fail together retry at different times, so a
+			// remote that comes back is not fetched by every node at
+			// once.
+			if len(waits) < 2 {
+				t.Errorf("50 waits took %d values, want them spread", len(waits))
+			}
+		})
 	}
-	// Nodes that fail together retry at different times, so a remote
-	// that comes back is not fetched by every node at once.
-	if len(waits) < 2 {
-		t.Errorf("50 waits took %d values, want them spread", len(waits))
+}
+
+func TestEveryRetryWaitsAtLeastTheDemandIntervalAndAtMostFiveMinutes(t *testing.T) {
+	loop := detachedLoop()
+	loop.node.demandMin = 10 * time.Second
+	for failure := range 20 {
+		wait := loop.nextRetry()
+		if wait < loop.node.demandMin || wait > maxDemandRetry {
+			t.Fatalf("retry %d waits %s, want %s to %s",
+				failure+1, wait, loop.node.demandMin, maxDemandRetry)
+		}
 	}
 }
 
@@ -109,7 +131,7 @@ func TestAVolumeOffTheLoopIsNeitherDemandedNorWantedAgain(t *testing.T) {
 
 func TestNoBackoffHasNoJitter(t *testing.T) {
 	for _, backoff := range []time.Duration{0, 1} {
-		if got := jittered(backoff); got != backoff {
+		if got := jittered(backoff, 0); got != backoff {
 			t.Errorf("jittered(%s) is %s, want %s", backoff, got, backoff)
 		}
 	}

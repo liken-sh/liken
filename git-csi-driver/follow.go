@@ -241,29 +241,39 @@ func (f *follower) noteHealth(ctx context.Context, held *volume) {
 }
 
 // settle sets the retry after a pass. A pass whose demanded fetch
-// failed waits --demand-min-interval, then twice as long after each
-// further failure up to maxDemandRetry. A pass that worked stops the
-// retry.
+// failed waits nextRetry. A pass that worked stops the retry.
 func (f *follower) settle(failed bool, retry *time.Timer) {
 	retry.Stop()
 	if !failed {
 		f.backoff = 0
 		return
 	}
-	f.backoff = min(max(2*f.backoff, f.node.demandMin), maxDemandRetry)
-	retry.Reset(jittered(f.backoff))
+	retry.Reset(f.nextRetry())
 }
 
-// jittered is the backoff less a random part of up to half of it.
-// Every node that fetches a repository fails when its remote does, and
-// the same doubling would retry them all at the same moment when it
-// comes back. The jitter comes off the backoff, not on top of it, so
-// the wait never passes maxDemandRetry.
-func jittered(backoff time.Duration) time.Duration {
+// nextRetry doubles the backoff, from --demand-min-interval up to
+// maxDemandRetry, and answers the wait before the next fetch. The retry
+// fetches without the gate a demand waits on, so the wait itself never
+// falls below --demand-min-interval.
+func (f *follower) nextRetry() time.Duration {
+	f.backoff = min(max(2*f.backoff, f.node.demandMin), maxDemandRetry)
+	return jittered(f.backoff, f.node.demandMin)
+}
+
+// jittered is a wait from half the backoff, or the floor when that is
+// higher, up to the backoff. Every node that fetches a repository fails
+// when its remote does, and the same doubling would retry them all at
+// the same moment when it comes back. The jitter comes off the backoff,
+// not on top of it, so the wait never passes maxDemandRetry.
+func jittered(backoff, floor time.Duration) time.Duration {
 	if backoff < 2 {
 		return backoff
 	}
-	return backoff - rand.N(backoff/2)
+	lowest := max(floor, backoff/2)
+	if lowest >= backoff {
+		return backoff
+	}
+	return lowest + rand.N(backoff-lowest+1)
 }
 
 func (f *follower) snapshot() []*volume {

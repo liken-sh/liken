@@ -285,6 +285,51 @@ func TestTheLoopWaitsWhereTheWatchGuardsSay(t *testing.T) {
 	}
 }
 
+func TestAWatchThatEndsInAnErrorClosesBeforeTheWait(t *testing.T) {
+	failed := apierrors.NewInternalError(errors.New("the storage failed")).Status()
+	for _, c := range []struct {
+		name   string
+		event  watch.Event
+		actErr error
+	}{
+		{name: "an error event", event: watch.Event{Type: watch.Error, Object: &failed}},
+		{
+			name:   "an event the node could not read",
+			event:  changed("franchises", "104"),
+			actErr: errors.New("the class config-eager was not read"),
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			sent := watch.NewFakeWithChanSize(1, false)
+			sent.Action(c.event.Type, c.event.Object)
+			s := &script{
+				answers: []func() (watch.Interface, error){
+					func() (watch.Interface, error) { return sent, nil },
+				},
+				actErr: c.actErr,
+			}
+
+			loop := scripted(io.Discard, newMetrics(), s)
+			loop.retry = time.Hour
+			ctx, stop := context.WithCancel(t.Context())
+			over := make(chan struct{})
+			go func() {
+				defer close(over)
+				loop.follow(ctx)
+			}()
+			time.Sleep(200 * time.Millisecond)
+
+			// The retry is an hour, so the loop is still waiting here.
+			stopped := sent.IsStopped()
+			stop()
+			<-over
+			if !stopped {
+				t.Error("the watch stayed open through the wait")
+			}
+		})
+	}
+}
+
 func TestA410AfterAWatchThatRanASecondListsAtOnce(t *testing.T) {
 	s := &script{answers: []func() (watch.Interface, error){
 		refusedWatch(apierrors.NewResourceExpired("too old resource version")),

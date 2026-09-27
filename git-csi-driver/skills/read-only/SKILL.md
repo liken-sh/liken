@@ -127,8 +127,11 @@ A node pulls for a demand only when its time is later than the start
 of the volume's last fetch that worked on that node, less one minute.
 The minute covers a writer whose clock runs behind the node's clock. A
 fetch that fails answers no demand: the node fetches again after
-`--demand-min-interval`, then twice as long after each further failure,
-up to five minutes.
+`--demand-min-interval`. The wait doubles after each further failure,
+up to five minutes, and each wait is a random time between half of that
+and all of it, but never less than `--demand-min-interval`. The random
+part keeps the nodes that failed together from all fetching at the
+same moment when the remote comes back.
 
 The annotation stays on the `PersistentVolume` after the pull. A node
 that stages the volume later does not pull again for a demand stamped

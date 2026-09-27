@@ -18,8 +18,12 @@ import (
 
 // defaultRetry is how long the node waits after a call to the API
 // server failed before it makes the call again. It bounds the load a
-// refusing API server takes from each list and watch to one call per
-// wait.
+// refusing API server takes from each list and watch to one failed
+// call per wait. Inside one call, client-go retries a request that the
+// server resets, or answers with Retry-After, up to ten times about a
+// second apart, so one failed call can be up to eleven requests. The
+// typed client sets that count on each request and offers no way to
+// change it.
 const defaultRetry = 30 * time.Second
 
 // listWatch is one list and the watch that continues from it. The watch
@@ -115,6 +119,9 @@ func (l *listWatch) hold(ctx context.Context, from string) (string, bool, bool) 
 		waitOut(ctx, l.retry)
 		return from, false, false
 	}
+	// Every path out stops the watch. A path that waits out the retry
+	// stops it first, so the stream does not stay open through the
+	// wait. A second Stop does nothing.
 	defer watching.Stop()
 	if l.opened {
 		l.readings.watchRestarted(l.kind)
@@ -149,6 +156,7 @@ func (l *listWatch) hold(ctx context.Context, from string) (string, bool, bool) 
 				if expired(err) {
 					return "", true, time.Since(began) >= shortWatch
 				}
+				watching.Stop()
 				waitOut(ctx, l.retry)
 				return "", false, false
 			}
@@ -160,6 +168,7 @@ func (l *listWatch) hold(ctx context.Context, from string) (string, bool, bool) 
 				// the same version again and reads the same event.
 				l.logger.WarnContext(ctx, "the event did not decode", "kind", l.kind,
 					"type", event.Type)
+				watching.Stop()
 				waitOut(ctx, l.retry)
 				return "", false, false
 			}
@@ -168,6 +177,7 @@ func (l *listWatch) hold(ctx context.Context, from string) (string, bool, bool) 
 			}
 			if err := l.act(ctx, event); err != nil {
 				l.logger.WarnContext(ctx, "the event was not read", "kind", l.kind, "error", err)
+				watching.Stop()
 				waitOut(ctx, l.retry)
 				return "", false, false
 			}
