@@ -14,10 +14,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// defaultResync is the interval at which the informer lists every
-// PersistentVolume again, whatever the watch delivered in between.
-const defaultResync = 10 * time.Minute
-
 // watchedKind is the resource kind per_node_csi_watch_restarts_total
 // reports: the one watch the sweep holds, on the PersistentVolumes of
 // this driver.
@@ -29,7 +25,6 @@ type sweeping struct {
 	node   *node
 	client kubernetes.Interface
 	every  time.Duration
-	resync time.Duration
 	logger *slog.Logger
 }
 
@@ -42,7 +37,6 @@ func newSweeping(answering *node, client kubernetes.Interface,
 		node:   answering,
 		client: client,
 		every:  every,
-		resync: defaultResync,
 		logger: logger,
 	}
 }
@@ -55,7 +49,10 @@ func (s *sweeping) follow(ctx context.Context) {
 		s.logger.WarnContext(ctx, "no sweep", "reason", "the driver reached no cluster")
 		return
 	}
-	factory := informers.NewSharedInformerFactory(s.client, s.resync)
+	// The informer takes no resync. A resync replays the cache to the
+	// handlers as updates and reads nothing from the API server, and
+	// the only handler here acts on a delete.
+	factory := informers.NewSharedInformerFactory(s.client, 0)
 	informer := factory.Core().V1().PersistentVolumes().Informer()
 	deleted := make(chan struct{}, 1)
 	s.watchDeletes(ctx, informer, deleted)
@@ -106,7 +103,7 @@ func (s *sweeping) watchDeletes(
 // watchErrors counts a restart every time the reflector's list and
 // watch call ends and it opens the watch again, whether the API server
 // closed it or refused it. The pass on the tick still finds every
-// orphan and every deletion the resync missed, so a handler the
+// orphan and every deletion the watch missed, so a handler the
 // informer refuses costs a metric and nothing more.
 func (s *sweeping) watchErrors(informer cache.SharedIndexInformer) {
 	if err := informer.SetWatchErrorHandler(s.handleWatchError); err != nil {
