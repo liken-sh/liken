@@ -292,9 +292,13 @@ func (c *confirmer) settleIf(ctx context.Context, run finishedRun, current func(
 // confirmed is confirmed again by nobody, because a second write of the row
 // would be a version every peer has to carry for nothing.
 //
-// The write runs with the mutex held, after current answers true, so a
-// delete that the stream carries waits for the write and never falls
-// between the check and the write.
+// The write runs with the mutex held, after current answers true. The
+// run stream changes the pending set only under the same mutex, so no
+// event the stream has delivered falls between the check and the write.
+// The check reads what the stream has delivered, not the catalog. A
+// delete that a cleanup Job has made and the agent has not streamed yet
+// does not stop the write, and the confirmation it writes outlives the
+// row it answers.
 //
 // Every read and write of one confirmation shares one bound. The
 // confirmer's client has no timeout, because the run stream stays open,

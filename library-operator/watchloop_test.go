@@ -6,6 +6,7 @@ package main
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -171,5 +172,50 @@ func TestTheWatcherClosesTheStreamAtOnceOnABadEvent(t *testing.T) {
 				t.Errorf("listed %q, want %q", got, librariesPath)
 			}
 		})
+	}
+}
+
+// A watch lives from the moment its 200 arrives. The dial and the wait
+// for the answer's headers do not count, so a server that refuses slowly,
+// or never answers, counts as a failure and the backoff grows.
+func TestAWatchLivesFromItsAnswer(t *testing.T) {
+	const slow = 100 * time.Millisecond
+	cases := []struct {
+		name   string
+		status int
+	}{
+		{name: "a slow refusal", status: http.StatusForbidden},
+		{name: "a slow 200 that ends at once", status: http.StatusOK},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(slow)
+				w.WriteHeader(testCase.status)
+			}))
+			t.Cleanup(server.Close)
+			client := NewClient(server.URL, server.Client(), "")
+
+			_, _, lived := openWatch(client, librariesPath+"?", "42", make(chan struct{}, 1))
+
+			if lived >= slow {
+				t.Errorf("lived = %s, want less than the %s the answer took", lived, slow)
+			}
+		})
+	}
+}
+
+// A server that cannot be reached answers nothing, and its watch lived
+// for no time at all.
+func TestAWatchThatGotNoAnswerLivedNoTime(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	address := server.URL
+	server.Close()
+	client := NewClient(address, http.DefaultClient, "")
+
+	outcome, _, lived := openWatch(client, librariesPath+"?", "42", make(chan struct{}, 1))
+
+	if outcome != watchFailed || lived != 0 {
+		t.Errorf("outcome = %v, lived = %s, want a failure that lived no time", outcome, lived)
 	}
 }

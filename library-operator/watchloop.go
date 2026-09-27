@@ -14,10 +14,11 @@ package main
 //     also gets a 410, it waits out the backoff first. Every other error
 //     loses the resume point too, and it waits out the backoff before
 //     the list, or a fault that lasts would make a tight list loop.
-//   - A watch that closed less than a second after it opened is a
-//     failure, whatever it delivered, and the backoff applies. A watch
-//     that ran for a second or longer resets the backoff, even when it
-//     ended on an error, and a 410 that ends it counts as a first 410.
+//   - A watch lives from the moment its 200 arrives. A watch that got
+//     no 200, or that closed less than a second after it, is a failure,
+//     whatever it delivered, and the backoff applies. A watch that lived
+//     for a second or longer resets the backoff, even when it ended on
+//     an error, and a 410 that ends it counts as a first 410.
 //
 // On any error the watcher closes the stream at once and never reads it
 // to its end. A server can hold the stream open for minutes after an
@@ -51,8 +52,8 @@ const (
 // It is a variable so a test can move it.
 var watchMinLife = newPause(time.Second)
 
-// WatchRetryCap is the longest the backoff grows to. An API server that
-// stays away costs one attempt every thirty seconds.
+// WatchRetryCap is the longest the backoff grows to. While the API server
+// stays away, each watcher sends one request every thirty seconds.
 const watchRetryCap = 30 * time.Second
 
 // What the watcher does after one watch ended: how long it waits, and
@@ -123,10 +124,9 @@ func watchCollection(c *Client, w collectionWatch, resourceVersion string, wake 
 		if attempt > 0 {
 			m.recordWatchRestart(w.kind)
 		}
-		opened := time.Now()
-		outcome, delivered := openWatch(c, w.path, resourceVersion, wake)
+		outcome, delivered, lived := openWatch(c, w.path, resourceVersion, wake)
 		resourceVersion = delivered
-		step := backoff.after(outcome, time.Since(opened))
+		step := backoff.after(outcome, lived)
 		time.Sleep(step.wait)
 		if !step.relist {
 			continue
@@ -146,13 +146,17 @@ func watchCollection(c *Client, w collectionWatch, resourceVersion string, wake 
 	}
 }
 
-// OpenWatch runs one watch from a version, and returns how it ended and
-// the last version it delivered.
-func openWatch(c *Client, path, resourceVersion string, wake chan<- struct{}) (watchOutcome, string) {
+// OpenWatch runs one watch from a version, and returns how it ended, the
+// last version it delivered, and how long it lived. A watch lives from the
+// moment its 200 arrives. The dial and the wait for the headers do not
+// count: a server that cannot be reached, or that refuses after a slow
+// answer, would otherwise count as a watch that lived and reset the
+// backoff on every attempt. A watch that got no 200 lived no time.
+func openWatch(c *Client, path, resourceVersion string, wake chan<- struct{}) (watchOutcome, string, time.Duration) {
 	resp, err := c.Do(watchContext(), http.MethodGet,
 		path+"watch=true&allowWatchBookmarks=true&resourceVersion="+resourceVersion, nil)
 	if err != nil {
-		return watchFailed, resourceVersion
+		return watchFailed, resourceVersion, 0
 	}
 	// Only a stream that ended on its own is read to its end, so the
 	// connection goes back to the pool. Every other answer is closed
@@ -160,15 +164,17 @@ func openWatch(c *Client, path, resourceVersion string, wake chan<- struct{}) (w
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
+		answered := time.Now()
 		outcome, delivered := readWatchStream(resp, resourceVersion, wake)
+		lived := time.Since(answered)
 		if outcome == watchClosed {
 			drain(resp.Body)
 		}
-		return outcome, delivered
+		return outcome, delivered, lived
 	case http.StatusGone:
-		return watchGone, resourceVersion
+		return watchGone, resourceVersion, 0
 	default:
-		return watchFailed, resourceVersion
+		return watchFailed, resourceVersion, 0
 	}
 }
 

@@ -50,6 +50,20 @@ for each catalog pod that confirmed the run:
   holds, on each pass. The next catalog change publishes the report
   again, and the report wakes one more pass.
 
+A second path leaves a `confirmations` row behind. A confirmer can
+confirm a run of a library in the short time after a cleanup `Job`
+deletes the run's row and before the confirmer's run stream carries
+that delete. Before it writes, the confirmer checks what its stream
+has delivered, not the catalog, so the write goes ahead. The
+confirmation then outlives the row it answers, and it keeps the
+library's key in the catalog the same way. The time is the latency of
+the agent's subscription matcher. No `Job` that runs is affected,
+because the cleanup `Job` already deleted the run that the
+confirmation answers. Each option below must handle this row too. The
+first two delete only the rows of the `cleanup` run, and this row
+answers a run of another worker. The third must count a confirmation
+of any run among the rows it ignores.
+
 ## Why this is not a one-line fix
 
 The `runs` row is the proof that the finalizer release reads, so the
