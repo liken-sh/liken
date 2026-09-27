@@ -24,6 +24,11 @@ const holdOpen = "hold"
 // time a watch must run to reset the backoff.
 const refuseSlowly = "refuse slowly"
 
+// resetConnection, as a line of a script, drops the connection in the
+// middle of the stream, so the watcher's read fails with an error that
+// is not a clean end of the stream.
+const resetConnection = "reset"
+
 // linger, as a line of a script, keeps the stream open a little longer
 // than shortWatch, so the watch counts as one that ran.
 const linger = "linger"
@@ -36,11 +41,12 @@ type watchServer struct {
 	items      string
 	scripts    [][]string
 
-	mu        sync.Mutex
-	lists     int
-	listTimes []time.Time
-	versions  []string
-	opened    chan struct{}
+	mu         sync.Mutex
+	lists      int
+	listTimes  []time.Time
+	watchTimes []time.Time
+	versions   []string
+	opened     chan struct{}
 }
 
 func newWatchServer(collection, items string, scripts ...[]string) *watchServer {
@@ -69,6 +75,7 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	connection := len(s.versions)
 	s.versions = append(s.versions, query.Get("resourceVersion"))
+	s.watchTimes = append(s.watchTimes, time.Now())
 	s.mu.Unlock()
 	s.opened <- struct{}{}
 
@@ -85,6 +92,14 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if line == refuseSlowly {
 			time.Sleep(shortWatch + 200*time.Millisecond)
 			http.Error(w, "the server is overloaded", http.StatusInternalServerError)
+			return
+		}
+		if line == resetConnection {
+			w.(http.Flusher).Flush()
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				connection.Close()
+			}
 			return
 		}
 		if line == linger {
@@ -371,7 +386,7 @@ func TestAFailedWatchThatStaysOpenListsAgainAfterTheBackoff(t *testing.T) {
 // request begins. A refusal that takes longer than shortWatch is still
 // a watch that never ran, so the backoff grows. The first refusal waits
 // one second, and the second waits two: the gap between the second and
-// the third list is the slow refusal plus two seconds, about 3.2
+// the third watch is the slow refusal plus two seconds, about 3.2
 // seconds, and a reset backoff would make it about 2.2.
 func TestASlowRefusalStillGrowsTheBackoff(t *testing.T) {
 	server := newWatchServer("/things", "[]", []string{refuseSlowly}, []string{refuseSlowly}, []string{holdOpen})
@@ -380,9 +395,45 @@ func TestASlowRefusalStillGrowsTheBackoff(t *testing.T) {
 	stop()
 
 	server.mu.Lock()
-	gap := server.listTimes[2].Sub(server.listTimes[1])
+	gap := server.watchTimes[2].Sub(server.watchTimes[1])
 	server.mu.Unlock()
 	if want := shortWatch + 200*time.Millisecond + 2*watchRetry; gap < want-300*time.Millisecond {
-		t.Fatalf("the third list came %s after the second, want about %s", gap, want)
+		t.Fatalf("the third watch came %s after the second, want about %s", gap, want)
+	}
+}
+
+// A watch that ran for a second or longer clears the mark of a list
+// made at once after a 410. So a 410 that ends such a watch is a first
+// 410 again, and lists at once. The second list comes after the first
+// 410, and the third comes after the second watch's life of about 1.2
+// seconds. A wait of one second before the third list would make the
+// gap about 2.2 seconds.
+func TestA410AfterAWatchThatRanListsAtOnce(t *testing.T) {
+	expired := `{"type":"ERROR","object":{"kind":"Status","code":410}}`
+	server := newWatchServer("/things", "[]", []string{expired}, []string{linger, expired}, []string{holdOpen})
+	stop := runWatcher(t, server)
+	server.awaitWatches(t, 3)
+	stop()
+
+	server.mu.Lock()
+	gap := server.listTimes[2].Sub(server.listTimes[1])
+	server.mu.Unlock()
+	if limit := shortWatch + 700*time.Millisecond; gap > limit {
+		t.Fatalf("the third list came %s after the second, want under %s", gap, limit)
+	}
+}
+
+// A connection that drops in the middle of a stream loses no event the
+// watcher has not read, so the next watch resumes at the last version
+// the stream delivered, and the watcher does not list again.
+func TestADroppedConnectionResumesAtTheLastVersion(t *testing.T) {
+	server := newWatchServer("/things", "[]", []string{bookmark("7"), linger, resetConnection}, []string{holdOpen})
+	stop := runWatcher(t, server)
+	server.awaitWatches(t, 2)
+	stop()
+
+	lists, versions := server.seen()
+	if lists != 1 || fmt.Sprint(versions) != "[list-1 7]" {
+		t.Fatalf("the watcher listed %d times and watched from %v, want 1 list and [list-1 7]", lists, versions)
 	}
 }

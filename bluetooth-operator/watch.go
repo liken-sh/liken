@@ -52,6 +52,14 @@ const (
 // list gives a version to start from.
 var errWatchExpired = errors.New("the watch's resource version expired")
 
+// errWatchEvent marks a watch that ended on an event: an ERROR event
+// other than a 410, or an event that does not decode. Either one can
+// stand for changes the watcher never received, so the next step is a
+// list. A read that fails on the connection is not one of these: the
+// watcher lost only what the stream had not sent yet, and the next
+// watch resumes at the last version it delivered.
+var errWatchEvent = errors.New("the watch ended on an event")
+
 // listThenWatch keeps one collection current until the context ends.
 // It calls listed with the whole collection after each list, and
 // changed with each ADDED, MODIFIED, or DELETED event after that.
@@ -64,12 +72,18 @@ var errWatchExpired = errors.New("the watch's resource version expired")
 //     a version to start from. A 410 on the watch from that fresh list
 //     waits out the backoff before the next list. Without the wait, a
 //     server that answers 410 to every version makes a tight loop.
-//   - Any other failure waits out the backoff and then lists again,
-//     because a failed watch may have lost events, and only a list
-//     recovers them. An event that does not decode is such a failure.
+//   - An ERROR event, or an event that does not decode, waits out the
+//     backoff and then lists again. Such an event can stand for changes
+//     the watch never sent, and only a list recovers them.
+//   - A watch the server refused, and a connection that failed in the
+//     middle of a stream, wait out the backoff and then resume at the
+//     last version the stream delivered. The stream lost nothing it had
+//     sent, so no list is needed.
 //
 // A watch that closed within shortWatch is a failure too, and waits out
-// the backoff before it resumes.
+// the backoff before it resumes. A watch that ran for shortWatch or
+// longer resets the backoff and clears relisted, so a 410 that ends it
+// counts as a first 410.
 func listThenWatch[T any](ctx context.Context, c *Client, collection, what string, listed func([]T), changed func(event string, object T)) {
 	version := ""
 	delay := watchRetry
@@ -96,7 +110,7 @@ func listThenWatch[T any](ctx context.Context, c *Client, collection, what strin
 		}
 		ran := !accepted.IsZero() && time.Since(accepted) >= shortWatch
 		if ran {
-			delay = watchRetry
+			delay, relisted = watchRetry, false
 		}
 		switch {
 		case errors.Is(err, errWatchExpired) && !relisted:
@@ -105,9 +119,12 @@ func listThenWatch[T any](ctx context.Context, c *Client, collection, what strin
 		case errors.Is(err, errWatchExpired):
 			fmt.Fprintf(os.Stderr, "watching %s: the version from a new list expired too\n", what)
 			version = ""
-		case err != nil:
+		case errors.Is(err, errWatchEvent):
 			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 			version, relisted = "", false
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
+			version, relisted = next, false
 		case !ran:
 			fmt.Fprintf(os.Stderr, "watching %s: the watch closed in under %s\n", what, shortWatch)
 			version, relisted = next, false
@@ -175,6 +192,11 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 			if errors.Is(err, io.EOF) {
 				return version, accepted, nil
 			}
+			var syntax *json.SyntaxError
+			var mistyped *json.UnmarshalTypeError
+			if errors.As(err, &syntax) || errors.As(err, &mistyped) {
+				return version, accepted, fmt.Errorf("%w: %v", errWatchEvent, err)
+			}
 			return version, accepted, err
 		}
 		var meta struct {
@@ -182,19 +204,19 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 			Metadata ObjectMeta `json:"metadata"`
 		}
 		if err := json.Unmarshal(event.Object, &meta); err != nil {
-			return version, accepted, err
+			return version, accepted, fmt.Errorf("%w: %v", errWatchEvent, err)
 		}
 		switch event.Type {
 		case "ERROR":
 			if meta.Code == 410 {
 				return version, accepted, errWatchExpired
 			}
-			return version, accepted, fmt.Errorf("the watch ended with %s", event.Object)
+			return version, accepted, fmt.Errorf("%w: %s", errWatchEvent, event.Object)
 		case "BOOKMARK":
 		default:
 			var object T
 			if err := json.Unmarshal(event.Object, &object); err != nil {
-				return version, accepted, err
+				return version, accepted, fmt.Errorf("%w: %v", errWatchEvent, err)
 			}
 			changed(event.Type, object)
 		}
