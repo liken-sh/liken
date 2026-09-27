@@ -1,15 +1,14 @@
 # The compositor holds DRM master
 
-Plan 24. Proposed 2026-09-27.
+Plan 24. Built on 2026-09-27, and drilled on liken-1 on 2026-09-27.
 
 The compositor must hold DRM master on its card, or it cannot show a
 frame. The operator container opens the same card node to read the
 connectors, and that open can take master from the compositor. This
 plan makes the operator open the card only while a compositor holds
 it, makes each open of the operator give master back at once, and
-restarts a compositor that runs without master. It answers the open
-problem [The compositor can start without DRM
-master](open-problems/the-compositor-can-start-without-drm-master.md).
+restarts a compositor that runs without master. It answers and replaces
+the open problem "The compositor can start without DRM master".
 
 ## The problem
 
@@ -99,8 +98,10 @@ callers change:
 - The card observation (`recordObservation("card", ...)` in
   `reconcile`) does not count `errCompositorAbsent` as a failed
   observation. A compositor restart is not a broken card.
-- The callers log `errCompositorAbsent` only when it starts, not on
-  each pass.
+- The gate logs the start of an absence once, and the callers do not
+  log `errCompositorAbsent`.
+- The Display pass does not judge a `spec.mode` against a mode list
+  that it did not read. `Output.ModesRead` says if the card answered.
 
 When `opened()` sets `live`, it wakes the slice pass and the Display
 pass, so the fields come back as soon as the compositor serves. A
@@ -113,12 +114,13 @@ reads continue while it hangs.
 This gate orders every compositor start: the boot, a restart that the
 operator orders, and a restart that the kubelet makes after weston
 exits. One gap stays. `closed()` runs when the compositor's process
-ends its connection. If weston closes the card before it closes its
-client connections on its way out, a read in that gap can open a card
-with no master. No new compositor can open the card before the old
-container exits, so change 2 gives master back before a new compositor
-exists. Change 3 then sees a false signal, which the pid check makes
-harmless.
+ends its connection, and weston 14.0.2 closes the card before it
+closes its client connections (`weston_compositor_destroy` runs before
+`wl_display_destroy` in `frontend/main.c`). A read in that gap opens a
+card with no master. No new compositor can open the card before the
+old container exits, so change 2 gives master back before a new
+compositor exists. Change 3 then sees a false signal about the exiting
+compositor, and its pid rules make that signal harmless.
 
 ### 2. Each open of the card gives master back at once
 
@@ -155,10 +157,14 @@ The check runs on each read, so it runs when the compositor becomes
 live, on each uevent, and on each pass. No timer runs it.
 
 The signal carries the compositor's pid from `compositorProcesses`
-(the pod shares one process namespace). The goroutine restarts only a
-pid that still runs, and it restarts each pid at most once. So the
-restart cannot loop, a new compositor gets its own check, and a
-signal about a compositor that has already exited ends nothing.
+(the pod shares one process namespace). Under the `modeSwitches`
+lock, the goroutine ends that one pid with `SIGTERM` through an
+`os.Process` handle, and never every compositor process. It skips a
+pid that no longer runs, and a pid that the operator has ended before
+for any reason: a mode, a heal, a hung compositor, or an earlier
+`masterless` report. So the restart cannot loop, a new compositor
+gets its own check, and a signal about a compositor on its way out
+ends nothing and counts nothing.
 
 ## What this plan does not cover
 
@@ -217,3 +223,33 @@ today.
      compositor serves. Wake a pass, for example with an annotation on
      the node's Display. Confirm the `masterless` restart and a
      compositor that shows frames.
+
+## What the drill measured
+
+The drill ran on liken-1 on 2026-09-27, with the development build of
+this change, on the testbed machine that has a connected panel.
+
+1. The rollout started a new pod, which starts the compositor and the
+   operator container together, as a reboot does. The operator logged
+   that it held no connection to a compositor 54 ms after it started,
+   and it read the card only after the connection opened. The DRM
+   clients list named `weston` as master, and the compositor logged no
+   `Permission denied`.
+2. The drill ended the compositor with `SIGTERM` and opened the card
+   from a privileged debug pod in the gap, so the debug pod's file was
+   master. The new compositor opened the card 1 s later without
+   master. The debug pod closed its file 7 s later, and the card had
+   no master. The compositor logged `atomic: couldn't commit new
+   state: Permission denied`, as in the incident.
+3. No annotation was needed. The operator's next pass read the card
+   6 s after the close, and it logged `card1: the compositor at pid 76
+   has no DRM master and cannot show a frame, so it restarts`. The
+   kubelet held the restart for 12 s in its backoff, because the
+   container had exited twice in 15 s. The next compositor was master,
+   it enabled `HDMI-A-1`, and a client surface arrived. The `Display`
+   reported `Serving` at `1920x1080@60`.
+   `display_compositor_restarts_total{reason="masterless"}` read 1.
+
+From the close of the debug pod's file to a compositor that drew,
+18 s passed.
+

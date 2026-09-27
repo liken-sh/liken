@@ -262,13 +262,13 @@ say why it is built the way it is.
   valid address while a receiver in standby serves none.
   equipment-operator's CEC adapter announces this address when it
   speaks for the machine.
-* [24, The compositor holds DRM master](24-the-compositor-holds-drm-master.md).
-  Proposed. The operator opens the card only while its output watch
+* [24, The compositor holds DRM master](completed/24-the-compositor-holds-drm-master.md).
+  Built on 2026-09-27, and drilled on liken-1 on 2026-09-27. The operator opens the card only while its output watch
   holds a connection to the compositor, and each open drops DRM master
   before any other ioctl. A drop that succeeds means the compositor
   holds no master, and the operator restarts it once with the reason
-  `masterless`. Answers the open problem "The compositor can start
-  without DRM master".
+  `masterless`. Answers and replaces the open problem "The compositor
+  can start without DRM master".
 
 ## Open problems
 
@@ -302,11 +302,6 @@ decided yet what work they become.
   node and connector alternate every pass. The name cannot gain the
   serial alone, because it is also the pairing identity that the ELD
   must match.
-* [The compositor can start without DRM master](open-problems/the-compositor-can-start-without-drm-master.md).
-  After a reboot, a compositor came up without master: every commit
-  failed with `Permission denied`, the panel showed the console, and
-  the liveness probe passed, because it proves only that the
-  compositor answers its clients.
 * [An external layout engine](open-problems/an-external-layout-engine.md).
   Plan 17 decides every placement in one function. The seam where a
   different engine would go is the `Service`, `EndpointSlice`, and
