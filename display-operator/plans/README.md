@@ -302,3 +302,7 @@ decided yet what work they become.
 * [A claim's listener outlives the claim](open-problems/a-claims-listener-outlives-the-claim.md).
   libwayland removes no listening socket, so a closed claim's
   descriptor stays open until the compositor restarts.
+* [A refused probe reads a dark panel every minute](open-problems/a-refused-probe-reads-a-dark-panel-every-minute.md).
+  A panel that refused its first probe is probed again every 60 s with
+  no power guard, so a panel that sleeps gets six DDC requests a
+  minute, and a DDC read wakes some panels.

@@ -19,12 +19,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"slices"
-	"time"
 )
 
 // The pod collection, and the field selector that keeps a read to one
@@ -143,51 +139,10 @@ func listPods(c *Client, node string) ([]Pod, error) {
 // keeps the bounds the Display watch keeps, and it carries the same
 // field selector the listing does.
 func watchPods(ctx context.Context, c *Client, node string, wake func(), readings *metrics) {
-	first := true
-	for ctx.Err() == nil {
-		if !first {
-			// The API server closed the last connection and this one
-			// opens in its place, the one restart milestone 65 counts.
-			readings.watchRestarted(kindPod)
-		}
-		first = false
-		if err := streamPods(ctx, c, node, wake); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "watching the pods on %s: %v\n", node, err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(displayWatchRetry):
-		}
-	}
+	watchWakes(ctx, c, kindPod, "the pods on "+node, podsWatchPath(node), wake, readings)
 }
 
-// One watch connection. It starts at the present and wakes the loop
-// once as it opens. The pass that the wake starts reads every object
-// after the watch is live, so a change made between two connections is
-// found by that read, and no event is lost. An event carries nothing
-// the pass uses, so the watch needs no resource version to resume from.
-func streamPods(ctx context.Context, c *Client, node string, wake func()) error {
-	path := fmt.Sprintf("%s%s%s&watch=true&timeoutSeconds=%d",
+func podsWatchPath(node string) string {
+	return fmt.Sprintf("%s%s%s&watch=true&timeoutSeconds=%d",
 		PodsPath, podsOnNode, node, int(displayWatchTimeout.Seconds()))
-	body, err := c.Watch(ctx, path)
-	if err != nil {
-		return err
-	}
-	defer drain(body)
-	wake()
-
-	events := json.NewDecoder(body)
-	for {
-		var event struct {
-			Type string `json:"type"`
-		}
-		if err := events.Decode(&event); err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-		wake()
-	}
 }

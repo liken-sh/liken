@@ -87,6 +87,10 @@ func (i *sidecarIndex) replace(pods []Pod) {
 	}
 }
 
+// How long the loop waits before it lists and watches again. Each
+// session starts with a listing, so the wait costs no lost event.
+const sidecarWatchRetry = 5 * time.Second
+
 // The loop: one listing, then one watch, and a listing again
 // whenever the watch ends, so a missed event costs one reconnection
 // and never a stale answer.
@@ -98,7 +102,7 @@ func (i *sidecarIndex) run(ctx context.Context, c *Client, namespace string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(displayWatchRetry):
+		case <-time.After(sidecarWatchRetry):
 		}
 	}
 }

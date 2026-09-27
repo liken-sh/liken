@@ -87,60 +87,6 @@ func TestListLayoutsReadsEveryLayout(t *testing.T) {
 	}
 }
 
-// The watch turns each event into one wake, which is all the pass
-// needs from it: the pass reads every Layout again.
-func TestTheLayoutWatchWakesOnEveryEvent(t *testing.T) {
-	events := 2
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("watch") != "true" {
-			t.Errorf("the operator opened %s, want a watch", r.URL)
-		}
-		for i := range events {
-			fmt.Fprintf(w, `{"type":"MODIFIED","object":{"metadata":{"name":"front-desk-%d"}}}`, i)
-		}
-	}))
-
-	wakes := 0
-	if err := streamLayouts(t.Context(), client, func() { wakes++ }); err != nil {
-		t.Fatal(err)
-	}
-	if wakes != events+1 {
-		t.Errorf("the watch woke the loop %d times, want %d", wakes, events+1)
-	}
-}
-
-// The open is a wake of its own. The pass it starts reads everything
-// after the watch is live, so a change made while no connection stood
-// is found at once and not on the backstop tick.
-func TestTheLayoutWatchWakesOnceWhenItOpens(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-
-	wakes := 0
-	if err := streamLayouts(t.Context(), client, func() { wakes++ }); err != nil {
-		t.Fatal(err)
-	}
-	if wakes != 1 {
-		t.Errorf("the watch woke the loop %d times, want one wake for the open", wakes)
-	}
-}
-
-// A watch the API server refuses is not live, and it wakes nothing:
-// a pass on every retry would read the resources every few seconds
-// while the API server is down.
-func TestTheLayoutWatchWakesNothingWhenRefused(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-
-	wakes := 0
-	if err := streamLayouts(t.Context(), client, func() { wakes++ }); err == nil {
-		t.Fatal("the refused watch answered no error")
-	}
-	if wakes != 0 {
-		t.Errorf("the refused watch woke the loop %d times, want none", wakes)
-	}
-}
-
 // The watch reopens its connection until the context ends, and a
 // context that ended is what stops it. Without that, a shutdown would
 // wait out the retry.

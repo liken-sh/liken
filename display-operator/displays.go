@@ -12,9 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -455,57 +453,12 @@ func writeDisplayStatus(c *Client, display *Display, status DisplayStatus) (*Dis
 // holds a connection through every network fault in between.
 const displayWatchTimeout = 290 * time.Second
 
-// How long the operator waits before it opens the watch again.
-const displayWatchRetry = 5 * time.Second
-
-// The watch turns a spec that changed into one wake. Nothing of
-// the event is read but its arrival: the pass that follows reads every
-// Display again, the same way every other wake in this operator works.
+// The watch turns every Display event in the cluster into one wake,
+// and the pass that follows reads every Display this node serves.
 func watchDisplays(ctx context.Context, c *Client, wake func(), readings *metrics) {
-	first := true
-	for ctx.Err() == nil {
-		if !first {
-			// The API server closed the last connection and this one
-			// opens in its place, the one restart milestone 65 counts.
-			readings.watchRestarted(kindDisplay)
-		}
-		first = false
-		if err := streamDisplays(ctx, c, wake); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "watching displays: %v\n", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(displayWatchRetry):
-		}
-	}
+	watchWakes(ctx, c, kindDisplay, "displays", displaysWatchPath(), wake, readings)
 }
 
-// One watch connection. It starts at the present and wakes the loop
-// once as it opens. The pass that the wake starts reads every object
-// after the watch is live, so a change made between two connections is
-// found by that read, and no event is lost. An event carries nothing
-// the pass uses, so the watch needs no resource version to resume from.
-func streamDisplays(ctx context.Context, c *Client, wake func()) error {
-	path := fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", DisplaysPath, int(displayWatchTimeout.Seconds()))
-	body, err := c.Watch(ctx, path)
-	if err != nil {
-		return err
-	}
-	defer drain(body)
-	wake()
-
-	events := json.NewDecoder(body)
-	for {
-		var event struct {
-			Type string `json:"type"`
-		}
-		if err := events.Decode(&event); err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-		wake()
-	}
+func displaysWatchPath() string {
+	return fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", DisplaysPath, int(displayWatchTimeout.Seconds()))
 }

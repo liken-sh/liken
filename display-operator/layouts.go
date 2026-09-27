@@ -20,11 +20,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"time"
 )
 
 // The Layout collection, under the same group and version the
@@ -143,50 +139,9 @@ func listLayouts(c *Client) ([]Layout, error) {
 // the bounds the Display watch keeps, because what they bound is the
 // API server's own behavior and not anything about either resource.
 func watchLayouts(ctx context.Context, c *Client, wake func(), readings *metrics) {
-	first := true
-	for ctx.Err() == nil {
-		if !first {
-			// The API server closed the last connection and this one
-			// opens in its place, the one restart milestone 65 counts.
-			readings.watchRestarted(kindLayout)
-		}
-		first = false
-		if err := streamLayouts(ctx, c, wake); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "watching layouts: %v\n", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(displayWatchRetry):
-		}
-	}
+	watchWakes(ctx, c, kindLayout, "layouts", layoutsWatchPath(), wake, readings)
 }
 
-// One watch connection. It starts at the present and wakes the loop
-// once as it opens. The pass that the wake starts reads every object
-// after the watch is live, so a change made between two connections is
-// found by that read, and no event is lost. An event carries nothing
-// the pass uses, so the watch needs no resource version to resume from.
-func streamLayouts(ctx context.Context, c *Client, wake func()) error {
-	path := fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", LayoutsPath, int(displayWatchTimeout.Seconds()))
-	body, err := c.Watch(ctx, path)
-	if err != nil {
-		return err
-	}
-	defer drain(body)
-	wake()
-
-	events := json.NewDecoder(body)
-	for {
-		var event struct {
-			Type string `json:"type"`
-		}
-		if err := events.Decode(&event); err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-		wake()
-	}
+func layoutsWatchPath() string {
+	return fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", LayoutsPath, int(displayWatchTimeout.Seconds()))
 }
