@@ -52,13 +52,6 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 		want    string
 	}{
 		{
-			"power",
-			func(receiver *Receiver) { receiver.Spec.Power = equipment.PowerOn },
-			func(*testing.T, *fakeDenon, *controller) {},
-			denon.PowerOnCommand,
-			"Receiver theater: generation 4 asks power on; sent power on; the receiver reported power on after <time>",
-		},
-		{
 			"settings",
 			func(receiver *Receiver) {
 				receiver.Spec.Denon.Settings = denon.Settings{Audio: denon.AudioSettings{DRC: &drc, LFE: &lfe}}
@@ -151,7 +144,7 @@ func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
 	unit.setPower(equipment.PowerStandby)
 
 	mustDeepEqual(t, log.lines(), []string{
-		"Receiver studio: generation 3 asks power standby; sent power standby; the command failed: a WiiM has no standby command; power off is not supported",
+		"Receiver studio: generation 3 asks power Standby; sent power Standby; the command failed: a WiiM has no standby command; power off is not supported",
 	})
 }
 
@@ -240,7 +233,7 @@ func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 	mustSucceed(t, operator.pass(t.Context()))
 
 	mustDeepEqual(t, linesWith(log, "session for Player"), []string{
-		"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active false, awake false",
+		"Receiver theater: a session for Player house/theater started: input GAME, volume topic liken/players/theater/volume, no power topic, active false, awake false; the operator found it when it started, so it sends nothing for these flags",
 		"Receiver theater: the session for Player house/theater: active went from false to true",
 		"Receiver theater: the session for Player house/theater ended",
 	})
@@ -250,8 +243,8 @@ func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 	})
 }
 
-// A WiiM has no power-on command, so the line says the operator sent
-// nothing.
+// A WiiM has no standby, so it always reports On, and a spec.power of
+// On sends nothing. The line says why.
 func TestASpecPowerOnForAWiimSaysNothingWasSent(t *testing.T) {
 	amp := startFakeWiim(t)
 	_, unit := waitingWiim(t, amp)
@@ -263,7 +256,7 @@ func TestASpecPowerOnForAWiimSaysNothingWasSent(t *testing.T) {
 	unit.setPower(equipment.PowerOn)
 
 	mustDeepEqual(t, log.lines(), []string{
-		"Receiver studio: generation 3 asks power on; sent nothing, because a WiiM has no power-on command",
+		"Receiver studio: generation 3 asks power On; sent nothing, because the receiver reports power On",
 	})
 	mustDeepEqual(t, amp.sent(), []string(nil))
 }

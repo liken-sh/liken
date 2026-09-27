@@ -51,14 +51,21 @@ The operator clears the mark on two paths:
 
 * A stop. The `media-operator` removes `spec.session`, or writes a
   session that names another `Player`, input, or volume topic. The
-  same stop runs when the `Receiver` is deleted, when
-  `spec.denon.address` changes, and when the operator shuts down.
-  The operator publishes the empty payload, waits 200 ms for it to
-  reach the broker, and closes the connection.
+  same stop runs when the `Receiver` is deleted, and when its
+  protocol address changes. The operator publishes the empty
+  payload, waits 200 ms for it to reach the broker, and closes the
+  connection.
 * The MQTT Last Will. Each session's connection names the owner
   topic as its will, retained, with an empty payload. When the
   operator dies without a clean disconnect, the broker publishes
   the will, and the pods take the level back.
+
+An operator that shuts down does not clear the mark. It closes each
+session's connection with an MQTT DISCONNECT, so the broker drops
+the will and keeps the mark. The next operator starts the same
+session and publishes the same mark. The pods therefore keep `mpv`
+at unity through the restart, and the level does not change while
+no operator runs.
 
 ## The level
 

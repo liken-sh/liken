@@ -26,6 +26,9 @@ const (
 	mqttSuback    = 0x90
 	mqttPingreq   = 0xC0
 	mqttPingresp  = 0xD0
+	// mqttDisconnect is a clean close, after which the broker publishes
+	// no will.
+	mqttDisconnect = 0xE0
 )
 
 // The MQTT 3.1.1 protocol name and level. The name is the literal
@@ -170,6 +173,12 @@ func encodeSubscribe(packetID uint16, filter string) []byte {
 // is the two bytes 0xC0 0x00, and the broker answers with a PINGRESP.
 func encodePingreq() []byte {
 	return []byte{mqttPingreq, 0x00}
+}
+
+// encodeDisconnect builds the packet that closes a session on purpose:
+// the two bytes 0xE0 0x00. The broker then drops the client's will.
+func encodeDisconnect() []byte {
+	return []byte{mqttDisconnect, 0x00}
 }
 
 // readPacket reads one whole control packet: the fixed-header first

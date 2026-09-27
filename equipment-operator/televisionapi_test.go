@@ -3,11 +3,11 @@ package main
 // The fake API server's Television, Receiver, and Display collections.
 // A status apply keeps each writer's fields apart the way server-side
 // apply does for the fields these writers state: the Deployment's
-// apply replaces cec, power, activeSource, displays, and its own
-// conditions, the Deployment's session apply replaces session, a node
-// workload's power apply replaces powerGeneration and its own
-// conditions, and a node workload's wake apply replaces wokeAt and its
-// own conditions. No apply touches a field another manager owns.
+// apply replaces cec, power, activeSource, activeDisplay, displays,
+// and its own conditions, the Deployment's session apply replaces
+// session, a node workload's power apply replaces powerGeneration and
+// its own conditions, and a node workload's wake apply replaces wokeAt
+// and its own conditions. No apply touches a field another manager owns.
 // The conditions are a map keyed by type, so each apply leaves the
 // other writer's conditions in place.
 
@@ -29,8 +29,17 @@ func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool
 	path := r.URL.Path
 	a.mutex.Lock()
 	refusing, missing := a.refusingTelevisions, a.noTelevisionDefinition
+	listing := path == televisionsPath && r.Method == http.MethodGet && r.URL.Query().Get("watch") != "true"
+	throttled := listing && a.throttledTelevisionLists > 0
+	if throttled {
+		a.throttledTelevisionLists--
+	}
 	a.mutex.Unlock()
 	switch {
+	case throttled:
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(initializingBody))
 	case missing && strings.HasPrefix(path, televisionsPath):
 		w.WriteHeader(http.StatusNotFound)
 	case refusing && path == televisionsPath && r.URL.Query().Get("watch") != "true":
@@ -178,6 +187,7 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		television.Status.CEC = body.Status.CEC
 		television.Status.Power = body.Status.Power
 		television.Status.ActiveSource = body.Status.ActiveSource
+		television.Status.ActiveDisplay = body.Status.ActiveDisplay
 		television.Status.Displays = body.Status.Displays
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
 	}

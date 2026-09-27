@@ -1,6 +1,9 @@
 package equipment
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestZoneReadsOneZoneOutOfAState(t *testing.T) {
 	state := State{
@@ -38,5 +41,34 @@ func TestZoneOnAnEmptyState(t *testing.T) {
 	}
 	if state.Reachable != "" {
 		t.Errorf("an empty state reads reachable as %q", state.Reachable)
+	}
+}
+
+// An object an older operator wrote holds the lowercase form, and the
+// API server keeps it under the new enum, so a power reads case-blind
+// into the one PascalCase form. A word that is no power stays as it is.
+func TestAPowerReadsCaseBlind(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want Power
+	}{
+		{`"on"`, PowerOn},
+		{`"standby"`, PowerStandby},
+		{`"off"`, PowerOff},
+		{`"On"`, PowerOn},
+		{`"STANDBY"`, PowerStandby},
+		{`"sleep"`, Power("sleep")},
+		{`""`, Power("")},
+	}
+	for _, c := range cases {
+		t.Run(c.raw, func(t *testing.T) {
+			var got Power
+			if err := json.Unmarshal([]byte(c.raw), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
 	}
 }

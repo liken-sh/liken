@@ -21,11 +21,11 @@ import (
 )
 
 // These bound one request and the wait between polls. A failed poll
-// backs off, because a device that is down should not be hammered.
+// backs off from the healthy interval, because a device that is down
+// should be asked less often than one that answers, not more.
 var (
 	requestTimeout = 8 * time.Second
 	pollInterval   = 10 * time.Second
-	minBackoff     = time.Second
 	maxBackoff     = 30 * time.Second
 
 	// pollFailures is how many polls in a row must fail before the
@@ -151,26 +151,35 @@ func (c *Client) Surveyed() bool {
 func (c *Client) Run(ctx context.Context) {
 	c.startEvents(ctx)
 	defer c.stopEvents()
-	backoff := minBackoff
+	var waits pollWaits
 	for ctx.Err() == nil {
 		c.manageSubscriptions(ctx)
-		answered := c.poll(ctx)
-		wait := pollInterval
-		if answered {
-			backoff = minBackoff
-		} else {
-			wait = backoff
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
-		}
+		wait := waits.after(c.poll(ctx))
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
 		}
 	}
+}
+
+// pollWaits chooses the wait before the next poll. The first failure
+// waits the healthy interval, and each failure in a row after it
+// doubles the wait up to maxBackoff. An answered poll starts again from
+// the healthy interval.
+type pollWaits struct {
+	next time.Duration
+}
+
+// after answers the wait that follows a poll.
+func (w *pollWaits) after(answered bool) time.Duration {
+	if answered {
+		w.next = 0
+		return pollInterval
+	}
+	wait := max(w.next, pollInterval)
+	w.next = min(wait*2, maxBackoff)
+	return wait
 }
 
 // poll reads the whole command set once. getStatusEx comes first,
@@ -209,10 +218,12 @@ func (c *Client) poll(ctx context.Context) bool {
 	// A poll's reads were taken before any event that arrived while it
 	// ran, so the evented fields keep the event's value.
 	c.mergeEvents(&next)
-	c.publish(next)
+	// The survey is marked before the publish, so the event the publish
+	// sends already reports it.
 	c.mutex.Lock()
 	c.surveyed = true
 	c.mutex.Unlock()
+	c.publish(next)
 	return true
 }
 

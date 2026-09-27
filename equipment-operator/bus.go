@@ -27,6 +27,10 @@ const (
 	busQueueDepth = 64
 )
 
+// How long a stop waits to write DISCONNECT. A broker that does not
+// read in that time gets a closed connection, and it publishes the will.
+const busDisconnectWait = time.Second
+
 // The reconnect backoff bounds. The client waits busMinBackoff after
 // the first failure and doubles the wait up to busMaxBackoff, so a
 // broker that is down does not become a tight reconnect loop. A test
@@ -49,12 +53,10 @@ func init() {
 type busHandler func(topic string, payload []byte)
 
 // busWill is the MQTT Last Will the client names at connect time. The
-// broker publishes it on any disconnect the client does not make
-// cleanly.
-//
-// busWill is the message the broker publishes when this connection dies
-// without a clean disconnect. It is how a killed operator's owner mark
-// is cleared.
+// broker publishes it when the connection closes without a DISCONNECT.
+// Run sends DISCONNECT when its context ends, so the will reaches the
+// broker only from a client that died, and it is how a killed
+// operator's owner mark is cleared.
 type busWill struct {
 	Topic    string
 	Payload  []byte
@@ -155,8 +157,16 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 	defer cancel()
 	// The reader blocks in Read until the broker writes or the
 	// connection closes. Closing the connection when the session ends
-	// is what unblocks a reader waiting on a silent broker.
-	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	// is what unblocks a reader waiting on a silent broker. A session
+	// that ends because Run's context ended is a stop the client chose,
+	// so it sends DISCONNECT first, and the broker publishes no will.
+	defer context.AfterFunc(ctx, func() {
+		if parent.Err() != nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(busDisconnectWait))
+			_, _ = conn.Write(encodeDisconnect())
+		}
+		conn.Close()
+	})()
 
 	out := make(chan []byte, busQueueDepth)
 	b.mutex.Lock()

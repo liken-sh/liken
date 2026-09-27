@@ -714,7 +714,7 @@ func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
 func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
-	h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
+	h.soundModes = map[string]string{"GAME": "STEREO"}
 	h.beginIdle(t, "GAME")
 	broker := h.brokers.waitForSession(t)
 	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
@@ -723,7 +723,7 @@ func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 
 	mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 	mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
-	mustMatch(t, h.equipment.waitForCommand(t), denon.SoundModeCommand("MULTI CH IN"))
+	mustMatch(t, h.equipment.waitForCommand(t), denon.SoundModeCommand("STEREO"))
 	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
 }
 
@@ -839,5 +839,5 @@ func TestAToggleWritesTheSpecsPower(t *testing.T) {
 	body := map[string]any{}
 	mustSucceed(t, json.Unmarshal(sent.Body, &body))
 	spec, _ := body["spec"].(map[string]any)
-	mustMatch(t, spec["power"], any("on"))
+	mustMatch(t, spec["power"], any("On"))
 }

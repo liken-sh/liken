@@ -268,8 +268,13 @@ type ReceiverStatus struct {
 	// ones the receiver does not report. After a restart the operator
 	// sends those unreported fields again only when the spec's
 	// generation differs from this one.
-	SettingsGeneration int64       `json:"settingsGeneration,omitempty"`
-	Conditions         []Condition `json:"conditions,omitempty"`
+	SettingsGeneration int64 `json:"settingsGeneration,omitempty"`
+	// PowerGeneration is the metadata.generation whose spec.power the
+	// operator settled: it sent spec.power, found the receiver already at
+	// it, found no spec.power, or adopted the value it found when it
+	// started.
+	PowerGeneration int64       `json:"powerGeneration,omitempty"`
+	Conditions      []Condition `json:"conditions,omitempty"`
 }
 
 // ZoneStatus is one zone in the receiver's own units. Volume and

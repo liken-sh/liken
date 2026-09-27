@@ -109,6 +109,8 @@ func TestAWrittenTelevisionStatusValidates(t *testing.T) {
 			"physicalAddress": "0.0.0.0", "logicalAddress": int64(0), "osdName": "TV", "vendor": "00e091", "cecVersion": "1.4",
 		},
 		"power":           "ToOn",
+		"activeSource":    "1.3.0.0",
+		"activeDisplay":   "acm-0001-receiver",
 		"powerGeneration": int64(2),
 		"displays": []any{map[string]any{
 			"name": "acm-0001-receiver", "physicalAddress": "1.3.0.0", "via": map[string]any{"kind": "Receiver", "name": "den"},

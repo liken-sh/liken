@@ -509,8 +509,6 @@ func (d *Client) record(status equipment.ConditionStatus) {
 	d.notify(equipment.Event{Zone: equipment.MainZone, Field: equipment.EventReachable, State: state})
 }
 
-// notify runs on the reading goroutine. A blocking listener therefore
-// delays processing of every later line on the connection.
 // Surveyed answers whether the connect replies have stopped arriving,
 // which is when the receiver's own facts are in hand.
 func (d *Client) Surveyed() bool {
@@ -519,11 +517,18 @@ func (d *Client) Surveyed() bool {
 	return d.surveyed
 }
 
-// recordSurveyed marks the survey complete.
+// recordSurveyed marks the survey complete, and tells the listener the
+// first time. It runs on the survey's timer, because the survey ends
+// when no line arrives.
 func (d *Client) recordSurveyed() {
 	d.mutex.Lock()
+	first := !d.surveyed
 	d.surveyed = true
+	state := d.equipmentState(d.state)
 	d.mutex.Unlock()
+	if first {
+		d.notify(equipment.Event{Zone: equipment.MainZone, Field: equipment.EventSurveyed, State: state})
+	}
 }
 
 // Address answers the address the receiver is reached on: the peer a
@@ -573,6 +578,9 @@ func hostOf(address string) string {
 	return host
 }
 
+// notify runs on the reading goroutine, and on the survey's timer once.
+// A blocking listener therefore delays processing of every later line
+// on the connection.
 func (d *Client) notify(event equipment.Event) {
 	if d.listener != nil {
 		d.listener(event)

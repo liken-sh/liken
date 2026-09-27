@@ -204,6 +204,22 @@ func inputWords(zone equipment.ZoneState, _ int) string {
 	return "input " + zone.Input
 }
 
+func soundModeWords(zone equipment.ZoneState, _ int) string {
+	if zone.SoundMode == "" {
+		return "no sound mode"
+	}
+	return "sound mode " + zone.SoundMode
+}
+
+// wordList joins the words of a line's fields: two with and, and three
+// or more with commas and a last and.
+func wordList(words []string) string {
+	if len(words) < 3 {
+		return strings.Join(words, " and ")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + ", and " + words[len(words)-1]
+}
+
 func volumeWords(zone equipment.ZoneState, resolution int) string {
 	if zone.Volume == equipment.Unknown {
 		return "no volume"

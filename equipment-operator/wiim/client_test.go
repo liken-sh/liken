@@ -648,10 +648,9 @@ func TestASetterFailureCarriesTheDeviceWords(t *testing.T) {
 
 // Run backs off while the device is down, and reports it unreachable.
 func TestRunBacksOffWhenTheDeviceIsDown(t *testing.T) {
-	restore := pollInterval
-	restoreMin, restoreMax := minBackoff, maxBackoff
-	t.Cleanup(func() { pollInterval, minBackoff, maxBackoff = restore, restoreMin, restoreMax })
-	minBackoff, maxBackoff = time.Millisecond, 5*time.Millisecond
+	restore, restoreMax := pollInterval, maxBackoff
+	t.Cleanup(func() { pollInterval, maxBackoff = restore, restoreMax })
+	pollInterval, maxBackoff = time.Millisecond, 5*time.Millisecond
 
 	client := NewClient("127.0.0.1:1", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
@@ -666,9 +665,37 @@ func TestRunBacksOffWhenTheDeviceIsDown(t *testing.T) {
 // applies a declared setting.
 func TestASurveyCompletesAfterOnePoll(t *testing.T) {
 	amp := startFakeAmp(t)
-	client := amp.client(nil)
+	var client *Client
+	var surveyedAtEvent []bool
+	client = amp.client(func(equipment.Event) { surveyedAtEvent = append(surveyedAtEvent, client.Surveyed()) })
 
 	mustMatch(t, client.Surveyed(), false)
 	client.poll(context.Background())
 	mustMatch(t, client.Surveyed(), true)
+	// The poll's own event reports the survey, so a listener that waits
+	// for it needs no other event.
+	mustMatch(t, surveyedAtEvent[len(surveyedAtEvent)-1], true)
+}
+
+// A device that fails a poll is asked again no sooner than a healthy
+// one, and each failure after that doubles the wait up to its bound.
+func TestAFailedPollWaitsAtLeastTheHealthyInterval(t *testing.T) {
+	var waits pollWaits
+	cases := []struct {
+		name     string
+		answered bool
+		want     time.Duration
+	}{
+		{"the first failure", false, pollInterval},
+		{"the second failure", false, 2 * pollInterval},
+		{"the third failure", false, maxBackoff},
+		{"a failure at the bound", false, maxBackoff},
+		{"an answer", true, pollInterval},
+		{"a failure after an answer", false, pollInterval},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mustMatch(t, waits.after(c.answered), c.want)
+		})
+	}
 }

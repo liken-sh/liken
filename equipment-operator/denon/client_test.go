@@ -287,20 +287,16 @@ func TestSetVolumeHoldsTheReceiverToItsOwnScale(t *testing.T) {
 
 // The survey is complete once the connect replies have stopped
 // arriving, so a declared setting is compared against what the receiver
-// reported and not against an empty state.
+// reported and not against an empty state. The survey completes on a
+// timer with no line, so the client sends an event for it.
 func TestASurveyCompletesAfterTheConnectReplies(t *testing.T) {
 	harness := startHarness(t)
 
 	mustMatch(t, harness.client.Surveyed(), false)
 	drainQueries(t, harness)
-	deadline := time.After(testTimeout)
-	for !harness.client.Surveyed() {
-		select {
-		case <-deadline:
-			t.Fatal("the receiver was never surveyed")
-		case <-time.After(time.Millisecond):
-		}
-	}
+
+	waitForField(t, harness.events, equipment.EventSurveyed)
+	mustMatch(t, harness.client.Surveyed(), true)
 }
 
 // The address is the peer the receiver answered from, so a receiver

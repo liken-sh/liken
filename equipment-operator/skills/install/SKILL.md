@@ -84,10 +84,14 @@ that cable. The volume block is in the receiver's own scale. `max` is
 the loudest level a press may set the room to, and a Denon requires
 it, because the limit a Denon reports moves with the volume. `step`
 is how far one press moves the volume, and half steps are allowed.
-`kubectl get receivers` shows what the receiver last reported:
+`kubectl get receivers` shows what the receiver last reported, and
+the `Player` whose session holds it:
 
-    NAME          POWER   INPUT   VOLUME   REACHABLE   AGE
-    living-room   on      MPLAY   50.0     True        2m
+    NAME          POWER   INPUT   VOLUME   PLAYER              REACHABLE   AGE
+    living-room   On      MPLAY   50.0     house/living-room   True        2m
+
+`kubectl get receivers -o wide` adds the driver, the address, whether
+a `Play` stands, and the sound mode.
 
 ## Put it under a Player
 
@@ -102,9 +106,11 @@ Its [players page](https://media.liken.sh/docs/reference/players/)
 defines them. This operator's reads and writes on that topic are
 described on [the receiver on the bus](https://equipment.liken.sh/docs/reference/bus/). When a
 `Play` starts, the session powers the receiver on and selects the input
-once. Waking the screen also triggers those commands through
+once. It sends each command only when the receiver reports another
+value. Waking the screen also triggers those commands through
 `spec.session.awake`, even with no `Play`. Starting an idle screen after
-a reboot does not by itself power the receiver on.
+a reboot does not by itself power the receiver on, and an operator
+restart sends nothing for the sessions it finds.
 
 A person at the receiver's own remote can change the receiver without
 the cluster changing it back immediately. If the person selects

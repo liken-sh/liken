@@ -143,7 +143,7 @@ func TestDeclaredNamesOnlyTheDeclaredValues(t *testing.T) {
 		block any
 		want  string
 	}{
-		{ZoneSpec{Power: "on", Volume: &volume, Mute: &mute}, `{"mute":true,"power":"on","volume":40}`},
+		{ZoneSpec{Power: "On", Volume: &volume, Mute: &mute}, `{"mute":true,"power":"On","volume":40}`},
 		{map[string]any{"system": map[string]any{}, "tone": map[string]any{"bass": 3}}, `{"tone":{"bass":3}}`},
 		{map[string]any{"number": 3}, `{"number":3}`},
 	}

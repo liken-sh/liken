@@ -24,6 +24,10 @@ spec:
       # TV. The node workloads write what they applied.
       subresources:
         status: {}
+      # The default view says what the TV shows and for which Player.
+      # kubectl get -o wide adds the columns with priority 1: the raw
+      # physical address of the source, the Display of the session, and
+      # the reasons of the last wake and the last spec.power.
       additionalPrinterColumns:
         - name: Bus
           type: string
@@ -31,15 +35,34 @@ spec:
         - name: Power
           type: string
           jsonPath: .status.power
-        - name: Source
+        - name: Display
           type: string
-          jsonPath: .status.activeSource
+          jsonPath: .status.activeDisplay
+        - name: Player
+          type: string
+          jsonPath: .status.session.player
         - name: Reachable
           type: string
           jsonPath: .status.conditions[?(@.type=="Reachable")].status
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        - name: Source
+          type: string
+          jsonPath: .status.activeSource
+          priority: 1
+        - name: Session
+          type: string
+          jsonPath: .status.session.display
+          priority: 1
+        - name: Wake
+          type: string
+          jsonPath: .status.conditions[?(@.type=="WakeApplied")].reason
+          priority: 1
+        - name: Applied
+          type: string
+          jsonPath: .status.conditions[?(@.type=="PowerApplied")].reason
+          priority: 1
       schema:
         openAPIV3Schema:
           type: object
@@ -103,6 +126,9 @@ spec:
                 activeSource:
                   type: string
                   description: "The physical address of the last Active Source the CECBus carried: the one that the first adapter in spec.adapters with a current entry that reports an Active Source reports. An adapter that has heard none is passed over. CEC has no query for the TV's input. A TV that switches to its own apps, or to an input with no CEC, sends nothing, so this field states the last CEC source, and it does not state what the TV shows."
+                activeDisplay:
+                  type: string
+                  description: "The Display at the physical address in activeSource, which is the machine output the TV last switched to over CEC. The operator looks first at the Displays that the CECBus's adapters name, then at the other Displays of the machines the CECBus names, and takes the first by name when two match. It is absent when no Display has that address, such as when a streaming player or a game console is the active source, and when activeSource is absent. It states the last CEC source, the way activeSource does, and it does not state what the TV shows."
                 powerGeneration:
                   type: integer
                   format: int64

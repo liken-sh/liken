@@ -48,8 +48,8 @@ const (
 
 // The two power words the status carries.
 const (
-	powerOn      = "on"
-	powerStandby = "standby"
+	powerOn      = "On"
+	powerStandby = "Standby"
 )
 
 // The fields a line can name, which is what a listener switches on.

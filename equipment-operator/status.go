@@ -140,7 +140,7 @@ func sleepMinutes(minutes int) int {
 
 // sameStatus answers whether a write would change anything.
 func sameStatus(a, b ReceiverStatus) bool {
-	if a.Service != b.Service || a.Driver != b.Driver || a.SettingsGeneration != b.SettingsGeneration || !reflect.DeepEqual(a.Denon, b.Denon) ||
+	if a.Service != b.Service || a.Driver != b.Driver || a.SettingsGeneration != b.SettingsGeneration || a.PowerGeneration != b.PowerGeneration || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
 		len(a.Zones) != len(b.Zones) || len(a.Conditions) != len(b.Conditions) {
 		return false

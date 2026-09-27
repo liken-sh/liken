@@ -154,6 +154,18 @@ var claimTypes = map[DeviceType]struct {
 	TypeAudioSystem: {4, 5, 0x08},
 }
 
+// claimedType answers the device type a claim's kind of logical
+// address stands for, and an empty type for a kind this package does
+// not claim.
+func claimedType(logAddrType byte) DeviceType {
+	for kind, numbers := range claimTypes {
+		if numbers.logAddrType == logAddrType {
+			return kind
+		}
+	}
+	return ""
+}
+
 // maxOSDName is the longest OSD name CEC carries: fourteen bytes of
 // operand after the header and the opcode.
 const maxOSDName = 14
@@ -206,11 +218,16 @@ func (d *Device) Release() error {
 	return d.ioctl(RequestSetLogAddrs, unsafe.Pointer(&raw))
 }
 
-// Addresses is what the adapter holds now: its logical addresses and
-// the OSD name it announces.
+// Addresses is what the adapter holds now: its logical addresses, the
+// OSD name it announces, and the claim they came from. The kernel keeps
+// a claim after the handle that made it closes, so a program that
+// starts can read what the last run claimed. Type is empty when the
+// adapter holds no claim.
 type Addresses struct {
-	Logical []LogicalAddress
-	OSDName string
+	Logical     []LogicalAddress
+	OSDName     string
+	Type        DeviceType
+	Passthrough bool
 }
 
 // Addresses reads the logical addresses the adapter holds. The list is
@@ -220,7 +237,10 @@ func (d *Device) Addresses() (Addresses, error) {
 	if err := d.ioctl(RequestGetLogAddrs, unsafe.Pointer(&raw)); err != nil {
 		return Addresses{}, err
 	}
-	held := Addresses{OSDName: cString(raw.OSDName[:])}
+	held := Addresses{OSDName: cString(raw.OSDName[:]), Passthrough: raw.Flags&logAddrsAllowRCPassthrough != 0}
+	if raw.NumLogAddrs > 0 {
+		held.Type = claimedType(raw.LogAddrType[0])
+	}
 	for index := 0; index < int(raw.NumLogAddrs) && index < maxLogicalAddresses; index++ {
 		if raw.LogAddr[index] <= byte(AddressUnregistered) {
 			held.Logical = append(held.Logical, LogicalAddress(raw.LogAddr[index]))

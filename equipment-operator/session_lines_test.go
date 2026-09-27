@@ -15,13 +15,13 @@ import (
 
 func TestAPlayThatStartsIsALineForThePowerAndOneForTheInput(t *testing.T) {
 	h := newSessionHarness(t)
-	h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
+	h.soundModes = map[string]string{"GAME": "STEREO"}
 
 	h.begin(t, "GAME")
 
 	mustDeepEqual(t, waitForLines(t, h.log, "a Play started", 2), []string{
-		"Receiver theater: a Play started on Player theater; sent power on; the receiver reported power on after <time>",
-		"Receiver theater: a Play started on Player theater; sent input GAME and sound mode MULTI CH IN; the receiver reported input GAME after <time>",
+		"Receiver theater: a Play started on Player theater; sent power On; the receiver reported power On after <time>",
+		"Receiver theater: a Play started on Player theater; sent input GAME and sound mode STEREO; the receiver reported input GAME after <time>",
 	})
 }
 
@@ -67,7 +67,7 @@ func TestAToggleOnAReceiverThatIsOnIsOneLine(t *testing.T) {
 	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
 	mustDeepEqual(t, waitForLines(t, h.log, "toggle", 1), []string{
-		"Receiver theater: the power topic asks toggle; the receiver reports power on, so sent power standby; the receiver reported power standby after <time>",
+		"Receiver theater: the power topic asks toggle; the receiver reports power On, so sent power Standby; the receiver reported power Standby after <time>",
 	})
 }
 
@@ -88,7 +88,7 @@ func TestAnEnsureIsOneLine(t *testing.T) {
 				h, _, held := idleListening(t)
 				return h, held
 			},
-			"Receiver theater: the commands topic asks input.ensure; sent nothing, because the receiver reports power standby",
+			"Receiver theater: the commands topic asks input.ensure; sent nothing, because the receiver reports power Standby",
 		},
 	}
 	for _, one := range cases {

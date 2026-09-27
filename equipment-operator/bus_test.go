@@ -34,14 +34,18 @@ type fakeBroker struct {
 	reader *bufio.Reader
 	subs   chan string
 	pubs   chan brokerPublish
+	// disconnected is closed when the client sends DISCONNECT, which
+	// tells the broker to drop the client's will.
+	disconnected chan struct{}
 }
 
 func newFakeBroker(conn net.Conn) *fakeBroker {
 	broker := &fakeBroker{
-		conn:   conn,
-		reader: bufio.NewReader(conn),
-		subs:   make(chan string, 8),
-		pubs:   make(chan brokerPublish, 8),
+		conn:         conn,
+		reader:       bufio.NewReader(conn),
+		subs:         make(chan string, 8),
+		pubs:         make(chan brokerPublish, 8),
+		disconnected: make(chan struct{}),
 	}
 	go broker.serve()
 	return broker
@@ -75,7 +79,21 @@ func (b *fakeBroker) serve() {
 			}
 		case mqttPingreq:
 			b.conn.Write([]byte{mqttPingresp, 0x00})
+		case mqttDisconnect:
+			close(b.disconnected)
+			return
 		}
+	}
+}
+
+// waitForDisconnect fails the test when the client does not send
+// DISCONNECT.
+func (b *fakeBroker) waitForDisconnect(t *testing.T) {
+	t.Helper()
+	select {
+	case <-b.disconnected:
+	case <-time.After(testTimeout):
+		t.Fatal("the client closed no session with DISCONNECT")
 	}
 }
 
@@ -353,4 +371,25 @@ func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
 	case <-time.After(busTestTimeout):
 		t.Fatal("Run waited out the whole backoff")
 	}
+}
+
+// A client that stops on purpose sends DISCONNECT before it closes the
+// connection, so the broker drops the will. A client that dies sends
+// none, and the broker publishes the will.
+func TestABusThatStopsDisconnectsCleanly(t *testing.T) {
+	brokers := startFakeBrokerServer(t)
+	connected := make(chan struct{}, 1)
+	bus := newBus(brokers.address(), "equipment-operator", &busWill{Topic: "owner", Retained: true}, func(*Bus) { connected <- struct{}{} }, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	go bus.Run(ctx)
+	broker := brokers.waitForSession(t)
+	select {
+	case <-connected:
+	case <-time.After(testTimeout):
+		t.Fatal("the client never connected")
+	}
+
+	cancel()
+
+	broker.waitForDisconnect(t)
 }

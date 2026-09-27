@@ -195,11 +195,22 @@ const (
 // control makes the handle the adapter's only initiator and a
 // follower, sets the Display's physical address, and claims a playback
 // logical address. The claim clears any address a previous run left,
-// because the kernel refuses a new claim on a configured adapter.
+// because the kernel refuses a new claim on a configured adapter. A
+// claim the kernel already holds with the same physical address, type,
+// OSD name, and passthrough is kept: a release and a claim take the
+// adapter off the bus and put it back, and the TV sees its source leave
+// and return.
 func (n *cecNode) control(want adapterConfig) (CECAdapterStatus, error) {
 	entry := CECAdapterStatus{State: AdapterJoining}
 	if err := n.device.Follow(); err != nil {
 		return entry, err
+	}
+	kept, err := n.holdsClaim(want)
+	if err != nil {
+		return entry, err
+	}
+	if kept {
+		return n.readClaim(entry, want)
 	}
 	if err := n.device.Release(); err != nil {
 		return entry, err
@@ -223,6 +234,33 @@ func (n *cecNode) control(want adapterConfig) (CECAdapterStatus, error) {
 		return entry, err
 	}
 	return n.readClaim(entry, want)
+}
+
+// holdsClaim answers whether the kernel already holds the claim that
+// control would make: one logical address of a playback device, with
+// the OSD name and passthrough the claim states, on an adapter that
+// announces the Display's physical address. An adapter on a video port
+// takes its address from its own port, so for it the address is not
+// compared.
+func (n *cecNode) holdsClaim(want adapterConfig) (bool, error) {
+	if want.problem != "" {
+		return false, nil
+	}
+	held, err := n.device.Addresses()
+	if err != nil {
+		return false, err
+	}
+	if len(held.Logical) != 1 || held.Type != cec.TypePlayback || held.OSDName != want.osdName || !held.Passthrough {
+		return false, nil
+	}
+	if !n.caps.Capabilities.Has(cec.CapPhysAddr) {
+		return true, nil
+	}
+	actual, err := n.device.PhysicalAddress()
+	if err != nil {
+		return false, err
+	}
+	return actual == want.physical, nil
 }
 
 // readClaim fills the entry from the adapter's addresses as the kernel

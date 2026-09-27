@@ -20,6 +20,7 @@ package main
 // media operator lifted for a moment, and wakes nothing either.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -44,8 +45,17 @@ var (
 // each undo the other's change. The mutex serializes them: the reconcile
 // pass, which reports the flags, and a session's own goroutine, which
 // reports the remote's power button, write one after the other.
+//
+// Every list and write waits out a 429 and asks again, because the API
+// server answers 429 for a moment after a CRD changes. An event whose
+// writes still fail is held in retries and tried again on each later
+// pass, so a refusal delays a TV's session and never drops it.
 type televisionSessions struct {
 	client *Client
+	// ctx bounds the waits for a 429, and stop ends it, so a stop never
+	// waits for an API server that is not ready.
+	ctx    context.Context
+	cancel context.CancelFunc
 	mutex  sync.Mutex
 	// lifts holds the removal waiting for each Player whose session
 	// ended, and the Display that session showed.
@@ -56,6 +66,11 @@ type televisionSessions struct {
 	// live says the operator is past its first pass, so a session that
 	// appears is a change it saw happen.
 	live bool
+	// retries holds, for each Player, the last event whose writes did not
+	// all go through. It holds the decision the event made, so a retry on
+	// a live pass still adopts what the first pass adopted. A later event
+	// of the same Player replaces it, because it is newer.
+	retries map[string]func() bool
 }
 
 // pendingLift is one removal that waits.
@@ -65,7 +80,50 @@ type pendingLift struct {
 }
 
 func newTelevisionSessions(client *Client) *televisionSessions {
-	return &televisionSessions{client: client, lifts: map[string]pendingLift{}, shown: map[string]string{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &televisionSessions{
+		client: client, ctx: ctx, cancel: cancel,
+		lifts: map[string]pendingLift{}, shown: map[string]string{}, retries: map[string]func() bool{},
+	}
+}
+
+// attempt runs one event's writes, and holds the event for a later pass
+// when they did not all go through. The caller holds the mutex.
+func (t *televisionSessions) attempt(player string, settle func() bool) {
+	if settle() {
+		delete(t.retries, player)
+		return
+	}
+	t.retries[player] = settle
+}
+
+// retry runs each held event again. The reconcile pass calls it, so an
+// event the API server refused is tried on every pass until it goes
+// through.
+func (t *televisionSessions) retry() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for player, settle := range t.retries {
+		if settle() {
+			delete(t.retries, player)
+		}
+	}
+}
+
+// list reads the Televisions, and waits out a 429.
+func (t *televisionSessions) list() (*TelevisionList, error) {
+	var list *TelevisionList
+	err := retryThrottled(t.ctx, func() error {
+		var err error
+		list, err = ListTelevisions(t.client)
+		return err
+	})
+	return list, err
+}
+
+// apply writes one Television's status.session, and waits out a 429.
+func (t *televisionSessions) apply(name string, session *TelevisionSession) error {
+	return retryThrottled(t.ctx, func() error { return ApplyTelevisionSession(t.client, name, session) })
 }
 
 // markLive records the end of the operator's first pass: from then on,
@@ -113,32 +171,44 @@ func (r *roomTelevision) opened(awake bool, trigger string) {
 		pending.timer.Stop()
 		delete(t.lifts, r.player)
 	}
+	wakes := t.live && awake
+	t.attempt(r.player, func() bool { return r.open(awake, wakes, lifted, pending.display, trigger) })
+}
+
+// open writes what opened decided, and answers whether every write went
+// through. wakes is decided when the session starts, so a retry on a
+// later pass does the same thing. The caller holds the mutex.
+func (r *roomTelevision) open(awake, wakes, lifted bool, liftedDisplay, trigger string) bool {
+	t := r.sessions
 	list, display, television, ok := r.resolve()
 	if !ok {
-		return
+		return false
+	}
+	if display == "" {
+		return true
 	}
 	t.shown[r.player] = display
-	returning := lifted && pending.display == display
+	returning := lifted && liftedDisplay == display
+	settled := true
 	for _, other := range namedBy(list, r.player) {
 		if television == nil || other.Metadata.Name != television.Metadata.Name {
-			t.write(other.Metadata.Name, nil)
+			settled = t.write(other.Metadata.Name, nil) && settled
 		}
 	}
 	if television == nil {
-		return
+		return settled
 	}
-	if t.live && awake && !returning {
-		r.wake(trigger, display, television)
-		return
+	if wakes && !returning {
+		return r.wake(trigger, display, television) && settled
 	}
 	adopted := &TelevisionSession{Player: r.player, Display: display, Awake: awake}
 	if held := television.Status.Session; held != nil && held.Player == r.player && held.Display == display {
 		adopted.WokeAt = held.WokeAt
 	}
 	if held := television.Status.Session; held != nil && *held == *adopted {
-		return
+		return settled
 	}
-	t.write(television.Metadata.Name, adopted)
+	return t.write(television.Metadata.Name, adopted) && settled
 }
 
 // woke writes a new wokeAt on the TV that shows the session's input,
@@ -148,24 +218,30 @@ func (r *roomTelevision) woke(trigger string) {
 	t := r.sessions
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	_, display, television, ok := r.resolve()
-	if !ok || television == nil {
-		return
-	}
-	t.shown[r.player] = display
-	r.wake(trigger, display, television)
+	t.attempt(r.player, func() bool {
+		_, display, television, ok := r.resolve()
+		if !ok {
+			return false
+		}
+		if television == nil {
+			return true
+		}
+		t.shown[r.player] = display
+		return r.wake(trigger, display, television)
+	})
 }
 
-// wake writes a new wokeAt on a TV, and its one line. The caller holds
-// the mutex.
-func (r *roomTelevision) wake(trigger, display string, television *Television) {
+// wake writes a new wokeAt on a TV, and its one line, and answers
+// whether the write went through. The caller holds the mutex.
+func (r *roomTelevision) wake(trigger, display string, television *Television) bool {
 	session := &TelevisionSession{Player: r.player, Display: display, Awake: true, WokeAt: time.Now().UTC().Format(wakeTimeLayout)}
 	line := fmt.Sprintf("%s; asked Television %s to wake and show Display %s", trigger, television.Metadata.Name, display)
-	if err := ApplyTelevisionSession(r.sessions.client, television.Metadata.Name, session); err != nil {
+	if err := r.sessions.apply(television.Metadata.Name, session); err != nil {
 		r.log.refused(line, err)
-		return
+		return false
 	}
 	r.log.printf("%s", line)
+	return true
 }
 
 // slept marks the TV's session asleep, which stops a wake in progress,
@@ -176,30 +252,35 @@ func (r *roomTelevision) slept() {
 	t := r.sessions
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	list, err := ListTelevisions(t.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing Televisions for Player %s's session: %v\n", r.player, err)
-		return
-	}
-	for _, television := range namedBy(list.Items, r.player) {
-		asleep := *television.Status.Session
-		if !asleep.Awake {
-			continue
+	t.attempt(r.player, func() bool {
+		list, err := t.list()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing Televisions for Player %s's session: %v\n", r.player, err)
+			return false
 		}
-		asleep.Awake = false
-		t.write(television.Metadata.Name, &asleep)
-	}
+		settled := true
+		for _, television := range namedBy(list.Items, r.player) {
+			asleep := *television.Status.Session
+			if !asleep.Awake {
+				continue
+			}
+			asleep.Awake = false
+			settled = t.write(television.Metadata.Name, &asleep) && settled
+		}
+		return settled
+	})
 }
 
 // resolve reads the Televisions and answers them, the session's
-// Display, and the Television that shows it, or nil for none. ok is
-// false when the input names no Display or the list failed.
+// Display, and the Television that shows it, or nil for none. The
+// Display is empty when the input names none, and then nothing is read.
+// ok is false only when the list failed.
 func (r *roomTelevision) resolve() ([]Television, string, *Television, bool) {
 	display := r.monitor(r.input)
 	if display == "" {
-		return nil, "", nil, false
+		return nil, "", nil, true
 	}
-	list, err := ListTelevisions(r.sessions.client)
+	list, err := r.sessions.list()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions for Player %s's session: %v\n", r.player, err)
 		return nil, "", nil, false
@@ -220,6 +301,9 @@ func (t *televisionSessions) lift(player string) {
 	}
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	// The session ended, so an event of it that waits for a retry is
+	// moot; the lift has retries of its own.
+	delete(t.retries, player)
 	t.schedule(player, sessionLiftDelay)
 }
 
@@ -247,7 +331,7 @@ func (t *televisionSessions) schedule(player string, after time.Duration) {
 // remove takes a Player's session off every TV, and answers whether
 // every write went through. The caller holds the mutex.
 func (t *televisionSessions) remove(player string) bool {
-	list, err := ListTelevisions(t.client)
+	list, err := t.list()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions to lift Player %s's session: %v\n", player, err)
 		return false
@@ -259,23 +343,27 @@ func (t *televisionSessions) remove(player string) bool {
 	return removed
 }
 
-// stop drops every removal that waits, at operator shutdown.
+// stop drops every removal that waits, at operator shutdown. It ends
+// the waits for a 429 before it takes the mutex, because a write that
+// waits holds the mutex.
 func (t *televisionSessions) stop() {
 	if t == nil {
 		return
 	}
+	t.cancel()
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	for player, pending := range t.lifts {
 		pending.timer.Stop()
 		delete(t.lifts, player)
 	}
+	clear(t.retries)
 }
 
 // write applies one session, and answers whether the API server took
 // it. The caller holds the mutex.
 func (t *televisionSessions) write(name string, session *TelevisionSession) bool {
-	if err := ApplyTelevisionSession(t.client, name, session); err != nil {
+	if err := t.apply(name, session); err != nil {
 		fmt.Fprintf(os.Stderr, "writing the session of Television %s: %v\n", name, err)
 		return false
 	}

@@ -37,8 +37,9 @@ type Adapter struct {
 	// requested says that a claim is stored, and requestType is its
 	// kind of logical address, which the kernel claims once the adapter
 	// has a physical address.
-	requested   bool
-	requestType uint8
+	requested    bool
+	requestType  uint8
+	requestFlags uint32
 	// claims counts the claim requests the adapter received.
 	claims int
 	mode   uint32
@@ -220,8 +221,14 @@ func (a *Adapter) Ioctl(request uintptr, argument unsafe.Pointer) error {
 	case cec.RequestSetLogAddrs:
 		return a.claim((*cec.KernelLogAddrs)(argument))
 	case cec.RequestGetLogAddrs:
+		// The kernel reports a stored claim whole, with the invalid
+		// address 0xff in each place it has not claimed yet.
 		held := (*cec.KernelLogAddrs)(argument)
-		*held = cec.KernelLogAddrs{NumLogAddrs: uint8(len(a.logical))}
+		*held = cec.KernelLogAddrs{}
+		if a.requested {
+			held.NumLogAddrs, held.LogAddr[0] = 1, 0xff
+			held.LogAddrType[0], held.Flags = a.requestType, a.requestFlags
+		}
 		for index, address := range a.logical {
 			held.LogAddr[index] = uint8(address)
 		}
@@ -298,7 +305,7 @@ func (a *Adapter) claim(request *cec.KernelLogAddrs) error {
 		return unix.EBUSY
 	}
 	a.osdName = string(trimNul(request.OSDName[:]))
-	a.requested, a.requestType = true, request.LogAddrType[0]
+	a.requested, a.requestType, a.requestFlags = true, request.LogAddrType[0], request.Flags
 	a.claims++
 	if a.complete() {
 		a.stateChanged()

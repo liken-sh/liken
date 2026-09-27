@@ -11,6 +11,8 @@ package equipment
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 )
 
 // ConditionStatus is the three-valued verdict a condition carries. It
@@ -24,14 +26,35 @@ const (
 	ConditionUnknown ConditionStatus = "Unknown"
 )
 
-// Power is what a zone reports, in words every protocol shares.
+// Power is what a zone reports, in words every protocol shares. The
+// words are the Kubernetes enum form, PascalCase, the same as a
+// Television's power, so every power the operator reads or writes has
+// one spelling.
 type Power string
 
 const (
-	PowerOn      Power = "on"
-	PowerStandby Power = "standby"
-	PowerOff     Power = "off"
+	PowerOn      Power = "On"
+	PowerStandby Power = "Standby"
+	PowerOff     Power = "Off"
 )
+
+// UnmarshalJSON reads a power case-blind into its one form. An older
+// operator wrote the lowercase form, and the API server keeps a stored
+// value unchanged under a new enum, so an object can still hold it. A
+// word that is no power is kept as it is.
+func (p *Power) UnmarshalJSON(raw []byte) error {
+	var word string
+	if err := json.Unmarshal(raw, &word); err != nil {
+		return err
+	}
+	*p = Power(word)
+	for _, known := range []Power{PowerOn, PowerStandby, PowerOff} {
+		if strings.EqualFold(word, string(known)) {
+			*p = known
+		}
+	}
+	return nil
+}
 
 // MainZone names the zone a session drives when it names no other. A
 // driver that has one zone calls it main.
@@ -90,6 +113,11 @@ const (
 	EventMute      = "mute"
 	EventSoundMode = "soundMode"
 	EventReachable = "reachable"
+	// EventSurveyed says that Surveyed has become true. A driver sends it
+	// once, because a survey can complete with no line from the device,
+	// and a listener that waits for the survey would otherwise hear
+	// nothing.
+	EventSurveyed = "surveyed"
 )
 
 // Driver is the one interface a protocol implements. Commands are

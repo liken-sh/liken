@@ -167,28 +167,6 @@ func TestCRDSchema(t *testing.T) {
 	})
 }
 
-func TestCRDPrinterColumns(t *testing.T) {
-	crd := loadCRD(t)
-	columns := crd.Spec.Versions[0].AdditionalPrinterColumns
-
-	paths := make(map[string]string, len(columns))
-	for _, column := range columns {
-		paths[column.Name] = column.JSONPath
-	}
-
-	cases := []struct{ name, jsonPath string }{
-		{"Power", ".status.zones.main.power"},
-		{"Input", ".status.zones.main.input"},
-		{"Volume", ".status.zones.main.volume"},
-		{"Reachable", `.status.conditions[?(@.type=="Reachable")].status`},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			mustMatch(t, paths[c.name], c.jsonPath)
-		})
-	}
-}
-
 // The API server runs the whole definition through this before it
 // serves the resource, and that pass is where a CEL rule is compiled
 // and its cost estimated. A rule the estimator refuses is a CRD the
@@ -474,8 +452,34 @@ func TestCRDValidatesExamples(t *testing.T) {
 			receiver: receiver(map[string]any{
 				"denon":  map[string]any{"address": "receiver.example"},
 				"volume": map[string]any{"max": 75.0},
-				"zones":  map[string]any{"zone3": map[string]any{"power": "on"}},
+				"zones":  map[string]any{"zone3": map[string]any{"power": "On"}},
 			}),
+		},
+		{
+			name: "a receiver asked to Standby",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"power":  "Standby",
+			}),
+		},
+		{
+			name: "a power in lower case",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"power":  "on",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "a zone power in lower case",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+				"zones":  map[string]any{"zone2": map[string]any{"power": "standby"}},
+			}),
+			wantErr: true,
 		},
 	}
 	for _, c := range cases {

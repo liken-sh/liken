@@ -274,3 +274,31 @@ func TestLeaveStopsTheHandleFollowing(t *testing.T) {
 		t.Errorf("a handle that left may still send: %v", err)
 	}
 }
+
+// A program that starts on an adapter a previous run claimed reads the
+// claim back whole, so it can keep a claim that already says what it
+// would claim.
+func TestAddressesReadTheClaimsTypeAndPassthrough(t *testing.T) {
+	cases := []struct {
+		name  string
+		claim cec.Claim
+		want  cec.DeviceType
+	}{
+		{"a playback claim with passthrough", cec.Claim{OSDName: "den", Passthrough: true}, cec.TypePlayback},
+		{"an audio system claim without passthrough", cec.Claim{Type: cec.TypeAudioSystem, OSDName: "den"}, cec.TypeAudioSystem},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, device := room().Adapter(cectest.Options{Physical: 0x1300})
+			mustSucceed(t, device.Follow())
+			mustSucceed(t, device.Claim(c.claim))
+
+			held, err := device.Addresses()
+
+			mustSucceed(t, err)
+			if held.Type != c.want || held.Passthrough != c.claim.Passthrough {
+				t.Errorf("addresses = %+v, want type %s and passthrough %t", held, c.want, c.claim.Passthrough)
+			}
+		})
+	}
+}

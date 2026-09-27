@@ -41,10 +41,10 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 		volume    string
 		volumeMax string
 	}{
-		{"whole steps", testState(equipment.PowerOn, 100, 139), "on", "50", "69.5"},
-		{"half steps", testState(equipment.PowerOn, 131, 139), "on", "65.5", "69.5"},
-		{"zero", testState(equipment.PowerStandby, 0, 139), "standby", "0", "69.5"},
-		{"unknown volume", testState(equipment.PowerStandby, equipment.Unknown, equipment.Unknown), "standby", "", ""},
+		{"whole steps", testState(equipment.PowerOn, 100, 139), "On", "50", "69.5"},
+		{"half steps", testState(equipment.PowerOn, 131, 139), "On", "65.5", "69.5"},
+		{"zero", testState(equipment.PowerStandby, 0, 139), "Standby", "0", "69.5"},
+		{"unknown volume", testState(equipment.PowerStandby, equipment.Unknown, equipment.Unknown), "Standby", "", ""},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -126,18 +126,18 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	held := ReceiverStatus{
 		Zones: map[string]ZoneStatus{
-			equipment.MainZone: {Power: "on", Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
+			equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
 		},
 		Conditions: []Condition{{Type: reachableConditionType, Status: ConditionTrue}},
 	}
 	movedVolume := held
 	movedVolume.Zones = map[string]ZoneStatus{
-		equipment.MainZone: {Power: "on", Input: "MPLAY", Volume: "51", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
+		equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "51", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
 	}
 	addedZone := held
 	addedZone.Zones = map[string]ZoneStatus{
-		equipment.MainZone: {Power: "on", Input: "MPLAY", Volume: "50"},
-		"zone2":            {Power: "on", Input: "PHONO", Volume: "90"},
+		equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "50"},
+		"zone2":            {Power: "On", Input: "PHONO", Volume: "90"},
 	}
 	movedProtocol := held
 	bass := 3

@@ -79,18 +79,19 @@ func televisionApply(name string) (string, string, ObjectMeta) {
 // one.
 func ApplyTelevisionDerived(c *Client, name string, derived televisionDerived) error {
 	type status struct {
-		CEC          *TelevisionCECStatus `json:"cec,omitempty"`
-		Power        string               `json:"power,omitempty"`
-		ActiveSource string               `json:"activeSource,omitempty"`
-		Displays     []TelevisionDisplay  `json:"displays,omitempty"`
-		Conditions   []Condition          `json:"conditions"`
+		CEC           *TelevisionCECStatus `json:"cec,omitempty"`
+		Power         string               `json:"power,omitempty"`
+		ActiveSource  string               `json:"activeSource,omitempty"`
+		ActiveDisplay string               `json:"activeDisplay,omitempty"`
+		Displays      []TelevisionDisplay  `json:"displays,omitempty"`
+		Conditions    []Condition          `json:"conditions"`
 	}
 	body := struct {
 		APIVersion string     `json:"apiVersion"`
 		Kind       string     `json:"kind"`
 		Metadata   ObjectMeta `json:"metadata"`
 		Status     status     `json:"status"`
-	}{Status: status{CEC: derived.cec, Power: derived.power, ActiveSource: derived.activeSource, Displays: derived.displays, Conditions: []Condition{derived.reachable, derived.inCharge}}}
+	}{Status: status{CEC: derived.cec, Power: derived.power, ActiveSource: derived.activeSource, ActiveDisplay: derived.activeDisplay, Displays: derived.displays, Conditions: []Condition{derived.reachable, derived.inCharge}}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(name)
 	return applyTelevision(c, televisionPath(name)+"/status", fieldManager, body)
 }

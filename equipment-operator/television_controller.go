@@ -90,6 +90,7 @@ func televisionUnchanged(status TelevisionStatus, derived televisionDerived) boo
 	return reflect.DeepEqual(status.CEC, derived.cec) &&
 		status.Power == derived.power &&
 		status.ActiveSource == derived.activeSource &&
+		status.ActiveDisplay == derived.activeDisplay &&
 		reflect.DeepEqual(status.Displays, derived.displays) &&
 		reflect.DeepEqual(conditionOf(status.Conditions, conditionReachable), derived.reachable) &&
 		reflect.DeepEqual(conditionOf(status.Conditions, conditionInCharge), derived.inCharge)

@@ -75,7 +75,8 @@ is a `Display` that a `Television` lists, the TV wakes with the
 receiver. A session wakes the room when a Play starts on it, when its
 screen wakes, when the remote's power button turns the receiver on, or
 when it appears with a Play or its screen already on. The sessions the
-operator finds when it starts wake nothing. The adapter that speaks for that `Display` sends the TV
+operator finds when it starts wake nothing, and they send the receiver
+nothing either. The adapter that speaks for that `Display` sends the TV
 Image View On and then Active Source, so the TV and the receiver show
 the machine. For 30 seconds after, it takes the input back from
 another source that claims it, at most twice. `status.session` holds

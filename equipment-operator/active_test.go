@@ -91,6 +91,8 @@ func TestTheFlipsKeepOneBrokerConnection(t *testing.T) {
 	held.setFlags(true, false)
 	h.equipment.waitForCommands(t, "SIGAME")
 	held.setFlags(false, false)
+	handOnTheRemote(t, h.equipment, "SIDVD")
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 	held.setFlags(true, false)
 	h.equipment.waitForCommands(t, "SIGAME")
 
@@ -178,6 +180,8 @@ func TestTheAwakeFlipsKeepOneBrokerConnection(t *testing.T) {
 	held.setFlags(false, true)
 	h.equipment.waitForCommands(t, "SIGAME")
 	held.setFlags(false, false)
+	handOnTheRemote(t, h.equipment, "SIDVD")
+	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Input == "DVD" })
 	held.setFlags(false, true)
 	h.equipment.waitForCommands(t, "SIGAME")
 
@@ -223,8 +227,8 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 
 	h.equipment.waitForCommands(t, "SIGAME")
 	requireSeries(t, scrape(t, readings), `equipment_commands_total{status="timeout"} 1`)
-	mustDeepEqual(t, linesWith(log, "sent power on"), []string{
-		"Receiver theater: a Play started on Player theater; sent power on; the receiver did not report power on in 50 ms, so the input goes out anyway",
+	mustDeepEqual(t, linesWith(log, "sent power On"), []string{
+		"Receiver theater: a Play started on Player theater; sent power On; the receiver did not report power On in 50 ms, so the input goes out anyway",
 	})
 }
 
@@ -233,11 +237,11 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 func TestAnInputsSoundModeIsSelectedWithTheInput(t *testing.T) {
 	h := newSessionHarnessWith(t, ReceiverVolume{Max: 69.5, Step: 1})
 	h.powerOn(t)
-	h.soundModes = map[string]string{"GAME": "MULTI CH IN"}
+	h.soundModes = map[string]string{"GAME": "STEREO"}
 
 	h.begin(t, "GAME")
 
-	sent := h.equipment.waitForCommands(t, "MSMULTI CH IN")
+	sent := h.equipment.waitForCommands(t, "MSSTEREO")
 	if !slices.Contains(sent, "SIGAME") {
 		t.Fatalf("the input was not selected before the mode: %v", sent)
 	}

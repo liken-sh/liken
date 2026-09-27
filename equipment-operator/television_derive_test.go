@@ -288,3 +288,34 @@ func TestTheTelevisionForABus(t *testing.T) {
 		})
 	}
 }
+
+// The active Display is the Display at the physical address of the
+// last Active Source: first a Display the bus's adapters name, then
+// another Display on a machine the bus names. A source that is no
+// Display, such as a streaming box, names none.
+func TestTheActiveDisplayIsTheDisplayAtTheActiveSource(t *testing.T) {
+	named := display("acm-0001-receiver", "node-1", "1.3.0.0")
+	cases := []struct {
+		name     string
+		source   string
+		displays []Display
+		want     string
+	}{
+		{"a Display an adapter names", "1.3.0.0", []Display{named}, "acm-0001-receiver"},
+		{"a streaming box", "1.5.0.0", []Display{named}, ""},
+		{"another output of a machine the bus names", "1.4.0.0",
+			[]Display{named, display("gsm-0003-study", "node-1", "1.4.0.0")}, "gsm-0003-study"},
+		{"a Display on a machine the bus does not name", "1.4.0.0",
+			[]Display{named, display("gsm-0003-study", "node-9", "1.4.0.0")}, ""},
+		{"a named Display before another at the same address", "1.3.0.0",
+			[]Display{display("aaa-0000-first", "node-1", "1.3.0.0"), named}, "acm-0001-receiver"},
+		{"no Active Source", "", []Display{display("gsm-0003-study", "node-1", "")}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bus := busWith(CECControl, []string{"node-1"}, CECAdapterStatus{Machine: "node-1", ActiveSource: c.source})
+
+			mustMatch(t, derive(bus, c.displays, nil).activeDisplay, c.want)
+		})
+	}
+}

@@ -79,6 +79,11 @@ type session struct {
 	reachedOnce sync.Once
 	reached     chan struct{}
 
+	// surveyed closes when the driver has read the receiver's own facts,
+	// which the power and input step compares with before it sends.
+	surveyedOnce sync.Once
+	surveyed     chan struct{}
+
 	completeOnce sync.Once
 	complete     chan struct{}
 
@@ -105,14 +110,16 @@ type session struct {
 }
 
 // startSession opens the session's own broker connection and claims the
-// level with a retained owner mark.
+// level with a retained owner mark, for a session that appears while
+// the operator runs.
 //
-// Power and input go out once for a session that starts with either
-// flag on, and once only when both are on at the start. A session that
-// starts with both off owns the level and sends the equipment nothing.
+// The power and input step runs once for a session that starts with
+// either flag on, and once only when both are on at the start. A session
+// that starts with both off owns the level and sends the equipment
+// nothing.
 func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, busAddress string, scale func() ReceiverVolume, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
 	s := newSession(ctx, receiver, spec, driver, readings, log, busAddress, scale, inputSoundMode, applyPower, room)
-	s.start(spec.Active, spec.Awake)
+	s.start(spec.Active, spec.Awake, false)
 	return s
 }
 
@@ -140,6 +147,7 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 		room:           room,
 		powered:        make(chan struct{}),
 		reached:        make(chan struct{}),
+		surveyed:       make(chan struct{}),
 		complete:       make(chan struct{}),
 		connected:      make(chan struct{}),
 	}
@@ -158,12 +166,25 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 }
 
 // start reads the receiver's state as it stands, opens the broker
-// connection, and runs the one-shots the flags ask for.
-func (s *session) start(active, awake bool) {
+// connection, and takes the flags. A session that appears while the
+// operator runs is a change a person made, so its flags run the power
+// and input step. A session the operator finds when it starts is not:
+// the last operator already ran the step for those flags, and a person
+// may have changed the receiver since. So adopting stores the flags and
+// runs no step, and only a later flip runs one.
+func (s *session) start(active, awake, adopting bool) {
 	s.mark(s.driver.State())
 	go s.bus.Run(s.ctx)
 	go s.adopt(s.ctx)
-	s.flags(active, awake, true)
+	if !adopting {
+		s.flags(active, awake, true)
+		return
+	}
+	s.active.Store(active)
+	s.awake.Store(awake)
+	if s.room != nil {
+		s.room.opened(active || awake, s.flagWords(active, awake))
+	}
 }
 
 // roomEvents is how a session tells the TV of its room what it did to
@@ -248,6 +269,17 @@ func (s *session) stop() {
 	s.publishOwner(nil)
 	s.log.printf("cleared the owner mark on %s", ownerTopic(s.spec.VolumeTopic))
 	time.Sleep(sessionStopGrace)
+	s.cancel()
+}
+
+// handOver closes the connection and leaves the owner mark on the
+// broker, for an operator that shuts down. The next operator starts the
+// same session and publishes the same mark, so the playback pods leave
+// the level alone through the restart. The bus closes with DISCONNECT,
+// so the broker drops the will; an operator that dies sends none, and
+// the will clears the mark.
+func (s *session) handOver() {
+	s.log.printf("kept the owner mark on %s for the next operator", ownerTopic(s.spec.VolumeTopic))
 	s.cancel()
 }
 
@@ -452,12 +484,16 @@ func (s *session) ceiling() int {
 	return 0
 }
 
-// mark releases the three waits a session stands on: the connection the
-// commands go out over, the power the input selection follows, and the
-// volume reading the adopt needs.
+// mark releases the four waits a session stands on: the connection the
+// commands go out over, the survey the power and input step compares
+// with, the power the input selection follows, and the volume reading
+// the adopt needs.
 func (s *session) mark(state equipment.State) {
 	if state.Reachable == ConditionTrue {
 		s.reachedOnce.Do(func() { close(s.reached) })
+	}
+	if s.driver.Surveyed() {
+		s.surveyedOnce.Do(func() { close(s.surveyed) })
 	}
 	main := mainZone(state)
 	if main.Power == equipment.PowerOn {
@@ -569,13 +605,13 @@ func (s *session) togglePower(payload []byte) {
 	// settles, not a snapshot taken a moment earlier.
 	trigger := "the power topic asks toggle"
 	if mainZone(s.driver.State()).Power == equipment.PowerOn {
-		line := trigger + "; the receiver reports power on, so sent power standby"
+		line := trigger + "; the receiver reports power On, so sent power Standby"
 		began := time.Now()
 		if err := s.driver.SetPower(equipment.MainZone, false); err != nil {
 			s.log.refused(line, err)
 			return
 		}
-		s.log.confirm(line, began, mainZoneCheck(s.driver, "power standby", powerWords))
+		s.log.confirm(line, began, mainZoneCheck(s.driver, "power Standby", powerWords))
 		if s.applyPower != nil {
 			s.applyPower(equipment.PowerStandby)
 		}
@@ -605,20 +641,22 @@ func (s *session) selectInput(ctx context.Context, trigger string) {
 
 // selectInputLocked is the power-and-input one-shot, called with oneShot
 // held by either a flag flip or a toggle. trigger names what asked for
-// it, for the lines it writes.
+// it, for the lines it writes. It waits for the survey, because before
+// it the receiver has reported nothing to compare with, and then it
+// sends only the power, the input, and the sound mode that the receiver
+// reports at another value.
 func (s *session) selectInputLocked(ctx context.Context, trigger string) {
 	// A command sent before the connection is open is dropped, and a one-
-	// shot is never re-asserted, so the wait for the connection is what
-	// makes the one-shot land. The session's own lifetime is the bound: a
-	// receiver that never answers has nothing to select.
-	select {
-	case <-ctx.Done():
+	// shot is never re-asserted, so the wait for the survey, which comes
+	// after the connection, is what makes the one-shot land. The session's
+	// own lifetime is the bound: a receiver that never answers has nothing
+	// to select.
+	if !s.waitForSurvey(ctx) {
 		return
-	case <-s.reached:
 	}
 	powered := s.armPower()
 	if mainZone(s.driver.State()).Power != equipment.PowerOn {
-		line := trigger + "; sent power on"
+		line := trigger + "; sent power On"
 		began := time.Now()
 		if err := s.driver.SetPower(equipment.MainZone, true); err != nil {
 			s.log.refused(line, err)
@@ -626,13 +664,13 @@ func (s *session) selectInputLocked(ctx context.Context, trigger string) {
 		}
 		select {
 		case <-ctx.Done():
-			s.log.printf("%s; the session ended before the receiver reported power on", line)
+			s.log.printf("%s; the session ended before the receiver reported power On", line)
 			return
 		case <-powered:
-			s.log.printf("%s; the receiver reported power on after %s", line, elapsed(time.Since(began)))
+			s.log.printf("%s; the receiver reported power On after %s", line, elapsed(time.Since(began)))
 		case <-time.After(sessionPowerWait):
 			s.readings.reportCommand(denon.CommandTimeout)
-			s.log.printf("%s; the receiver did not report power on in %s, so the input goes out anyway", line, elapsed(sessionPowerWait))
+			s.log.printf("%s; the receiver did not report power On in %s, so the input goes out anyway", line, elapsed(sessionPowerWait))
 		}
 	}
 	if ctx.Err() != nil {
@@ -641,17 +679,53 @@ func (s *session) selectInputLocked(ctx context.Context, trigger string) {
 	s.selectTheInput(trigger)
 }
 
+// waitForSurvey waits until the receiver is reachable and surveyed, and
+// answers false when the session ends first.
+func (s *session) waitForSurvey(ctx context.Context) bool {
+	for _, wait := range []chan struct{}{s.reached, s.surveyed} {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-wait:
+		}
+	}
+	return true
+}
+
 // selectTheInput sends the session's input and the sound mode that
-// travels with it. The power one-shot and the ensure both reach it, so
-// the mode and the input can never drift apart.
+// travels with it, each only when the receiver reports another value.
+// The power one-shot and the ensure both reach it, so the mode and the
+// input can never drift apart.
 func (s *session) selectTheInput(trigger string) {
+	state := mainZone(s.driver.State())
+	mode := s.inputSoundMode(s.spec.Input)
+	sendInput := state.Input != s.spec.Input
+	sendMode := mode != "" && state.SoundMode != mode
+	switch {
+	case !sendInput && !sendMode:
+		reports := []string{powerWords(state, 0), inputWords(state, 0)}
+		if mode != "" {
+			reports = append(reports, soundModeWords(state, 0))
+		}
+		s.log.printf("%s; sent nothing, because the receiver reports %s", trigger, wordList(reports))
+		return
+	case !sendInput:
+		line := fmt.Sprintf("%s; sent sound mode %s", trigger, mode)
+		began := time.Now()
+		if err := s.driver.SetSoundMode(equipment.MainZone, mode); err != nil {
+			s.log.refused(line, err)
+			return
+		}
+		s.log.confirm(line, began, mainZoneCheck(s.driver, "sound mode "+mode, soundModeWords))
+		return
+	}
 	line := fmt.Sprintf("%s; sent input %s", trigger, s.spec.Input)
 	began := time.Now()
 	if err := s.driver.SetInput(equipment.MainZone, s.spec.Input); err != nil {
 		s.log.refused(line, err)
 		return
 	}
-	if mode := s.inputSoundMode(s.spec.Input); mode != "" {
+	if sendMode {
 		line += " and sound mode " + mode
 		if err := s.driver.SetSoundMode(equipment.MainZone, mode); err != nil {
 			s.log.refused(line, err)
@@ -680,10 +754,8 @@ func (s *session) ensureInput() {
 func (s *session) ensureInputOnce() {
 	s.oneShot.Lock()
 	defer s.oneShot.Unlock()
-	select {
-	case <-s.ctx.Done():
+	if !s.waitForSurvey(s.ctx) {
 		return
-	case <-s.reached:
 	}
 	trigger := "the commands topic asks " + commandEnsureInput
 	state := mainZone(s.driver.State())

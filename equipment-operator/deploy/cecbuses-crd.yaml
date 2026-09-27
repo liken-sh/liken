@@ -24,22 +24,37 @@ spec:
       # status.devices and the conditions.
       subresources:
         status: {}
+      # The default view says where the adapters are and whether the bus
+      # works. kubectl get -o wide adds the columns with priority 1: the
+      # scan, each adapter's state, and the names of the devices found.
       additionalPrinterColumns:
         - name: Mode
           type: string
           jsonPath: .spec.mode
+        - name: Machines
+          type: string
+          jsonPath: .spec.adapters[*].machine
         - name: Joined
           type: string
           jsonPath: .status.conditions[?(@.type=="Joined")].status
-        - name: Scanned
-          type: string
-          jsonPath: .status.conditions[?(@.type=="Scanned")].status
         - name: Coherent
           type: string
           jsonPath: .status.conditions[?(@.type=="Coherent")].status
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        - name: Scanned
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Scanned")].status
+          priority: 1
+        - name: State
+          type: string
+          jsonPath: .status.adapters[*].state
+          priority: 1
+        - name: Devices
+          type: string
+          jsonPath: .status.devices[*].osdName
+          priority: 1
       schema:
         openAPIV3Schema:
           type: object

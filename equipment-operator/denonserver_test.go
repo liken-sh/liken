@@ -139,6 +139,9 @@ func (f *fakeDenon) answer(command string) {
 	case strings.HasPrefix(command, "SI"):
 		f.input = command[2:]
 		f.send("SI" + f.input)
+	case strings.HasPrefix(command, "MS") && !strings.HasPrefix(command, "MSQUICK"):
+		f.soundMode = command[2:]
+		f.send("MS" + f.soundMode)
 	case strings.HasPrefix(command, "Z2"), strings.HasPrefix(command, "Z3"):
 		// A non-main zone set command is held or reported by the same map
 		// as a setting, so a test can model a zone that ignores a control.

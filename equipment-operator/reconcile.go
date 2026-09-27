@@ -59,7 +59,7 @@ type receiverUnit struct {
 	// The declared inputs live here for the same reason: the sound mode
 	// an input names is read when the session selects it.
 	inputs atomic.Pointer[[]ReceiverInput]
-	// The last power the operator applied, so a reconcile and a toggle
+	// The last power the operator settled, so a reconcile and a toggle
 	// share one memory of what was sent and neither re-asserts it.
 	power atomic.Pointer[equipment.Power]
 	// The last settings the operator applied. A field the receiver does
@@ -79,6 +79,9 @@ type receiverUnit struct {
 	// from status.settingsGeneration when the unit starts and written
 	// back with the status.
 	settingsGeneration atomic.Int64
+	// The generation whose spec.power the operator settled, the same way
+	// in status.powerGeneration.
+	powerGeneration atomic.Int64
 
 	mutex   sync.Mutex
 	session *session
@@ -141,6 +144,7 @@ func (u *receiverUnit) write() {
 	settings := u.denonSettings()
 	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.Address(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)
 	status.SettingsGeneration = u.settingsGeneration.Load()
+	status.PowerGeneration = u.powerGeneration.Load()
 	if condition, held := settingsConfirmed(u.budget.unconfirmed(), u.generation.Load(), u.applied.Conditions, now); held {
 		status.Conditions = append(status.Conditions, condition)
 	}
@@ -161,7 +165,11 @@ func (u *receiverUnit) write() {
 // A flip of either flag is not a change of session: it reaches the
 // session that stands, which keeps its broker connection and its
 // adopted level.
-func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
+//
+// adopting says that the operator found the session when it started, in
+// its first pass, and the session then adopts its flags and sends the
+// receiver nothing for them.
+func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, adopting bool) {
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
@@ -185,13 +193,17 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 		u.readings.setClaimed(u.name, false)
 		return
 	}
-	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t",
-		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake)
+	adopted := ""
+	if adopting {
+		adopted = "; the operator found it when it started, so it sends nothing for these flags"
+	}
+	u.log.printf("a session for Player %s started: input %s, volume topic %s, %s, active %t, awake %t%s",
+		spec.Player, spec.Input, spec.VolumeTopic, powerTopicWords(spec.PowerTopic), spec.Active, spec.Awake, adopted)
 	started := newSession(ctx, u.name, *spec, u.driver, u.readings, u.log, u.busAddress, u.volumeRule, u.inputSoundMode, u.applyPower, u.roomFor(spec))
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
-	started.start(spec.Active, spec.Awake)
+	started.start(spec.Active, spec.Awake, adopting)
 	u.readings.setClaimed(u.name, true)
 }
 
@@ -283,28 +295,33 @@ func (u *receiverUnit) inputSoundMode(input string) string {
 }
 
 // setPower drives the receiver to the power a person declared. The
-// operator owns this field, so it sends one command and applies the
-// spec once per change, and never re-asserts while the value stands. A
+// operator owns this field and acts only on a change of it that it sees
+// while it runs: a spec.power the operator already settled is not sent
+// again, so a person who turns the receiver on or off by hand is not
+// overruled, and a generation that changes another field, such as a
+// session flag, sends nothing. The value the operator finds in its first
+// pass is adopted, in adoptPower. A Receiver created while the operator
+// runs has no settled value, so its spec.power is a change. A spec.power
+// the operator has not settled waits for the survey,
+// and then goes out only when the receiver reports another power. A
 // command sent before the connection is open is dropped, so the change
-// waits for a reachable receiver rather than applying a value the
-// equipment never saw. A Denon cannot tell standby from off, so both
-// mean standby and the interface's two-way SetPower is enough; a
-// protocol that could would need a richer method. An empty value is no
-// declarative intent, and the receiver is left where it is.
+// waits for a reachable receiver. A Denon cannot tell Standby from Off,
+// so both mean Standby, and a WiiM has no standby, so it always reports
+// On. An empty value is no declarative intent, and the receiver is left
+// where it is.
 func (u *receiverUnit) setPower(power equipment.Power) {
-	if power == "" || u.powerApplied() == power {
+	if power == "" || power == u.powerApplied() {
+		u.recordPowerGeneration()
 		return
 	}
-	if u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	on := power != equipment.PowerStandby && power != equipment.PowerOff
 	asks := fmt.Sprintf("generation %d asks power %s", u.generation.Load(), power)
-	// A WiiM has no power command, and its driver answers power on with
-	// no error and nothing on the wire, so the line says that.
-	if on && u.wiimClient != nil {
-		u.log.printf("%s; sent nothing, because a WiiM has no power-on command", asks)
-		u.applyPower(power)
+	on := power == equipment.PowerOn
+	if observed := mainZone(u.driver.State()); on == (observed.Power == equipment.PowerOn) {
+		u.log.printf("%s; sent nothing, because the receiver reports %s", asks, powerWords(observed, 0))
+		u.settlePower(power)
 		return
 	}
 	sent := powerWords(equipment.ZoneState{Power: commandedPower(on)}, 0)
@@ -315,7 +332,47 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 		return
 	}
 	u.log.confirm(line, began, mainZoneCheck(u.driver, sent, powerWords))
+	u.settlePower(power)
+}
+
+// adoptPower takes the spec.power the operator finds in its first pass
+// as settled, and sends nothing. The operator acts only on a change it
+// sees while it runs, and a value it merely finds may be stale: the
+// session's toggle writes spec.power, and a Play or a person can turn
+// the receiver on after it. So a restart and an upgrade, which finds no
+// status.powerGeneration, both adopt.
+func (u *receiverUnit) adoptPower(power equipment.Power) {
+	u.power.Store(&power)
+	u.recordPowerGeneration()
+	if power != "" {
+		u.log.printf("generation %d asks power %s; the operator found it when it started, so it sent nothing", u.generation.Load(), power)
+	}
+}
+
+// carryPower gives a unit that replaces another for a new address the
+// spec.power the old one settled, because a new wiring is no change of
+// spec.power.
+func (u *receiverUnit) carryPower(old *receiverUnit) {
+	if held := old.power.Load(); held != nil {
+		u.power.Store(held)
+	}
+}
+
+// settlePower records a spec.power the operator settled, by a command or
+// because the receiver already reported it, and the generation it
+// settled.
+func (u *receiverUnit) settlePower(power equipment.Power) {
 	u.applyPower(power)
+	u.recordPowerGeneration()
+}
+
+// recordPowerGeneration records that the operator has settled the
+// spec.power of the current generation, and asks for a status write so
+// status.powerGeneration follows.
+func (u *receiverUnit) recordPowerGeneration() {
+	if generation := u.generation.Load(); u.powerGeneration.Swap(generation) != generation {
+		poke(u.dirty)
+	}
 }
 
 // denonSettings answers the last settings a Denon reported, and nil for
@@ -747,12 +804,23 @@ func (u *receiverUnit) player() string {
 // deleted Receiver leaves behind. The metrics scoped to this receiver
 // go with it, so a Receiver that is gone stops being reported.
 func (u *receiverUnit) stop() {
+	u.end((*session).stop)
+}
+
+// shutdown closes the unit at operator shutdown. The session hands its
+// owner mark to the next operator instead of clearing it.
+func (u *receiverUnit) shutdown() {
+	u.end((*session).handOver)
+}
+
+// end closes the session one way, then the connection.
+func (u *receiverUnit) end(close func(*session)) {
 	u.mutex.Lock()
 	held := u.session
 	u.session = nil
 	u.mutex.Unlock()
 	if held != nil {
-		held.stop()
+		close(held)
 	}
 	u.cancel()
 	u.readings.forgetReceiver(u.name)
@@ -770,6 +838,9 @@ type controller struct {
 	// sessions writes every Television's status.session for the units'
 	// sessions.
 	sessions *televisionSessions
+	// live says the first pass has ended. A session the first pass finds
+	// was there when the operator started, and it adopts its flags.
+	live bool
 	// log takes the lines a person reads to follow the receivers, the
 	// way the node workload's log does for its adapter.
 	log io.Writer
@@ -825,8 +896,11 @@ func (c *controller) doPass(ctx context.Context) error {
 	}
 
 	// The first pass adopts what it finds. From its end on, a session
-	// that appears is a change a person caused.
+	// that appears is a change a person caused. A TV's session that an
+	// earlier pass could not write is written again here.
+	defer func() { c.live = true }()
 	defer c.sessions.markLive()
+	defer c.sessions.retry()
 	for name, unit := range c.units {
 		if !live[name] {
 			// A deleted Receiver ends its session for good, so its TV's
@@ -849,6 +923,7 @@ func (c *controller) doPass(ctx context.Context) error {
 func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
+	var replaced *receiverUnit
 	if held && (unit.address != c.resolvedAddress(&receiver.Spec) ||
 		unit.settingsTopic != receiver.Spec.SettingsTopic ||
 		unit.commandsTopic != receiver.Spec.CommandsTopic) {
@@ -857,7 +932,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 		player := unit.player()
 		unit.stop()
 		delete(c.units, name)
-		held = false
+		held, replaced = false, unit
 		if player != "" {
 			c.sessions.lift(player)
 		}
@@ -865,6 +940,12 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	if !held {
 		unit = c.start(ctx, receiver)
 		c.units[name] = unit
+		switch {
+		case replaced != nil:
+			unit.carryPower(replaced)
+		case !c.live:
+			unit.adoptPower(receiver.Spec.Power)
+		}
 	}
 	unit.generation.Store(receiver.Metadata.Generation)
 	unit.setVolume(receiver.Spec.Volume)
@@ -881,7 +962,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	if settled {
 		unit.recordSettingsGeneration()
 	}
-	unit.setSession(ctx, receiver.Spec.Session)
+	unit.setSession(ctx, receiver.Spec.Session, !c.live)
 }
 
 // protocolAddress is the address the receiver's protocol block declares.
@@ -926,6 +1007,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 	// status names the spec it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
 	unit.settingsGeneration.Store(receiver.Status.SettingsGeneration)
+	unit.powerGeneration.Store(receiver.Status.PowerGeneration)
 	go unit.driver.Run(ctx)
 	go unit.report(ctx)
 	unit.startBus(ctx)
@@ -974,10 +1056,11 @@ func (c *controller) run(ctx context.Context) {
 	}
 }
 
+// stopAll closes every unit at operator shutdown.
 func (c *controller) stopAll() {
 	c.sessions.stop()
 	for name, unit := range c.units {
-		unit.stop()
+		unit.shutdown()
 		delete(c.units, name)
 	}
 }

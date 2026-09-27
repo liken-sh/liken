@@ -48,7 +48,7 @@ The snapshot shape, which the driver's transcript test pins:
 
 ```json
 {
-  "system": {"power": "on", "eco": "auto", "dimmer": "bright", "autoStandby": "off", "speakerPreset": 1, "audioInputMode": "hdmi", "videoSelect": "off", "bluetoothTransmitter": "off", "bluetoothOutput": "speakers"},
+  "system": {"power": "On", "eco": "auto", "dimmer": "bright", "autoStandby": "off", "speakerPreset": 1, "audioInputMode": "hdmi", "videoSelect": "off", "bluetoothTransmitter": "off", "bluetoothOutput": "speakers"},
   "tone": {"control": false, "bass": 0, "treble": 0},
   "audyssey": {"multeq": "reference", "dynamicEq": true, "referenceLevelOffset": 0, "dynamicVolume": "off", "loudnessManagement": true},
   "audio": {"drc": "off", "lfe": 0, "effect": 0, "delay": 0, "audioDelay": 0, "subwoofer": true, "restorer": "off", "graphicEq": "off", "headphoneEq": "off", "speakerVirtualizer": true, "dialogEnhancer": "off"},
@@ -58,7 +58,9 @@ The snapshot shape, which the driver's transcript test pins:
 ```
 
 The tone and channel values are in display units, so the wire's 50
-reads as 0. The LFE level is negative decibels.
+reads as 0. The LFE level is negative decibels. The power is `On` or
+`Standby`, the same PascalCase words as every power this operator
+reads and writes.
 
 Main-zone power comes from `ZM` when a model reports it, and from `PW`
 otherwise. A model that has a second zone names it with `Z2` lines, and

@@ -21,9 +21,11 @@ type televisionDerived struct {
 	cec          *TelevisionCECStatus
 	power        string
 	activeSource string
-	displays     []TelevisionDisplay
-	reachable    Condition
-	inCharge     Condition
+	// activeDisplay is the Display at activeSource, or empty.
+	activeDisplay string
+	displays      []TelevisionDisplay
+	reachable     Condition
+	inCharge      Condition
 }
 
 // deriveTelevision answers one Television's derived status. inCharge
@@ -48,6 +50,7 @@ func deriveTelevision(television *Television, inCharge string, bus *CECBus, disp
 	if bus != nil {
 		derived.displays = televisionDisplays(bus, displays, receivers)
 		derived.activeSource = activeSourceOf(bus, now)
+		derived.activeDisplay = activeDisplayOf(bus, displays, derived.activeSource)
 	}
 	verdict := televisionReachable(name, bus, tv)
 	derived.reachable = stampCondition(conditionReachable, verdict, television.Metadata.Generation, television.Status.Conditions, now)
@@ -122,6 +125,39 @@ func activeSourceOf(bus *CECBus, now time.Time) string {
 	for _, adapter := range bus.Spec.Adapters {
 		if entry, current := entries.current[adapter.Machine]; current && entry.ActiveSource != "" {
 			return entry.ActiveSource
+		}
+	}
+	return ""
+}
+
+// activeDisplayOf answers the Display at the physical address of the
+// active source, and an empty name when no Display is there, such as
+// for a streaming box. A Display that an adapter of the bus names comes
+// first, because that adapter announces its address on this wire. Then
+// comes a Display on a machine the bus names: its output can go to
+// another TV, but its address matches a source this bus carries. Of two
+// Displays in one group, the first by name wins.
+func activeDisplayOf(bus *CECBus, displays []Display, source string) string {
+	address, err := cec.ParsePhysicalAddress(source)
+	if err != nil {
+		return ""
+	}
+	var named, onMachine []string
+	for _, display := range displays {
+		at, err := cec.ParsePhysicalAddress(display.Status.PhysicalAddress)
+		if err != nil || at != address {
+			continue
+		}
+		switch {
+		case slices.ContainsFunc(bus.Spec.Adapters, func(adapter CECBusAdapter) bool { return adapter.Display == display.Metadata.Name }):
+			named = append(named, display.Metadata.Name)
+		case slices.ContainsFunc(bus.Spec.Adapters, func(adapter CECBusAdapter) bool { return adapter.Machine == display.Status.Node }):
+			onMachine = append(onMachine, display.Metadata.Name)
+		}
+	}
+	for _, found := range [][]string{named, onMachine} {
+		if len(found) > 0 {
+			return slices.Min(found)
 		}
 	}
 	return ""

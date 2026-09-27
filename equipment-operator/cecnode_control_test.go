@@ -212,3 +212,38 @@ func TestAMoveToAnotherBusClaimsUnderItsName(t *testing.T) {
 		t.Errorf("the adapter announces a new name with no new claim")
 	}
 }
+
+// The kernel keeps a claim after the pod that made it stops without a
+// release, such as a pod the kubelet killed. A new pod that finds the
+// claim it would make keeps it, because a release and a claim take the
+// adapter off the bus and back, and the TV sees its source leave. A
+// claim under another name is made again.
+func TestAClaimTheKernelHoldsIsKeptWhenItMatches(t *testing.T) {
+	cases := []struct {
+		name   string
+		held   cec.Claim
+		claims int
+	}{
+		{"the claim the pod would make", cec.Claim{OSDName: "den", Passthrough: true}, 1},
+		{"a claim under another name", cec.Claim{OSDName: "lounge", Passthrough: true}, 2},
+		{"a claim with no passthrough", cec.Claim{OSDName: "den"}, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := startCECAPI(t)
+			adapter, device := usbAdapter(cecRoom())
+			mustSucceed(t, device.Follow())
+			mustSucceed(t, device.SetPhysicalAddress(0x1300))
+			mustSucceed(t, device.Claim(c.held))
+			api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+			api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
+
+			startNode(t, api, "node-1", device)
+
+			entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+			mustMatch(t, entry.OSDName, "den")
+			mustMatch(t, *entry.LogicalAddress, 4)
+			mustMatch(t, adapter.Claims(), c.claims)
+		})
+	}
+}

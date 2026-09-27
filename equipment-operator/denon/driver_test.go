@@ -120,7 +120,7 @@ func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
 	got := waitForSettings(t, harness.client, func(s Settings) bool {
 		return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
 	})
-	mustMatch(t, got.System.Power, "standby")
+	mustMatch(t, got.System.Power, "Standby")
 	mustMatch(t, *got.System.VideoSelect, "off")
 	mustMatch(t, *got.Audio.DRC, "off")
 	mustMatch(t, *got.Audio.LFE, 0)

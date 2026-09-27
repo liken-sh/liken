@@ -1,0 +1,65 @@
+package main
+
+// The session path against an API server that is not ready. A new CRD
+// makes the API server answer 429 for a moment, and any other refusal
+// can last longer, so a Television's status.session that the first
+// try could not write is written on a later pass.
+
+import (
+	"testing"
+	"time"
+)
+
+// sessionOperator is the Deployment over one Receiver whose idle
+// session's input carries Display acm-0001-receiver, which Television
+// lounge lists.
+func sessionOperator(t *testing.T, api *cecAPI) *controller {
+	t.Helper()
+	amp := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	receiver := idleReceiver(amp.address(), ReceiverVolume{Max: 69.5})
+	receiver.Spec.Inputs = []ReceiverInput{{Name: "GAME", Machine: "node-1", Monitor: "acm-0001-receiver"}}
+	api.putReceiver(receiver)
+	api.showing(lounge(""), "acm-0001-receiver")
+	operator := newController(api.client, brokers.address(), testMetrics(t))
+	operator.log = &logBuffer{}
+	t.Cleanup(operator.stopAll)
+	return operator
+}
+
+// adoptedSession is what the first pass writes for the idle session.
+var adoptedSession = &TelevisionSession{Player: "house/theater", Display: "acm-0001-receiver"}
+
+func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
+	shorten(t, &retryAfterUnit, time.Millisecond)
+	api := startCECAPI(t)
+	operator := sessionOperator(t, api)
+	api.mutex.Lock()
+	api.throttledTelevisionLists = 1
+	api.mutex.Unlock()
+
+	mustSucceed(t, operator.pass(t.Context()))
+
+	television, _ := api.television("lounge")
+	mustDeepEqual(t, television.Status.Session, adoptedSession)
+}
+
+// A session write the API server refuses is written on the next pass,
+// as the adoption the first pass decided on: the pass that retries it
+// is live, and it still wakes nothing.
+func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
+	api := startCECAPI(t)
+	operator := sessionOperator(t, api)
+	api.mutex.Lock()
+	api.noSessionWrites = true
+	api.mutex.Unlock()
+	mustSucceed(t, operator.pass(t.Context()))
+	api.mutex.Lock()
+	api.noSessionWrites = false
+	api.mutex.Unlock()
+
+	mustSucceed(t, operator.pass(t.Context()))
+
+	television, _ := api.television("lounge")
+	mustDeepEqual(t, television.Status.Session, adoptedSession)
+}

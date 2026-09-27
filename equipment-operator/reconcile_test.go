@@ -301,7 +301,7 @@ func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 	status := api.waitForStatus(t, func(status ReceiverStatus) bool {
 		return connected(status) && status.Zones["main"].SoundMode != ""
 	})
-	mustMatch(t, status.Zones["main"].Power, "standby")
+	mustMatch(t, status.Zones["main"].Power, "Standby")
 	mustMatch(t, status.Zones["main"].Input, "MPLAY")
 	mustMatch(t, status.Zones["main"].Volume, "50")
 	mustMatch(t, status.Zones["main"].VolumeMax, "69.5")
@@ -446,9 +446,11 @@ func TestASessionThatChangesSelectsTheNewInput(t *testing.T) {
 func TestASessionThatHasNotChangedIsLeftAlone(t *testing.T) {
 	api := startFakeAPI(t)
 	equipment := startFakeDenon(t)
-	api.setReceivers(sessionedReceiver("theater", equipment.address(), "GAME"))
+	api.setReceivers(testReceiver("theater", equipment.address()))
 	operator := startController(t, api)
+	mustSucceed(t, operator.pass(t.Context()))
 
+	api.setReceivers(sessionedReceiver("theater", equipment.address(), "GAME"))
 	mustSucceed(t, operator.pass(t.Context()))
 	equipment.waitForCommands(t, "SIGAME")
 	mustSucceed(t, operator.pass(t.Context()))
@@ -546,6 +548,8 @@ func TestAVolumeEditReachesAStandingSession(t *testing.T) {
 	operator := newController(api.client, brokers.address(), testMetrics(t))
 	operator.now = func() time.Time { return statusNow }
 
+	api.setReceivers(testReceiver("theater", equipment.address()))
+	mustSucceed(t, operator.pass(t.Context()))
 	api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 1}))
 	mustSucceed(t, operator.pass(t.Context()))
 
@@ -588,6 +592,7 @@ func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 	adopted := broker.waitForTopic(t, testVolumeTopic)
 	broker.push(testVolumeTopic, adopted.payload)
 	waitUntilSessionAdopted(t, operator, "theater")
+	waitForSurvey(t, operator)
 
 	woken := playingReceiver(equipment.address(), rule)
 	woken.Spec.Session.Awake = true
@@ -686,23 +691,24 @@ func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 	mustMatch(t, empty.inputSoundMode("MPLAY"), "")
 }
 
-// A declarative spec.power change is applied once the receiver is
-// reachable, and a re-list with the same value sends nothing further:
-// the operator owns the field and never re-asserts it.
+// A declarative spec.power change the operator sees while it runs is
+// applied once the receiver is reachable and surveyed, and a re-list
+// with the same value sends nothing further: the operator owns the
+// field and never re-asserts it.
 func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 	api := startFakeAPI(t)
 	fake := startFakeDenon(t)
 	receiver := testReceiver("theater", fake.address())
-	receiver.Spec.Power = equipment.PowerOn
 	api.setReceivers(receiver)
 	operator := startController(t, api)
-
-	// The first pass starts the driver, which connects asynchronously, so
-	// the change waits for a reachable receiver.
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
+	waitForSurvey(t, operator)
 
-	// Once reachable, the change applies once.
+	// Once surveyed, the change applies once.
+	receiver.Spec.Power = equipment.PowerOn
+	receiver.Metadata.Generation = 5
+	api.setReceivers(receiver)
 	mustSucceed(t, operator.pass(t.Context()))
 	fake.waitForCommands(t, denon.PowerOnCommand)
 	mustMatch(t, <-api.powers, equipment.PowerOn)

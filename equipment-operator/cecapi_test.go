@@ -53,6 +53,10 @@ type cecAPI struct {
 	noTelevisionDefinition bool
 	// noSessionWrites refuses the Deployment's status.session writes.
 	noSessionWrites bool
+	// throttledTelevisionLists counts the Television lists still to
+	// answer with 429, the way the API server answers while a new CRD's
+	// storage starts.
+	throttledTelevisionLists int
 	// refusingWakeWrites refuses the node workloads' wake writes.
 	refusingWakeWrites bool
 	// sessionDelay holds each session write, and sessionInFlight and

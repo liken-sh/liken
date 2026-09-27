@@ -288,7 +288,7 @@ func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
 		t.Errorf("the apply body carries a status: %s", sent.Body)
 	}
 	spec, _ := body["spec"].(map[string]any)
-	mustMatch(t, spec["power"], any("on"))
+	mustMatch(t, spec["power"], any("On"))
 }
 
 // An absent object and a losing write are answers, not failures; the

@@ -70,7 +70,7 @@ func (t *Television) bus() string {
 }
 
 // TelevisionStatus has three writers. The Deployment derives cec,
-// power, activeSource, displays, and the Reachable and InCharge
+// power, activeSource, activeDisplay, displays, and the Reachable and InCharge
 // conditions from the CECBus, the Displays, and the Receivers, and it
 // writes session under a field manager of its own. The node workload
 // that sends the bus's commands writes powerGeneration and the
@@ -83,6 +83,9 @@ type TelevisionStatus struct {
 	// ActiveSource is the physical address of the last Active Source
 	// the bus carried.
 	ActiveSource string `json:"activeSource,omitempty"`
+	// ActiveDisplay is the Display at ActiveSource, or empty when no
+	// Display is there.
+	ActiveDisplay string `json:"activeDisplay,omitempty"`
 	// PowerGeneration is the metadata.generation whose spec.power the
 	// node workload applied. Every spec edit is a new generation, so the
 	// node workload applies each edit once, and a restart applies none

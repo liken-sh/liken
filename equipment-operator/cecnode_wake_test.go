@@ -419,7 +419,8 @@ func TestTheDisplaysAdapterRunsTheWake(t *testing.T) {
 
 // The last Active Source on the bus reaches the adapter's entry and the
 // Television's status, whether the adapter sent it or heard it, and in
-// Listen too.
+// Listen too. The Television also names the Display at that address,
+// and names none for a source that is no Display.
 func TestTheActiveSourceReachesTheTelevision(t *testing.T) {
 	fastWake(t)
 	wire := roomWithTV(televisionTV(cec.PowerOn))
@@ -430,6 +431,7 @@ func TestTheActiveSourceReachesTheTelevision(t *testing.T) {
 	passes(t, api, 1)
 	television, _ := api.television("lounge")
 	mustMatch(t, television.Status.ActiveSource, "1.3.0.0")
+	mustMatch(t, television.Status.ActiveDisplay, "acm-0001-receiver")
 
 	wire.Send(cec.ActiveSource(8, 0x1500))
 
@@ -437,6 +439,7 @@ func TestTheActiveSourceReachesTheTelevision(t *testing.T) {
 	passes(t, api, 1)
 	television, _ = api.television("lounge")
 	mustMatch(t, television.Status.ActiveSource, "1.5.0.0")
+	mustMatch(t, television.Status.ActiveDisplay, "")
 }
 
 func TestAListeningAdapterReportsTheActiveSource(t *testing.T) {
