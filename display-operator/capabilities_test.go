@@ -162,7 +162,7 @@ func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
 			refuses: []string{"sharpness"},
 			values: map[string][]string{
 				"input":       {"DP-1", "DP-2", "HDMI-1", "HDMI-2"},
-				"power":       {"on", "off"},
+				"power":       {"On", "Off"},
 				"audioMute":   {"mute", "unmute"},
 				"colorPreset": {"6500K", "9300K", "user-1"},
 			},
@@ -177,7 +177,7 @@ func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
 			refuses: []string{"audioMute", "audioVolume"},
 			values: map[string][]string{
 				"input": {"VGA-1", "DVI-1", "DVI-2", "DP-1", "DP-2", "HDMI-1", "HDMI-2"},
-				"power": {"on", "off", "hardOff"},
+				"power": {"On", "Off", "HardOff"},
 			},
 			maximums: []string{"brightness", "contrast", "sharpness"},
 		},
@@ -299,7 +299,7 @@ func TestValueNamesCoverWhatTheTableDoesNot(t *testing.T) {
 	}{
 		{code: vcpInput, raw: 0x11, name: "HDMI-1"},
 		{code: vcpInput, raw: 0x1b, name: "0x1b"},
-		{code: vcpPowerMode, raw: powerModeOff, name: "off"},
+		{code: vcpPowerMode, raw: powerModeOff, name: "Off"},
 		{code: vcpAudioMute, raw: 0x01, name: audioMuted},
 		{code: vcpBrightness, raw: 40, name: "0x28"},
 	}

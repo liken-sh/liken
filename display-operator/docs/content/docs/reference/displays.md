@@ -32,10 +32,10 @@ status:
     input:
       values: [VGA-1, DVI-1, DVI-2, DP-1, DP-2, HDMI-1, HDMI-2]
     power:
-      values: ["on", "off", hardOff]
+      values: [On, Off, HardOff]
   observed:
     brightness: 80
-    power: "on"
+    power: On
   conditions:
     - type: Connected
       status: "True"
@@ -77,8 +77,8 @@ A temporary layer above the resting settings. When a writer adds this block, the
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specoverride--backlight"></span>`backlight` | string | no | Hold the panel dark at brightness zero. Both spellings of off hold the panel the same way. One of: `off`, `Off`. |
-| <span id="specoverride--power"></span>`power` | string | no | Hold the panel powered down. Both spellings of off hold the panel the same way. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes. One of: `off`, `Off`. |
+| <span id="specoverride--backlight"></span>`backlight` | string | no | Hold the panel dark at brightness zero. The operator also takes the lowercase off, with the same meaning. One of: `Off`, `off`. |
+| <span id="specoverride--power"></span>`power` | string | no | Hold the panel powered down. The operator also takes the lowercase off, with the same meaning. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes. One of: `Off`, `off`. |
 
 ## status
 
@@ -121,7 +121,7 @@ The controls the panel declares, of the MCCS common core. A control with a value
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statuscapabilities--max"></span>`max` | integer | no | The largest number the panel accepts for a continuous control. |
-| <span id="statuscapabilities--values"></span>`values` | []string | no | Every value the panel accepts for a non-continuous control. |
+| <span id="statuscapabilities--values"></span>`values` | []string | no | Every value the panel accepts for a non-continuous control. The power control lists its values under the names status.observed.power uses. |
 
 ### status.observed
 
@@ -136,7 +136,7 @@ The last value the operator read or wrote for each control. It reads the panel d
 | <span id="statusobserved--input"></span>`input` | string | no |  |
 | <span id="statusobserved--audiovolume"></span>`audioVolume` | integer | no |  |
 | <span id="statusobserved--audiomute"></span>`audioMute` | boolean | no |  |
-| <span id="statusobserved--power"></span>`power` | string | no |  |
+| <span id="statusobserved--power"></span>`power` | string | no | The panel's power state: On, Standby, Suspend, Off, or HardOff. A value the MCCS table does not name is a hexadecimal number, such as 0x06. The operator reads a power name in any case, so a capture saved in lowercase still restores the panel. |
 
 ### status.unconfirmed[]
 
@@ -256,7 +256,7 @@ the resting declaration where `spec` states one, otherwise to the
 value it captured.
 
 The capture is the load-bearing step. Before the operator obeys
-`backlight: off`, it reads the panel's brightness and writes the
+`backlight: Off`, it reads the panel's brightness and writes the
 value to `status.captured`, and only a committed capture is followed
 by the write that darkens the panel. A capture in `etcd` survives an
 operator restart, a pod move, and a reboot, so the restore does too.

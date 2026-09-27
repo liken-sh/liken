@@ -224,17 +224,17 @@ should hold with no claim attached, declare it on the panel's
           driver: display.liken.sh
           parameters:
             brightness: 87
-            power: onWhileClaimed
+            power: OnWhileClaimed
 
 `brightness` is a percentage from 0 to 100 of the panel's own
-maximum. `power: on` powers the panel on at prepare. `power:
-onWhileClaimed` also powers it back down 30 seconds after the claim
+maximum. `power: On` powers the panel on at prepare. `power:
+OnWhileClaimed` also powers it back down 30 seconds after the claim
 ends, so a movie pod that ends leaves a dark screen. A new claim that
 prepares on the same connector inside the 30 seconds cancels the
 power-down, so a `Deployment` rollout does not blink the screen. Use
-`on` for a workload whose screen must stay on when its pod stops for
-longer than that. The parameter also takes `On` and `OnWhileClaimed`,
-with the same meaning.
+`On` for a workload whose screen must stay on when its pod stops for
+longer than that. The parameter also takes the lowercase `on` and
+`onWhileClaimed`, with the same meaning.
 
 The operator reads each control before it writes it, and a panel
 that already holds the value takes no write. So a prepare on a panel

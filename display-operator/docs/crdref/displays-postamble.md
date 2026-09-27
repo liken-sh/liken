@@ -40,7 +40,7 @@ the resting declaration where `spec` states one, otherwise to the
 value it captured.
 
 The capture is the load-bearing step. Before the operator obeys
-`backlight: off`, it reads the panel's brightness and writes the
+`backlight: Off`, it reads the panel's brightness and writes the
 value to `status.captured`, and only a committed capture is followed
 by the write that darkens the panel. A capture in `etcd` survives an
 operator restart, a pod move, and a reboot, so the restore does too.

@@ -24,10 +24,10 @@ status:
     input:
       values: [VGA-1, DVI-1, DVI-2, DP-1, DP-2, HDMI-1, HDMI-2]
     power:
-      values: ["on", "off", hardOff]
+      values: [On, Off, HardOff]
   observed:
     brightness: 80
-    power: "on"
+    power: On
   conditions:
     - type: Connected
       status: "True"

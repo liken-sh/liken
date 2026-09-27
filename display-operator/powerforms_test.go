@@ -1,10 +1,11 @@
 package main
 
-// Every power value a writer states has two spellings: the lowercase
-// word and its PascalCase form. An object can hold either one,
-// depending on the build of the writer that made it, so both spellings
-// must reach the panel as the same value, and the values this operator
-// writes and reports keep their lowercase form.
+// Every power value has two spellings: the lowercase word and its
+// PascalCase form. The operator reports the PascalCase form. An object
+// can hold either one, depending on the build of the writer that made
+// it, so both spellings must reach the panel as the same value, and a
+// stored value that differs from a new one only in case is the same
+// value: it never makes a restarted operator write to a panel.
 
 import (
 	"slices"
@@ -47,6 +48,91 @@ func TestAnotherSpellingOfAClaimsPowerFails(t *testing.T) {
 	}
 }
 
+// The panel's power state reports under the PascalCase names, in
+// status.observed and in the values status.capabilities lists.
+func TestThePanelsPowerReportsInPascalCase(t *testing.T) {
+	cases := []struct {
+		raw  uint16
+		name string
+	}{
+		{0x01, "On"},
+		{0x02, "Standby"},
+		{0x03, "Suspend"},
+		{0x04, "Off"},
+		{0x05, "HardOff"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := valueName(vcpPowerMode, c.raw); got != c.name {
+				t.Errorf("valueName(power, %#02x) = %q, want %q", c.raw, got, c.name)
+			}
+		})
+	}
+}
+
+func TestTheDisplayReportsItsPowerInPascalCase(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	status := fixture.display().Status
+	if status.Observed == nil || status.Observed.Power == nil || *status.Observed.Power != "On" {
+		t.Errorf("observed = %+v, want the power On", status.Observed)
+	}
+	if got := status.Capabilities[powerControl].Values; !slices.Equal(got, []string{"On", "Off"}) {
+		t.Errorf("power values = %v, want [On Off]", got)
+	}
+}
+
+// A capture an operator saved in either spelling brings the panel back
+// on.
+func TestACaptureInEitherSpellingRestoresThePower(t *testing.T) {
+	for _, power := range []string{"on", "On"} {
+		t.Run(power, func(t *testing.T) {
+			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel.values[vcpPowerMode] = powerModeOff
+			fixture := newDisplayFixture(t, panel)
+			fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Power: stringOf(power)})
+
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+			fixture.awaitRestore()
+
+			if got := fixture.holds(vcpPowerMode); got != powerModeOn {
+				t.Errorf("the panel holds the power mode %#02x, want %#02x", got, powerModeOn)
+			}
+		})
+	}
+}
+
+// A restore the panel never confirmed is recorded in status, and the
+// record holds a restarted operator off the panel. A record in the
+// lowercase spelling holds it the same way.
+func TestARecordInEitherSpellingHoldsARestartOffThePanel(t *testing.T) {
+	for _, power := range []string{"on", "On"} {
+		t.Run(power, func(t *testing.T) {
+			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel.values[vcpPowerMode] = powerModeOff
+			fixture := newDisplayFixture(t, panel)
+			display := fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Power: stringOf(power)})
+			display.Status.Unconfirmed = []DisplayUnconfirmed{{Control: powerControl, Value: power}}
+
+			fixture.restartOperator()
+			fixture.passes(3)
+
+			if fixture.control.restoresRunning() {
+				t.Error("a restore started against a panel the record holds it off")
+			}
+			if got := panel.took(vcpPowerMode); len(got) != 0 {
+				t.Errorf("the panel took the power writes %v, want none", got)
+			}
+		})
+	}
+}
+
 // The power record file keeps the lowercase word, whichever spelling
 // the claim stated, so the release after the claim ends finds it.
 func TestThePascalCasePowerRecordsAndReleasesTheLowercaseWord(t *testing.T) {
@@ -77,8 +163,8 @@ func TestBothSpellingsOfAnOverrideDarkenThePanel(t *testing.T) {
 		captured string
 		written  string
 	}{
-		{"power off", DisplayOverride{Power: "off"}, "status captured=power on", "set power=4"},
-		{"power Off", DisplayOverride{Power: "Off"}, "status captured=power on", "set power=4"},
+		{"power off", DisplayOverride{Power: "off"}, "status captured=power On", "set power=4"},
+		{"power Off", DisplayOverride{Power: "Off"}, "status captured=power On", "set power=4"},
 		{"backlight off", DisplayOverride{Backlight: "off"}, "status captured=brightness 50", "set brightness=0"},
 		{"backlight Off", DisplayOverride{Backlight: "Off"}, "status captured=brightness 50", "set brightness=0"},
 	}

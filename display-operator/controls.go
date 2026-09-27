@@ -54,7 +54,9 @@ const (
 const (
 	powerModeOn      = 0x01
 	powerModeStandby = 0x02
+	powerModeSuspend = 0x03
 	powerModeOff     = 0x04
+	powerModeHardOff = 0x05
 )
 
 // The two keys this driver reads beside mode. A brightness is a
@@ -298,8 +300,8 @@ func controlParameters(raw json.RawMessage) (requestedControls, error) {
 			value, known := powerSpellings[power]
 			if !known {
 				return requestedControls{}, fmt.Errorf(
-					"the claim's %s parameter is %q, and this driver takes %q or %q, each also with a capital first letter",
-					powerParameter, power, powerOn, powerOnWhileClaimed)
+					"the claim's %s parameter is %q, and this driver takes %q or %q, or the same word in lowercase",
+					powerParameter, power, "On", "OnWhileClaimed")
 			}
 			stated.Power = value
 		}

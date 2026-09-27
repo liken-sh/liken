@@ -818,9 +818,9 @@ func powerOffValue(facts panelFacts) (uint16, bool) {
 	if len(capability.Values) == 0 {
 		return powerModeOff, true
 	}
-	for _, name := range []string{"off", "hardOff", "standby"} {
-		if slices.Contains(capability.Values, name) {
-			return valueRaw(vcpPowerMode, name)
+	for _, raw := range []uint16{powerModeOff, powerModeHardOff, powerModeStandby} {
+		if slices.Contains(capability.Values, valueName(vcpPowerMode, raw)) {
+			return raw, true
 		}
 	}
 	return 0, false

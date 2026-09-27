@@ -49,7 +49,7 @@ const (
 
 // The one value each override field takes. The block states
 // what the panel is held at, and its absence is what lifts it.
-const overrideOff = "off"
+const overrideOff = "Off"
 
 // Whether an override field states off. The CRD accepts the value in
 // two spellings, "off" and "Off", because an override can hold either

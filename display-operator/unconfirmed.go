@@ -14,6 +14,7 @@ package main
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -78,11 +79,20 @@ func ledgerOf(display *Display) *unconfirmedLedger {
 	return ledger
 }
 
+// Whether a value in a status record and a value this pass computed
+// name the same thing. They compare without case, because a record can
+// hold a power name in the lowercase form an earlier build wrote, and a
+// record that did not match would make a restarted operator write the
+// panel again. No two names of one control differ in case alone.
+func sameValue(recorded, value string) bool {
+	return strings.EqualFold(recorded, value)
+}
+
 // How many confirmed writes of this value the control took in this
 // generation.
 func (l *unconfirmedLedger) writes(control, value string) int {
 	for _, entry := range l.written {
-		if entry.Control == control && entry.Value == value {
+		if entry.Control == control && sameValue(entry.Value, value) {
 			return entry.Count
 		}
 	}
@@ -92,7 +102,7 @@ func (l *unconfirmedLedger) writes(control, value string) int {
 // Count one confirmed write.
 func (l *unconfirmedLedger) wrote(control, value string) {
 	for i, entry := range l.written {
-		if entry.Control == control && entry.Value == value {
+		if entry.Control == control && sameValue(entry.Value, value) {
 			l.written[i].Count++
 			return
 		}
@@ -115,7 +125,7 @@ func (l *unconfirmedLedger) writtenPublished() []DisplayWritten {
 // this generation, and the device did not confirm it.
 func (l *unconfirmedLedger) declined(control, value string) bool {
 	for _, entry := range l.entries {
-		if entry.Control == control && entry.Value == value {
+		if entry.Control == control && sameValue(entry.Value, value) {
 			return true
 		}
 	}

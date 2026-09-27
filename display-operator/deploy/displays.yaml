@@ -113,12 +113,12 @@ spec:
                   properties:
                     backlight:
                       type: string
-                      enum: ["off", "Off"]
-                      description: "Hold the panel dark at brightness zero. Both spellings of off hold the panel the same way."
+                      enum: ["Off", "off"]
+                      description: "Hold the panel dark at brightness zero. The operator also takes the lowercase off, with the same meaning."
                     power:
                       type: string
-                      enum: ["off", "Off"]
-                      description: "Hold the panel powered down. Both spellings of off hold the panel the same way. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes."
+                      enum: ["Off", "off"]
+                      description: "Hold the panel powered down. The operator also takes the lowercase off, with the same meaning. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes."
                   x-kubernetes-validations:
                     - rule: "!(has(self.backlight) && has(self.power))"
                       message: "An override states backlight or power, and not both."
@@ -178,7 +178,7 @@ spec:
                         type: array
                         items:
                           type: string
-                        description: "Every value the panel accepts for a non-continuous control."
+                        description: "Every value the panel accepts for a non-continuous control. The power control lists its values under the names status.observed.power uses."
                 observed:
                   type: object
                   description: "The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels."
@@ -199,6 +199,7 @@ spec:
                       type: boolean
                     power:
                       type: string
+                      description: "The panel's power state: On, Standby, Suspend, Off, or HardOff. A value the MCCS table does not name is a hexadecimal number, such as 0x06. The operator reads a power name in any case, so a capture saved in lowercase still restores the panel."
                 captured:
                   type: object
                   description: "The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart."

@@ -271,7 +271,7 @@ A claim sets two opaque parameters, beside
               driver: display.liken.sh
               parameters:
                 brightness: 87
-                power: onWhileClaimed
+                power: OnWhileClaimed
 
 `brightness` is a whole number from 0 to 100, a percentage of the
 panel's own maximum, because one panel counts its scale to 100 and
@@ -280,10 +280,10 @@ when the panel holds another value, and reads it back. A readback
 that disagrees fails the claim, because a panel acknowledges a write
 whether it applies the value or not.
 
-`power` takes two values, each in two spellings: `on` or `On`, and
-`onWhileClaimed` or `OnWhileClaimed`. The two spellings of a value
-have the same meaning. `on` powers the panel on at prepare and
-never touches it again. `onWhileClaimed` also powers the panel back
+`power` takes two values, `On` and `OnWhileClaimed`. It also takes
+the lowercase `on` and `onWhileClaimed`, with the same meaning. `On`
+powers the panel on at prepare and never touches it again.
+`OnWhileClaimed` also powers the panel back
 down 30 seconds after the claim ends, for a claimant that owns the
 screen outright. A `Deployment` that replaces its pod ends one claim
 and makes another, so a prepare on the same connector inside the 30

@@ -546,7 +546,7 @@ func TestThePowerOverrideCapturesThePowerState(t *testing.T) {
 	}
 
 	journal := fixture.lines()
-	captured := slices.Index(journal, "status captured=power on")
+	captured := slices.Index(journal, "status captured=power On")
 	powered := slices.Index(journal, "set power=4")
 	if captured < 0 || powered < 0 || captured > powered {
 		t.Fatalf("journal = %q, want the captured power written before the panel went down", journal)

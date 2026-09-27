@@ -98,12 +98,6 @@ const outputDoneVersion uint32 = 2
 // header from allocating whatever its four bytes happen to state.
 const maxWaylandMessage = 4096
 
-// How long the watch waits before it dials again. A mode
-// switch waits for the connection that follows the restart, so this
-// interval is part of every switch, and a quarter second adds little
-// to the second the restart already costs.
-const compositorDialInterval = 250 * time.Millisecond
-
 var errShortMessage = errors.New("a Wayland message ended inside an argument")
 
 // The arguments of one message, read in order. Every read
@@ -266,7 +260,11 @@ func (c *waylandClient) event() (waylandEvent, error) {
 type outputWatch struct {
 	socketPath string
 	moved      func(recreated bool)
+	// The first wait between two dials and the longest one. They are
+	// fields so a test can make the fallback timer longer than the
+	// test, and prove that the socket's arrival starts the dial.
 	retry      time.Duration
+	retryLimit time.Duration
 
 	// The connector each live output global names, and the mode
 	// the compositor reports on each connector. Both belong to the
@@ -283,6 +281,7 @@ func newOutputWatch(socketPath string, moved func(recreated bool)) *outputWatch 
 		socketPath: socketPath,
 		moved:      moved,
 		retry:      compositorDialInterval,
+		retryLimit: compositorDialLimit,
 		names:      map[uint32]string{},
 		modes:      map[string]string{},
 	}
@@ -377,18 +376,34 @@ func westonRefresh(refreshMilliHertz uint32) uint32 {
 
 // The loop. One session runs for as long as the compositor
 // lives, and the wait between sessions is the price of a compositor
-// that is restarting. Nothing here reports a failure, because a
+// that is restarting. A mode switch waits for the connection that
+// follows the restart, so the loop dials the moment the new socket
+// arrives (socketwait.go). Nothing here reports a failure, because a
 // session ends every time the operator restarts the compositor
 // itself, and a log line for every planned restart would say
 // nothing.
 func (w *outputWatch) run(ctx context.Context) {
+	var watch *arrivals
+	defer func() { watch.close() }()
+	delay := w.retry
 	for {
+		// The runtime directory can appear after the operator starts,
+		// so a watch that could not start is tried again each round.
+		if watch == nil {
+			watch, _ = watchArrivals(w.socketPath)
+		}
+		watch.drain()
+		session := w.served().session
 		_ = w.connection(ctx)
 		w.closed()
-		select {
-		case <-ctx.Done():
+		if w.served().session != session {
+			delay = w.retry
+		} else {
+			delay = nextDialDelay(delay, w.retryLimit)
+		}
+		watch.wait(ctx, delay)
+		if ctx.Err() != nil {
 			return
-		case <-time.After(w.retry):
 		}
 	}
 }

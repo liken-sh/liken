@@ -186,7 +186,7 @@ func TestClaimControlsRefusesParametersItCannotRead(t *testing.T) {
 		{
 			name:   "a power state this driver does not carry",
 			config: claimControl(`{"power": "off"}`),
-			says:   `"onWhileClaimed"`,
+			says:   `"OnWhileClaimed"`,
 		},
 		{
 			name:   "parameters that are not an object",

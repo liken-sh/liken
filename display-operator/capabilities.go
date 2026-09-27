@@ -80,6 +80,12 @@ var coreControls = []struct {
 	{vcpPowerMode, powerControl},
 }
 
+// The power names are PascalCase, the Kubernetes form for an enum
+// value. A capture in status.captured can hold the lowercase word from
+// an earlier build, so valueRaw reads a power name in any case, and the
+// capture still restores. The other tables compare exactly, because
+// their names are the panel's own menu words and a spec states them.
+//
 // The values of each non-continuous core code, in MCCS 2.2a's
 // own numbering, under the names a person reads on the panel's own
 // menu. A value outside the list publishes as its hexadecimal number,
@@ -103,8 +109,8 @@ var coreValues = map[byte]map[uint16]string{
 		0x01: audioMuted, 0x02: audioUnmuted,
 	},
 	vcpPowerMode: {
-		powerModeOn: "on", powerModeStandby: "standby", 0x03: "suspend",
-		powerModeOff: "off", 0x05: "hardOff",
+		powerModeOn: "On", powerModeStandby: "Standby", powerModeSuspend: "Suspend",
+		powerModeOff: "Off", powerModeHardOff: "HardOff",
 	},
 }
 
@@ -148,7 +154,7 @@ func valueName(code byte, raw uint16) string {
 // of the table above.
 func valueRaw(code byte, name string) (uint16, bool) {
 	for raw, named := range coreValues[code] {
-		if named == name {
+		if named == name || (code == vcpPowerMode && strings.EqualFold(named, name)) {
 			return raw, true
 		}
 	}
