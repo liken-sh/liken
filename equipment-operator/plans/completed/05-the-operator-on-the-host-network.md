@@ -1,6 +1,6 @@
 # The operator on the host network
 
-Plan 05. Built and drilled on the house cluster on 2026-09-22. The
+Plan 05. Built and drilled on a home cluster on 2026-09-22. The
 Deployment runs on the host network, discovery runs in the process, and
 the metrics listener moved to 9260.
 
@@ -15,12 +15,12 @@ phone that casts to the screen are four protocols and one discovery
 problem.
 
 The operator today is a single-replica Deployment with ordinary pod
-networking. That reaches a declared address and nothing else. On the
-house cluster, a normal pod on the flannel overlay answered a WiiM on
+networking. That reaches a declared address and nothing else. On a
+home cluster, a normal pod on the flannel overlay answered a WiiM on
 port 443 over unicast, got no responders to an SSDP M-SEARCH, and saw
 no LAN responder to an mDNS query. A hostNetwork pod on the same node
 returned every device on the LAN to the same search, and mDNS listed
-all three WiiM amps with their UUIDs. A one-off hostNetwork Job
+every WiiM amp with its UUID. A one-off hostNetwork Job
 resolved each device to its UDN and its location.
 
 Without host network there is no discovery, so every device needs a
@@ -59,7 +59,7 @@ namespace. It resolves a declared identity to a current address: the
 LinkPlay UUID for a WiiM, and whatever identity each later protocol
 carries. It runs at startup and after a failed connect, it caches the
 answer, and it repeats the search rather than trusting one response.
-One Job run missed one of the three amps in a six-second window, so a
+One Job run missed one of the amps in a six-second window, so a
 single M-SEARCH is not enough.
 
 The address is never the identity. A `spec.wiim` block declares the
@@ -137,12 +137,12 @@ does not change.
 
 ## Verification
 
-The measurements above ran on the house cluster on 2026-09-20,
+The measurements above ran on a home cluster on 2026-09-20,
 from a flannel pod, a hostNetwork pod on one node, and a one-off
 hostNetwork Job.
 
 The plan is proved when the operator, built as a host-network
-Deployment, discovers the house's three WiiM amps and the Denon
+Deployment, discovers that cluster's WiiM amps and its Denon
 without a declared address and drives them, and when the WiiM driver
 reports them under `status.wiim`.
 

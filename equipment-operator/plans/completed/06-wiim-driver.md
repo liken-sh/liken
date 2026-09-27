@@ -1,6 +1,6 @@
 # The WiiM driver
 
-Plan 06. Built and drilled on the house cluster on 2026-09-22. The
+Plan 06. Built and drilled on a home cluster on 2026-09-22. The
 driver, its status, discovery, the spec settings, and the message bus
 are built. The settings families the Amp will not confirm are [an open
 problem](../open-problems/the-wiim-settings-the-amp-will-not-confirm.md).
@@ -98,8 +98,8 @@ mapped to the input names the amp carries.
 ## Phases
 
 1. The driver and its status. `spec.wiim` with the identity, the
-   polling driver, `status.wiim`, the CRD, and three amps declared on
-   the house cluster from a development build.
+   polling driver, `status.wiim`, the CRD, and several amps declared on
+   a home cluster from a development build.
 2. The driver as a full Receiver. The inputs bind a Player to the amp
    the way a Denon's do, so the media operator holds the session and
    the player's level drives the WiiM. A session uses the amp's own
@@ -151,11 +151,11 @@ and owns the level, which is how the player's volume drives the amp.
 
 ## Verification
 
-Phase 1 is proved on the house cluster, which has three WiiM amps. The
+Phase 1 is proved on a home cluster, which has several WiiM amps. The
 operator runs from a development build at a pinned commit, and the
-three amps are declared as Receivers with their UUIDs and addresses.
+amps are declared as Receivers with their UUIDs and addresses.
 Each receiver reports `Reachable: True`, a `status.zones.main` entry,
-and a populated `status.wiim`. The three devices were read directly
+and a populated `status.wiim`. The devices were read directly
 first, so the parser is written against what the firmware answers and
 not against the collected notes alone.
 

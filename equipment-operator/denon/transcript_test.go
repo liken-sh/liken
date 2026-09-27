@@ -1,5 +1,5 @@
-// The parser against a real receiver: every line the house's AVR-X1700H
-// sent, folded into the state it should produce.
+// The parser against a real receiver: every line an AVR-X1700H on a home
+// cluster sent, folded into the state it should produce.
 
 package denon
 

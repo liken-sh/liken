@@ -1,12 +1,12 @@
 # The Denon driver and the full receiver mirror
 
-Plan 02. Built and drilled on the house cluster on 2026-09-19.
+Plan 02. Built and drilled on a home cluster on 2026-09-19.
 
 ## The problem
 
 The first plan built what one room needed: power on, input select,
 volume, mute, and the level path. It reads five lines from the
-receiver and ignores the rest. The AVR-X1700H in this house answers
+receiver and ignores the rest. The AVR-X1700H on a home cluster answers
 about thirty more queries and volunteers many more events, so the
 cluster cannot see the second zone, the sound mode it reads but never
 sets, or any of the receiver's own settings.
@@ -14,7 +14,7 @@ sets, or any of the receiver's own settings.
 The Denon code is also in the root package beside the controller,
 so a second protocol such as a WiiM has nowhere to live. This plan
 makes the protocol a driver with its own directory, makes the parser
-cover every line the house's receiver emits, and makes the resource
+cover every line the measured receiver emits, and makes the resource
 carry the receiver's whole state.
 
 ## The design
@@ -219,7 +219,7 @@ the versions:
   sends the union and folds what comes back.
 * A line the parser does not know changes nothing.
 
-The house's AVR-X1700H is the one model we can prove. Its answers are
+The measured AVR-X1700H is the one model we can prove. Its answers are
 captured as `denon/testdata/avr-x1700h.txt`, one line per query, and
 a test folds that transcript into the state so a parser change is
 measured against a real receiver. An older model adds a transcript
@@ -231,11 +231,11 @@ Failing tests first. The transcript folds into the expected state, the
 session selects the input and the mode in one go, and the status
 carries both zones and the settings.
 
-The drill runs on the house cluster, where the receiver
+The drill runs on a home cluster, where the receiver
 is reachable. The cluster's Flux pins this repository at a release tag
 and applies `deploy/`, and its `ImageUpdateAutomation` advances the pin
 when a release is tagged, so a drill is a merge, a tag, and a read:
-`kubectl get receiver living-room-denon -o yaml` shows both zones and
+`kubectl get receiver den -o yaml` shows both zones and
 the `status.denon` settings. A change made at the receiver's own remote
 must then move the status.
 

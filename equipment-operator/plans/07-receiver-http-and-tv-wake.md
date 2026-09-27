@@ -36,7 +36,7 @@ volume, and ARC. There is no receiver-to-TV power-on, so turning the
 receiver on never wakes the TV.
 
 The four items under HDMI Setup are ARC, TV Audio Switching, Pow.Off
-Control (All, Video, Off), and Power Saving. The house's receiver has
+Control (All, Video, Off), and Power Saving. The measured receiver has
 HDMI Control on, ARC on, TV Audio Switching off, Pow.Off Control set to
 All, and Power Saving off.
 
@@ -55,13 +55,13 @@ and which of its controls the driver takes.
 
 ## What was considered and set aside
 
-* **The PlayStation 5's CEC.** It woke the equipment and switched the
-  display to its own input, which is why CEC was turned down. Its own
-  setting fixes this: with "Enable HDMI Device Link" off, the
-  PlayStation 5 does not interfere with the receiver's links to the TV.
-* **Home Assistant.** It reads the TV as a cast and Android TV device.
-  Its power control uses the Google TV's own CEC and does not control
-  the TV directly, and this house operates below that layer.
+* **A game console's CEC.** It woke the equipment and switched the
+  display to its own input, which is why CEC was turned down. The
+  console's own setting fixes this: with its HDMI device link off, the
+  console does not interfere with the receiver's links to the TV.
+* **A home automation hub.** It reads the TV as a cast device. Its
+  power control uses a streaming player's own CEC and does not control
+  the TV directly, and this setup operates below that layer.
 * **The receiver's HDMI Control setting.** It stays on. It carries the
   power-off links, ARC, and the TV remote's volume, and it does not
   block the wake.

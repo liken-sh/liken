@@ -71,7 +71,7 @@ the driver reports that zone only once the receiver has named it.
 The receiver's Video > HDMI Setup menu is on port 23 in two command
 families. `VSAUDIO` is HDMI Audio Out, and Denon's documents list it.
 The `SSHOS` family holds the rest, and no Denon document lists it.
-The house's AVR-X1700H answers `SSHOS ?` with one line per key and a
+The AVR-X1700H on a home cluster answers `SSHOS ?` with one line per key and a
 closing `SSHOS END`. The driver sends `VSAUDIO ?` and `SSHOS ?` on
 every connect.
 
@@ -96,7 +96,7 @@ family, so the status reads the value back in either case.
 
 The sources for each word:
 
-- Measured on the house's AVR-X1700H on 2026-09-26: every key above,
+- Measured on an AVR-X1700H on a home cluster on 2026-09-26: every key above,
   read with `VSAUDIO ?` and `SSHOS ?`, and the words `AMP`, `LAS`,
   `POS`, `ALL`, `ON`, and `OFF`. The only set command sent to the
   receiver was `SSHOSCONSTS LAS`, to its value at the time.
@@ -112,7 +112,7 @@ The sources for each word:
   `VID` follows the three-letter form of every other word in the
   family. Front is left out, because no source gives its word.
 
-The web setup page and port 23 disagree on ARC on the house's
+The web setup page and port 23 disagree on ARC on the measured
 receiver. The page reports ARC as on and does not let a person change
 it, and `SSHOSCONARC` reports `OFF`.
 
@@ -121,7 +121,7 @@ it, and `SSHOSCONARC` reports `OFF`.
 The parser ignores the tuner (`TF`, `TM`, `TP`), the network player
 (`NS`, `NSA`, `NSE`), the video controls (`VSASP`, `VSMONI`), the
 trigger outputs (`TR`), the speaker presets beyond the number, and the
-`OPINF` capability bitmaps. The house's AVR-X1700H answers none of the
+`OPINF` capability bitmaps. The measured AVR-X1700H answers none of the
 first four over port 23, so there is no way to prove a parser for them
 here.
 

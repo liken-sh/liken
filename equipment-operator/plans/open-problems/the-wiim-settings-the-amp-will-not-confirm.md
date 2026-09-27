@@ -1,7 +1,7 @@
 # WiiM settings that the amp does not report back
 
 The equalizer, the output mode, and the subwoofer have documented
-setters, but the house's amps refuse the reads that would confirm them.
+setters, but the measured amps refuse the reads that would confirm them.
 `EQGetStat` returns `{"status":"Failed"}` on every one, and the output
 mode the device reports is `hardware: 7`, which is not the enum the
 setter documents. The operator would re-send a declared setting with

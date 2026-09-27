@@ -1,6 +1,6 @@
 # The WiiM's event path
 
-Plan 08. Built and drilled on the house cluster on 2026-09-22. The
+Plan 08. Built and drilled on a home cluster on 2026-09-22. The
 driver subscribes to the amps' UPnP events for volume, mute, and the
 transport state. The poll stays at ten seconds for the settings and the
 identity that push does not reach, and it carries the evented fields
@@ -204,15 +204,15 @@ The fake GENA server in `wiim/events_test.go` pins the subscribe, the
 renewal, the `NOTIFY` parse, the full-state replace, the delta merge,
 and the fallback to polling.
 
-The drill runs on the house cluster, against a WiiM Amp, from a
+The drill runs on a home cluster, against a WiiM Amp, from a
 development build at a pinned commit:
 
-The drill ran on the house cluster against three WiiM amps, from
+The drill ran on a home cluster against several WiiM amps, from
 development build `2026.09.19-002-dev-028-ab218213`:
 
-* The driver subscribed to all three amps, and the log recorded no
+* The driver subscribed to every amp, and the log recorded no
   subscription failure for them.
-* A volume change made on the master bedroom amp itself, through the
+* A volume change made on one amp itself, through the
   device's own API and not through the operator, reached the room's
   topic in the same second, and `status.wiim.playback.volume`
   followed. The poll was still at ten seconds, so a poll cannot

@@ -46,18 +46,18 @@ equipment, how it is wired to liken machines, and the session a
 apiVersion: equipment.liken.sh/v1alpha1
 kind: Receiver
 metadata:
-  name: living-room-denon
+  name: den
 spec:
   denon:
-    address: living-room-denon.home.example
+    address: den-avr.home.example
   inputs:
     - name: GAME
-      machine: utility1
+      machine: node-3
       monitor: don-0070-denon-avr
   session:
-    player: media/living-room
+    player: media/den
     input: GAME
-    volumeTopic: liken/media/players/media/living-room/volume
+    volumeTopic: liken/media/players/media/den/volume
 status:
   power: "on"
   input: GAME
@@ -65,7 +65,7 @@ status:
   volumeMax: "80"
   mute: false
   soundMode: MULTI CH IN
-  service: living-room-denon
+  service: den
   conditions:
     - type: Reachable
       status: "True"

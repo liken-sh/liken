@@ -27,7 +27,7 @@ becomes a new plan or an open problem.
   operator serves Prometheus metrics on port 9200 under liken's shared
   contract: the receiver connected and claimed, power, volume, the
   selected input, and commands by status.
-* [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on the house cluster on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the house's AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
+* [02, The Denon driver and the full receiver mirror](completed/02-denon-driver.md). Built and drilled on a home cluster on 2026-09-19. The protocol moved into `denon/` behind the `equipment.Driver` contract, the parser covers every line the measured AVR-X1700H emits, and the status carries both zones and the receiver's own settings.
 * [04, Declarative settings and the bus controller](04-declarative-settings-and-bus.md). Every setting the driver reads becomes declarable in `spec.denon.settings` and settable over a bus settings topic, one-shot actions go over a bus commands topic, and each setting key has exactly one writer.
 * [07, The receiver's HTTP interface and the TV wake](07-receiver-http-and-tv-wake.md). The receiver answers a second interface over HTTP, and it carries HDMI Control and the video controls. The receiver is a CEC responder, so it cannot wake the TV, and the wake needs a node-attached CEC adapter from plan 05. Plan 09 designs the wake, and its phase 3 builds it; the hardware drill is open. The HTTP driver design is not written.
 * [09, The TV and the receiver over HDMI-CEC](09-cec.md). A USB CEC adapter on a node joins the HDMI tree's CEC wire through the kernel's CEC API. A declared `CECBus` in `Listen` or `Control` mode reports every device on the wire, a new `Television` kind holds the TV's power and the displays that reach it, a `Receiver` gains a `cec:` block, and the wake job closes plan 07's TV wake. It depends on `liken` plan 70 and display-operator plan 23. Phase 1 is built and tested against the kernel's `vivid` driver: `cec/`, the `equipment-operator cec` node workload, and the `CECBus` in `Listen` and `Control`. Phase 2 is built and tested against `vivid` with `cec-follower` playing the TV: the `Television` with `spec.power`, `status.power`, and `status.displays`. Phase 3 is built and tested against `vivid` with a second output playing a streaming player: the session match, the wake job, and `status.activeSource`. The power press that turns the room off, TV included, is built and tested against `vivid` and the fakes: `status.session.standbyAt` and `StandbyApplied`. The adapter sends nothing on a timer, tested against `vivid` and the fakes: one scan when it joins, one set of questions for a device that announces itself, the TV's power from what the bus carries, and a read for each power press through `status.session.powerReadAt`. The hardware drills of phases 1 to 3, of the power press, and of the quiet bus, and phases 4 and 5, are open.
@@ -48,28 +48,28 @@ becomes a new plan or an open problem.
   press is a direction and not a level.
 
 * Plan 02, the Denon driver and the full receiver mirror. Drilled on
-  the house cluster on 2026-09-19: the live `living-room-denon` Receiver
+  a home cluster on 2026-09-19: a live Denon Receiver
   reported both zones (main on MPLAY at 65, zone2 on PHONO at 90) and
   every setting under `status.denon`, and a dimmer change made at the
   receiver itself moved `status.denon.system.dimmer` from bright to
   dark and back. Release 2026.09.19-001.
 
-* Plan 05, the operator on the host network. Drilled on the house
+* Plan 05, the operator on the host network. Drilled on a home
   cluster on 2026-09-22: the operator runs on the host network, finds
   the amps by mDNS and SSDP, and resolves each identity to a current
   address without a declared address. The metrics listener moved to
   9260.
 
-* Plan 06, the WiiM driver. Drilled on the house cluster on
-  2026-09-22: three WiiM amps report `status.wiim` in full, discovery
+* Plan 06, the WiiM driver. Drilled on a home cluster on
+  2026-09-22: several WiiM amps report `status.wiim` in full, discovery
   creates a Receiver for an unclaimed amp and steps aside when a person
   declares one, a declared setting reaches the device and returns in
   status, and a settings write over the media broker lands on the
   device and back in `spec.wiim.settings`.
 
-* Plan 08, the WiiM's event path. Drilled on the house cluster on
-  2026-09-22: the driver subscribed to three WiiM amps' UPnP events for
+* Plan 08, the WiiM's event path. Drilled on a home cluster on
+  2026-09-22: the driver subscribed to several WiiM amps' UPnP events for
   volume, mute, and the transport state, and a volume change made on
-  the master bedroom amp itself reached the room's topic in the same
+  one amp itself reached the room's topic in the same
   second while the poll stayed at ten seconds. Development build
   `2026.09.19-002-dev-028-ab218213`.

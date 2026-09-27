@@ -155,7 +155,7 @@ zone has no entry: `spec.power` and `spec.session` drive it.
 ## Future families
 
 The protocol names four families that the driver does not parse. The
-house's AVR-X1700H responds to none of them, so no hardware can test a
+measured AVR-X1700H responds to none of them, so no hardware can test a
 parser. This plan documents them and does not build them. Each one is
 added the same way: a family type on `denon.Settings`, a
 `denon/settings_<family>.go` that holds its specs and command builders,
@@ -169,7 +169,7 @@ add one.
   now-playing state, and transport. Transport is a command, not a
   setting.
 - **The video controls** (`VSASP`, `VSMONI`): the aspect and the
-  monitor out. The house's receiver responds to none of the port-23
+  monitor out. The measured receiver responds to none of the port-23
   commands for these controls. The same controls are button codes on
   the HTTP interface that plan 07 records.
 - **The trigger outputs** (`TR`): the twelve-volt triggers.
@@ -178,16 +178,16 @@ add one.
 
 ## Verification
 
-The mechanism is tested on the house's AVR-X1700H, which responds to
+The mechanism is tested on an AVR-X1700H on a home cluster, which responds to
 the settings the driver already parses. A declared setting reaches the
 receiver. A bus write reaches the receiver and is written back to
 `spec.denon.settings`. A key in both is reported. The drill runs on the
-house cluster the same way as plan 02's drill.
+home cluster the same way as plan 02's drill.
 
 The tuner, network/HEOS, video, and trigger families get parsers,
 command builders, and fake-receiver coverage that emulates the
 documented protocol. They get no transcript from real hardware, because
-this house's AVR-X1700H responds to none of them. Each family stays
+the measured AVR-X1700H responds to none of them. Each family stays
 marked unproven until a model that supports it responds. A transcript
 from a real model marks it proven. The fake-receiver test only checks
 the message format and does not prove a family.
