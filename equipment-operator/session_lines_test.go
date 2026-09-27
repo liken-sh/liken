@@ -67,7 +67,7 @@ func TestAToggleOnAReceiverThatIsOnIsOneLine(t *testing.T) {
 	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
 
 	mustDeepEqual(t, waitForLines(t, h.log, "toggle", 1), []string{
-		"Receiver theater: the power topic asks toggle; the receiver reports power On, so sent power Standby; the receiver reported power Standby after <time>",
+		"Receiver theater: the power topic asks toggle, and the receiver reports power On; sent power Standby; the receiver reported power Standby after <time>",
 	})
 }
 

@@ -11,13 +11,19 @@ package main
 //
 // The Deployment writes a new wokeAt only for a change it sees happen
 // while it runs: a flag of a standing session that turns on, the
-// remote's power button that turns the receiver on, or a session that
+// remote's power button that turns the room on, or a session that
 // appears with a flag on, such as a Play that starts on a Player with
 // no standing session. What it finds in its first pass is not a change
 // it saw, so a session that stands at an operator restart is adopted
 // and wakes nothing. A session that returns for the same Player and
 // Display while its lift waits is the same session, such as one the
 // media operator lifted for a moment, and wakes nothing either.
+//
+// The remote's power button is the one event that turns the TV off. A
+// press that finds the room on writes a standbyAt, and the node
+// workload sends the TV Standby. A session that sleeps or ends writes
+// none, because a TV in a living room shows other inputs, such as a
+// streaming player, while the room's player is idle.
 
 import (
 	"context"
@@ -209,7 +215,7 @@ func (r *roomTelevision) open(awake, wakes, lifted bool, liftedDisplay, trigger 
 	}
 	adopted := &TelevisionSession{Player: r.player, Display: display, Awake: awake}
 	if held := television.Status.Session; held != nil && held.Player == r.player && held.Display == display {
-		adopted.WokeAt = held.WokeAt
+		adopted.WokeAt, adopted.StandbyAt = held.WokeAt, held.StandbyAt
 	}
 	if held := television.Status.Session; held != nil && *held == *adopted {
 		return settled
@@ -250,10 +256,55 @@ func (r *roomTelevision) wake(trigger, display string, television *Television) b
 	return true
 }
 
+// television answers the Television that shows the session's input
+// and the power it reports, for a power press that decides whether the
+// room is on. Both are empty when no Television lists the input's
+// Display, and the power is empty when the TV does not answer.
+func (r *roomTelevision) television() (string, string) {
+	_, _, television, ok := r.resolve()
+	if !ok || television == nil {
+		return "", ""
+	}
+	return television.Metadata.Name, television.Status.Power
+}
+
+// standby writes a new standbyAt on the TV that shows the session's
+// input, with the session asleep, which stops a wake in progress. The
+// node workload that speaks for the Display then sends the TV Standby.
+// Only the remote's power button calls it: a TV in a living room shows
+// other inputs while the room's player is idle, so a sleep of the
+// session never turns the TV off.
+func (r *roomTelevision) standby(trigger string) {
+	t := r.sessions
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.attempt(r.player, func() bool {
+		_, display, television, ok := r.resolve()
+		if !ok {
+			return false
+		}
+		if television == nil {
+			return true
+		}
+		t.shown[r.player] = display
+		session := &TelevisionSession{Player: r.player, Display: display, StandbyAt: time.Now().UTC().Format(wakeTimeLayout)}
+		if held := television.Status.Session; held != nil && held.Player == r.player && held.Display == display {
+			session.WokeAt = held.WokeAt
+		}
+		line := fmt.Sprintf("%s; asked Television %s to go to standby", trigger, television.Metadata.Name)
+		if err := t.apply(television.Metadata.Name, session); err != nil {
+			r.log.refused(line, err)
+			return false
+		}
+		r.log.printf("%s", line)
+		return true
+	})
+}
+
 // slept marks the TV's session asleep, which stops a wake in progress,
-// so the adapter claims no input in a room a person just turned off.
-// It sends the TV nothing: the receiver's own CEC link puts the TV in
-// standby with it.
+// so the adapter claims no input in a room that went dark. It sends the
+// TV nothing: a Play that ends or a screen that sleeps leaves the TV
+// free to show another input.
 func (r *roomTelevision) slept() {
 	t := r.sessions
 	t.mutex.Lock()

@@ -103,15 +103,17 @@ func TestAWakeThatWritesNothing(t *testing.T) {
 }
 
 // A session that starts adopts the session the TV holds, with the
-// flags it starts with, and never writes a new wokeAt: at an operator
-// restart, after a brief lift, for a Television created again, and for
-// a session a person slept before the restart. Nothing wakes.
+// flags it starts with, and never writes a new wokeAt or standbyAt: at
+// an operator restart, after a brief lift, for a Television created
+// again, and for a session a person slept or turned off before the
+// restart. Nothing wakes, and nothing goes to standby.
 func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
 	held := wokeAt(time.Now().Add(-time.Hour))
 	slept := *held
 	slept.Awake = false
 	other := wokeNow()
 	other.Player = "media/study"
+	pressed := pressedOff(held)
 	cases := []struct {
 		name  string
 		held  *TelevisionSession
@@ -126,6 +128,8 @@ func TestAStartingSessionAdoptsAndWakesNothing(t *testing.T) {
 			TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", Awake: true, WokeAt: held.WokeAt}},
 		{"a session that starts idle", held, false,
 			TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", WokeAt: held.WokeAt}},
+		{"a restart after a power press", pressed, false,
+			TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", WokeAt: held.WokeAt, StandbyAt: pressed.StandbyAt}},
 		{"another Player's session", other, true,
 			TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", Awake: true}},
 	}

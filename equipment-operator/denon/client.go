@@ -139,6 +139,9 @@ func (d *Client) VolumeResolution() int {
 	return 2
 }
 
+// HasStandby answers true: PWSTANDBY puts the receiver in standby.
+func (d *Client) HasStandby() bool { return true }
+
 // SetPower turns one zone on or to standby. The main zone answers PW,
 // and a second or third zone answers its own Z2 or Z3 pair. An unknown
 // zone is an error.

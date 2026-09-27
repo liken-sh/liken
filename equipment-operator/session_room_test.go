@@ -22,6 +22,19 @@ import (
 type roomRecord struct {
 	mutex  sync.Mutex
 	events []string
+	// name and power are the TV the room reports to a power press, and
+	// empty for a room with no TV.
+	name, power string
+}
+
+func (r *roomRecord) television() (string, string) {
+	return r.name, r.power
+}
+
+func (r *roomRecord) standby(trigger string) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.events = append(r.events, "standby: "+trigger)
 }
 
 func (r *roomRecord) opened(awake bool, _ string) {
@@ -100,8 +113,9 @@ func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
 	}
 }
 
-// The remote's power button wakes the room when it turns the receiver
-// on, and puts it to sleep when it turns the receiver off.
+// In a room with no TV, the remote's power button wakes the room when
+// it turns the receiver on, and puts it to sleep when it turns the
+// receiver off.
 func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
 	h := newSessionHarness(t)
 	h.powerTopic = testPowerTopic
@@ -121,6 +135,6 @@ func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
 	mustDeepEqual(t, room.waitFor(t, 3), []string{
 		"opened (awake false)",
 		"slept",
-		"woke: the power topic asks toggle",
+		"woke: the power topic asks toggle, and the receiver reports power Standby",
 	})
 }

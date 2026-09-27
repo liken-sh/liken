@@ -175,6 +175,9 @@ func (n *cecNode) passWake(bus *CECBus, television *Television) {
 				asks, television.Metadata.Generation, television.Spec.Power)
 		}
 	default:
+		// A wake is a newer press than a standby in progress, and the two
+		// send the TV opposite commands, so the standby stops first.
+		n.cancelStandby()
 		n.startWake(*television, own, physical, othersOf(bus, n.machine, n.now()))
 	}
 }

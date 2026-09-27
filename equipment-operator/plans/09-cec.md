@@ -4,7 +4,9 @@ Plan 09. Phase 1 built 2026-09-26 and tested against `vivid`. Phase 2
 built 2026-09-26 and tested against `vivid`, with `cec-follower`
 playing the TV. Phase 3 built 2026-09-26 and tested against `vivid`,
 with a second `vivid` output playing a streaming player. The hardware
-drills of phases 1 to 3 and phases 4 and 5 are open. It depends on `liken` plan 70, which
+drills of phases 1 to 3 and phases 4 and 5 are open. The power press
+that turns the TV off was built 2026-09-27 and tested against `vivid`
+and the fakes; see "The power press turns the room off". It depends on `liken` plan 70, which
 attaches a USB CEC adapter and publishes it as a device, and on
 display-operator plan 23, which publishes each `Display`'s CEC
 physical address.
@@ -821,6 +823,53 @@ Phase 3 settled these questions that the design left open:
   so the node workload records its own. The `Deployment` copies the
   one the first adapter in `spec.adapters` with a current entry
   reports.
+
+## The power press turns the room off
+
+A home cluster showed the gap on 2026-09-27. A person pressed the
+power button on a room's remote to turn the room off. The room's
+receiver is a WiiM, which has no standby command, and its `Receiver`
+session logged a failed command. Nothing turned the TV off. The rule
+"A sleep" above assumed that the receiver's own CEC link turns the TV
+off with it. A WiiM has no CEC link, and a receiver that stays on
+sends the TV nothing. No path led from a power press to the TV.
+
+The press now toggles the room, TV included:
+
+* **The TV decides.** The `Receiver` session finds the `Television`
+  that lists its input's `Display`, as the wake does. A TV that
+  reports On or ToOn means the room is on, and the press turns it off.
+  A TV in Standby or ToStandby means the room is off, and the press
+  turns it on. With no `Television`, or a TV with no reported power,
+  the receiver's power decides, as before.
+* **Off.** The `Deployment` writes a new `status.session.standbyAt`
+  on the `Television`, with `awake` false and the `wokeAt` it held,
+  under the session's field manager. The receiver goes to standby when
+  it has a standby command. The `equipment.Driver` contract answers
+  that with `HasStandby`: a Denon has `PWSTANDBY`, and a WiiM has
+  none, so a WiiM stays on and its line states that as the outcome of
+  the press.
+* **On.** The press writes a new `wokeAt`, and the wake runs as
+  before, with its reclaims and its `TooLate` rule. A new wake removes
+  `standbyAt`, because the apply does not state it.
+* **The node workload.** The adapter that speaks for the session's
+  `Display` sends the TV Standby once for each `standbyAt`, through
+  the same power confirmation `spec.power` uses: a read first, at most
+  three commands, and a readback. Before its first command it writes
+  `status.standbyAt` as a started mark under
+  `equipment-operator-standby-<machine>`, and `StandbyApplied` states
+  the result. A `standbyAt` in the status when the node workload
+  starts sends nothing. `spec.power` goes first, by the rule of the
+  wake. A wake stops a standby in progress, and a standby never starts
+  beside a wake, because the two send the TV opposite commands.
+* **Only a press.** A `Play` that ends, a screen that sleeps, a
+  session that the media operator lifts, and an operator restart write
+  no `standbyAt`. A TV in a living room shows other inputs, such as a
+  streaming player, while the room's player is idle, and those events
+  must not turn it off.
+
+The fakes and `vivid` prove the paths. A hardware drill on the room
+that showed the gap is open.
 
 ## Failure and recovery
 

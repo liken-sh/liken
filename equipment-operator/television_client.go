@@ -8,8 +8,10 @@ package main
 // the node workload that sends the bus's commands, which writes
 // powerGeneration and the PowerApplied condition; and the node workload
 // that speaks for the session's Display, which writes wokeAt and the
-// WakeApplied condition. The conditions are a map keyed by type, so each writer's
-// apply leaves the other writers' conditions in place. Discovery
+// WakeApplied condition under one manager, and standbyAt and the
+// StandbyApplied condition under another. The conditions are a map
+// keyed by type, so each writer's apply leaves the other writers'
+// conditions in place. Discovery
 // creates its Television with a create, so it writes no spec field
 // after that.
 
@@ -146,6 +148,34 @@ func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt stri
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
 	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecWakeFieldManager(machine), body)
+}
+
+// cecStandbyFieldManager is the field manager of the node workload on
+// one machine for the standby. It is not the wake's manager, because
+// the wake and the standby are written apart, and an apply removes
+// each field its manager owns and does not state.
+func cecStandbyFieldManager(machine string) string {
+	return "equipment-operator-standby-" + machine
+}
+
+// ApplyTelevisionStandby writes what the node workload's standby did:
+// the status.session.standbyAt it ran and the StandbyApplied condition.
+// The body states the object's uid for the same reason
+// ApplyTelevisionPower does.
+func ApplyTelevisionStandby(c *Client, television *Television, machine, standbyAt string, condition Condition) error {
+	type status struct {
+		StandbyAt  string      `json:"standbyAt"`
+		Conditions []Condition `json:"conditions"`
+	}
+	body := struct {
+		APIVersion string     `json:"apiVersion"`
+		Kind       string     `json:"kind"`
+		Metadata   ObjectMeta `json:"metadata"`
+		Status     status     `json:"status"`
+	}{Status: status{StandbyAt: standbyAt, Conditions: []Condition{condition}}}
+	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
+	body.Metadata.UID = television.Metadata.UID
+	return applyTelevision(c, televisionPath(television.Metadata.Name)+"/status", cecStandbyFieldManager(machine), body)
 }
 
 // sessionFieldManager is the Deployment's field manager for

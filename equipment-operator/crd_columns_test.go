@@ -53,6 +53,7 @@ func TestThePrinterColumns(t *testing.T) {
 			{"Source", ".status.activeSource", 1},
 			{"Session", ".status.session.display", 1},
 			{"Wake", conditionReason("WakeApplied"), 1},
+			{"Standby", conditionReason("StandbyApplied"), 1},
 			{"Applied", conditionReason("PowerApplied"), 1},
 		}},
 		{receiversCRD, []column{

@@ -157,10 +157,12 @@ type cecNode struct {
 	modeContext context.Context
 	modeWork    *sync.WaitGroup
 	// powered is what the node workload holds about its applications of
-	// a Television's spec.power, and woken what it holds about its
-	// wakes of a Television's session.
+	// a Television's spec.power, woken what it holds about its wakes of
+	// a Television's session, and standby what it holds about the
+	// standbys a power press asked of the session.
 	powered powerMemory
 	woken   wakeMemory
+	standby standbyMemory
 	// lastCommand is when the TV was last sent a power command: by this
 	// adapter, or a Standby by another device that the adapter heard,
 	// such as a receiver that turns the TV off with itself. A TV answers

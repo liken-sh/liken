@@ -43,6 +43,10 @@ func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
 		{"a cec block with an empty bus", televisionObject(map[string]any{"cec": map[string]any{"bus": ""}}), true},
 		{"a session the operator writes", withSession(map[string]any{
 			"player": "media/den", "display": "acm-0001-receiver", "awake": true, "wokeAt": "2026-09-26T18:04:05.123Z"}), false},
+		{"a session a power press turned off", withSession(map[string]any{
+			"player": "media/den", "display": "acm-0001-receiver", "wokeAt": "2026-09-26T18:04:05.123Z", "standbyAt": "2026-09-26T22:31:10.456Z"}), false},
+		{"a session whose standbyAt is not a time", withSession(map[string]any{
+			"player": "media/den", "display": "acm-0001-receiver", "standbyAt": "later"}), true},
 		{"a session with no display", withSession(map[string]any{"player": "media/den"}), true},
 		{"a session whose wokeAt is not a time", withSession(map[string]any{
 			"player": "media/den", "display": "acm-0001-receiver", "wokeAt": "soon"}), true},
@@ -112,6 +116,8 @@ func TestAWrittenTelevisionStatusValidates(t *testing.T) {
 		"activeSource":    "1.3.0.0",
 		"activeDisplay":   "acm-0001-receiver",
 		"powerGeneration": int64(2),
+		"wokeAt":          "2026-09-26T18:04:05.123Z",
+		"standbyAt":       "2026-09-26T22:31:10.456Z",
 		"displays": []any{map[string]any{
 			"name": "acm-0001-receiver", "physicalAddress": "1.3.0.0", "via": map[string]any{"kind": "Receiver", "name": "den"},
 		}},

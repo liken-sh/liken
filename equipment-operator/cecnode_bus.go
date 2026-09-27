@@ -55,23 +55,26 @@ func (n *cecNode) pass(ctx context.Context) error {
 	return nil
 }
 
-// passTelevisions reads the bus's Television once for both of the
-// Television's intents: its spec.power and its session's wake. A list
-// that fails leaves both for the next pass, and cancels nothing,
-// because the Television may still ask for what runs.
+// passTelevisions reads the bus's Television once for each of the
+// Television's intents: its spec.power, its session's wake, and its
+// session's standby. A list that fails leaves each for the next pass,
+// and cancels nothing, because the Television may still ask for what
+// runs.
 func (n *cecNode) passTelevisions(bus *CECBus) {
 	list, err := ListTelevisions(n.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
 		n.writePower()
 		n.writeWake()
+		n.writeStandby()
 		return
 	}
 	television := televisionFor(list.Items, bus.Metadata.Name)
-	// The wake pass goes first: a new generation of spec.power stops a
-	// wake in progress there, so no Active Source follows the power
-	// pass's first command.
+	// The wake and standby passes go first: a new generation of
+	// spec.power stops a wake or a standby in progress there, so no
+	// session command follows the power pass's first command.
 	n.passWake(bus, television)
+	n.passStandby(bus, television)
 	n.passTelevision(bus, television)
 }
 

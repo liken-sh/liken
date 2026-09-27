@@ -137,6 +137,10 @@ func (c *Client) Address() string { return c.address }
 // unit: the wire counts whole steps from 0 to 100, so it is 1.
 func (c *Client) VolumeResolution() int { return 1 }
 
+// HasStandby answers false: the HTTP API carries no power command, so
+// the amp is always on.
+func (c *Client) HasStandby() bool { return false }
+
 // Surveyed answers whether one poll has read every family, which is
 // when the device's own facts are in hand.
 func (c *Client) Surveyed() bool {

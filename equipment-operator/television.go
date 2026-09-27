@@ -41,18 +41,23 @@ type TelevisionSpec struct {
 
 // TelevisionSession is a Receiver's session as the TV sees it: the
 // Player, the Display the session's input shows, whether the session
-// holds the room awake, and when it last woke the room. The node
-// workload runs one wake for each wokeAt, so a wake is a new time and
-// not a change of awake: a session wakes the room again while it is
-// awake when a person presses the remote's power button, and the TV
-// must wake with the receiver then too. It is status and not spec,
+// holds the room awake, when it last woke the room, and when a power
+// press last turned the room off. The node workload runs one wake for
+// each wokeAt, so a wake is a new time and not a change of awake: a
+// session wakes the room again while it is awake when a person presses
+// the remote's power button, and the TV must wake with the receiver
+// then too. It runs one standby for each standbyAt, and only a press
+// of the remote's power button writes one, because a TV in a living
+// room shows other inputs while the room's player is idle, and a sleep
+// of the session must not turn that TV off. It is status and not spec,
 // because no person asks for it: the Deployment writes it from the
 // Receiver's session, and a status write changes no generation.
 type TelevisionSession struct {
-	Player  string `json:"player"`
-	Display string `json:"display"`
-	Awake   bool   `json:"awake,omitempty"`
-	WokeAt  string `json:"wokeAt,omitempty"`
+	Player    string `json:"player"`
+	Display   string `json:"display"`
+	Awake     bool   `json:"awake,omitempty"`
+	WokeAt    string `json:"wokeAt,omitempty"`
+	StandbyAt string `json:"standbyAt,omitempty"`
 }
 
 // TelevisionCEC names the CECBus the TV is on.
@@ -76,7 +81,8 @@ func (t *Television) bus() string {
 // that sends the bus's commands writes powerGeneration and the
 // PowerApplied condition when it applies spec.power. The node workload
 // that speaks for the session's Display writes wokeAt and the
-// WakeApplied condition when it wakes the TV.
+// WakeApplied condition when it wakes the TV, and standbyAt and the
+// StandbyApplied condition when it puts the TV in standby.
 type TelevisionStatus struct {
 	CEC   *TelevisionCECStatus `json:"cec,omitempty"`
 	Power string               `json:"power,omitempty"`
@@ -95,7 +101,10 @@ type TelevisionStatus struct {
 	Session *TelevisionSession `json:"session,omitempty"`
 	// WokeAt is the session.wokeAt whose wake the node workload ran, so
 	// a restart runs no wake twice.
-	WokeAt     string              `json:"wokeAt,omitempty"`
+	WokeAt string `json:"wokeAt,omitempty"`
+	// StandbyAt is the session.standbyAt whose standby the node workload
+	// ran, so a restart runs no standby twice.
+	StandbyAt  string              `json:"standbyAt,omitempty"`
 	Displays   []TelevisionDisplay `json:"displays,omitempty"`
 	Conditions []Condition         `json:"conditions,omitempty"`
 }
@@ -125,28 +134,30 @@ type EquipmentRef struct {
 }
 
 // The Television conditions and their reasons. The Deployment writes
-// Reachable and InCharge; the node workloads write PowerApplied and
-// WakeApplied.
+// Reachable and InCharge; the node workloads write PowerApplied,
+// WakeApplied, and StandbyApplied.
 const (
-	conditionReachable    = "Reachable"
-	conditionInCharge     = "InCharge"
-	conditionPowerApplied = "PowerApplied"
-	conditionWakeApplied  = "WakeApplied"
+	conditionReachable      = "Reachable"
+	conditionInCharge       = "InCharge"
+	conditionPowerApplied   = "PowerApplied"
+	conditionWakeApplied    = "WakeApplied"
+	conditionStandbyApplied = "StandbyApplied"
 
 	reasonInCharge        = "InCharge"
 	reasonAnotherInCharge = "AnotherInCharge"
 
-	reasonAnswers     = "Answers"
-	reasonNoBus       = "NoBus"
-	reasonNotScanned  = "NotScanned"
-	reasonNotFound    = "NotFound"
-	reasonNoPower     = "NoPowerStatus"
-	reasonConfirmed   = "Confirmed"
-	reasonUnconfirmed = "Unconfirmed"
-	reasonTaken       = "SourceTaken"
-	reasonTooLate     = "TooLate"
-	reasonSuperseded  = "Superseded"
-	reasonWaking      = "Waking"
+	reasonAnswers         = "Answers"
+	reasonNoBus           = "NoBus"
+	reasonNotScanned      = "NotScanned"
+	reasonNotFound        = "NotFound"
+	reasonNoPower         = "NoPowerStatus"
+	reasonConfirmed       = "Confirmed"
+	reasonUnconfirmed     = "Unconfirmed"
+	reasonTaken           = "SourceTaken"
+	reasonTooLate         = "TooLate"
+	reasonSuperseded      = "Superseded"
+	reasonWaking          = "Waking"
+	reasonEnteringStandby = "EnteringStandby"
 )
 
 // discovered answers whether discovery owns this Television: it

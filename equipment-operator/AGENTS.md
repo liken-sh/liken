@@ -56,7 +56,10 @@ that lists the input's `Display`, and writes that `Television`'s
 `status.session`, in `television_session.go`. The node workload whose
 adapter speaks for that `Display` runs the wake in
 `cecnode_wake.go`, and claims and guards the active source in
-`cecnode_source.go`.
+`cecnode_source.go`. The remote's power button turns the room off the
+same way: the session's `togglePower` asks the room for standby, the
+`Deployment` writes `status.session.standbyAt`, and the node workload
+sends the TV Standby in `cecnode_standby.go`.
 
 ## Errors include their source's text
 

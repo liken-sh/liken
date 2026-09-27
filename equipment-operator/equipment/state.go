@@ -151,6 +151,12 @@ type Driver interface {
 	// one display unit. The Denon reports half steps, so it answers 2.
 	VolumeResolution() int
 
+	// HasStandby answers whether the device has a standby command. A
+	// power press that turns the room off reads it: a device with no
+	// standby stays on, and the press states that as its outcome and
+	// sends the device nothing.
+	HasStandby() bool
+
 	// SetPower turns one zone on or to standby. An unknown zone is an
 	// error.
 	SetPower(zone string, on bool) error

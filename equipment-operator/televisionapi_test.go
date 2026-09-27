@@ -6,8 +6,10 @@ package main
 // apply replaces cec, power, activeSource, activeDisplay, displays,
 // and its own conditions, the Deployment's session apply replaces
 // session, a node workload's power apply replaces powerGeneration and
-// its own conditions, and a node workload's wake apply replaces wokeAt
-// and its own conditions. No apply touches a field another manager owns.
+// its own conditions, a node workload's wake apply replaces wokeAt and
+// its own conditions, and a node workload's standby apply replaces
+// standbyAt and its own conditions. No apply touches a field another
+// manager owns.
 // The conditions are a map keyed by type, so each apply leaves the
 // other writer's conditions in place.
 
@@ -131,6 +133,7 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	manager := r.URL.Query().Get("fieldManager")
 	node := strings.HasPrefix(manager, "equipment-operator-cec-")
 	waking := strings.HasPrefix(manager, "equipment-operator-wake-")
+	standing := strings.HasPrefix(manager, "equipment-operator-standby-")
 	if manager == sessionFieldManager {
 		// The fake counts the session writes in flight, and holds each one
 		// for sessionDelay, so a test can see two that overlap.
@@ -181,6 +184,9 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	case waking:
 		a.wakeWrites++
 		television.Status.WokeAt = body.Status.WokeAt
+		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+	case standing:
+		television.Status.StandbyAt = body.Status.StandbyAt
 		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
 	default:
 		a.derivedWrites++

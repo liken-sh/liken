@@ -115,6 +115,21 @@ value. Waking the screen also triggers those commands through
 a reboot does not by itself power the receiver on, and an operator
 restart sends nothing for the sessions it finds.
 
+The remote's power button turns the whole room on or off. The
+`media-operator` publishes a toggle on the session's power topic. When
+the session's input names a `Display` that a `Television` lists, the
+TV's reported power decides what the press does: a TV that is on means
+the press turns the room off, and a TV in standby means the press turns
+the room on. With no `Television`, the receiver's power decides. A
+press that turns the room off asks the TV for standby over CEC and puts
+the receiver in standby. A WiiM has no standby command, so it stays on,
+and its log line says so. A press that turns the room on wakes the TV,
+shows the machine's input, and turns the receiver on. Only the power
+button turns the TV off. A `Play` that ends, a screen that goes idle,
+and an operator restart leave the TV as it is, because the TV can show
+another input, such as a streaming player, while the room's player is
+idle.
+
 A person at the receiver's own remote can change the receiver without
 the cluster changing it back immediately. If the person selects
 another input, the status records that input. The operator selects the
