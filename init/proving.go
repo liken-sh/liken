@@ -289,13 +289,14 @@ func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Co
 }
 
 // assertProvenSlotUnderLock is the proving watch's way to the
-// firmware. The watch runs for as long as the machine runs, so its
-// assertion is the one write that can collide with the reboot path,
-// and the comment on firmwareWrites in actuator.go says what that
-// collision costs. The shutdown test happens under the lock, not
-// before it: a watch that waited out the reboot path's turn must see
-// the flag that turn set, and testing before the lock would let it
-// pass the test, wait, and then undo the trial the reboot path armed.
+// firmware. The watch runs beside the rest of the boot until the
+// trial settles, so its assertion is the one write that can collide
+// with the reboot path, and the comment on firmwareWrites in
+// actuator.go says what that collision costs. The shutdown test
+// happens under the lock, not before it: a watch that waited out the
+// reboot path's turn must see the flag that turn set, and testing
+// before the lock would let it pass the test, wait, and then undo the
+// trial the reboot path armed.
 func assertProvenSlotUnderLock(act bootActuator, stateRoot string) {
 	firmwareWrites.Lock()
 	defer firmwareWrites.Unlock()

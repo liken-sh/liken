@@ -165,9 +165,9 @@ func TestDescribeExitForAStoppedProcess(t *testing.T) {
 
 // scriptedFetch replays a sequence of kubectl tables, and repeats the
 // last table forever. This simulates a cluster converging over time.
-func scriptedFetch(outputs ...string) func() (string, bool) {
+func scriptedFetch(outputs ...string) func(time.Duration) (string, bool) {
 	i := 0
-	return func() (string, bool) {
+	return func(time.Duration) (string, bool) {
 		out := outputs[min(i, len(outputs)-1)]
 		i++
 		return out, true
@@ -197,7 +197,7 @@ func TestPollAndReportSkipsFailedFetches(t *testing.T) {
 	// A fetch that fails, because k3s is not serving yet, produces
 	// no lines and no verdict. The loop tries again.
 	failures := 0
-	fetch := func() (string, bool) {
+	fetch := func(time.Duration) (string, bool) {
 		failures++
 		if failures < 3 {
 			return "", false
@@ -216,6 +216,61 @@ func TestPollAndReportReturnsWhenThePlaneShutsDown(t *testing.T) {
 	fetch := scriptedFetch("node-1   Ready")
 	if pollAndReport(ctx, time.Millisecond, time.Second, "node", fetch, containsReady) {
 		t.Error("a cancelled plane means no verdict")
+	}
+}
+
+func TestKubectlGetPassesTheRequestTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		timeout time.Duration
+		args    []string
+		want    []string
+	}{
+		{"nodes", 10 * time.Second, []string{"nodes"},
+			[]string{"kubectl", "get", "nodes", "--no-headers", "--request-timeout=10s"}},
+		{"pods", 2500 * time.Millisecond, []string{"pods", "-A"},
+			[]string{"kubectl", "get", "pods", "-A", "--no-headers", "--request-timeout=2.5s"}},
+		// kubectl reads zero as no timeout, so a spent budget still
+		// passes a positive one.
+		{"spent budget", 0, []string{"nodes"},
+			[]string{"kubectl", "get", "nodes", "--no-headers", "--request-timeout=1ms"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := kubectlGet(c.timeout, c.args...); !slices.Equal(got, c.want) {
+				t.Errorf("kubectlGet = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestPollAndReportBoundsEachFetchByThePatienceLeft(t *testing.T) {
+	var timeouts []time.Duration
+	fetch := func(timeout time.Duration) (string, bool) {
+		timeouts = append(timeouts, timeout)
+		return "node-1   NotReady", true
+	}
+	pollAndReport(t.Context(), time.Millisecond, 20*time.Millisecond, "node", fetch, containsReady)
+	if len(timeouts) == 0 {
+		t.Fatal("the loop made no fetch")
+	}
+	if longest := slices.Max(timeouts); longest > 20*time.Millisecond {
+		t.Errorf("fetch timeout %s is longer than the 20ms patience", longest)
+	}
+	if shortest := slices.Min(timeouts); shortest <= 0 {
+		t.Errorf("fetch timeout %s is not positive", shortest)
+	}
+}
+
+func TestPollAndReportCapsEachFetchAtTheRequestTimeout(t *testing.T) {
+	var got time.Duration
+	fetch := func(timeout time.Duration) (string, bool) {
+		got = timeout
+		return "node-1   Ready", true
+	}
+	pollAndReport(t.Context(), time.Millisecond, time.Hour, "node", fetch, containsReady)
+	if got != kubectlRequestTimeout {
+		t.Errorf("fetch timeout = %s, want %s", got, kubectlRequestTimeout)
 	}
 }
 

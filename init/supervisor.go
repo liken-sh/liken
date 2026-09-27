@@ -450,8 +450,8 @@ func describeExit(status unix.WaitStatus) string {
 // moment the operator runs. reportWhenReady is the bridge to that
 // moment.
 func reportWhenReady(ctx context.Context) error {
-	fetch := func() (string, bool) {
-		return run(k3sBinary, "kubectl", "get", "nodes", "--no-headers")
+	fetch := func(timeout time.Duration) (string, bool) {
+		return run(k3sBinary, kubectlGet(timeout, "nodes")...)
 	}
 	if pollAndReport(ctx, 3*time.Second, 5*time.Minute, "node", fetch, containsReady) {
 		fmt.Println("liken: kubernetes is up")
@@ -463,18 +463,39 @@ func reportWhenReady(ctx context.Context) error {
 }
 
 // reportPods prints the system pods as they start, after the node
-// goes Ready. It stops printing once every pod reaches Running. This
-// is the console equivalent of watching `kubectl get pods -A` until
-// the output settles.
+// goes Ready. It stops printing once every pod reaches Running or
+// Completed, or when five minutes pass. This is the console
+// equivalent of watching `kubectl get pods -A` until the output
+// settles.
 func reportPods(ctx context.Context) {
-	fetch := func() (string, bool) {
-		return run(k3sBinary, "kubectl", "get", "pods", "-A", "--no-headers")
+	fetch := func(timeout time.Duration) (string, bool) {
+		return run(k3sBinary, kubectlGet(timeout, "pods", "-A")...)
 	}
 	if pollAndReport(ctx, 5*time.Second, 5*time.Minute, "pod", fetch, podsSettled) {
 		fmt.Println("liken: all system pods are settled")
 	} else if ctx.Err() == nil {
 		fmt.Println("liken: system pods have not settled; see the pod status lines above")
 	}
+}
+
+// kubectlRequestTimeout bounds one kubectl request from the boot
+// reporters. An API server that accepts the connection and never
+// answers would otherwise hold kubectl, and the reporter with it,
+// past its patience, because kubectl sets no request timeout of its
+// own. A starting k3s answers a node or pod list in well under a
+// second, so ten seconds is room for a slow start, and a server that
+// does not answer in ten seconds costs one skipped table, not the
+// whole wait.
+const kubectlRequestTimeout = 10 * time.Second
+
+// kubectlGet builds the arguments for one `k3s kubectl get` with its
+// request timeout. The timeout is always positive, because kubectl
+// reads a zero --request-timeout as no timeout at all.
+func kubectlGet(timeout time.Duration, args ...string) []string {
+	timeout = max(timeout.Round(time.Millisecond), time.Millisecond)
+	out := []string{"kubectl", "get"}
+	out = append(out, args...)
+	return append(out, "--no-headers", "--request-timeout="+timeout.String())
 }
 
 // pollAndReport is the pattern both reporters share: fetch a kubectl
@@ -484,15 +505,23 @@ func reportPods(ctx context.Context) {
 // plane shuts down. Printing only the changes keeps the console
 // readable: a table that stays unchanged for a minute produces no
 // lines at all.
+//
+// Each fetch gets kubectlRequestTimeout or the patience that is left,
+// whichever is shorter, so a server that never answers cannot hold
+// the loop past its deadline by more than kubectl's own start.
 func pollAndReport(ctx context.Context, interval, patience time.Duration, prefix string,
-	fetch func() (string, bool), settled func(string) bool) bool {
+	fetch func(timeout time.Duration) (string, bool), settled func(string) bool) bool {
 	last := ""
 	deadline := time.Now().Add(patience)
 	for time.Now().Before(deadline) {
 		if !sleepUnlessCancelled(ctx, interval) {
 			return false
 		}
-		out, ok := fetch()
+		left := time.Until(deadline)
+		if left <= 0 {
+			return false
+		}
+		out, ok := fetch(min(kubectlRequestTimeout, left))
 		if !ok || out == "" {
 			continue
 		}

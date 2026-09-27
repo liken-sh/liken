@@ -264,12 +264,16 @@ func collectionPath(o seedObject) (string, error) {
 }
 
 // engineProbeInterval sets how long the sweep waits between engine
-// probes. The sweep runs every ten seconds, and a probe on every
-// sweep would make this GET the most frequent request liken sends,
-// for an answer that almost never changes. The engine goes missing
-// only when someone deletes it, and an engine that heals within a
-// minute is still far faster than the only other repair, which is
-// this program's next start.
+// probes. The probe is a backstop for one failure: someone deletes
+// the kustomize-controller `Deployment` while the flux feature is
+// on. This program watches only Machines, so no event announces that
+// deletion. The sweep runs at least every ten seconds and again after
+// each Machine change, and a probe on every sweep would make this GET
+// the most frequent request `liken` sends, for an answer that almost
+// never changes. One GET a minute costs less than a second watch and
+// its restart handling. An engine that heals within a minute is
+// still far faster than the only other repair, which is this
+// program's next start.
 const engineProbeInterval = 60 * time.Second
 
 // engineProbe holds the one fact the engine's care must remember

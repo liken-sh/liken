@@ -234,7 +234,7 @@ func declinedFluxTeardown() *api.Condition {
 
 // janitorFlux tears the flux feature down when the cluster document
 // no longer declares it, and only when liken planted it. Every call
-// is one stage at most; the sweep calls it again ten seconds later,
+// is one stage at most; the sweep calls it again within ten seconds,
 // and silence is the converged state. The returned condition reports
 // a refusal, and nil means there is nothing to report.
 func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Condition {

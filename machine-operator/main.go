@@ -175,9 +175,9 @@ func main() {
 	// person's edit is acted on at once. The facts watch wakes the loop
 	// when init publishes a change under /run/liken/facts, so a fresh
 	// fact like a time sync reaches status without waiting on a timer.
-	// The ticker wakes the loop on a fixed cadence, so it renews the
-	// heartbeat lease and backstops any drift that neither watch
-	// reported; it is no longer the bound on facts latency.
+	// The ticker wakes the loop on a fixed cadence. It renews the
+	// heartbeat lease, and it catches the changes that neither watch
+	// reports (the ticker's own comment below names them).
 	//
 	// The watch covers exactly one object: this machine's own. The
 	// fieldSelector asks the server to filter, so no other machine's
@@ -206,13 +206,23 @@ func main() {
 		fmt.Fprintf(os.Stderr, "watching the facts tree: %v\n", err)
 	}
 
-	// The ticker sets the pace for the heartbeat and also acts as the
-	// drift backstop, so it runs at the kubelet's own lease cadence
-	// of ten seconds (the kubernetes package explains the numbers).
-	// The reconcile pass renews the heartbeat deliberately, instead
-	// of a dedicated goroutine doing it: a heartbeat should prove the
+	// The ticker is a clock first: it sets the pace for the
+	// heartbeat, so it runs at the kubelet's own lease cadence of ten
+	// seconds (the kubernetes package explains the numbers). The
+	// reconcile pass renews the heartbeat deliberately, instead of a
+	// dedicated goroutine doing it: a heartbeat should prove the
 	// operator is doing its job, and a goroutine would keep
 	// confirming a reconcile loop that had gotten stuck.
+	//
+	// The same pass is also the backstop for the state that no event
+	// announces. A sysctl or an /etc/hosts entry that another process
+	// changes sends no event, so the pass writes each one back within
+	// ten seconds. The DRA inventory comes from a walk of sysfs on
+	// each pass. The operator reads the Node, the Cluster, the
+	// registry credentials Secret, and the OS pods on its node with
+	// plain requests, and the only watch it holds covers its own
+	// Machine. A release download that finishes between passes
+	// reaches status on the next one.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		// Sync before the read closes the window between a new subtree

@@ -109,11 +109,21 @@ func main() {
 	poller := newChannelPoller()
 	probe := &engineProbe{}
 
-	// The ticker catches the changes that no Machine event announces:
-	// a heartbeat aging past the staleness limit (a Lease renewal is
-	// not a Machine write), and a Cluster spec edit such as a new
-	// version target. Ten seconds keeps those verdicts inside the
-	// same window that the machine operators work on.
+	// The ticker catches the changes that no Machine event announces.
+	// Some are clocks: a heartbeat that ages past the staleness limit
+	// (a Lease renewal is not a Machine write), a granted reboot turn
+	// that passes rolloutStallAfter, and the channel poller's own
+	// interval. The rest are reads that no watch covers, because this
+	// program watches only Machines: the Cluster spec (a new version
+	// target, a retracted feature), the OS DaemonSets and their pods
+	// for the steward, the feature workloads for the janitor, each
+	// stage of the flux teardown, and the flux deploy key Secret.
+	// Ten seconds keeps those verdicts inside the same window that
+	// the machine operators work on. A pass costs about ten reads. On
+	// a nine-machine fleet, this program and the machine operators
+	// together sent a small share of the API server's requests, so a
+	// watch for each of these kinds would add code without a
+	// measurable gain.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		started := time.Now()
