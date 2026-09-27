@@ -153,8 +153,8 @@ func (c *Catalog) countTitles(ctx context.Context, library string) (int, error) 
 const subscriptionsPath = "/v1/subscriptions"
 
 // Posts one statement and calls onRow for every row of the opening
-// snapshot and every change after it, with deleted set for a change that
-// removed its row, and with the column names the stream
+// snapshot and every change after it, with deleted set for a row that
+// left the query's result, and with the column names the stream
 // opened with, because the agent's matcher prepends the primary key to
 // the projection and a reader that counts cells would read the wrong one.
 // onReady is called once the snapshot ends. The call returns when the
@@ -218,7 +218,10 @@ func (c *Catalog) subscribe(ctx context.Context, sql string, params []any,
 
 // The events a subscription stream carries that the reader acts on;
 // every other event reads as a skipped one. A delete is a change event of
-// the kind "delete", and it carries the cells of the row it removed.
+// the kind "delete", and it carries the last cells of a row that left the
+// query's result. The row left for one of two causes: a statement deleted
+// it from its table, or an update moved it out of the query's WHERE
+// clause. The table row can still exist.
 const (
 	subscriptionColumns = "columns"
 	subscriptionRow     = "row"
@@ -238,7 +241,8 @@ type subscriptionEvent struct {
 // Reads one streamed subscription event. A row event is
 // [rowid, [cells]] and a change event is [kind, rowid, [cells], id], so
 // both carry their cells. An insert and an update read as a row, and a
-// delete reads as a delete, because its cells are a row that is gone.
+// delete reads as a delete, because its cells are a row that is no longer
+// in the query's result.
 func decodeSubscriptionEvent(line []byte) (subscriptionEvent, error) {
 	var event map[string]json.RawMessage
 	if err := json.Unmarshal(line, &event); err != nil {

@@ -158,7 +158,10 @@ func (a *sqliteAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Answers a subscription the way the agent does: the columns, the
 // rows the query holds now, the end of that snapshot, and then one change
-// per row that appears or moves after it, until the caller goes away.
+// per row that appears or moves after it, until the caller goes away. A
+// row that leaves the query's result streams as a delete with its last
+// cells. This agent tells rows apart by their cells alone, so a row whose
+// cells move streams a delete of the old cells beside the change.
 func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) {
 	query, params := parseQuery(readBody(r))
 	enc := json.NewEncoder(w)
@@ -170,11 +173,12 @@ func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	_ = enc.Encode(map[string]any{"columns": columns})
-	held := map[string]bool{}
+	held := map[string][]any{}
 	for number, cells := range rows {
-		held[fmt.Sprint(cells)] = true
+		held[fmt.Sprint(cells)] = cells
 		_ = enc.Encode(map[string]any{"row": []any{number + 1, cells}})
 	}
+	changes := len(held)
 	_ = enc.Encode(map[string]any{"eoq": map[string]any{"time": 0.0}})
 	flusher.Flush()
 
@@ -184,13 +188,27 @@ func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			return
 		}
-		for number, cells := range rows {
-			key := fmt.Sprint(cells)
-			if held[key] {
+		current := map[string]bool{}
+		for _, cells := range rows {
+			current[fmt.Sprint(cells)] = true
+		}
+		for key, cells := range held {
+			if current[key] {
 				continue
 			}
-			held[key] = true
-			_ = enc.Encode(map[string]any{"change": []any{"update", number + 1, cells, len(held)}})
+			delete(held, key)
+			changes++
+			_ = enc.Encode(map[string]any{"change": []any{"delete", 0, cells, changes}})
+			flusher.Flush()
+		}
+		for number, cells := range rows {
+			key := fmt.Sprint(cells)
+			if _, seen := held[key]; seen {
+				continue
+			}
+			held[key] = cells
+			changes++
+			_ = enc.Encode(map[string]any{"change": []any{"update", number + 1, cells, changes}})
 			flusher.Flush()
 		}
 	}

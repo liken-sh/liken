@@ -176,6 +176,102 @@ func TestADeletedRowTakesItsPendingRun(t *testing.T) {
 	}
 }
 
+// A cleanup Job deletes a run the confirmer holds. The agent streams the
+// delete, and the run leaves the pending set with no confirmation.
+func TestARunDeletedFromTheCatalogLeavesThePendingSet(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	if _, _, err := catalog.UpsertRun(t.Context(), "house/departed", libraryRun{
+		Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0),
+		Actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", Version: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	work := testConfirmer(t, catalog, io.Discard)
+	serving(t, work)
+	awaitWaiting(t, work, 1)
+
+	if _, err := catalog.DeleteRuns(t.Context(), "house/departed"); err != nil {
+		t.Fatal(err)
+	}
+
+	awaitWaiting(t, work, 0)
+}
+
+// A handoff's first write sets the version to zero, and the run stream
+// carries that as a delete of the run before it. A delete of an older run
+// of the row leaves the newer run pending.
+func TestADeleteOfAnOlderRunKeepsTheNewerOne(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	work := testConfirmer(t, catalog, io.Discard)
+	older := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+	newer := finishedRun{library: "house/movies", worker: workerScan, job: "scan-2",
+		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
+	streamRun(t, work, newer)
+
+	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
+		[]any{older.library, older.worker, older.job, older.actor, float64(older.version)}, true)
+
+	if waiting := work.waiting(); len(waiting) != 1 || waiting[0] != newer {
+		t.Errorf("waiting = %+v, want only %+v", waiting, newer)
+	}
+}
+
+// Stands until the confirmer holds this many runs, and fails when it
+// never does.
+func awaitWaiting(t *testing.T, work *confirmer, want int) {
+	t.Helper()
+	deadline := time.After(scanTestTimeout)
+	for len(work.waiting()) != want {
+		select {
+		case <-deadline:
+			t.Fatalf("waiting = %+v, want %d runs", work.waiting(), want)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// The recheck reads a copy of the pending set, and a delete can take the
+// run out of the set while the recheck reads the catalog. The recheck
+// then writes no confirmation, even when the copy holds the versions.
+func TestTheRecheckConfirmsOnlyARunThatIsStillPending(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	written := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
+	work := testConfirmer(t, catalog, io.Discard)
+	run := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+		actor: written.Actor, version: written.Version}
+
+	work.recheck(t.Context(), run)
+
+	held, err := catalog.confirmedBy(t.Context(), "house/departed", workerScan, "scan-1",
+		testConfirmerPod, written.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held {
+		t.Error("the recheck confirmed a run that left the pending set")
+	}
+}
+
+// The events between one run stream and the next are gone, deletes
+// among them. The confirmer forgets its pending runs when it opens the
+// stream again, and the snapshot holds every run that still exists.
+func TestTheConfirmerForgetsPendingRunsWhenTheStreamOpensAgain(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	log := &syncLog{}
+	refusing := proxyCatalog(t, catalog, func(path string, body []byte) bool {
+		return strings.HasSuffix(path, subscriptionsPath)
+	})
+	work := testConfirmer(t, refusing, log)
+	work.hold(finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12})
+	serving(t, work)
+
+	waitForLog(t, log, "the run stream ended")
+
+	awaitWaiting(t, work, 0)
+}
+
 // The recheck can confirm a run while the stream's read of the same run
 // still runs. The stream's hold that follows keeps nothing, because the
 // run is already confirmed.
