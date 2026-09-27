@@ -265,9 +265,11 @@ func sidecarNamed(name string, ready, deleting bool) Pod {
 }
 
 // A rollout replaces a node's sidecar, and the events of the two pods
-// arrive interleaved. The old pod's late events must not take the node
-// from the new one, so the index answers per node with the pod that is
-// not being deleted, and a Ready pod before one that is not.
+// arrive interleaved. The index answers per node with a Ready pod
+// first, even one being deleted, because it still serves captures
+// through its grace period, and a DaemonSet rollout with no surge
+// starts the new pod only after the old one begins to leave. Among
+// pods of equal readiness, one not being deleted comes first.
 func TestTheIndexAnswersTheNodesCurrentSidecar(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -290,10 +292,17 @@ func TestTheIndexAnswersTheNodesCurrentSidecar(t *testing.T) {
 			index.hold(sidecarNamed("old", true, false))
 			index.hold(sidecarNamed("new", false, false))
 		}, want: "old", ready: true},
-		{name: "a starting pod before one that is being deleted", events: func(index *sidecarIndex) {
+		{name: "a ready pod being deleted before one that is starting", events: func(index *sidecarIndex) {
 			index.hold(sidecarNamed("new", false, false))
 			index.hold(sidecarNamed("old", true, true))
+		}, want: "old", ready: true},
+		{name: "a starting pod before one being deleted that is not ready", events: func(index *sidecarIndex) {
+			index.hold(sidecarNamed("new", false, false))
+			index.hold(sidecarNamed("old", false, true))
 		}, want: "new", ready: false},
+		{name: "a pod being deleted when it is the only one", events: func(index *sidecarIndex) {
+			index.hold(sidecarNamed("old", false, true))
+		}, want: "old", ready: false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

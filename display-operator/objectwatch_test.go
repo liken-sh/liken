@@ -473,7 +473,7 @@ func TestAWatchRefusedWithGoneListsAgain(t *testing.T) {
 // countListings runs the named watch for window against a server that
 // lists at version 1 and answers every watch with answer, and counts
 // the listings.
-func countListings(t *testing.T, window time.Duration, answer func(w http.ResponseWriter)) int64 {
+func countListings(t *testing.T, window time.Duration, answer func(w http.ResponseWriter, r *http.Request)) int64 {
 	t.Helper()
 	var lists atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -482,7 +482,7 @@ func countListings(t *testing.T, window time.Duration, answer func(w http.Respon
 			fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
 			return
 		}
-		answer(w)
+		answer(w, r)
 	}))
 	t.Cleanup(server.Close)
 	ctx, stop := context.WithTimeout(t.Context(), window)
@@ -498,12 +498,12 @@ func countListings(t *testing.T, window time.Duration, answer func(w http.Respon
 func TestAGoneAfterAFreshListingWaits(t *testing.T) {
 	cases := []struct {
 		name   string
-		answer func(w http.ResponseWriter)
+		answer func(w http.ResponseWriter, r *http.Request)
 	}{
-		{name: "as an event", answer: func(w http.ResponseWriter) {
+		{name: "as an event", answer: func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
 		}},
-		{name: "as the response", answer: func(w http.ResponseWriter) {
+		{name: "as the response", answer: func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusGone)
 			fmt.Fprint(w, `{"kind":"Status","code":410}`)
 		}},
@@ -519,12 +519,45 @@ func TestAGoneAfterAFreshListingWaits(t *testing.T) {
 
 // An event whose object does not decode would come back at the same
 // version on every reopen, so it counts as an ERROR event: the loop
-// waits, then lists again.
+// waits, then lists again. The API server holds the stream open after
+// the event, as a real one does until its timeout, so the loop must end
+// the connection itself and not wait for the server to close it.
 func TestAnEventThatDoesNotDecodeListsAgain(t *testing.T) {
-	lists := countListings(t, 1500*time.Millisecond, func(w http.ResponseWriter) {
+	lists := countListings(t, 1500*time.Millisecond, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"type":"MODIFIED","object":{"metadata":{"name":"tracked","resourceVersion":"2"},"data":5}}`)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
 	})
 	if lists < 2 {
 		t.Errorf("the loop listed %d times, want a second listing after the event that does not decode", lists)
+	}
+}
+
+// A 410 lists again at once, but it does not reset the growing wait:
+// only a watch that ran for a second or longer does. So a server that
+// closes each watch at once keeps its growing wait through a 410. The
+// watches here close at once twice, which grows the wait to 4 s, then
+// answer 410, then close at once again. The next watch comes 4 s after
+// that, and not 1 s after it.
+func TestAGoneDoesNotResetTheWait(t *testing.T) {
+	var watches atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") != "true" {
+			fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
+			return
+		}
+		if watches.Add(1) == 3 {
+			fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	ctx, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+
+	watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
+		"tracked", "the test ConfigMap", func(*ConfigMap) {})
+
+	if got := watches.Load(); got != 4 {
+		t.Errorf("the loop opened %d watches in 5 s, want 4: the wait after the 410 still grows", got)
 	}
 }

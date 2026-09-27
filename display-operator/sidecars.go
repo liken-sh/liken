@@ -48,11 +48,13 @@ func newSidecarIndex() *sidecarIndex {
 // A request reads this map and never the API server, so a capture
 // costs one call to the node and nothing else.
 //
-// The answer is the node's pod that is not being deleted, a Ready one
-// before one that is not. A pod that is being deleted answers only
-// when the node has no other, because it still runs through its grace
-// period. Pods of equal rank answer by name, so every request gets the
-// same one.
+// The answer is the node's Ready pod, even one being deleted: it still
+// serves captures through its grace period, and a DaemonSet rollout
+// with no surge starts the new pod only after the old one begins to
+// leave, so preferring the new pod would refuse captures until it is
+// Ready. Among pods of equal readiness, one not being deleted answers
+// first, and pods of equal rank answer by name, so every request gets
+// the same one.
 func (i *sidecarIndex) on(node string) (sidecarPod, bool) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -79,14 +81,14 @@ func (i *sidecarIndex) on(node string) (sidecarPod, bool) {
 	}, true
 }
 
-// How strongly a pod answers for its node: not being deleted counts
-// before Ready.
+// How strongly a pod answers for its node: Ready counts before not
+// being deleted.
 func sidecarRank(pod Pod) int {
 	rank := 0
-	if pod.Metadata.DeletionTimestamp == nil {
+	if pod.Status.ready() {
 		rank += 2
 	}
-	if pod.Status.ready() {
+	if pod.Metadata.DeletionTimestamp == nil {
 		rank++
 	}
 	return rank

@@ -97,8 +97,9 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 				delay = pauseWatch(ctx, delay)
 				continue
 			}
+			// The listing runs at once, and the wait keeps what it has
+			// grown to: only a watch that ran resets it.
 			afterGone = true
-			delay = objectWatchRetry
 			continue
 		}
 		afterGone = false
@@ -183,14 +184,23 @@ func undecodable(object json.RawMessage, err error) *watchErrorEvent {
 func streamList[T any](ctx context.Context, c *Client, path, version string, changed func(string, T)) (string, error) {
 	stream := fmt.Sprintf("%s&watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
 		path, url.QueryEscape(version), int(displayWatchTimeout.Seconds()))
-	body, err := c.Watch(ctx, stream)
+	// The connection has a context of its own. A watch that ends on an
+	// event it cannot use returns with the stream still open, and the
+	// API server holds it until its timeout, so the drain below would
+	// wait out that timeout and every event in it would be lost. The
+	// cancel ends the connection first, and it runs before the drain.
+	watchCtx, cancel := context.WithCancel(ctx)
+	body, err := c.Watch(watchCtx, stream)
 	if errors.Is(err, ErrGone) {
+		cancel()
 		return version, errWatchExpired
 	}
 	if err != nil {
+		cancel()
 		return version, err
 	}
 	defer drain(body)
+	defer cancel()
 
 	events := json.NewDecoder(body)
 	for {
