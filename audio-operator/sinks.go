@@ -390,6 +390,7 @@ func watchEndpoints(ctx context.Context, c *Client, machine string, wake func(),
 			restarted:  func() { readings.watchRestarted(kind) },
 			retry:      objectWatchRetry,
 			retryLimit: objectWatchRetryLimit,
+			shortLife:  objectWatchShortLife,
 		}
 		go watch.run(ctx)
 	}

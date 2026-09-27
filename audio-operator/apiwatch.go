@@ -47,10 +47,16 @@ import (
 // objectWatchRetry is the first wait after a failure, and each failure
 // in a row doubles it up to objectWatchRetryLimit. An API server that
 // is down gets one list a minute from each watch, not one a second.
+//
+// objectWatchShortLife is the shortest life of a watch that counts as
+// working. A watch that closes sooner is a failure whatever it
+// delivered, because an API server that accepts each watch and closes
+// it at once would otherwise get a new one in a tight loop.
 const (
 	objectWatchTimeout    = 290 * time.Second
 	objectWatchRetry      = time.Second
 	objectWatchRetryLimit = time.Minute
+	objectWatchShortLife  = time.Second
 )
 
 // objectWatch follows the objects one selector takes. changed runs
@@ -75,9 +81,13 @@ type objectWatch struct {
 	// nil when nothing counts the reopens.
 	restarted func()
 
-	// The two waits are fields so a test runs a retry in a
-	// millisecond.
-	retry, retryLimit time.Duration
+	// The waits and the short life are fields so a test runs a retry
+	// in a millisecond and chooses which watches count as short.
+	retry, retryLimit, shortLife time.Duration
+
+	// after is the wait, time.After when nil, a field so a test reads
+	// each backoff without a clock.
+	after func(time.Duration) <-chan time.Time
 }
 
 // followObject starts the watch with the production waits.
@@ -86,7 +96,7 @@ func followObject(ctx context.Context, client *Client, kind, collection, name st
 	watch := &objectWatch{
 		client: client, kind: kind, collection: collection, selector: "metadata.name=" + name,
 		changed: changed, complain: complain,
-		retry: objectWatchRetry, retryLimit: objectWatchRetryLimit,
+		retry: objectWatchRetry, retryLimit: objectWatchRetryLimit, shortLife: objectWatchShortLife,
 	}
 	go watch.run(ctx)
 }
@@ -97,43 +107,84 @@ func followObject(ctx context.Context, client *Client, kind, collection, name st
 // A watch that the API server ends opens again from the version of the
 // last event, so no change between the two watches is lost and no list
 // is needed. A version the API server no longer keeps answers 410
-// Gone, and only then does the loop list again: the list reads the
-// present state, which covers every change the lost window held.
+// Gone, and the loop lists again at once: the list reads the present
+// state, which covers every change the lost window held. A second 410
+// on the watch that opens from that fresh list is a fault the list
+// cannot cure, so the loop waits out the backoff before it lists
+// again.
+//
+// Every other failure waits out the backoff, and each failure in a row
+// doubles it. A watch that closed within shortLife of its open is a
+// failure, even when it ended cleanly. A watch that lived longer
+// resets the backoff, even when it ended on an error, and one that
+// ended cleanly opens again at once.
 func (w *objectWatch) run(ctx context.Context) {
 	version := ""
 	delay := w.retry
 	opened := false
+	relisted := false
 	for ctx.Err() == nil {
-		var err error
 		if version == "" {
-			version, err = w.list()
-		}
-		if err == nil {
-			if opened && w.restarted != nil {
-				w.restarted()
+			listed, err := w.list()
+			if err != nil {
+				w.complain(err)
+				if !w.wait(ctx, delay) {
+					return
+				}
+				delay = min(2*delay, w.retryLimit)
+				continue
 			}
-			opened = true
-			version, err = w.follow(ctx, version)
+			version = listed
 		}
-		switch {
-		case ctx.Err() != nil:
+		if opened && w.restarted != nil {
+			w.restarted()
+		}
+		opened = true
+		started := time.Now()
+		last, err := w.follow(ctx, version)
+		lived := time.Since(started) >= w.shortLife
+		if ctx.Err() != nil {
 			return
-		case errors.Is(err, ErrGone):
+		}
+		version = last
+		gone := errors.Is(err, ErrGone)
+		if gone {
 			version = ""
-			continue
-		case err != nil:
-			w.complain(err)
-		default:
-			delay = w.retry
+			if !relisted || lived {
+				relisted = true
+				continue
+			}
+		} else {
+			relisted = false
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
+		if lived {
+			delay = w.retry
+			if err == nil {
+				continue
+			}
 		}
 		if err != nil {
-			delay = min(2*delay, w.retryLimit)
+			w.complain(err)
 		}
+		if !w.wait(ctx, delay) {
+			return
+		}
+		delay = min(2*delay, w.retryLimit)
+	}
+}
+
+// wait waits out one backoff, and answers false when the context ended
+// first.
+func (w *objectWatch) wait(ctx context.Context, delay time.Duration) bool {
+	after := w.after
+	if after == nil {
+		after = time.After
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-after(delay):
+		return true
 	}
 }
 
@@ -225,19 +276,34 @@ func (w *objectWatch) follow(ctx context.Context, version string) (string, error
 			}
 			return version, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
 		}
+		// An event whose object does not decode, or carries no
+		// version, leaves no version to open the next watch from. The
+		// empty version sends the loop back to a list after the
+		// backoff, so a watch never opens again at the same version to
+		// read the same event.
 		if err := json.Unmarshal(event.Raw, &event.Object); err != nil {
-			return version, fmt.Errorf("watching the %s %s: %w", w.kind, w.selector, err)
+			return "", fmt.Errorf("reading an event on the %s %s: %w", w.kind, w.selector, err)
 		}
 		switch event.Type {
 		case "ERROR":
 			if event.Object.Code == http.StatusGone {
 				return version, fmt.Errorf("%w: %s", ErrGone, event.Object.Message)
 			}
-			return version, fmt.Errorf("watching the %s %s: %d: %s",
+			// Any other error event lists again after the backoff,
+			// because the watch says nothing about the version it
+			// stopped at.
+			return "", fmt.Errorf("watching the %s %s: %d: %s",
 				w.kind, w.selector, event.Object.Code, event.Object.Message)
 		case "BOOKMARK":
+			if event.Object.Metadata.ResourceVersion == "" {
+				return "", fmt.Errorf("reading an event on the %s %s: a bookmark with no version", w.kind, w.selector)
+			}
 			version = event.Object.Metadata.ResourceVersion
 		default:
+			if event.Object.Metadata.ResourceVersion == "" {
+				return "", fmt.Errorf("reading an event on the %s %s: a %s event with no version",
+					w.kind, w.selector, event.Type)
+			}
 			version = event.Object.Metadata.ResourceVersion
 			if w.keep != nil {
 				// An object the keeper cannot read leaves the memory

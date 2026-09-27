@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -90,6 +91,10 @@ func (f *oneObject) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Fprintln(w, event)
 			w.(http.Flusher).Flush()
+			// The API server closes a watch after an ERROR event.
+			if strings.Contains(event, `"type":"ERROR"`) {
+				return
+			}
 		}
 	}
 }
@@ -111,7 +116,16 @@ const expired = `{"type":"ERROR","object":{"kind":"Status","code":410,"message":
 // reports every change and every complaint on a channel.
 func (f *oneObject) follow(t *testing.T) (changed chan struct{}, complaints chan error) {
 	t.Helper()
-	changed, complaints = make(chan struct{}, 8), make(chan error, 8)
+	changed, complaints, _ = f.followWith(t, nil)
+	return changed, complaints
+}
+
+// followWith runs the watch after shape changes it, and reports every
+// wait the loop asks for on waited, where the wait ends at once. A
+// test reads the backoff from the waits and runs no clock.
+func (f *oneObject) followWith(t *testing.T, shape func(*objectWatch)) (changed chan struct{}, complaints chan error, waited chan time.Duration) {
+	t.Helper()
+	changed, complaints, waited = make(chan struct{}, 8), make(chan error, 8), make(chan time.Duration, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	watch := &objectWatch{
@@ -124,8 +138,17 @@ func (f *oneObject) follow(t *testing.T) (changed chan struct{}, complaints chan
 		retry:      time.Millisecond,
 		retryLimit: 10 * time.Millisecond,
 	}
+	if shape != nil {
+		watch.after = func(d time.Duration) <-chan time.Time {
+			waited <- d
+			now := make(chan time.Time, 1)
+			now <- time.Now()
+			return now
+		}
+		shape(watch)
+	}
 	go watch.run(ctx)
-	return changed, complaints
+	return changed, complaints, waited
 }
 
 // next waits for one value on a channel, for at most five seconds.
@@ -287,5 +310,102 @@ func TestAWatchThatReopensCountsOneRestart(t *testing.T) {
 
 	if got := testutil.ToFloat64(readings.watchRestarts.WithLabelValues(SinkKind)); got != 1 {
 		t.Errorf("audio_watch_restarts_total{kind=Sink} = %v, want 1", got)
+	}
+}
+
+// noWait says the loop asked for no wait before its next request.
+func noWait(t *testing.T, waited chan time.Duration, before string) {
+	t.Helper()
+	select {
+	case d := <-waited:
+		t.Errorf("the loop waited %s before %s", d, before)
+	default:
+	}
+}
+
+// The first 410 lists again at once. A 410 on the watch that opens
+// from that fresh list is a server that keeps no version, and the loop
+// waits out the backoff before it lists a third time.
+func TestA410OnTheFreshListsWatchWaitsOutTheBackoff(t *testing.T) {
+	fake := newOneObject(t)
+	fake.goneWatches = 2
+	// A 410 on the open ends the watch at once, so the watch is short.
+	_, _, waited := fake.followWith(t, func(w *objectWatch) { w.shortLife = time.Hour })
+
+	next(t, fake.listed, "first list")
+	next(t, fake.watched, "watch that gets the first 410")
+	next(t, fake.listed, "list after the first 410")
+	next(t, fake.watched, "watch that gets the second 410")
+	next(t, fake.listed, "list after the second 410")
+	if got := next(t, waited, "wait before the third list"); got != time.Millisecond {
+		t.Errorf("the loop waited %s, want the first backoff", got)
+	}
+	next(t, fake.watched, "watch that opens")
+	if len(waited) != 0 {
+		t.Errorf("the loop waited %d more times", len(waited))
+	}
+}
+
+// An event that does not decode leaves no version to trust, so it
+// counts as an error event: the loop reports it, waits, and lists.
+// Opening again at the same version would read the same event again.
+func TestAnEventThatDoesNotDecodeListsAgainAfterABackoff(t *testing.T) {
+	for _, event := range []string{
+		`{"type":"MODIFIED","object":"not an object"}`,
+		`{"type":"MODIFIED","object":{"metadata":{}}}`,
+		`{"type":"ERROR","object":{"kind":"Status","code":500,"message":"etcdserver: leader changed"}}`,
+	} {
+		t.Run(event, func(t *testing.T) {
+			fake := newOneObject(t)
+			_, complaints, waited := fake.followWith(t, func(*objectWatch) {})
+			next(t, fake.listed, "first list")
+			next(t, fake.watched, "watch")
+			fake.events <- event
+
+			next(t, complaints, "complaint")
+			next(t, waited, "wait")
+			next(t, fake.listed, "list after the bad event")
+		})
+	}
+}
+
+// A watch that closes under a second after it opened is a failure,
+// whatever it delivered, so the waits grow. A watch that lived a
+// second or more resets the backoff, even when it ended with an
+// error, and one that ended cleanly opens again at once.
+func TestAWatchsLifetimeDecidesTheBackoff(t *testing.T) {
+	errorEvent := `{"type":"ERROR","object":{"kind":"Status","code":500,"message":"etcdserver: leader changed"}}`
+	cases := []struct {
+		name      string
+		shortLife time.Duration
+		end       string
+		want      []time.Duration
+	}{
+		{"short watches that end cleanly", time.Hour, endWatch,
+			[]time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}},
+		{"short watches that end on an error", time.Hour, errorEvent,
+			[]time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}},
+		{"long watches that end on an error", 0, errorEvent,
+			[]time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}},
+		{"long watches that end cleanly", 0, endWatch, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake := newOneObject(t)
+			_, _, waited := fake.followWith(t, func(w *objectWatch) { w.shortLife = c.shortLife })
+			var got []time.Duration
+			for range 3 {
+				next(t, fake.watched, "watch")
+				fake.events <- modified("11")
+				fake.events <- c.end
+			}
+			next(t, fake.watched, "fourth watch")
+			for len(waited) > 0 {
+				got = append(got, <-waited)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("waits = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

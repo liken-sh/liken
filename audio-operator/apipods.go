@@ -185,6 +185,7 @@ func podWatch(client *Client, namespace string, index *podIndex, complain func(e
 		complain:   complain,
 		retry:      objectWatchRetry,
 		retryLimit: objectWatchRetryLimit,
+		shortLife:  objectWatchShortLife,
 	}
 }
 
