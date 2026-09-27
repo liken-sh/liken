@@ -452,6 +452,10 @@ that took a hearing-impaired flag for Hindi.
   back](open-problems/copies-never-give-space-back.md). A Job's agent
   stops before the incremental vacuum loop runs, so freed pages stay in
   the file.
+* [A cleanup run outlives its
+  `Library`](open-problems/a-cleanup-run-outlives-its-library.md). The
+  cleanup `Job` leaves its own `runs` row, so the reporter publishes a
+  deleted library's report again on each catalog change.
 
 ## Rejected
 
@@ -473,3 +477,7 @@ that took a hearing-impaired flag for Hindi.
   Operator-written symlink groupings, replaced by catalog queries.
 * [Toolkits other than Iced](rejected/toolkits-other-than-iced.md). Gio,
   Slint, Bevy, Godot, and the rest, with the measurements.
+* [Skipping the operator's own watch
+  echoes](rejected/skipping-the-operators-own-watch-echoes.md). Built
+  and measured on `liken-1`. It saves a few passes during a scan and
+  none at rest, for a version map with a time window in the wake path.

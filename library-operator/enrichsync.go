@@ -30,7 +30,12 @@ const (
 	defaultSyncTimeout  = 10 * time.Minute
 )
 
-// The poll of the local copy is a variable so a test drives it in
+// How often the wait reads the local copy again. The wait is a clock with
+// a deadline: it runs once, when a phase container starts, and ends at the
+// sync or at the timeout. No event covers the sync. The proof is in the
+// cr-sqlite bookkeeping, and a subscription or an update stream follows
+// only the catalog's own tables. Each read is two small queries against
+// the agent in the same pod. It is a variable so a test drives it in
 // milliseconds.
 var catalogSyncInterval = time.Second
 

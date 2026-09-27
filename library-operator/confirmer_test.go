@@ -129,6 +129,53 @@ func TestTheConfirmerWaitsUntilItsCopyHoldsTheVersions(t *testing.T) {
 	awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", 12)
 }
 
+// Hands one run to the confirmer the way the run stream does.
+func streamRun(t *testing.T, work *confirmer, run finishedRun) {
+	t.Helper()
+	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
+		[]any{run.library, run.worker, run.job, run.actor, float64(run.version)})
+}
+
+// A retried pod of a Job that timed out writes the same runs row with
+// a write of its own. The confirmer then waits on the newer run alone,
+// because no pod waits on the older one.
+func TestTheConfirmerWaitsOnTheNewestRunOfARow(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	work := testConfirmer(t, catalog, io.Discard)
+	timedOut := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+	retried := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
+
+	streamRun(t, work, timedOut)
+	streamRun(t, work, retried)
+
+	waiting := work.waiting()
+	if len(waiting) != 1 || waiting[0] != retried {
+		t.Errorf("waiting = %+v, want only %+v", waiting, retried)
+	}
+}
+
+// A recheck of the older run can end after the stream replaced it
+// with the newer one. A recheck that cannot confirm the older run leaves
+// the newer run pending.
+func TestARecheckKeepsTheNewerRunOfARow(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	work := testConfirmer(t, catalog, io.Discard)
+	timedOut := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+	retried := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
+		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
+	streamRun(t, work, retried)
+
+	work.settle(t.Context(), timedOut)
+
+	waiting := work.waiting()
+	if len(waiting) != 1 || waiting[0] != retried {
+		t.Errorf("waiting = %+v, want only %+v", waiting, retried)
+	}
+}
+
 // A run that names no write is a run whose Job has not answered for
 // itself yet, so no confirmer acts on it.
 func TestTheConfirmerSkipsARunThatNamesNoWrite(t *testing.T) {
@@ -294,7 +341,7 @@ func TestAnAgentThatWillNotAnswerHoldsTheRun(t *testing.T) {
 	work := testConfirmer(t, catalog, log)
 	agent.queriesLeft = 1
 
-	work.settle(t.Context(), finishedRun{library: "house/movies", worker: workerScan,
+	streamRun(t, work, finishedRun{library: "house/movies", worker: workerScan,
 		job: "scan-1", actor: run.Actor, version: run.Version})
 
 	if len(work.pending) != 1 {

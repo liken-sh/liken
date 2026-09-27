@@ -62,8 +62,16 @@ func (r finishedRun) key() string {
 		"\x1f" + r.actor + "\x1f" + strconv.FormatInt(r.version, 10)
 }
 
+// The runs row one run was read from. The runs table holds one row per
+// library and worker, so a newer run of the same row replaces the older one,
+// and no Job waits on the older run any more.
+func (r finishedRun) row() string {
+	return r.library + "\x1f" + r.worker
+}
+
 // One confirmer: its pod name, the catalog it reads, and the runs
-// it has confirmed and the ones it still waits on.
+// it has confirmed and the ones it still waits on. The confirmed set is
+// keyed by run and the pending set by runs row.
 type confirmer struct {
 	name    string
 	catalog *Catalog
@@ -155,7 +163,13 @@ func (c *confirmer) follow(ctx context.Context) {
 // RecheckWhilePending reads the copy again for every run it could
 // not confirm, until the context ends. A run reaches the pending set when
 // the versions behind it have not arrived yet, which gossip answers within
-// seconds.
+// seconds. No event covers the arrival: the proof is in the cr-sqlite
+// bookkeeping, and a subscription or an update stream follows only the
+// catalog's own tables. So the recheck is a backstop timer. It reads
+// nothing when no run is pending, and a pending run leaves the set when
+// it is confirmed or when a newer run of its row replaces it. A run whose
+// versions never arrive stays until the pod restarts, at up to three small
+// reads of the local copy every two seconds.
 func (c *confirmer) recheckWhilePending(ctx context.Context) {
 	ticker := time.NewTicker(confirmerRecheck)
 	defer ticker.Stop()
@@ -165,6 +179,9 @@ func (c *confirmer) recheckWhilePending(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
+		// A run the recheck cannot confirm is already pending, and the
+		// recheck never holds it again. The run stream may have replaced
+		// it with a newer run of the same row while this read ran.
 		for _, run := range c.waiting() {
 			c.settle(ctx, run)
 		}
@@ -179,7 +196,9 @@ func (c *confirmer) noteRun(ctx context.Context, columns []string, cells []any) 
 	if !ok {
 		return
 	}
-	c.settle(ctx, run)
+	if !c.settle(ctx, run) {
+		c.hold(run)
+	}
 }
 
 // DecodeFinishedRun reads one runs row by column name into the run
@@ -209,22 +228,22 @@ func namedString(columns []string, cells []any, name string) (string, bool) {
 	return value, ok
 }
 
-// Settle confirms one run where this copy holds it, and holds it for
-// the next recheck where it does not.
-func (c *confirmer) settle(ctx context.Context, run finishedRun) {
+// Settle confirms one run where this copy holds it, and reports
+// whether the run is confirmed.
+func (c *confirmer) settle(ctx context.Context, run finishedRun) bool {
 	if c.done(run.key()) {
-		return
+		return true
 	}
 	confirmed, err := c.confirm(ctx, run)
 	if err != nil {
 		c.logf("could not confirm the %s run %s of %s: %v", run.worker, run.job, run.library, err)
 	}
 	if !confirmed {
-		c.hold(run)
-		return
+		return false
 	}
 	c.mark(run.key())
 	c.logf("confirmed the %s run %s of %s", run.worker, run.job, run.library)
+	return true
 }
 
 // Confirm reads whether this copy holds every version the run names
@@ -266,15 +285,22 @@ func (c *confirmer) mark(key string) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.confirmed[key] = true
-	delete(c.pending, key)
+	for row, run := range c.pending {
+		if run.key() == key {
+			delete(c.pending, row)
+		}
+	}
 }
 
-// Hold keeps a run for the next recheck. The newest row replaces the
-// last one, because a Job writes its run again while it waits.
+// Hold keeps a run for the next recheck, in the place of its runs row.
+// The newest run of the row replaces the last one: a Job writes its run
+// again while it waits, and a retried pod of a Job that timed out writes a
+// run with a write of its own. Without the replacement, the run of every
+// pod that timed out stays pending for the life of this pod.
 func (c *confirmer) hold(run finishedRun) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.pending[run.key()] = run
+	c.pending[run.row()] = run
 }
 
 // Waiting is the runs the recheck reads, copied out from under the
