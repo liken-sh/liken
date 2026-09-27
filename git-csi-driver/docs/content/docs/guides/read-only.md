@@ -123,11 +123,17 @@ kubectl annotate pv franchises git.liken.sh/pull-requested-at="$(date -u +%FT%TZ
 ```
 
 A node pulls for a demand only when its time is later than the start
-of the volume's last fetch on that node, less one minute. The annotation
-stays on the `PersistentVolume` after the pull, and a node that stages
-the volume later does not pull again for it, because its own fetch is
-newer. The minute covers a writer whose clock runs behind the node's
-clock. A value that is not a time is logged and does nothing.
+of the volume's last fetch that worked on that node, less one minute.
+The minute covers a writer whose clock runs behind the node's clock. A
+fetch that fails answers no demand: the node fetches again after
+`--demand-min-interval`, then twice as long after each further failure,
+up to five minutes.
+
+The annotation stays on the `PersistentVolume` after the pull. A node
+that stages the volume later does not pull again for a demand stamped
+more than a minute before its own fetch started. For a demand stamped
+inside that minute, it pulls once more. The same value read again does
+nothing. A value that is not a time is logged and does nothing.
 
 The node that holds the volume pulls at once, and every volume of the
 same URL on that node updates with it. Twenty demands inside

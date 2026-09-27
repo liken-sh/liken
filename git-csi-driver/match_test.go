@@ -210,7 +210,7 @@ func TestMarkAnnotatesEveryVolumeThePushNames(t *testing.T) {
 		t.Errorf("mark answered %d, want 2", marked)
 	}
 	for _, name := range []string{"x", "x-again"} {
-		if demandedAt(t, hooks, name) != webhookTime.Format(time.RFC3339) {
+		if demandedAt(t, hooks, name) != webhookTime.Format(time.RFC3339Nano) {
 			t.Errorf("the volume %s is not marked", name)
 		}
 	}
@@ -293,7 +293,7 @@ func TestAStartDemandsAPullOnEveryReadOnlyVolume(t *testing.T) {
 	hooks.demandAll(t.Context())
 
 	for _, name := range []string{"x", "y"} {
-		if demandedAt(t, hooks, name) != webhookTime.Format(time.RFC3339) {
+		if demandedAt(t, hooks, name) != webhookTime.Format(time.RFC3339Nano) {
 			t.Errorf("the read-only volume %s is not marked", name)
 		}
 	}

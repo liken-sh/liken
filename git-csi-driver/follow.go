@@ -30,7 +30,15 @@ type follower struct {
 	// waits on.
 	wanted   map[string]*volume
 	lastPull time.Time
+	// backoff is the wait before the loop fetches again for a demand
+	// whose fetch failed. Only run reads and writes it.
+	backoff time.Duration
 }
+
+// maxDemandRetry bounds the wait between fetches for a demand whose
+// fetch keeps failing, so a remote that comes back is pulled within
+// five minutes.
+const maxDemandRetry = 5 * time.Minute
 
 // follow adds a volume to its repository's loop, starting the loop on
 // the first volume. The caller holds the node's lock. A volume with
@@ -129,6 +137,9 @@ func (f *follower) run(ctx context.Context) {
 	delay := time.NewTimer(time.Hour)
 	defer delay.Stop()
 	delay.Stop()
+	retry := time.NewTimer(time.Hour)
+	defer retry.Stop()
+	retry.Stop()
 	waiting := false
 	f.arm(timer)
 	for {
@@ -146,14 +157,17 @@ func (f *follower) run(ctx context.Context) {
 				waiting = true
 				break
 			}
-			f.tick(ctx)
+			f.settle(f.tick(ctx), retry)
 			f.arm(timer)
 		case <-delay.C:
 			waiting = false
-			f.tick(ctx)
+			f.settle(f.tick(ctx), retry)
 			f.arm(timer)
 		case <-timer.C:
-			f.tick(ctx)
+			f.settle(f.tick(ctx), retry)
+			f.arm(timer)
+		case <-retry.C:
+			f.settle(f.tick(ctx), retry)
 			f.arm(timer)
 		}
 	}
@@ -169,19 +183,53 @@ func (f *follower) arm(timer *time.Timer) {
 }
 
 // tick is one pass over the volumes of this repository, under the
-// repository's lock, so a fetch never races a publish.
+// repository's lock, so a fetch never races a publish. It reports
+// whether the fetch failed for a volume a demand named.
 //
 // The pass is timed from its start, so the demands that arrive while it
-// fetches are answered by the next pass.
-func (f *follower) tick(ctx context.Context) {
+// fetches are answered by the next pass. A fetch that worked answers
+// every demand stamped before that start. A fetch that failed answers
+// none, so the volume stays wanted and the loop fetches again after the
+// backoff. Without that, a volume with pull on-demand keeps its old
+// commit until the next demand.
+func (f *follower) tick(ctx context.Context) bool {
 	defer f.repository.lock()()
 	now := time.Now()
-	f.answered(now)
+	wanted := f.answered(now)
+	failed := false
 	for _, held := range f.snapshot() {
 		held.reportPulled(now)
-		held.answerDemandsBefore(now)
-		f.refresh(ctx, held)
+		if f.refresh(ctx, held) {
+			held.answerDemandsBefore(now)
+			continue
+		}
+		if wanted[held.id] != nil {
+			f.want(held)
+			failed = true
+		}
 	}
+	return failed
+}
+
+// want records a volume a demand named that no fetch has answered.
+func (f *follower) want(held *volume) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.wanted[held.id] = held
+}
+
+// settle sets the retry after a pass. A pass whose demanded fetch
+// failed waits --demand-min-interval, then twice as long after each
+// further failure up to maxDemandRetry. A pass that worked stops the
+// retry.
+func (f *follower) settle(failed bool, retry *time.Timer) {
+	retry.Stop()
+	if !failed {
+		f.backoff = 0
+		return
+	}
+	f.backoff = min(max(2*f.backoff, f.node.demandMin), maxDemandRetry)
+	retry.Reset(f.backoff)
 }
 
 func (f *follower) snapshot() []*volume {
@@ -195,17 +243,18 @@ func (f *follower) snapshot() []*volume {
 }
 
 // refresh fetches the volume's ref and, when it moved, places the new
-// commit in the published tree.
+// commit in the published tree. It reports whether the tree now holds
+// what the remote holds.
 //
 // Every path out of a fetch changes what the volume reports, so
 // the gauge and the log take the answer here, once, rather than at each
 // of them.
-func (f *follower) refresh(ctx context.Context, held *volume) {
+func (f *follower) refresh(ctx context.Context, held *volume) bool {
 	defer f.node.noteHealth(ctx, held)
 	env, remove, err := held.credentials.use(held.directory)
 	if err != nil {
 		f.trouble(ctx, held, err.Error())
-		return
+		return false
 	}
 	fetchErr := f.node.readings.timeFetch(f.repository.name, func() error {
 		return f.repository.fetch(ctx, env, held.attributes.ref, 0)
@@ -213,25 +262,26 @@ func (f *follower) refresh(ctx context.Context, held *volume) {
 	remove()
 	if fetchErr != nil {
 		f.trouble(ctx, held, fetchErr.Error())
-		return
+		return false
 	}
 	commit, err := f.repository.resolve(ctx, held.attributes.ref)
 	if err != nil {
 		f.trouble(ctx, held, err.Error())
-		return
+		return false
 	}
 	if standing, _ := held.condition(); standing == commit {
 		held.reportCommit(commit)
-		return
+		return true
 	}
 
 	if err := f.repository.place(ctx, commit, held.directory, held.tree); err != nil {
 		f.trouble(ctx, held, err.Error())
-		return
+		return false
 	}
 	held.reportCommit(commit)
 	f.node.logger.InfoContext(ctx, "the tree moved",
 		"volume", held.id, "ref", held.attributes.ref, "commit", short(commit))
+	return true
 }
 
 // trouble records a failed fetch. The first failure after a

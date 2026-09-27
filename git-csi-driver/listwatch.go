@@ -54,11 +54,23 @@ type versioned interface {
 	GetResourceVersion() string
 }
 
+// shortWatch is the shortest life of a healthy watch. A watch that
+// closes sooner failed, whatever it sent, so the next one waits out the
+// retry first. Without the wait, a server that closes every watch at
+// once takes a watch call as fast as it answers.
+const shortWatch = time.Second
+
 // follow holds the list and the watch until the context ends. An empty
 // version means the next pass lists, and any other version is where
 // the next watch resumes.
+//
+// A 410 Gone lists again at once, but only once in a row. A server
+// that answers 410 to the version of a list it just made answers 410
+// to the next one too, so the loop waits out the retry before that
+// list, or it lists and watches as fast as the server answers.
 func (l *listWatch) follow(ctx context.Context) {
 	version := ""
+	relisted := false
 	for ctx.Err() == nil {
 		if version == "" {
 			listed, err := l.list(ctx)
@@ -69,14 +81,19 @@ func (l *listWatch) follow(ctx context.Context) {
 			}
 			version = listed
 		}
-		version = l.hold(ctx, version)
+		next, gone := l.hold(ctx, version)
+		if gone && relisted {
+			waitOut(ctx, l.retry)
+		}
+		relisted = gone
+		version = next
 	}
 }
 
-// hold watches from the version until the watch ends, and returns the
+// hold watches from the version until the watch ends. It returns the
 // version the next watch resumes from, or an empty version when the
-// next pass must list.
-func (l *listWatch) hold(ctx context.Context, from string) string {
+// next pass must list, and whether the watch ended on a 410 Gone.
+func (l *listWatch) hold(ctx context.Context, from string) (string, bool) {
 	// A bookmark carries the newest resourceVersion while no object
 	// changes, so a watch that the API server closes resumes from a
 	// version the server still serves.
@@ -84,41 +101,38 @@ func (l *listWatch) hold(ctx context.Context, from string) string {
 		ResourceVersion:     from,
 		AllowWatchBookmarks: true,
 	})
-	if apierrors.IsResourceExpired(err) || apierrors.IsGone(err) {
+	if expired(err) {
 		// 410 Gone: the server no longer holds the changes after this
 		// version, so only a new list reads them.
 		l.logger.InfoContext(ctx, "the watch version expired", "kind", l.kind, "error", err)
-		return ""
+		return "", true
 	}
 	if err != nil {
 		l.logger.WarnContext(ctx, "the watch failed", "kind", l.kind, "error", err)
 		waitOut(ctx, l.retry)
-		return from
+		return from, false
 	}
 	defer watching.Stop()
 	if l.opened {
 		l.readings.watchRestarted(l.kind)
 	}
 	l.opened = true
+	began := time.Now()
 
-	version, heard := from, false
+	version := from
 	for {
 		select {
 		case <-ctx.Done():
-			return version
+			return version, false
 		case event, open := <-watching.ResultChan():
 			if !open {
 				// The API server closes a healthy watch after its
 				// request timeout, and the next watch resumes at once.
-				// A watch that closes before it sends anything waits
-				// first, so a server that closes every watch at once
-				// takes one call per wait.
-				if !heard {
+				if time.Since(began) < shortWatch {
 					waitOut(ctx, l.retry)
 				}
-				return version
+				return version, false
 			}
-			heard = true
 			if event.Type == watch.Error {
 				// A 410 Gone arrives as an error event, and so does any
 				// other failure on the stream. The node lists again,
@@ -129,21 +143,39 @@ func (l *listWatch) hold(ctx context.Context, from string) string {
 				err := apierrors.FromObject(event.Object)
 				l.logger.InfoContext(ctx, "the watch ended with an error", "kind", l.kind,
 					"error", err)
-				if !apierrors.IsResourceExpired(err) && !apierrors.IsGone(err) {
-					waitOut(ctx, l.retry)
+				if expired(err) {
+					return "", true
 				}
-				return ""
+				waitOut(ctx, l.retry)
+				return "", false
 			}
-			if held, ok := event.Object.(versioned); ok && held.GetResourceVersion() != "" {
+			held, decoded := event.Object.(versioned)
+			if !decoded {
+				// An object the client could not decode carries no
+				// version to resume from, so the event counts as an
+				// error. Without the wait, the loop opens the watch at
+				// the same version again and reads the same event.
+				l.logger.WarnContext(ctx, "the event did not decode", "kind", l.kind,
+					"type", event.Type)
+				waitOut(ctx, l.retry)
+				return "", false
+			}
+			if held.GetResourceVersion() != "" {
 				version = held.GetResourceVersion()
 			}
 			if err := l.act(ctx, event); err != nil {
 				l.logger.WarnContext(ctx, "the event was not read", "kind", l.kind, "error", err)
 				waitOut(ctx, l.retry)
-				return ""
+				return "", false
 			}
 		}
 	}
+}
+
+// expired reports whether the error is a 410 Gone, which the API server
+// sends with the reason Expired or the reason Gone.
+func expired(err error) bool {
+	return apierrors.IsResourceExpired(err) || apierrors.IsGone(err)
 }
 
 // waitOut waits out the retry after a call that failed, and ends early

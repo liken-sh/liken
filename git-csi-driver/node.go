@@ -258,10 +258,17 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
+	start := time.Now()
 	fetchErr := n.readings.timeFetch(repo.name, func() error {
 		return repo.fetch(ctx, env, mounting.attributes.ref, depth)
 	})
 	remove()
+	// A fetch that worked answers every demand stamped before it
+	// started. A stage that serves the node's copy after a failed fetch
+	// answers none, so the next demand read pulls.
+	if fetchErr == nil {
+		mounting.answerDemandsBefore(start)
+	}
 
 	commit, resolveErr := repo.resolve(ctx, mounting.attributes.ref)
 	switch {

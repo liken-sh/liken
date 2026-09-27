@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -144,6 +145,16 @@ func TestADemandIsActedOnByItsTime(t *testing.T) {
 		{
 			name:   "an older demand after a newer one",
 			stamps: []string{demandAt(2 * time.Second), demandAt(0)},
+			want:   2,
+		},
+		{
+			name:   "a second demand from a writer whose clock runs behind",
+			stamps: []string{demandAt(0), demandAt(-demandSkew / 3)},
+			want:   2,
+		},
+		{
+			name:   "a demand stamped in the future read twice",
+			stamps: []string{demandAt(time.Hour), demandAt(time.Hour)},
 			want:   1,
 		},
 		{
@@ -174,4 +185,33 @@ func TestADemandThatIsNotATimeSaysSo(t *testing.T) {
 	if !strings.Contains(logs.String(), "the demand is not a time") {
 		t.Errorf("the log is %q, want the value that is not a time in it", logs)
 	}
+}
+
+func TestADemandWhoseFetchFailsIsFetchedAgain(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	answering.demandMin = 50 * time.Millisecond
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+	want := commitFiles(t, source, map[string]string{"a.txt": "two"})
+
+	// The remote is gone when the demand arrives, so the pull it starts
+	// fails.
+	away := source + ".away"
+	if err := os.Rename(source, away); err != nil {
+		t.Fatalf("moving the remote away: %v", err)
+	}
+	answering.demands.read(t.Context(),
+		annotated(csiVolume("franchises", driverName), demandAt(0)))
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, trouble := held.condition(); trouble != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.Rename(away, source); err != nil {
+		t.Fatalf("moving the remote back: %v", err)
+	}
+
+	waitForCommit(t, held, want)
 }

@@ -57,7 +57,9 @@ func scripted(logs io.Writer, readings *metrics, s *script) *listWatch {
 		act: func(_ context.Context, event watch.Event) error {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			s.acted = append(s.acted, event.Object.(metav1.Object).GetName())
+			if named, ok := event.Object.(metav1.Object); ok {
+				s.acted = append(s.acted, named.GetName())
+			}
 			return s.actErr
 		},
 		retry:    10 * time.Millisecond,
@@ -209,6 +211,93 @@ func TestTheWatchResumesAfterTheListOrListsAgain(t *testing.T) {
 				t.Errorf("the watches opened at %q, want %q", got, strings.Join(c.watches, " "))
 			}
 		})
+	}
+}
+
+// heldFor runs the loop with a retry of an hour for the time, then
+// stops it. Every call the loop makes inside that time came without a
+// wait.
+func heldFor(t *testing.T, loop *listWatch, running time.Duration) {
+	t.Helper()
+	loop.retry = time.Hour
+	ctx, stop := context.WithCancel(t.Context())
+	over := make(chan struct{})
+	go func() {
+		defer close(over)
+		loop.follow(ctx)
+	}()
+	time.Sleep(running)
+	stop()
+	<-over
+}
+
+func TestTheLoopWaitsWhereTheWatchGuardsSay(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		answers []func() (watch.Interface, error)
+		lists   int
+		watches int
+	}{
+		{
+			name: "a 410 on the watch call after the list a 410 made",
+			answers: []func() (watch.Interface, error){
+				refusedWatch(apierrors.NewResourceExpired("too old resource version")),
+				refusedWatch(apierrors.NewResourceExpired("too old resource version")),
+			},
+			lists:   2,
+			watches: 2,
+		},
+		{
+			name: "a 410 event after the list a 410 made",
+			answers: []func() (watch.Interface, error){
+				ended(gone()),
+				ended(gone()),
+			},
+			lists:   2,
+			watches: 2,
+		},
+		{
+			name: "an event whose object does not decode",
+			answers: []func() (watch.Interface, error){
+				ended(watch.Event{Type: watch.Modified, Object: &runtime.Unknown{}}),
+			},
+			lists:   1,
+			watches: 1,
+		},
+		{
+			name: "a watch that closes less than a second after it opened",
+			answers: []func() (watch.Interface, error){
+				ended(changed("franchises", "104")),
+			},
+			lists:   1,
+			watches: 1,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := &script{answers: c.answers}
+			heldFor(t, scripted(io.Discard, newMetrics(), s), 200*time.Millisecond)
+
+			if s.lists != c.lists || len(s.watches) != c.watches {
+				t.Errorf("the loop listed %d times and watched %d times, want %d and %d",
+					s.lists, len(s.watches), c.lists, c.watches)
+			}
+		})
+	}
+}
+
+func TestAWatchThatRanASecondResumesAtOnce(t *testing.T) {
+	s := &script{answers: []func() (watch.Interface, error){
+		func() (watch.Interface, error) {
+			sent := watch.NewFake()
+			time.AfterFunc(1100*time.Millisecond, sent.Stop)
+			return sent, nil
+		},
+	}}
+	heldFor(t, scripted(io.Discard, newMetrics(), s), 1500*time.Millisecond)
+
+	if s.lists != 1 || len(s.watches) != 2 {
+		t.Errorf("the loop listed %d times and watched %d times, want 1 and 2",
+			s.lists, len(s.watches))
 	}
 }
 

@@ -155,8 +155,8 @@ func TestAVerifiedPushMarksTheVolume(t *testing.T) {
 	if !strings.Contains(answered, "marked 1") {
 		t.Errorf("the listener answered %q, want the count in it", answered)
 	}
-	if got := demandedAt(t, hooks, "x"); got != webhookTime.Format(time.RFC3339) {
-		t.Errorf("the volume is marked %q, want %q", got, webhookTime.Format(time.RFC3339))
+	if got := demandedAt(t, hooks, "x"); got != webhookTime.Format(time.RFC3339Nano) {
+		t.Errorf("the volume is marked %q, want %q", got, webhookTime.Format(time.RFC3339Nano))
 	}
 	for _, want := range []string{
 		"secret=sites/x-webhook", "forge=github", "ref=refs/heads/main", "marked=1",
@@ -516,5 +516,27 @@ func TestTheControllerReadsItsOwnCredentials(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "no webhook") {
 		t.Errorf("the log is %q, want the missing cluster in it", logs)
+	}
+}
+
+func TestTwoPushesInOneSecondWriteTwoDemands(t *testing.T) {
+	hooks := testWebhook(t, io.Discard)
+	writeVolume(t, hooks, csiVolume("franchises", driverName))
+	at := webhookTime
+	hooks.now = func() time.Time { return at }
+
+	if err := hooks.demandPull(t.Context(), "franchises"); err != nil {
+		t.Fatalf("marking the first push: %v", err)
+	}
+	first := demandedAt(t, hooks, "franchises")
+	at = at.Add(time.Millisecond)
+	if err := hooks.demandPull(t.Context(), "franchises"); err != nil {
+		t.Fatalf("marking the second push: %v", err)
+	}
+
+	// The same value writes no change, so the watch sends no event and
+	// the second push is not pulled.
+	if second := demandedAt(t, hooks, "franchises"); second == first {
+		t.Errorf("both pushes wrote %q, want two values", first)
 	}
 }

@@ -247,8 +247,9 @@ func (f *follower) demandWait(now time.Time) time.Duration {
 }
 
 // answered records when the pass ran and counts one demanded pull for
-// every volume a demand named since the last pass.
-func (f *follower) answered(at time.Time) {
+// every volume a demand named since the last pass, and returns those
+// volumes.
+func (f *follower) answered(at time.Time) map[string]*volume {
 	f.mu.Lock()
 	wanted := f.wanted
 	f.wanted = map[string]*volume{}
@@ -257,6 +258,7 @@ func (f *follower) answered(at time.Time) {
 	for _, held := range wanted {
 		f.node.readings.demanded(held)
 	}
+	return wanted
 }
 
 // resumePull is the demand a restart makes. A demand that came while

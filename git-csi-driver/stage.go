@@ -77,7 +77,6 @@ func (n *node) NodeStageVolume(
 		kind:        writeableVolume,
 		context:     request.GetVolumeContext(),
 	}
-	arriving.answerDemandsBefore(time.Now())
 	if err := n.stageTree(ctx, arriving, repo); err != nil {
 		return nil, err
 	}
@@ -134,6 +133,7 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
+	start := time.Now()
 	fetchErr := n.readings.timeFetch(repo.name, func() error {
 		return repo.fetch(ctx, env, staging.attributes.ref, 0)
 	})
@@ -145,6 +145,7 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 		}
 		return status.Error(codes.Unavailable, fetchErr.Error())
 	}
+	staging.answerDemandsBefore(start)
 	commit, err := repo.resolve(ctx, staging.attributes.ref)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())

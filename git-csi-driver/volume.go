@@ -70,8 +70,10 @@ type volume struct {
 	lastDemand time.Time
 	lastPull   time.Time
 	// answered is the latest demand time a fetch of this volume on
-	// this node answers. demand.go says how it moves.
+	// this node answers, and taken is the time of the last demand the
+	// node acted on. demand.go says how they move.
 	answered time.Time
+	taken    time.Time
 	// What the size guard left out, what the remote does not hold
 	// yet, and when a push last worked.
 	skipped  []change
@@ -439,19 +441,25 @@ func (v *volume) answerDemandsBefore(start time.Time) {
 }
 
 // takeDemand reports whether a demand stamped at the time is later than
-// what the volume's fetches answer, and records it as answered when it
-// is. The record never moves past now: a demand a writer stamped in the
-// future still pulls, and it does not hide a later demand from a writer
-// whose clock is right.
+// what the volume's fetches answer, and records what the pull it starts
+// will answer.
+//
+// The pull starts after now, so it answers every demand stamped before
+// now, less the skew, and no later one. A record at the demand's own
+// time would drop a second demand from a writer whose clock runs
+// behind, and a record in the future would drop a later demand from a
+// writer whose clock is right. The exact time of the last demand is
+// kept apart, so a read of the same value again, from a list or a
+// resumed watch, pulls nothing.
 func (v *volume) takeDemand(at, now time.Time) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if !at.After(v.answered) {
+	if at.Equal(v.taken) || !at.After(v.answered) {
 		return false
 	}
-	v.answered = at
-	if at.After(now) {
-		v.answered = now
+	v.taken = at
+	if answers := now.Add(-demandSkew); answers.After(v.answered) {
+		v.answered = answers
 	}
 	return true
 }

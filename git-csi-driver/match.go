@@ -83,7 +83,7 @@ func (w *webhook) demandAll(ctx context.Context) {
 // moves.
 func (w *webhook) demandPull(ctx context.Context, name string) error {
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`,
-		demandAnnotation, w.now().UTC().Format(time.RFC3339))
+		demandAnnotation, w.now().UTC().Format(time.RFC3339Nano))
 	_, err := w.client.CoreV1().PersistentVolumes().
 		Patch(ctx, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
 	return err

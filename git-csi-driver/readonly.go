@@ -55,7 +55,6 @@ func (n *node) stageReadOnly(
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, n.refusedClaim(ctx, arriving, status.Error(codes.Internal, err.Error()))
 	}
-	arriving.answerDemandsBefore(time.Now())
 	if err := n.stage(ctx, arriving); err != nil {
 		_ = os.RemoveAll(directory)
 		return nil, n.refusedClaim(ctx, arriving, err)
