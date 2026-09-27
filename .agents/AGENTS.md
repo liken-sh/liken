@@ -93,11 +93,18 @@ component keeps its view of the world current in the same three steps:
 3. When the subscription fails, open it again and read the whole
    state again.
 
-A Kubernetes list and a watch from the list's `resourceVersion` follow
-these steps, with a new list after a `410 Gone`. The same shape fits
-`pw-dump -m`, an MQTT subscription with retained messages, an inotify
-watch followed by one look at the directory, and a CEC receive loop
-followed by one scan of the bus.
+For Kubernetes, list first and then watch from the list's
+`resourceVersion`. The watch starts at that version, not at the present,
+so the API server sends every change made after the list, and the order
+loses nothing. A `410 Gone` means the version is too old: list again. A
+watch with no `resourceVersion` starts at the present, and a change
+between the list and the watch is lost.
+
+Every other source has no version to resume from, so the subscription
+must open before the read. The same shape fits `pw-dump -m`, an MQTT
+subscription with retained messages, an inotify watch followed by one
+look at the directory, and a CEC receive loop followed by one scan of
+the bus.
 
 A timer is correct only as a clock: a time-to-live, a deadline, or the
 age of a certificate. A timer that reads state again to find a change
