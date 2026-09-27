@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 )
 
 // The Layout collection, under the same group and version the
@@ -143,5 +142,5 @@ func watchLayouts(ctx context.Context, c *Client, wake func(), readings *metrics
 }
 
 func layoutsWatchPath() string {
-	return fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", LayoutsPath, int(displayWatchTimeout.Seconds()))
+	return LayoutsPath
 }

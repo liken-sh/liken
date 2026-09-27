@@ -580,3 +580,79 @@ func TestASlowRefusalStillGrowsTheNamedWatchWait(t *testing.T) {
 		t.Errorf("the loop opened %d watches in three seconds, want 2: a slow refusal is a failure", got)
 	}
 }
+
+// scriptedWatches serves a listing at version 1 and answers the n-th
+// watch with script[n-1], holding any watch past the script open. It
+// counts listings and watches.
+func scriptedWatches(t *testing.T, window time.Duration, script ...func(w http.ResponseWriter, r *http.Request)) (lists, watches int64) {
+	t.Helper()
+	var listed, watched atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") != "true" {
+			listed.Add(1)
+			fmt.Fprint(w, `{"metadata":{"resourceVersion":"1"},"items":[]}`)
+			return
+		}
+		n := watched.Add(1)
+		if int(n) > len(script) {
+			<-r.Context().Done()
+			return
+		}
+		script[n-1](w, r)
+	}))
+	t.Cleanup(server.Close)
+	ctx, stop := context.WithTimeout(t.Context(), window)
+	defer stop()
+	watchNamed(ctx, NewClient(server.URL, server.Client(), ""), "/api/v1/namespaces/test/configmaps",
+		"tracked", "the test ConfigMap", func(*ConfigMap) {})
+	return listed.Load(), watched.Load()
+}
+
+func goneEvent(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
+}
+
+func closesAtOnce(w http.ResponseWriter, r *http.Request) {}
+
+// livesThenGone runs for 1.5 s and then ends on a 410.
+func livesThenGone(w http.ResponseWriter, r *http.Request) {
+	w.(http.Flusher).Flush()
+	time.Sleep(1500 * time.Millisecond)
+	goneEvent(w, r)
+}
+
+// A 410 that ends a watch that ran for a second or longer is a first
+// 410, even when the watch opened from a 410's fresh listing, so the
+// loop lists again at once: three listings by 2 s, at 0 s, at once
+// after the first 410, and at 1.5 s.
+func TestAGoneAfterAWatchThatRanListsAtOnce(t *testing.T) {
+	lists, _ := scriptedWatches(t, 2*time.Second, goneEvent, livesThenGone)
+	if lists != 3 {
+		t.Errorf("the loop listed %d times in 2 s, want 3: a 410 after a watch that ran lists at once", lists)
+	}
+}
+
+// A watch that ran resets the wait even when a 410 ends it. Two watches
+// that close at once grow the wait to 4 s by 3 s. The third runs for
+// 1.5 s and ends on a 410, and the fourth closes at once, so the fifth
+// comes 1 s after it, at 5.5 s, and not 4 s after it.
+func TestAGoneAfterAWatchThatRanResetsTheWait(t *testing.T) {
+	_, watches := scriptedWatches(t, 6500*time.Millisecond, closesAtOnce, closesAtOnce, livesThenGone, closesAtOnce)
+	if watches != 5 {
+		t.Errorf("the loop opened %d watches in 6.5 s, want 5: the watch that ran reset the wait", watches)
+	}
+}
+
+// A line that is not JSON counts as an event that does not decode: the
+// loop closes the stream at once, waits, and lists again, so a second
+// listing comes at 1 s even while the server holds the stream open.
+func TestALineThatIsNotJSONListsAgain(t *testing.T) {
+	lists, _ := scriptedWatches(t, 1500*time.Millisecond, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "not json")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	if lists != 2 {
+		t.Errorf("the loop listed %d times in 1.5 s, want 2: close, wait, list", lists)
+	}
+}

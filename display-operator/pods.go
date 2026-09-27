@@ -19,7 +19,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"slices"
 )
 
@@ -148,6 +147,5 @@ func watchPods(ctx context.Context, c *Client, node string, wake func(), reading
 }
 
 func podsWatchPath(node string) string {
-	return fmt.Sprintf("%s%s%s&watch=true&timeoutSeconds=%d",
-		PodsPath, podsOnNode, node, int(displayWatchTimeout.Seconds()))
+	return PodsPath + podsOnNode + node
 }

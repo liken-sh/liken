@@ -129,7 +129,7 @@ func (i *sidecarIndex) replace(pods []Pod) {
 // each event after it moves one pod.
 func (i *sidecarIndex) run(ctx context.Context, c *Client, namespace string) {
 	path := fmt.Sprintf("/api/v1/namespaces/%s/pods?labelSelector=%s", namespace, sidecarSelector)
-	watchList(ctx, c, path, "the capture sidecars in "+namespace, i.replace,
+	watchList(ctx, c, path, "the capture sidecars in "+namespace, i.replace, nil,
 		func(kind string, pod Pod) {
 			if kind == "DELETED" {
 				i.drop(pod)

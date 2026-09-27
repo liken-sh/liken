@@ -7,21 +7,23 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// The path each kind's watch opens, and what the path must carry.
+// The collection each kind's watch opens, and what the path must carry.
 var wakeWatchPaths = []struct {
 	kind  string
 	path  string
 	wants string
 }{
-	{"Display", displaysWatchPath(), DisplaysPath + "?watch=true"},
-	{"Layout", layoutsWatchPath(), LayoutsPath + "?watch=true"},
-	{"Pod", podsWatchPath("node-1"), "fieldSelector=spec.nodeName=node-1&watch=true"},
+	{"Display", displaysWatchPath(), DisplaysPath},
+	{"Layout", layoutsWatchPath(), LayoutsPath},
+	{"Pod", podsWatchPath("node-1"), PodsPath + "?fieldSelector=spec.nodeName=node-1"},
 }
 
 func TestEachWakeWatchOpensAWatchOnItsCollection(t *testing.T) {
@@ -46,28 +48,26 @@ func TestAWakeWatchWakesOnItsOpenAndOnEveryEvent(t *testing.T) {
 		status int
 		events int
 		wakes  int
-		fails  bool
 	}{
 		{name: "two events", status: http.StatusOK, events: 2, wakes: 3},
 		{name: "no event", status: http.StatusOK, events: 0, wakes: 1},
-		{name: "refused", status: http.StatusInternalServerError, wakes: 0, fails: true},
+		{name: "refused", status: http.StatusInternalServerError, wakes: 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var wakes atomic.Int64
+			countOpens(t, 300*time.Millisecond, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(c.status)
 				for i := range c.events {
-					fmt.Fprintf(w, `{"type":"MODIFIED","object":{"metadata":{"name":"panel-%d"}}}`, i)
+					fmt.Fprintf(w, `{"type":"MODIFIED","object":{"metadata":{"name":"panel-%d","resourceVersion":"%d"}}}`, i, i+2)
 				}
-			}))
-
-			wakes := 0
-			_, err := streamWakes(t.Context(), client, displaysWatchPath(), func() { wakes++ })
-			if (err != nil) != c.fails {
-				t.Fatalf("the watch answered %v, want a failure: %v", err, c.fails)
-			}
-			if wakes != c.wakes {
-				t.Errorf("the watch woke the loop %d times, want %d", wakes, c.wakes)
+				if c.status == http.StatusOK {
+					w.(http.Flusher).Flush()
+					<-r.Context().Done()
+				}
+			}, func() { wakes.Add(1) })
+			if got := wakes.Load(); got != int64(c.wakes) {
+				t.Errorf("the watch woke the loop %d times, want %d", got, c.wakes)
 			}
 		})
 	}
@@ -91,12 +91,12 @@ func TestTheWakeWatchBacksOffAfterAShortWatch(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			opens := countOpens(t, 500*time.Millisecond, func(w http.ResponseWriter) {
+			opens := countOpens(t, 500*time.Millisecond, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(c.status)
 				for i := range c.events {
 					fmt.Fprintf(w, `{"type":"ADDED","object":{"metadata":{"name":"panel-%d"}}}`, i)
 				}
-			})
+			}, nil)
 			if opens < 1 || opens > 2 {
 				t.Errorf("the loop opened %d watches in half a second, want one or two", opens)
 			}
@@ -119,7 +119,7 @@ func TestTheWakeWatchReopensAtOnceAfterAWatchThatLived(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			opens := countOpens(t, 3*time.Second, func(w http.ResponseWriter) {
+			opens := countOpens(t, 3*time.Second, func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(w, `{"type":"ADDED","object":{"metadata":{"name":"panel-0"}}}`)
 				w.(http.Flusher).Flush()
 				time.Sleep(1100 * time.Millisecond)
@@ -129,7 +129,7 @@ func TestTheWakeWatchReopensAtOnceAfterAWatchThatLived(t *testing.T) {
 						_ = conn.Close()
 					}
 				}
-			})
+			}, nil)
 			if opens < 3 {
 				t.Errorf("the loop opened %d watches in three seconds, want three: one per lifetime", opens)
 			}
@@ -139,16 +139,20 @@ func TestTheWakeWatchReopensAtOnceAfterAWatchThatLived(t *testing.T) {
 
 // countOpens runs the Display watch against a server that answers each
 // watch with answer, for the time given, and counts the watches opened.
-func countOpens(t *testing.T, window time.Duration, answer func(w http.ResponseWriter)) int64 {
+// A nil wake wakes nothing.
+func countOpens(t *testing.T, window time.Duration, answer func(w http.ResponseWriter, r *http.Request), wake func()) int64 {
 	t.Helper()
+	if wake == nil {
+		wake = func() {}
+	}
 	var opens atomic.Int64
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		opens.Add(1)
-		answer(w)
+		answer(w, r)
 	}))
 	ctx, stop := context.WithTimeout(t.Context(), window)
 	defer stop()
-	watchWakes(ctx, client, kindDisplay, "displays", displaysWatchPath(), func() {}, nil)
+	watchWakes(ctx, client, kindDisplay, "displays", displaysWatchPath(), wake, nil)
 	return opens.Load()
 }
 
@@ -157,11 +161,82 @@ func countOpens(t *testing.T, window time.Duration, answer func(w http.ResponseW
 // wait: opens at 0 s and 2.2 s fit in three seconds, and a third does
 // not.
 func TestASlowRefusalStillGrowsTheWakeWatchWait(t *testing.T) {
-	opens := countOpens(t, 3*time.Second, func(w http.ResponseWriter) {
+	opens := countOpens(t, 3*time.Second, func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1200 * time.Millisecond)
 		w.WriteHeader(http.StatusInternalServerError)
-	})
+	}, nil)
 	if opens != 2 {
 		t.Errorf("the loop opened %d watches in three seconds, want 2: a slow refusal is a failure", opens)
+	}
+}
+
+// An ERROR event, a Status that does not decode, or a line that is not
+// JSON ends the watch at once, even while the server holds the stream
+// open, and the next watch opens after the wait: at 1 s, inside the
+// window.
+func TestTheWakeWatchClosesOnAnErrorAndOpensAgain(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+	}{
+		{name: "an error event", line: `{"type":"ERROR","object":{"kind":"Status","code":500}}`},
+		{name: "a status that does not decode", line: `{"type":"ERROR","object":5}`},
+		{name: "a line that is not JSON", line: "not json"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			opens := countOpens(t, 1600*time.Millisecond, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintln(w, c.line)
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}, nil)
+			if opens != 2 {
+				t.Errorf("the loop opened %d watches in 1.6 s, want 2: close at once, wait, open again", opens)
+			}
+		})
+	}
+}
+
+// The first watch opens from no version, and its replay is the
+// baseline. Each watch after it resumes from the last version the
+// stream delivered, with bookmarks on, so a reopen replays nothing. A
+// 410 says that version is gone, and the next watch opens from no
+// version again.
+func TestTheWakeWatchResumesFromTheLastVersion(t *testing.T) {
+	var mu sync.Mutex
+	var asked []string
+	var bookmarks []string
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.URL.Query().Get("resourceVersion"))
+		bookmarks = append(bookmarks, r.URL.Query().Get("allowWatchBookmarks"))
+		n := len(asked)
+		mu.Unlock()
+		switch n {
+		case 1:
+			fmt.Fprint(w, `{"type":"ADDED","object":{"metadata":{"name":"panel-0","resourceVersion":"7"}}}`)
+			w.(http.Flusher).Flush()
+			time.Sleep(1100 * time.Millisecond)
+		case 2:
+			fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
+		default:
+			<-r.Context().Done()
+		}
+	}))
+	ctx, stop := context.WithTimeout(t.Context(), 1600*time.Millisecond)
+	defer stop()
+
+	watchWakes(ctx, client, kindDisplay, "displays", displaysWatchPath(), func() {}, nil)
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"", "7", ""}
+	if !slices.Equal(asked, want) {
+		t.Errorf("the watches asked for versions %q, want %q", asked, want)
+	}
+	for i, on := range bookmarks {
+		if on != "true" {
+			t.Errorf("watch %d asked for bookmarks %q, want true", i, on)
+		}
 	}
 }

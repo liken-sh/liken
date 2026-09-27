@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -460,5 +459,5 @@ func watchDisplays(ctx context.Context, c *Client, wake func(), readings *metric
 }
 
 func displaysWatchPath() string {
-	return fmt.Sprintf("%s?watch=true&timeoutSeconds=%d", DisplaysPath, int(displayWatchTimeout.Seconds()))
+	return DisplaysPath
 }

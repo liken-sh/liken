@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -42,6 +43,7 @@ func watchNamed[T any](ctx context.Context, c *Client, collection, name string, 
 			}
 			seen(&items[0])
 		},
+		nil,
 		func(kind string, held T) {
 			if kind == "DELETED" {
 				seen(nil)
@@ -54,29 +56,46 @@ func watchNamed[T any](ctx context.Context, c *Client, collection, name string, 
 // watchList keeps listed and changed current with the objects at path,
 // until the context ends. listed gets every object a listing answers,
 // and changed gets each ADDED, MODIFIED, or DELETED event after it, with
-// its object. The path carries its own query, a selector at least.
+// its object. opened, when it is not nil, runs each time the API server
+// accepts a watch.
+//
+// A nil listed takes no listing. The watch then opens from no version,
+// and the API server sends every object as an ADDED event before the
+// changes, so that replay is the baseline. A caller whose events only
+// wake a pass that reads everything uses this form.
 //
 // A listing gives the whole truth and a resource version, and the
 // watch that follows starts at that version, so no change between the
 // two is missed. A watch that the API server ends on its timeout, or
 // that a reset connection ends, resumes at the last version it
-// delivered, and bookmarks move that version while nothing changes. A
-// version the API server no longer holds answers 410 Gone, as the
-// response or as an ERROR event, and the loop lists again at once, and
-// after a wait when the watch that opened from that fresh listing meets
-// 410 again. Any other ERROR event lists again after a wait, and so
-// does an event whose object does not decode, because the reopened
-// watch would meet the same event at the same version.
+// delivered, and bookmarks move that version while nothing changes.
+//
+// A version the API server no longer holds answers 410 Gone, as the
+// response or as an ERROR event, and the loop lists again at once. When
+// the watch that opened from that fresh listing meets 410 again and did
+// not run, the loop waits first. Any other ERROR event, an event whose
+// object does not decode, and a line that is not JSON all end the watch
+// at once, and the loop waits, then lists again, because a watch that
+// resumed would meet the same event at the same version.
+//
+// A watch that ran, which is one that lived for objectWatchRetry or
+// longer from when the API server accepted it, resets the wait, however
+// it ended. A load balancer that resets a long connection then costs
+// one reopen, not a wait that climbs toward a minute. Any other watch
+// is a failure, and the wait grows, so a server or a proxy that ends
+// every watch at once, or refuses it slowly, gets a few requests and
+// not a tight loop of them.
 func watchList[T any](ctx context.Context, c *Client, path, what string,
-	listed func(items []T), changed func(kind string, held T)) {
+	listed func(items []T), opened func(), changed func(kind string, held T)) {
 	version := ""
 	delay := objectWatchRetry
-	// Whether the listing the loop holds was taken because of a 410.
-	// A second 410 in a row names a version the API server just gave,
-	// so a listing at once would only meet it again.
+	// Whether the baseline the loop holds was taken because of a 410.
+	// A second 410 in a row from a watch that did not run names a
+	// version the API server just gave, so a listing at once would only
+	// meet it again.
 	afterGone := false
 	for ctx.Err() == nil {
-		if version == "" {
+		if version == "" && listed != nil {
 			items, listedAt, err := listAt[T](c, path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "listing %s: %v\n", what, err)
@@ -86,9 +105,14 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 			version = listedAt
 			listed(items)
 		}
-		next, accepted, err := streamList(ctx, c, path, version, changed)
+		next, accepted, err := streamList(ctx, c, path, version, opened, changed)
 		if ctx.Err() != nil {
 			return
+		}
+		ran := ranFor(accepted, objectWatchRetry)
+		if ran {
+			delay = objectWatchRetry
+			afterGone = false
 		}
 		if errors.Is(err, errWatchExpired) {
 			version = ""
@@ -96,8 +120,6 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 				delay = pauseWatch(ctx, delay)
 				continue
 			}
-			// The listing runs at once, and the wait keeps what it has
-			// grown to: only a watch that ran resets it.
 			afterGone = true
 			continue
 		}
@@ -105,30 +127,14 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 		}
-		// An ERROR event, or an event whose object does not decode,
-		// says the watch cannot go on from its version, so the loop
-		// lists again, after a wait. Any other end, a
-		// timeout or a reset connection, leaves the version good, and the
-		// next watch resumes there with no listing.
 		var ended *watchErrorEvent
 		if errors.As(err, &ended) {
 			version = ""
 		} else {
 			version = next
 		}
-		// The lifetime decides the wait, not what the watch delivered.
-		// A watch that lived a second or more ran, so a load balancer
-		// that resets a long connection costs one reopen and not a wait
-		// that climbs toward a minute. The life counts from when the API
-		// server accepted the watch, so a slow dial or a slow refusal is
-		// a failure. A shorter one is a server or a
-		// proxy that ends each watch at once, and the wait keeps the loop
-		// from a tight loop of requests.
-		if ranFor(accepted, objectWatchRetry) {
-			delay = objectWatchRetry
-			if version != "" {
-				continue
-			}
+		if ran && ended == nil {
+			continue
 		}
 		delay = pauseWatch(ctx, delay)
 	}
@@ -177,15 +183,28 @@ func (e *watchErrorEvent) Error() string {
 // counts as an ERROR event, and the error carries the decoder's text
 // and the object word for word.
 func undecodable(object json.RawMessage, err error) *watchErrorEvent {
+	if len(object) == 0 {
+		return &watchErrorEvent{status: fmt.Sprintf("a line that does not decode: %v", err)}
+	}
 	return &watchErrorEvent{status: fmt.Sprintf("an object that does not decode (%v): %s", err, object)}
 }
 
 // One watch connection. It answers the last version it delivered, so
 // the next connection resumes there, and when the API server accepted
-// the watch, which is zero for a watch it refused.
-func streamList[T any](ctx context.Context, c *Client, path, version string, changed func(string, T)) (string, time.Time, error) {
-	stream := fmt.Sprintf("%s&watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
-		path, url.QueryEscape(version), int(displayWatchTimeout.Seconds()))
+// the watch, which is zero for a watch it refused. A watch from no
+// version sends no resourceVersion, and the API server replays every
+// object first.
+func streamList[T any](ctx context.Context, c *Client, path, version string,
+	opened func(), changed func(string, T)) (string, time.Time, error) {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	stream := fmt.Sprintf("%s%swatch=true&allowWatchBookmarks=true&timeoutSeconds=%d",
+		path, separator, int(displayWatchTimeout.Seconds()))
+	if version != "" {
+		stream += "&resourceVersion=" + url.QueryEscape(version)
+	}
 	// The connection has a context of its own. A watch that ends on an
 	// event it cannot use returns with the stream still open, and the
 	// API server holds it until its timeout, so the drain below would
@@ -204,6 +223,9 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 	accepted := time.Now()
 	defer drain(body)
 	defer cancel()
+	if opened != nil {
+		opened()
+	}
 
 	events := json.NewDecoder(body)
 	for {
@@ -214,6 +236,14 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 		if err := events.Decode(&event); err != nil {
 			if err == io.EOF {
 				return version, accepted, nil
+			}
+			// A line that is not JSON, or not an event, is the same
+			// failure as an object that does not decode. Any other error
+			// is the connection's own, and the version still stands.
+			var syntax *json.SyntaxError
+			var mistyped *json.UnmarshalTypeError
+			if errors.As(err, &syntax) || errors.As(err, &mistyped) {
+				return version, accepted, undecodable(nil, err)
 			}
 			return version, accepted, err
 		}
