@@ -36,11 +36,12 @@ const (
 	// network fault between here and the API server.
 	watchTimeout = 290 * time.Second
 
-	// shortWatch is the shortest time a watch with no events may last
-	// and still count as a stream that ended normally. A server that
-	// answers a watch and closes it at once is failing, and a watcher
-	// that reopened such a stream with no wait would send thousands of
-	// requests each second. client-go's reflector makes the same test.
+	// shortWatch is the shortest time a watch may last and still count
+	// as one that ran. A watch that closes sooner is a failure, whatever
+	// it delivered, and a watcher that reopened it with no wait would
+	// send thousands of requests each second while the fault lasts. A
+	// watch that ran this long or longer resets the backoff, even when
+	// it ended with an error. client-go's reflector makes the same test.
 	shortWatch = time.Second
 )
 
@@ -49,22 +50,30 @@ const (
 // list gives a version to start from.
 var errWatchExpired = errors.New("the watch's resource version expired")
 
-// errShortWatch is a watch that the API server closed within
-// shortWatch and before it sent an event.
-var errShortWatch = errors.New("the watch closed with no events in under a second")
-
 // listThenWatch keeps one collection current until the context ends.
 // It calls listed with the whole collection after each list, and
 // changed with each ADDED, MODIFIED, or DELETED event after that.
 //
-// A stream that the API server closes at watchTimeout resumes at the
-// last version it delivered, with no new list. A 410 Gone lists again
-// at once. Any other failure lists again after a wait, because a
-// failed watch may have lost events, and only a list recovers them. A
-// stream that closed within shortWatch with no events is a failure.
+// Each way a watch ends has its own next step:
+//
+//   - A stream that the API server closes resumes at the last version
+//     it delivered, with no new list.
+//   - The first 410 Gone lists again at once, because only a list gives
+//     a version to start from. A 410 on the watch from that fresh list
+//     waits out the backoff before the next list. Without the wait, a
+//     server that answers 410 to every version makes a tight loop.
+//   - Any other failure waits out the backoff and then lists again,
+//     because a failed watch may have lost events, and only a list
+//     recovers them. An event that does not decode is such a failure.
+//
+// A watch that closed within shortWatch is a failure too, and waits out
+// the backoff before it resumes.
 func listThenWatch[T any](ctx context.Context, c *Client, collection, what string, listed func([]T), changed func(event string, object T)) {
 	version := ""
 	delay := watchRetry
+	// relisted is true when version comes from a list made at once
+	// after a 410, which is the one list a 410 may skip the wait for.
+	relisted := false
 	for ctx.Err() == nil {
 		if version == "" {
 			list, err := get[struct {
@@ -79,21 +88,33 @@ func listThenWatch[T any](ctx context.Context, c *Client, collection, what strin
 			version = list.Metadata.ResourceVersion
 			listed(list.Items)
 		}
+		opened := time.Now()
 		next, err := streamChanges(ctx, c, collection, version, changed)
-		switch {
-		case ctx.Err() != nil:
+		if ctx.Err() != nil {
 			return
-		case errors.Is(err, errWatchExpired):
-			version = ""
-			delay = watchRetry
-		case err != nil:
-			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
-			version = ""
-			delay = pauseWatch(ctx, delay)
-		default:
-			version = next
+		}
+		ran := time.Since(opened) >= shortWatch
+		if ran {
 			delay = watchRetry
 		}
+		switch {
+		case errors.Is(err, errWatchExpired) && !relisted:
+			version, relisted = "", true
+			continue
+		case errors.Is(err, errWatchExpired):
+			fmt.Fprintf(os.Stderr, "watching %s: the version from a new list expired too\n", what)
+			version = ""
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
+			version, relisted = "", false
+		case !ran:
+			fmt.Fprintf(os.Stderr, "watching %s: the watch closed in under %s\n", what, shortWatch)
+			version, relisted = next, false
+		default:
+			version, relisted = next, false
+			continue
+		}
+		delay = pauseWatch(ctx, delay)
 	}
 }
 
@@ -123,8 +144,6 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 	}
 	defer drain(body)
 
-	opened := time.Now()
-	delivered := false
 	events := json.NewDecoder(body)
 	for {
 		var event struct {
@@ -133,9 +152,6 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 		}
 		if err := events.Decode(&event); err != nil {
 			if errors.Is(err, io.EOF) {
-				if !delivered && time.Since(opened) < shortWatch {
-					return version, errShortWatch
-				}
 				return version, nil
 			}
 			return version, err
@@ -147,7 +163,6 @@ func streamChanges[T any](ctx context.Context, c *Client, collection, version st
 		if err := json.Unmarshal(event.Object, &meta); err != nil {
 			return version, err
 		}
-		delivered = true
 		switch event.Type {
 		case "ERROR":
 			if meta.Code == 410 {

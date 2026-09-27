@@ -19,6 +19,10 @@ import (
 // its last line, the way the API server does at timeoutSeconds.
 const holdOpen = "hold"
 
+// linger, as a line of a script, keeps the stream open a little longer
+// than shortWatch, so the watch counts as one that ran.
+const linger = "linger"
+
 // watchServer is an API server for one collection. Each list answers
 // the version "list-N", where N counts the lists. Each watch
 // connection plays the next script of events.
@@ -27,10 +31,11 @@ type watchServer struct {
 	items      string
 	scripts    [][]string
 
-	mu       sync.Mutex
-	lists    int
-	versions []string
-	opened   chan struct{}
+	mu        sync.Mutex
+	lists     int
+	listTimes []time.Time
+	versions  []string
+	opened    chan struct{}
 }
 
 func newWatchServer(collection, items string, scripts ...[]string) *watchServer {
@@ -51,6 +56,7 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if query.Get("watch") != "true" {
 		s.lists++
+		s.listTimes = append(s.listTimes, time.Now())
 		version := fmt.Sprintf("list-%d", s.lists)
 		s.mu.Unlock()
 		fmt.Fprintf(w, `{"metadata":{"resourceVersion":%q},"items":%s}`, version, s.items)
@@ -70,6 +76,11 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 			return
+		}
+		if line == linger {
+			w.(http.Flusher).Flush()
+			time.Sleep(shortWatch + 200*time.Millisecond)
+			continue
 		}
 		fmt.Fprintln(w, line)
 	}
@@ -198,16 +209,10 @@ func TestTheWatchDeliversTheListAndEachChange(t *testing.T) {
 	<-done
 }
 
-// A watch that the API server closes at once with no events is a
-// failure, not a stream that ran to its timeout. Without the backoff
-// the watcher opens the next watch at once, and a server that answers
-// every watch that way takes thousands of requests each second.
-func TestAnEmptyShortWatchWaitsBeforeTheNextOne(t *testing.T) {
-	empty := make([][]string, 100)
-	for index := range empty {
-		empty[index] = []string{}
-	}
-	server := newWatchServer("/things", "[]", empty...)
+// runWatcher runs listThenWatch against a server, and returns the
+// function that stops it.
+func runWatcher(t *testing.T, server *watchServer) func() {
+	t.Helper()
 	client := testClient(t, server)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -216,13 +221,104 @@ func TestAnEmptyShortWatchWaitsBeforeTheNextOne(t *testing.T) {
 		listThenWatch(ctx, client, "/things", "the things",
 			func([]ObjectMeta) {}, func(string, ObjectMeta) {})
 	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
 
-	server.awaitWatches(t, 1)
-	time.Sleep(300 * time.Millisecond)
-	cancel()
-	<-done
+// repeat builds count copies of one script, so every watch the watcher
+// opens gets the same answer.
+func repeat(count int, script ...string) [][]string {
+	scripts := make([][]string, count)
+	for index := range scripts {
+		scripts[index] = script
+	}
+	return scripts
+}
 
-	if _, versions := server.seen(); len(versions) != 1 {
-		t.Fatalf("the watcher opened %d watches in 300 ms, want 1", len(versions))
+// A failed watch waits out the backoff before the next request. Without
+// the wait, a fault that lasts turns into thousands of requests each
+// second. The one exception is the first 410 Gone, which lists again at
+// once. A watch that closes in under a second is a failure whatever it
+// delivered, and an object that does not decode is an error event.
+func TestAFailedWatchWaitsBeforeTheNextRequest(t *testing.T) {
+	added := `{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":"first"}}`
+	cases := []struct {
+		name        string
+		script      []string
+		wantLists   int
+		wantWatches int
+	}{
+		{
+			name:        "a watch that closed at once with no events",
+			script:      []string{},
+			wantLists:   1,
+			wantWatches: 1,
+		},
+		{
+			name:        "a watch that closed at once after an event",
+			script:      []string{added},
+			wantLists:   1,
+			wantWatches: 1,
+		},
+		{
+			name:        "a 410 on the watch from a fresh list",
+			script:      []string{`{"type":"ERROR","object":{"kind":"Status","code":410}}`},
+			wantLists:   2,
+			wantWatches: 2,
+		},
+		{
+			name:        "an error event",
+			script:      []string{`{"type":"ERROR","object":{"kind":"Status","code":500}}`},
+			wantLists:   1,
+			wantWatches: 1,
+		},
+		{
+			name:        "an object that does not decode",
+			script:      []string{`{"type":"ADDED","object":{"metadata":{"resourceVersion":"2"},"name":42}}`},
+			wantLists:   1,
+			wantWatches: 1,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			server := newWatchServer("/things", "[]", repeat(100, c.script...)...)
+			stop := runWatcher(t, server)
+
+			server.awaitWatches(t, c.wantWatches)
+			time.Sleep(300 * time.Millisecond)
+			stop()
+
+			lists, versions := server.seen()
+			if lists != c.wantLists || len(versions) != c.wantWatches {
+				t.Fatalf("in 300 ms the watcher listed %d times and opened %d watches, want %d and %d",
+					lists, len(versions), c.wantLists, c.wantWatches)
+			}
+		})
+	}
+}
+
+// A watch that ran for a second or longer resets the backoff, even when
+// it ended with an error. The first watch fails at once, so the wait
+// before the second list is one second and the next wait would be two.
+// The second watch runs past shortWatch before its error, so the wait
+// before the third list is one second again.
+func TestAWatchThatRanResetsTheBackoff(t *testing.T) {
+	failure := `{"type":"ERROR","object":{"kind":"Status","code":500}}`
+	server := newWatchServer("/things", "[]", []string{failure}, []string{linger, failure}, []string{holdOpen})
+	stop := runWatcher(t, server)
+	server.awaitWatches(t, 3)
+	stop()
+
+	server.mu.Lock()
+	gap := server.listTimes[2].Sub(server.listTimes[1])
+	server.mu.Unlock()
+	// The second watch lasts shortWatch plus 200 ms, and the wait after
+	// it is one second: about 2.2 seconds. A wait of two seconds would
+	// make it about 3.2.
+	if gap > shortWatch+200*time.Millisecond+1500*time.Millisecond {
+		t.Fatalf("the third list came %s after the second, want about %s",
+			gap, shortWatch+200*time.Millisecond+watchRetry)
 	}
 }
