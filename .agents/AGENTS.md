@@ -121,7 +121,10 @@ failed in review at least once:
   failure, whatever it delivered, so the backoff applies. A watch
   with no version replays every object first, so "no events" does not
   identify a short watch. A watch that ran for a second or longer
-  resets the backoff, even when it ended with an error.
+  resets the backoff, even when it ended with an error. Measure a
+  watch's life from when the server accepted it, not from when the
+  request began: a watch the server never accepted did not run, so a
+  slow dial or a slow refusal must not reset the backoff.
 
 Every other source has no version to resume from, so the subscription
 must open before the read. The same shape fits `pw-dump -m`, an MQTT
