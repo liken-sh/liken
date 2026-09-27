@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -29,30 +30,42 @@ type scriptedStarts struct {
 	attempts int
 	failures int
 	pids     chan int
+	signals  *signals
 }
 
 // scriptStarts installs the stand-in and fails the given number of
 // starts after the first success.
 func scriptStarts(t *testing.T, failures int) *scriptedStarts {
 	t.Helper()
-	s := &scriptedStarts{failures: failures, pids: make(chan int, 16)}
+	s := &scriptedStarts{failures: failures, pids: make(chan int, 16), signals: &signals{}}
 	orig := startSupplicant
-	startSupplicant = func(ifname, config string) (int, error) {
+	startSupplicant = func(ifname, config string) (runningSupplicant, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.attempts++
 		if s.failures > 0 {
 			s.failures--
-			return 0, fmt.Errorf("starting the supplicant on %s: no such file", ifname)
+			return runningSupplicant{}, fmt.Errorf("starting the supplicant on %s: no such file", ifname)
 		}
-		// A pid no test can signal: the stand-in below records the
-		// signals instead of sending them.
+		// A pid no test can signal: its handle records the signals
+		// instead of sending them.
 		pid := 1_000_000 + s.attempts
 		s.pids <- pid
-		return pid, nil
+		return s.process(pid), nil
 	}
 	t.Cleanup(func() { startSupplicant = orig })
 	return s
+}
+
+// process is the stand-in for a supplicant that the caller started.
+// execSupplicant starts through the death registry, so the registry
+// expects the death of every pid it hands out.
+func (s *scriptedStarts) process(pid int) runningSupplicant {
+	deaths.expect(pid)
+	return runningSupplicant{pid: pid, signal: func(os.Signal) error {
+		s.signals.record(pid)
+		return nil
+	}}
 }
 
 // started waits for the next pid the loop launched.
@@ -82,19 +95,11 @@ type signals struct {
 	sent []int
 }
 
-func recordSignals(t *testing.T) *signals {
-	t.Helper()
-	s := &signals{}
-	orig := killProcess
-	killProcess = func(pid int, sig unix.Signal) error {
-		s.mu.Lock()
-		s.sent = append(s.sent, pid)
-		s.mu.Unlock()
-		deaths.record(pid, 0)
-		return nil
-	}
-	t.Cleanup(func() { killProcess = orig })
-	return s
+func (s *signals) record(pid int) {
+	s.mu.Lock()
+	s.sent = append(s.sent, pid)
+	s.mu.Unlock()
+	deaths.record(pid, 0)
 }
 
 func (s *signals) reached() []int {
@@ -130,12 +135,11 @@ func end(t *testing.T, p *supplicantProcess) {
 
 func TestTheSupplicantStartsAgainAfterItDies(t *testing.T) {
 	starts := scriptStarts(t, 0)
-	recordSignals(t)
 	p := supervised(t)
 	p.control.socket = servingSocket(t)
 
 	first := 999_001
-	go p.run(context.Background(), first, "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	go p.run(context.Background(), starts.process(first), "/run/liken/wireless/wlan0/wpa_supplicant.conf")
 	deaths.record(first, 0)
 
 	if second := starts.started(t); second == first {
@@ -149,12 +153,11 @@ func TestAFailedStartIsTriedAgainUntilOneSucceeds(t *testing.T) {
 	// on believing the radio is supervised, so a loop that stops here
 	// leaves a machine whose radio nothing will ever restart.
 	starts := scriptStarts(t, 2)
-	recordSignals(t)
 	p := supervised(t)
 	p.control.socket = servingSocket(t)
 
 	first := 999_002
-	go p.run(context.Background(), first, "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	go p.run(context.Background(), starts.process(first), "/run/liken/wireless/wlan0/wpa_supplicant.conf")
 	deaths.record(first, 0)
 
 	live := starts.started(t)
@@ -173,12 +176,12 @@ func TestAFailedStartNeverSignalsTheProcessThatAlreadyDied(t *testing.T) {
 	// second time never returns, and the shutdown would abandon the
 	// loop at its timeout instead of ending it.
 	starts := scriptStarts(t, 1)
-	sent := recordSignals(t)
+	sent := starts.signals
 	p := supervised(t)
 	p.control.socket = servingSocket(t)
 
 	first := 999_003
-	go p.run(context.Background(), first, "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	go p.run(context.Background(), starts.process(first), "/run/liken/wireless/wlan0/wpa_supplicant.conf")
 	deaths.record(first, 0)
 	starts.started(t)
 
@@ -200,12 +203,12 @@ func TestStoppingDuringARetryEndsTheLoopWithNothingToSignal(t *testing.T) {
 	// Every start fails, so the loop is between processes. There is
 	// nothing to stop, and the stop must still end the loop at once.
 	starts := scriptStarts(t, 1_000)
-	sent := recordSignals(t)
+	sent := starts.signals
 	p := supervised(t)
 	p.control.socket = servingSocket(t)
 
 	first := 999_004
-	go p.run(context.Background(), first, "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	go p.run(context.Background(), starts.process(first), "/run/liken/wireless/wlan0/wpa_supplicant.conf")
 	deaths.record(first, 0)
 	for starts.count() < 2 {
 		time.Sleep(time.Millisecond)
@@ -219,13 +222,12 @@ func TestStoppingDuringARetryEndsTheLoopWithNothingToSignal(t *testing.T) {
 
 func TestCancellingThePlaneEndsTheLoop(t *testing.T) {
 	starts := scriptStarts(t, 0)
-	recordSignals(t)
 	p := supervised(t)
 	p.control.socket = servingSocket(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	first := 999_005
-	go p.run(ctx, first, "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	go p.run(ctx, starts.process(first), "/run/liken/wireless/wlan0/wpa_supplicant.conf")
 	deaths.record(first, 0)
 	starts.started(t)
 
@@ -243,7 +245,6 @@ func TestTheEventStreamComesBackAfterARestart(t *testing.T) {
 	// exactly those reports, so an attach that fails once must be tried
 	// again rather than logged and forgotten.
 	starts := scriptStarts(t, 0)
-	recordSignals(t)
 	p := supervised(t)
 
 	// The socket does not exist yet, so the first attach after the
@@ -259,7 +260,7 @@ func TestTheEventStreamComesBackAfterARestart(t *testing.T) {
 	p.control.patience = time.Millisecond
 
 	first := 999_006
-	go p.run(context.Background(), first, "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	go p.run(context.Background(), starts.process(first), "/run/liken/wireless/wlan0/wpa_supplicant.conf")
 	deaths.record(first, 0)
 	starts.started(t)
 
@@ -322,7 +323,7 @@ func TestASupplicantThatStartsAfterTheShutdownIsStoppedAtOnce(t *testing.T) {
 	// never be tracked as if the shutdown could still reach it.
 	aimWirelessRunDir(t)
 	starts := scriptStarts(t, 0)
-	sent := recordSignals(t)
+	sent := starts.signals
 	afterTheShutdown(t)
 
 	dir := controlSocketDir("wlan0")
@@ -380,4 +381,25 @@ func serveAt(t *testing.T, socket, answer string) {
 			}
 		}
 	}()
+}
+
+func TestStopSupplicantEndsARealProcessThroughItsHandle(t *testing.T) {
+	// The stop signals through the os.Process and its pidfd, so the
+	// signal can reach only the process this handle started.
+	reapForTest(t)
+	cmd := exec.Command("sleep", "60")
+	if err := deaths.start(cmd); err != nil {
+		t.Fatal(err)
+	}
+	proc := supplicantHandle(cmd.Process)
+	died := make(chan unix.WaitStatus, 1)
+	go func() { died <- deaths.await(proc.pid) }()
+
+	stopped := make(chan struct{})
+	go func() { stopSupplicant("wlan0", proc, died); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stop did not end the process")
+	}
 }

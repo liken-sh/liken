@@ -7,8 +7,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,25 +104,72 @@ func TestLineWriterBuffersPartialLines(t *testing.T) {
 	}
 }
 
-func TestDeathRegistryParksAnUnclaimedDeath(t *testing.T) {
-	d := &deathRegistry{
+func newDeathRegistry() *deathRegistry {
+	return &deathRegistry{
 		waiters:   map[int]chan unix.WaitStatus{},
 		unclaimed: map[int]unix.WaitStatus{},
+		expected:  map[int]bool{},
 	}
+}
+
+func TestDeathRegistryParksAnUnclaimedDeath(t *testing.T) {
+	d := newDeathRegistry()
+	d.expect(42)
 	d.record(42, unix.WaitStatus(0))
 	if got := d.await(42); got != unix.WaitStatus(0) {
 		t.Errorf("got %v", got)
 	}
-	if len(d.unclaimed) != 0 {
+	if len(d.unclaimed) != 0 || len(d.expected) != 0 {
 		t.Error("a claimed death should leave the registry")
 	}
 }
 
-func TestDeathRegistryWakesAWaiter(t *testing.T) {
-	d := &deathRegistry{
-		waiters:   map[int]chan unix.WaitStatus{},
-		unclaimed: map[int]unix.WaitStatus{},
+func TestDeathRegistryDropsTheDeathOfAnAdoptedOrphan(t *testing.T) {
+	// PID 1 adopts every orphan on the machine, such as a containerd
+	// shim, and the reaper collects it. Nobody in init awaits it, so
+	// a parked status would stay forever, and a later child that
+	// reuses the pid would read it as its own death.
+	d := newDeathRegistry()
+	d.record(42, unix.WaitStatus(9))
+	if len(d.unclaimed) != 0 {
+		t.Errorf("the death of a process init did not start was parked: %v", d.unclaimed)
 	}
+}
+
+func TestDeathRegistryStartExpectsTheChild(t *testing.T) {
+	d := newDeathRegistry()
+	cmd := exec.Command("true")
+	if err := d.start(cmd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Wait() })
+	if !d.expected[cmd.Process.Pid] {
+		t.Errorf("the registry does not expect the death of child %d", cmd.Process.Pid)
+	}
+}
+
+func TestDeathRegistryAWokenWaiterLeavesNoExpectation(t *testing.T) {
+	d := newDeathRegistry()
+	d.expect(42)
+	got := make(chan unix.WaitStatus, 1)
+	go func() { got <- d.await(42) }()
+	for {
+		d.mu.Lock()
+		waiting := len(d.waiters) == 1
+		d.mu.Unlock()
+		if waiting {
+			break
+		}
+	}
+	d.record(42, unix.WaitStatus(0))
+	<-got
+	if len(d.expected) != 0 || len(d.unclaimed) != 0 {
+		t.Errorf("the registry kept state for a delivered death: expected=%v unclaimed=%v", d.expected, d.unclaimed)
+	}
+}
+
+func TestDeathRegistryWakesAWaiter(t *testing.T) {
+	d := newDeathRegistry()
 	got := make(chan unix.WaitStatus, 1)
 	go func() { got <- d.await(42) }()
 	// The waiter parks first; the recorded death must find the
@@ -151,7 +201,7 @@ func TestStopK3sNarratesTheExitTheReaperReports(t *testing.T) {
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	died := make(chan unix.WaitStatus, 1)
 	died <- unix.WaitStatus(0)
-	stopK3s(cmd.Process.Pid, died)
+	stopK3s(cmd.Process, died)
 }
 
 func TestDescribeExitForAStoppedProcess(t *testing.T) {
@@ -309,9 +359,40 @@ func reapForTest(t *testing.T) {
 		cancel()
 		<-done
 	})
-	// reap installs its SIGCHLD handler on its own goroutine; a child
-	// that exits before the handler exists would never be collected.
-	time.Sleep(50 * time.Millisecond)
+}
+
+// awaitZombie waits until a child has exited and waits to be
+// collected, which /proc shows as state Z.
+func awaitZombie(t *testing.T, pid int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err == nil && strings.Contains(string(stat), ") Z ") {
+			return
+		}
+	}
+	t.Fatalf("child %d never exited", pid)
+}
+
+func TestReapCollectsAChildThatExitedBeforeTheReaperStarted(t *testing.T) {
+	// The child's SIGCHLD arrives before the reaper subscribes, so
+	// only the reaper's first look at its children can collect it.
+	cmd := exec.Command("true")
+	if err := deaths.start(cmd); err != nil {
+		t.Fatal(err)
+	}
+	awaitZombie(t, cmd.Process.Pid)
+	reapForTest(t)
+	got := make(chan unix.WaitStatus, 1)
+	go func() { got <- deaths.await(cmd.Process.Pid) }()
+	select {
+	case status := <-got:
+		if !status.Exited() || status.ExitStatus() != 0 {
+			t.Errorf("status = %v, want a clean exit", status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reaper never collected a child that exited before it started")
+	}
 }
 
 func TestRunWithinReturnsTheOutputOfACommandThatFinishes(t *testing.T) {

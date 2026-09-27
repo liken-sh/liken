@@ -6,8 +6,11 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/liken-sh/liken/machine"
 )
@@ -28,88 +31,184 @@ import (
 // selector is only a query parameter on the same request.
 //
 // resourceVersion tells the server where to resume, so no change is
-// missed between reconnects. When history has been compacted away,
-// the server answers with 410 Gone. Stream drops are also routine,
-// because the server ends watches on its own schedule. Both cases
-// recover the same way, the way informers do: list the collection
-// and watch again from the list's own resourceVersion, which is the
-// current revision of the whole collection. A single object's
-// version does not work here. That version is the revision of that
-// object's own last write, and on a quiet object, that revision can
-// be old enough to have been compacted away. Using it would earn
-// another 410 and leave the loop stuck. The recovery list's items
-// are delivered as events, so the caller's working copy is
-// refreshed along the way.
+// missed between reconnects. The loop follows three rules, the ones
+// every hand-written watch loop in liken follows:
 //
-// allowWatchBookmarks asks the server to send an occasional BOOKMARK
-// event: no object change, just a signal that says "you are current
-// through version X." Without this, a watch on a quiet fleet would
-// sit on an increasingly old resourceVersion, and the next reconnect
-// would more likely find that version already compacted away (see
-// the 410 case above). Bookmarks keep the resume point fresh at no
-// extra cost; informers request them for this reason.
+//   - The server ends watches on its own schedule, so a clean close
+//     after a healthy watch is routine. The loop opens the next watch
+//     at once from the last resourceVersion the stream delivered, and
+//     does not list. allowWatchBookmarks asks the server for an
+//     occasional BOOKMARK event: no object change, only "you are
+//     current through version X". Without bookmarks a quiet watch
+//     would keep an old version, and the next open would more likely
+//     find it compacted away.
+//   - A 410 Gone, as the response or as an ERROR event, means the
+//     version was compacted away. The loop lists at once and watches
+//     from the list's own resourceVersion, the current revision of the
+//     whole collection. A single object's version does not work here:
+//     it is the revision of that object's own last write, and on a
+//     quiet object it can be old enough to be compacted away too. If
+//     the watch from that fresh list also gets a 410, the loop waits
+//     out the pause before it lists again, so a server that keeps
+//     answering 410 does not get a tight list loop. Every other
+//     failure, including an event whose object does not decode, also
+//     waits out the pause and then lists. On any error the loop closes
+//     the stream at once and does not read the rest of it: a server
+//     can hold the stream open for minutes after an ERROR event, and
+//     every change in that time would reach the caller late.
+//   - A watch that closes less than a second after it opened is a
+//     failure, whatever it delivered, because a watch opened with no
+//     version replays every object first, and a broken stream can
+//     still deliver events. A watch that lived for a second or longer
+//     counts as healthy even when it ended with an error, so a 410
+//     that ends it is a first 410 again. The pause is RetryPause's
+//     five to seven and a half seconds every time, so no backoff
+//     grows that a healthy watch would reset.
+//
+// The recovery list's items are delivered as events, so the caller's
+// working copy is refreshed along the way.
 func WatchMachines(c *Client, fieldSelector, resourceVersion string, events chan<- *machine.Machine, restarted func()) {
-	selector := ""
-	if fieldSelector != "" {
-		selector = "&fieldSelector=" + url.QueryEscape(fieldSelector)
+	w := &machineWatch{
+		c:             c,
+		fieldSelector: fieldSelector,
+		events:        events,
+		minLife:       time.Second,
+		pause:         func() { RetryPause() },
 	}
-	for {
-		path := MachinesPath +
-			"?watch=true&allowWatchBookmarks=true" +
-			"&resourceVersion=" + resourceVersion + selector
+	w.run(resourceVersion, restarted)
+}
 
-		resp, err := c.Do(http.MethodGet, path, "", nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			decoder := json.NewDecoder(resp.Body)
-			for {
-				var event struct {
-					Type   string          `json:"type"`
-					Object machine.Machine `json:"object"`
-				}
-				if err := decoder.Decode(&event); err != nil {
-					break
-				}
-				if event.Type == "ERROR" {
-					// Usually a 410 Gone status wrapped in an event. Fall
-					// back to a fresh list below.
-					break
-				}
-				resourceVersion = event.Object.Metadata.ResourceVersion
-				if event.Type == "BOOKMARK" {
-					// A bookmark only refreshes the resume point. There
-					// is no change to reconcile.
-					continue
-				}
-				events <- &event.Object
-			}
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
+// machineWatch holds what one watch loop needs. minLife and pause are
+// fields so a test can make every watch short or healthy, and can see
+// each pause, without waiting out real time.
+type machineWatch struct {
+	c             *Client
+	fieldSelector string
+	events        chan<- *machine.Machine
+	minLife       time.Duration
+	pause         func()
+}
+
+// watchOutcome is how one watch ended.
+type watchOutcome int
+
+const (
+	watchClosed watchOutcome = iota // the server ended the stream cleanly
+	watchGone                       // 410: the version was compacted away
+	watchFailed                     // any other error
+)
+
+func (w *machineWatch) run(resourceVersion string, restarted func()) {
+	relistedForGone := false
+	for {
+		opened := time.Now()
+		var outcome watchOutcome
+		outcome, resourceVersion = w.watch(resourceVersion)
 
 		// Every arrival here is one restart: the stream ended, and
-		// the recovery below opens it again. A caller counts these,
+		// the code below opens it again. A caller counts these,
 		// because a low rate is the API server's own schedule and a
 		// high rate is a stream that breaks faster than the loop can
 		// use it.
 		restarted()
 
-		RetryPause()
-		var list struct {
-			Metadata struct {
-				ResourceVersion string `json:"resourceVersion"`
-			} `json:"metadata"`
-			Items []machine.Machine `json:"items"`
+		healthy := time.Since(opened) >= w.minLife
+		if healthy {
+			relistedForGone = false
 		}
-		listPath := MachinesPath
-		if selector != "" {
-			listPath += "?fieldSelector=" + url.QueryEscape(fieldSelector)
+		switch {
+		case outcome == watchClosed && healthy:
+			continue
+		case outcome == watchGone && !relistedForGone:
+			relistedForGone = true
+		default:
+			w.pause()
 		}
-		if err := c.RequestJSON(http.MethodGet, listPath, nil, &list); err == nil {
-			resourceVersion = list.Metadata.ResourceVersion
-			for i := range list.Items {
-				events <- &list.Items[i]
-			}
+		if listed, ok := w.list(); ok {
+			resourceVersion = listed
 		}
 	}
+}
+
+// watch opens one watch from resourceVersion, delivers its events,
+// and returns how the watch ended and the last version it delivered.
+func (w *machineWatch) watch(resourceVersion string) (watchOutcome, string) {
+	path := MachinesPath + "?watch=true&allowWatchBookmarks=true" +
+		"&resourceVersion=" + url.QueryEscape(resourceVersion) + w.selector("&")
+	resp, err := w.c.Do(http.MethodGet, path, "", nil)
+	if err != nil {
+		return watchFailed, resourceVersion
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusGone:
+		return watchGone, resourceVersion
+	default:
+		return watchFailed, resourceVersion
+	}
+
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var event struct {
+			Type   string          `json:"type"`
+			Object json.RawMessage `json:"object"`
+		}
+		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+			return watchClosed, resourceVersion
+		} else if err != nil {
+			return watchFailed, resourceVersion
+		}
+		if event.Type == "ERROR" {
+			// The object of an ERROR event is a Status, and its code
+			// is the HTTP status the server would have answered.
+			var status struct {
+				Code int `json:"code"`
+			}
+			if json.Unmarshal(event.Object, &status) == nil && status.Code == http.StatusGone {
+				return watchGone, resourceVersion
+			}
+			return watchFailed, resourceVersion
+		}
+		var m machine.Machine
+		if err := json.Unmarshal(event.Object, &m); err != nil {
+			return watchFailed, resourceVersion
+		}
+		if m.Metadata.ResourceVersion != "" {
+			resourceVersion = m.Metadata.ResourceVersion
+		}
+		if event.Type == "BOOKMARK" {
+			// A bookmark only moves the resume point. There is no
+			// change to reconcile.
+			continue
+		}
+		w.events <- &m
+	}
+}
+
+// list reads the collection, delivers each item as an event, and
+// returns the list's own resourceVersion.
+func (w *machineWatch) list() (string, bool) {
+	var list struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+		Items []machine.Machine `json:"items"`
+	}
+	if err := w.c.RequestJSON(http.MethodGet, MachinesPath+w.selector("?"), nil, &list); err != nil {
+		return "", false
+	}
+	for i := range list.Items {
+		w.events <- &list.Items[i]
+	}
+	return list.Metadata.ResourceVersion, true
+}
+
+// selector is the fieldSelector query parameter after sep, or nothing
+// when the watch spans the whole collection.
+func (w *machineWatch) selector(sep string) string {
+	if w.fieldSelector == "" {
+		return ""
+	}
+	return sep + "fieldSelector=" + url.QueryEscape(w.fieldSelector)
 }

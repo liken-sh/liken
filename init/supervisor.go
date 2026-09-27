@@ -83,6 +83,11 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 // calls wait. It posts every exit status it collects to the death
 // registry below, where whoever started the process can claim the
 // status.
+//
+// The loop subscribes to SIGCHLD first and then collects once before
+// it waits for a signal. A child that exits before the subscription
+// sends its SIGCHLD to nobody, and that first collection is what
+// reaps it.
 // (Go note: signal.Notify registers a handler with the runtime, and
 // forwards deliveries onto a channel. This turns an asynchronous
 // interrupt into an ordinary receive loop, and satisfies the "PID 1
@@ -92,11 +97,6 @@ func reap(ctx context.Context) error {
 	signal.Notify(sigchld, unix.SIGCHLD)
 	defer signal.Stop(sigchld)
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-sigchld:
-		}
 		for {
 			// -1 means "any child". WNOHANG means "do not block if none
 			// have exited"; in that case, Wait4 returns pid 0.
@@ -107,6 +107,11 @@ func reap(ctx context.Context) error {
 			}
 			deaths.record(pid, status)
 		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-sigchld:
+		}
 	}
 }
 
@@ -116,26 +121,59 @@ func reap(ctx context.Context) error {
 // leaves a channel open to be filled later. deathRegistry is one
 // value with methods, the same pattern machinePlane uses to
 // encapsulate the other half of init's shared state.
+//
+// The registry parks a status only for a child that init started
+// through start and has not yet awaited. As PID 1, init also adopts
+// every orphan on the machine, such as a containerd shim, and the
+// reaper collects those too. Nobody awaits an orphan, so a parked
+// status for one would stay forever, and a later child that reuses
+// the pid would read it at once as its own death.
 type deathRegistry struct {
 	mu        sync.Mutex
 	waiters   map[int]chan unix.WaitStatus
 	unclaimed map[int]unix.WaitStatus
+	expected  map[int]bool
 }
 
 var deaths = &deathRegistry{
 	waiters:   map[int]chan unix.WaitStatus{},
 	unclaimed: map[int]unix.WaitStatus{},
+	expected:  map[int]bool{},
+}
+
+// start starts a command and marks its pid as one whose death to
+// keep. It holds the lock across the start, because a child can exit
+// and be reaped before cmd.Start returns: the reaper's record then
+// waits for the lock, and finds the pid already expected.
+func (d *deathRegistry) start(cmd *exec.Cmd) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	d.expected[cmd.Process.Pid] = true
+	return nil
+}
+
+// expect marks a pid as one whose death to keep, for a process that
+// start did not start.
+func (d *deathRegistry) expect(pid int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.expected[pid] = true
 }
 
 // record stores the exit status that the reaper collects for each
-// process.
+// process: it wakes the waiter, parks the status for a child that
+// init started, and drops the status of an adopted orphan.
 func (d *deathRegistry) record(pid int, status unix.WaitStatus) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if ch, ok := d.waiters[pid]; ok {
 		ch <- status
 		delete(d.waiters, pid)
-	} else {
+		delete(d.expected, pid)
+	} else if d.expected[pid] {
 		d.unclaimed[pid] = status
 	}
 }
@@ -145,6 +183,7 @@ func (d *deathRegistry) await(pid int) unix.WaitStatus {
 	d.mu.Lock()
 	if status, ok := d.unclaimed[pid]; ok {
 		delete(d.unclaimed, pid)
+		delete(d.expected, pid)
 		d.mu.Unlock()
 		return status
 	}
@@ -255,7 +294,7 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 					fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
 					break running
 				case intent := <-reboot:
-					stopK3s(cmd.Process.Pid, died)
+					stopK3s(cmd.Process, died)
 					_ = cmd.Process.Release()
 					// This close is part of the shutdown order, not
 					// cleanup. The log lives on clusterState, which
@@ -270,7 +309,7 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 						continue running
 					}
 					fmt.Println("liken: restarting k3s to apply the staged changes")
-					stopK3s(cmd.Process.Pid, died)
+					stopK3s(cmd.Process, died)
 					afterStop()
 					_ = cmd.Process.Release()
 					logf.Close()
@@ -394,7 +433,7 @@ func startK3s(role api.Role) (*exec.Cmd, io.Closer, error) {
 	}
 	cmd.Stdout = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
 	cmd.Stderr = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
-	if err := cmd.Start(); err != nil {
+	if err := deaths.start(cmd); err != nil {
 		logf.Close()
 		return nil, nil, fmt.Errorf("starting k3s: %w", err)
 	}
@@ -407,15 +446,21 @@ func startK3s(role api.Role) (*exec.Cmd, io.Closer, error) {
 // stopK3s only sends the signal and receives the confirmation. The
 // reaper stays the sole authority on calling wait (the file comment's
 // one rule).
-func stopK3s(pid int, died <-chan unix.WaitStatus) {
-	fmt.Printf("liken: stopping k3s (pid %d)\n", pid)
-	_ = unix.Kill(pid, unix.SIGTERM)
+//
+// The signals go through the os.Process, not through the pid. The
+// Process holds a pidfd, and Go signals through pidfd_send_signal, so
+// a signal to a process that the reaper already collected returns
+// os.ErrProcessDone. A pid can be reused once the reaper collects
+// it, and a pidfd cannot.
+func stopK3s(p *os.Process, died <-chan unix.WaitStatus) {
+	fmt.Printf("liken: stopping k3s (pid %d)\n", p.Pid)
+	_ = p.Signal(unix.SIGTERM)
 	select {
 	case status := <-died:
 		fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
 	case <-time.After(30 * time.Second):
 		fmt.Fprintln(os.Stderr, "liken: k3s ignored SIGTERM for 30s; killing it")
-		_ = unix.Kill(pid, unix.SIGKILL)
+		_ = p.Kill()
 		fmt.Printf("liken: k3s exited (%s)\n", describeExit(<-died))
 	}
 }
@@ -571,10 +616,10 @@ func podsSettled(out string) bool {
 // runWithin executes a command like run, and kills it with SIGKILL
 // when the timeout passes. The reaper stays the only caller of wait:
 // runWithin waits for the death registry's report, the same way
-// stopK3s does, and sends the kill only when no report has arrived.
-// A process that the reaper has not collected keeps its pid. The
-// reaper can collect it between that check and the kill, and
-// stopK3s accepts the same short window. The output is read on its own goroutine,
+// stopK3s does. The kill goes through the os.Process and its pidfd,
+// so a kill after the reaper collected the process returns
+// os.ErrProcessDone and cannot reach a later process with the same
+// pid. The output is read on its own goroutine,
 // because a command that fills the pipe blocks until someone reads it,
 // and that command would then never exit on its own.
 func runWithin(timeout time.Duration, path string, args ...string) (string, bool) {
@@ -584,7 +629,7 @@ func runWithin(timeout time.Duration, path string, args ...string) (string, bool
 		return "", false
 	}
 	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
+	if err := deaths.start(cmd); err != nil {
 		return "", false
 	}
 	pid := cmd.Process.Pid
@@ -603,13 +648,10 @@ func runWithin(timeout time.Duration, path string, args ...string) (string, bool
 	select {
 	case status = <-died:
 	case <-timer.C:
-		select {
-		case status = <-died:
-		default:
-			fmt.Fprintf(os.Stderr, "liken: %s did not finish within %s; killing it\n", path, timeout)
-			_ = unix.Kill(pid, unix.SIGKILL)
-			status = <-died
+		if cmd.Process.Kill() == nil {
+			fmt.Fprintf(os.Stderr, "liken: %s did not finish within %s; killed it\n", path, timeout)
 		}
+		status = <-died
 	}
 	_ = cmd.Process.Release()
 	buf := <-output
@@ -627,7 +669,7 @@ func runNarrated(prefix, path string, args ...string) bool {
 	w := &lineWriter{dest: console, prefix: prefix}
 	cmd.Stdout = w
 	cmd.Stderr = w
-	if err := cmd.Start(); err != nil {
+	if err := deaths.start(cmd); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: starting %s: %v\n", path, err)
 		return false
 	}
@@ -647,7 +689,7 @@ func run(path string, args ...string) (string, bool) {
 		return "", false
 	}
 	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
+	if err := deaths.start(cmd); err != nil {
 		return "", false
 	}
 	// Reading the pipe to EOF shows that the process finished

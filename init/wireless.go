@@ -258,7 +258,7 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 		return nil, fmt.Errorf("preparing %s: %w", dir, err)
 	}
 
-	pid, err := startSupplicant(ifname, config)
+	proc, err := startSupplicant(ifname, config)
 	if err != nil {
 		return nil, err
 	}
@@ -279,12 +279,12 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 	if !registerSupplicant(p) {
 		control.close()
 		died := make(chan unix.WaitStatus, 1)
-		go func() { died <- deaths.await(pid) }()
-		stopSupplicant(ifname, pid, died)
+		go func() { died <- deaths.await(proc.pid) }()
+		stopSupplicant(ifname, proc, died)
 		return nil, fmt.Errorf("the machine is stopping its supplicants; the one on %s was stopped again", ifname)
 	}
 	plane.start("the supplicant on "+ifname, func(ctx context.Context) error {
-		p.run(ctx, pid, config)
+		p.run(ctx, proc, config)
 		return nil
 	})
 	return control, nil
@@ -306,10 +306,10 @@ const (
 //
 // The stop step is conditional because between a death and the next
 // successful start there is no process, so a stop arriving in that
-// window has nothing to signal. Signalling the pid of a process whose
-// exit the reaper already collected would wait on an exit that can
-// never be reported a second time.
-func (p *supplicantProcess) await(ctx context.Context, pid int,
+// window has nothing to signal. Stopping a process whose exit the
+// reaper already collected would wait on an exit that can never be
+// reported a second time.
+func (p *supplicantProcess) await(ctx context.Context, proc runningSupplicant,
 	died <-chan unix.WaitStatus, delay <-chan time.Time) supplicantOutcome {
 	select {
 	case status := <-died:
@@ -317,12 +317,12 @@ func (p *supplicantProcess) await(ctx context.Context, pid int,
 		return supplicantDied
 	case <-p.stop:
 		if died != nil {
-			stopSupplicant(p.ifname, pid, died)
+			stopSupplicant(p.ifname, proc, died)
 		}
 		return supplicantEnded
 	case <-ctx.Done():
 		if died != nil {
-			stopSupplicant(p.ifname, pid, died)
+			stopSupplicant(p.ifname, proc, died)
 		}
 		return supplicantEnded
 	case <-delay:
@@ -346,9 +346,9 @@ func (p *supplicantProcess) next(backoff time.Duration) time.Duration {
 //
 // The loop has exactly two states, and they are separate functions
 // because they wait on different things. While a process runs, watch
-// holds it. Between processes, restart holds it, and there is no pid to
-// signal or to wait on until restart hands back a live one.
-func (p *supplicantProcess) run(ctx context.Context, pid int, config string) {
+// holds it. Between processes, restart holds it, and there is no
+// process to signal or to wait on until restart hands back a live one.
+func (p *supplicantProcess) run(ctx context.Context, proc runningSupplicant, config string) {
 	defer close(p.done)
 	backoff := p.backoff
 	attached := true
@@ -358,9 +358,9 @@ func (p *supplicantProcess) run(ctx context.Context, pid int, config string) {
 		// The pid is passed in rather than captured, because the loop
 		// gives the variable the next process's pid before this
 		// goroutine is guaranteed to have read it.
-		go func(pid int) { died <- deaths.await(pid) }(pid)
+		go func(pid int) { died <- deaths.await(pid) }(proc.pid)
 
-		if p.watch(ctx, pid, died, attached) == supplicantEnded {
+		if p.watch(ctx, proc, died, attached) == supplicantEnded {
 			return
 		}
 		// A supplicant that ran for a while and then died is a fresh
@@ -378,7 +378,7 @@ func (p *supplicantProcess) run(ctx context.Context, pid int, config string) {
 		// clients lives in the process that died, so the new one
 		// reports to nobody until it is asked, and a parked boot is
 		// waiting on exactly those reports.
-		pid, attached = next, false
+		proc, attached = next, false
 	}
 }
 
@@ -390,12 +390,12 @@ func (p *supplicantProcess) run(ctx context.Context, pid int, config string) {
 // same backoff the restarts use. A single failed attach would otherwise
 // leave the supplicant running and reporting to nobody, which reads on
 // the console and in the status exactly like a radio that went quiet.
-func (p *supplicantProcess) watch(ctx context.Context, pid int,
+func (p *supplicantProcess) watch(ctx context.Context, proc runningSupplicant,
 	died <-chan unix.WaitStatus, attached bool) supplicantOutcome {
 	backoff := p.backoff
 	for {
 		if attached {
-			return p.await(ctx, pid, died, nil)
+			return p.await(ctx, proc, died, nil)
 		}
 		// The attach runs in a goroutine so that waiting for the
 		// supplicant's socket to appear cannot delay a stop.
@@ -413,42 +413,60 @@ func (p *supplicantProcess) watch(ctx context.Context, pid int,
 			fmt.Printf("liken: wireless: the supplicant on %s exited (%s)\n", p.ifname, describeExit(status))
 			return supplicantDied
 		case <-p.stop:
-			stopSupplicant(p.ifname, pid, died)
+			stopSupplicant(p.ifname, proc, died)
 			return supplicantEnded
 		case <-ctx.Done():
-			stopSupplicant(p.ifname, pid, died)
+			stopSupplicant(p.ifname, proc, died)
 			return supplicantEnded
 		}
 		backoff = p.next(backoff)
-		if outcome := p.await(ctx, pid, died, time.After(withJitter(backoff))); outcome != supplicantWaited {
+		if outcome := p.await(ctx, proc, died, time.After(withJitter(backoff))); outcome != supplicantWaited {
 			return outcome
 		}
 	}
 }
 
 // restart gets a supplicant running again, however many attempts that
-// takes. It returns the pid of a live process, or false when the loop
+// takes. It returns a live process, or false when the loop
 // was asked to finish. It never returns after a failed start, because a
 // start that failed leaves the machine with no supplicant at all, and
 // the radio then has nothing keeping its session alive.
-func (p *supplicantProcess) restart(ctx context.Context, config string, backoff *time.Duration) (int, bool) {
+func (p *supplicantProcess) restart(ctx context.Context, config string, backoff *time.Duration) (runningSupplicant, bool) {
 	for {
 		*backoff = p.next(*backoff)
 		delay := withJitter(*backoff)
 		fmt.Printf("liken: wireless: restarting the supplicant on %s in %s\n", p.ifname, delay.Round(time.Millisecond))
-		if p.await(ctx, 0, nil, time.After(delay)) == supplicantEnded {
-			return 0, false
+		if p.await(ctx, runningSupplicant{}, nil, time.After(delay)) == supplicantEnded {
+			return runningSupplicant{}, false
 		}
-		pid, err := startSupplicant(p.ifname, config)
+		proc, err := startSupplicant(p.ifname, config)
 		if err == nil {
-			return pid, true
+			return proc, true
 		}
 		fmt.Fprintf(os.Stderr, "liken: wireless: %v\n", err)
 	}
 }
 
+// runningSupplicant is one supplicant process: its pid, for the death
+// registry and the console, and the way to signal it. The signal goes
+// through the os.Process that started the process. The Process holds a
+// pidfd, and Go signals through pidfd_send_signal, so a signal to a
+// process that the reaper already collected returns os.ErrProcessDone
+// and cannot reach a later process that reuses the pid. signal is a
+// function so that a test can record the signals the loop sends
+// without any real process being signalled.
+type runningSupplicant struct {
+	pid    int
+	signal func(os.Signal) error
+}
+
+// supplicantHandle wraps the os.Process that started a supplicant.
+func supplicantHandle(p *os.Process) runningSupplicant {
+	return runningSupplicant{pid: p.Pid, signal: p.Signal}
+}
+
 // startSupplicant launches the supplicant for one interface and reports
-// its process id. It is a variable holding the real launcher below, so a
+// the running process. It is a variable holding the real launcher below, so a
 // test can script the outcomes of the restart loop without a radio, a
 // binary, or a reaper, the same way parkConsole and wirelessRunDir let a
 // test stand in for a device and a tmpfs.
@@ -463,17 +481,15 @@ var startSupplicant = execSupplicant
 // what keeps it running, and a daemonized process would exit
 // immediately and put its own child out of the death registry's
 // reach.
-func execSupplicant(ifname, config string) (int, error) {
+func execSupplicant(ifname, config string) (runningSupplicant, error) {
 	cmd := exec.Command(supplicantBinary, "-i", ifname, "-c", config, "-D", "nl80211")
 	cmd.Stdout = &lineWriter{dest: console, prefix: "wpa | "}
 	cmd.Stderr = &lineWriter{dest: console, prefix: "wpa | "}
-	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("starting the supplicant on %s: %w", ifname, err)
+	if err := deaths.start(cmd); err != nil {
+		return runningSupplicant{}, fmt.Errorf("starting the supplicant on %s: %w", ifname, err)
 	}
-	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
-	fmt.Printf("liken: wireless: the supplicant on %s started (pid %d)\n", ifname, pid)
-	return pid, nil
+	fmt.Printf("liken: wireless: the supplicant on %s started (pid %d)\n", ifname, cmd.Process.Pid)
+	return supplicantHandle(cmd.Process), nil
 }
 
 // stopSupplicant asks one supplicant to exit and waits for the reaper
@@ -485,22 +501,17 @@ func execSupplicant(ifname, config string) (int, error) {
 // next boot can start from. And the shutdown's kill(-1) would race
 // the restart loop above into starting a supplicant it is about to
 // kill.
-func stopSupplicant(ifname string, pid int, died <-chan unix.WaitStatus) {
-	fmt.Printf("liken: wireless: stopping the supplicant on %s (pid %d)\n", ifname, pid)
-	_ = killProcess(pid, unix.SIGTERM)
+func stopSupplicant(ifname string, proc runningSupplicant, died <-chan unix.WaitStatus) {
+	fmt.Printf("liken: wireless: stopping the supplicant on %s (pid %d)\n", ifname, proc.pid)
+	_ = proc.signal(unix.SIGTERM)
 	select {
 	case <-died:
 	case <-time.After(5 * time.Second):
 		fmt.Fprintf(os.Stderr, "liken: wireless: the supplicant on %s ignored SIGTERM for 5s; killing it\n", ifname)
-		_ = killProcess(pid, unix.SIGKILL)
+		_ = proc.signal(unix.SIGKILL)
 		<-died
 	}
 }
-
-// killProcess sends a signal to one process. It is a variable holding
-// the syscall, so a test can watch which process the supervision loop
-// signals without a test run being able to signal anything real.
-var killProcess = unix.Kill
 
 // stopSupplicants ends every supervised supplicant. The shutdown calls
 // it before it signals the rest of the machine, so the restart loops are

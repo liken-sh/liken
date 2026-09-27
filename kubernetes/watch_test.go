@@ -2,8 +2,9 @@ package kubernetes
 
 // These tests run the watch loop against a real streaming server.
 // Events arrive as the server sends them. Bookmarks advance the
-// resume point without sending an event. A dropped stream recovers
-// through a fresh list.
+// resume point without sending an event. A stream that drops within
+// a second of its start is a failure, and recovers through a fresh
+// list. watch_guards_test.go covers the rest of the loop's rules.
 
 import (
 	"encoding/json"
@@ -97,8 +98,8 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 		t.Errorf("got %s", first.Metadata.ResourceVersion)
 	}
 
-	// The stream then ends. This is an ordinary drop, and the loop
-	// recovers with a fresh list. The list's items arrive as events,
+	// The stream then ends at once. A watch that short is a failure,
+	// and the loop recovers with a fresh list. The list's items arrive as events,
 	// so the caller's working copies are refreshed.
 	second := <-events
 	if second.Metadata.Name != "node-1" || second.Metadata.ResourceVersion != "50" {

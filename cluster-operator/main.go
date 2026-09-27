@@ -92,10 +92,10 @@ func main() {
 	// can change the Cluster's phase, a rollout's budget, or a Lost
 	// verdict. Events are only wake signals. The pass below re-reads
 	// everything it judges, so this program discards the drained
-	// objects themselves, and a missed event can never matter. The
-	// empty resourceVersion starts the watch at the server's current
-	// state. The first recovery list then establishes a precise
-	// resume point.
+	// objects themselves, and a missed event can never matter. With
+	// an empty resourceVersion, the first watch sends every Machine as
+	// it is now and then the changes, and each event after that moves
+	// the resume point.
 	events := make(chan *machine.Machine, 32)
 	go kubernetes.WatchMachines(client, "", "", events,
 		func() { operatorMetrics.WatchRestarted(machineKind) })
