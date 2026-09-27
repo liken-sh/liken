@@ -103,11 +103,17 @@ const (
 // are finalizer controllers: an object that is deleting keeps its
 // deletionTimestamp and stays readable until the last finalizer is
 // removed, and that window is where the ordered teardown runs.
+//
+// Generation is the API server's count of changes to the spec. A write
+// to the status subresource does not change it, so the edit watcher
+// (editwatch.go) compares it to tell a person's edit from the
+// operator's own status write.
 type ObjectMeta struct {
 	Name              string            `json:"name,omitempty"`
 	Namespace         string            `json:"namespace,omitempty"`
 	UID               string            `json:"uid,omitempty"`
 	ResourceVersion   string            `json:"resourceVersion,omitempty"`
+	Generation        int64             `json:"generation,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Finalizers        []string          `json:"finalizers,omitempty"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`

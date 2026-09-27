@@ -76,6 +76,11 @@ type inventory struct {
 	// anything, so the pass that closes a window reads this instead.
 	windowOpen bool
 
+	// follow reports the radio this pod holds to the edit watcher
+	// (editwatch.go), which watches that radio's Peripherals. It does
+	// nothing until main sets it.
+	follow func(adapterKey string)
+
 	// metrics is this operator's Prometheus registry. A nil value
 	// records nothing, which is what every test that has no reason to
 	// check a metric gets by leaving the field unset.
@@ -92,6 +97,7 @@ func newInventory(client *Client, radio radio, held *relays, nodeName, namespace
 		now:       time.Now,
 		retired:   map[bonds.Address]bool{},
 		retiring:  map[bonds.Address]bool{},
+		follow:    func(string) {},
 		metrics:   readings,
 	}
 	// The connector reads the clock through a closure, because the
@@ -164,6 +170,7 @@ func (i *inventory) reconcile() inventoryPass {
 	i.metrics.setAdapterPresent(true)
 
 	i.releaseDepartedAdapters(snapshot.Adapter.Address)
+	i.follow(snapshot.Adapter.Address.Key())
 
 	// A radio that is not connectable answers no bonded device: page
 	// scan is off, so a controller's reconnect button reaches nothing,

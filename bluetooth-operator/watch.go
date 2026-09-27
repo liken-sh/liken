@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -168,8 +169,14 @@ func pauseWatch(ctx context.Context, delay time.Duration) time.Duration {
 // or a slow refusal is not a watch that ran.
 func streamChanges[T any](ctx context.Context, c *Client, collection, version string, changed func(string, T)) (string, time.Time, error) {
 	var accepted time.Time
-	path := fmt.Sprintf("%s?watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
-		collection, url.QueryEscape(version), int(watchTimeout.Seconds()))
+	// A collection can carry a query of its own, such as a label
+	// selector, so the watch's parameters join that query.
+	separator := "?"
+	if strings.Contains(collection, "?") {
+		separator = "&"
+	}
+	path := fmt.Sprintf("%s%swatch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
+		collection, separator, url.QueryEscape(version), int(watchTimeout.Seconds()))
 	ctx, cancel := context.WithCancel(ctx)
 	body, err := c.Watch(ctx, path)
 	if err != nil {

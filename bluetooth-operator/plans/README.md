@@ -58,14 +58,18 @@ considered and why.
   contract: peripherals connected and claimed, battery level,
   disconnects, adapter presence, and relayed input events.
 
+* [08, Watch the Adapters and the Peripherals](completed/08-watch-adapters-and-peripherals.md).
+  Built on 2026-09-27; the drill on liken-1 is still owed. The
+  operator watches both kinds through the loop that watches the
+  PairingRequests, so an edit or an unpair acts on the next pass
+  instead of at the backstop tick. Answers and replaces the open
+  problem "An Adapter or Peripheral edit waits for the backstop".
+
 ## Open problems
 
 * [The restore set is tested on one BR/EDR device only](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
   The adapter's own `identity` file does not travel, and no LE device
   has been through a restore.
-* [An Adapter or Peripheral edit waits for the backstop](open-problems/an-adapter-or-peripheral-edit-waits-for-the-backstop.md).
-  The operator does not watch those two kinds, so an edit or an unpair
-  acts on the next pass, at most 60 seconds later.
 * [The operator serves one adapter](open-problems/the-operator-serves-one-adapter.md).
   The bond store and controller discovery are written for one adapter,
   so a node with two adapters serves only the one the claim took.

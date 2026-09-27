@@ -33,6 +33,27 @@ const resetConnection = "reset"
 // than shortWatch, so the watch counts as one that ran.
 const linger = "linger"
 
+// forbid, as the first line of a script, answers the watch with a 403
+// at once, the way an API server answers a grant that is missing.
+const forbid = "forbid"
+
+// expire, as the first line of a script, answers the watch with a 410
+// response at once, and expireSlowly answers it a little later than
+// shortWatch.
+const (
+	expire       = "expire"
+	expireSlowly = "expire slowly"
+)
+
+// acceptSlowly, as the first line of a script, waits a little longer
+// than shortWatch before the 200, and then plays the rest of the
+// script.
+const acceptSlowly = "accept slowly"
+
+// pause, as a line of a script, holds the stream open until the test
+// calls release, and then plays the rest of the script.
+const pause = "pause"
+
 // watchServer is an API server for one collection. Each list answers
 // the version "list-N", where N counts the lists. Each watch
 // connection plays the next script of events.
@@ -46,7 +67,10 @@ type watchServer struct {
 	listTimes  []time.Time
 	watchTimes []time.Time
 	versions   []string
+	selectors  []string
+	holding    int
 	opened     chan struct{}
+	released   chan struct{}
 }
 
 func newWatchServer(collection, items string, scripts ...[]string) *watchServer {
@@ -55,6 +79,7 @@ func newWatchServer(collection, items string, scripts ...[]string) *watchServer 
 		items:      items,
 		scripts:    scripts,
 		opened:     make(chan struct{}, len(scripts)+1),
+		released:   make(chan struct{}, 1),
 	}
 }
 
@@ -65,6 +90,7 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	s.mu.Lock()
+	s.selectors = append(s.selectors, query.Get("labelSelector"))
 	if query.Get("watch") != "true" {
 		s.lists++
 		s.listTimes = append(s.listTimes, time.Now())
@@ -86,8 +112,34 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, line := range s.scripts[connection] {
 		if line == holdOpen {
 			w.(http.Flusher).Flush()
+			s.hold(1)
 			<-r.Context().Done()
+			s.hold(-1)
 			return
+		}
+		if line == forbid {
+			http.Error(w, "the service account may not watch this collection", http.StatusForbidden)
+			return
+		}
+		if line == expire || line == expireSlowly {
+			if line == expireSlowly {
+				time.Sleep(shortWatch + 200*time.Millisecond)
+			}
+			http.Error(w, "too old resource version", http.StatusGone)
+			return
+		}
+		if line == pause {
+			w.(http.Flusher).Flush()
+			select {
+			case <-s.released:
+			case <-r.Context().Done():
+				return
+			}
+			continue
+		}
+		if line == acceptSlowly {
+			time.Sleep(shortWatch + 200*time.Millisecond)
+			continue
 		}
 		if line == refuseSlowly {
 			time.Sleep(shortWatch + 200*time.Millisecond)
@@ -109,6 +161,24 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintln(w, line)
 	}
+}
+
+// release lets a paused stream play the rest of its script.
+func (s *watchServer) release() { s.released <- struct{}{} }
+
+// hold counts the streams the server holds open.
+func (s *watchServer) hold(change int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holding += change
+}
+
+// held answers how many streams the server holds open, and the label
+// selector of each request, lists and watches in the order they came.
+func (s *watchServer) held() (int, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.holding, append([]string{}, s.selectors...)
 }
 
 // seen answers how many lists the server answered, and the version

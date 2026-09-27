@@ -23,7 +23,7 @@
 // creates to open a pairing window. Those objects are the reason a
 // person never needs a shell in this pod.
 //
-// Five sources drive the loop, and each one only says that something
+// Six sources drive the loop, and each one only says that something
 // changed. Every pass re-reads bluetoothd's whole object tree and
 // re-walks sysfs. A cache built from event payloads can fall out of
 // step with the daemon; a full re-read stays correct.
@@ -60,21 +60,25 @@ const (
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. The tick is a backstop, and it covers two changes
-	// that no event this operator receives reports. A uevent datagram
-	// that the kernel dropped is not one of them: the receive after the
-	// loss fails with ENOBUFS, and the reader wakes the loop for it
-	// (uevents.go).
+	// to prompt it. The tick is a backstop, and it covers two failures
+	// that no event reports:
 	//
 	//   - A bond file that bluetoothd wrote with no D-Bus signal to
 	//     announce it, such as the cache entry it writes when it
 	//     resolves a device's name and browses its services
-	//     (bondstore.go).
-	//   - An edit to an Adapter or a Peripheral: an Adapter's
-	//     spec.alias, a Peripheral's spec, and the deletion of a
-	//     Peripheral, which starts an unpair. The operator watches the
-	//     PairingRequests, but not these two kinds, so such an edit
-	//     takes effect on the next pass, which is at most this long.
+	//     (bondstore.go). The Secret that holds the bond gets that file
+	//     on the next pass, which is at most this long.
+	//   - A pass that failed, and whose one retry failed too. A pass
+	//     fails when a read fails, such as bluetoothd's object tree or a
+	//     list from the API server, or when a write fails. The loop
+	//     schedules no more retries (retryDelay), so the tick runs the
+	//     pass again.
+	//
+	// The other sources report their own changes. A uevent datagram
+	// that the kernel dropped makes the next receive fail with ENOBUFS,
+	// and the reader wakes the loop for it (uevents.go). The watches of
+	// the PairingRequests, the Adapters, and the Peripherals wake the
+	// loop for an edit (requestwatch.go, editwatch.go).
 	backstopInterval = 60 * time.Second
 
 	// retryDelay is how long the loop waits before it runs a failed
@@ -175,7 +179,8 @@ func main() {
 	// through the same settle window as everything else.
 	retries := make(chan struct{}, 1)
 	requests := watchPairingRequests(ctx, client, time.Now)
-	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests), settleWindow, settleLimit)
+	edits := watchEdits(ctx, client, nodeName)
+	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests, edits.wakes()), settleWindow, settleLimit)
 
 	// readings is this operator's Prometheus registry. Every method on
 	// it accepts a nil receiver and records nothing, so wiring it in
@@ -212,6 +217,9 @@ func main() {
 	// pass that reads the result is the loop's, so a finished call is
 	// a wake like the kernel's and the bus's.
 	objects.connects.wake = wake
+	// The pass reads the radio's address, and the edit watcher needs
+	// it to select the Peripherals of that radio.
+	objects.follow = edits.follow
 	retryScheduled := false
 	pass := func() {
 		// The three parts of a pass run in order and all of them run. The
@@ -320,10 +328,11 @@ func exitReason(ctx context.Context, ok bool) error {
 }
 
 // wakes merges the kernel's uevents, bluetoothd's signals, the
-// PairingRequests that need a pass, and the loop's own retries into
-// one channel. None of them holds state that the loop uses, so the
-// merge loses nothing: each wake means look again.
-func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retries, requests <-chan struct{}) <-chan struct{} {
+// PairingRequests that need a pass, the edits to Adapters and
+// Peripherals, and the loop's own retries into one channel. None of
+// them holds state that the loop uses, so the merge loses nothing:
+// each wake means look again.
+func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retries, requests, edits <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -356,6 +365,11 @@ func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retrie
 				}
 				wake()
 			case _, ok := <-requests:
+				if !ok {
+					return
+				}
+				wake()
+			case _, ok := <-edits:
 				if !ok {
 					return
 				}

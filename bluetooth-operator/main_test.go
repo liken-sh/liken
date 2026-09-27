@@ -116,11 +116,11 @@ func assertQuiet(t *testing.T, out <-chan struct{}, within time.Duration) {
 	}
 }
 
-// wakes merges four sources, and each of them closing must end the
+// wakes merges five sources, and each of them closing must end the
 // merge. A source that closed and stayed in the select would spin the
 // loop on a channel that is always ready to receive.
 func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
-	sources := []string{"uevents", "bluez", "retries", "requests"}
+	sources := []string{"uevents", "bluez", "retries", "requests", "edits"}
 	for i, closing := range sources {
 		t.Run(closing, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -130,7 +130,8 @@ func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 			bluez := make(chan struct{})
 			retries := make(chan struct{})
 			requests := make(chan struct{})
-			out := wakes(ctx, uevents, bluez, retries, requests)
+			edits := make(chan struct{})
+			out := wakes(ctx, uevents, bluez, retries, requests, edits)
 
 			switch i {
 			case 0:
@@ -141,6 +142,8 @@ func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 				close(retries)
 			case 3:
 				close(requests)
+			case 4:
+				close(edits)
 			}
 			select {
 			case _, ok := <-out:
@@ -162,7 +165,8 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	bluez := make(chan struct{}, 1)
 	retries := make(chan struct{}, 1)
 	requests := make(chan struct{}, 1)
-	out := wakes(ctx, uevents, bluez, retries, requests)
+	edits := make(chan struct{}, 1)
+	out := wakes(ctx, uevents, bluez, retries, requests, edits)
 
 	uevents <- kernelEvent{Subsystem: "hid", Action: "add", MAC: "a0:ab:51:33:b7:12"}
 	waitForWake(t, out, time.Second)
@@ -171,6 +175,8 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	retries <- struct{}{}
 	waitForWake(t, out, time.Second)
 	requests <- struct{}{}
+	waitForWake(t, out, time.Second)
+	edits <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
