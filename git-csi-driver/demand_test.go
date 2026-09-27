@@ -190,6 +190,171 @@ func TestADemandOnAWriteableVolumeDoesNothingAndSaysSoOnce(t *testing.T) {
 	}
 }
 
+func TestADemandReadWhileTheVolumeStagesIsActedOnWhenTheStageEnds(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+
+	// The watch sends the demand after the stage fetched and before the
+	// stage adds the volume to the node, so the volume is not staged
+	// yet when the node reads it.
+	answering.demands.read(t.Context(),
+		annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z"))
+	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+
+	waitForCondition(t, held, ", demanded ")
+}
+
+// scriptedVolumeWatches answers every watch on PersistentVolumes with
+// the next watcher from the returned channel, which the test sends
+// events on.
+func scriptedVolumeWatches(t *testing.T, answering *node) chan *watch.FakeWatcher {
+	t.Helper()
+	opened := make(chan *watch.FakeWatcher, 4)
+	cluster(t, answering).PrependWatchReactor("persistentvolumes",
+		func(k8stesting.Action) (bool, watch.Interface, error) {
+			sent := watch.NewFake()
+			opened <- sent
+			return true, sent, nil
+		})
+	return opened
+}
+
+// noDemand fails when the volume's report says a demand named it.
+func noDemand(t *testing.T, held *volume) {
+	t.Helper()
+	if _, message := held.report(); strings.Contains(message, ", demanded ") {
+		t.Errorf("the report says %q, want no demand", message)
+	}
+}
+
+func TestADeletedPersistentVolumeTakesItsDemandAway(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	opened := scriptedVolumeWatches(t, answering)
+	watchDemands(t, answering)
+	sent := <-opened
+
+	demanded := annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z")
+	sent.Modify(demanded)
+	sent.Delete(demanded)
+	sent.Delete(&corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "local"}})
+	// The send blocks until the loop reads the event, so the bookmark
+	// returns only once the loop has read the delete.
+	sent.Action(watch.Bookmark, &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{ResourceVersion: "250"},
+	})
+	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+
+	noDemand(t, held)
+}
+
+func TestAListThatNoLongerHoldsAPersistentVolumeTakesItsDemandAway(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	volumes := cluster(t, answering).CoreV1().PersistentVolumes()
+	if _, err := volumes.Create(t.Context(),
+		annotated(csiVolume("franchises", driverName), "2026-09-06T14:31:07Z"),
+		metav1.CreateOptions{}); err != nil {
+		t.Fatalf("writing the PersistentVolume: %v", err)
+	}
+	opened := scriptedVolumeWatches(t, answering)
+	watchDemands(t, answering)
+	sent := <-opened
+
+	if err := volumes.Delete(t.Context(), "franchises", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("deleting the PersistentVolume: %v", err)
+	}
+	// A 410 makes the loop list again, and the second watch opens only
+	// after that list.
+	sent.Action(watch.Error, gone().Object)
+	<-opened
+	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+
+	noDemand(t, held)
+}
+
+// writeableDemand is a demand on the writeable volume config. A
+// writeable volume logs each demand it acts on and pulls nothing, so the
+// log counts the demands the node acted on.
+func writeableDemand() *corev1.PersistentVolume {
+	return annotated(csiVolume("config", driverName), "2026-09-06T14:31:07Z")
+}
+
+// bookmarked sends a bookmark on the watch. The send blocks until the
+// loop reads the event, so it returns only once the loop has read every
+// event sent before it.
+func bookmarked(sent *watch.FakeWatcher) {
+	sent.Action(watch.Bookmark, &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{ResourceVersion: "250"},
+	})
+}
+
+func TestARecreatedPersistentVolumeWithTheSameDemandIsActedOnAgain(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		delete func(t *testing.T, answering *node, sent *watch.FakeWatcher, opened chan *watch.FakeWatcher) *watch.FakeWatcher
+	}{
+		{
+			name: "a delete the watch sends",
+			delete: func(t *testing.T, _ *node, sent *watch.FakeWatcher, _ chan *watch.FakeWatcher) *watch.FakeWatcher {
+				sent.Delete(writeableDemand())
+				return sent
+			},
+		},
+		{
+			name: "a list that no longer holds it",
+			delete: func(t *testing.T, answering *node, sent *watch.FakeWatcher, opened chan *watch.FakeWatcher) *watch.FakeWatcher {
+				if err := cluster(t, answering).CoreV1().PersistentVolumes().
+					Delete(t.Context(), "config", metav1.DeleteOptions{}); err != nil {
+					t.Fatalf("deleting the PersistentVolume: %v", err)
+				}
+				sent.Action(watch.Error, gone().Object)
+				return <-opened
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := &logbook{}
+			answering, _ := testNode(t, logs)
+			boundVolume(t, answering, "config", "")
+			stagedWriteable(t, answering, "config",
+				fileURL(bareRemote(t, map[string]string{"a.txt": "one"})))
+			opened := scriptedVolumeWatches(t, answering)
+			watchDemands(t, answering)
+			sent := <-opened
+
+			sent.Modify(writeableDemand())
+			sent = c.delete(t, answering, sent, opened)
+			sent.Add(writeableDemand())
+			bookmarked(sent)
+
+			if got := strings.Count(logs.String(), "the demand did nothing"); got != 2 {
+				t.Errorf("the log says the demand did nothing %d times, want 2 (%q)", got, logs)
+			}
+		})
+	}
+}
+
+func TestARelistActsOnceOnADemandItAlreadyActedOn(t *testing.T) {
+	logs := &logbook{}
+	answering, _ := testNode(t, logs)
+	boundVolume(t, answering, "config", "")
+	stagedWriteable(t, answering, "config",
+		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})))
+	opened := scriptedVolumeWatches(t, answering)
+	watchDemands(t, answering)
+	sent := <-opened
+
+	demandPull(t, answering, "config", "2026-09-06T14:31:07Z")
+	sent.Modify(writeableDemand())
+	sent.Action(watch.Error, gone().Object)
+	bookmarked(<-opened)
+
+	if got := strings.Count(logs.String(), "the demand did nothing"); got != 1 {
+		t.Errorf("the log says the demand did nothing %d times, want 1 (%q)", got, logs)
+	}
+}
+
 func TestTheSameDemandReadTwiceIsActedOnOnce(t *testing.T) {
 	logs := &logbook{}
 	answering, _ := testNode(t, logs)

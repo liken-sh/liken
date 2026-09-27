@@ -122,9 +122,16 @@ func (l *listWatch) hold(ctx context.Context, from string) string {
 			if event.Type == watch.Error {
 				// A 410 Gone arrives as an error event, and so does any
 				// other failure on the stream. The node lists again,
-				// because it cannot tell which changes it missed.
+				// because it cannot tell which changes it missed. Only
+				// a 410 lists at once: any other error waits first, so
+				// a server that fails every watch takes one list per
+				// wait.
+				err := apierrors.FromObject(event.Object)
 				l.logger.InfoContext(ctx, "the watch ended with an error", "kind", l.kind,
-					"error", apierrors.FromObject(event.Object))
+					"error", err)
+				if !apierrors.IsResourceExpired(err) && !apierrors.IsGone(err) {
+					waitOut(ctx, l.retry)
+				}
 				return ""
 			}
 			if held, ok := event.Object.(versioned); ok && held.GetResourceVersion() != "" {

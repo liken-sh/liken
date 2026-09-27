@@ -232,8 +232,8 @@ func (m *metrics) observeCall(kind string, duration time.Duration, failed bool) 
 	}
 }
 
-// watchRestarted counts one watch the API closed that the driver
-// reopened.
+// watchRestarted counts one watch the driver opened again after one
+// ended.
 func (m *metrics) watchRestarted(kind string) {
 	if m == nil {
 		return

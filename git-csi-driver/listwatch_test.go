@@ -212,6 +212,31 @@ func TestTheWatchResumesAfterTheListOrListsAgain(t *testing.T) {
 	}
 }
 
+func TestAnErrorEventThatIsNotGoneWaitsBeforeTheList(t *testing.T) {
+	failed := apierrors.NewInternalError(errors.New("the storage failed")).Status()
+	s := &script{answers: []func() (watch.Interface, error){
+		ended(watch.Event{Type: watch.Error, Object: &failed}),
+	}}
+	loop := scripted(io.Discard, newMetrics(), s)
+	loop.retry = time.Hour
+	ctx, stop := context.WithCancel(t.Context())
+	over := make(chan struct{})
+	go func() {
+		defer close(over)
+		loop.follow(ctx)
+	}()
+
+	// The error event arrives at once, and a loop that did not wait
+	// lists again within the pause.
+	time.Sleep(200 * time.Millisecond)
+	stop()
+	<-over
+
+	if s.lists != 1 {
+		t.Errorf("the loop listed %d times within the retry, want 1", s.lists)
+	}
+}
+
 func TestTheLoopListsAgainAfterAnEventItCouldNotRead(t *testing.T) {
 	logs := &logbook{}
 	s := &script{

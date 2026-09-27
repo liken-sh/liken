@@ -65,6 +65,7 @@ func (n *node) stageReadOnly(
 	n.staged[id] = arriving
 	n.follow(arriving)
 	n.mu.Unlock()
+	n.demands.arrived(ctx, id)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 

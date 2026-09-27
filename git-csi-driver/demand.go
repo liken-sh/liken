@@ -39,9 +39,12 @@ type demanding struct {
 	retry  time.Duration
 
 	// acted is the annotation value the node last acted on, by volume
-	// handle. A value that differs from it is a demand.
+	// handle. A value that differs from it is a demand. seen is the
+	// last value the node read, by handle, whether or not this node
+	// staged the handle.
 	mu    sync.Mutex
 	acted map[string]string
+	seen  map[string]string
 }
 
 func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Logger) *demanding {
@@ -51,6 +54,7 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 		logger: logger,
 		retry:  defaultRetry,
 		acted:  map[string]string{},
+		seen:   map[string]string{},
 	}
 }
 
@@ -71,16 +75,27 @@ func (d *demanding) follow(ctx context.Context) {
 			if err != nil {
 				return "", err
 			}
+			// The list is the whole state, so a value for a volume it
+			// no longer holds belongs to a deleted PersistentVolume.
+			d.mu.Lock()
+			d.seen = map[string]string{}
+			d.mu.Unlock()
 			for i := range held.Items {
 				d.read(ctx, &held.Items[i])
 			}
+			d.keepListed(held.Items)
 			return held.ResourceVersion, nil
 		},
 		watch: volumes.Watch,
 		act: func(ctx context.Context, event watch.Event) error {
-			// A bookmark is a PersistentVolume with no spec, so read
-			// passes over it.
-			if held, isVolume := event.Object.(*corev1.PersistentVolume); isVolume {
+			held, isVolume := event.Object.(*corev1.PersistentVolume)
+			switch {
+			case !isVolume:
+			case event.Type == watch.Deleted:
+				d.forget(held)
+			default:
+				// A bookmark is a PersistentVolume with no spec, so
+				// read passes over it.
 				d.read(ctx, held)
 			}
 			return nil
@@ -93,7 +108,10 @@ func (d *demanding) follow(ctx context.Context) {
 
 // read acts on one PersistentVolume. It acts only when the volume is
 // this driver's, only when this node staged the handle, and only when
-// the annotation carries a value the node has not acted on.
+// the annotation carries a value the node has not acted on. It records
+// the value for a handle this node has not staged, because a stage
+// fetches before it adds the volume to the node, and a demand that
+// arrives between the two is read again when the stage ends.
 func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
 	source := held.Spec.CSI
 	if source == nil || source.Driver != driverName {
@@ -103,11 +121,67 @@ func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
 	if asked == "" {
 		return
 	}
-	staged := d.node.stagedVolume(source.VolumeHandle)
+	d.mu.Lock()
+	d.seen[source.VolumeHandle] = asked
+	d.mu.Unlock()
+	d.actOn(ctx, source.VolumeHandle, asked)
+}
+
+// forget drops the values the node read and acted on for a deleted
+// PersistentVolume. The maps then hold one entry for each
+// PersistentVolume that exists, not for every one the driver ever read,
+// and a PersistentVolume created again with the same handle and the
+// same value is a new demand.
+func (d *demanding) forget(held *corev1.PersistentVolume) {
+	if held.Spec.CSI == nil {
+		return
+	}
+	d.mu.Lock()
+	delete(d.seen, held.Spec.CSI.VolumeHandle)
+	delete(d.acted, held.Spec.CSI.VolumeHandle)
+	d.mu.Unlock()
+}
+
+// keepListed drops the acted value of every handle the list does not
+// hold. A handle the list holds keeps its value, so a list does not act
+// again on a demand the node already acted on.
+func (d *demanding) keepListed(listed []corev1.PersistentVolume) {
+	present := map[string]bool{}
+	for i := range listed {
+		if source := listed[i].Spec.CSI; source != nil {
+			present[source.VolumeHandle] = true
+		}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for handle := range d.acted {
+		if !present[handle] {
+			delete(d.acted, handle)
+		}
+	}
+}
+
+// arrived acts on the last demand the node read for a volume a stage
+// just added to the node. The watch sends no event for that demand
+// again, so without this read the volume keeps its old commit until
+// the annotation changes.
+func (d *demanding) arrived(ctx context.Context, handle string) {
+	d.mu.Lock()
+	asked, found := d.seen[handle]
+	d.mu.Unlock()
+	if found {
+		d.actOn(ctx, handle, asked)
+	}
+}
+
+// actOn carries the demand to the volume the handle names, once per
+// value, when this node staged the handle.
+func (d *demanding) actOn(ctx context.Context, handle, asked string) {
+	staged := d.node.stagedVolume(handle)
 	if staged == nil {
 		return
 	}
-	if !d.acting(source.VolumeHandle, asked) {
+	if !d.acting(handle, asked) {
 		return
 	}
 	if staged.writeable() {
