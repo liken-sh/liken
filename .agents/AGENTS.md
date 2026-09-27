@@ -97,8 +97,25 @@ For Kubernetes, list first and then watch from the list's
 `resourceVersion`. The watch starts at that version, not at the present,
 so the API server sends every change made after the list, and the order
 loses nothing. A `410 Gone` means the version is too old: list again. A
-watch with no `resourceVersion` starts at the present, and a change
-between the list and the watch is lost.
+watch with no `resourceVersion` first sends every object as it is now,
+and then the changes, so each open costs as much as a list. Start a
+watch from a version, and open it again from the last version it
+delivered.
+
+A watch loop written by hand needs three guards, and each one has
+failed in review at least once:
+
+- When a watch closes, open the next one from the last
+  `resourceVersion` it delivered, with `allowWatchBookmarks=true` so
+  that the version moves while nothing changes. Do not list again.
+- List again at once only on a `410 Gone`, as a response or as an
+  `ERROR` event. After any other error event, wait out a backoff
+  before the list, or a fault that lasts makes a tight list loop.
+- A watch that closes less than a second after it opened is a
+  failure, whatever it delivered, so the backoff applies. A watch
+  with no version replays every object first, so "no events" does not
+  identify a short watch. A watch that ran for a second or longer
+  resets the backoff, even when it ended with an error.
 
 Every other source has no version to resume from, so the subscription
 must open before the read. The same shape fits `pw-dump -m`, an MQTT
