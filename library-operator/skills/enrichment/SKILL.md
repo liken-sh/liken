@@ -111,7 +111,13 @@ order:
 
 A fact with one value, such as a plot or a certification, takes the
 first provider that answers. A fact with a set of values, such as the
-genres, takes the union of every provider that answers. Art takes the
+genres, takes the union of every provider that answers. The providers
+spell some genres differently, so the enricher writes each genre in one
+spelling: `Sci-Fi` and `Science-Fiction` become `Science Fiction`,
+`Sport` becomes `Sports`, and `Talk` becomes `Talk Show`. TMDb's
+combined series genres split in two: `Sci-Fi & Fantasy` becomes
+`Science Fiction` and `Fantasy`, `Action & Adventure` becomes `Action`
+and `Adventure`, and `War & Politics` becomes `War` and `Politics`. Art takes the
 first provider that holds an image. The `Sources` condition on the
 `Library` reports whether every name resolves and every fact the
 library needs has a provider.

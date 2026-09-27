@@ -150,7 +150,7 @@ func mergeOverview(merged *factAnswer, held providerAnswer, note func(string)) {
 		merged.RuntimeMinutes = held.answer.RuntimeMinutes
 		note(held.block)
 	}
-	merged.Genres = unionOf(merged.Genres, held.answer.Genres, held.block, note)
+	merged.Genres = unionOf(merged.Genres, canonicalGenres(held.answer.Genres), held.block, note)
 	merged.Studios = unionOf(merged.Studios, held.answer.Studios, held.block, note)
 }
 
