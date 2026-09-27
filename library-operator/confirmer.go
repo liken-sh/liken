@@ -138,11 +138,6 @@ func (c *confirmer) serve(ctx context.Context) {
 func (c *confirmer) follow(ctx context.Context) {
 	backoff := reportMinBackoff
 	for ctx.Err() == nil {
-		// The events between one stream and the next are gone, deletes
-		// among them, and the snapshot of the next stream sends every run
-		// that still exists. So the pending set starts empty with each
-		// stream, and the snapshot fills it again.
-		c.forget()
 		reached := false
 		err := c.catalog.subscribe(ctx, confirmerRunsQuery, nil,
 			func() { reached = true },
@@ -150,6 +145,12 @@ func (c *confirmer) follow(ctx context.Context) {
 		if err != nil && ctx.Err() == nil {
 			c.logf("the run stream ended: %v", err)
 		}
+		// The events between one stream and the next are gone, deletes
+		// among them, and the next stream's snapshot sends every run that
+		// still exists. So the pending set is emptied when the stream ends,
+		// and no run of the ended stream stays pending through the backoff
+		// for the recheck to confirm.
+		c.forget()
 		if reached {
 			backoff = reportMinBackoff
 		}
@@ -172,11 +173,12 @@ func (c *confirmer) follow(ctx context.Context) {
 // bookkeeping, and a subscription or an update stream follows only the
 // catalog's own tables. So the recheck is a backstop timer. It reads
 // nothing when no run is pending. A pending run leaves the set when it is
-// confirmed, when a newer run of its row replaces it, or when its row is
-// deleted, and the set starts empty each time the run stream opens. A
-// confirmed run never enters the set again. A run whose
-// versions never arrive stays until the pod restarts, at up to three small
-// reads of the local copy every two seconds.
+// confirmed, when a newer run of its row replaces it, or when its row
+// leaves the query's result. The set is emptied when a run stream ends,
+// and the next stream's snapshot fills it again. A confirmed run never
+// enters the set again. A run whose versions never arrive stays pending
+// for as long as its row names it, at up to three small reads of the
+// local copy every two seconds.
 func (c *confirmer) recheckWhilePending(ctx context.Context) {
 	ticker := time.NewTicker(confirmerRecheck)
 	defer ticker.Stop()
@@ -196,26 +198,32 @@ func (c *confirmer) recheckWhilePending(ctx context.Context) {
 // image cannot read is skipped, so one row of a shape this operator did not
 // write never costs the confirmer the rest of the table.
 //
-// A delete says that a run left the query's result, for one of two
-// causes. A cleanup Job deletes the runs and the confirmations of its
-// library, and a confirmation written for that run would keep the
-// library's key in the catalog after the library is gone. And every new
-// run of a row first sends a delete of the run before it: the first write
-// of a hand-off sets the version to zero, and the query reads only runs
-// with a version. Either way no Job waits on the run the delete carries,
-// so it is never confirmed, and it leaves the pending set.
+// The pending set holds at most one run per runs row: the newest run
+// the stream carried for it, while that run waits on its versions. Every
+// event for a row decides the row's entry alone, with one rule:
+//
+//   - A row event replaces the entry with its run, or clears the entry
+//     when its run is confirmed at once.
+//   - A delete clears the entry, whatever run it carries.
+//
+// The agent buffers changes before it streams them, so a row can move
+// from one run to the next in one change, and a delete can carry a run
+// other than the pending one. A delete says the row left the query's
+// result: a cleanup Job deleted it, or a hand-off's first write set its
+// version to zero, which the query does not read. No Job waits on the
+// row's old run after either one, and a confirmation written for a
+// deleted library's run would keep the library's key in the catalog
+// after the library is gone.
 func (c *confirmer) noteRun(ctx context.Context, columns []string, cells []any, deleted bool) {
 	run, ok := decodeFinishedRun(columns, cells)
 	if !ok {
 		return
 	}
 	if deleted {
-		c.drop(run)
+		c.clearRow(run.row())
 		return
 	}
-	if !c.settle(ctx, run) {
-		c.hold(run)
-	}
+	c.place(run, c.settle(ctx, run))
 }
 
 // DecodeFinishedRun reads one runs row by column name into the run
@@ -274,7 +282,7 @@ func (c *confirmer) settleIf(ctx context.Context, run finishedRun, current func(
 	if !confirmed {
 		return false
 	}
-	c.mark(run.key())
+	c.mark(run)
 	c.logf("confirmed the %s run %s of %s", run.worker, run.job, run.library)
 	return true
 }
@@ -287,7 +295,15 @@ func (c *confirmer) settleIf(ctx context.Context, run finishedRun, current func(
 // The write runs with the mutex held, after current answers true, so a
 // delete that the stream carries waits for the write and never falls
 // between the check and the write.
+//
+// Every read and write of one confirmation shares one bound. The
+// confirmer's client has no timeout, because the run stream stays open,
+// and the stream's own goroutine confirms the runs it carries. An agent
+// that stops answering then fails one confirmation, and never holds the
+// stream or the mutex for ever.
 func (c *confirmer) confirm(ctx context.Context, run finishedRun, current func() bool) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, catalogWriteTimeout)
+	defer cancel()
 	already, err := c.catalog.confirmedBy(ctx, run.library, run.worker, run.job, c.name, run.version)
 	if err != nil || already {
 		return already, err
@@ -316,62 +332,54 @@ func (c *confirmer) done(key string) bool {
 }
 
 // Mark records a run as confirmed and takes it out of the set the
-// recheck reads.
-func (c *confirmer) mark(key string) {
+// recheck reads, where it is still its row's pending run.
+func (c *confirmer) mark(run finishedRun) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.confirmed[key] = true
-	for row, run := range c.pending {
-		if run.key() == key {
-			delete(c.pending, row)
-		}
+	c.confirmed[run.key()] = true
+	if c.pending[run.row()] == run {
+		delete(c.pending, run.row())
 	}
 }
 
-// Hold keeps a run for the next recheck, in the place of its runs row.
+// Place sets the pending entry of one run's row after the stream carried
+// the run: the run itself while it waits, or nothing once it is confirmed.
 // The newest run of the row replaces the last one: a Job writes its run
 // again while it waits, and a retried pod of a Job that timed out writes a
 // run with a write of its own. Without the replacement, the run of every
 // pod that timed out stays pending for the life of this pod.
 //
-// A run that is already confirmed is not held. The recheck can confirm a
-// run while the stream's read of the same run still runs, and the stream's
-// hold then arrives after the confirmation.
-func (c *confirmer) hold(run finishedRun) {
+// A run that is already confirmed clears the entry. The recheck can
+// confirm a run while the stream's read of the same run still runs, and
+// the stream's place then arrives after the confirmation.
+func (c *confirmer) place(run finishedRun, confirmed bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if c.confirmed[run.key()] {
+	if confirmed || c.confirmed[run.key()] {
+		delete(c.pending, run.row())
 		return
 	}
 	c.pending[run.row()] = run
 }
 
 // WriteIf writes the confirmations row of one run while current answers
-// true, and reports whether it wrote the row. The write is bounded,
-// because the run stream waits on the mutex while it runs, and an agent
-// that stops answering must not hold the stream for ever.
+// true, and reports whether it wrote the row.
 func (c *confirmer) writeIf(ctx context.Context, run finishedRun, current func() bool) (bool, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if !current() {
 		return false, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, catalogWriteTimeout)
-	defer cancel()
 	err := c.catalog.UpsertConfirmation(ctx, run.library, run.worker, run.job,
 		c.name, run.version, time.Now().UTC())
 	return err == nil, err
 }
 
-// Drop takes the run of one deleted runs row out of the pending set. A
-// delete that carries an older run of the row leaves the newer run
-// pending.
-func (c *confirmer) drop(run finishedRun) {
+// ClearRow takes one row's run out of the pending set.
+func (c *confirmer) clearRow(row string) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if c.pending[run.row()] == run {
-		delete(c.pending, run.row())
-	}
+	delete(c.pending, row)
 }
 
 // Forget empties the pending set.

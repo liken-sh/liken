@@ -6,13 +6,10 @@ package main
 //
 // A watch carries no object to the loop. Every pass re-lists, so a
 // change here is only a wake, and the loop decides what to read.
+// watchloop.go holds the recovery all eight watchers share.
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os"
 	"sync/atomic"
 	"time"
 )
@@ -25,9 +22,8 @@ func watchContext() context.Context {
 	return context.Background()
 }
 
-// WatchRetryPause is how long a watcher waits before it re-lists after
-// a dropped stream, and a variable so a test drives a reconnect in
-// milliseconds. It is an atomic because a watcher has no stop: the
+// WatchRetryPause is the first wait of a watcher's backoff, and a
+// variable so a test drives a reconnect in milliseconds. It is an atomic because a watcher has no stop: the
 // watchers one test's operator started outlive that test and read the
 // pause while a later test writes it.
 var watchRetryPause = newPause(2 * time.Second)
@@ -51,224 +47,106 @@ func (p *pause) set(d time.Duration) {
 	p.nanos.Store(int64(d))
 }
 
-// WatchLibraries resumes each stream from a resourceVersion, so no
-// change is missed between reconnects. A 410 Gone and a routine stream
-// end recover the same way: list the collection, wake the loop, and
-// watch again from the list's own version.
-//
-// The list after every ended stream is what keeps the resume point
-// current, so a bookmark's version matters only when that list itself
-// fails. The watcher asks for bookmarks anyway because they cost one
-// line each and make that failure window resumable, where a relist
-// costs one full read of the collection and the pass the wake
-// triggers.
+// WatchLibraries wakes the loop on every Library change.
 func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindLibrary)
-		}
-		path := librariesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		// A failed watch is never fatal. The ticker keeps the passes
-		// running while this loop is down, and a relist is the whole
-		// recovery.
-		time.Sleep(watchRetryPause.get())
-		list, err := ListLibraries(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing libraries to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindLibrary, path: librariesPath + "?", noun: "libraries",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListLibraries(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // WatchCatalogs wakes the loop on every Catalog change, so a Library
 // waiting on its namespace's Catalog proceeds on the next pass, and a
-// second Catalog is marked Blocked without a backstop tick's delay. The
-// recovery is watchLibraries's: a dropped stream or a 410 Gone lists the
-// collection, wakes the loop, and resumes from the list's version.
+// second Catalog is marked Blocked without a backstop tick's delay.
 func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindCatalog)
-		}
-		path := catalogsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListCatalogs(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing catalogs to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindCatalog, path: catalogsPath + "?", noun: "catalogs",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListCatalogs(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // WatchPlayers wakes the loop on every Player change, so a Player that
 // names this operator as its idle controller gets a screen pod without a
 // backstop tick's delay, and one that names another controller loses its
-// screen pod as fast. The recovery is watchLibraries's: a dropped stream or a
-// 410 Gone lists the collection, wakes the loop, and resumes from the list's
-// version. A list that fails leaves the resume point where it was, which is
-// what a cluster with no media-operator answers on every turn.
+// screen pod as fast. A cluster with no media-operator fails the watch and
+// the list on every turn, and the backoff keeps that from spinning.
 func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindPlayer)
-		}
-		path := playersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListPlayers(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing players to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindPlayer, path: playersPath + "?", noun: "players",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListPlayers(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // This watcher wakes the loop on every MediaPreferences change, so a zone
 // the household just set rolls the screen pods without a backstop tick's
-// delay. The recovery is watchPlayers's, and so is the list that fails on a
-// cluster with no media-operator.
+// delay. A cluster with no media-operator fails it the way it fails
+// watchPlayers.
 func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindMediaPreferences)
-		}
-		path := mediaPreferencesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListMediaPreferences(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing media preferences to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindMediaPreferences, path: mediaPreferencesPath + "?",
+		noun: "media preferences",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListMediaPreferences(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // This watcher wakes the loop on every MetadataProvider change, so a key a
-// person has just declared is checked without a backstop tick's delay. The
-// recovery is watchLibraries's. A list that fails leaves the resume point
-// where it was, which is what a cluster that has not applied the CRD answers
-// on every turn.
+// person has just declared is checked without a backstop tick's delay. A
+// cluster that has not applied the CRD fails the list on every turn.
 func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindMetadataProvider)
-		}
-		path := metadataProvidersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListMetadataProviders(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing metadata providers to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindMetadataProvider, path: metadataProvidersPath + "?",
+		noun: "metadata providers",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListMetadataProviders(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // This watcher wakes the loop on every Play change, so a Play that
 // media-operator created, finished, or is deleting is held, published,
-// or released without a backstop tick's delay. The recovery is
-// watchPlayers's, and so is the list that fails on a cluster with no
-// media-operator.
+// or released without a backstop tick's delay.
 func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindPlay)
-		}
-		path := playsAllPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListPlays(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing plays to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindPlay, path: playsAllPath + "?", noun: "plays",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListPlays(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // This watcher wakes the loop on every Person change, so a person a
 // house just declared is held, and one on the way out is asked for,
-// without a backstop tick's delay. The recovery is watchPlayers's: a
-// cluster with no people-operator fails the list on every turn, and the
-// pause between turns is what keeps that from spinning.
+// without a backstop tick's delay. A cluster with no people-operator
+// fails the list on every turn.
 func watchPeople(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindPerson)
-		}
-		path := peoplePath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListPeople(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing people to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
+	watchCollection(c, collectionWatch{kind: kindPerson, path: peoplePath + "?", noun: "people",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListPeople(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }
 
 // WatchPods wakes the loop on every change to a pod that holds a
@@ -277,74 +155,14 @@ func watchPeople(c *Client, resourceVersion string, wake chan<- struct{}, m *met
 // its namespace's catalog pod runs with every container ready: the
 // update that turns a container ready is as much a change to report as
 // a delete.
-//
-// The recovery is the same as watchLibraries: a dropped stream or a
-// 410 Gone lists the collection, wakes the loop, and resumes the watch
-// from the list's version.
 func watchPods(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			m.recordWatchRestart(kindPod)
-		}
-		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + catalogMemberQuery +
-			"&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListCatalogMemberPods(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing catalog member pods to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
-}
-
-// ReadWatchStream reads one connection's worth of events. The returned
-// version is where the next watch resumes.
-func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var event struct {
-			Type   string `json:"type"`
-			Object struct {
-				Metadata ObjectMeta `json:"metadata"`
-			} `json:"object"`
-		}
-		if err := decoder.Decode(&event); err != nil {
-			return resourceVersion
-		}
-		if event.Type == "ERROR" {
-			// Usually a 410 Gone wrapped in an event: the server no
-			// longer holds this resourceVersion. The relist in the
-			// caller is the answer.
-			return resourceVersion
-		}
-		if event.Object.Metadata.ResourceVersion != "" {
-			resourceVersion = event.Object.Metadata.ResourceVersion
-		}
-		if event.Type == "BOOKMARK" {
-			// A bookmark moves the resume point and reconciles
-			// nothing, so it earns no wake.
-			continue
-		}
-		poke(wake)
-	}
-}
-
-// Poke never blocks, and the wake channel buffers exactly one. A wake
-// already queued says everything a second one would say, because the
-// pass that answers it reads the whole collection.
-func poke(wake chan<- struct{}) {
-	select {
-	case wake <- struct{}{}:
-	default:
-	}
+	watchCollection(c, collectionWatch{kind: kindPod, path: podsAllPath + "?" + catalogMemberQuery + "&",
+		noun: "catalog member pods",
+		list: func(ctx context.Context, c *Client) (string, error) {
+			list, err := ListCatalogMemberPods(ctx, c)
+			if err != nil {
+				return "", err
+			}
+			return list.Metadata.ResourceVersion, nil
+		}}, resourceVersion, wake, m)
 }

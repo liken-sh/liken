@@ -248,69 +248,52 @@ func TestThePodWatchWakesOnEveryScannerPodEvent(t *testing.T) {
 }
 
 // A bookmark carries a resourceVersion and nothing to reconcile, so it
-// moves the resume point and wakes nothing. The list after the stream
-// fails here, because a list that answered would give the watcher a
-// newer version and hide what the bookmark did.
+// moves the resume point and wakes nothing. The next watch opens from the
+// bookmark's version.
 func TestABookmarkMovesTheResumePointAndWakesNothing(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()
-	release := make(chan struct{})
-	api.answersWatches(
-		watchTurn{events: []string{watchEvent("BOOKMARK", "99")}},
-		watchTurn{hold: release},
-	)
-	api.answersLists(
-		listTurn{status: http.StatusInternalServerError},
-		listTurn{version: "150"},
-	)
+	api.answersWatches(watchTurn{events: []string{watchEvent("BOOKMARK", "99")}})
 
 	wake := startWatch(t, api, watchLibraries, "42")
 
 	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "42" {
 		t.Errorf("the first watch resumed from %q, want 42", got)
 	}
-	nextListRequest(t, api)
 	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "99" {
 		t.Errorf("the second watch resumed from %q, want the bookmark's 99", got)
 	}
 	expectNoWatchWake(t, wake)
-
-	// The run ends on a list that answers, which is the one thing in
-	// this test that wakes the loop.
-	close(release)
-	nextListRequest(t, api)
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the third watch resumed from %q, want the list's 150", got)
-	}
 }
 
-// Each case ends one watch connection without a change to report, and
-// the recovery is the same: list the collection, resume from its
-// version, and wake the loop for the pass that reads it. An ERROR
-// event is a 410 Gone in the stream, which the API server sends when
-// it no longer holds the version the watch asked for.
-func TestTheWatcherListsAndWakesAfterAStreamThatCarriedNothing(t *testing.T) {
+// Each watcher lists its own collection after a 410, wakes the loop,
+// and watches from the list's version.
+func TestEachWatchListsItsCollectionAfterA410(t *testing.T) {
 	cases := []struct {
-		name string
-		turn watchTurn
+		name    string
+		watcher func(*Client, string, chan<- struct{}, *metrics)
+		path    string
 	}{
-		{name: "the server refused the watch", turn: watchTurn{status: http.StatusInternalServerError}},
-		{name: "the stream ended", turn: watchTurn{}},
-		{name: "the version is gone", turn: watchTurn{events: []string{watchEvent("ERROR", "0")}}},
+		{name: "catalogs", watcher: watchCatalogs, path: catalogsPath},
+		{name: "media preferences", watcher: watchMediaPreferences, path: mediaPreferencesPath},
+		{name: "players", watcher: watchPlayers, path: playersPath},
+		{name: "metadata providers", watcher: watchMetadataProviders, path: metadataProvidersPath},
+		{name: "plays", watcher: watchPlays, path: playsAllPath},
+		{name: "people", watcher: watchPeople, path: peoplePath},
+		{name: "catalog member pods", watcher: watchPods, path: podsAllPath},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			useWatchRetryPause(t)
 			api := newWatchAPI()
-			api.answersWatches(testCase.turn)
+			api.answersWatches(watchTurn{status: http.StatusGone})
 			api.answersLists(listTurn{version: "150"})
 
-			wake := startWatch(t, api, watchLibraries, "42")
+			wake := startWatch(t, api, testCase.watcher, "42")
 
 			nextWatchRequest(t, api)
-			if got := nextListRequest(t, api); got != librariesPath {
-				t.Errorf("listed %q, want %q", got, librariesPath)
+			if got := nextListRequest(t, api); got != testCase.path {
+				t.Errorf("listed %q, want %q", got, testCase.path)
 			}
 			waitForWatchWake(t, wake)
 			if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
@@ -320,94 +303,13 @@ func TestTheWatcherListsAndWakesAfterAStreamThatCarriedNothing(t *testing.T) {
 	}
 }
 
-// A Catalog change wakes the loop, so a Library waiting on its
-// namespace's Catalog proceeds without a backstop tick's delay. The
-// watcher lists the Catalogs to resume and wakes on the list.
-func TestTheCatalogWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchCatalogs, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != catalogsPath {
-		t.Errorf("listed %q, want %q", got, catalogsPath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
-	}
-}
-
-// A Player change wakes the loop, so a screen that was delegated to
-// this operator stands without a backstop tick's delay. The watcher
-// lists the Players to resume and wakes on the list.
-func TestTheMediaPreferencesWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchMediaPreferences, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != mediaPreferencesPath {
-		t.Errorf("listed %q, want %q", got, mediaPreferencesPath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
-	}
-}
-
-func TestThePlayerWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchPlayers, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != playersPath {
-		t.Errorf("listed %q, want %q", got, playersPath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
-	}
-}
-
-// A MetadataProvider change wakes the loop, so a key a person has just
-// declared is checked without a backstop tick's delay. The watcher
-// lists the providers to resume and wakes on the list.
-func TestTheMetadataProviderWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchMetadataProviders, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != metadataProvidersPath {
-		t.Errorf("listed %q, want %q", got, metadataProvidersPath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
-	}
-}
-
 // A cluster with no media-operator serves no Players, so the list
 // fails on every turn. The watcher reports it and tries again, and it
 // wakes the loop for nothing it could not read.
 func TestThePlayerWatchCarriesOnWithNoPlayersToRead(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()
-	api.answersWatches(watchTurn{status: http.StatusNotFound}, watchTurn{})
+	api.answersWatches(watchTurn{status: http.StatusNotFound}, watchTurn{status: http.StatusGone})
 	api.answersLists(listTurn{status: http.StatusNotFound}, listTurn{version: "150"})
 
 	wake := startWatch(t, api, watchPlayers, "42")
@@ -427,7 +329,8 @@ func TestThePlayerWatchCarriesOnWithNoPlayersToRead(t *testing.T) {
 func TestTheWatcherRetriesAfterAListThatFails(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()
-	api.answersWatches(watchTurn{}, watchTurn{})
+	api.answersWatches(watchTurn{status: http.StatusInternalServerError},
+		watchTurn{status: http.StatusInternalServerError})
 	api.answersLists(listTurn{status: http.StatusInternalServerError}, listTurn{version: "150"})
 
 	wake := startWatch(t, api, watchPods, "42")
@@ -443,47 +346,6 @@ func TestTheWatcherRetriesAfterAListThatFails(t *testing.T) {
 	waitForWatchWake(t, wake)
 	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
 		t.Errorf("the next watch resumed from %q, want the list's 150", got)
-	}
-}
-
-// A Play change wakes the loop, so a Play that just finished is
-// published and released without a backstop tick's delay. The watcher
-// lists the Plays to resume and wakes on the list.
-func TestThePlayWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchPlays, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != playsAllPath {
-		t.Errorf("listed %q, want %q", got, playsAllPath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
-	}
-}
-
-// A Person change wakes the loop, so a person on the way out is asked
-// for without a backstop tick's delay.
-func TestThePeopleWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchPeople, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != peoplePath {
-		t.Errorf("listed %q, want %q", got, peoplePath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
 	}
 }
 
@@ -535,7 +397,6 @@ func TestAReconnectCountsOneWatchRestart(t *testing.T) {
 	if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 0 {
 		t.Errorf("watch_restarts_total = %v before any reconnect, want 0", got)
 	}
-	nextListRequest(t, api)
 	nextWatchRequest(t, api)
 	if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 1 {
 		t.Errorf("watch_restarts_total = %v after one reconnect, want 1", got)

@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -197,23 +199,64 @@ func TestARunDeletedFromTheCatalogLeavesThePendingSet(t *testing.T) {
 	awaitWaiting(t, work, 0)
 }
 
-// A handoff's first write sets the version to zero, and the run stream
-// carries that as a delete of the run before it. A delete of an older run
-// of the row leaves the newer run pending.
-func TestADeleteOfAnOlderRunKeepsTheNewerOne(t *testing.T) {
+// A delete clears its row's pending run, whatever run the delete
+// carries. The pending run and the deleted one can differ, because the
+// agent streams a row that moves from one run to the next as one change.
+func TestADeleteClearsTheRowWhateverRunItCarries(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work := testConfirmer(t, catalog, io.Discard)
 	older := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
 		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
 	newer := finishedRun{library: "house/movies", worker: workerScan, job: "scan-2",
 		actor: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", version: 15}
-	streamRun(t, work, newer)
+	streamRun(t, work, older)
 
+	streamDelete(t, work, newer)
+
+	awaitWaiting(t, work, 0)
+}
+
+// Hands one delete to the confirmer the way the run stream does.
+func streamDelete(t *testing.T, work *confirmer, run finishedRun) {
+	t.Helper()
 	work.noteRun(t.Context(), []string{"library", "worker", "job", "actor", "version"},
-		[]any{older.library, older.worker, older.job, older.actor, float64(older.version)}, true)
+		[]any{run.library, run.worker, run.job, run.actor, float64(run.version)}, true)
+}
 
-	if waiting := work.waiting(); len(waiting) != 1 || waiting[0] != newer {
-		t.Errorf("waiting = %+v, want only %+v", waiting, newer)
+// The agent buffers changes before it streams them, so a hand-off's two
+// quick writes arrive as one change from run A to run B. Run A waits on
+// versions that have not arrived, and run B is confirmed at once. A
+// cleanup Job then deletes the row, and A's versions arrive after it. The
+// confirmer writes no confirmation for A, and B's confirmation stays.
+func TestARunReplacedByARunConfirmedAtOnceIsNotConfirmedLater(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	b := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-2")
+	work := testConfirmer(t, catalog, io.Discard)
+	runA := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
+	runB := finishedRun{library: "house/departed", worker: workerScan, job: "scan-2",
+		actor: b.Actor, version: b.Version}
+	streamRun(t, work, runA)
+	streamRun(t, work, runB)
+	streamDelete(t, work, runB)
+	agent.holdVersion(t, runA.actor, runA.version)
+
+	for _, run := range work.waiting() {
+		work.recheck(t.Context(), run)
+	}
+
+	confirmedA, err := catalog.confirmedBy(t.Context(), runA.library, runA.worker, runA.job,
+		testConfirmerPod, runA.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmedB, err := catalog.confirmedBy(t.Context(), runB.library, runB.worker, runB.job,
+		testConfirmerPod, runB.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmedA || !confirmedB {
+		t.Errorf("confirmed A = %v, B = %v, want only B", confirmedA, confirmedB)
 	}
 }
 
@@ -263,13 +306,65 @@ func TestTheConfirmerForgetsPendingRunsWhenTheStreamOpensAgain(t *testing.T) {
 		return strings.HasSuffix(path, subscriptionsPath)
 	})
 	work := testConfirmer(t, refusing, log)
-	work.hold(finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
-		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12})
+	work.place(finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}, false)
 	serving(t, work)
 
 	waitForLog(t, log, "the run stream ended")
 
 	awaitWaiting(t, work, 0)
+}
+
+// A run stream that ends leaves no pending run behind for the backoff
+// before the next stream, because the deletes in that time are lost.
+func TestTheConfirmerForgetsPendingRunsWhenTheStreamEnds(t *testing.T) {
+	// The agent streams one run and ends the stream. It refuses every
+	// read, so the run stays pending and the failed read is in the log.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, subscriptionsPath) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"columns":["library","worker","job","actor","version"]}` + "\n" +
+			`{"row":[1,["house/movies","scan","scan-1","1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",12]]}` + "\n" +
+			`{"eoq":{"time":0.1}}` + "\n"))
+	}))
+	t.Cleanup(agent.Close)
+	log := &syncLog{}
+	work := testConfirmer(t, NewCatalog(agent.URL, agent.Client()), log)
+	reportMinBackoff = time.Hour
+	serving(t, work)
+
+	waitForLog(t, log, "could not confirm the scan run scan-1")
+
+	awaitWaiting(t, work, 0)
+}
+
+// An agent that stops answering fails one confirmation after a bound,
+// and never holds the run stream for ever.
+func TestAnAgentThatHangsFailsTheConfirmation(t *testing.T) {
+	// The handler also ends when the test does, because a server whose
+	// caller gave up on a request body it never read can miss the cancel.
+	stop := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-stop:
+		}
+	}))
+	t.Cleanup(hung.Close)
+	t.Cleanup(func() { close(stop) })
+	work := testConfirmer(t, NewCatalog(hung.URL, &http.Client{}), io.Discard)
+	was := catalogWriteTimeout
+	t.Cleanup(func() { catalogWriteTimeout = was })
+	catalogWriteTimeout = 20 * time.Millisecond
+
+	confirmed := work.settle(t.Context(), finishedRun{library: "house/movies", worker: workerScan,
+		job: "scan-1", actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12})
+
+	if confirmed {
+		t.Error("the confirmer confirmed a run against an agent that never answered")
+	}
 }
 
 // The recheck can confirm a run while the stream's read of the same run
@@ -280,9 +375,9 @@ func TestAConfirmedRunIsNotHeldAgain(t *testing.T) {
 	work := testConfirmer(t, catalog, io.Discard)
 	run := finishedRun{library: "house/movies", worker: workerScan, job: "scan-1",
 		actor: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", version: 12}
-	work.mark(run.key())
+	work.mark(run)
 
-	work.hold(run)
+	work.place(run, false)
 
 	if waiting := work.waiting(); len(waiting) != 0 {
 		t.Errorf("waiting = %+v, want nothing for a confirmed run", waiting)
