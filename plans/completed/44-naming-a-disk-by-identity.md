@@ -17,7 +17,7 @@ the link trees that make such a name resolvable.
 
 ## What the running fleet shows
 
-The 44stonypoint fleet is the first place this matters. Three of its
+A home cluster is the first place this matters. Three of its
 five machines declare `/dev/sda`, and every one of those three also
 holds iSCSI LUNs, which the kernel names `sdb`, `sdc`, and onward in
 the same series:
