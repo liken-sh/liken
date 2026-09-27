@@ -313,7 +313,7 @@ func TestEndCompositorReportsThatItFoundNone(t *testing.T) {
 }
 
 func TestWestonArgvNamesTheCardAndTheConfig(t *testing.T) {
-	argv := westonArgv("card1", "/etc/weston/weston.ini", socketName)
+	argv := westonArgv("card1", "/etc/weston/weston.ini", socketName, "")
 
 	want := []string{
 		westonBinary,
@@ -324,6 +324,53 @@ func TestWestonArgvNamesTheCardAndTheConfig(t *testing.T) {
 	}
 	if !slices.Equal(argv, want) {
 		t.Fatalf("argv = %v, want %v", argv, want)
+	}
+}
+
+// The scopes a person names go to the logger after log, so weston's
+// own lines stay in the container log beside them.
+func TestWestonArgvWritesTheNamedLogScopes(t *testing.T) {
+	cases := []struct {
+		name   string
+		scopes string
+		want   string
+	}{
+		{name: "one scope", scopes: "drm-backend", want: "--logger-scopes=log,drm-backend"},
+		{name: "two scopes", scopes: "drm-backend,timeline", want: "--logger-scopes=log,drm-backend,timeline"},
+		{name: "spaces and empty entries", scopes: " drm-backend, ,timeline ,", want: "--logger-scopes=log,drm-backend,timeline"},
+		{name: "log named again", scopes: "log,drm-backend", want: "--logger-scopes=log,drm-backend"},
+		{name: "a scope named twice", scopes: "drm-backend,drm-backend", want: "--logger-scopes=log,drm-backend"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			argv := westonArgv("card1", "/etc/weston/weston.ini", socketName, c.scopes)
+			if argv[len(argv)-1] != c.want {
+				t.Fatalf("argv = %v, want it to end with %q", argv, c.want)
+			}
+		})
+	}
+}
+
+// An empty knob, or one that names only log, leaves weston on its
+// default logger, which writes the log scope alone.
+func TestWestonArgvAddsNoLoggerFlagWithoutAScope(t *testing.T) {
+	cases := []struct {
+		name   string
+		scopes string
+	}{
+		{name: "unset", scopes: ""},
+		{name: "blank", scopes: " , "},
+		{name: "log alone", scopes: "log"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			argv := westonArgv("card1", "/etc/weston/weston.ini", socketName, c.scopes)
+			for _, arg := range argv {
+				if strings.HasPrefix(arg, "--logger-scopes") {
+					t.Fatalf("argv = %v, want no --logger-scopes", argv)
+				}
+			}
+		})
 	}
 }
 

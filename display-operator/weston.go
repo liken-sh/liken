@@ -410,8 +410,8 @@ func compose() {
 	// else before it, so nothing needs to restore it.
 	unix.Umask(0)
 	fmt.Printf("%s: the compositor takes %s\n", DriverName, card)
-	if err := syscall.Exec(westonBinary, westonArgv(card, westonConfigPath, socketName),
-		westonEnvironment(os.Environ(), socketDir)); err != nil {
+	argv := westonArgv(card, westonConfigPath, socketName, os.Getenv(westonLogScopesVariable))
+	if err := syscall.Exec(westonBinary, argv, westonEnvironment(os.Environ(), socketDir)); err != nil {
 		fatal("running %s: %v", westonBinary, err)
 	}
 }
@@ -423,14 +423,77 @@ func compose() {
 // itself. The card and the socket name come from this binary rather
 // than the manifest, because neither is a fact a deployment can
 // know.
-func westonArgv(card, configPath, socketName string) []string {
-	return []string{
+//
+// The log scopes are the value of westonLogScopesVariable, and an
+// empty value adds no flag.
+func westonArgv(card, configPath, socketName, logScopes string) []string {
+	argv := []string{
 		westonBinary,
 		"--backend=drm",
 		"--drm-device=" + card,
 		"--config=" + configPath,
 		"--socket=" + socketName,
 	}
+	if scopes := loggerScopes(logScopes); scopes != "" {
+		argv = append(argv, "--logger-scopes="+scopes)
+	}
+	return argv
+}
+
+// westonLogScopesVariable names the environment variable that lists
+// the weston debug scopes the compositor writes to its standard
+// error, which is this container's log. The value is a
+// comma-separated list, such as drm-backend, and it is empty by
+// default.
+//
+// A scope reports what one part of weston decides. drm-backend
+// reports, on every repaint, the display plane weston tries for each
+// view and the reason it rejects each plane. That reason is the only
+// report of why a view goes to the renderer instead of a plane, and
+// nothing else in the pod can read it.
+//
+// The variable is an environment variable and not a weston.ini key,
+// because weston reads scopes only from its command line. So a change
+// takes effect only when the compositor starts again. The scope is on
+// the command line and not behind --debug, because --debug advertises
+// weston_debug_v1 on every socket. With it, every consumer on a claim
+// socket could subscribe to any scope, including proto, which prints
+// the protocol traffic of the other claims. --debug also lets every
+// client capture every output. The container log is readable only by
+// someone who can read the pod logs in the operator's namespace.
+//
+// The cost of a scope is the volume of the log. weston 14 already
+// subscribes its flight recorder, a 5 MiB ring buffer in memory, to
+// log and drm-backend, so it formats every drm-backend line whether
+// or not this variable is set. The variable adds the write to the
+// container log. Each atomic test and commit prints every property it
+// sets, so by a count of the weston 14 source one repaint writes
+// about a hundred lines. A film repaints on every frame, so at 24
+// frames a second the log grows by thousands of lines each second.
+// The DaemonSet sets the variable on every machine at once, so set it
+// while you read the plane decisions, and clear it after.
+const westonLogScopesVariable = "WESTON_LOG_SCOPES"
+
+// loggerScopes builds the value of weston's --logger-scopes flag from
+// the scopes a person named, or returns an empty string when they
+// named none.
+//
+// The flag replaces weston's default subscription to the log scope,
+// so the list always starts with log. Without it, weston's own lines
+// and the layout module's lines would leave the container log while
+// the scope is on.
+func loggerScopes(named string) string {
+	scopes := []string{"log"}
+	for _, scope := range strings.Split(named, ",") {
+		scope = strings.TrimSpace(scope)
+		if scope != "" && !slices.Contains(scopes, scope) {
+			scopes = append(scopes, scope)
+		}
+	}
+	if len(scopes) == 1 {
+		return ""
+	}
+	return strings.Join(scopes, ",")
 }
 
 // westonEnvironment builds the compositor's environment from the

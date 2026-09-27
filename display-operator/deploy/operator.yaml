@@ -159,6 +159,18 @@ spec:
           image: ghcr.io/liken-sh/display-operator:latest
           args: ["weston"]
           restartPolicy: Always
+          env:
+            # The weston debug scopes this container writes to its
+            # log, as a comma-separated list. drm-backend reports why
+            # each view goes to a display plane or to the renderer.
+            # The value is empty, because drm-backend writes about a
+            # hundred lines on each repaint, and a film repaints on
+            # every frame. The comment on westonLogScopesVariable in
+            # weston.go gives the cost and the reason the scope is not
+            # behind --debug. A change to the value starts new pods,
+            # and so a new compositor.
+            - name: WESTON_LOG_SCOPES
+              value: ""
           securityContext:
             # No privilege and no capability. libseat's noop backend
             # opens the card node with a plain open(), and the kernel
