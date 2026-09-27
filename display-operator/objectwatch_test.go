@@ -561,3 +561,22 @@ func TestAGoneDoesNotResetTheWait(t *testing.T) {
 		t.Errorf("the loop opened %d watches in 5 s, want 4: the wait after the 410 still grows", got)
 	}
 }
+
+// A watch's life counts from when the API server accepted it. A watch
+// refused after more than a second never ran, so it still grows the
+// wait: watches at 0 s and 2.2 s fit in three seconds, and a third
+// does not.
+func TestASlowRefusalStillGrowsTheNamedWatchWait(t *testing.T) {
+	var watches atomic.Int64
+	countListings(t, 3*time.Second, func(w http.ResponseWriter, r *http.Request) {
+		watches.Add(1)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(1200 * time.Millisecond):
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if got := watches.Load(); got != 2 {
+		t.Errorf("the loop opened %d watches in three seconds, want 2: a slow refusal is a failure", got)
+	}
+}

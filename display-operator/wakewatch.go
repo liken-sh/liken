@@ -19,8 +19,9 @@ import (
 //
 // The watch sends no resource version, so every connection opens with
 // a replay of every object, and an event says nothing about whether the
-// connection ran. Its lifetime does. A connection that lived for at
-// least objectWatchRetry ran, and the next one opens at once, even
+// connection ran. Its lifetime does, counted from when the API server
+// accepted it, so a slow dial or a slow refusal is not a watch that
+// ran. A connection that lived for at least objectWatchRetry ran, and the next one opens at once, even
 // when it ended with an error: a load balancer that resets a long
 // connection costs one reopen, not a wait that climbs toward a minute.
 // The next open is a wake, so a change made between the two is found
@@ -37,15 +38,14 @@ func watchWakes(ctx context.Context, c *Client, kind reconcileKind, what, path s
 			readings.watchRestarted(kind)
 		}
 		first = false
-		opened := time.Now()
-		err := streamWakes(ctx, c, path, wake)
+		accepted, err := streamWakes(ctx, c, path, wake)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 		}
-		if time.Since(opened) >= objectWatchRetry {
+		if ranFor(accepted, objectWatchRetry) {
 			delay = objectWatchRetry
 			continue
 		}
@@ -59,12 +59,14 @@ func watchWakes(ctx context.Context, c *Client, kind reconcileKind, what, path s
 // reads every object after the watch is live, so a change made between
 // two connections is found by that read, and no event is lost. An event
 // carries nothing the pass uses, so the watch needs no resource version
-// to resume from.
-func streamWakes(ctx context.Context, c *Client, path string, wake func()) error {
+// to resume from. The answer carries when the API server accepted the
+// watch, which is zero for a watch it refused.
+func streamWakes(ctx context.Context, c *Client, path string, wake func()) (time.Time, error) {
 	body, err := c.Watch(ctx, path)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
+	accepted := time.Now()
 	defer drain(body)
 	wake()
 
@@ -75,9 +77,9 @@ func streamWakes(ctx context.Context, c *Client, path string, wake func()) error
 		}
 		if err := events.Decode(&event); err != nil {
 			if err == io.EOF {
-				return nil
+				return accepted, nil
 			}
-			return err
+			return accepted, err
 		}
 		wake()
 	}

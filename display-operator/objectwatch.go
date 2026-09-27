@@ -86,8 +86,7 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 			version = listedAt
 			listed(items)
 		}
-		opened := time.Now()
-		next, err := streamList(ctx, c, path, version, changed)
+		next, accepted, err := streamList(ctx, c, path, version, changed)
 		if ctx.Err() != nil {
 			return
 		}
@@ -120,10 +119,12 @@ func watchList[T any](ctx context.Context, c *Client, path, what string,
 		// The lifetime decides the wait, not what the watch delivered.
 		// A watch that lived a second or more ran, so a load balancer
 		// that resets a long connection costs one reopen and not a wait
-		// that climbs toward a minute. A shorter one is a server or a
+		// that climbs toward a minute. The life counts from when the API
+		// server accepted the watch, so a slow dial or a slow refusal is
+		// a failure. A shorter one is a server or a
 		// proxy that ends each watch at once, and the wait keeps the loop
 		// from a tight loop of requests.
-		if time.Since(opened) >= objectWatchRetry {
+		if ranFor(accepted, objectWatchRetry) {
 			delay = objectWatchRetry
 			if version != "" {
 				continue
@@ -180,8 +181,9 @@ func undecodable(object json.RawMessage, err error) *watchErrorEvent {
 }
 
 // One watch connection. It answers the last version it delivered, so
-// the next connection resumes there.
-func streamList[T any](ctx context.Context, c *Client, path, version string, changed func(string, T)) (string, error) {
+// the next connection resumes there, and when the API server accepted
+// the watch, which is zero for a watch it refused.
+func streamList[T any](ctx context.Context, c *Client, path, version string, changed func(string, T)) (string, time.Time, error) {
 	stream := fmt.Sprintf("%s&watch=true&allowWatchBookmarks=true&resourceVersion=%s&timeoutSeconds=%d",
 		path, url.QueryEscape(version), int(displayWatchTimeout.Seconds()))
 	// The connection has a context of its own. A watch that ends on an
@@ -193,12 +195,13 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 	body, err := c.Watch(watchCtx, stream)
 	if errors.Is(err, ErrGone) {
 		cancel()
-		return version, errWatchExpired
+		return version, time.Time{}, errWatchExpired
 	}
 	if err != nil {
 		cancel()
-		return version, err
+		return version, time.Time{}, err
 	}
+	accepted := time.Now()
 	defer drain(body)
 	defer cancel()
 
@@ -210,9 +213,9 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 		}
 		if err := events.Decode(&event); err != nil {
 			if err == io.EOF {
-				return version, nil
+				return version, accepted, nil
 			}
-			return version, err
+			return version, accepted, err
 		}
 		var meta struct {
 			Code     int `json:"code"`
@@ -221,18 +224,18 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 			} `json:"metadata"`
 		}
 		if err := json.Unmarshal(event.Object, &meta); err != nil {
-			return version, undecodable(event.Object, err)
+			return version, accepted, undecodable(event.Object, err)
 		}
 		switch event.Type {
 		case "ERROR":
 			if meta.Code == 410 {
-				return version, errWatchExpired
+				return version, accepted, errWatchExpired
 			}
-			return version, &watchErrorEvent{status: string(event.Object)}
+			return version, accepted, &watchErrorEvent{status: string(event.Object)}
 		case "ADDED", "MODIFIED", "DELETED":
 			var held T
 			if err := json.Unmarshal(event.Object, &held); err != nil {
-				return version, undecodable(event.Object, err)
+				return version, accepted, undecodable(event.Object, err)
 			}
 			changed(event.Type, held)
 		}
@@ -242,4 +245,10 @@ func streamList[T any](ctx context.Context, c *Client, path, version string, cha
 			version = meta.Metadata.ResourceVersion
 		}
 	}
+}
+
+// ranFor reports whether a watch the API server accepted at accepted
+// has lived for at least life. A watch it never accepted never ran.
+func ranFor(accepted time.Time, life time.Duration) bool {
+	return !accepted.IsZero() && time.Since(accepted) >= life
 }

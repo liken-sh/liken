@@ -62,7 +62,7 @@ func TestAWakeWatchWakesOnItsOpenAndOnEveryEvent(t *testing.T) {
 			}))
 
 			wakes := 0
-			err := streamWakes(t.Context(), client, displaysWatchPath(), func() { wakes++ })
+			_, err := streamWakes(t.Context(), client, displaysWatchPath(), func() { wakes++ })
 			if (err != nil) != c.fails {
 				t.Fatalf("the watch answered %v, want a failure: %v", err, c.fails)
 			}
@@ -150,4 +150,18 @@ func countOpens(t *testing.T, window time.Duration, answer func(w http.ResponseW
 	defer stop()
 	watchWakes(ctx, client, kindDisplay, "displays", displaysWatchPath(), func() {}, nil)
 	return opens.Load()
+}
+
+// A watch's life counts from when the API server accepted it. A watch
+// refused after more than a second never ran, so it still grows the
+// wait: opens at 0 s and 2.2 s fit in three seconds, and a third does
+// not.
+func TestASlowRefusalStillGrowsTheWakeWatchWait(t *testing.T) {
+	opens := countOpens(t, 3*time.Second, func(w http.ResponseWriter) {
+		time.Sleep(1200 * time.Millisecond)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if opens != 2 {
+		t.Errorf("the loop opened %d watches in three seconds, want 2: a slow refusal is a failure", opens)
+	}
 }
