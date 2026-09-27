@@ -30,25 +30,34 @@ type coreAPI struct {
 	hidden  map[string]bool
 	writes  []string
 	version int
+
+	// revision is the collection's resourceVersion that a list
+	// answers. It is apart from each object's own version, as on a
+	// cluster, where an object that has not changed in a while carries
+	// a version far older than the collection's.
+	revision string
 }
 
 func newCoreAPI() *coreAPI {
-	return &coreAPI{objects: map[string]json.RawMessage{}, hidden: map[string]bool{}}
+	return &coreAPI{objects: map[string]json.RawMessage{}, hidden: map[string]bool{}, revision: "900"}
 }
 
 // handler answers the secrets and configmaps paths, told apart by the
-// kind segment, with a get, a create, and an update on each.
+// kind segment, with a get, a list by name, a create, and an update on
+// each.
 func (a *coreAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		kind, name := coreTarget(r.URL.Path)
-		switch r.Method {
-		case http.MethodGet:
+		switch {
+		case r.Method == http.MethodGet && name == "":
+			a.list(w, kind, r.URL.Query().Get("fieldSelector"))
+		case r.Method == http.MethodGet:
 			a.answer(w, kind+"/"+name)
-		case http.MethodPost:
+		case r.Method == http.MethodPost:
 			a.take(w, r, kind, true)
-		case http.MethodPut:
+		case r.Method == http.MethodPut:
 			a.take(w, r, kind, false)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -73,6 +82,27 @@ func (a *coreAPI) answer(w http.ResponseWriter, key string) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	_, _ = w.Write(body)
+}
+
+// list answers a list under the field selector metadata.name, the only
+// list the program sends: the one object if the server holds it, and
+// the collection's revision.
+func (a *coreAPI) list(w http.ResponseWriter, kind, selector string) {
+	name, named := strings.CutPrefix(selector, "metadata.name=")
+	if !named {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	items := []json.RawMessage{}
+	key := kind + "/" + name
+	if body, held := a.objects[key]; held && !a.hidden[key] {
+		items = append(items, body)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"metadata": map[string]string{"resourceVersion": a.revision},
+		"items":    items,
+	})
 	_, _ = w.Write(body)
 }
 

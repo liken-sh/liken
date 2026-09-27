@@ -13,11 +13,21 @@ package main
 // so a Role that names one object grants its watch. A GET on the
 // object's own path with watch=true is not a watch: the API server
 // answers it as a plain get and closes the stream.
+//
+// The read before the watch is a list under the same field selector,
+// not a get, and the watch starts from the list's resourceVersion. An
+// object's own resourceVersion is the revision of its last write. An
+// object that has not changed in a while carries a revision older than
+// the API server's watch window, so a watch from it answers 410 Gone
+// at once, and a read that gets the object answers the same old
+// revision again. The list's resourceVersion is the revision of the
+// collection when the API server answered, so the watch starts inside
+// the window. The list also answers a revision when the object is
+// absent, so a later create arrives as an event.
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,7 +49,7 @@ const (
 // namedWatch follows one object in one namespace. changed receives
 // the object's JSON on each ADDED and MODIFIED event and on each read
 // that finds the object. removed runs on a DELETED event and on a read
-// that answers 404. An error from changed is reported, and the watch
+// whose list is empty. An error from changed is reported, and the watch
 // continues, because the next version of the object can be valid.
 type namedWatch struct {
 	client    *Client
@@ -97,22 +107,25 @@ func (w *namedWatch) collectionPath() string {
 	return podPrefix + w.namespace + "/" + w.resource
 }
 
-// read gets the object once and hands it to its owner. It answers the
-// resourceVersion a watch resumes from. An absent object is not an
-// error: removed runs, and the empty version opens a watch that starts
-// at the current state, so a later create arrives as an ADDED event.
+// read lists the collection under the object's name once, hands the
+// object to its owner, and answers the list's resourceVersion for the
+// watch to start from. An absent object is not an error: removed runs,
+// and the watch starts from the list's version all the same.
 func (w *namedWatch) read() (string, error) {
-	var object json.RawMessage
-	err := w.client.RequestJSON(http.MethodGet, w.collectionPath()+"/"+url.PathEscape(w.name), nil, &object)
-	if errors.Is(err, ErrNotFound) {
-		w.removed()
-		return "", nil
+	query := url.Values{"fieldSelector": {"metadata.name=" + w.name}}
+	var list struct {
+		Metadata ListMeta          `json:"metadata"`
+		Items    []json.RawMessage `json:"items"`
 	}
-	if err != nil {
+	if err := w.client.RequestJSON(http.MethodGet, w.collectionPath()+"?"+query.Encode(), nil, &list); err != nil {
 		return "", fmt.Errorf("reading %s: %w", w.subject(), err)
 	}
-	version := resourceVersionOf(object)
-	if err := w.changed(object); err != nil {
+	version := list.Metadata.ResourceVersion
+	if len(list.Items) == 0 {
+		w.removed()
+		return version, nil
+	}
+	if err := w.changed(list.Items[0]); err != nil {
 		return version, fmt.Errorf("reading %s: %w", w.subject(), err)
 	}
 	return version, nil
@@ -121,9 +134,9 @@ func (w *namedWatch) read() (string, error) {
 // follow is the watch loop. It streams from the last resourceVersion,
 // and when a stream ends it opens the next one from the version of the
 // last event. When the API server no longer holds that version, a 410
-// Gone, the loop reads the object again for a current version first.
-// The read also delivers a change or a delete that the lost window
-// held.
+// Gone, the loop lists the object again and resumes from the list's
+// version. The list also delivers a change or a delete that the lost
+// window held.
 //
 // One line reports each change of state: the first refusal of a
 // fault, and the return after it. An attempt that fails the same way

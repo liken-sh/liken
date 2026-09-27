@@ -262,7 +262,7 @@ func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	opened := <-watched
 	mustMatch(t, opened.Path, "/api/v1/namespaces/kube-system/configmaps")
 	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+clientCAConfigMap)
-	mustMatch(t, opened.Query().Get("resourceVersion"), "7")
+	mustMatch(t, opened.Query().Get("resourceVersion"), "900")
 
 	events <- objectEvent(t, "MODIFIED", authenticationConfigMap(string(second.certPEM), "8"))
 	until(t, "the anchors never took up the rotated authority", func() bool {

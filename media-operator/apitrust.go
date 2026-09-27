@@ -3,10 +3,10 @@ package main
 // This file holds the trust store: the CA certificates media-api
 // trusts when it calls a sibling. Each sibling publishes its CA in a
 // ConfigMap the way this API publishes its own, so trust is public
-// data read with get on three named objects and no Secret. The store
-// watches the ConfigMaps because a rotation appends the coming CA to
-// ca.crt in place, and the next connection must trust it with no
-// restart.
+// data read with list and watch on three named objects and no Secret.
+// The store watches the ConfigMaps because a rotation appends the
+// coming CA to ca.crt in place, and the next connection must trust it
+// with no restart.
 
 import (
 	"context"
@@ -51,10 +51,9 @@ func CreateConfigMap(c *Client, configMap *ConfigMap) (*ConfigMap, error) {
 }
 
 // trustAnchor is one sibling's published file: every certificate in
-// it, and the resourceVersion its watch resumes from.
+// it.
 type trustAnchor struct {
-	certificates    []byte
-	resourceVersion string
+	certificates []byte
 }
 
 // trustStore holds the anchors, one per named ConfigMap, and the pool
@@ -81,6 +80,12 @@ type trustStore struct {
 	anchors map[string]trustAnchor
 	absent  map[string]bool
 	roots   *x509.CertPool
+
+	// listed holds, per name, the resourceVersion of the list that
+	// load read. Each watch starts from it, not from the ConfigMap's
+	// own version, which can be older than the API server's watch
+	// window.
+	listed map[string]string
 }
 
 func newTrustStore(client *Client, namespace string, names ...string) *trustStore {
@@ -96,6 +101,7 @@ func newTrustStore(client *Client, namespace string, names ...string) *trustStor
 		anchors:      map[string]trustAnchor{},
 		absent:       map[string]bool{},
 		roots:        x509.NewCertPool(),
+		listed:       map[string]string{},
 	}
 }
 
@@ -104,9 +110,13 @@ func newTrustStore(client *Client, namespace string, names ...string) *trustStor
 // API server that will not answer is.
 func (t *trustStore) load() error {
 	for _, name := range t.names {
-		if _, err := t.follower(name).read(); err != nil {
+		version, err := t.follower(name).read()
+		if err != nil {
 			return err
 		}
+		t.mu.Lock()
+		t.listed[name] = version
+		t.mu.Unlock()
 	}
 	return nil
 }
@@ -118,7 +128,7 @@ func (t *trustStore) pool() *x509.CertPool {
 }
 
 // watch follows each ConfigMap in a goroutine of its own, because the
-// Role scopes the get and the watch by resourceNames, and a field
+// Role scopes the list and the watch by resourceNames, and a field
 // selector names one object, so one watch cannot cover three.
 func (t *trustStore) watch(ctx context.Context) {
 	for _, name := range t.names {
@@ -126,8 +136,8 @@ func (t *trustStore) watch(ctx context.Context) {
 	}
 }
 
-// follow watches one ConfigMap from the version the last read or
-// event recorded.
+// follow watches one ConfigMap from the version of the list that
+// load read.
 func (t *trustStore) follow(ctx context.Context, name string) {
 	t.follower(name).follow(ctx, t.version(name))
 }
@@ -157,10 +167,7 @@ func (t *trustStore) follower(name string) *namedWatch {
 func (t *trustStore) remember(name string, configMap *ConfigMap) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.anchors[name] = trustAnchor{
-		certificates:    []byte(configMap.Data[apiCACertKey]),
-		resourceVersion: configMap.Metadata.ResourceVersion,
-	}
+	t.anchors[name] = trustAnchor{certificates: []byte(configMap.Data[apiCACertKey])}
 	t.rebuild()
 	if t.absent[name] {
 		delete(t.absent, name)
@@ -200,5 +207,5 @@ func (t *trustStore) rebuild() {
 func (t *trustStore) version(name string) string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.anchors[name].resourceVersion
+	return t.listed[name]
 }

@@ -194,18 +194,14 @@ func TestASiblingIsReachedOnlyThroughATrustedAnchor(t *testing.T) {
 // empty.
 func clusterHolding(t *testing.T, anchor string) *Client {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if anchor == "" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(ConfigMap{
+	api := newCoreAPI()
+	if anchor != "" {
+		api.seed(t, "configmaps/"+displayCAConfigMapName, &ConfigMap{
 			Metadata: ObjectMeta{Name: displayCAConfigMapName, ResourceVersion: "1"},
 			Data:     map[string]string{apiCACertKey: anchor},
 		})
-	}))
-	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	}
+	return testAPIClient(t, api.handler())
 }
 
 // A body that goes quiet past the idle timeout ends the composition

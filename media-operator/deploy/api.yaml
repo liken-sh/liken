@@ -173,8 +173,9 @@ metadata:
   # certificate. extension-apiserver-authentication-reader is the
   # built-in Role that grants get, list, and watch on that one object,
   # and it is the Role every extension API server binds for the same
-  # read. The API watches the object, so a rotated authority reaches
-  # the next handshake with no restart.
+  # read. The API lists the object and watches it from the list's
+  # resourceVersion, so a rotated authority reaches the next handshake
+  # with no restart.
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -237,13 +238,15 @@ metadata:
 rules:
   # The three CA ConfigMaps: this API's own and the two siblings'
   # anchors, watched so a rotation reaches the next connection with
-  # no restart. Both verbs keep their resourceNames. The watch names
-  # its ConfigMap with the field selector metadata.name, and RBAC reads
-  # the name from that selector.
+  # no restart. Both verbs keep their resourceNames. The list and the
+  # watch name their ConfigMap with the field selector metadata.name,
+  # and RBAC reads the name from that selector. The watch starts from
+  # the list's resourceVersion, because a ConfigMap's own version can
+  # be older than the API server's watch window.
   - apiGroups: [""]
     resources: [configmaps]
     resourceNames: [display-api-ca, audio-api-ca, media-api-ca]
-    verbs: [get, watch]
+    verbs: [list, watch]
   # create carries no resourceNames, because RBAC cannot read a name
   # off a create. A create that loses the race reads the winner.
   - apiGroups: [""]
@@ -251,17 +254,20 @@ rules:
     verbs: [create]
   # The update is the rotation's first step: the new CA appended to
   # ca.crt, and the leaf switched only after every client has read it.
+  # The get finds whether the ConfigMap exists before the API creates
+  # it.
   - apiGroups: [""]
     resources: [configmaps]
     resourceNames: [media-api-ca]
-    verbs: [update]
+    verbs: [get, update]
   # The serving key and certificate, re-minted under a third of the
   # leaf's life. The watch serves a pair that an owner or another pod
-  # wrote with no restart.
+  # wrote with no restart, and it lists the Secret again after a 410
+  # Gone.
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [media-api-tls]
-    verbs: [get, update, watch]
+    verbs: [get, list, update, watch]
   # No resourceNames here, because a Deployment's pod name is
   # generated and not known when this file is written. The API reads
   # one pod, its own, for the tag of its own image.

@@ -2,7 +2,7 @@ package main
 
 // These tests cover the watch on one named object: it opens the
 // collection under a field selector that names the object, hands each
-// event's object to its owner, reads the object again after a 410
+// event's object to its owner, lists the object again after a 410
 // Gone, and backs off a watch the API server refuses.
 
 import (
@@ -151,12 +151,32 @@ func TestANamedWatchHandsEachEventToItsOwner(t *testing.T) {
 	until(t, "the owner kept an object the watch deleted", held.is(""))
 }
 
-// A 410 Gone means the API server no longer holds the version, so the
-// watch reads the object and resumes from the read's own version. The
-// read also delivers a change the lost window held.
-func TestANamedWatchReadsAgainAfterAGone(t *testing.T) {
+// The read lists the collection under the name and answers the list's
+// resourceVersion, not the object's. An object that has not changed in
+// a while carries a version older than the API server's watch window,
+// and a watch from it answers 410 Gone at once.
+func TestANamedWatchReadAnswersTheListsVersion(t *testing.T) {
 	api := newCoreAPI()
-	api.seed(t, "configmaps/anchor", valueConfigMap("current", "40"))
+	api.seed(t, "configmaps/anchor", valueConfigMap("current", "16"))
+	held := &heldValue{}
+	watch := newNamedWatch(testAPIClient(t, api.handler()),
+		"liken-system", "configmaps", "anchor", held.changed, held.removed)
+
+	version, err := watch.read()
+
+	mustSucceed(t, err)
+	mustMatch(t, version, "900")
+	mustMatch(t, held.is("current")(), true)
+}
+
+// A 410 Gone means the API server no longer holds the version, so the
+// watch lists again and resumes from the list's version. The object's
+// own version is older than the window, and a watch from it would
+// answer 410 again. The list also delivers a change the lost window
+// held.
+func TestANamedWatchListsAgainAfterAGone(t *testing.T) {
+	api := newCoreAPI()
+	api.seed(t, "configmaps/anchor", valueConfigMap("current", "16"))
 	events := make(chan string)
 	defer close(events)
 	watched := make(chan *url.URL, 2)
@@ -172,12 +192,15 @@ func TestANamedWatchReadsAgainAfterAGone(t *testing.T) {
 
 	events <- goneEvent(t)
 	resumed := <-watched
-	mustMatch(t, resumed.Query().Get("resourceVersion"), "40")
-	until(t, "the read after the gone never reached the owner", held.is("current"))
+	mustMatch(t, resumed.Query().Get("resourceVersion"), "900")
+	until(t, "the list after the gone never reached the owner", held.is("current"))
 }
 
-// A read that finds no object runs removed and answers no error,
+// A list that finds no object runs removed and answers no error,
 // because an absent object is a state the owner handles, not a fault.
+// It still answers the list's version, so the watch that follows
+// starts where the list ended and a later create arrives as an ADDED
+// event.
 func TestANamedWatchReadOfAnAbsentObjectRemovesIt(t *testing.T) {
 	held := &heldValue{value: "stale"}
 	watch := newNamedWatch(testAPIClient(t, newCoreAPI().handler()),
@@ -186,7 +209,7 @@ func TestANamedWatchReadOfAnAbsentObjectRemovesIt(t *testing.T) {
 	version, err := watch.read()
 
 	mustSucceed(t, err)
-	mustMatch(t, version, "")
+	mustMatch(t, version, "900")
 	mustMatch(t, held.is("")(), true)
 }
 

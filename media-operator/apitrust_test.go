@@ -105,7 +105,8 @@ func TestTrustStoreCarriesTheServersFailure(t *testing.T) {
 }
 
 // The watch keeps the pool current, taking up an appended anchor and
-// dropping a deleted one. It opens from the read's resourceVersion.
+// dropping a deleted one. It opens from the list's resourceVersion,
+// not the ConfigMap's own, which can be older than the watch window.
 func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
 	api := newCoreAPI()
 	was, next := testAuthority(t), testAuthority(t)
@@ -125,7 +126,7 @@ func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
 
 	opened := <-watched
 	mustMatch(t, opened.Query().Get("fieldSelector"), "metadata.name="+displayCAConfigMapName)
-	mustMatch(t, opened.Query().Get("resourceVersion"), "11")
+	mustMatch(t, opened.Query().Get("resourceVersion"), "900")
 
 	events <- objectEvent(t, "MODIFIED", caConfigMap(displayCAConfigMapName, was.certPEM, next.certPEM))
 	until(t, "the pool never took up the anchor the watch delivered", func() bool {
@@ -161,7 +162,7 @@ func TestTrustStoreReportsASiblingThatAppears(t *testing.T) {
 	defer stop()
 	store.watch(ctx)
 	opened := <-watched
-	mustMatch(t, opened.Query().Get("resourceVersion"), "")
+	mustMatch(t, opened.Query().Get("resourceVersion"), "900")
 
 	authority := testAuthority(t)
 	events <- objectEvent(t, "ADDED", caConfigMap(displayCAConfigMapName, authority.certPEM))
