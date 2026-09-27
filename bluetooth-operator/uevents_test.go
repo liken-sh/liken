@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // datagram builds one uevent datagram the way the kernel frames it:
@@ -141,5 +145,59 @@ func TestDevpathMACsPrefersTheDatagram(t *testing.T) {
 	}
 	if got := macs.resolve("remove", devpath, ""); got != "b4:8c:9d:11:22:33" {
 		t.Fatalf("resolve = %q, want the recorded address", got)
+	}
+}
+
+// EAGAIN and EINTR leave nothing unread. ENOBUFS is the case the check
+// exists for: the kernel's receive buffer overflowed, and it dropped
+// datagrams. Every other error gets the same answer as ENOBUFS, because
+// poll reported the socket ready and the call returned no datagram. The
+// wrapped case proves the check reads through %w.
+func TestRecvErrorLostAUevent(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "EAGAIN", err: unix.EAGAIN, want: false},
+		{name: "EINTR", err: unix.EINTR, want: false},
+		{name: "ENOBUFS", err: unix.ENOBUFS, want: true},
+		{name: "a wrapped ENOBUFS", err: fmt.Errorf("recvfrom: %w", unix.ENOBUFS), want: true},
+		{name: "an unrelated error", err: unix.EBADF, want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := recvErrorLostAUevent(c.err); got != c.want {
+				t.Errorf("recvErrorLostAUevent(%v) = %t, want %t", c.err, got, c.want)
+			}
+		})
+	}
+}
+
+// The reader wakes the loop when a receive loses a datagram. The test
+// uses a descriptor number the process never opened, not one it
+// closed: the runtime can reuse a closed number before the reader
+// polls it. poll reports the never-opened number ready with POLLNVAL,
+// and Recvfrom on it fails with EBADF, which takes the same path as
+// ENOBUFS.
+func TestReadUeventsWakesOnALostDatagram(t *testing.T) {
+	const neverOpened = 1 << 20
+	var pipe [2]int
+	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan kernelEvent, 1)
+	go readUevents(neverOpened, pipe[0], events)
+
+	select {
+	case event := <-events:
+		if !event.Lost {
+			t.Errorf("event = %+v, want a lost datagram", event)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a lost datagram did not wake the loop")
+	}
+	unix.Close(pipe[1])
+	for range events {
 	}
 }

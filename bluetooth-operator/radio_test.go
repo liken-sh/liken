@@ -151,6 +151,10 @@ type fakeRadio struct {
 	// that stopped answering mid-pairing.
 	pairErr error
 
+	// windowErr makes OpenWindow fail, the way bluetoothd does for an
+	// adapter that is powered off.
+	windowErr error
+
 	// connectErr makes Connect fail the way bluetoothd does for a
 	// speaker that is switched off or out of range.
 	connectErr error
@@ -237,6 +241,9 @@ func (r *fakeRadio) SetDeviceTrusted(device bonds.Address, trusted bool) error {
 
 func (r *fakeRadio) OpenWindow(window time.Duration) error {
 	r.record("OpenWindow %s", window)
+	if r.windowErr != nil {
+		return r.windowErr
+	}
 	r.snapshot.Adapter.Discoverable = true
 	r.snapshot.Adapter.Pairable = true
 	r.snapshot.Adapter.Discovering = true

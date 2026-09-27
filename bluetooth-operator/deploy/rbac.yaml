@@ -53,10 +53,10 @@ rules:
     verbs: [get]
   # The pairing API (crd.go). The operator owns all three objects: it
   # creates an Adapter for the radio it holds and a Peripheral for each
-  # bond, it reads the PairingRequests a person creates, and it deletes
-  # a finished request when its TTL is up. patch is for the finalizer
-  # lists alone, which are edited as a merge patch so that a person's
-  # own fields on the object survive the write.
+  # bond, it watches the PairingRequests a person creates, and it
+  # deletes a finished request when its TTL is up. patch is for the
+  # finalizer lists alone, which are edited as a merge patch so that a
+  # person's own fields on the object survive the write.
   #
   # This is a ClusterRole and not a Role. Adapters and Peripherals are
   # cluster-scoped, and a PairingRequest may be created in any
@@ -65,7 +65,7 @@ rules:
   # needs no exec into liken-system.
   - apiGroups: [bluetooth.liken.sh]
     resources: [adapters, peripherals, pairingrequests]
-    verbs: [get, list, create, update, patch, delete]
+    verbs: [get, list, watch, create, update, patch, delete]
   # The status halves, which the operator writes through the status
   # subresource so that a status write can never overwrite a spec a
   # person edited in the same moment.

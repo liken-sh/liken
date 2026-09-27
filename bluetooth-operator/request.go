@@ -21,7 +21,6 @@ package main
 // radio to pair with something that is no longer listening.
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -106,6 +105,10 @@ func (i *inventory) runWindow(adapter *Adapter, request *PairingRequest, snapsho
 		status.Message = fmt.Sprintf("the radio refused the window: %v", err)
 		pass.ok = false
 		i.writeRequestStatus(request, status, pass)
+		// The loop retries a failed pass once, and no event reports that
+		// the radio would now accept the window. The follow-up pass asks
+		// again while the window lasts.
+		pass.runAgainIn(followUpDelay)
 		return true
 	}
 
@@ -246,9 +249,10 @@ func (i *inventory) collectRequest(request *PairingRequest, pass *inventoryPass)
 		i.writeRequestStatus(request, status, pass)
 		return
 	}
-	due := finished.Add(ttl)
-	if i.now().Before(due) {
-		pass.runAgainIn(min(due.Sub(i.now()), backstopInterval))
+	// A request inside its TTL needs no follow-up pass. The request
+	// watcher sets a clock for the moment the TTL is up, and wakes the
+	// loop then.
+	if i.now().Before(finished.Add(ttl)) {
 		return
 	}
 	path := pairingRequestPath(request.Metadata.Namespace, request.Metadata.Name)
@@ -322,57 +326,4 @@ func sameRequestStatus(current, next PairingRequestStatus) bool {
 		}
 	}
 	return true
-}
-
-// watchPairingRequests wakes the loop while a request needs attention.
-//
-// The operator holds no informer and no watch. A request is a small
-// object that a person creates by hand, and the loop's own wakes come
-// from the kernel and from bluetoothd, and neither of those reports
-// that somebody wrote a request or approved a device in one. So this
-// lists the requests on a timer, and it wakes the loop only when the
-// list contains a request that is unfinished or one whose collection
-// is due. An idle cluster costs one list of one small collection every
-// interval, served from the API server's watch cache.
-func watchPairingRequests(ctx context.Context, client *Client, interval time.Duration, now func() time.Time) <-chan struct{} {
-	wake := make(chan struct{}, 1)
-	go func() {
-		defer close(wake)
-		tick := time.NewTicker(interval)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-			}
-			list, err := get[PairingRequestList](client, fromCache(pairingRequestsPath()))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "watching the PairingRequests: %v\n", err)
-				continue
-			}
-			if !requestsNeedAPass(list.Items, now()) {
-				continue
-			}
-			select {
-			case wake <- struct{}{}:
-			default:
-			}
-		}
-	}()
-	return wake
-}
-
-// requestsNeedAPass reports whether any request needs the loop to run.
-func requestsNeedAPass(requests []PairingRequest, now time.Time) bool {
-	for _, request := range requests {
-		if !request.Status.finished() {
-			return true
-		}
-		finished := parseTimestamp(request.Status.FinishedAt)
-		if finished.IsZero() || !now.Before(finished.Add(request.Spec.ttl())) {
-			return true
-		}
-	}
-	return false
 }

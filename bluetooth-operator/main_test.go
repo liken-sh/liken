@@ -174,8 +174,8 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	waitForWake(t, out, time.Second)
 }
 
-// The loop prints what woke it. A HID event names its controller, and
-// a power supply change names none.
+// The loop prints what woke it. A HID event names its controller, a
+// power supply change names none, and a lost datagram says so.
 func TestKernelEventLine(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -191,6 +191,11 @@ func TestKernelEventLine(t *testing.T) {
 			name:  "a battery change",
 			event: kernelEvent{Subsystem: "power_supply", Action: "change"},
 			want:  "kernel: power_supply change",
+		},
+		{
+			name:  "a lost datagram",
+			event: kernelEvent{Lost: true},
+			want:  "kernel: uevents were lost; reading the whole state",
 		},
 	}
 	for _, c := range cases {

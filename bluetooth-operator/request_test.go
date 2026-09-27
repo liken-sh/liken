@@ -8,6 +8,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,6 +62,27 @@ func TestRequestOpensAWindowAndReportsWhatTheRadioSees(t *testing.T) {
 	// sooner than its backstop tick.
 	if pass.again == 0 {
 		t.Error("an open window asked for no follow-up pass")
+	}
+}
+
+// A radio that refuses the window is asked again while the window
+// lasts. No event reports that the radio would now accept it, and the
+// loop's retry after a failure runs once.
+func TestARefusedWindowAsksForAnotherPass(t *testing.T) {
+	fixture := newAPIFixture()
+	fixture.put(t, testRequestPath(), openRequest(""))
+	radio := testRadio(t)
+	radio.windowErr = errors.New("org.bluez.Error.NotReady: Resource Not Ready")
+	inventory := testInventory(t, fixture, radio)
+
+	pass := inventory.reconcile()
+
+	request := read[PairingRequest](t, fixture, testRequestPath())
+	if !strings.Contains(request.Status.Message, "Resource Not Ready") {
+		t.Errorf("message = %q, want the radio's own refusal", request.Status.Message)
+	}
+	if pass.again == 0 {
+		t.Error("a refused window asked for no follow-up pass")
 	}
 }
 
@@ -253,7 +275,8 @@ func TestFinishedRequestStaysUntilItsTTL(t *testing.T) {
 
 // A TTL needs a start. A finished request with no time on it gets one
 // written, because a pass that counted from itself would never collect
-// the request and the watcher would wake the loop for it forever.
+// the request and the watcher would wake the loop on every change to
+// any request.
 func TestFinishedRequestWithNoTimeGetsOne(t *testing.T) {
 	fixture := newAPIFixture()
 	request := openRequest("")
@@ -320,51 +343,6 @@ func TestSeenListLeavesOutTheDevicesAlreadyPaired(t *testing.T) {
 
 	if seen, _ := seenDevices(nil, snapshot, testNow); len(seen) != 0 {
 		t.Fatalf("seen = %+v, want nothing", seen)
-	}
-}
-
-// The watcher wakes the loop for a request that is unfinished and for
-// one whose collection is due, and for nothing else. On an idle
-// cluster a poll must not trigger a pass.
-func TestRequestsNeedAPass(t *testing.T) {
-	cases := []struct {
-		name    string
-		request PairingRequest
-		want    bool
-	}{
-		{
-			name:    "a request nobody has run yet",
-			request: PairingRequest{},
-			want:    true,
-		},
-		{
-			name:    "an open window",
-			request: PairingRequest{Status: PairingRequestStatus{Phase: phaseOpen}},
-			want:    true,
-		},
-		{
-			name: "a finished request inside its TTL",
-			request: PairingRequest{Status: PairingRequestStatus{
-				Phase:      phasePaired,
-				FinishedAt: timestamp(testNow.Add(-time.Hour)),
-			}},
-			want: false,
-		},
-		{
-			name: "a finished request past its TTL",
-			request: PairingRequest{Status: PairingRequestStatus{
-				Phase:      phaseExpired,
-				FinishedAt: timestamp(testNow.Add(-25 * time.Hour)),
-			}},
-			want: true,
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := requestsNeedAPass([]PairingRequest{c.request}, testNow); got != c.want {
-				t.Fatalf("requestsNeedAPass = %t, want %t", got, c.want)
-			}
-		})
 	}
 }
 

@@ -60,9 +60,21 @@ const (
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. The kernel drops uevent datagrams when its socket
-	// buffer fills, and a dropped datagram costs one edge, so this
-	// tick recovers the state after one.
+	// to prompt it. The tick is a backstop, and it covers two changes
+	// that no event this operator receives reports. A uevent datagram
+	// that the kernel dropped is not one of them: the receive after the
+	// loss fails with ENOBUFS, and the reader wakes the loop for it
+	// (uevents.go).
+	//
+	//   - A bond file that bluetoothd wrote with no D-Bus signal to
+	//     announce it, such as the cache entry it writes when it
+	//     resolves a device's name and browses its services
+	//     (bondstore.go).
+	//   - An edit to an Adapter or a Peripheral: an Adapter's
+	//     spec.alias, a Peripheral's spec, and the deletion of a
+	//     Peripheral, which starts an unpair. The operator watches the
+	//     PairingRequests, but not these two kinds, so such an edit
+	//     takes effect on the next pass, which is at most this long.
 	backstopInterval = 60 * time.Second
 
 	// retryDelay is how long the loop waits before it runs a failed
@@ -89,14 +101,6 @@ const (
 	// socket is a file on a volume shared with the other container,
 	// and there is no event to wait on.
 	busRetryDelay = 500 * time.Millisecond
-
-	// requestPoll is how often the operator asks the API server whether
-	// a PairingRequest needs attention. A request is a small object that
-	// a person creates and edits by hand, and neither the kernel nor
-	// bluetoothd raises an event when that happens, so this is the one
-	// place the loop polls. Five seconds is the delay a person accepts
-	// between creating a request and reading the window it opened.
-	requestPoll = 5 * time.Second
 )
 
 // metricsAddressVar names the address the /metrics listener binds, in
@@ -170,7 +174,7 @@ func main() {
 	// sources of wakes like the kernel and the bus are, so they go
 	// through the same settle window as everything else.
 	retries := make(chan struct{}, 1)
-	requests := watchPairingRequests(ctx, client, requestPoll, time.Now)
+	requests := watchPairingRequests(ctx, client, time.Now)
 	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests), settleWindow, settleLimit)
 
 	// readings is this operator's Prometheus registry. Every method on
@@ -366,8 +370,11 @@ func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retrie
 
 // kernelEventLine says what one uevent reported. A HID event names its
 // controller, and a power supply change names none, because the
-// datagram carries no address.
+// datagram carries no address. A lost datagram says so.
 func kernelEventLine(event kernelEvent) string {
+	if event.Lost {
+		return "kernel: uevents were lost; reading the whole state"
+	}
 	if event.MAC == "" {
 		return fmt.Sprintf("kernel: %s %s", event.Subsystem, event.Action)
 	}

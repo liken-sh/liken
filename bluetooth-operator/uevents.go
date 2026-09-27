@@ -45,10 +45,15 @@ import (
 // device that appeared or left, with the peer address it resolved, or
 // a power supply whose reading changed, which names no address because
 // the datagram carries none and the pass re-reads sysfs anyway.
+//
+// Lost marks the third kind: a receive that lost datagrams. It names
+// no subsystem, because the lost datagrams could be any of them, and
+// the pass that follows reads the whole state.
 type kernelEvent struct {
 	Subsystem string
 	Action    string
 	MAC       string
+	Lost      bool
 }
 
 // The two subsystems this operator reads events from. hid carries a
@@ -222,19 +227,39 @@ func readUevents(fd, cancelRead int, events chan<- kernelEvent) {
 		}
 		size, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
-			// EAGAIN means the poll woke with no datagram to read. Any
-			// other error left this datagram unread. A missed datagram
-			// costs one late reconcile at worst, because the backstop
-			// tick in main.go re-reads sysfs anyway.
+			// A lost datagram can be a controller that connected or left,
+			// so the loop runs a pass now, and does not wait for the next
+			// uevent or the backstop tick. EAGAIN and EINTR lose nothing,
+			// so they wake nothing.
+			if recvErrorLostAUevent(err) {
+				sendEvent(events, kernelEvent{Lost: true})
+			}
 			continue
 		}
 		event, ok := kernelEventFrom(buf[:size], macs)
 		if !ok {
 			continue
 		}
-		select {
-		case events <- event:
-		default:
-		}
+		sendEvent(events, event)
+	}
+}
+
+// recvErrorLostAUevent reports whether a Recvfrom error on the uevent
+// socket lost datagrams. EAGAIN means poll woke with nothing queued,
+// and EINTR means a signal interrupted the call before it read
+// anything. Every other error loses datagrams, most often ENOBUFS: the
+// kernel's receive buffer overflowed, and the kernel dropped the
+// datagrams that did not fit.
+func recvErrorLostAUevent(err error) bool {
+	return !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EINTR)
+}
+
+// sendEvent sends one event and drops it when the channel is full. A
+// full channel already holds a wake, and the pass that the wake starts
+// reads the whole state, so the dropped event loses nothing.
+func sendEvent(events chan<- kernelEvent, event kernelEvent) {
+	select {
+	case events <- event:
+	default:
 	}
 }

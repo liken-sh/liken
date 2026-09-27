@@ -32,10 +32,9 @@ import (
 )
 
 // followUpDelay is how soon the loop runs again while the pass has
-// work in flight: a window that is open, a teardown between two of its
-// steps, or a finished request whose TTL is close. It is short because
-// each of those is a person waiting, and it is bounded because the
-// pass asks for exactly one follow-up.
+// work in flight: a window that is open, or a teardown between two of
+// its steps. It is short because each of those is a person waiting,
+// and it is bounded because the pass asks for exactly one follow-up.
 const followUpDelay = 2 * time.Second
 
 // inventory reconciles the Adapter, its Peripherals, and the

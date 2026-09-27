@@ -420,10 +420,12 @@ func byAdapter(path, adapterKey string) string {
 }
 
 // fromCache makes the API server serve a list from its watch cache
-// instead of the datastore. The operator lists PairingRequests on a
-// timer, and a list with no resourceVersion reads through to etcd
-// every time. The cache can be a moment behind, which can delay the
-// first pass on a just-created request by one poll interval.
+// instead of the datastore. A list with no resourceVersion reads
+// through to etcd every time. The cache can be a moment behind, and
+// that costs nothing: a pass that reads a request before its latest
+// change gets a wake for the change, because the watch delivers it,
+// and a watch that starts at the list's version receives every change
+// after that version.
 func fromCache(path string) string {
 	separator := "?"
 	if strings.Contains(path, "?") {
