@@ -106,19 +106,77 @@ correct result.
 
 ## Open plan: one watch loop for every operator
 
-Open problem. The seven hand-written loops drift apart, and each fix
-lands in one repository at a time. Two answers are on the table, and
-neither is chosen:
+Open problem. Eight repositories each hold one hand-written watch loop:
+about 2,470 lines in all (1,530 of code) and 4,900 lines of tests for
+the loop alone. The loops drift apart, and each fix lands in one
+repository at a time. `per-node-csi-driver` already uses a client-go
+informer, and `git-csi-driver` already links client-go's typed
+clientset under its hand-written loop. Two answers are on the table,
+and neither is chosen.
 
-- **One shared Go module**, such as `github.com/liken-sh/watch`, that
-  holds one loop and a conformance test built from the scenarios
-  above. Every operator imports it, and a fix lands once.
-- **client-go's reflector and informers** in each operator. They are
-  the Kubernetes-native answer and already hold these guards. Most
-  operators avoid client-go to keep their binaries small, and that
-  cost is not measured. `git-csi-driver` and `per-node-csi-driver`
-  already use client-go.
+**Measured cost of client-go.** On 2026-09-27, the `PairingRequest`
+watch in `bluetooth-operator` was ported to client-go in a throwaway
+copy. Each build watched 50, then 250, `PairingRequest` objects on a
+k3s v1.36.3 API server in Docker, with client-go v0.36.3. The
+operator cannot run outside its pod, so each binary ran only its
+watch. The binary still linked every package, so every package
+initialized.
 
-Measure the binary size and memory cost of client-go in one operator
-before you choose. Until then, test every hand-written loop against
-the scenarios above.
+| | Hand-written | `cache.NewSharedIndexInformer` and `dynamic` | `dynamicinformer` |
+|---|---|---|---|
+| Stripped binary (the image is `FROM scratch`, so the same) | 14.9 MB | 20.0 MB | 39.1 MB |
+| Linked Go packages | 354 | 474 | 807 |
+| RSS, idle, 50 objects | 14.8 MB | 22.1 MB | 31.0 MB |
+| RSS, idle, 250 objects | 16.6 MB | 24.0 MB | 32.8 MB |
+| Cold build | 11.0 s | 14.3 s | 33.0 s |
+
+`dynamicinformer` links the typed clientset and the informers for
+every built-in kind. The middle column links only `tools/cache` and
+`dynamic`, and it decodes each object into the operator's own struct
+with `runtime.DefaultUnstructuredConverter`, so it needs no code
+generation. `go mod graph` did not change (729 to 730 lines), because
+the CLI already requires client-go. In the port, 270 lines of loop
+code and 439 lines of loop tests were removed, and 55 lines were
+added. The port added no tests.
+
+- **client-go's reflector and informer.** This is the Kubernetes-native
+  answer. Upstream maintains and tests the guards, and it adds
+  streaming lists (`WatchListClient`, on by default in v0.36). It
+  fixes the drift, because no loop code stays in the repositories.
+  It costs about 5 MB of image and 6 to 7 MB of RSS for each process.
+  A two-node test cluster ran seven and four operator pods on its
+  nodes that do not link client-go now, so the cost is about 25 to
+  50 MB on each node, which matters on a 1 GB machine. Maintenance is
+  a client-go version bump with each Kubernetes pin, and a handler
+  for each watched collection (about 45 lines in the port).
+  The reflector does not meet the guards above exactly:
+  - After a `410`, it waits a backoff of 0.8 to 1.6 seconds before it
+    lists.
+  - A watch that closes in under a second with no event makes it list
+    again after the backoff. It does not resume.
+  - A watch that delivered an event is never short.
+  - It measures a watch's life from the request, not from the `200`.
+  - Its backoff resets after two minutes with no failure, not after
+    one watch that ran a second.
+
+  Each handler must also report an object that does not convert to
+  the operator's struct. The port drops such an object with no error.
+- **One shared Go module**, `github.com/liken-sh/watch`. It holds one
+  loop and a conformance test built from the scenarios above. The
+  scripted fake API server from the 2026-09 reviews (524 lines) is the
+  start of that test. The module removes about 2,300 lines from the
+  eight repositories, and it costs no memory. It fixes the drift and
+  keeps the guards exactly as written above. The project then
+  maintains the loop, the fake server, and a release that every
+  operator must take. Each new API server behavior, such as streaming
+  lists, is work for the project.
+
+**Recommendation:** client-go, in the form of the middle column.
+Accept the reflector's differences from the guards; none of them
+loses an event. An operator that does not link client-go now imports
+only `k8s.io/client-go/tools/cache` and `k8s.io/client-go/dynamic`,
+never `dynamicinformer`, `informers`, or `kubernetes`. Move one
+operator first, and measure its pod on a 1 GB machine before the
+others move. Choose the shared module if that memory is too much for
+the 1 GB machines. Until the choice, test every hand-written loop
+against the scenarios above.
