@@ -11,6 +11,11 @@ package main
 // holds master, which the feasibility drill proved on the lab
 // machine.
 //
+// Each read takes a file on the card from the gate in cardgate.go.
+// The gate opens the card only while the operator holds a connection
+// to a compositor, and it
+// drops DRM master before the walk sends its first request.
+//
 // The walk is GETRESOURCES to list the connectors and crtcs,
 // GETCONNECTOR for each connector's encoder, GETENCODER for that
 // encoder's crtc, and GETCRTC for the mode the crtc drives. A
@@ -159,15 +164,9 @@ type drmMode struct {
 }
 
 // ReadConnectorModes answers what each connector offers right now,
-// keyed by the connector name sysfs uses. This is the list a
-// claim's mode is validated against.
-func readConnectorModes(cardPath string) (map[string][]drmMode, error) {
-	fd, err := unix.Open(cardPath, unix.O_RDWR|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", cardPath, err)
-	}
-	defer unix.Close(fd)
-
+// keyed by the connector name sysfs uses, from a file the gate
+// opened. This is the list a claim's mode is validated against.
+func readConnectorModes(fd int) (map[string][]drmMode, error) {
 	connectors, err := cardConnectors(fd)
 	if err != nil {
 		return nil, err
@@ -219,18 +218,13 @@ func connectorModeList(fd int, id uint32) (string, []drmMode, error) {
 }
 
 // ReadCurrentModes answers the mode each of the card's outputs
-// runs right now, keyed by the connector name sysfs uses.
+// runs right now, keyed by the connector name sysfs uses, from a file
+// the gate opened.
 //
 // An output that runs no mode is absent from the map rather
 // than present with an empty value, because absent is what the slice
 // publishes for it and what a wait for a mode change must not accept.
-func readCurrentModes(cardPath string) (map[string]string, error) {
-	fd, err := unix.Open(cardPath, unix.O_RDWR|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", cardPath, err)
-	}
-	defer unix.Close(fd)
-
+func readCurrentModes(fd int) (map[string]string, error) {
 	connectors, err := cardConnectors(fd)
 	if err != nil {
 		return nil, err

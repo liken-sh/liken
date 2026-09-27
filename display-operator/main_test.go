@@ -106,7 +106,7 @@ func TestWakesCarriesAnEventThrough(t *testing.T) {
 	defer cancel()
 
 	events := make(chan drmEvent, 1)
-	out := wakes(ctx, events, nil, nil, nil, nil)
+	out := wakes(ctx, events, nil, nil, nil, nil, nil)
 
 	events <- drmEvent{Action: "change", DevPath: "/devices/pci0000:00/0000:00:02.0/drm/card1"}
 	waitForWake(t, out, time.Second)
@@ -117,11 +117,24 @@ func TestWakesCarriesTheCompositorsSocketThrough(t *testing.T) {
 	defer cancel()
 
 	sockets := make(chan struct{}, 1)
-	out := wakes(ctx, nil, nil, sockets, nil, nil)
+	out := wakes(ctx, nil, nil, sockets, nil, nil, nil)
 
 	// A compositor that comes back is a pass of its own, because the
 	// pass is what removes the taint and re-reads the connectors.
 	sockets <- struct{}{}
+	waitForWake(t, out, time.Second)
+}
+
+func TestWakesCarriesTheCompositorsConnectionThrough(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	connections := make(chan struct{}, 1)
+	out := wakes(ctx, nil, nil, nil, connections, nil, nil)
+
+	// The card gate opens when the output watch connects, and the pass
+	// that follows reads the fields the closed gate cost.
+	connections <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
@@ -130,7 +143,7 @@ func TestWakesCarriesARetryThrough(t *testing.T) {
 	defer cancel()
 
 	retries := make(chan struct{}, 1)
-	out := wakes(ctx, nil, retries, nil, nil, nil)
+	out := wakes(ctx, nil, retries, nil, nil, nil, nil)
 
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses, so the retry never blocks the
@@ -144,7 +157,7 @@ func TestWakesCarriesTheLayoutModulesReportsThrough(t *testing.T) {
 	defer cancel()
 
 	reports := make(chan struct{}, 1)
-	out := wakes(ctx, nil, nil, nil, reports, nil)
+	out := wakes(ctx, nil, nil, nil, nil, reports, nil)
 
 	// A surface that arrives, changes size, or goes is a pass of its
 	// own, because the pass is what places what the module reports.
@@ -157,7 +170,7 @@ func TestWakesCarriesTheResourceWatchesThrough(t *testing.T) {
 	defer cancel()
 
 	resources := make(chan struct{}, 1)
-	out := wakes(ctx, nil, nil, nil, nil, resources)
+	out := wakes(ctx, nil, nil, nil, nil, nil, resources)
 
 	// A pod that gained a label, an edited Layout, and a Display that
 	// names another one all reach the loop here, because each of them
@@ -414,6 +427,43 @@ func TestReconcilePublishesNoCurrentModeWhenTheCardCannotAnswer(t *testing.T) {
 
 	if len(published) != 0 {
 		t.Errorf("currentMode = %v, want none", published)
+	}
+}
+
+// A compositor that restarts is not a broken card. The card
+// observation keeps what the last read measured while the gate is
+// closed, and a read that fails for any other reason marks it stale.
+func TestAnAbsentCompositorIsNoFailedCardObservation(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want float64
+	}{
+		{"the compositor is absent", errCompositorAbsent, 1},
+		{"the card cannot answer", errors.New("the card node is not there"), 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			compositorFixture(t)
+			fixture := &slicePublishFixture{}
+			client := testClient(t, fixture.handler(t))
+			readings := newMetrics("display-operator", "dev")
+			socket := servingSocket(t, t.TempDir())
+			pass := func(current func() (map[string]string, error)) {
+				t.Helper()
+				if err := reconcile(client, "liken-1", testOwner(), "card1", socket,
+					current, noPanelControls, newLinkHistory(), readings); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			pass(noCurrentModes)
+			pass(func() (map[string]string, error) { return nil, c.err })
+
+			if got := testutil.ToFloat64(readings.observationValid.WithLabelValues("card")); got != c.want {
+				t.Errorf(`display_observation_valid{source="card"} = %v, want %v`, got, c.want)
+			}
+		})
 	}
 }
 

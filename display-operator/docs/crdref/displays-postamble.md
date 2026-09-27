@@ -85,9 +85,11 @@ A client draws at the second one. When the two values differ, the
 clients on that screen are drawn at the wrong size, and the
 operator restarts the compositor to correct it once the screens are
 free. `weston` is absent while the operator holds no connection to
-a compositor, and `kernel` is absent while the connector drives
-nothing. `kubectl get displays` shows the two as the `MODE` and
-`CANVAS` columns.
+a compositor. `kernel` is absent while the connector drives nothing,
+and also while the operator holds no connection to a compositor,
+because the operator opens the card only while it holds a connection
+to a compositor. `kubectl get displays` shows the two as the `MODE`
+and `CANVAS` columns.
 
 ## The physical address
 

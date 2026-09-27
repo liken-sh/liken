@@ -92,6 +92,9 @@ type displayFixture struct {
 	// which is the other half of the mode status reports. It is empty
 	// on a bench with no compositor answering.
 	serving map[string]string
+	// The pass read nothing from the card, which is every pass while
+	// the operator holds no connection to a compositor.
+	unread bool
 }
 
 func (f *displayFixture) clock() time.Time { return f.at }
@@ -179,6 +182,7 @@ func (f *displayFixture) outputs() []Output {
 		output.Connected = f.present[one.Connector]
 		output.OfferedModes = one.Modes
 		output.CurrentMode = f.current[one.Connector]
+		output.ModesRead = !f.unread
 		outputs = append(outputs, output)
 	}
 	return outputs
@@ -1348,6 +1352,26 @@ func TestTheRestingModeFollowsTheClaim(t *testing.T) {
 				t.Errorf("the controller set %q, want %q", fixture.modeSets, c.want)
 			}
 		})
+	}
+}
+
+// A pass that read nothing from the card knows no mode list. It
+// cannot judge the resting mode, so it neither applies the mode nor
+// reports that the card does not offer it.
+func TestTheRestingModeWaitsForAReadOfTheCard(t *testing.T) {
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   labMonitor(),
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+	})
+	fixture.unread = true
+	fixture.declare(DisplaySpec{Mode: stringOf("1920x1080@60")})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.modeSets) != 0 {
+		t.Errorf("the controller set %q with no read of the card", fixture.modeSets)
 	}
 }
 

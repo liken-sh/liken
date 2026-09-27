@@ -6,7 +6,9 @@ package main
 // holds the hardware that the operator's own claim acquired, and what
 // it holds is what the operator publishes. DRM master is one per card,
 // so exactly one process may set a mode on the card, and the exclusive
-// display claim is what makes weston that process.
+// display claim is what makes weston that process. The operator
+// container opens the same card to read the modes, and the card gate
+// (cardgate.go) keeps those opens from taking master from weston.
 //
 // ivi-shell is the shell for a screen a controller places surfaces
 // on. The shell itself decides nothing: a surface stays invisible

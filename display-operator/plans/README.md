@@ -262,6 +262,13 @@ say why it is built the way it is.
   valid address while a receiver in standby serves none.
   equipment-operator's CEC adapter announces this address when it
   speaks for the machine.
+* [24, The compositor holds DRM master](24-the-compositor-holds-drm-master.md).
+  Proposed. The operator opens the card only while its output watch
+  holds a connection to the compositor, and each open drops DRM master
+  before any other ioctl. A drop that succeeds means the compositor
+  holds no master, and the operator restarts it once with the reason
+  `masterless`. Answers the open problem "The compositor can start
+  without DRM master".
 
 ## Open problems
 

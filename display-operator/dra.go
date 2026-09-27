@@ -86,6 +86,11 @@ type draPlugin struct {
 	// found no module serving delivers nothing, because the socket it
 	// would name in the CDI spec is the socket the module opens.
 	layout *layoutLink
+	// Gate opens the card for both reads below. It answers
+	// errCompositorAbsent while the operator holds no connection to a
+	// compositor, and it
+	// reports a compositor with no DRM master.
+	gate *cardGate
 	// CurrentModes reads what each output runs, connectorModes
 	// reads what each connector offers, and endCompositor is the
 	// restart that makes a new mode take. All three are fields
@@ -94,6 +99,17 @@ type draPlugin struct {
 	currentModes   func() (map[string]string, error)
 	connectorModes func() (map[string][]drmMode, error)
 	endCompositor  func() error
+	// EndProcess is the same restart for one compositor process, the
+	// one that the card gate reports with no DRM master.
+	endProcess func(pid int) error
+	// Compositors lists the compositor processes that run now.
+	compositors func() []int
+	// Ended records every compositor process that ran when this
+	// operator ended the compositor, for any reason. A process on
+	// its way out can still be reported with no DRM master, and the
+	// masterless restart skips every pid in this record. ModeSwitches
+	// guards it.
+	ended map[int]bool
 	// KillCompositor is the same restart for a compositor that
 	// answers nothing. It sends SIGKILL, because a stopped process
 	// takes no SIGTERM.
@@ -149,24 +165,24 @@ type draPlugin struct {
 // only in a test, so this is the one place the card readback and the
 // compositor's restart are named together.
 func newDRAPlugin(client *Client, card, socketDir string, layout *layoutLink) *draPlugin {
+	gate := newCardGate(filepath.Join(driRoot, card), procRoot)
 	return &draPlugin{
-		client:     client,
-		sysRoot:    sysRoot,
-		card:       card,
-		socketDir:  socketDir,
-		configPath: westonConfigPath,
-		recordPath: modeRecordPath,
-		powerPath:  powerRecordPath,
-		controls:   newPanelControls(sysRoot, card),
-		claims:     newClaimIndex(client),
-		layout:     layout,
-		currentModes: func() (map[string]string, error) {
-			return readCurrentModes(filepath.Join(driRoot, card))
-		},
-		connectorModes: func() (map[string][]drmMode, error) {
-			return readConnectorModes(filepath.Join(driRoot, card))
-		},
+		client:         client,
+		sysRoot:        sysRoot,
+		card:           card,
+		socketDir:      socketDir,
+		configPath:     westonConfigPath,
+		recordPath:     modeRecordPath,
+		powerPath:      powerRecordPath,
+		controls:       newPanelControls(sysRoot, card),
+		claims:         newClaimIndex(client),
+		layout:         layout,
+		gate:           gate,
+		currentModes:   gate.currentModes,
+		connectorModes: gate.connectorModes,
 		endCompositor:  func() error { return endCompositor(procRoot) },
+		endProcess:     endCompositorProcess,
+		compositors:    func() []int { return compositorProcesses(procRoot) },
 		killCompositor: func() error { return killCompositor(procRoot) },
 		switchTimeout:  modeSwitchTimeout,
 		switchFallback: modeSwitchFallback,

@@ -425,7 +425,7 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	// compositor parses the rewritten config, and every client on every
 	// output of this card loses its connection. That is the accepted
 	// cost of a mode change, and the manual's claim guide states it.
-	if err := p.endCompositor(); err != nil {
+	if err := p.ending(p.endCompositor); err != nil {
 		return fmt.Errorf("ending the compositor: %w", err)
 	}
 	p.metrics.compositorRestarted("mode")
@@ -542,7 +542,7 @@ func (p *draPlugin) compositorOutputs() servedOutputs {
 // restart in the middle of a switch would end the compositor the
 // switch is waiting on and fail the prepare.
 func (p *draPlugin) restartCompositor() error {
-	return p.restart("heal", p.endCompositor)
+	return p.restart("heal", func() error { return p.ending(p.endCompositor) })
 }
 
 // KillHungCompositor is the restart for a compositor that accepts on
@@ -552,7 +552,7 @@ func (p *draPlugin) restartCompositor() error {
 // again, and that Down is the path the taint and the clients already
 // take.
 func (p *draPlugin) killHungCompositor() error {
-	return p.restart("hung", p.killCompositor)
+	return p.restart("hung", func() error { return p.ending(p.killCompositor) })
 }
 
 // Restart ends the compositor and counts the restart under the reason
@@ -569,6 +569,27 @@ func (p *draPlugin) restart(reason string, end func() error) error {
 		return err
 	}
 	p.metrics.compositorRestarted(reason)
+	return nil
+}
+
+// Ending runs one end of every compositor process and records the
+// processes that ran when it did, so the masterless restart never
+// ends one of them again. The caller holds modeSwitches, which also
+// guards the record. A nil compositors seam records nothing.
+func (p *draPlugin) ending(end func() error) error {
+	var pids []int
+	if p.compositors != nil {
+		pids = p.compositors()
+	}
+	if err := end(); err != nil {
+		return err
+	}
+	if p.ended == nil {
+		p.ended = map[int]bool{}
+	}
+	for _, pid := range pids {
+		p.ended[pid] = true
+	}
 	return nil
 }
 

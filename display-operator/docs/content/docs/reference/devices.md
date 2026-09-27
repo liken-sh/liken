@@ -207,7 +207,11 @@ releasing a claim restarts nothing.
 
 The attribute is absent while the output drives nothing, which
 covers a connector with no monitor and one the compositor left
-disabled, and absent when the card could not answer the ioctl.
+disabled, and absent when the card could not answer the ioctl. It
+is also absent while the operator holds no connection to a
+compositor, for example during a compositor restart. The operator
+opens the card only while it holds a connection to a compositor, so
+that its read cannot take DRM master from the compositor.
 Guard it with `has()`, like every other monitor attribute.
 
 ## The pairing identity

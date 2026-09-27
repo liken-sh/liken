@@ -135,7 +135,9 @@ type DisplayStatus struct {
 	// The mode the output runs, as the card and the compositor
 	// each report it, and every mode the card offers for this
 	// connector. Status has no attribute-length limit, so this list
-	// is whole where the slice's is cut to fit.
+	// is whole where the slice's is cut to fit. The list is absent
+	// while the operator holds no connection to a compositor, because
+	// the card gate opens the card only while it holds one.
 	Mode         *DisplayMode               `json:"mode,omitempty"`
 	Modes        []string                   `json:"modes,omitempty"`
 	Capabilities map[string]panelCapability `json:"capabilities,omitempty"`
@@ -207,7 +209,9 @@ type DisplayRegion struct {
 // and a gap between the two values is the canvas defect the operator
 // heals. Weston is absent while this operator holds no connection to
 // a compositor, because an absent value is honest and a carried-over
-// one is a guess.
+// one is a guess. Kernel is absent then too, because the card gate
+// opens the card only while the operator holds a connection to a
+// compositor.
 type DisplayMode struct {
 	Kernel string `json:"kernel,omitempty"`
 	Weston string `json:"weston,omitempty"`

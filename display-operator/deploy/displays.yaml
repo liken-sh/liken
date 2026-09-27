@@ -156,7 +156,7 @@ spec:
                   properties:
                     kernel:
                       type: string
-                      description: "The mode the card reports this connector is synced to, absent while it drives nothing."
+                      description: "The mode the card reports this connector is synced to, absent while it drives nothing and while the operator holds no connection to a compositor."
                     weston:
                       type: string
                       description: "The mode the compositor reports it serves canvases at, from its own wl_output events, absent while the operator holds no connection to a compositor."
@@ -164,7 +164,7 @@ spec:
                   type: array
                   items:
                     type: string
-                  description: "Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against."
+                  description: "Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. It is absent while the operator holds no connection to a compositor."
                 capabilities:
                   type: object
                   description: "The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it."

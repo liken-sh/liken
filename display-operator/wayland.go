@@ -275,6 +275,12 @@ type outputWatch struct {
 	// test, and prove that the socket's arrival starts the dial.
 	retry      time.Duration
 	retryLimit time.Duration
+	// Connected runs each time a connection to a compositor opens,
+	// after the watch reports that it serves. The operator wakes the
+	// passes that read the card with it, because a closed card gate
+	// cost them the fields that the card fills. It is nil until the
+	// operator wires it, and a nil hook wakes nothing.
+	connected func()
 
 	// The connector each live output global names, and the mode
 	// the compositor reports on each connector. Both belong to the
@@ -284,6 +290,11 @@ type outputWatch struct {
 	names   map[uint32]string
 	modes   map[string]string
 	session uint64
+	// Live is set while a connection to a compositor stands. The card
+	// gate reads it: weston opens the card before it listens on its
+	// socket, so a live connection means the compositor already holds
+	// the card, and an open by the operator cannot take DRM master.
+	live bool
 	// Changed closes when the answer changes, and a new channel takes
 	// its place. A mode switch waits on it for the compositor that
 	// follows the restart.
@@ -362,22 +373,42 @@ func (w *outputWatch) forget(global uint32) {
 // moment the connection ends, not when the next one opens, so the
 // window between two compositors reports no mode instead of the
 // last answer of the one that died.
+//
+// The end of the connection also closes the card gate. A compositor
+// that has exited holds no DRM master, and an open by the operator in
+// that time would take master from the next compositor.
 func (w *outputWatch) closed() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.names, w.modes = map[uint32]string{}, map[string]string{}
+	w.live = false
 	w.announce()
 }
 
 // A new connection starts from nothing. Everything the ended
 // compositor reported about its outputs goes with it, because a dead
 // compositor serves no canvases at any mode.
+//
+// The connection opens the card gate, and the hook runs after the
+// lock is released, so a pass that it wakes finds the gate open.
 func (w *outputWatch) opened() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.names, w.modes = map[uint32]string{}, map[string]string{}
 	w.session++
+	w.live = true
 	w.announce()
+	w.mu.Unlock()
+	if w.connected != nil {
+		w.connected()
+	}
+}
+
+// Serving answers whether a connection to a compositor stands, which
+// is the card gate's condition to open the card.
+func (w *outputWatch) serving() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.live
 }
 
 // Weston states a mode as its size in pixels and its refresh

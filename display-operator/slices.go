@@ -215,8 +215,9 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			// The modes list above stays name-only. It follows a
 			// claim's mode, and it is what makes a mode a released
 			// claim left behind visible instead of hidden. It is
-			// absent while the output drives nothing and when the
-			// card could not answer.
+			// absent while the output drives nothing, when the card
+			// could not answer, and while the operator holds no
+			// connection to a compositor.
 			addAttribute(device.Attributes, "currentMode", output.CurrentMode)
 			// The CEC physical address of the port this cable is in,
 			// 1.2.0.0, from the EDID on the wire now. A dark connector

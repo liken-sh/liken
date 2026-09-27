@@ -306,6 +306,26 @@ func operate() {
 	// to, and status.mode.weston is what the compositor serves
 	// canvases at.
 	panels.served = watch.served
+	// The same connection opens the card gate. The gate refuses every
+	// read of the card while the operator holds no connection to a
+	// compositor, so no read by the operator takes DRM master from a
+	// compositor on its way up. The connection
+	// wakes the slice pass and the Display pass, because a closed gate
+	// cost them the fields that the card fills.
+	plugin.gate.live = watch.serving
+	connections := make(chan struct{}, 1)
+	watch.connected = func() {
+		select {
+		case connections <- struct{}{}:
+		default:
+		}
+		panels.wake()
+	}
+	// A read that finds its file was master reports the compositor,
+	// which then holds no master and shows no frame. One goroutine
+	// restarts it, because applyMode reads the card while it holds the
+	// lock that a restart takes.
+	go plugin.restartMasterless(ctx, plugin.gate.masterless)
 	go watch.run(ctx)
 	go panels.run(ctx)
 
@@ -419,9 +439,9 @@ func operate() {
 	// is silent when nothing changed, so the prompt path costs nothing
 	// on a wake that carried no news.
 	settled := settle(ctx,
-		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath, plugin.killHungCompositor), nil, nil),
+		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath, plugin.killHungCompositor), connections, nil, nil),
 		settleWindow, settleLimit)
-	prompt := wakes(ctx, nil, nil, nil, layout.reports, resources)
+	prompt := wakes(ctx, nil, nil, nil, nil, layout.reports, resources)
 
 	// The first pass runs before any event. It replaces the slice the
 	// previous pod left and states whether a compositor serves right
@@ -462,18 +482,20 @@ func operate() {
 // each connector offers. It is the same pair of reads the slice pass
 // makes, through the same seams, so the resource and the slice report
 // one card and cannot disagree about it. A read that fails costs the
-// field it fills and nothing else.
+// field it fills and nothing else. The card gate logs once when the
+// operator loses its connection to a compositor, so the reads here log
+// only other failures.
 func screens(card string,
 	currentModes func() (map[string]string, error),
 	connectorModes func() (map[string][]drmMode, error),
 ) []Output {
 	outputs := discoverOutputs(sysRoot, card)
 	current, err := currentModes()
-	if err != nil {
+	if err != nil && !errors.Is(err, errCompositorAbsent) {
 		fmt.Fprintf(os.Stderr, "reading the mode each output runs: %v\n", err)
 	}
 	offered, err := connectorModes()
-	if err != nil {
+	if err != nil && !errors.Is(err, errCompositorAbsent) {
 		fmt.Fprintf(os.Stderr, "reading the modes each connector offers: %v\n", err)
 	}
 	return withOfferedModes(withCurrentModes(outputs, current), offered)
@@ -517,7 +539,10 @@ func eventsEnded(ctx context.Context) error {
 //
 // A read that fails costs the attribute and nothing else. The
 // rest of the slice is what sysfs says, and a card that cannot answer
-// the ioctl still has connectors, monitors, and a compositor.
+// the ioctl still has connectors, monitors, and a compositor. While
+// the operator holds no connection to a compositor, the card gate
+// opens nothing, so every compositor restart costs the attribute until
+// the operator connects again.
 //
 // The link history holds the taint on a dark connector back for the
 // grace, so an HDMI link that goes down and comes back carrying the
@@ -535,9 +560,16 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 	// The card source is this ioctl: the same read that fills the
 	// slice's currentMode attribute. A failure here costs that
 	// attribute, and it is the fact display_observation_valid reports.
-	readings.recordObservation("card", err == nil, now)
-	if err != nil {
+	// A read while the operator holds no connection to a compositor
+	// records nothing: a compositor restart is not a broken card, and
+	// the card gate logs it once.
+	switch {
+	case errors.Is(err, errCompositorAbsent):
+	case err != nil:
+		readings.recordObservation("card", false, now)
 		fmt.Fprintf(os.Stderr, "reading the mode each output runs: %v\n", err)
+	default:
+		readings.recordObservation("card", true, now)
 	}
 	withModes := withCurrentModes(outputs, modes)
 
@@ -646,13 +678,14 @@ func endHungCompositor(socketPath string, frozen *hungCompositor, repair func() 
 }
 
 // wakes turns the kernel's drm events, the write retries, the
-// compositor's socket, the layout module's reports, and the resources
-// a pass reads into one channel of wakes, with a backstop tick in it.
+// compositor's socket, the output watch's connections, the layout
+// module's reports, and the resources a pass reads into one channel of
+// wakes, with a backstop tick in it.
 // Nothing on any of them holds state that the loop uses: each wake
 // means look again, and the look is a fresh read of sysfs, of the
 // module's store, and of the resources.
 func wakes(ctx context.Context, uevents <-chan drmEvent,
-	retries, sockets, reports, resources <-chan struct{}) <-chan struct{} {
+	retries, sockets, connections, reports, resources <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -680,6 +713,11 @@ func wakes(ctx context.Context, uevents <-chan drmEvent,
 				}
 				wake()
 			case _, ok := <-sockets:
+				if !ok {
+					return
+				}
+				wake()
+			case _, ok := <-connections:
 				if !ok {
 					return
 				}

@@ -95,7 +95,7 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--heightmillimeters"></span>`heightMillimeters` | integer | no | The panel's physical height, as the monitor states it. |
 | <span id="status--physicaladdress"></span>`physicalAddress` | string | no | The HDMI-CEC physical address of the port this machine's cable is in, in the dotted form 1.2.0.0, from the HDMI vendor block of the EDID the connector serves. A CEC adapter announces this address when it speaks for this machine. The field keeps the last valid address while the connector serves no EDID for this monitor, while it serves no valid address in it, or while two connectors on this node serve this monitor with different addresses, and the PhysicalAddressCurrent condition says which. The field is absent while the monitor has never served a valid address, for example on a DisplayPort cable. 0.0.0.0, f.f.f.f, and an address with a non-zero digit after a zero are not valid. |
 | <span id="status--mode"></span>`mode` | [object](#statusmode) | no | The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows. |
-| <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. |
+| <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. It is absent while the operator holds no connection to a compositor. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels. |
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart. |
@@ -111,7 +111,7 @@ The mode this output runs, from the two parties that each report one. The kernel
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusmode--kernel"></span>`kernel` | string | no | The mode the card reports this connector is synced to, absent while it drives nothing. |
+| <span id="statusmode--kernel"></span>`kernel` | string | no | The mode the card reports this connector is synced to, absent while it drives nothing and while the operator holds no connection to a compositor. |
 | <span id="statusmode--weston"></span>`weston` | string | no | The mode the compositor reports it serves canvases at, from its own wl_output events, absent while the operator holds no connection to a compositor. |
 
 ### status.capabilities.*
@@ -301,9 +301,11 @@ A client draws at the second one. When the two values differ, the
 clients on that screen are drawn at the wrong size, and the
 operator restarts the compositor to correct it once the screens are
 free. `weston` is absent while the operator holds no connection to
-a compositor, and `kernel` is absent while the connector drives
-nothing. `kubectl get displays` shows the two as the `MODE` and
-`CANVAS` columns.
+a compositor. `kernel` is absent while the connector drives nothing,
+and also while the operator holds no connection to a compositor,
+because the operator opens the card only while it holds a connection
+to a compositor. `kubectl get displays` shows the two as the `MODE`
+and `CANVAS` columns.
 
 ## The physical address
 

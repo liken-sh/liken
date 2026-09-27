@@ -777,3 +777,41 @@ func TestAMessageWithAnImpossibleSizeEndsTheRead(t *testing.T) {
 		t.Error("a message of 65535 bytes was read as a message")
 	}
 }
+
+// The card gate reads the watch's live bit. A connection makes it
+// live and wakes the passes, so the fields a card read fills come back
+// as soon as a compositor serves, and the end of the connection closes
+// the gate again.
+func TestAConnectionOpensTheCardGateAndWakesThePasses(t *testing.T) {
+	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
+	watch := newOutputWatch(server.path, func(bool) {})
+	watch.retry = 10 * time.Millisecond
+	woken := make(chan bool, 8)
+	watch.connected = func() { woken <- watch.serving() }
+	ctx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	if watch.serving() {
+		t.Fatal("the watch serves before it has dialed")
+	}
+	go watch.run(ctx)
+	session := server.client()
+
+	select {
+	case serving := <-woken:
+		if !serving {
+			t.Error("the passes woke before the gate opened")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection woke no pass")
+	}
+
+	_ = os.Remove(watch.socketPath)
+	server.end(session)
+	deadline := time.Now().Add(5 * time.Second)
+	for watch.serving() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if watch.serving() {
+		t.Error("the gate stays open after the compositor ended")
+	}
+}

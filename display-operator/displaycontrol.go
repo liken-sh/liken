@@ -381,6 +381,11 @@ func (d *displayControl) restMode(ctx context.Context, display *Display, output 
 	if display.Spec.Mode == nil {
 		return nil
 	}
+	// A pass that read no mode list from the card cannot judge the
+	// mode, and the pass after the next read of the card applies it.
+	if !output.ModesRead {
+		return nil
+	}
 	want := *display.Spec.Mode
 	if !slices.Contains(output.OfferedModes, want) {
 		return fmt.Errorf("the spec states the mode %s, and %s offers %s",

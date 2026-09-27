@@ -134,9 +134,11 @@ func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 // is a claim's prepare changing the resolution. heal is the canvas
 // repair after the compositor re-creates an output. hung is the kill
 // the socket watch orders after the probe has read Hung for
-// compositorHungLimit. A compositor that exited on its own is none of
-// them: display_compositor_container_restarts_total counts that one,
-// from the kubelet's own restart count.
+// compositorHungLimit. masterless is the restart of a compositor that
+// holds no DRM master, which the card gate reports. A compositor that
+// exited on its own is none of them:
+// display_compositor_container_restarts_total counts that one, from
+// the kubelet's own restart count.
 func (m *metrics) compositorRestarted(reason string) {
 	if m == nil {
 		return

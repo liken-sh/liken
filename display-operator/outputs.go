@@ -74,12 +74,18 @@ type Output struct {
 	// path validates a mode against, where Modes above is the sysfs
 	// list of bare names. It is empty until withOfferedModes has run.
 	OfferedModes []string
+	// ModesRead is true when the card answered the read of its mode
+	// lists on this pass. A pass that read nothing, for example while
+	// the operator holds no connection to a compositor, knows no mode
+	// list, and an empty OfferedModes then says nothing about the card.
+	ModesRead bool
 	// CurrentMode is the mode this output runs right now, with the
 	// refresh the card reports: 3840x1600@24, the vocabulary a claim
 	// states, while Modes stays name-only. It comes from the card
 	// node, not from sysfs: sysfs publishes what a connector accepts
 	// and never what it drives. It is empty when the output drives
-	// nothing and when the card could not answer.
+	// nothing, when the card could not answer, and while the operator
+	// holds no connection to a compositor.
 	CurrentMode string
 	// Remembered is the monitor this connector carried the last time
 	// one answered on it. It is set only while the connector is dark,
@@ -131,6 +137,7 @@ func withOfferedModes(outputs []Output, offered map[string][]drmMode) []Output {
 	for i, output := range outputs {
 		out[i] = output
 		out[i].OfferedModes = modeStrings(offered[output.Connector])
+		out[i].ModesRead = offered != nil
 	}
 	return out
 }
