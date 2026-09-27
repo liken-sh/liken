@@ -217,3 +217,25 @@ func TestWatchClosesTheStreamAtOnceAfterAnError(t *testing.T) {
 		})
 	}
 }
+
+// slowStatus answers a watch with code after delay, the way a server
+// that is slow to refuse answers.
+func slowStatus(code int, delay time.Duration) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(delay)
+		w.WriteHeader(code)
+	}
+}
+
+func TestAWatchRefusedSlowlyIsStillAFailure(t *testing.T) {
+	// A watch's life starts when the server accepts it. A refusal that
+	// took longer than the shortest healthy watch never ran, so the
+	// 410 it carries is the second in a row, and the loop waits out
+	// the pause before it lists again.
+	fake := runScripted(t, 50*time.Millisecond,
+		stream(goneEvent), slowStatus(http.StatusGone, 100*time.Millisecond))
+	want := []string{"watch from 1", "list", "watch from 99", "pause", "list", "watch from 99"}
+	if got := fake.next(t, len(want)); !slices.Equal(got, want) {
+		t.Errorf("steps = %q, want %q", got, want)
+	}
+}

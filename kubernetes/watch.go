@@ -56,10 +56,13 @@ import (
 //     the stream at once and does not read the rest of it: a server
 //     can hold the stream open for minutes after an ERROR event, and
 //     every change in that time would reach the caller late.
-//   - A watch that closes less than a second after it opened is a
-//     failure, whatever it delivered, because a watch opened with no
-//     version replays every object first, and a broken stream can
-//     still deliver events. A watch that lived for a second or longer
+//   - A watch that closes less than a second after the server
+//     accepted it is a failure, whatever it delivered, because a watch
+//     opened with no version replays every object first, and a broken
+//     stream can still deliver events. The life starts when the 200
+//     arrives, not when the request began, so a slow dial or a slow
+//     refusal never counts as a watch that ran. A watch that lived for
+//     a second or longer
 //     counts as healthy even when it ended with an error, so a 410
 //     that ends it is a first 410 again. The pause is RetryPause's
 //     five to seven and a half seconds every time, so no backoff
@@ -101,9 +104,9 @@ const (
 func (w *machineWatch) run(resourceVersion string, restarted func()) {
 	relistedForGone := false
 	for {
-		opened := time.Now()
 		var outcome watchOutcome
-		outcome, resourceVersion = w.watch(resourceVersion)
+		var accepted time.Time
+		outcome, accepted, resourceVersion = w.watch(resourceVersion)
 
 		// Every arrival here is one restart: the stream ended, and
 		// the code below opens it again. A caller counts these,
@@ -112,7 +115,7 @@ func (w *machineWatch) run(resourceVersion string, restarted func()) {
 		// use it.
 		restarted()
 
-		healthy := time.Since(opened) >= w.minLife
+		healthy := !accepted.IsZero() && time.Since(accepted) >= w.minLife
 		if healthy {
 			relistedForGone = false
 		}
@@ -131,22 +134,24 @@ func (w *machineWatch) run(resourceVersion string, restarted func()) {
 }
 
 // watch opens one watch from resourceVersion, delivers its events,
-// and returns how the watch ended and the last version it delivered.
-func (w *machineWatch) watch(resourceVersion string) (watchOutcome, string) {
+// and returns how the watch ended, when the server accepted it (zero
+// when it did not), and the last version it delivered.
+func (w *machineWatch) watch(resourceVersion string) (watchOutcome, time.Time, string) {
 	path := MachinesPath + "?watch=true&allowWatchBookmarks=true" +
 		"&resourceVersion=" + url.QueryEscape(resourceVersion) + w.selector("&")
 	resp, err := w.c.Do(http.MethodGet, path, "", nil)
 	if err != nil {
-		return watchFailed, resourceVersion
+		return watchFailed, time.Time{}, resourceVersion
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusGone:
-		return watchGone, resourceVersion
+		return watchGone, time.Time{}, resourceVersion
 	default:
-		return watchFailed, resourceVersion
+		return watchFailed, time.Time{}, resourceVersion
 	}
+	accepted := time.Now()
 
 	decoder := json.NewDecoder(resp.Body)
 	for {
@@ -155,9 +160,9 @@ func (w *machineWatch) watch(resourceVersion string) (watchOutcome, string) {
 			Object json.RawMessage `json:"object"`
 		}
 		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
-			return watchClosed, resourceVersion
+			return watchClosed, accepted, resourceVersion
 		} else if err != nil {
-			return watchFailed, resourceVersion
+			return watchFailed, accepted, resourceVersion
 		}
 		if event.Type == "ERROR" {
 			// The object of an ERROR event is a Status, and its code
@@ -166,13 +171,13 @@ func (w *machineWatch) watch(resourceVersion string) (watchOutcome, string) {
 				Code int `json:"code"`
 			}
 			if json.Unmarshal(event.Object, &status) == nil && status.Code == http.StatusGone {
-				return watchGone, resourceVersion
+				return watchGone, accepted, resourceVersion
 			}
-			return watchFailed, resourceVersion
+			return watchFailed, accepted, resourceVersion
 		}
 		var m machine.Machine
 		if err := json.Unmarshal(event.Object, &m); err != nil {
-			return watchFailed, resourceVersion
+			return watchFailed, accepted, resourceVersion
 		}
 		if m.Metadata.ResourceVersion != "" {
 			resourceVersion = m.Metadata.ResourceVersion
