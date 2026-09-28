@@ -1,6 +1,9 @@
-# The controller plugin validates a VolumeAttributesClass and
-# holds no volume, so one replica serves the whole cluster and a restart
-# costs nothing.
+# The controller plugin validates a VolumeAttributesClass, marks the
+# PersistentVolumes a webhook names, and holds no volume, so one
+# replica serves the whole cluster and a restart costs nothing. A
+# second replica is safe too: the driver container answers each
+# webhook and each CSI call on its own, and the resizer sidecar acts
+# only while it holds its Lease.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -54,6 +57,39 @@ subjects:
     name: git-csi-driver-controller
     namespace: liken-system
 ---
+# The resizer sidecar elects one leader through a Lease in the
+# controller's namespace, so only one replica writes a claim's status.
+# client-go's leader election reads, creates, and renews the one Lease.
+# The sidecar names it external-resizer- and the driver name with each
+# character that is not a letter, a digit, or a dash made a dash. RBAC
+# cannot narrow create to one name, because the name of an object that
+# does not exist yet is not in the request's path.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: git-csi-driver-controller
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [external-resizer-git-liken-sh]
+    verbs: [get, update]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: git-csi-driver-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: git-csi-driver-controller
+subjects:
+  - kind: ServiceAccount
+    name: git-csi-driver-controller
+    namespace: liken-system
+---
 # The one address a forge posts to. The listener speaks plain HTTP, and
 # the Ingress the person writes terminates TLS, because that is where
 # the cluster already holds its certificates.
@@ -74,9 +110,20 @@ kind: Deployment
 metadata:
   name: git-csi-driver-controller
 spec:
-  # One replica, because the plugin changes nothing and a claim
-  # whose class is not validated for a minute costs nothing.
+  # One replica, because the plugin holds no volume and a claim
+  # whose class is not validated for a minute costs nothing. 2 is safe:
+  # the resizers elect one leader, and either driver container answers
+  # a webhook.
   replicas: 1
+  # The new pod starts before the old one stops, so the webhook is
+  # down for a moment at most during a rollout. The new resizer takes
+  # the Lease when the old one's expires, up to 30 seconds after the
+  # old pod stops, and a class change waits that long.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: git-csi-driver-controller
@@ -133,6 +180,17 @@ spec:
             # cluster serves no v1 VolumeAttributesClass, so the gate is
             # named here to keep it on.
             - --feature-gates=VolumeAttributesClass=true
+            # Two resizers that both act on one claim race on its
+            # status, so each one acts only while it holds the Lease.
+            # A leader tries to renew for the 10-second renew deadline,
+            # which starts one 5-second retry period after its last
+            # renew, so it gives up up to 15 seconds after that renew,
+            # and it still writes while it exits. A 15-second Lease,
+            # the sidecar's default, lets the next leader start at that
+            # same moment. The 30-second Lease leaves 15 seconds for
+            # the old resizer to exit.
+            - --leader-election
+            - --leader-election-lease-duration=30s
           securityContext:
             capabilities:
               drop: ["ALL"]

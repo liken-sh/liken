@@ -84,6 +84,12 @@ Nothing is planned. The next work comes out of
   contract: CSI operations as the reconcile layer, volumes mounted,
   fetch duration and failures per repository, and store size. This
   closes the open problem "Monitoring".
+* [14, The watches use client-go](completed/14-the-watches-use-client-go.md).
+  Built on 2026-09-27; the drill on liken-1 is still owed. The node
+  plugin's two watches run on client-go's reflector through the typed
+  clientset the driver already links, and the loop written by hand is
+  gone. The controller's resizer sidecar elects a leader, so two
+  replicas are safe.
 
 ## Open problems
 

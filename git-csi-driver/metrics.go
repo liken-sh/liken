@@ -122,10 +122,10 @@ func newMetrics() *metrics {
 			prometheus.CounterOpts{Name: "git_csi_reconcile_errors_total",
 				Help: "CSI calls that answered an error."}, callLabels),
 		// Every watch the node opens again after one ended is one
-		// restart, by the kind it watches. The API server closes a
-		// healthy watch after its request timeout, so each watch
-		// restarts about once or twice an hour. A rate well above that
-		// is a watch that fails. Only the node plugin watches
+		// restart, by the kind it watches. client-go's reflector asks
+		// the API server to close each watch after 5 to 10 minutes, so
+		// a healthy watch restarts 6 to 12 times an hour. A rate well
+		// above that is a watch that fails. Only the node plugin watches
 		// PersistentVolumes and claims, so only its registry moves this
 		// past zero.
 		watchRestarts: prometheus.NewCounterVec(

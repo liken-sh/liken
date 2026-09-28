@@ -71,3 +71,9 @@ The controller pod declares both ports, and the base includes a
 `Service` named `git-csi-driver-webhook` on port 80 in front of the
 webhook port. The [read-only guide](../read-only/#webhooks) says how a
 forge reaches it.
+
+The base runs one controller pod. To run two, patch the `Deployment`
+named `git-csi-driver-controller` to `replicas: 2`. Either pod answers
+a webhook. The `external-resizer` in each pod acts only while it holds
+the `Lease` named `external-resizer-git-liken-sh` in `liken-system`,
+so one resizer at a time writes a claim's status.

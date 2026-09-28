@@ -433,71 +433,42 @@ func TestADeletedClaimLeavesTheVolumeArmed(t *testing.T) {
 		})
 	held := armedVolume(t, answering, "config",
 		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+	armingClass(t, answering, "config-later", nil)
 
-	// The deleted claim names no class, so acting on it would unarm the
-	// volume. The send blocks until the loop reads the event, so the
-	// bookmark after it returns only once the loop has read the delete.
+	// The deleted claim names no class, so a read of it would unarm the
+	// volume and post an Event that says so. The claim after it names
+	// another class of this driver, and the informer hands the reads
+	// its events in order, so once that class is in force the delete
+	// has been through the handlers. The test catches a handler that
+	// arms from a delete only when the reads take the deleted copy
+	// before the next one replaces it in the slot, so it can pass
+	// where such a handler exists.
 	sent.Delete(&corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
 	})
-	sent.Action(watch.Bookmark, &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{ResourceVersion: "250"},
+	later := "config-later"
+	sent.Modify(&corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
+		Spec:       corev1.PersistentVolumeClaimSpec{VolumeAttributesClassName: &later},
 	})
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) && classOf(held) != later {
+		time.Sleep(10 * time.Millisecond)
+	}
 
-	if _, armed, _ := held.reading(); !armed {
-		t.Error("a deleted claim unarmed the volume")
+	if class := classOf(held); class != later {
+		t.Fatalf("the volume is armed by %q, want %q", class, later)
+	}
+	if posted := eventsWithReason(t, answering, reasonUnarmed); len(posted) != 0 {
+		t.Errorf("a deleted claim unarmed the volume: %v", posted)
 	}
 }
 
-func TestAListTheAPIServerRefusesIsLogged(t *testing.T) {
-	for _, c := range []struct {
-		name     string
-		resource string
-		follow   func(ctx context.Context, answering *node)
-		kind     string
-	}{
-		{
-			name:     "the PersistentVolumes",
-			resource: "persistentvolumes",
-			follow:   func(ctx context.Context, answering *node) { answering.demands.follow(ctx) },
-			kind:     persistentVolumeKind,
-		},
-		{
-			name:     "a claim",
-			resource: "persistentvolumeclaims",
-			follow: func(ctx context.Context, answering *node) {
-				answering.arms.follow(ctx, volumeNamed("config"))
-			},
-			kind: persistentVolumeClaimKind,
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			logs := &logbook{}
-			answering, _ := testNode(t, logs)
-			boundVolume(t, answering, "config", "")
-			cluster(t, answering).PrependReactor("list", c.resource,
-				func(k8stesting.Action) (bool, runtime.Object, error) {
-					return true, nil, errors.New("the api server said no")
-				})
-			ctx, stop := context.WithCancel(t.Context())
-			over := make(chan struct{})
-			go func() {
-				defer close(over)
-				c.follow(ctx, answering)
-			}()
-
-			want := `msg="the list failed" kind=` + c.kind
-			deadline := time.Now().Add(30 * time.Second)
-			for time.Now().Before(deadline) && !strings.Contains(logs.String(), want) {
-				time.Sleep(10 * time.Millisecond)
-			}
-			stop()
-			<-over
-			if !strings.Contains(logs.String(), want) {
-				t.Errorf("the log is %q, want %q in it", logs, want)
-			}
-		})
-	}
+// classOf is the class the volume last read from its claim.
+func classOf(held *volume) string {
+	held.mu.Lock()
+	defer held.mu.Unlock()
+	return held.class
 }
 
 // waitForEvents waits until the node has posted the number of Events

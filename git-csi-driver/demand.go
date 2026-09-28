@@ -6,14 +6,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 // demandAnnotation is where a demand is written. The value is the time
@@ -55,7 +57,6 @@ type demanding struct {
 	node   *node
 	client kubernetes.Interface
 	logger *slog.Logger
-	retry  time.Duration
 
 	// seen is the last demand the node read, by volume handle, whether
 	// or not this node staged the handle. A stage reads it when it adds
@@ -69,56 +70,62 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 		node:   answering,
 		client: client,
 		logger: logger,
-		retry:  defaultRetry,
 		seen:   map[string]time.Time{},
 	}
 }
 
 // follow holds the list and the watch for the driver's whole run. A
 // driver outside a cluster holds no client, so it reads no demand. The
-// list reads every PersistentVolume once, which catches a demand
+// first read takes every PersistentVolume once, which catches a demand
 // written while no watch was open, and the watch carries every demand
 // after it.
+//
+// Every add and every update is read, because a demand is an
+// annotation, and an annotation changes no generation. read acts only
+// on a demand later than what the volume's last fetch answered, so a
+// status write the watch also sends acts on nothing.
 func (d *demanding) follow(ctx context.Context) {
 	if d.client == nil {
 		return
 	}
 	volumes := d.client.CoreV1().PersistentVolumes()
-	(&listWatch{
-		kind: persistentVolumeKind,
-		list: func(ctx context.Context) (string, error) {
-			held, err := volumes.List(ctx, metav1.ListOptions{})
-			if err != nil {
-				return "", err
-			}
-			// The list is the whole state, so a value for a volume it
-			// no longer holds belongs to a deleted PersistentVolume.
-			d.mu.Lock()
-			d.seen = map[string]time.Time{}
-			d.mu.Unlock()
-			for i := range held.Items {
-				d.read(ctx, &held.Items[i])
-			}
-			return held.ResourceVersion, nil
+	collection{
+		kind:   persistentVolumeKind,
+		client: d.client,
+		object: &corev1.PersistentVolume{},
+		list: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			return volumes.List(ctx, options)
 		},
 		watch: volumes.Watch,
-		act: func(ctx context.Context, event watch.Event) error {
-			held, isVolume := event.Object.(*corev1.PersistentVolume)
-			switch {
-			case !isVolume:
-			case event.Type == watch.Deleted:
-				d.forget(held)
-			default:
-				// A bookmark is a PersistentVolume with no spec, so
-				// read passes over it.
-				d.read(ctx, held)
-			}
-			return nil
+		handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(object any) {
+				d.read(ctx, object.(*corev1.PersistentVolume))
+			},
+			UpdateFunc: func(_, object any) {
+				d.read(ctx, object.(*corev1.PersistentVolume))
+			},
+			DeleteFunc: func(object any) { d.deleted(ctx, object) },
 		},
-		retry:    d.retry,
-		logger:   d.logger,
 		readings: d.node.readings,
-	}).follow(ctx)
+	}.follow(ctx)
+}
+
+// deleted forgets the demand of a PersistentVolume the watch reports
+// deleted. A read after a gap in the watch reports a PersistentVolume
+// it no longer holds as a tombstone, which carries the last copy the
+// informer held.
+func (d *demanding) deleted(ctx context.Context, object any) {
+	held, isVolume := unwrapped(object).(*corev1.PersistentVolume)
+	if !isVolume {
+		// The informer of a typed kind stores only that kind, so this
+		// names a fault in client-go. The demand stays in seen, where
+		// it costs one entry and acts on nothing new, because a fetch
+		// already answered it.
+		d.logger.WarnContext(ctx, "the delete carries no PersistentVolume",
+			"object", fmt.Sprintf("%#v", object))
+		return
+	}
+	d.forget(held)
 }
 
 // read acts on one PersistentVolume. It acts only when the volume is

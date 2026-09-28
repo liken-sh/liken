@@ -8,13 +8,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 // persistentVolumeClaimKind is what git_csi_watch_restarts_total names
@@ -67,7 +70,12 @@ func (n *node) disarm(staged *volume) {
 // follow finds the claim, then lists it and watches it until the
 // driver stops. The list and the watch select the claim by name, so a
 // claim that does not exist yet costs one list, and its creation
-// arrives as an event.
+// arrives as an event. It returns only after the watch and the reads
+// have ended.
+//
+// Every add and every update is read, status writes included, because
+// the resizer records the class in force on the claim's status. A
+// deleted claim arms nothing new, so a delete is not read.
 func (a *arming) follow(ctx context.Context, staged *volume) {
 	claim, found := a.find(ctx, staged)
 	if !found {
@@ -75,37 +83,73 @@ func (a *arming) follow(ctx context.Context, staged *volume) {
 	}
 	claims := a.client.CoreV1().PersistentVolumeClaims(claim.namespace)
 	selector := "metadata.name=" + claim.name
-	(&listWatch{
-		kind: persistentVolumeClaimKind,
-		list: func(ctx context.Context) (string, error) {
-			held, err := claims.List(ctx, metav1.ListOptions{FieldSelector: selector})
-			if err != nil {
-				return "", err
-			}
-			for i := range held.Items {
-				if err := a.read(ctx, staged, claim, &held.Items[i]); err != nil {
-					return "", err
-				}
-			}
-			return held.ResourceVersion, nil
+	// The slot holds the newest copy of the claim that the reads have
+	// not taken. Only the informer's one handler goroutine sends, so a
+	// send after the drain always finds the slot empty.
+	latest := make(chan *corev1.PersistentVolumeClaim, 1)
+	offer := func(object any) {
+		select {
+		case <-latest:
+		default:
+		}
+		latest <- object.(*corev1.PersistentVolumeClaim)
+	}
+	var reading sync.WaitGroup
+	reading.Go(func() { a.reads(ctx, staged, claim, latest) })
+	collection{
+		kind:   persistentVolumeClaimKind,
+		client: a.client,
+		object: &corev1.PersistentVolumeClaim{},
+		list: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = selector
+			return claims.List(ctx, options)
 		},
 		watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			options.FieldSelector = selector
 			return claims.Watch(ctx, options)
 		},
-		act: func(ctx context.Context, event watch.Event) error {
-			// A deleted claim arms nothing new. A bookmark is a claim
-			// with no name, and read passes over it.
-			held, isClaim := event.Object.(*corev1.PersistentVolumeClaim)
-			if !isClaim || event.Type == watch.Deleted {
-				return nil
-			}
-			return a.read(ctx, staged, claim, held)
+		handler: cache.ResourceEventHandlerFuncs{
+			AddFunc:    offer,
+			UpdateFunc: func(_, object any) { offer(object) },
 		},
-		retry:    a.retry,
-		logger:   a.logger,
 		readings: a.node.readings,
-	}).follow(ctx)
+	}.follow(ctx)
+	reading.Wait()
+}
+
+// reads arms the volume from each copy of the claim the watch offers,
+// until the driver stops. A read that fails is made again after the
+// retry, with the newest copy the watch offered by then. A class that
+// arrives after the claim names it sends no event on the claim, so the
+// read after the retry is what finds it.
+func (a *arming) reads(
+	ctx context.Context, staged *volume, claim claimReference, latest <-chan *corev1.PersistentVolumeClaim,
+) {
+	for {
+		var held *corev1.PersistentVolumeClaim
+		select {
+		case <-ctx.Done():
+			return
+		case held = <-latest:
+		}
+		for {
+			err := a.read(ctx, staged, claim, held)
+			if err == nil {
+				break
+			}
+			a.logger.WarnContext(ctx, "the claim was not read",
+				"volume", staged.id, "claim", claim.namespace+"/"+claim.name, "error", err)
+			waitOut(ctx, a.retry)
+			if ctx.Err() != nil {
+				return
+			}
+			select {
+			case newer := <-latest:
+				held = newer
+			default:
+			}
+		}
+	}
 }
 
 // find reads the claim the volume is bound to, and reads it again
@@ -152,8 +196,8 @@ func (a *arming) claimOf(ctx context.Context, handle string) (claimReference, er
 
 // read takes the class the claim names and arms the volume when that
 // class belongs to this driver. A class the node could not read is an
-// error, so the loop reads the claim and the class again after the
-// retry. A class that arrives after the claim names it sends no event
+// error, so reads reads the class again after the retry, with the
+// newest copy of the claim the watch offered by then. A class that arrives after the claim names it sends no event
 // on the claim, and that read is what finds it.
 func (a *arming) read(
 	ctx context.Context, staged *volume, claim claimReference, held *corev1.PersistentVolumeClaim,

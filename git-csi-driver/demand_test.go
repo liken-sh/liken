@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/cache"
 )
 
 // demandPull annotates the PersistentVolume, which is the one action
@@ -222,6 +223,18 @@ func TestADemandReadWhileTheVolumeStagesIsActedOnWhenTheStageEnds(t *testing.T) 
 	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
 
 	waitForCondition(t, held, ", demanded ")
+	waitForPass(t, answering, held)
+}
+
+// waitForPass waits until the pass the demand started has ended. The
+// pass writes into the store, and a pass that outlives the test writes
+// while the test's cleanup removes the store. The pass records its
+// start under the repository's lock and holds the lock until it ends,
+// so the lock is free again only after the pass.
+func waitForPass(t *testing.T, answering *node, held *volume) {
+	t.Helper()
+	waitForCondition(t, held, ", pulled ")
+	answering.store.repository(held.attributes.url).lock()()
 }
 
 func TestAnOldDemandIsNotActedOnWhenTheVolumeStages(t *testing.T) {
@@ -274,11 +287,7 @@ func TestADeletedPersistentVolumeTakesItsDemandAway(t *testing.T) {
 	sent.Modify(demanded)
 	sent.Delete(demanded)
 	sent.Delete(&corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "local"}})
-	// The send blocks until the loop reads the event, so the bookmark
-	// returns only once the loop has read the delete.
-	sent.Action(watch.Bookmark, &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{ResourceVersion: "250"},
-	})
+	settled(t, answering, sent)
 	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
 
 	noDemand(t, held)
@@ -300,10 +309,10 @@ func TestAListThatNoLongerHoldsAPersistentVolumeTakesItsDemandAway(t *testing.T)
 	if err := volumes.Delete(t.Context(), "franchises", metav1.DeleteOptions{}); err != nil {
 		t.Fatalf("deleting the PersistentVolume: %v", err)
 	}
-	// A 410 makes the loop list again, and the second watch opens only
-	// after that list.
+	// A 410 makes the informer list again, and the second watch opens
+	// only after that list.
 	sent.Action(watch.Error, gone().Object)
-	<-opened
+	settled(t, answering, <-opened)
 	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
 
 	noDemand(t, held)
@@ -316,13 +325,24 @@ func writeableDemand(at string) *corev1.PersistentVolume {
 	return annotated(csiVolume("config", driverName), at)
 }
 
-// bookmarked sends a bookmark on the watch. The send blocks until the
-// loop reads the event, so it returns only once the loop has read every
-// event sent before it.
-func bookmarked(sent *watch.FakeWatcher) {
-	sent.Action(watch.Bookmark, &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{ResourceVersion: "250"},
-	})
+// settled sends a demand on a PersistentVolume no test stages, and
+// waits until the node has read it. The informer hands the handlers
+// its events in the order the watch sent them, so settled returns only
+// once the node has read every event sent before it.
+func settled(t *testing.T, answering *node, sent *watch.FakeWatcher) {
+	t.Helper()
+	sent.Modify(annotated(csiVolume("sentinel", driverName), oldDemand))
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		answering.demands.mu.Lock()
+		_, read := answering.demands.seen["sentinel"]
+		answering.demands.mu.Unlock()
+		if read {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the node did not read the sentinel within 30s")
 }
 
 func TestARecreatedPersistentVolumeWithTheSameDemandIsNotActedOnAgain(t *testing.T) {
@@ -366,7 +386,7 @@ func TestARecreatedPersistentVolumeWithTheSameDemandIsNotActedOnAgain(t *testing
 			sent.Modify(writeableDemand(at))
 			sent = c.delete(t, answering, sent, opened)
 			sent.Add(writeableDemand(at))
-			bookmarked(sent)
+			settled(t, answering, sent)
 
 			if got := strings.Count(logs.String(), "the demand did nothing"); got != 1 {
 				t.Errorf("the log says the demand did nothing %d times, want 1 (%q)", got, logs)
@@ -389,7 +409,7 @@ func TestARelistActsOnceOnADemandItAlreadyActedOn(t *testing.T) {
 	demandPull(t, answering, "config", at)
 	sent.Modify(writeableDemand(at))
 	sent.Action(watch.Error, gone().Object)
-	bookmarked(<-opened)
+	settled(t, answering, <-opened)
 
 	if got := strings.Count(logs.String(), "the demand did nothing"); got != 1 {
 		t.Errorf("the log says the demand did nothing %d times, want 1 (%q)", got, logs)
@@ -653,5 +673,16 @@ func TestARestartedWatchCountsOnGitCSIWatchRestartsTotal(t *testing.T) {
 
 	if count, found := watchRestartsOf(t, answering.readings, persistentVolumeKind); !found || count == 0 {
 		t.Errorf("git_csi_watch_restarts_total reads %v (found: %v), want at least one restart", count, found)
+	}
+}
+
+func TestADeleteWithNoCopyOfThePersistentVolumeIsLogged(t *testing.T) {
+	logs := &logbook{}
+	answering, _ := testNode(t, logs)
+
+	answering.demands.deleted(t.Context(), cache.DeletedFinalStateUnknown{Key: "franchises"})
+
+	if !strings.Contains(logs.String(), `msg="the delete carries no PersistentVolume"`) {
+		t.Errorf("the log is %q, want the delete that carries no PersistentVolume", logs)
 	}
 }

@@ -47,7 +47,6 @@ func TestARestartCountsOneDemandForAnOldAnnotation(t *testing.T) {
 	again.arms.client = answering.arms.client
 	again.mounted = func(string) bool { return true }
 	again.demands = newDemanding(again, cluster(t, answering), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	again.demands.retry = 20 * time.Millisecond
 	again.resume(t.Context())
 	again.mu.Lock()
 	resumed := again.staged["franchises"]

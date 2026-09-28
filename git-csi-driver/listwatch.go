@@ -5,190 +5,110 @@ package main
 // finds a change only at the next tick, so the node reads the whole
 // state once, then follows every change after that read through a
 // watch.
+//
+// client-go's reflector runs each watch. It reads the whole collection
+// first, as a list or as the initial events of a streaming list, and
+// then watches from the version that read returned, so it receives
+// every change made after the read. It resumes a watch that the API
+// server closed from the last version it delivered, reads the
+// collection again after a 410 Gone, and backs off while the API
+// server fails. Upstream maintains and tests that loop, so the driver
+// keeps none of its own.
+//
+// The driver watches through the typed clientset, not the dynamic
+// client. It already links the typed clientset for every read and
+// write it makes, and it watches only built-in kinds. So the watch
+// links tools/cache and the few packages it imports and no client of
+// its own, and each handler receives a typed object with no
+// conversion step.
 
 import (
 	"context"
-	"log/slog"
+	"sync/atomic"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 )
 
-// defaultRetry is how long the node waits after a call to the API
-// server failed before it makes the call again. It bounds the load a
-// refusing API server takes from each list and watch to one failed
-// call per wait. Inside one call, client-go retries a request that the
-// server resets, or answers with Retry-After, up to ten times about a
-// second apart, so one failed call can be up to eleven requests. The
-// typed client sets that count on each request and offers no way to
-// change it.
+// defaultRetry is how long the node waits after a read of the cluster
+// failed before it reads again. It bounds the load a refusing API
+// server takes from each volume's search for its claim, and from each
+// class the node could not read, to one failed call per wait. Inside
+// one call, client-go retries a request that the server resets, or
+// answers with Retry-After, up to ten times about a second apart, so
+// one failed call can be up to eleven requests. The typed client sets
+// that count on each request and offers no way to change it.
 const defaultRetry = 30 * time.Second
 
-// listWatch is one list and the watch that continues from it. The watch
-// opens at the list's resourceVersion, so the API server sends every
-// change made after the list, and a change between the list and the
-// watch is not lost.
-type listWatch struct {
-	// kind labels git_csi_watch_restarts_total and the log lines.
+// collection is one list and the watch that continues from it.
+type collection struct {
+	// kind labels git_csi_watch_restarts_total.
 	kind string
-	// list reads the whole state, acts on each object in it, and
-	// returns the list's resourceVersion.
-	list func(ctx context.Context) (string, error)
-	// watch opens a watch with the options the loop gives it.
-	watch func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error)
-	// act reads one event. An error from act means the node could not
-	// finish reading the state, so the loop waits and lists again.
-	act func(ctx context.Context, event watch.Event) error
-
-	retry    time.Duration
-	logger   *slog.Logger
+	// client is the clientset the list and the watch call. A fake
+	// clientset declares that it does not answer a streaming list, and
+	// the reflector reads that declaration from the client.
+	client any
+	// object is an empty object of the kind, which tells the informer
+	// what the watch decodes to.
+	object runtime.Object
+	list   func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error)
+	watch  func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error)
+	// handler takes every object of the first read, and every change
+	// after it.
+	handler  cache.ResourceEventHandler
 	readings *metrics
-
-	// opened is true once a watch has opened, so every later watch
-	// counts as a restart.
-	opened bool
 }
 
-// versioned is an object that carries a resourceVersion. Every object
-// an API server sends does, including the bookmark that only moves the
-// version forward.
-type versioned interface {
-	GetResourceVersion() string
-}
-
-// shortWatch is the shortest life of a healthy watch. A watch that
-// closes sooner failed, whatever it sent, so the next one waits out the
-// retry first. Without the wait, a server that closes every watch at
-// once takes a watch call as fast as it answers.
-const shortWatch = time.Second
-
-// follow holds the list and the watch until the context ends. An empty
-// version means the next pass lists, and any other version is where
-// the next watch resumes.
-//
-// A 410 Gone lists again at once, but only once in a row. A server
-// that answers 410 to the version of a list it just made answers 410
-// to the next one too, so the loop waits out the retry before that
-// list, or it lists and watches as fast as the server answers. A 410
-// that ends a watch which ran for shortWatch or longer is a first 410
-// again, because that watch was healthy.
-func (l *listWatch) follow(ctx context.Context) {
-	version := ""
-	relisted := false
-	for ctx.Err() == nil {
-		if version == "" {
-			listed, err := l.list(ctx)
-			if err != nil {
-				l.logger.WarnContext(ctx, "the list failed", "kind", l.kind, "error", err)
-				waitOut(ctx, l.retry)
-				continue
+// follow runs the watch until the context ends. It returns only after
+// the last handler call.
+func (c collection) follow(ctx context.Context) {
+	// Every watch after the first counts as a restart. The reflector
+	// opens one watch at a time. The flag is atomic all the same, so a
+	// change in client-go that opens watches from two goroutines makes
+	// no data race here.
+	var opened atomic.Bool
+	source := &cache.ListWatch{
+		ListWithContextFunc: c.list,
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			watching, err := c.watch(ctx, options)
+			if err == nil && opened.Swap(true) {
+				c.readings.watchRestarted(c.kind)
 			}
-			version = listed
-		}
-		next, gone, ran := l.hold(ctx, version)
-		if gone && relisted && !ran {
-			waitOut(ctx, l.retry)
-		}
-		relisted = gone
-		version = next
+			return watching, err
+		},
 	}
-}
-
-// hold watches from the version until the watch ends. It returns the
-// version the next watch resumes from, or an empty version when the
-// next pass must list, whether the watch ended on a 410 Gone, and
-// whether that watch ran for shortWatch or longer first.
-func (l *listWatch) hold(ctx context.Context, from string) (string, bool, bool) {
-	// A bookmark carries the newest resourceVersion while no object
-	// changes, so a watch that the API server closes resumes from a
-	// version the server still serves.
-	watching, err := l.watch(ctx, metav1.ListOptions{
-		ResourceVersion:     from,
-		AllowWatchBookmarks: true,
+	_, informer := cache.NewInformerWithOptions(cache.InformerOptions{
+		ListerWatcher: cache.ToListWatcherWithWatchListSemantics(source, c.client),
+		ObjectType:    c.object,
+		Handler:       c.handler,
+		Transform:     dropManagedFields,
 	})
-	if expired(err) {
-		// 410 Gone: the server no longer holds the changes after this
-		// version, so only a new list reads them.
-		l.logger.InfoContext(ctx, "the watch version expired", "kind", l.kind, "error", err)
-		return "", true, false
-	}
-	if err != nil {
-		l.logger.WarnContext(ctx, "the watch failed", "kind", l.kind, "error", err)
-		waitOut(ctx, l.retry)
-		return from, false, false
-	}
-	// Every path out stops the watch. A path that waits out the retry
-	// stops it first, so the stream does not stay open through the
-	// wait. A second Stop does nothing.
-	defer watching.Stop()
-	if l.opened {
-		l.readings.watchRestarted(l.kind)
-	}
-	l.opened = true
-	began := time.Now()
-
-	version := from
-	for {
-		select {
-		case <-ctx.Done():
-			return version, false, false
-		case event, open := <-watching.ResultChan():
-			if !open {
-				// The API server closes a healthy watch after its
-				// request timeout, and the next watch resumes at once.
-				if time.Since(began) < shortWatch {
-					waitOut(ctx, l.retry)
-				}
-				return version, false, false
-			}
-			if event.Type == watch.Error {
-				// A 410 Gone arrives as an error event, and so does any
-				// other failure on the stream. The node lists again,
-				// because it cannot tell which changes it missed. Only
-				// a 410 lists at once: any other error waits first, so
-				// a server that fails every watch takes one list per
-				// wait.
-				err := apierrors.FromObject(event.Object)
-				l.logger.InfoContext(ctx, "the watch ended with an error", "kind", l.kind,
-					"error", err)
-				if expired(err) {
-					return "", true, time.Since(began) >= shortWatch
-				}
-				watching.Stop()
-				waitOut(ctx, l.retry)
-				return "", false, false
-			}
-			held, decoded := event.Object.(versioned)
-			if !decoded {
-				// An object the client could not decode carries no
-				// version to resume from, so the event counts as an
-				// error. Without the wait, the loop opens the watch at
-				// the same version again and reads the same event.
-				l.logger.WarnContext(ctx, "the event did not decode", "kind", l.kind,
-					"type", event.Type)
-				watching.Stop()
-				waitOut(ctx, l.retry)
-				return "", false, false
-			}
-			if held.GetResourceVersion() != "" {
-				version = held.GetResourceVersion()
-			}
-			if err := l.act(ctx, event); err != nil {
-				l.logger.WarnContext(ctx, "the event was not read", "kind", l.kind, "error", err)
-				watching.Stop()
-				waitOut(ctx, l.retry)
-				return "", false, false
-			}
-		}
-	}
+	informer.RunWithContext(ctx)
 }
 
-// expired reports whether the error is a 410 Gone, which the API server
-// sends with the reason Expired or the reason Gone.
-func expired(err error) bool {
-	return apierrors.IsResourceExpired(err) || apierrors.IsGone(err)
+// dropManagedFields removes metadata.managedFields from each object
+// before the informer stores it. The field records which client set
+// each field of the object. The driver never reads it, and without the
+// transform the informer holds a copy of it for every
+// PersistentVolume in the cluster.
+func dropManagedFields(object any) (any, error) {
+	if item, ok := object.(metav1.Object); ok {
+		item.SetManagedFields(nil)
+	}
+	return object, nil
+}
+
+// unwrapped is the object a delete names. For an object deleted while
+// the watch was down, the informer sends a tombstone that holds the
+// last copy it knew.
+func unwrapped(object any) any {
+	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
+		return tombstone.Obj
+	}
+	return object
 }
 
 // waitOut waits out the retry after a call that failed, and ends early
