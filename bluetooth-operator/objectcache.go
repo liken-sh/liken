@@ -35,6 +35,8 @@ package main
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"sync"
 
 	"k8s.io/client-go/tools/cache"
@@ -46,6 +48,13 @@ import (
 type storeView struct {
 	store  cache.Store
 	synced func() bool
+
+	// whole says the watch takes every object of the kind, with no
+	// selector. A list from such a store also holds each object this
+	// operator created or wrote that the store does not hold yet. A
+	// store with a selector leaves that out, because an object the
+	// operator wrote can be outside the selection.
+	whole bool
 }
 
 // ready reports whether a list can come from the store.
@@ -61,9 +70,31 @@ func (v storeView) ready() bool {
 type versionMemo struct {
 	mu   sync.Mutex
 	seen map[string]string
+
+	// requests holds, for each object, one request at a time with the
+	// note of its answer, so the memo notes the answers in the order the
+	// API server gave them. Two goroutines that write one object could
+	// otherwise note the older answer last, and a store's copy at that
+	// older version would then count as current. Requests about other
+	// objects do not wait.
+	requests map[string]*sync.Mutex
 }
 
-func newVersionMemo() *versionMemo { return &versionMemo{seen: map[string]string{}} }
+func newVersionMemo() *versionMemo {
+	return &versionMemo{seen: map[string]string{}, requests: map[string]*sync.Mutex{}}
+}
+
+// requestsOf answers the lock of one object's requests.
+func (m *versionMemo) requestsOf(key string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	held, ok := m.requests[key]
+	if !ok {
+		held = &sync.Mutex{}
+		m.requests[key] = held
+	}
+	return held
+}
 
 // current reports whether a store's copy at this version is at least as
 // new as every copy this operator wrote or read.
@@ -78,8 +109,8 @@ func (m *versionMemo) current(key, version string) bool {
 }
 
 // note records the version of a copy the API server answered. An empty
-// version records an object the API server no longer holds, and no
-// copy in a store matches it.
+// version records an object the API server no longer holds, or one
+// another writer changed, and no copy in a store matches it.
 func (m *versionMemo) note(key, version string) {
 	if m == nil {
 		return
@@ -87,6 +118,44 @@ func (m *versionMemo) note(key, version string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.seen[key] = version
+}
+
+// unheld answers each key the memo noted at a version, which the store
+// does not hold.
+func (m *versionMemo) unheld(store cache.Store) []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var keys []string
+	for key, version := range m.seen {
+		if _, held, _ := store.GetByKey(key); !held && version != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// send runs one request about one object, and notes the version of the
+// copy the API server answered. A failed request notes the empty
+// version: after a 404 or a 409 the operator holds no copy of the API
+// server's, and a write whose answer was lost may have landed. The
+// next read of the object then goes to the API server.
+func (m *versionMemo) send(key string, request func() (version string, err error)) error {
+	if m == nil {
+		_, err := request()
+		return err
+	}
+	requests := m.requestsOf(key)
+	requests.Lock()
+	defer requests.Unlock()
+	version, err := request()
+	if err != nil {
+		version = ""
+	}
+	m.note(key, version)
+	return err
 }
 
 // heldObjects is one kind's store, and the memo of the copies this
@@ -132,12 +201,26 @@ func cachedCopy[T any](view storeView, key string) (*T, bool) {
 	return &item, true
 }
 
-// cachedList answers every copy in the store. A copy that does not
-// convert is logged and left out, the same as a watch event that does
-// not convert.
+// storedObjects answers every object in the store, in the order of
+// their keys, which is the order of a list from the API server.
+func storedObjects(view storeView) []any {
+	objects := view.store.List()
+	slices.SortFunc(objects, func(a, b any) int { return strings.Compare(objectKey(a), objectKey(b)) })
+	return objects
+}
+
+// objectKey is the key a store holds an object under.
+func objectKey(object any) string {
+	key, _ := cache.MetaNamespaceKeyFunc(object)
+	return key
+}
+
+// cachedList answers every copy in the store, in the order of their
+// keys. A copy that does not convert is logged and left out, the same
+// as a watch event that does not convert.
 func cachedList[T any](view storeView) []T {
 	var items []T
-	for _, object := range view.store.List() {
+	for _, object := range storedObjects(view) {
 		item, err := convert[T](object)
 		if err != nil {
 			reportUnconverted("the cached objects", err)
@@ -165,30 +248,40 @@ func readFresh[T any, P interface {
 	*T
 	metaObject
 }](c *Client, versions *versionMemo, key, path string) (*T, error) {
-	fresh, err := get[T](c, path)
-	switch {
-	case err == nil:
-		versions.note(key, P(fresh).meta().ResourceVersion)
-	case errors.Is(err, ErrNotFound):
-		versions.note(key, "")
-	}
+	var fresh *T
+	err := versions.send(key, func() (string, error) {
+		var err error
+		if fresh, err = get[T](c, path); err != nil {
+			return "", err
+		}
+		return P(fresh).meta().ResourceVersion, nil
+	})
 	return fresh, err
 }
 
-// currentList answers the store's copies, with each copy that is older
-// than this operator's own last write replaced by the API server's
-// copy, and each object the API server no longer holds left out.
+// currentList answers the store's copies, in the order of their keys.
+// A copy that is older than this operator's own last write, or that
+// does not convert, is replaced by the API server's copy, and an object
+// the API server no longer holds is left out. A store that holds the
+// whole collection also answers each object the memo noted and the
+// store does not hold yet, such as one this operator created a moment
+// ago, so a pass does not create it again.
 func currentList[T any, P interface {
 	*T
 	metaObject
 }](c *Client, held heldObjects, path func(key string) string) ([]T, error) {
-	items := cachedList[T](held.view)
-	current := items[:0]
-	for index := range items {
-		meta := P(&items[index]).meta()
-		key := storeKey(meta)
-		if held.versions.current(key, meta.ResourceVersion) {
-			current = append(current, items[index])
+	keys := held.view.store.ListKeys()
+	if held.view.whole {
+		keys = append(keys, held.versions.unheld(held.view.store)...)
+	}
+	slices.Sort(keys)
+	// The store can take a key between the two reads, so a key can
+	// appear twice.
+	keys = slices.Compact(keys)
+	current := make([]T, 0, len(keys))
+	for _, key := range keys {
+		if copied, ok := cachedCopy[T](held.view, key); ok && held.versions.current(key, P(copied).meta().ResourceVersion) {
+			current = append(current, *copied)
 			continue
 		}
 		fresh, err := readFresh[T, P](c, held.versions, key, path(key))
@@ -216,19 +309,25 @@ func stale(err error) bool {
 // gone, reads the object again, applies again to the fresh copy, and
 // writes once more. It reports whether a write landed, and an object
 // that is gone answers ErrNotFound. Each copy the API server answers
-// is noted in versions.
+// is noted in versions. After an error, held carries the status that
+// apply set, which the API server did not take.
 func settleStatus[T any, P interface {
 	*T
 	metaObject
 }](c *Client, versions *versionMemo, path string, held *T, apply func(*T) bool) (bool, error) {
 	key := storeKey(P(held).meta())
+	write := func() error {
+		return versions.send(key, func() (string, error) {
+			if err := replaceStatus(c, path, held); err != nil {
+				return "", err
+			}
+			return P(held).meta().ResourceVersion, nil
+		})
+	}
 	if !apply(held) {
 		return false, nil
 	}
-	err := replaceStatus(c, path, held)
-	if err == nil {
-		versions.note(key, P(held).meta().ResourceVersion)
-	}
+	err := write()
 	if !stale(err) {
 		return err == nil, err
 	}
@@ -240,10 +339,9 @@ func settleStatus[T any, P interface {
 	if !apply(held) {
 		return false, nil
 	}
-	if err := replaceStatus(c, path, held); err != nil {
+	if err := write(); err != nil {
 		return false, err
 	}
-	versions.note(key, P(held).meta().ResourceVersion)
 	return true, nil
 }
 

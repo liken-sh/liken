@@ -227,6 +227,20 @@ write yet. The stripped binary grew from 19,964,064 to 20,013,216
 bytes, and the linked package count stayed at 474. The pass model does not change: one full pass for
 each wake, through the settle window.
 
+### One shape for the store reads
+
+The organization chose this memo as the one way to read from a store,
+and `audio-operator`, `display-operator`, and `equipment-operator` now
+hold the same types and functions in `objectcache.go`. The shared form
+adds `versionMemo.send`, which runs one request for an object at a
+time and notes the version it answers, or the empty version after a
+failure. `display-operator` needs the order that gives, because two
+of its passes write the same `Display` on their own goroutines.
+`readFresh`, `settleStatus`, and the bond store's `fetchBond` send
+through it. One pass goroutine writes every kind here, so the other
+writes note their versions with `note` and do not take the request
+lock.
+
 ## Measurements
 
 Each binary ran only its watches, on the laptop, against a k3s

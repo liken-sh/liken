@@ -286,13 +286,14 @@ func (s *bondStore) readBond(key, path string) (*bonds.Secret, error) {
 // fetchBond reads one bond's Secret from the API server and notes its
 // version.
 func (s *bondStore) fetchBond(key, path string) (*bonds.Secret, error) {
-	fresh, err := get[bonds.Secret](s.client, path)
-	switch {
-	case err == nil:
-		s.secretVersions.note(key, fresh.Metadata.ResourceVersion)
-	case errors.Is(err, ErrNotFound):
-		s.secretVersions.note(key, "")
-	}
+	var fresh *bonds.Secret
+	err := s.secretVersions.send(key, func() (string, error) {
+		var err error
+		if fresh, err = get[bonds.Secret](s.client, path); err != nil {
+			return "", err
+		}
+		return fresh.Metadata.ResourceVersion, nil
+	})
 	return fresh, err
 }
 
