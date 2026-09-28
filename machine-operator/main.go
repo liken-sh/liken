@@ -33,6 +33,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -243,11 +244,20 @@ func main() {
 		// reconciling against a stale copy would make every status
 		// update a conflict. A read that fails keeps the copy the last
 		// pass had; the publish conflict retry handles a stale one.
+		//
+		// A Machine that is gone gets no heartbeat. The lease names the
+		// Machine as its owner, so the garbage collector deletes the
+		// lease with it, and a renewal from the last copy would create
+		// the lease again, owned by a Machine that does not exist, for
+		// the collector to delete again.
+		renewing := heartbeat
 		if fresh, err := objects.machine(name); err == nil {
 			current = fresh
+		} else if errors.Is(err, kubernetes.ErrNotFound) {
+			renewing = nil
 		}
 		started := time.Now()
-		err := reconcile(objects, current, clusterName, f, heartbeat, machineLayer)
+		err := reconcile(objects, current, clusterName, f, renewing, machineLayer)
 		operatorMetrics.ObserveReconcile(machineKind, time.Since(started), err)
 		select {
 		case <-wakes:

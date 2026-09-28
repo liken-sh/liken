@@ -58,8 +58,14 @@ const APIVersion = "liken.sh/v1alpha1"
 // fresh, from the name alone, so an annotation can never change a
 // staged document's hash, and an annotation edit can never reboot a
 // machine.
+//
+// UID names one instance of an object, so an owner reference to it
+// does not also name an object that is deleted and created again under
+// the same name. The machine operator reads its Machine's UID to name
+// the Machine as the owner of its heartbeat lease.
 type ObjectMeta struct {
 	Name            string            `json:"name"`
+	UID             string            `json:"uid,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
 	Generation      int64             `json:"generation,omitempty"`
 	Annotations     map[string]string `json:"annotations,omitempty"`

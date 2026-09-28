@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -209,5 +210,24 @@ func TestASettledPassOverTheCopiesSendsNoReads(t *testing.T) {
 	w, _ := json.Marshal(watchedMachine.Status)
 	if string(d) != string(w) {
 		t.Errorf("the pass over the copies published\n%s\nwant the direct pass's\n%s", w, d)
+	}
+}
+
+// The pass writes the heartbeat lease with this machine's Machine as
+// its owner, so deleting the Machine deletes the lease.
+func TestAPassNamesTheMachineAsItsLeaseOwner(t *testing.T) {
+	isolatePass(t)
+	api := newPassAPI()
+	client, _ := passClients(t, api)
+	runPasses(t, api, &reader{client: client})
+
+	lease := &kubernetes.Lease{}
+	if err := client.RequestJSON(http.MethodGet, "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/node-1", nil, lease); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []kubernetes.OwnerReference{{APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Name: "node-1", UID: "uid-node-1"}}
+	if !slices.Equal(lease.Metadata.OwnerReferences, want) {
+		t.Errorf("the lease's owners are %+v, want %+v", lease.Metadata.OwnerReferences, want)
 	}
 }

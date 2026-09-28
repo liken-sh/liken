@@ -78,7 +78,7 @@ func (fake *leaseAPI) store(l *Lease) {
 func TestHeartbeatCreatesTheFirstLease(t *testing.T) {
 	fake := &leaseAPI{}
 	client := testClient(t, fake.handler())
-	NewHeartbeat("node-1").Renew(client, heartbeatNow)
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
 	if fake.lease == nil || fake.lease.Spec.HolderIdentity != "node-1" {
 		t.Fatalf("the first pass creates the machine's lease: %+v", fake.lease)
 	}
@@ -88,7 +88,7 @@ func TestHeartbeatRenewsAnAgedLease(t *testing.T) {
 	fake := &leaseAPI{}
 	fake.store(testLease("node-1", 30*time.Second))
 	client := testClient(t, fake.handler())
-	NewHeartbeat("node-1").Renew(client, heartbeatNow)
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
 	if fake.lease.Spec.RenewTime != heartbeatNow.UTC().Format(microTime) {
 		t.Errorf("an aged lease should renew: %s", fake.lease.Spec.RenewTime)
 	}
@@ -99,7 +99,7 @@ func TestHeartbeatLeavesAFreshLeaseAlone(t *testing.T) {
 	fake.store(testLease("node-1", 5*time.Second))
 	client := testClient(t, fake.handler())
 	before := fake.lease.Spec.RenewTime
-	NewHeartbeat("node-1").Renew(client, heartbeatNow)
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
 	if fake.lease.Spec.RenewTime != before {
 		t.Errorf("a fresh lease should not be rewritten: %s", fake.lease.Spec.RenewTime)
 	}
@@ -123,10 +123,10 @@ func TestAHeldLeaseRenewsWithNoRead(t *testing.T) {
 			fake.store(testLease("node-1", 30*time.Second))
 			client := testClient(t, fake.handler())
 			h := NewHeartbeat("node-1")
-			h.Renew(client, heartbeatNow)
+			h.Renew(client, testMachineOwner, heartbeatNow)
 			fake.requests = nil
 
-			h.Renew(client, heartbeatNow.Add(c.after))
+			h.Renew(client, testMachineOwner, heartbeatNow.Add(c.after))
 
 			if !slices.Equal(fake.requests, c.want) {
 				t.Errorf("requests = %q, want %q", fake.requests, c.want)
@@ -155,12 +155,12 @@ func TestAHeldLeaseThatChangedIsReadAgain(t *testing.T) {
 			fake.store(testLease("node-1", 30*time.Second))
 			client := testClient(t, fake.handler())
 			h := NewHeartbeat("node-1")
-			h.Renew(client, heartbeatNow)
+			h.Renew(client, testMachineOwner, heartbeatNow)
 			c.change(fake)
 			fake.requests = nil
 			later := heartbeatNow.Add(10 * time.Second)
 
-			h.Renew(client, later)
+			h.Renew(client, testMachineOwner, later)
 
 			if !slices.Equal(fake.requests, c.want) || fake.lease.Spec.RenewTime != later.UTC().Format(microTime) {
 				t.Errorf("requests = %q, renewed at %s; want %q and a renewal at %s",
@@ -168,6 +168,96 @@ func TestAHeldLeaseThatChangedIsReadAgain(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The lease names its Machine as its owner, so the garbage collector
+// deletes the lease when the Machine is deleted. A lease from before
+// the owner existed takes it on its next renewal. A lease whose owner
+// is a Machine of the same name that was deleted and created again
+// takes the new Machine's UID.
+func TestTheLeaseIsOwnedByItsMachine(t *testing.T) {
+	cases := []struct {
+		name  string
+		lease *Lease
+	}{
+		{"a new lease", nil},
+		{"a lease with no owner", testLease("node-1", 30*time.Second)},
+		{"a lease owned by an earlier Machine", ownedLease(testLease("node-1", 30*time.Second), "uid-earlier")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake := &leaseAPI{}
+			if c.lease != nil {
+				fake.store(c.lease)
+			}
+			client := testClient(t, fake.handler())
+
+			NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
+
+			if fake.lease == nil || !slices.Equal(fake.lease.Metadata.OwnerReferences, []OwnerReference{testMachineOwner}) {
+				t.Errorf("the lease's owners are %+v, want %+v", fake.lease, testMachineOwner)
+			}
+		})
+	}
+}
+
+// An owner with no UID is one the API server refuses, and a refused
+// renewal is a missed heartbeat. The lease renews with no owner.
+func TestAnOwnerWithNoUIDIsLeftOut(t *testing.T) {
+	fake := &leaseAPI{}
+	fake.store(testLease("node-1", 30*time.Second))
+	client := testClient(t, fake.handler())
+	owner := testMachineOwner
+	owner.UID = ""
+
+	NewHeartbeat("node-1").Renew(client, owner, heartbeatNow)
+
+	if fake.lease.Spec.RenewTime != heartbeatNow.UTC().Format(microTime) || fake.lease.Metadata.OwnerReferences != nil {
+		t.Errorf("the lease renewed at %s with owners %+v; want a renewal at %s with none",
+			fake.lease.Spec.RenewTime, fake.lease.Metadata.OwnerReferences, heartbeatNow.UTC().Format(microTime))
+	}
+}
+
+// A pass whose Machine is gone renews with no heartbeat, and sends
+// nothing.
+func TestANilHeartbeatSendsNothing(t *testing.T) {
+	fake := &leaseAPI{}
+	client := testClient(t, fake.handler())
+
+	var h *Heartbeat
+	h.Renew(client, testMachineOwner, heartbeatNow)
+
+	if len(fake.requests) != 0 {
+		t.Errorf("requests = %q, want none", fake.requests)
+	}
+}
+
+// A renewal replaces the whole lease, so it keeps the labels and
+// annotations that another client set.
+func TestARenewalKeepsLabelsAndAnnotations(t *testing.T) {
+	fake := &leaseAPI{}
+	l := testLease("node-1", 30*time.Second)
+	l.Metadata.Labels = map[string]string{"team": "lab"}
+	l.Metadata.Annotations = map[string]string{"note": "kept"}
+	fake.store(l)
+	client := testClient(t, fake.handler())
+
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
+
+	if fake.lease.Metadata.Labels["team"] != "lab" || fake.lease.Metadata.Annotations["note"] != "kept" {
+		t.Errorf("the renewal left labels %v and annotations %v", fake.lease.Metadata.Labels, fake.lease.Metadata.Annotations)
+	}
+}
+
+var testMachineOwner = OwnerReference{
+	APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Name: "node-1", UID: "uid-node-1",
+}
+
+func ownedLease(l *Lease, uid string) *Lease {
+	owner := testMachineOwner
+	owner.UID = uid
+	l.Metadata.OwnerReferences = []OwnerReference{owner}
+	return l
 }
 
 // The heartbeat's failure handling follows one rule: report the
@@ -179,7 +269,7 @@ func TestAHeldLeaseThatChangedIsReadAgain(t *testing.T) {
 func TestHeartbeatSurvivesARefusedRead(t *testing.T) {
 	fake := &leaseAPI{fail: map[string]int{http.MethodGet: http.StatusInternalServerError}}
 	client := testClient(t, fake.handler())
-	NewHeartbeat("node-1").Renew(client, heartbeatNow)
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
 	if fake.lease != nil {
 		t.Errorf("an unreadable lease must not be rewritten: %+v", fake.lease)
 	}
@@ -188,7 +278,7 @@ func TestHeartbeatSurvivesARefusedRead(t *testing.T) {
 func TestHeartbeatSurvivesARefusedCreate(t *testing.T) {
 	fake := &leaseAPI{fail: map[string]int{http.MethodPost: http.StatusInternalServerError}}
 	client := testClient(t, fake.handler())
-	NewHeartbeat("node-1").Renew(client, heartbeatNow)
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
 	if fake.lease != nil {
 		t.Errorf("a refused create leaves no lease behind: %+v", fake.lease)
 	}
@@ -199,7 +289,7 @@ func TestHeartbeatSurvivesARefusedRenewal(t *testing.T) {
 	fake.store(testLease("node-1", 30*time.Second))
 	client := testClient(t, fake.handler())
 	before := fake.lease.Spec.RenewTime
-	NewHeartbeat("node-1").Renew(client, heartbeatNow)
+	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
 	if fake.lease.Spec.RenewTime != before {
 		t.Errorf("a refused renewal changes nothing: %s", fake.lease.Spec.RenewTime)
 	}

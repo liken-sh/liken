@@ -508,7 +508,12 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// sweeper stops writing Lost verdicts onto the very object the
 	// status write below is about to update. Writing status first
 	// would invite that collision on every boot.
-	hb.Renew(c, now)
+	hb.Renew(c, kubernetes.OwnerReference{
+		APIVersion: api.APIVersion,
+		Kind:       machineKind,
+		Name:       m.Metadata.Name,
+		UID:        m.Metadata.UID,
+	}, now)
 
 	// The metrics read the very status this pass is about to
 	// publish, so a graph and a `kubectl get machine -o yaml` always

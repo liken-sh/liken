@@ -35,8 +35,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/liken-sh/liken/api"
 )
 
 const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
@@ -71,9 +69,9 @@ const microTime = "2006-01-02T15:04:05.000000Z07:00"
 // Lease is the part of a coordination.k8s.io Lease that the heartbeat
 // writes and the cluster operator reads.
 type Lease struct {
-	APIVersion string         `json:"apiVersion"`
-	Kind       string         `json:"kind"`
-	Metadata   api.ObjectMeta `json:"metadata"`
+	APIVersion string    `json:"apiVersion"`
+	Kind       string    `json:"kind"`
+	Metadata   LeaseMeta `json:"metadata"`
 	Spec       struct {
 		HolderIdentity       string `json:"holderIdentity,omitempty"`
 		LeaseDurationSeconds int    `json:"leaseDurationSeconds,omitempty"`
@@ -82,10 +80,42 @@ type Lease struct {
 	} `json:"spec"`
 }
 
+// LeaseMeta is api.ObjectMeta with the owner reference that a
+// heartbeat lease carries.
+//
+// A machine's lease names its Machine as its owner. The Machine is
+// cluster-scoped and the lease is in liken-system, and Kubernetes
+// allows a namespaced object to have a cluster-scoped owner. When the
+// Machine of a machine that left the fleet is deleted, the
+// garbage collector deletes the lease too. Without the owner the lease
+// stays in liken-system with its last renewal, and nothing deletes it.
+//
+// A renewal replaces the whole lease, so LeaseMeta carries the labels
+// and annotations too, and a renewal writes back the ones it read.
+type LeaseMeta struct {
+	Name            string            `json:"name"`
+	ResourceVersion string            `json:"resourceVersion,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+	OwnerReferences []OwnerReference  `json:"ownerReferences,omitempty"`
+}
+
+// owners is the owner list a lease is written with. The API server
+// refuses an owner reference with no UID, and a refused write is a
+// missed heartbeat, so an owner with no UID writes a lease with no
+// owner instead.
+func owners(owner OwnerReference) []OwnerReference {
+	if owner.UID == "" {
+		return nil
+	}
+	return []OwnerReference{owner}
+}
+
 // newLease creates a new claim, held by holder as of the given time.
-func newLease(name, holder string, duration time.Duration, now time.Time) *Lease {
+func newLease(name, holder string, owner OwnerReference, duration time.Duration, now time.Time) *Lease {
 	l := &Lease{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
 	l.Metadata.Name = name
+	l.Metadata.OwnerReferences = owners(owner)
 	l.Spec.HolderIdentity = holder
 	l.Spec.LeaseDurationSeconds = int(duration.Seconds())
 	l.Spec.AcquireTime = now.UTC().Format(microTime)
@@ -126,21 +156,31 @@ func NewHeartbeat(name string) *Heartbeat {
 // a lease that somebody deleted answers 404. Either answer drops the
 // copy, and the same call reads the lease again and renews from what
 // it read.
-func (h *Heartbeat) Renew(c *Client, now time.Time) {
+//
+// owner is this machine's Machine. Every create and every renewal
+// writes it as the lease's one owner, so a lease created before the
+// lease had an owner, or owned by an earlier Machine of the same name,
+// names the current Machine after its next renewal.
+//
+// A nil Heartbeat renews nothing, for a pass whose Machine is gone.
+func (h *Heartbeat) Renew(c *Client, owner OwnerReference, now time.Time) {
+	if h == nil {
+		return
+	}
 	path := heartbeatDir + "/" + h.name
-	if h.held == nil && !h.read(c, now) {
+	if h.held == nil && !h.read(c, owner, now) {
 		return
 	}
 	if renewed, err := time.Parse(microTime, h.held.Spec.RenewTime); err == nil && now.Sub(renewed) < HeartbeatRenewAfter {
 		return
 	}
-	err := h.write(c, path, now)
+	err := h.write(c, path, owner, now)
 	if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
 		h.held = nil
-		if !h.read(c, now) {
+		if !h.read(c, owner, now) {
 			return
 		}
-		err = h.write(c, path, now)
+		err = h.write(c, path, owner, now)
 	}
 	if err != nil {
 		h.held = nil
@@ -151,12 +191,12 @@ func (h *Heartbeat) Renew(c *Client, now time.Time) {
 // read reads the lease into the held copy, or creates the lease when
 // it does not exist. It answers false when the caller has nothing left
 // to do: the read failed, or the create already renewed the lease.
-func (h *Heartbeat) read(c *Client, now time.Time) bool {
+func (h *Heartbeat) read(c *Client, owner OwnerReference, now time.Time) bool {
 	l := &Lease{}
 	err := c.RequestJSON(http.MethodGet, heartbeatDir+"/"+h.name, nil, l)
 	if errors.Is(err, ErrNotFound) {
 		// A lease is a struct of strings and ints. Marshaling it cannot fail.
-		body, _ := json.Marshal(newLease(h.name, h.name, HeartbeatStaleAfter, now))
+		body, _ := json.Marshal(newLease(h.name, h.name, owner, HeartbeatStaleAfter, now))
 		created := &Lease{}
 		if err := c.RequestJSON(http.MethodPost, heartbeatDir, body, created); err != nil {
 			if !errors.Is(err, ErrConflict) {
@@ -177,8 +217,9 @@ func (h *Heartbeat) read(c *Client, now time.Time) bool {
 
 // write sends the renewal from the held copy, and keeps the lease the
 // API server answers with, which carries the new resourceVersion.
-func (h *Heartbeat) write(c *Client, path string, now time.Time) error {
+func (h *Heartbeat) write(c *Client, path string, owner OwnerReference, now time.Time) error {
 	renewal := *h.held
+	renewal.Metadata.OwnerReferences = owners(owner)
 	renewal.Spec.HolderIdentity = h.name
 	renewal.Spec.LeaseDurationSeconds = int(HeartbeatStaleAfter.Seconds())
 	renewal.Spec.RenewTime = now.UTC().Format(microTime)
