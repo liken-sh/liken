@@ -23,6 +23,13 @@ locals {
   # the resource below builds the pages block and the homepage link
   # from it. A repository with no site states its homepage directly, or
   # none at all.
+  #
+  # An archived repository moved into liken as a directory of the same
+  # name, with its history. It stays in this map because it still
+  # exists, read-only, and because its Pages site still serves the
+  # manual under its old name. GitHub refuses every change to an
+  # archived repository, so its entry must not change after the
+  # archive.
   repositories = {
     liken = {
       description = "Linux + Kubernetes"
@@ -33,46 +40,55 @@ locals {
       description = "Publishes audio outputs as DRA devices on liken clusters"
       cname       = "audio.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "audio", "pipewire"]
+      archived    = true
     }
     display-operator = {
       description = "Publishes monitor outputs as DRA devices on liken clusters"
       cname       = "display.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "drm", "ddc"]
+      archived    = true
     }
     bluetooth-operator = {
       description = "Publishes paired Bluetooth controllers as DRA devices on liken clusters"
       cname       = "bluetooth.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "bluetooth", "bluez"]
+      archived    = true
     }
     media-operator = {
       description = "Routing and control of media playback on liken clusters"
       cname       = "media.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "mqtt", "mpv", "media"]
+      archived    = true
     }
     library-operator = {
       description = "Media libraries, their catalog, and a browser for every screen on liken clusters"
       cname       = "library.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "media", "sqlite", "corrosion", "iced"]
+      archived    = true
     }
     git-csi-driver = {
       description = "Mounts git repositories as volumes on liken clusters"
       cname       = "git.liken.sh"
       topics      = ["liken", "kubernetes", "csi", "csi-driver", "git"]
+      archived    = true
     }
     people-operator = {
       description = "People as a fact of liken clusters: the Person CRD"
       cname       = "people.liken.sh"
       topics      = ["liken", "kubernetes", "crd", "identity"]
+      archived    = true
     }
     per-node-csi-driver = {
       description = "Volumes with one copy on every node, for replicated stores and caches on liken clusters"
       cname       = "per-node.liken.sh"
       topics      = ["liken", "kubernetes", "csi", "csi-driver", "storage"]
+      archived    = true
     }
     equipment-operator = {
       description = "Receivers and other A/V equipment on the network, as resources of liken clusters"
       cname       = "equipment.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "denon", "home-theater"]
+      archived    = true
     }
     log = {
       description = "The liken devlog"
@@ -84,6 +100,7 @@ locals {
       cname       = null
       homepage    = "https://liken.sh"
       topics      = ["liken", "hugo-theme"]
+      archived    = true
     }
     liken-dev-cluster = {
       description = "Dev fleet repository for liken GitOps drills"
@@ -110,6 +127,8 @@ resource "github_repository" "repositories" {
   homepage_url = each.value.cname != null ? "https://${each.value.cname}" : lookup(each.value, "homepage", null)
 
   topics = each.value.topics
+
+  archived = lookup(each.value, "archived", false)
 
   # The settings every repository shares, stated so an apply never
   # writes a provider default over a value someone chose.
