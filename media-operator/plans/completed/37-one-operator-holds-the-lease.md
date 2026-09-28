@@ -107,7 +107,17 @@ with a conflict, but a delete in flight can still land.
 session and waits for its reader to return, because a press or a
 report on the bus can write to the API. Then it ends the election, and
 client-go writes the `Lease` with no holder. A waiting copy takes it on
-its next read, not after the `Lease` expires. If the bus session does
+its next read, not after the `Lease` expires.
+
+client-go's release can fail on a normal shutdown. The cancel ends its
+renewal loop, but a renewal already sent can reach the API server after
+the release read the `Lease`, so the release's update carries a stale
+resourceVersion and the API server refuses it. So after the election
+ends, `end` reads the `Lease` again and clears it itself if it still
+names this process. The late renewal can land after that read too, so
+a conflict reads the `Lease` again, up to three times within 5 seconds.
+The renewal loop sends one renewal at a time, so at most one late write
+is in flight. If the bus session does
 not stop within 5 seconds, `stepDown` does not release the `Lease`: the
 process exits holding it, and a waiting copy takes it when it expires,
 after any write the session still makes can land.
@@ -193,6 +203,9 @@ client-go:
 * A step down stops the bus while the `Lease` still names the leader,
   then releases the `Lease`, and exits with no code.
 * A step down whose bus session does not stop keeps the `Lease`.
+* A step down releases the `Lease` when a late renewal lands after
+  client-go's release read it. This test and the step-down test above
+  each ran 600 times under `-race` with no failure.
 * A waiting copy takes a released `Lease` in less than one duration.
 * A leader that cannot renew exits with code 1.
 * A leader whose `Lease` another process took exits.

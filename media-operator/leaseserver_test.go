@@ -21,11 +21,15 @@ import (
 )
 
 type leaseServer struct {
-	mu       sync.Mutex
-	current  map[string]any
-	version  int
-	refuse   map[string]int
-	requests map[string]int
+	mu      sync.Mutex
+	current map[string]any
+	version int
+	// landAfterRead writes the Lease again, at a new version, right after
+	// the next read is answered. It is the state a renewal leaves when
+	// its client gave up on it and the API server applied it anyway.
+	landAfterRead bool
+	refuse        map[string]int
+	requests      map[string]int
 }
 
 func newLeaseServer() *leaseServer {
@@ -86,6 +90,12 @@ func (s *leaseServer) holder() string {
 	return holder
 }
 
+func (s *leaseServer) landAWriteAfterTheNextRead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.landAfterRead = true
+}
+
 func (s *leaseServer) setRefusal(method string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -119,6 +129,10 @@ func (s *leaseServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(s.current)
+		if s.landAfterRead {
+			s.landAfterRead = false
+			s.store(s.current)
+		}
 	case r.Method == http.MethodPost:
 		if s.current != nil {
 			status(w, http.StatusConflict, "AlreadyExists")

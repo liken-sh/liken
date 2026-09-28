@@ -122,6 +122,27 @@ func TestAStepDownQuietsTheBusBeforeItReleasesTheLease(t *testing.T) {
 	}
 }
 
+// A renewal the step down cancelled can still land on the API server
+// after client-go's release read the Lease, and the release then fails
+// with a conflict. The step down still leaves the Lease released, so a
+// waiting copy does not wait out the Lease's duration.
+func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
+	server := newLeaseServer()
+	leader := newCandidate(t, server, "media-operator-a")
+	if !awaitWithin(leader, 3*testLeaseTiming.duration) {
+		t.Fatal("the copy never took the Lease")
+	}
+
+	leader.stepDown(func() bool {
+		server.landAWriteAfterTheNextRead()
+		return true
+	})
+
+	if server.holder() != "" {
+		t.Errorf("holder after the step down = %q, want the Lease released", server.holder())
+	}
+}
+
 // A bus session that does not stop in time keeps the Lease, so no
 // other copy leads while the session can still write.
 func TestAStepDownWhoseBusDoesNotStopKeepsTheLease(t *testing.T) {
