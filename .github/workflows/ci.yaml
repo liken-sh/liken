@@ -18,7 +18,10 @@
 name: ci
 
 on:
+  # Branches only. A push with no filter also runs for a tag, and a tag
+  # names a commit that a branch push already gated.
   push:
+    branches: ['**']
   pull_request:
     branches: [main]
   # A dispatch runs every job, whatever changed.
