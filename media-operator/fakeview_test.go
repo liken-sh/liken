@@ -18,6 +18,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/client-go/tools/cache"
 )
 
 // fakeSource serves one map of the fake cluster. collection is the
@@ -43,6 +44,27 @@ func (s fakeSource[T]) List() []any {
 		items = append(items, item)
 	}
 	return items
+}
+
+// fakeStore is a fakeSource in the shape of client-go's cache.Store, for
+// the reads of objectcache.go. A method it does not define is one a
+// read never calls.
+type fakeStore[T any] struct {
+	cache.Store
+	source fakeSource[T]
+}
+
+func (s fakeStore[T]) List() []any { return s.source.List() }
+
+func (s fakeStore[T]) GetByKey(key string) (any, bool, error) { return s.source.GetByKey(key) }
+
+func (s fakeStore[T]) ListKeys() []string {
+	var keys []string
+	for _, item := range s.source.List() {
+		key, _ := cache.MetaNamespaceKeyFunc(item)
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func (s fakeSource[T]) GetByKey(key string) (any, bool, error) {
@@ -109,7 +131,13 @@ func clusterPath(collection string) func(string, string) string {
 // call, so it follows every change a test or a write makes.
 func (f *fakeCluster) view() *clusterView {
 	return &clusterView{
-		plays:       fakeSource[Play]{f, valuesOf(f.plays), playsPath, playPath},
+		plays: heldObjects{
+			view: storeView{
+				store: fakeStore[Play]{source: fakeSource[Play]{f, valuesOf(f.plays), playsPath, playPath}},
+				whole: true,
+			},
+			versions: newVersionMemo(),
+		},
 		players:     fakeSource[Player]{f, valuesOf(f.players), playersPath, playerPath},
 		remotes:     fakeSource[Remote]{f, valuesOf(f.remotes), remotesAllPath, remotePath},
 		keymaps:     fakeSource[Keymap]{f, valuesOf(f.keymaps), keymapsPath, clusterPath(keymapsPath)},

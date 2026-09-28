@@ -16,9 +16,14 @@ package main
 // API server (reconcile, ensurePlayback, and reconcileStanding), and
 // acts on that read.
 //
-// The accessors answer the operator's own structs. An object that does
-// not convert fails the read that holds it, with an error that names
-// it, the way a list fails when the API server answers it with an
+// The Plays are the one collection the view reads through the object
+// cache (objectcache.go), with a memo of the operator's own writes,
+// because the pass publishes what it derives from a Play's phase before
+// it acts on anything.
+//
+// The other accessors answer the operator's own structs. An object that
+// does not convert fails the read that holds it, with an error that
+// names it, the way a list fails when the API server answers it with an
 // object that does not decode.
 
 import (
@@ -38,7 +43,7 @@ type objectSource interface {
 
 // clusterView holds one source per collection a pass reads.
 type clusterView struct {
-	plays       objectSource
+	plays       heldObjects
 	players     objectSource
 	remotes     objectSource
 	keymaps     objectSource
@@ -105,7 +110,6 @@ func oneOf[T any](source objectSource, key string) (*T, error) {
 
 func namespacedKey(namespace, name string) string { return namespace + "/" + name }
 
-func (v *clusterView) Plays() ([]Play, error)     { return listOf[Play](v.plays) }
 func (v *clusterView) Players() ([]Player, error) { return listOf[Player](v.players) }
 func (v *clusterView) Remotes() ([]Remote, error) { return listOf[Remote](v.remotes) }
 func (v *clusterView) Keymaps() ([]Keymap, error) { return listOf[Keymap](v.keymaps) }

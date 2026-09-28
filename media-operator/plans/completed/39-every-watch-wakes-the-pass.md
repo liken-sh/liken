@@ -136,6 +136,112 @@ the replacement test proves what the pass that follows does.
   names the driver. Drivers write a slice only when its devices
   change, so the wakes from other drivers are few.
 
+## A unit's activity moves forward only
+
+Added on 2026-09-27, after a `liken-1` drill of the development build.
+When a `Play` was deleted, its `Player`'s activity on the bus read
+`Idle`, then `Playing`, then `Idle` again within 12 ms. The same
+flicker showed while a playback pod was recreated. A bus client, such
+as the idle screen or a remote, read a `Playing` that was false.
+
+Three defects let a unit publish a state it had already left for the
+same `Play`:
+
+1. **The pass derived a unit's state before it published it, outside
+   the lock.** `reconcilePlayers` derives each unit's activity, then
+   sends the unit's screen, panel, and `Receiver` requests, and only
+   then publishes. When the kubelet stops a playback pod, the sidecar
+   reports the ending on the pod's `SIGTERM`, and the bus reader
+   publishes `Idle` at once (`answerEnding`). A pass that the pod's
+   deletion mark woke can derive `Playing` before the ending arrives
+   and publish it after the `Idle`. The pass that the ending wakes then
+   publishes `Idle` again. This fits both drill cases, and it needs no
+   store lag. `publishPlayerStatus` now derives the state at the
+   publish, after the unit's requests, and inside the mutex that
+   serializes the publishes (`publishDerived`). The bus reader sets the
+   ending mark before it takes that mutex, so each publish reads the
+   report desk at least as new as the publish before it. The test
+   covers the move of the derivation past the requests; the mutex
+   closes the remaining gap of microseconds, and no test covers that
+   gap.
+
+   One gap of this kind stays open, in the list of Plays and not the
+   desk. `answerEnding` derives from the list the last pass read at its
+   start, before that pass's writes. On a unit with two Plays, an ending
+   for one that arrives after `reconcilePlayers` can publish the other
+   as `Starting` over the `Playing` the pass published, until the next
+   pass. A superseded `Play` ends seconds before its successor runs, so
+   this is unlikely. The `Player`'s Kubernetes status and the
+   `media_players` gauge also keep the state the pass derived before
+   the ending, until the next pass.
+2. **A deleting `Play` still named its unit.** `derivePlayerStatus`
+   skipped a `Play` whose sidecar reported the ending, and did not
+   skip a `Play` with a deletion mark. The pass that finds the pod gone
+   runs `releasePlay`, which clears the run's topics and forgets the
+   run's ending mark. That same pass then publishes each unit again in
+   `reconcilePlayers`, from a list that still holds the deleting `Play`
+   with the phase `Running`, so the unit read `Playing` until the next
+   pass. A deleting `Play` now names nothing, because the pass that
+   reads the deletion mark deletes its pod.
+3. **The `Play` store's copy can be older than the operator's own
+   write.** The pass publishes each unit's activity from the store's
+   copies before it reconciles. After the pass writes a `Play`'s phase,
+   a pass that another watch or a bus report wakes can read the copy
+   that the write replaced, publish the old phase, and then publish the
+   new phase again when its reconcile writes it: `Playing`, `Starting`,
+   `Playing`. The Plays now go through the object cache core that
+   `bluetooth-operator`, `display-operator`, `audio-operator`, and
+   `equipment-operator` use (`objectcache.go`). `versionMemo` notes
+   the version of each status write, finalizer patch, and read, and a
+   store's copy at another version is read from the API server. A
+   delete notes no version, so the next pass reads the `Play` from the
+   API server.
+
+`objectcache.go` holds the shared code without changes to what it
+keeps. The pass reads the Plays only as one list, from a view that
+exists only after each watch's first read, so the file leaves out
+`readOne`, `cachedList`, `storedObjects`, `objectKey`, and
+`storeView.ready` with its `synced` field. It adds `get` and
+`replaceStatus`, which `display-operator` keeps in other files, and
+`forgetGone`. Plays come and go with each film, so `forgetGone` drops
+the memo's record of a `Play` once the API server and the store both
+no longer hold it.
+
+The memo covers only the Plays, because no unit's activity on the bus
+comes from the status of a `Player` or a `Remote`. One gap of the same
+kind stays open. `reconcilePlayers` composes a `Player`'s remembered
+screen and sinks from the copy it reads, and `writePlayerStatus`
+answers a `409` by writing that composed status onto the fresh copy.
+So a pass that reads a `Player` copy older than the operator's own
+write can write an older memory back. Moving the Players to the memo,
+with a conflict retry that composes again from the fresh copy
+(`settleStatus`), closes it.
+
+A settled pass still sends the API server no request
+(`TestASettledPassSendsTheAPIServerNothing`). A pass that reads a
+`Play`'s copy older than the operator's own write sends one `GET` for
+that `Play`, until the watch delivers the write.
+
+A recreate still moves the unit to `Starting` or `Idle` when the old
+pod stops, and back to `Playing` when the new pod plays, seconds later.
+Whether a recreate of the same `Play` should hold `Playing` through
+that gap is a design question this change does not settle.
+
+| What | Test |
+|---|---|
+| An ending that arrives while the pass works on the unit is not published over | `TestAnEndingDuringThePassIsNotPublishedOver` |
+| A deleted `Play` moves its unit to `Idle` once, and never back to `Playing` | `TestADeletedPlayNeverTurnsItsPlayerBackToPlaying` |
+| A store's copy older than the operator's own status write does not move the unit back | `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` |
+| A `Play` the operator deleted is not listed from the store's copy | `TestAPlayTheOperatorDeletedIsNotListedFromTheStore` |
+| The memo forgets a `Play` only once the store does not hold it | `TestTheMemoForgetsAPlayOnlyOnceItIsGoneFromTheStore` |
+| The memo itself | `versionmemo_test.go`, the same file as in the other four operators |
+
+Each of the first three tests fails without its fix. The drill below
+gains one step: delete a playing `Play`, and delete the playback pod of
+another, and read the unit's activity lines. A deleted `Play` must read
+one move to `Idle`. A recreated pod must read no `Playing` between its
+`Idle` or `Starting` and the new pod's first report.
+
 ## The drill still owed
 
 On `liken-1`, with the operator on a build of this change:

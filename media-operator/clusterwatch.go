@@ -78,7 +78,12 @@ const clusterSyncWait = time.Minute
 type watchedCollection struct {
 	kind  string
 	watch collectionWatch
-	into  *objectSource
+	into  func(cache.Store)
+}
+
+// keepIn keeps a store in one field of the view.
+func keepIn(field *objectSource) func(cache.Store) {
+	return func(store cache.Store) { *field = store }
 }
 
 // watchCluster starts one informer for each collection the pass reads,
@@ -91,25 +96,29 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 	view := &clusterView{}
 	wakes := wakeOnChange(wake)
 	collections := []watchedCollection{
-		{kindPlay, collectionWatch{resource: playResource, handler: wakes}, &view.plays},
-		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, &view.players},
-		{kindRemote, collectionWatch{resource: remoteResource, handler: wakes}, &view.remotes},
-		{kindKeymap, collectionWatch{resource: keymapResource, handler: wakes}, &view.keymaps},
-		{kindMediaPreferences, collectionWatch{resource: preferencesResource, handler: wakes}, &view.preferences},
-		{kindPeripheral, collectionWatch{resource: peripheralResource, handler: wakes}, &view.peripherals},
-		{kindPod, collectionWatch{resource: podResource, labels: ownPodsSelector, handler: podRule.handler(wake)}, &view.pods},
-		{kindResourceClaim, collectionWatch{resource: claimResource, handler: claimRule.handler(wake)}, &view.claims},
-		{kindResourceSlice, collectionWatch{resource: sliceResource, handler: sliceRule.handler(wake)}, &view.slices},
+		// The Play watch takes every Play, so its store holds the whole
+		// collection.
+		{kindPlay, collectionWatch{resource: playResource, handler: wakes}, func(store cache.Store) {
+			view.plays = heldObjects{view: storeView{store: store, whole: true}, versions: newVersionMemo()}
+		}},
+		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, keepIn(&view.players)},
+		{kindRemote, collectionWatch{resource: remoteResource, handler: wakes}, keepIn(&view.remotes)},
+		{kindKeymap, collectionWatch{resource: keymapResource, handler: wakes}, keepIn(&view.keymaps)},
+		{kindMediaPreferences, collectionWatch{resource: preferencesResource, handler: wakes}, keepIn(&view.preferences)},
+		{kindPeripheral, collectionWatch{resource: peripheralResource, handler: wakes}, keepIn(&view.peripherals)},
+		{kindPod, collectionWatch{resource: podResource, labels: ownPodsSelector, handler: podRule.handler(wake)}, keepIn(&view.pods)},
+		{kindResourceClaim, collectionWatch{resource: claimResource, handler: claimRule.handler(wake)}, keepIn(&view.claims)},
+		{kindResourceSlice, collectionWatch{resource: sliceResource, handler: sliceRule.handler(wake)}, keepIn(&view.slices)},
 		// The display-operator and the equipment-operator define these
 		// two, and a cluster can run the media operator with neither.
 		{kindDisplay, collectionWatch{resource: displayResource, optional: true,
-			handler: displayRule.handler(wake)}, &view.displays},
+			handler: displayRule.handler(wake)}, keepIn(&view.displays)},
 		{kindReceiver, collectionWatch{resource: receiverResource, optional: true,
-			handler: receiverRule.handler(wake)}, &view.receivers},
+			handler: receiverRule.handler(wake)}, keepIn(&view.receivers)},
 	}
 	type read struct {
 		kind  string
-		into  *objectSource
+		into  func(cache.Store)
 		store cache.Store
 	}
 	reads := make(chan read, len(collections))
@@ -127,7 +136,7 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, wake chan
 	for len(pending) > 0 {
 		select {
 		case done := <-reads:
-			*done.into = done.store
+			done.into(done.store)
 			delete(pending, done.kind)
 		case <-wait.Done():
 			return nil, fmt.Errorf("these collections were not read: %s: %w", sortedKinds(pending), wait.Err())

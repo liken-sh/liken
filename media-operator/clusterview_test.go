@@ -41,7 +41,7 @@ func TestTheViewAnswersInTheAPIServersOrder(t *testing.T) {
 		cluster.plays[name] = &Play{Metadata: ObjectMeta{Namespace: namespace, Name: name}}
 	}
 
-	plays, err := cluster.view().Plays()
+	plays, err := cluster.view().Plays(nil)
 
 	mustSucceed(t, err)
 	var keys []string
@@ -79,7 +79,7 @@ func TestTheViewConvertsAPlayWithItsPresentations(t *testing.T) {
 		},
 	}
 
-	plays, err := cluster.view().Plays()
+	plays, err := cluster.view().Plays(nil)
 
 	mustSucceed(t, err)
 	items := plays[0].Spec.Items

@@ -361,7 +361,7 @@ func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
 		kind     string
 		source   objectSource
 	}{
-		{playResource, "Play", view.plays},
+		{playResource, "Play", view.plays.view.store},
 		{playerResource, "Player", view.players},
 		{remoteResource, "Remote", view.remotes},
 		{keymapResource, "Keymap", view.keymaps},

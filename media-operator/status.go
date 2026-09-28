@@ -11,7 +11,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -215,46 +214,42 @@ func playerName(play *Play) string {
 // write per pass would wake the watch that wakes the pass, and the
 // ten-second tick would become a write every ten seconds for
 // every settled Play in the cluster.
-func writePlayStatus(c *Client, play *Play, desired PlayStatus) error {
-	_, _, err := writePlayStatusFrom(c, play, desired)
+//
+// versions is the memo of the Play store (objectcache.go), which notes
+// each copy the API server answers. A nil memo notes nothing.
+func writePlayStatus(c *Client, versions *versionMemo, play *Play, desired PlayStatus) error {
+	_, _, err := writePlayStatusFrom(c, versions, play, desired)
 	return err
 }
 
 // writePlayStatusFrom is writePlayStatus that also answers the phase
-// the API server held before the write, and whether it wrote. The pass
-// reads a Play from the view, which can be one write behind: the
-// operator's own last write can still be on its way. The conflict that
-// follows reads the Play again, and the phase that read answers is the
-// one a line and a counter compare against.
-func writePlayStatusFrom(c *Client, play *Play, desired PlayStatus) (string, bool, error) {
+// the API server held before the write, and whether it wrote. A pass
+// can hold a copy that another writer changed since, and the conflict
+// that follows reads the Play again, so the phase that read answers is
+// the one a line and a counter compare against. The copy the caller
+// holds ends as the API server's answer, with its new resourceVersion,
+// so a later write in the same pass does not meet a conflict of its own.
+func writePlayStatusFrom(c *Client, versions *versionMemo, play *Play, desired PlayStatus) (string, bool, error) {
 	was := play.Status.Phase
-	same, err := sameStatus(play.Status, desired)
-	if err != nil || same {
-		return was, false, err
+	var compared error
+	wrote, err := settleStatus(c, versions, playPath(play.Metadata.Namespace, play.Metadata.Name), play,
+		func(held *Play) bool {
+			was = held.Status.Phase
+			same, err := sameStatus(held.Status, desired)
+			if err != nil {
+				compared = err
+				return false
+			}
+			if same {
+				return false
+			}
+			held.Status = desired
+			return true
+		})
+	if compared != nil {
+		return was, false, compared
 	}
-
-	play.Status = desired
-	_, err = PutPlayStatus(c, play)
-	if !errors.Is(err, ErrConflict) {
-		return was, err == nil, err
-	}
-
-	// A conflict means something wrote the Play between the read and
-	// the write. The fresh copy carries the resourceVersion the API
-	// server will accept, and the desired status still describes the
-	// same facts, so it goes on unchanged.
-	fresh, err := GetPlay(c, play.Metadata.Namespace, play.Metadata.Name)
-	if err != nil {
-		return was, false, err
-	}
-	was = fresh.Status.Phase
-	same, err = sameStatus(fresh.Status, desired)
-	if err != nil || same {
-		return was, false, err
-	}
-	fresh.Status = desired
-	_, err = PutPlayStatus(c, fresh)
-	return was, err == nil, err
+	return was, wrote, err
 }
 
 // onlyPositionChanged reports whether the desired status differs from the

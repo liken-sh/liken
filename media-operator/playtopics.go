@@ -34,8 +34,7 @@ func (o *operator) holdPlay(play *Play) {
 	}
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	finalizers := play.Metadata.with(playFinalizer)
-	version, err := PatchPlayFinalizers(o.client, namespace, name,
-		play.Metadata.ResourceVersion, finalizers)
+	version, err := o.patchPlayFinalizers(play, finalizers)
 	if err != nil {
 		// A conflict and an absent Play are both states the next pass reads
 		// again, so neither is reported here.
@@ -88,8 +87,7 @@ func (o *operator) releasePlay(play *Play) {
 	if !play.Metadata.holds(playFinalizer) {
 		return
 	}
-	if _, err := PatchPlayFinalizers(o.client, namespace, name, play.Metadata.ResourceVersion,
-		play.Metadata.without(playFinalizer)); err != nil {
+	if _, err := o.patchPlayFinalizers(play, play.Metadata.without(playFinalizer)); err != nil {
 		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrNotFound) {
 			fmt.Fprintf(os.Stderr, "releasing play %s/%s: %v\n", namespace, name, err)
 		}
@@ -130,4 +128,29 @@ func (o *operator) reclaimPlays(live map[string]bool) {
 		o.clearPlayTopics(namespace, name)
 		o.reports.forget(key)
 	}
+}
+
+// patchPlayFinalizers writes one Play's finalizer list from the copy the
+// pass holds, and notes the version the API server answers in the Play
+// store's memo, so the next pass does not read the copy the patch
+// replaced.
+func (o *operator) patchPlayFinalizers(play *Play, finalizers []string) (string, error) {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	var version string
+	err := o.view.plays.versions.send(playKey(play), func() (string, error) {
+		var err error
+		version, err = PatchPlayFinalizers(o.client, namespace, name, play.Metadata.ResourceVersion, finalizers)
+		return version, err
+	})
+	return version, err
+}
+
+// deletePlay deletes one Play. The memo then holds no version of it, so
+// the next pass reads the Play from the API server: a Play that a
+// finalizer keeps is there with its deletion mark, and a Play the
+// delete removed is absent, whatever the store still holds.
+func (o *operator) deletePlay(namespace, name string) error {
+	return o.view.plays.versions.send(namespace+"/"+name, func() (string, error) {
+		return "", DeletePlay(o.client, namespace, name)
+	})
 }

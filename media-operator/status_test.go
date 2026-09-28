@@ -343,7 +343,7 @@ func TestAnUnchangedStatusIsNotWritten(t *testing.T) {
 	play := statusTestPlay()
 	play.Status = PlayStatus{Phase: phaseRunning, Pod: "movie-playback", Position: "0:01:00"}
 
-	err := writePlayStatus(testAPIClient(t, api.handler(t)), play, play.Status)
+	err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, play.Status)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestAChangedStatusIsWrittenOnce(t *testing.T) {
 	play.Status = PlayStatus{Phase: phasePending}
 	desired := PlayStatus{Phase: phaseRunning, Pod: "movie-playback", Item: 1}
 
-	if err := writePlayStatus(testAPIClient(t, api.handler(t)), play, desired); err != nil {
+	if err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, desired); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.writes) != 1 {
@@ -379,7 +379,7 @@ func TestAConflictEarnsOneRetryWithTheFreshVersion(t *testing.T) {
 	play := statusTestPlay()
 	desired := PlayStatus{Phase: phaseRunning, Pod: "movie-playback"}
 
-	if err := writePlayStatus(testAPIClient(t, api.handler(t)), play, desired); err != nil {
+	if err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, desired); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.writes) != 1 {
@@ -408,7 +408,7 @@ func TestAConflictWhoseWinnerWroteTheSameStatusStopsThere(t *testing.T) {
 	api.stored.Status = desired
 
 	play := statusTestPlay()
-	if err := writePlayStatus(testAPIClient(t, api.handler(t)), play, desired); err != nil {
+	if err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, desired); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.writes) != 0 {
@@ -423,7 +423,7 @@ func TestASecondConflictIsReported(t *testing.T) {
 	api.stored = *statusTestPlay()
 	api.stored.Metadata.ResourceVersion = "13"
 
-	err := writePlayStatus(testAPIClient(t, api.handler(t)), statusTestPlay(), PlayStatus{Phase: phaseRunning})
+	err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, statusTestPlay(), PlayStatus{Phase: phaseRunning})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want %v", err, ErrConflict)
 	}

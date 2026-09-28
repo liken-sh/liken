@@ -84,6 +84,10 @@ type fakeCluster struct {
 	// server, so a test proves what a pass did before it reached that
 	// request and not merely what the pass left behind.
 	held map[string]chan struct{}
+
+	// arrived, when a test sets it, receives each held request as the
+	// server starts to hold it, so the test acts while the pass waits.
+	arrived chan string
 }
 
 // One apply the operator made: the Display it named, the block
@@ -139,6 +143,9 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 		if release, holding := f.held[r.Method+" "+r.URL.Path]; holding {
+			if f.arrived != nil {
+				f.arrived <- r.Method + " " + r.URL.Path
+			}
 			<-release
 		}
 		if f.fails[r.URL.Path] {

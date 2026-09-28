@@ -478,7 +478,7 @@ func operate() {
 		leader.stepDown(quiet)
 		os.Exit(1)
 	}
-	plays, _ := media.view.Plays()
+	plays, _ := media.view.Plays(media.client)
 	remotes, _ := media.view.Remotes()
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays), len(remotes), busAddress)
@@ -509,7 +509,7 @@ func (o *operator) pass() {
 	if o.busReconnected.Swap(false) {
 		o.reestablishRetained()
 	}
-	plays, err := o.view.Plays()
+	plays, err := o.view.Plays(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading plays: %v\n", err)
 		return
@@ -581,7 +581,7 @@ func (o *operator) pass() {
 		// termination signal, and the library's store records the last
 		// position before the finalizer clears.
 		if superseded[runKey(namespace, name)] {
-			if err := DeletePlay(o.client, namespace, name); err != nil {
+			if err := o.deletePlay(namespace, name); err != nil {
 				fmt.Fprintf(os.Stderr, "deleting superseded play %s/%s: %v\n", namespace, name, err)
 			} else {
 				logLine(o.log, "play %s/%s: deleted, because a newer play on player %s replaces it",
@@ -863,7 +863,7 @@ func (o *operator) retire(play *Play) error {
 	// on the same terms as a Play a person deleted: the operator's finalizer
 	// holds the Play until the pod is gone and the topics are cleared.
 	if now.Sub(finished) >= playTTL(play) {
-		if err := DeletePlay(o.client, namespace, name); err != nil {
+		if err := o.deletePlay(namespace, name); err != nil {
 			return err
 		}
 		logLine(o.log, "play %s/%s: deleted, because %s passed after it finished", namespace, name, playTTL(play))
@@ -874,7 +874,7 @@ func (o *operator) retire(play *Play) error {
 	}
 	status := play.Status
 	status.FinishedAt = finished.UTC().Format(time.RFC3339)
-	return writePlayStatus(o.client, play, status)
+	return writePlayStatus(o.client, o.view.plays.versions, play, status)
 }
 
 // supersededPlays names every unfinished Play that a newer Play on the
@@ -1133,7 +1133,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// screen client draws its return from it. The client subscribes to
 		// that topic itself, so the status reaches it in bus time, seconds
 		// before the playback pod terminates.
-		published[o.publishPlayerStatus(player, desired, plays)] = true
+		published[o.publishPlayerStatus(player, plays)] = true
 		if err := writePlayerStatus(o.client, player, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
@@ -1170,32 +1170,40 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	}
 }
 
-// publishPlayerStatus writes one unit's presentable state to its retained
-// status topic and returns the topic it wrote, so the caller records which
-// topics this pass still owns. The memo decides whether the payload
-// reaches the broker at all: a payload the broker already holds is churn a
-// new subscriber does not need, because it reads the current value off the
-// retained topic. That skip is what keeps the tick off the bus
+// publishPlayerStatus derives one unit's presentable state from the
+// Plays the caller read and the report desk, writes it to the unit's
+// retained status topic, and returns the topic it wrote, so the caller
+// records which topics this pass still owns. The memo decides whether the
+// payload reaches the broker at all: a payload the broker already holds is
+// churn a new subscriber does not need, because it reads the current value
+// off the retained topic. That skip is what keeps the tick off the bus
 // while a unit sits idle, and it is also what makes the pass silent behind
 // an ending the bus reader already answered.
 //
-// The pass and the bus reader both call this, so it holds no state of its
-// own beyond the memo, which carries its own mutex.
-func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, plays []Play) string {
+// The pass and the bus reader both call this, and the state is derived
+// inside the memo's mutex (publishedStatuses says why), so the derivation
+// here can differ from the one the pass wrote into the Player's status,
+// when an ending arrived between the two. The ending wakes the next pass,
+// and that pass writes the status again.
+func (o *operator) publishPlayerStatus(player *Player, plays []Play) string {
 	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
-	status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus)
-	payload, err := json.Marshal(status)
+	var desired PlayerStatus
+	was, moved, err := o.playerStatuses.publishDerived(o.bus, topic, func() ([]byte, string, error) {
+		desired = derivePlayerStatus(player, plays, o.reports)
+		status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus)
+		payload, err := json.Marshal(status)
+		return payload, status.Activity, err
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshaling player %s/%s bus status: %v\n",
 			player.Metadata.Namespace, player.Metadata.Name, err)
 		return topic
 	}
-	o.playerStatuses.publish(o.bus, topic, payload)
 	// A unit that starts or ends a run is the moment the idle screen gives
 	// the screen to a film or takes it back, so the move gets a line.
-	if was, moved := o.playerStatuses.noteActivity(topic, status.Activity); moved {
+	if moved {
 		logLine(o.log, "player %s/%s: activity %s, was %s%s, published to %s",
-			player.Metadata.Namespace, player.Metadata.Name, status.Activity, was, playOf(desired), topic)
+			player.Metadata.Namespace, player.Metadata.Name, desired.Activity, was, playOf(desired), topic)
 	}
 	return topic
 }
@@ -1570,7 +1578,7 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 		time.Since(o.positionWrites[key]) < positionWriteInterval {
 		return nil
 	}
-	was, wrote, err := writePlayStatusFrom(o.client, play, desired)
+	was, wrote, err := writePlayStatusFrom(o.client, o.view.plays.versions, play, desired)
 	if err != nil {
 		return err
 	}

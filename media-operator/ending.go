@@ -88,7 +88,7 @@ func (o *operator) answerEnding(namespace, name string) {
 	if player == nil {
 		return
 	}
-	o.publishPlayerStatus(player, derivePlayerStatus(player, plays, o.reports), plays)
+	o.publishPlayerStatus(player, plays)
 }
 
 // findPlayer returns the Player of that name in that namespace, or nil

@@ -340,9 +340,9 @@ func TestAnActivityMoveLogsOnce(t *testing.T) {
 	player := housePlayer()
 	playing := []Play{*cluster.plays["movie"]}
 
-	media.publishPlayerStatus(player, PlayerStatus{Activity: playerIdle}, nil)
-	media.publishPlayerStatus(player, derivePlayerStatus(player, playing, media.reports), playing)
-	media.publishPlayerStatus(player, derivePlayerStatus(player, playing, media.reports), playing)
+	media.publishPlayerStatus(player, nil)
+	media.publishPlayerStatus(player, playing)
+	media.publishPlayerStatus(player, playing)
 
 	mustLogOnce(t, log, "player house/theater: activity "+playerPlaying+", was "+playerIdle+", play movie, published to "+
 		playerStatusTopic(defaultTopicBase, "house", "theater"))

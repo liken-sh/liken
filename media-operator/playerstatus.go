@@ -19,10 +19,16 @@ import (
 // to skip it.
 //
 // Two goroutines publish here: the pass, and the bus reader when it
-// answers an ending from memory. So one mutex covers the compare, the
-// publish, and the record together. A mutex over the map alone would let
-// the two publish in one order and record in the other, and the broker
-// would then hold a payload the map does not name.
+// answers an ending from memory. So one mutex covers the derivation, the
+// compare, the publish, and the record together. The derivation reads
+// the report desk, and the bus reader sets a run's ending mark on the
+// desk before it publishes. A pass that derived a unit's state outside
+// the mutex could derive Playing, lose the mutex to the bus reader's
+// Idle, and then publish its Playing over that Idle. Inside the mutex,
+// the later publish always reads the desk at least as new as the
+// earlier one. A mutex over the map alone would also let the two
+// publish in one order and record in the other, and the broker would
+// then hold a payload the map does not name.
 //
 // The zero value records nothing and publishes everything, which is
 // correct for a fresh operator, so the map is built on the first publish
@@ -37,33 +43,33 @@ type publishedStatuses struct {
 	activities map[string]string
 }
 
-// noteActivity records one unit's activity and answers the one it
-// replaces, and whether it moved. A unit this operator has not
-// published before did not move, so a restart reports no unit.
-func (p *publishedStatuses) noteActivity(topic, activity string) (string, bool) {
+// publishDerived derives one unit's payload and its activity, and
+// publishes the payload to its topic, retained, unless the last payload
+// on that topic was the same one. It answers the activity the unit had
+// before and whether the activity moved. A unit this operator has not
+// published before did not move, so a restart reports no unit. A
+// derivation that fails publishes nothing and answers its error.
+func (p *publishedStatuses) publishDerived(bus *Bus, topic string,
+	derive func() (payload []byte, activity string, err error)) (string, bool, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
+	payload, activity, err := derive()
+	if err != nil {
+		return "", false, err
+	}
+	if p.payloads[topic] != string(payload) {
+		bus.Publish(topic, payload, true)
+		if p.payloads == nil {
+			p.payloads = map[string]string{}
+		}
+		p.payloads[topic] = string(payload)
+	}
 	was, known := p.activities[topic]
 	if p.activities == nil {
 		p.activities = map[string]string{}
 	}
 	p.activities[topic] = activity
-	return was, known && was != activity
-}
-
-// publish writes one payload to its topic, retained, unless the last
-// payload on that topic was the same one.
-func (p *publishedStatuses) publish(bus *Bus, topic string, payload []byte) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	if p.payloads[topic] == string(payload) {
-		return
-	}
-	bus.Publish(topic, payload, true)
-	if p.payloads == nil {
-		p.payloads = map[string]string{}
-	}
-	p.payloads[topic] = string(payload)
+	return was, known && was != activity, nil
 }
 
 // payloadFor answers the payload the operator last published on one
@@ -104,6 +110,15 @@ func (p *publishedStatuses) clear(bus *Bus, owned map[string]bool) {
 // the same on every pass. A Play in a terminal phase is over and
 // names nothing.
 //
+// A deleting Play names nothing either. Its phase still reads Running
+// until its finalizer comes off, but the pass that reads the deletion
+// mark deletes its pod, so the run is over from the mark. The release
+// also forgets the run's ending mark on the pass that clears its topics,
+// and that pass still holds the Play in its list. If the deletion mark
+// did not end the run, that pass would publish the unit Playing again,
+// between the Idle the ending published and the Idle of the pass after
+// the Play is gone.
+//
 // A Play whose sidecar reported the ending names nothing either, though
 // its pod still runs and its phase still reads Running. The pod takes
 // seconds to terminate, and the film is over for every one of them, so
@@ -120,7 +135,7 @@ func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatu
 		if playerName(play) != player.Metadata.Name {
 			continue
 		}
-		if desk.endedFor(play.Metadata.Namespace, play.Metadata.Name) {
+		if play.Metadata.deleting() || desk.endedFor(play.Metadata.Namespace, play.Metadata.Name) {
 			continue
 		}
 		switch play.Status.Phase {
@@ -179,7 +194,7 @@ func playerMetricState(namespace string, status PlayerStatus, plays []Play) stri
 func (o *operator) publishPlayerStatuses(players []Player, plays []Play) {
 	for index := range players {
 		player := &players[index]
-		o.publishPlayerStatus(player, derivePlayerStatus(player, plays, o.reports), plays)
+		o.publishPlayerStatus(player, plays)
 	}
 }
 
