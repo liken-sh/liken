@@ -30,8 +30,8 @@ type gitOutput struct {
 }
 
 // runGit runs git in dir, with env added to the hermetic environment
-// below, under the deadline. The error carries git's own last line of
-// stderr, which is where git says why it failed.
+// below, under the deadline. The error carries git's own stderr, which
+// is where git says why it failed.
 func runGit(ctx context.Context, dir string, env []string, args ...string) (gitOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitDeadline)
 	defer cancel()
@@ -70,12 +70,20 @@ func gitEnvironment() []string {
 	}
 }
 
-// gitReason is the last non-empty line of stderr, where git states its
-// reason, or the exec error when git wrote nothing.
+// gitReason is everything git wrote on stderr, one line after another
+// on a single line, or the exec error when git wrote nothing. git
+// states the cause above its closing advice: a refused ssh key ends
+// with "and the repository exists.", and the line that names the key
+// comes first, so no single line is enough.
 func gitReason(output gitOutput, err error) string {
-	lines := strings.Split(strings.TrimSpace(output.stderr), "\n")
-	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
-		return last
+	said := []string{}
+	for _, line := range strings.Split(output.stderr, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			said = append(said, trimmed)
+		}
 	}
-	return err.Error()
+	if len(said) == 0 {
+		return err.Error()
+	}
+	return strings.Join(said, " ")
 }

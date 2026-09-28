@@ -106,12 +106,13 @@ both references, and start the pods. A writeable volume pushes at the
 unpublish, and the node keeps its work tree, so a stage on the same
 node starts from it. The migration comes before the upgrade that
 carries this plan, because that upgrade restarts the driver. After the
-restart, the unpublish push of such a volume fails, and its commits
-stay in the node's work tree until a stage on the same node.
+restart, the unpublish of such a volume pushes nothing. It posts
+`GitVolumePushFailed` on the claim and writes a warning, and its
+commits stay in the node's work tree until a stage on the same node.
 
 A resumed volume's report puts the missing credential ahead of a failed
-fetch or push, so a timed pass that fails without the credential does
-not hide the reason.
+fetch or push from before the restart, so the older failure does not
+hide the reason.
 
 ### The resume waits for the credential and then works at once
 
@@ -136,6 +137,36 @@ nothing else does:
 
 The wake happens only when the volume waited for a credential. A
 rotation reaches the next timed fetch or push with no extra fetch.
+
+### A volume that waits fetches and pushes nothing
+
+A volume that waits for its credential runs no fetch and no push, and
+starts none for another volume:
+
+- The volumes of one URL share one repository and one loop, and each
+  volume fetches with its own credential. A pass passes over a volume
+  that waits, so a pass for another volume of the repository leaves its
+  tree where it is. Each volume waits for its own republish. A fetch
+  with another volume's credential is not used, because two volumes of
+  one URL can name different `Secret`s, and the one a volume names is
+  the one it has the right to use.
+- A demand for a volume that waits is dropped, and wakes no pass. This
+  covers a demand stamped less than a minute before the restart, which
+  the first read of `PersistentVolume`s after the restart reads again.
+  The republish that returns the credential runs a pass, and that pass
+  answers every demand stamped before it.
+- A writeable volume that waits commits what the class allows and
+  keeps the commits in its work tree. The republish pushes them.
+
+### A resumed tree names its commit
+
+A read-only volume's tree holds no git directory. Each placement writes
+the commit it placed to a file `commit` beside the tree, with one
+rename, and a resumed volume reads it. So the report names the commit
+the tree holds from the resume on, and a volume that pulls never names
+it after a restart. A tree placed by a driver without this file has no
+record of its commit, and its report names no commit until the next
+placement.
 
 ### The cost
 
@@ -201,6 +232,17 @@ a cluster.
   republish writes when it returns a credential after a restart.
   `TestTheCallLogKeepsEveryErrorAndEveryUnmarkedCall` checks that a
   quiet call that fails is still logged.
+- `TestAVolumeThatWaitsForItsCredentialFetchesNothingWhenAnotherVolumeOfItsRepositoryFetches`:
+  two inline volumes of one URL resume, and the republish of one
+  moves its tree and leaves the other's tree and report as they were,
+  until the other's own republish.
+- `TestADemandForAVolumeThatWaitsForItsCredentialWakesNoPass` and
+  `TestAWriteableVolumeThatWaitsForItsCredentialPushesNothing`: a
+  demand wakes no pass, and a timed push and an unpublish push leave
+  the remote as it was. The unpublish push posts `GitVolumePushFailed`.
+- `TestAResumedReadOnlyVolumeReportsTheCommitItsTreeHolds`: after the
+  republish, the report of an inline volume and a claim names the
+  commit, with no fetch.
 - `TestAResumedVolumeWithNoPublishSecretSaysWhatItNeeds`: after a
   failed fetch, three republishes with no `Secret` post one Event, the
   report names

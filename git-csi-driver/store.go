@@ -154,6 +154,14 @@ func (r *repository) place(ctx context.Context, commit, directory, tree string) 
 	if err := r.checkout(ctx, commit, fresh); err != nil {
 		return err
 	}
+	if err := arrive(fresh, tree); err != nil {
+		return err
+	}
+	return recordPlaced(directory, commit)
+}
+
+// arrive moves the checkout at fresh into the published tree.
+func arrive(fresh, tree string) error {
 	if _, err := os.Stat(tree); err != nil {
 		return os.Rename(fresh, tree)
 	}
@@ -165,6 +173,30 @@ func (r *repository) place(ctx context.Context, commit, directory, tree string) 
 	// the placement.
 	_ = os.RemoveAll(fresh)
 	return nil
+}
+
+// placedFile is the file beside a read-only volume's tree that names the
+// commit the tree holds. The tree holds no git directory, so a restarted
+// driver reads the commit from this file, and the volume's report names
+// it before the next fetch.
+const placedFile = "commit"
+
+// recordPlaced writes the commit the tree now holds. The file arrives
+// with one rename, so a driver that stops during the write leaves the
+// old commit or the new one, and never part of a name.
+func recordPlaced(directory, commit string) error {
+	next := filepath.Join(directory, placedFile+".next")
+	if err := os.WriteFile(next, []byte(commit+"\n"), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(next, filepath.Join(directory, placedFile))
+}
+
+// placedCommit is the commit recordPlaced wrote, and the empty string
+// for a volume with no such file.
+func placedCommit(directory string) string {
+	content, _ := os.ReadFile(filepath.Join(directory, placedFile))
+	return trimLine(string(content))
 }
 
 // trimLine removes the newline from one line of git output.

@@ -124,13 +124,15 @@ is refused with `GitVolumeRefused`, because the driver cannot choose
 between two credentials for one volume.
 
 A `PersistentVolume` with `nodeStageSecretRef` and no
-`nodePublishSecretRef` works until the driver restarts, and then every
-push fails until the pod is deleted and started again. The driver posts
+`nodePublishSecretRef` works until the driver restarts, and then the
+driver pushes nothing for it until the pod is deleted and started
+again. The driver posts
 `GitVolumeNoPublishSecret` on the pod and the claim when it publishes
 such a volume. The `csi` block cannot change, so give the volume a new
 `PersistentVolume`. Do it before an upgrade of the driver, because the
-upgrade restarts the driver. After a restart, the push at step 1 fails
-too, and the commits stay in the node's work tree until the volume is
+upgrade restarts the driver. After a restart, the driver does not
+push at step 1 either, and posts `GitVolumePushFailed`. The commits
+stay in the node's work tree until the volume is
 staged on the same node again.
 
 1. Scale the application to zero. The driver pushes what the tree holds

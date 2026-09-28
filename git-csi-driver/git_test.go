@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,44 @@ func TestRunGitReportsAContextThatIsOver(t *testing.T) {
 	}
 	if output.code != -1 {
 		t.Errorf("runGit answered code %d, want -1 for a command that never ran", output.code)
+	}
+}
+
+func TestGitReasonKeepsEveryLineGitWrote(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		stderr string
+		want   string
+	}{
+		{
+			name: "a refused key",
+			stderr: "git@git-server: Permission denied (publickey).\r\n" +
+				"fatal: Could not read from remote repository.\n\n" +
+				"Please make sure you have the correct access rights\n" +
+				"and the repository exists.\n",
+			want: "git@git-server: Permission denied (publickey). " +
+				"fatal: Could not read from remote repository. " +
+				"Please make sure you have the correct access rights " +
+				"and the repository exists.",
+		},
+		{name: "one line", stderr: "fatal: bad revision\n", want: "fatal: bad revision"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := gitReason(gitOutput{stderr: c.stderr}, context.Canceled); got != c.want {
+				t.Errorf("gitReason answered %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestAFetchFromNoRepositorySaysWhy(t *testing.T) {
+	_, repo := storeWith(t, fileURL(filepath.Join(t.TempDir(), "nothing")))
+	if err := repo.create(t.Context()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	err := repo.fetch(t.Context(), nil, "main", 0)
+	if err == nil || !strings.Contains(err.Error(), "does not appear to be a git repository") {
+		t.Errorf("the fetch answered %v, want the line where git says why", err)
 	}
 }
 

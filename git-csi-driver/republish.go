@@ -21,8 +21,8 @@ import (
 
 // reasonNoPublishSecret is the Event a volume posts when its
 // PersistentVolume names a stage Secret and no publish Secret. Such a
-// volume works until the driver restarts, and then fails every fetch and
-// push until the kubelet stages it again.
+// volume works until the driver restarts, and then fetches and pushes
+// nothing until the kubelet stages it again.
 const reasonNoPublishSecret = "GitVolumeNoPublishSecret"
 
 // lostCredential is what a volume reports from the moment a restarted
@@ -64,6 +64,17 @@ func (v *volume) needsCredential() bool {
 	return v.credentials != nil || v.credentialLost
 }
 
+// waitsForCredential reports whether the volume is a resumed volume
+// that had a credential and holds none yet. Such a volume fetches and
+// pushes nothing, because every attempt fails without the credential and
+// writes a warning. The republish that returns the credential starts the
+// fetch or the push at once.
+func (v *volume) waitsForCredential() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.credentialLost
+}
+
 // loseCredential marks a resumed volume that had a credential and holds
 // none now.
 func (v *volume) loseCredential() {
@@ -74,8 +85,8 @@ func (v *volume) loseCredential() {
 
 // credentialReport is what a volume that waits for its credential
 // reports, and false for every other volume. It comes before a failed
-// fetch or push in the report, because the missing credential is why
-// they fail.
+// fetch or push in the report: the failure is from before the restart,
+// and no fetch or push runs until the credential returns.
 func (v *volume) credentialReport() (string, bool) {
 	if !v.credentialLost {
 		return "", false

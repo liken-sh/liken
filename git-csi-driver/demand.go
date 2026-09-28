@@ -274,7 +274,16 @@ func (n *node) loopOf(held *volume) *follower {
 // demand records the volume the demand named and wakes the loop. The
 // channel has one slot and the send never blocks, so a burst of demands
 // never waits on a loop that is fetching.
+//
+// A volume that waits for its credential takes no demand. Its fetch
+// fails without the credential, and a wake would fetch the other
+// volumes of the repository for a demand that did not name them. The
+// republish that returns the credential runs a pass, and that pass
+// answers every demand stamped before it.
 func (f *follower) demand(held *volume) {
+	if held.waitsForCredential() {
+		return
+	}
 	f.mu.Lock()
 	if f.volumes[held.id] != held {
 		// The unstage took the volume off the loop after the node

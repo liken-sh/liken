@@ -198,6 +198,12 @@ func (f *follower) arm(timer *time.Timer) {
 // repository's lock, so a fetch never races a publish. It reports
 // whether the fetch failed for a volume a demand named.
 //
+// A volume that waits for its credential is passed over. Each volume
+// fetches with its own credential, so another volume's fetch of the same
+// repository does not serve it, and a fetch with no credential only
+// fails. The republish that returns its credential wants it in a pass of
+// its own.
+//
 // The pass is timed from its start, so the demands that arrive while it
 // fetches are answered by the next pass. A fetch that worked answers
 // every demand stamped before that start. A fetch that failed answers
@@ -210,6 +216,9 @@ func (f *follower) tick(ctx context.Context) bool {
 	wanted := f.answered(now)
 	failed := false
 	for _, held := range f.snapshot() {
+		if held.waitsForCredential() {
+			continue
+		}
 		held.reportPulled(now)
 		if f.refresh(ctx, held) {
 			held.answerDemandsBefore(now)

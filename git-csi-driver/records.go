@@ -189,6 +189,7 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string, mo
 		context:    held.Attributes,
 		targets:    map[string]podReference{},
 		pod:        parsed.pod,
+		commit:     placedCommit(directory),
 	}
 	if held.Credentials {
 		resumed.loseCredential()

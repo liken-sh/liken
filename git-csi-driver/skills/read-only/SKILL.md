@@ -264,14 +264,16 @@ driver's publish again for every mounted volume on each pod sync, about
 once a minute, and reads the `Secret` again for each call. A driver
 that restarts, for example in an upgrade, holds no credential until the
 next of those calls, and then fetches at once, with no restart of the
-pod. A rotated `Secret` reaches the driver the same way.
+pod. A rotated `Secret` reaches the driver the same way. Each volume
+fetches with its own credential alone, so two volumes of one
+repository each wait for their own publish.
 
 A claim's stage fetches with `nodeStageSecretRef`, and its publishes
 carry `nodePublishSecretRef`, so a claim names one `Secret` in both. A
 publish whose `Secret` differs from the one the volume holds is
 refused. A `PersistentVolume` with `nodeStageSecretRef` alone works
-until the driver restarts, and then every fetch fails until every pod on
-the node that mounts it stops. The driver posts
+until the driver restarts, and then the driver fetches nothing for it
+until every pod on the node that mounts it stops. The driver posts
 `GitVolumeNoPublishSecret` on the pods and the claim when it publishes
 such a volume. The `csi` block cannot change, so stop the pods that
 mount the claim, delete the claim and the `PersistentVolume`, create

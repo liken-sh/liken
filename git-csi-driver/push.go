@@ -100,9 +100,17 @@ func (n *node) pushIfDue(ctx context.Context, held *volume, rules *policy, quiet
 
 // push is what unpublish and unstage do. It asks the policy nothing,
 // because durability is the last push.
+//
+// A volume that waits for its credential cannot push, and the pod is
+// gone, so no republish comes. The failure is posted, because the
+// commits stay in this node's work tree.
 func (n *node) push(ctx context.Context, held *volume) {
 	count, _, err := n.counted(ctx, held)
 	if err != nil || count == 0 {
+		return
+	}
+	if held.waitsForCredential() {
+		n.pushFailed(ctx, held, fmt.Sprintf("%d commits stay on this node: %s", count, lostCredential))
 		return
 	}
 	n.pushNow(ctx, held, count)
@@ -128,7 +136,10 @@ func (n *node) counted(ctx context.Context, held *volume) (int, time.Time, error
 // now and pushes again, and takes its side branch only when that
 // fails too.
 func (n *node) pushNow(ctx context.Context, held *volume, count int) {
-	if held.refIsDeleted() {
+	// A volume that waits for its credential keeps its commits in the
+	// work tree. A push without the credential only fails, and the
+	// republish that returns the credential pushes at once.
+	if held.refIsDeleted() || held.waitsForCredential() {
 		return
 	}
 	head, err := held.work.head(ctx)

@@ -405,7 +405,8 @@ func TestAFetchOverSSHFailsWithoutTheKey(t *testing.T) {
 	if err := repo.create(t.Context()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := repo.fetch(t.Context(), nil, "main", 0); err == nil {
-		t.Error("a fetch with no credentials answered no error")
+	err = repo.fetch(t.Context(), nil, "main", 0)
+	if err == nil || !strings.Contains(err.Error(), "Host key verification failed") {
+		t.Errorf("a fetch with no credentials answered %v, want ssh's refusal in it", err)
 	}
 }
