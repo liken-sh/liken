@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -208,6 +209,154 @@ func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release
 		}
 	}()
 	return changed
+}
+
+// mediaBus is this operator's connection to the delivered media bus.
+// The reconcile pass reads the paired set through it, and followBus
+// replaces the connection when the bus closes.
+//
+// The bus belongs to the Bluetooth operator's pod. When that pod
+// restarts, its dbus-daemon exits, the connection closes, and godbus
+// closes every signal channel on it. The operator connects to the new
+// dbus-daemon and reads the paired set again, and the rest of the pod
+// runs on. A pass that runs while no connection is open gets an error,
+// and the pass keeps each paired speaker in the slice without its sink
+// (reconciler.lastSpeakers).
+type mediaBus struct {
+	mu   sync.Mutex
+	conn *dbus.Conn
+}
+
+// errNoBus is the answer of a read while no connection is open.
+var errNoBus = errors.New("no connection to the media bus is open")
+
+func (b *mediaBus) speakers() (map[string]speaker, error) {
+	b.mu.Lock()
+	conn := b.conn
+	b.mu.Unlock()
+	if conn == nil {
+		return nil, errNoBus
+	}
+	return pairedSpeakers(conn)
+}
+
+// subscribe connects to the bus, subscribes to bluetoothd's signals on
+// that connection, and only then makes the connection the one the pass
+// reads through. The subscription opens before the read, so a change
+// during the read is not lost.
+//
+// dbus.SystemBus returns the connection it made before for as long as
+// that connection is open, so the first call uses the connection that
+// waitForBus opened at start. After the bus closes, the call opens a
+// new connection.
+//
+// godbus registers no signal channel on a connection that has already
+// closed, and never closes such a channel. A bus that closes between
+// the connect and the registration would leave a subscription that
+// never ends and never delivers, so the connection is checked after
+// the registration, and a closed one ends the relay and counts as a
+// failed subscription.
+func (b *mediaBus) subscribe(ctx context.Context) (<-chan struct{}, error) {
+	conn, err := dbus.SystemBus()
+	if err != nil {
+		return nil, err
+	}
+	relay, stop := context.WithCancel(ctx)
+	changed, err := watchBlueZ(relay, conn)
+	if err != nil {
+		stop()
+		return nil, err
+	}
+	if !conn.Connected() {
+		stop()
+		return nil, errors.New("the media bus closed during the subscription")
+	}
+	// A relay that runs ends with ctx, or when the bus closes its
+	// channel.
+	context.AfterFunc(ctx, stop)
+	b.mu.Lock()
+	b.conn = conn
+	b.mu.Unlock()
+	return changed, nil
+}
+
+// followBus keeps the operator subscribed to bluetoothd for the life
+// of ctx, and returns the channel that wakes the loop.
+func followBus(ctx context.Context, bus *mediaBus) <-chan struct{} {
+	return resubscribe(ctx, bus.subscribe, busRetryDelay, func(line string) { fmt.Println(line) })
+}
+
+// resubscribe keeps one subscription open until ctx ends. subscribe
+// opens a subscription and returns a channel that carries its events
+// and closes when the subscription fails. When it closes, resubscribe
+// opens a new one, and tries again every retry until one opens.
+//
+// Each subscription that opens sends one wake before its events. The
+// pass that the wake starts reads the whole state again, because the
+// subscription that closed missed every change made while no
+// subscription was open.
+//
+// The retry is a poll, because the bus sends no event before it
+// exists, the same limit that waitForBus has at start. The retry is
+// bounded only by ctx. A bus that never answers at start ends the
+// process, but a bus that closes while the operator runs costs only
+// the speakers' sinks, and the card's outputs publish as before.
+func resubscribe(ctx context.Context, subscribe func(context.Context) (<-chan struct{}, error),
+	retry time.Duration, report func(string)) <-chan struct{} {
+	out := make(chan struct{}, 1)
+	wake := func() {
+		select {
+		case out <- struct{}{}:
+		default:
+		}
+	}
+	go func() {
+		defer close(out)
+		for {
+			events, err := subscribeUntilOpen(ctx, subscribe, retry, report)
+			if err != nil {
+				return
+			}
+			wake()
+			for range events {
+				wake()
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			report("the Bluetooth media bus closed; connecting again")
+		}
+	}()
+	return out
+}
+
+// subscribeUntilOpen calls subscribe until it succeeds, and reports
+// the first failure of a run and the success that ends it. It returns
+// an error only when ctx ends first.
+func subscribeUntilOpen(ctx context.Context, subscribe func(context.Context) (<-chan struct{}, error),
+	retry time.Duration, report func(string)) (<-chan struct{}, error) {
+	failed := false
+	for {
+		events, err := subscribe(ctx)
+		if err == nil {
+			if failed {
+				report("subscribed to bluetoothd on the Bluetooth media bus again")
+			}
+			return events, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !failed {
+			report(fmt.Sprintf("subscribing to bluetoothd on the Bluetooth media bus: %v; trying again every %s", err, retry))
+			failed = true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retry):
+		}
+	}
 }
 
 // waitForBus connects to the delivered system bus, and retries until

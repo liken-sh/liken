@@ -190,18 +190,19 @@ func operate() {
 	// of hiding in a log. Plan 60 accepts the coupling this creates,
 	// because the pod could not prepare its claim without the
 	// Bluetooth operator either.
+	//
+	// After start, a bus that closes is connected again (mediaBus), so
+	// a restart of the Bluetooth operator's pod does not restart this
+	// one.
 	var speakers func() (map[string]speaker, error)
 	var bluez <-chan struct{}
 	if bluetoothEnabled() {
-		conn, err := waitForBus(ctx, busReadyTimeout)
-		if err != nil {
+		if _, err := waitForBus(ctx, busReadyTimeout); err != nil {
 			fatal("connecting to the delivered Bluetooth media bus: %v", err)
 		}
-		speakers = func() (map[string]speaker, error) { return pairedSpeakers(conn) }
-		bluez, err = watchBlueZ(ctx, conn)
-		if err != nil {
-			fatal("watching bluetoothd: %v", err)
-		}
+		bus := &mediaBus{}
+		speakers = bus.speakers
+		bluez = followBus(ctx, bus)
 		fmt.Printf("%s: the claim delivered a Bluetooth media bus at %s\n",
 			DriverName, os.Getenv(busAddressVariable))
 	}
@@ -320,11 +321,10 @@ func operate() {
 //
 // bluez is nil on a pod whose claim delivered no media bus. A
 // receive on a nil channel blocks forever, so the merge needs no
-// branch for that pod.
+// branch for that pod. It closes only when ctx ends, because
+// followBus connects again when the bus closes.
 //
-// A closed bluez or cards channel ends the merge. The bluez relay closes it when the connection to the bus
-// is lost, and a lost bus is a bluetoothd this operator can no
-// longer read, so the loop stops and the kubelet restarts the pod.
+// A closed bluez or cards channel ends the merge.
 func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent,
 	pokes <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)

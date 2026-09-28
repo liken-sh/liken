@@ -40,11 +40,12 @@ func run(ctx context.Context, operator *reconciler, settled <-chan struct{}) err
 					return nil
 				}
 				// The wake channel merges bluetoothd, the cards' own
-				// control devices, the graph feed, and
-				// the backstop tick. A closed channel while the context
-				// is live leaves the operator running with no way to
-				// notice a change again, so it exits and the kubelet
-				// restarts it.
+				// control devices, the graph feed, and the backstop
+				// tick. A closed channel while the context is live
+				// leaves the operator running with no way to notice a
+				// change again, so it exits and the kubelet restarts
+				// it. A closed media bus does not close the channel:
+				// followBus connects again.
 				return errors.New("the event sources closed while running")
 			}
 			if err := operator.pass(ctx); err != nil {

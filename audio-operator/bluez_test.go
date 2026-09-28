@@ -1,14 +1,19 @@
 package main
 
-// These tests cover two decisions: which BlueZ objects are speakers
-// this operator can play into, and when the declare container
-// enables WirePlumber's Bluetooth monitor.
+// These tests cover which BlueZ objects are speakers this operator
+// can play into, when the declare container enables WirePlumber's
+// Bluetooth monitor, and how the operator follows the media bus
+// across a restart of the Bluetooth operator's pod.
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -263,5 +268,84 @@ func TestMonitorConfigStatesTheProfileAndTheRoles(t *testing.T) {
 		if strings.Contains(monitorConfig, role) {
 			t.Errorf("the fragment enables the headset role %q", role)
 		}
+	}
+}
+
+// fakeSubscriptions hands out one scripted subscription per call: a
+// channel, or an error when the channel is nil.
+type fakeSubscriptions struct {
+	mu    sync.Mutex
+	calls int
+	next  []chan struct{}
+}
+
+func (f *fakeSubscriptions) subscribe(context.Context) (<-chan struct{}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if len(f.next) == 0 {
+		return nil, errors.New("the bus refused the connection")
+	}
+	events := f.next[0]
+	f.next = f.next[1:]
+	if events == nil {
+		return nil, errors.New("the bus refused the connection")
+	}
+	return events, nil
+}
+
+// A media bus that closes, as it does when the Bluetooth operator's
+// pod restarts, is connected again, and the loop wakes once the new
+// subscription is open. The wake is what makes the next pass read the
+// whole paired set from the new bus, because the subscription missed
+// every change while it was closed. A connection that fails is tried
+// again.
+func TestTheMediaBusIsFollowedAcrossARestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first, second := make(chan struct{}, 1), make(chan struct{}, 1)
+	bus := &fakeSubscriptions{next: []chan struct{}{first, nil, second}}
+
+	out := resubscribe(ctx, bus.subscribe, time.Millisecond, func(string) {})
+	waitForWake(t, out, testLimit)
+
+	first <- struct{}{}
+	waitForWake(t, out, testLimit)
+
+	close(first)
+	waitForWake(t, out, testLimit)
+	second <- struct{}{}
+	waitForWake(t, out, testLimit)
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	if bus.calls != 3 {
+		t.Errorf("the bus was subscribed %d times, want 3: the first, the refused one, and the one after it", bus.calls)
+	}
+}
+
+// The subscription ends with its context, and only then.
+func TestTheMediaBusFollowerEndsWithItsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	bus := &fakeSubscriptions{}
+
+	out := resubscribe(ctx, bus.subscribe, time.Millisecond, func(string) {})
+	cancel()
+
+	select {
+	case _, open := <-out:
+		if open {
+			t.Fatal("the follower woke the loop with no subscription open")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the follower did not end with its context")
+	}
+}
+
+// A pass that runs while the bus is closed reads no paired set, and
+// the error keeps the speakers the last read found.
+func TestAClosedMediaBusAnswersAnError(t *testing.T) {
+	speakers, err := (&mediaBus{}).speakers()
+	if err == nil || speakers != nil {
+		t.Errorf("speakers = %v, %v; want an error", speakers, err)
 	}
 }
