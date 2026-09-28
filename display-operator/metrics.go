@@ -110,7 +110,7 @@ func newMetrics(component, version string) *metrics {
 		}, []string{"kind"}),
 		watchRestarts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "display_watch_restarts_total",
-			Help: "Times a watch the API server closed was opened again.",
+			Help: "Times the API server accepted a watch after the first one, for each kind.",
 		}, []string{"kind"}),
 	}
 	m.newDisplayMetrics()
@@ -139,9 +139,9 @@ func (m *metrics) reconciled(kind reconcileKind, pass func() error) error {
 	return err
 }
 
-// watchRestarted counts one watch connection opened after an earlier
-// one closed. The first connection of a process is not a restart, so
-// the caller of a watch loop counts from its second iteration.
+// watchRestarted counts one watch that the API server accepted after
+// an earlier one. The first watch of a process is not a restart, and a
+// refused watch is a retry, not a restart.
 func (m *metrics) watchRestarted(kind reconcileKind) {
 	if m == nil {
 		return

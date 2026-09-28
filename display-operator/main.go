@@ -233,6 +233,10 @@ func operate() {
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
+	watcher, err := inClusterWatcher()
+	if err != nil {
+		fatal("in-cluster config for the watches: %v", err)
+	}
 	owner, err := NodeOwner(client, nodeName)
 	if err != nil {
 		fatal("reading node %s: %v", nodeName, err)
@@ -349,9 +353,9 @@ func operate() {
 		default:
 		}
 	}
-	go watchPods(ctx, client, nodeName, resourceWake, readings)
-	go watchLayouts(ctx, client, resourceWake, readings)
-	go watchDisplays(ctx, client, func() {
+	go watchPods(ctx, watcher, nodeName, resourceWake, readings)
+	go watchLayouts(ctx, watcher, resourceWake, readings)
+	go watchDisplays(ctx, watcher, func() {
 		panels.wake()
 		resourceWake()
 	}, readings)

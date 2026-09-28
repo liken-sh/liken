@@ -2,14 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/cache"
 )
 
 // A pod is held under the node it runs on, because a capture goes to
@@ -85,168 +82,86 @@ func TestAPodThatLeftIsDropped(t *testing.T) {
 	}
 }
 
-// The listing is the whole truth, so a pod the listing does not name
-// is gone from the index.
-func TestAListingReplacesWhatTheIndexHeld(t *testing.T) {
-	index := newSidecarIndex()
-	index.hold(readySidecar("node-1", "10.42.0.7"))
-	index.replace([]Pod{readySidecar("node-2", "10.42.1.3")})
-
-	if _, held := index.on("node-1"); held {
-		t.Error("a node the listing did not name is still in the index")
-	}
-	if _, held := index.on("node-2"); !held {
-		t.Error("a node the listing named is not in the index")
-	}
-}
-
-// The loop lists and then watches from the listing's version, and the
-// watch's events move the index.
+// The watch asks for the sidecar pods by label, its first read fills
+// the index, and each change after it moves one pod.
 func TestTheIndexFollowsTheWatch(t *testing.T) {
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if !strings.Contains(r.URL.RawQuery, "watch=true") {
-			fmt.Fprint(w, `{"metadata":{"resourceVersion":"41"},"items":[
-				{"metadata":{"name":"display-operator-a","namespace":"liken-system"},
-				 "spec":{"nodeName":"node-1"},
-				 "status":{"podIP":"10.42.0.7","conditions":[{"type":"Ready","status":"True"}]}}]}`)
-			return
-		}
-		if !strings.Contains(r.URL.RawQuery, "resourceVersion=41") {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		fmt.Fprint(w, `{"type":"ADDED","object":{"metadata":{"name":"display-operator-b","namespace":"liken-system"},
-			"spec":{"nodeName":"node-2"},
-			"status":{"podIP":"10.42.1.3","conditions":[{"type":"Ready","status":"True"}]}}}`)
-		fmt.Fprint(w, `{"type":"DELETED","object":{"metadata":{"name":"display-operator-a","namespace":"liken-system"},
-			"spec":{"nodeName":"node-1"}}}`)
-	}))
-	defer api.Close()
-
+	pods := newObjectStore(t, "/api/v1/namespaces/"+sidecarNamespace+"/pods", "v1", "Pod")
+	pods.put(readySidecar("node-1", "10.42.0.7"))
 	index := newSidecarIndex()
 	ctx, stop := context.WithCancel(t.Context())
-	defer stop()
-	go index.run(ctx, NewClient(api.URL, api.Client(), ""), sidecarNamespace)
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
+	go func() {
+		defer close(done)
+		index.run(ctx, pods.watcher(), sidecarNamespace)
+	}()
+	eventually(t, "the first read", func() bool {
+		_, held := index.on("node-1")
+		return held
+	})
 
-	eventually(t, "the watch's new pod", func() bool {
+	pods.put(readySidecar("node-2", "10.42.1.3"))
+	eventually(t, "the new pod", func() bool {
 		pod, held := index.on("node-2")
 		return held && pod.IP == "10.42.1.3"
 	})
-	eventually(t, "the watch's deletion", func() bool {
+	pods.remove("display-operator-node-1")
+	eventually(t, "the deletion", func() bool {
 		_, held := index.on("node-1")
 		return !held
 	})
-}
 
-// sidecarAPI serves the capture sidecars' listing at version 41 and
-// answers each watch with the next of answers, counting the listings
-// and recording the version each watch asked for. A watch past the
-// last answer is held open until the loop ends.
-type sidecarAPI struct {
-	mu      sync.Mutex
-	lists   int
-	asked   []string
-	answers []func(w http.ResponseWriter)
-}
-
-func (a *sidecarAPI) serve(t *testing.T) *Client {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("watch") != "true" {
-			a.mu.Lock()
-			a.lists++
-			a.mu.Unlock()
-			fmt.Fprint(w, `{"metadata":{"resourceVersion":"41"},"items":[]}`)
-			return
+	for _, query := range pods.asked() {
+		if got := query.Get("labelSelector"); got != sidecarSelector {
+			t.Errorf("a request selected %q, want %q", got, sidecarSelector)
 		}
-		a.mu.Lock()
-		a.asked = append(a.asked, r.URL.Query().Get("resourceVersion"))
-		n := len(a.asked)
-		a.mu.Unlock()
-		if n > len(a.answers) {
-			<-r.Context().Done()
-			return
-		}
-		a.answers[n-1](w)
-	}))
-	t.Cleanup(server.Close)
-	return NewClient(server.URL, server.Client(), "")
+	}
 }
 
-func (a *sidecarAPI) run(t *testing.T, window time.Duration) (int, []string) {
-	t.Helper()
-	client := a.serve(t)
-	ctx, stop := context.WithTimeout(t.Context(), window)
-	defer stop()
-	newSidecarIndex().run(ctx, client, sidecarNamespace)
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.lists, append([]string(nil), a.asked...)
-}
-
-const sidecarAddedAt42 = `{"type":"ADDED","object":{"metadata":{"name":"display-operator-b","namespace":"liken-system","resourceVersion":"42"},"spec":{"nodeName":"node-2"}}}`
-
-// A watch that lived a second and ended resumes at the last version it
-// delivered, with no second listing, whether the API server ended it
-// cleanly or the connection was reset.
-func TestTheSidecarWatchResumesWhereItEnded(t *testing.T) {
+// A deleted pod leaves the index even when the index cannot read it: a
+// tombstone with a copy, a tombstone with no copy, and a pod whose
+// fields do not convert each drop it by its key.
+func TestADeletionDropsThePod(t *testing.T) {
+	mistyped := podObject(t, readySidecar("node-1", "10.42.0.7"))
+	mistyped.Object["spec"] = "not a spec"
 	cases := []struct {
-		name  string
-		reset bool
+		name    string
+		deleted any
 	}{
-		{name: "ended cleanly"},
-		{name: "reset", reset: true},
+		{name: "a tombstone with a copy", deleted: cache.DeletedFinalStateUnknown{
+			Key: sidecarNamespace + "/display-operator-node-1",
+			Obj: podObject(t, readySidecar("node-1", "10.42.0.7")),
+		}},
+		{name: "a tombstone with no copy", deleted: cache.DeletedFinalStateUnknown{
+			Key: sidecarNamespace + "/display-operator-node-1",
+		}},
+		{name: "that does not convert", deleted: mistyped},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			api := &sidecarAPI{answers: []func(w http.ResponseWriter){func(w http.ResponseWriter) {
-				fmt.Fprint(w, sidecarAddedAt42)
-				w.(http.Flusher).Flush()
-				time.Sleep(1100 * time.Millisecond)
-				if c.reset {
-					if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
-						_ = conn.Close()
-					}
-				}
-			}}}
+			index := newSidecarIndex()
+			index.hold(readySidecar("node-1", "10.42.0.7"))
 
-			lists, asked := api.run(t, 1600*time.Millisecond)
+			index.handler("the test sidecars").OnDelete(c.deleted)
 
-			if lists != 1 || len(asked) != 2 || asked[1] != "42" {
-				t.Errorf("the loop listed %d times and watched from %v, want one listing and a second watch from 42",
-					lists, asked)
+			if _, held := index.on("node-1"); held {
+				t.Error("the index still answers for a deleted pod")
 			}
 		})
 	}
 }
 
-// A 410 Gone means the version is too old, so the loop lists again at
-// once and watches from the new listing.
-func TestTheSidecarWatchListsAgainOnGone(t *testing.T) {
-	api := &sidecarAPI{answers: []func(w http.ResponseWriter){func(w http.ResponseWriter) {
-		fmt.Fprint(w, `{"type":"ERROR","object":{"kind":"Status","code":410}}`)
-	}}}
-
-	lists, _ := api.run(t, 300*time.Millisecond)
-
-	if lists != 2 {
-		t.Errorf("the loop listed %d times, want a second listing at once after the 410", lists)
+// podObject is a pod the way the informer hands it to a handler.
+func podObject(t *testing.T, pod Pod) *unstructured.Unstructured {
+	t.Helper()
+	fields, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pod)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-// A watch that lived under a second is a failure, whatever it
-// delivered, so the loop waits before the next one.
-func TestTheSidecarWatchWaitsAfterAShortWatch(t *testing.T) {
-	answer := func(w http.ResponseWriter) { fmt.Fprint(w, sidecarAddedAt42) }
-	api := &sidecarAPI{answers: []func(w http.ResponseWriter){answer, answer, answer, answer, answer}}
-
-	lists, asked := api.run(t, 500*time.Millisecond)
-
-	if lists+len(asked) > 3 {
-		t.Errorf("the loop listed %d times and watched %d times in half a second, want it to wait",
-			lists, len(asked))
-	}
+	return &unstructured.Unstructured{Object: fields}
 }
 
 // A sidecar pod by name on node-1, ready or not, and deleting or not.
@@ -314,32 +229,5 @@ func TestTheIndexAnswersTheNodesCurrentSidecar(t *testing.T) {
 				t.Errorf("the index answers %+v (held: %v), want %s with ready=%v", held, there, c.want, c.ready)
 			}
 		})
-	}
-}
-
-// A listing replaces the index in one step, so a capture that reads the
-// index while a listing lands never finds a node the listing names
-// missing.
-func TestAListingNeverEmptiesTheIndexOnTheWay(t *testing.T) {
-	index := newSidecarIndex()
-	pods := []Pod{readySidecar("node-1", "10.42.0.7")}
-	index.replace(pods)
-	var missed atomic.Int64
-	ctx, stop := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer stop()
-	go func() {
-		for ctx.Err() == nil {
-			index.replace(pods)
-		}
-	}()
-
-	for ctx.Err() == nil {
-		if _, held := index.on("node-1"); !held {
-			missed.Add(1)
-		}
-	}
-
-	if n := missed.Load(); n > 0 {
-		t.Errorf("a read found node-1 missing %d times while listings landed", n)
 	}
 }

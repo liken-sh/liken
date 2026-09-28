@@ -198,7 +198,7 @@ func TestTheAPIMintsItsAuthorityAtFirstStart(t *testing.T) {
 
 	readings := newAPIMetrics(apiComponent, version)
 	holder := &certificateHolder{}
-	anchor, err := startAuthority(ctx, client, testNamespace, holder, readings)
+	anchor, err := startAuthority(ctx, client, idleWatcher(t), testNamespace, holder, readings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestTheAPIMintsNothingBesideAnOwnersCertificate(t *testing.T) {
 	defer stop()
 
 	holder := &certificateHolder{}
-	if _, err := startAuthority(ctx, objectClient(t, api), testNamespace, holder,
+	if _, err := startAuthority(ctx, objectClient(t, api), idleWatcher(t), testNamespace, holder,
 		newAPIMetrics(apiComponent, version)); err != nil {
 		t.Fatal(err)
 	}
@@ -366,12 +366,12 @@ func serialOf(t *testing.T, secret Secret) string {
 // owner's cert-manager rotated reaches the listener as it lands.
 func TestTheAPITakesUpALeafTheOwnerRotated(t *testing.T) {
 	ca := testAuthority(t)
-	api := newNamedObjects(t)
+	api := newSecretStore(t, testNamespace)
 	first, second := ownersSecret(t, ca), ownersSecret(t, ca)
 	api.put(first)
 	holder := &certificateHolder{}
 
-	go keepCertificates(t.Context(), api.client(), testNamespace, nil, holder, nil)
+	go keepCertificates(t.Context(), api.client(), api.watcher(), testNamespace, nil, holder, nil)
 	eventually(t, "the first leaf", func() bool { return servedSerial(t, holder) == serialOf(t, first) })
 	api.put(second)
 
@@ -382,8 +382,8 @@ func TestTheAPITakesUpALeafTheOwnerRotated(t *testing.T) {
 // the watch's news, not on a clock.
 func TestTheAPIMintsTheSidecarsSecretAgainWhenItGoes(t *testing.T) {
 	ca := testAuthority(t)
-	api := newNamedObjects(t)
-	go keepSidecarLeaf(t.Context(), api.client(), testNamespace, ca)
+	api := newSecretStore(t, testNamespace)
+	go keepSidecarLeaf(t.Context(), api.client(), api.watcher(), testNamespace, ca)
 	minted := func() bool {
 		held, err := get[Secret](api.client(), secretsPath(testNamespace)+"/"+sidecarTLSSecret)
 		return err == nil && sidecarLeafStands(held, sidecarName, time.Now())

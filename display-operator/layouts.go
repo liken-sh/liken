@@ -20,6 +20,8 @@ package main
 
 import (
 	"context"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The Layout collection, under the same group and version the
@@ -134,13 +136,7 @@ func listLayouts(c *Client) ([]Layout, error) {
 	return list.Items, nil
 }
 
-// The watch turns a Layout a person edited into one wake. It keeps
-// the bounds the Display watch keeps, because what they bound is the
-// API server's own behavior and not anything about either resource.
-func watchLayouts(ctx context.Context, c *Client, wake func(), readings *metrics) {
-	watchWakes(ctx, c, kindLayout, "layouts", layoutsWatchPath(), wake, readings)
-}
-
-func layoutsWatchPath() string {
-	return LayoutsPath
+// The watch turns a Layout a person edited into one wake.
+func watchLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
+	watchWakes(ctx, client, kindLayout, collectionWatch{resource: layoutResource}, wake, readings)
 }

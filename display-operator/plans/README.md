@@ -275,6 +275,11 @@ say why it is built the way it is.
   control devices untainted, because DDC/CI needs no compositor.
   Answers and replaces the open problem "A control claim waits for the
   compositor".
+* [26, The watches use client-go](completed/26-the-watches-use-client-go.md).
+  Built on 2026-09-27. The seven Kubernetes watches of the operator and
+  display-api run on client-go's reflector with the dynamic client, and
+  the hand-written watch loop is gone. The stripped operator binary
+  grows from 15.4 MB to 20.2 MB.
 
 ## Open problems
 

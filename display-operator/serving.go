@@ -16,6 +16,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The API re-mints the leaves it signs on a twelve-hour clock, which is
@@ -113,7 +115,7 @@ func serviceNames(namespace string) []string {
 // leaf with that CA, and publishes the CA certificate in the
 // ConfigMap. An owner whose cert-manager owns the Secret gets none of
 // the minting and all of the reloading.
-func startAuthority(ctx context.Context, c *Client, namespace string,
+func startAuthority(ctx context.Context, c *Client, watcher dynamic.Interface, namespace string,
 	holder *certificateHolder, readings *apiMetrics) (*x509.CertPool, error) {
 	now := time.Now()
 	material, ca, err := ensureServingMaterial(c, namespace, apiTLSSecret, serviceNames(namespace), now)
@@ -146,7 +148,7 @@ func startAuthority(ctx context.Context, c *Client, namespace string,
 	// The loop runs either way. It re-mints the leaf this API minted,
 	// or it watches for the leaf an owner's cert-manager rotated, so
 	// neither one waits for a restart.
-	go keepCertificates(ctx, c, namespace, ca, holder, readings)
+	go keepCertificates(ctx, c, watcher, namespace, ca, holder, readings)
 	return anchor, nil
 }
 
@@ -161,14 +163,14 @@ func startAuthority(ctx context.Context, c *Client, namespace string,
 // An API that serves an owner's Secret watches that Secret, so a leaf
 // the owner's cert-manager rotated reaches the listener as soon as it
 // lands, with no restart.
-func keepCertificates(ctx context.Context, c *Client, namespace string,
+func keepCertificates(ctx context.Context, c *Client, watcher dynamic.Interface, namespace string,
 	ca *certificateAuthority, holder *certificateHolder, readings *apiMetrics) {
 	if ca == nil {
-		watchNamed(ctx, c, secretsPath(namespace), apiTLSSecret, "the Secret "+apiTLSSecret,
+		watchNamed(ctx, watcher, secretResource, namespace, apiTLSSecret, "the Secret "+apiTLSSecret,
 			func(held *Secret) { takeOwnersLeaf(held, holder, readings) })
 		return
 	}
-	go keepSidecarLeaf(ctx, c, namespace, ca)
+	go keepSidecarLeaf(ctx, c, watcher, namespace, ca)
 	tick := time.NewTicker(renewalInterval)
 	defer tick.Stop()
 	for {
@@ -228,8 +230,8 @@ func takeOwnersLeaf(held *Secret, holder *certificateHolder, readings *apiMetric
 // every capture in the cluster answers 503 until the Secret returns.
 // The API's own write arrives on the watch too, and a leaf that stands
 // costs one get and writes nothing.
-func keepSidecarLeaf(ctx context.Context, c *Client, namespace string, ca *certificateAuthority) {
-	watchNamed(ctx, c, secretsPath(namespace), sidecarTLSSecret, "the Secret "+sidecarTLSSecret,
+func keepSidecarLeaf(ctx context.Context, c *Client, watcher dynamic.Interface, namespace string, ca *certificateAuthority) {
+	watchNamed(ctx, watcher, secretResource, namespace, sidecarTLSSecret, "the Secret "+sidecarTLSSecret,
 		func(held *Secret) {
 			if held != nil && sidecarLeafStands(held, sidecarName, time.Now()) {
 				return

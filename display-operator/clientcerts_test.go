@@ -342,11 +342,11 @@ func TestAnAbsentConfigMapLeavesNoAnchors(t *testing.T) {
 // listener with no restart and no clock.
 func TestTheWatchTakesUpANewAuthority(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
-	published := newNamedObjects(t)
+	published := newConfigMapStore(t, clientCANamespace)
 	published.put(authenticationConfigMapHolding(string(first.certPEM)))
 	anchors := &clientAnchors{}
 
-	go keepClientAnchors(t.Context(), published.client(), anchors)
+	go keepClientAnchors(t.Context(), published.watcher(), anchors)
 	eventually(t, "the first authority", func() bool { return verifies(t, anchors, first) })
 	published.put(authenticationConfigMapHolding(string(second.certPEM)))
 
@@ -357,10 +357,10 @@ func TestTheWatchTakesUpANewAuthority(t *testing.T) {
 // certificates it holds are still the ones the cluster issued.
 func TestTheWatchKeepsTheAnchorsWhenTheConfigMapGoes(t *testing.T) {
 	first := newClientAuthority(t)
-	published := newNamedObjects(t)
+	published := newConfigMapStore(t, clientCANamespace)
 	published.put(authenticationConfigMapHolding(string(first.certPEM)))
 	anchors := &clientAnchors{}
-	go keepClientAnchors(t.Context(), published.client(), anchors)
+	go keepClientAnchors(t.Context(), published.watcher(), anchors)
 	eventually(t, "the first authority", func() bool { return verifies(t, anchors, first) })
 
 	published.remove(clientCAConfigMap)

@@ -13,7 +13,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The API group is the driver's own name, so one domain names
@@ -451,17 +452,8 @@ func writeDisplayStatus(c *Client, display *Display, status DisplayStatus) (*Dis
 	return updated, nil
 }
 
-// How long one watch connection lives before the API server
-// closes it and the operator opens another. A watch that never ends
-// holds a connection through every network fault in between.
-const displayWatchTimeout = 290 * time.Second
-
 // The watch turns every Display event in the cluster into one wake,
 // and the pass that follows reads every Display this node serves.
-func watchDisplays(ctx context.Context, c *Client, wake func(), readings *metrics) {
-	watchWakes(ctx, c, kindDisplay, "displays", displaysWatchPath(), wake, readings)
-}
-
-func displaysWatchPath() string {
-	return DisplaysPath
+func watchDisplays(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
+	watchWakes(ctx, client, kindDisplay, collectionWatch{resource: displayResource}, wake, readings)
 }

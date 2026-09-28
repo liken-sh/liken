@@ -99,10 +99,14 @@ func serveAPI() {
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
+	watcher, err := inClusterWatcher()
+	if err != nil {
+		fatal("in-cluster config for the watches: %v", err)
+	}
 	readings := newAPIMetrics(apiComponent, version)
 
 	holder := &certificateHolder{}
-	anchor, err := startAuthority(ctx, client, namespace, holder, readings)
+	anchor, err := startAuthority(ctx, client, watcher, namespace, holder, readings)
 	if err != nil {
 		fatal("the serving certificate: %v", err)
 	}
@@ -117,10 +121,10 @@ func serveAPI() {
 	if err := anchors.load(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 	}
-	go keepClientAnchors(ctx, client, anchors)
+	go keepClientAnchors(ctx, watcher, anchors)
 
 	index := newSidecarIndex()
-	go index.run(ctx, client, namespace)
+	go index.run(ctx, watcher, namespace)
 
 	server := &apiServer{
 		client:   client,

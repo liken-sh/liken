@@ -92,10 +92,10 @@ func TestListLayoutsReadsEveryLayout(t *testing.T) {
 // wait out the retry.
 func TestTheLayoutWatchEndsWithTheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	watcher := testWatcher(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	watchLayouts(ctx, client, func() {}, nil)
+	watchLayouts(ctx, watcher, func() {}, nil)
 }

@@ -20,14 +20,17 @@ package main
 import (
 	"context"
 	"slices"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The pod collection, and the field selector that keeps a read to one
 // node's pods.
 const (
-	PodsPath     = "/api/v1/pods"
-	podsOnNode   = "?fieldSelector=spec.nodeName="
-	podsResource = "pods"
+	PodsPath        = "/api/v1/pods"
+	podsOnNodeField = "spec.nodeName="
+	podsOnNode      = "?fieldSelector=" + podsOnNodeField
+	podsResource    = "pods"
 )
 
 // Pod holds the part of a pod this program reads: the labels a
@@ -41,14 +44,7 @@ type Pod struct {
 }
 
 type PodList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Pod    `json:"items"`
-}
-
-// A watch starts at the version the listing answered with, so no
-// event between the two is missed.
-type ListMeta struct {
-	ResourceVersion string `json:"resourceVersion,omitempty"`
+	Items []Pod `json:"items"`
 }
 
 // The node is the only field of a pod's spec this program reads. It
@@ -140,12 +136,7 @@ func listPods(c *Client, node string) ([]Pod, error) {
 
 // The watch turns a pod that gained or lost a label into one wake,
 // because the labels a region's selector matches are the pods' own. It
-// keeps the bounds the Display watch keeps, and it carries the same
-// field selector the listing does.
-func watchPods(ctx context.Context, c *Client, node string, wake func(), readings *metrics) {
-	watchWakes(ctx, c, kindPod, "the pods on "+node, podsWatchPath(node), wake, readings)
-}
-
-func podsWatchPath(node string) string {
-	return PodsPath + podsOnNode + node
+// carries the same field selector the listing does.
+func watchPods(ctx context.Context, client dynamic.Interface, node string, wake func(), readings *metrics) {
+	watchWakes(ctx, client, kindPod, collectionWatch{resource: podResource, fields: podsOnNodeField + node}, wake, readings)
 }

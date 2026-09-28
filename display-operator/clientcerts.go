@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"k8s.io/client-go/dynamic"
 )
 
 // The ConfigMap the API server publishes the cluster's client
@@ -87,8 +89,8 @@ func (a *clientAnchors) take(held *ConfigMap) error {
 // holds no authority is reported, and so is a ConfigMap that is gone.
 // Either way the API keeps the pool it holds, because the certificates
 // that pool holds are still the ones the cluster issued.
-func keepClientAnchors(ctx context.Context, c *Client, anchors *clientAnchors) {
-	watchNamed(ctx, c, configMapsPath(clientCANamespace), clientCAConfigMap, "the ConfigMap "+clientCAConfigMap,
+func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *clientAnchors) {
+	watchNamed(ctx, watcher, configMapResource, clientCANamespace, clientCAConfigMap, "the ConfigMap "+clientCAConfigMap,
 		func(held *ConfigMap) {
 			if held == nil {
 				fmt.Fprintf(os.Stderr, "the ConfigMap %s is gone, and the API keeps the client authority it holds\n", clientCAConfigMap)

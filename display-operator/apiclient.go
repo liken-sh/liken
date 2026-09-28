@@ -5,9 +5,11 @@ package main
 //
 // It follows liken's own client (kubernetes/apiclient.go) and for
 // the same reason: the Kubernetes API is HTTPS that serves JSON, and
-// this program calls three URLs. client-go would bring informers,
-// work queues, and generated types this program does not use, into a
-// container that also holds Weston and its library closure.
+// every read and write a pass makes is one request for one object or
+// one collection. Only the watches use client-go (watch.go), because
+// its reflector is a loop that upstream maintains and tests. The typed
+// clientset and its generated types stay out of a container that also
+// holds Weston and its library closure.
 //
 // Every pod starts with what it needs to reach the API server.
 // Kubernetes injects two environment variables that name the server's
@@ -17,7 +19,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -40,34 +41,23 @@ var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 // the caller handles it by creating the object. ErrConflict marks the
 // same difference for "something else wrote this object first", which
 // is normal under optimistic concurrency, and the caller handles it
-// by reading the object again. ErrGone marks a watch refused because
-// the resource version it asked for is older than any the API server
-// holds, and the caller handles it by listing again.
+// by reading the object again.
 var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict: something else wrote this object first")
-	ErrGone     = errors.New("the resource version is gone")
 )
 
 type Client struct {
 	base        string
 	http        *http.Client
-	stream      *http.Client
 	credentials string
 }
 
 // NewClient builds a client from its three parts. InClusterClient
 // gets these parts from the pod's environment, and tests get them
 // from an httptest server.
-//
-// The second client is the same transport with no deadline on
-// the whole request. A watch holds its response open for as long as
-// the API server keeps it, and the timeout that bounds a read of one
-// object would end it every half minute.
 func NewClient(base string, httpClient *http.Client, credentials string) *Client {
-	stream := *httpClient
-	stream.Timeout = 0
-	return &Client{base: base, http: httpClient, stream: &stream, credentials: credentials}
+	return &Client{base: base, http: httpClient, credentials: credentials}
 }
 
 func InClusterClient() (*Client, error) {
@@ -162,34 +152,6 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-// Watch opens a streaming request and hands the caller the open
-// body. The caller reads events until the stream ends and closes the
-// body, and the context is what ends the request early.
-func (c *Client) Watch(ctx context.Context, path string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.authorize(req); err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.stream.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		drain(resp.Body)
-		if resp.StatusCode == http.StatusGone {
-			return nil, fmt.Errorf("GET %s: %s: %s: %w", path, resp.Status, message, ErrGone)
-		}
-		return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, message)
-	}
-	return resp.Body, nil
 }
 
 // get sends a GET request for a single object.

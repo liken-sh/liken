@@ -74,10 +74,10 @@ func TestListPodsReadsOnlyThisNodesPods(t *testing.T) {
 // wait out the retry.
 func TestThePodWatchEndsWithTheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	watcher := testWatcher(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	watchPods(ctx, client, "liken-1", func() {}, nil)
+	watchPods(ctx, watcher, "liken-1", func() {}, nil)
 }

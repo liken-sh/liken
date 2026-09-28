@@ -1,17 +1,20 @@
 package main
 
 // This file holds display-api's memory of the capture sidecars: one
-// pod per node, found by label. The API keeps one list-and-watch on
-// those pods instead of asking the API server on every request, so
-// a capture costs one call to the node and nothing else, and the API
-// answers "no ready sidecar on that node" from memory. A sidecar is
-// ready when the kubelet's own Ready condition on its pod is True,
-// which covers every container of the pod, the compositor included.
+// pod per node, found by label. The API keeps one watch on those pods
+// instead of asking the API server on every request, so a capture
+// costs one call to the node and nothing else, and the API answers
+// "no ready sidecar on that node" from memory. A sidecar is ready when
+// the kubelet's own Ready condition on its pod is True, which covers
+// every container of the pod, the compositor included.
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"sync"
+
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // The pods the API watches: the display-operator DaemonSet's pods in
@@ -109,32 +112,61 @@ func (i *sidecarIndex) drop(pod Pod) {
 	delete(i.byName, pod.Metadata.Name)
 }
 
-// The listing is the whole truth. The new map is built first and
-// swapped in under one lock, so a request never reads an index that is
-// half filled.
-func (i *sidecarIndex) replace(pods []Pod) {
-	byName := make(map[string]Pod, len(pods))
-	for _, pod := range pods {
-		if pod.Spec.NodeName != "" {
-			byName[pod.Metadata.Name] = pod
-		}
+// forget drops a deleted pod that the index cannot read, such as one
+// whose tombstone holds no copy. The key is namespace/name, and the
+// index holds pods of one namespace by name.
+func (i *sidecarIndex) forget(key string) {
+	_, name, found := strings.Cut(key, "/")
+	if !found {
+		name = key
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.byName = byName
+	delete(i.byName, name)
 }
 
-// The loop: one listing, then a watch from the listing's version, for
-// as long as the API runs. The listing replaces the whole index, and
-// each event after it moves one pod.
-func (i *sidecarIndex) run(ctx context.Context, c *Client, namespace string) {
-	path := fmt.Sprintf("/api/v1/namespaces/%s/pods?labelSelector=%s", namespace, sidecarSelector)
-	watchList(ctx, c, path, "the capture sidecars in "+namespace, i.replace, nil,
-		func(kind string, pod Pod) {
-			if kind == "DELETED" {
+// The watch keeps the index current for as long as the API runs.
+func (i *sidecarIndex) run(ctx context.Context, client dynamic.Interface, namespace string) {
+	watchCollection(ctx, client, collectionWatch{
+		resource:  podResource,
+		namespace: namespace,
+		labels:    sidecarSelector,
+		handler:   i.handler("the capture sidecars in " + namespace),
+	})
+}
+
+// handler moves the index with each change the informer reports. The
+// informer's first read adds every sidecar pod, and each change after
+// it moves one pod. A watch that resumes after a gap receives each
+// change made during it. When the watch cannot resume, after a 410
+// Gone, the informer reads the pods again and reports each difference
+// from what it held, so a pod that left during the gap is dropped and
+// no pod that stayed leaves the index on the way.
+func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
+	take := func(object any) {
+		pod, err := convert[Pod](object)
+		if err != nil {
+			reportUnconverted(what, err)
+			return
+		}
+		i.hold(pod)
+	}
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    take,
+		UpdateFunc: func(_, object any) { take(object) },
+		DeleteFunc: func(object any) {
+			pod, err := convert[Pod](object)
+			if err == nil {
 				i.drop(pod)
 				return
 			}
-			i.hold(pod)
-		})
+			// A pod that does not convert still left, so the index
+			// drops it by its key, which needs none of the fields that
+			// failed.
+			reportUnconverted(what, err)
+			if key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(object); err == nil {
+				i.forget(key)
+			}
+		},
+	}
 }
