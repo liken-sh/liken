@@ -214,6 +214,44 @@ func TestAWakeWatchWakesOnItsFirstReadAndOnEveryChange(t *testing.T) {
 	}
 }
 
+// podAt is a pod with one label and one address, the way the kubelet
+// reports it.
+func podAt(uid, region, address string) map[string]any {
+	return map[string]any{
+		"kind":     "Pod",
+		"metadata": map[string]any{"name": "player", "namespace": "default", "uid": uid, "labels": map[string]any{"region": region}},
+		"status":   map[string]any{"podIP": address},
+	}
+}
+
+// Through the reflector: the pod watch wakes the placement pass on its
+// first read, a new pod, a change to a pod's labels, a pod deleted and
+// created again, and a removal. The pass reads a pod's name,
+// namespace, and labels, so the kubelet's status writes wake nothing.
+func TestThePodWatchWakesOnALabelChangeAndNotOnAStatusWrite(t *testing.T) {
+	store := newObjectStore(t, PodsPath, "v1", "Pod")
+	wakes := runWakeWatch(t, store, func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) {
+		watchPods(ctx, client, "node-1", wake, readings)
+	}, nil)
+	awaitWake(t, wakes, "the first read")
+	eventually(t, "the watch opening", func() bool { return store.watching() > 0 })
+
+	store.put(podAt("uid-1", "left", "10.42.0.7"))
+	awaitWake(t, wakes, "a new pod")
+	store.put(podAt("uid-1", "left", "10.42.0.8"))
+	select {
+	case <-wakes:
+		t.Fatal("a status write woke a pass")
+	case <-time.After(300 * time.Millisecond):
+	}
+	store.put(podAt("uid-1", "right", "10.42.0.8"))
+	awaitWake(t, wakes, "a label change")
+	store.put(podAt("uid-2", "right", "10.42.0.8"))
+	awaitWake(t, wakes, "a pod deleted and created again")
+	store.remove("player")
+	awaitWake(t, wakes, "a removal")
+}
+
 // displayAt is a Display at one generation, with a status that names
 // the node it is on and the connector it is on.
 func displayAt(generation int64, node, connector string) map[string]any {

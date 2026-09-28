@@ -19,9 +19,12 @@ package main
 
 import (
 	"context"
+	"maps"
 	"slices"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 )
 
 // The pod collection, and the field selector that keeps a read to one
@@ -134,9 +137,9 @@ func listPods(c *Client, node string) ([]Pod, error) {
 	return list.Items, nil
 }
 
-// The watch turns a pod that gained or lost a label into one wake,
-// because the labels a region's selector matches are the pods' own. It
-// carries the same field selector the listing does.
+// The watch turns a pod that arrived, left, or changed its labels into
+// one wake, because the labels a region's selector matches are the
+// pods' own. It carries the same field selector the listing does.
 func watchPods(ctx context.Context, client dynamic.Interface, node string, wake func(), readings *metrics) {
 	openPods(client, node, wake, readings).run(ctx)
 }
@@ -145,6 +148,40 @@ func watchPods(ctx context.Context, client dynamic.Interface, node string, wake 
 // node, which the placement pass reads for the holders of a claim, and
 // the compositor's restart count reads for this operator's own pod
 // (objectcache.go).
+//
+// The placement pass reads a pod's name, namespace, and labels, so an
+// update wakes it only when the labels or the UID differ. The kubelet
+// writes a pod's status at each start, probe, and restart, and a pass
+// for each of those writes would read a claim from the API server and
+// probe the compositor again to find nothing to change. The restart
+// count is read on the passes that publish the slice, which the
+// compositor's socket wakes, so it needs no wake from this watch.
 func openPods(client dynamic.Interface, node string, wake func(), readings *metrics) openWatch {
-	return wakeWatch(client, kindPod, collectionWatch{resource: podResource, fields: podsOnNodeField + node}, wake, readings)
+	labels := cache.ResourceEventHandlerFuncs{
+		AddFunc: func(any) { wake() },
+		UpdateFunc: func(before, after any) {
+			if labelsMoved(before, after) {
+				wake()
+			}
+		},
+		DeleteFunc: func(any) { wake() },
+	}
+	return wakeWatch(client, kindPod, collectionWatch{resource: podResource, fields: podsOnNodeField + node, handler: labels}, wake, readings)
+}
+
+// labelsMoved reports whether an update changed a pod's labels or its
+// UID. After a gap in the watch, a pod deleted and created again with
+// the same name reaches the handler as an update, so the UID is part of
+// the compare. Something that is not an object counts as a move,
+// because nothing says what it changed.
+func labelsMoved(before, after any) bool {
+	was, ok := before.(*unstructured.Unstructured)
+	if !ok {
+		return true
+	}
+	is, ok := after.(*unstructured.Unstructured)
+	if !ok {
+		return true
+	}
+	return was.GetUID() != is.GetUID() || !maps.Equal(was.GetLabels(), is.GetLabels())
 }

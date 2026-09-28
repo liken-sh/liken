@@ -217,11 +217,14 @@ func reportUnconverted(what string, err error) {
 	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 }
 
-// wakeWatch builds a watch that turns every change to a collection
-// into one wake. The watches on Layouts and on this node's pods carry
-// nothing a pass uses but their arrival, because the pass that follows
-// reads every object again from the watch's store, the same way every
-// other wake in this operator works. So the handler converts nothing.
+// wakeWatch builds a watch that turns a change to a collection into
+// one wake. The pass that follows reads every object again from the
+// watch's store, the same way every other wake in this operator works,
+// so the handler converts nothing. With no handler of its own, the
+// watch wakes on every change: a Layout has no status, so each update
+// to one is a person's edit. The pod watch (openPods) and the Display
+// watch (openDisplays) pass a handler that wakes only on the changes
+// their passes read.
 //
 // The first read is a wake of its own, even a read that finds no
 // object. At a start, a pass can read the collection before the watch
