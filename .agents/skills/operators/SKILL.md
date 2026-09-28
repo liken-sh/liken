@@ -137,11 +137,16 @@ affinity:
   labeled node, and a second expression narrows where the pod runs.
   `nodeSelectorTerms` is an atomic list, so a cluster owner's patch
   that sets a node affinity replaces the term, and the guide says so.
-- **The label.** A person sets it with `kubectl label node`. A
-  `Machine`'s `spec.nodeLabels` refuses every key in `liken.sh` and its
-  subdomains, so it cannot declare the label. `liken` leaves a label it
-  did not declare in place. When the label changes, the `DaemonSet`
-  controller deletes or adds the pod.
+- **The label.** A person declares it in the node's `Machine`, in
+  `spec.nodeLabels`, which refuses only keys that start with
+  `liken.sh/` and accepts a key in an operator's subdomain. A `Machine`
+  accepts such a key only from `liken` 2026.09.28-002 on; an older
+  release refuses it, so an install guide must also show the
+  `kubectl label` way for a cluster on an older release. The machine
+  operator applies the label, and removes it when the key leaves the
+  spec. A person can also set it with `kubectl label node`; `liken`
+  leaves a label it did not declare in place. When the label changes,
+  the `DaemonSet` controller deletes or adds the pod.
 - **The test.** A test in the repository reads the `DaemonSet` from
   `deploy/` and checks for the one term with its key
   (`nodeaffinity_test.go`).
