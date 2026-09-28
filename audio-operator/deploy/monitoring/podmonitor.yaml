@@ -1,0 +1,49 @@
+# One pod runs this operator's metrics: the DaemonSet's own pod, on
+# the container port named metrics. A PodMonitor selects by pod label
+# rather than a Service, because a DaemonSet's pods have none, and the
+# prometheus-operator scrapes each one directly.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: audio-operator
+  namespace: liken-system
+spec:
+  selector:
+    matchLabels:
+      app: audio-operator
+  podMetricsEndpoints:
+    - port: metrics
+      # A DaemonSet pod's metrics are about the machine it runs on,
+      # and the fleet dashboard selects by that machine, not by pod
+      # name.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+    # The capture listener serves metrics and taps on one TLS port,
+    # with a leaf signed by a CA that audio-api mints after this file
+    # is applied and that Prometheus never holds. The series carry no
+    # capture content, so the scrape skips verification.
+    - port: capture
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+---
+# audio-api is one Deployment for the whole cluster, so its series
+# are about the API and not about a machine. There is no node
+# relabeling here: the pod runs wherever the scheduler put it, and
+# that node means nothing to a reader of these series. The scrape
+# reads the plain HTTP metrics port, not the API's TLS port.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: audio-api
+  namespace: liken-system
+spec:
+  selector:
+    matchLabels:
+      app: audio-api
+  podMetricsEndpoints:
+    - port: metrics

@@ -1,0 +1,535 @@
+package main
+
+// These tests cover one pass of the controller: the resources it
+// creates, the status it writes and the status it does not write
+// again, the declaration it carries to the hardware, and what it
+// reports for an endpoint the machine no longer publishes.
+
+import (
+	"context"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+// testEndpointControl builds a controller over the API server fixture,
+// with no card behind it: the fixture machines hold ordinary files
+// where a control device would be, so the endpoints publish without
+// their capabilities and the pass is the same pass.
+func testEndpointControl(t *testing.T, api *endpointAPI, record *writeRecord) *endpointControl {
+	t.Helper()
+	control := recordingControl(record)
+	control.client = testClient(t, api.handler(t))
+	control.machine = "liken-1"
+	control.claims = &preparedClaims{}
+	control.now = func() time.Time { return factsTime }
+	control.openCard = func(int) (*mixer, error) {
+		return nil, errors.New("this test has no control device")
+	}
+	return control
+}
+
+// labEndpoints is the analog jack of the lab card and its capture
+// side, which is one PCM device in both directions.
+func labEndpoints() []alsaEndpoint {
+	return named(
+		alsaEndpoint{Card: 0, PCM: 0},
+		alsaEndpoint{Card: 0, PCM: 0, Capture: true},
+	)
+}
+
+// labGraph holds a node for each of those endpoints and one for the
+// speaker.
+func labGraph() pwGraph {
+	address := pcmAddress{Card: 0, PCM: 0}
+	return pwGraph{
+		Nodes: map[nodeAddress]pwNode{
+			{pcmAddress: address, Direction: directionSink}: {
+				ID: 42, Name: sinkNodeName(0, 0), Volumes: []float64{1, 1},
+			},
+			{pcmAddress: address, Direction: directionSource}: {
+				ID: 43, Name: sourceNodeName(0, 0), Volumes: []float64{1},
+			},
+		},
+		Speakers: map[string]bluezSink{
+			testSpeakerAddress: {Node: testSpeakerNode, NodeID: 63, Codec: "sbc", Volumes: []float64{1, 1}},
+		},
+	}
+}
+
+// Every endpoint the machine publishes gets its own resource, a
+// playback one as a Sink and a capture one as a Source, and the
+// operator creates each one before it writes any status.
+func TestPassCreatesAResourceForEveryEndpoint(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	control.claims.prepared("claim-1",
+		EndpointClaim{Namespace: "media", Name: "kitchen"}, []string{testSpeakerName})
+
+	if err := control.pass(context.Background(), labEndpoints(), testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{testAnalogName, testSpeakerName} {
+		if _, created := api.sinks[name]; !created {
+			t.Errorf("no Sink for %s; the fixture holds %v", name, api.sinks)
+		}
+	}
+	if _, created := api.sources[testSourceName]; !created {
+		t.Errorf("no Source for %s; the fixture holds %v", testSourceName, api.sources)
+	}
+
+	analog := api.sinks[testAnalogName].Status
+	if analog.Node != "liken-1" || analog.NodeName != sinkNodeName(0, 0) {
+		t.Errorf("the analog sink's status = %+v", analog)
+	}
+	if analog.Claim != nil {
+		t.Errorf("the analog sink reports the claim %+v, and the claim holds the speaker", analog.Claim)
+	}
+	// The claim that holds the speaker is what answers which workload
+	// has it now.
+	speaker := api.sinks[testSpeakerName].Status
+	if speaker.Claim == nil || speaker.Claim.Name != "kitchen" || speaker.Claim.Namespace != "media" {
+		t.Errorf("the speaker's claim = %+v", speaker.Claim)
+	}
+	if speaker.Bluetooth == nil || speaker.Bluetooth.Peripheral != testSpeakerName {
+		t.Errorf("the speaker's bluetooth block = %+v", speaker.Bluetooth)
+	}
+}
+
+// A pass that finds the published status already correct writes
+// nothing. With no stores, a machine at rest costs the API server one
+// read for each endpoint and no write.
+func TestPassWritesTheStatusOnce(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	ctx := context.Background()
+
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	for _, request := range api.requests {
+		if request[:3] == "PUT" {
+			writes++
+		}
+	}
+	if writes != 3 {
+		t.Fatalf("the first pass wrote %d statuses, want one for each endpoint: %v", writes, api.requests)
+	}
+
+	api.requests = nil
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range api.requests {
+		if request[:3] == "PUT" {
+			t.Errorf("a second pass wrote a status again: %v", api.requests)
+			break
+		}
+	}
+}
+
+// turnedDownGraph is the lab graph after a person turned the analog
+// jack to 40 percent and the speaker to 30 percent on the speaker's
+// own absolute volume.
+func turnedDownGraph() pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	analog := graph.Nodes[address]
+	analog.Volumes = []float64{0.4, 0.4}
+	graph.Nodes[address] = analog
+	speaker := graph.Speakers[testSpeakerAddress]
+	speaker.Device = 64
+	speaker.Route = &pwRoute{Device: 1, Volumes: []float64{0.3, 0.3}, AbsoluteVolume: true}
+	graph.Speakers[testSpeakerAddress] = speaker
+	return graph
+}
+
+// An operator that starts, or starts again, finds nodes that were
+// built before it and levels a person chose. The first pass records
+// those nodes and writes nothing to them, so a speaker that plays a
+// film under a claim keeps the level it has.
+func TestAStartWritesNothingToNodesThatStand(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	control.claims.prepared("claim-1",
+		EndpointClaim{Namespace: "media", Name: "film"}, []string{testSpeakerName})
+	ctx := context.Background()
+
+	for range 2 {
+		if err := control.pass(ctx, labEndpoints(), testSpeakers(), turnedDownGraph()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if record.node != nil || record.route != nil {
+		t.Errorf("a start wrote a level to a node that stood: %+v", record)
+	}
+}
+
+// The unity default is for a node PipeWire builds after the operator
+// started. It takes the write once, and a level a person sets on it
+// after that reaches the status and nothing else.
+func TestUnityIsWrittenOnceForANodeBuiltAfterTheStart(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	ctx := context.Background()
+
+	graph := turnedDownGraph()
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
+
+	// A node PipeWire built again carries a new object id, and it is
+	// born at the configuration's level, so it takes the write.
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	rebuilt := graph.Nodes[address]
+	rebuilt.ID = 77
+	graph.Nodes[address] = rebuilt
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.node.ID != 77 || record.level.Volume == nil || *record.level.Volume != unityPercent {
+		t.Fatalf("a node built after the start was left at 40 percent: %+v", record)
+	}
+
+	record.node, record.level = nil, levelWrite{}
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
+	if record.node != nil {
+		t.Errorf("the next pass wrote the level again: %+v", record)
+	}
+}
+
+// A declared level reaches the endpoint on the pass that reads it,
+// under a claim or not.
+func TestPassCarriesADeclaredLevel(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(25), Mute: pointerTo(true)},
+	}
+
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 || record.level.Mute == nil || !*record.level.Mute {
+		t.Fatalf("the declaration reached the node as %+v", record)
+	}
+}
+
+// An endpoint the machine no longer publishes keeps its resource and
+// its declaration, and the conditions report the absence. Deleting it
+// would lose the level a person declared for a card that is unplugged
+// for an hour.
+func TestPassReportsAnEndpointThatLeft(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	ctx := context.Background()
+
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+
+	status := api.sources[testSourceName].Status
+	if status.NodeName != "" {
+		t.Errorf("an absent endpoint still names the node %q", status.NodeName)
+	}
+	for _, want := range []EndpointCondition{
+		condition(ConnectedCondition, false, "EndpointAbsent",
+			"this machine no longer publishes the endpoint", factsTime),
+		condition(ReadyCondition, false, "NoNode",
+			"PipeWire holds no node for this endpoint", factsTime),
+	} {
+		if !holdsCondition(status.Conditions, want) {
+			t.Errorf("conditions = %+v, want %+v among them", status.Conditions, want)
+		}
+	}
+	// The endpoint that is still there keeps its own conditions.
+	if analog := api.sinks[testAnalogName].Status; analog.NodeName != sinkNodeName(0, 0) {
+		t.Errorf("the endpoint that stayed lost its node: %+v", analog)
+	}
+}
+
+// An endpoint another machine publishes is left alone, because the
+// resource is cluster-scoped and every machine sweeps its own.
+func TestPassLeavesAnotherMachinesEndpointAlone(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	elsewhere := &Sink{
+		Metadata: EndpointMeta{Name: "stick-1-pci-0000-00-0e-0-hdmi-0"},
+		Status:   EndpointStatus{Node: "stick-1", NodeName: "liken.audio.card0-pcm3"},
+	}
+	api.sinks[elsewhere.Metadata.Name] = elsewhere
+
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if got := api.sinks[elsewhere.Metadata.Name].Status.NodeName; got != "liken.audio.card0-pcm3" {
+		t.Errorf("another machine's sink was swept: %q", got)
+	}
+}
+
+// statusWrites counts the status writes among the requests the
+// fixture received.
+func statusWrites(api *endpointAPI) int {
+	api.mutex.Lock()
+	defer api.mutex.Unlock()
+	writes := 0
+	for _, request := range api.requests {
+		if strings.HasPrefix(request, "PUT ") {
+			writes++
+		}
+	}
+	return writes
+}
+
+// A pass later in time over the same hardware writes nothing, for an
+// endpoint that is present and for one the sweep reports absent. A
+// status field that moved on its own, such as a timestamp, would make
+// every pass a write, and every write wakes each reader of the
+// resource.
+func TestALaterPassOverTheSameHardwareWritesNothing(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	written := statusWrites(api)
+
+	// Two hours on, the sweep is due again on the backstop's clock.
+	control.now = func() time.Time { return factsTime.Add(2 * time.Hour) }
+	if err := control.pass(ctx, labEndpoints()[:1], testSpeakers(), labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusWrites(api); got != written {
+		t.Errorf("a later pass over the same hardware wrote %d statuses", got-written)
+	}
+}
+
+// A resource whose name no machine publishes any more, such as a USB
+// card's Sink under a name that carried no machine, is reported absent
+// once by the machine its status.node names, and never again. It keeps
+// its spec, because the spec is a person's declaration.
+func TestAResourceNoMachinePublishesIsReportedAbsentOnce(t *testing.T) {
+	api := newEndpointAPI()
+	control := testEndpointControl(t, api, &writeRecord{})
+	const shared = "usb-0573-1573-a34004801402-usb-audio"
+	api.sinks[shared] = &Sink{
+		Metadata: EndpointMeta{Name: shared},
+		Spec:     SinkSpec{Volume: pointerTo(40)},
+		Status: EndpointStatus{Node: "liken-1", NodeName: "liken.audio.card1-pcm0", Conditions: []EndpointCondition{
+			condition(ConnectedCondition, true, "CardPresent", "the card is on the bus", factsTime),
+		}},
+	}
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	old := api.sinks[shared]
+	if !holdsCondition(old.Status.Conditions, condition(ConnectedCondition, false, "EndpointAbsent",
+		"this machine no longer publishes the endpoint", factsTime)) {
+		t.Errorf("the old Sink's conditions = %+v, want it reported absent", old.Status.Conditions)
+	}
+	if old.Spec.Volume == nil || *old.Spec.Volume != 40 {
+		t.Errorf("the old Sink's spec = %+v, want the declaration kept", old.Spec)
+	}
+	written := statusWrites(api)
+
+	control.now = func() time.Time { return factsTime.Add(2 * time.Hour) }
+	if err := control.pass(ctx, labEndpoints(), nil, labGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusWrites(api); got != written {
+		t.Errorf("the sweep wrote the absent Sink %d more times", got-written)
+	}
+}
+
+func holdsCondition(conditions []EndpointCondition, want EndpointCondition) bool {
+	for _, condition := range conditions {
+		if condition == want {
+			return true
+		}
+	}
+	return false
+}
+
+// The live check. It runs only where a card answers, and it reads the
+// card without writing to it.
+//
+// The control device a pass opens is the one its writes go through,
+// so the device has to outlive the read that gathered the facts. A
+// device closed at the end of the read would fail every control write
+// the same pass planned.
+func TestTheCardStaysOpenForTheLengthOfAPass(t *testing.T) {
+	sndDir = "/dev/snd"
+	t.Cleanup(func() { sndDir = "/dev/snd" })
+	if _, err := os.Stat(sndDir + "/controlC0"); err != nil {
+		t.Skip("this machine has no card 0 to read")
+	}
+	control := newEndpointControl(nil, objectCache{}, "liken-1", nil, nil, nil)
+	endpoints := []alsaEndpoint{{Card: 0, PCM: 0, DeviceName: "the local card"}}
+
+	cards := control.openCards(endpoints)
+	defer closeCards(cards)
+	device := cards[0]
+	if device == nil {
+		t.Skip("card 0 does not open for this user")
+	}
+
+	readings := control.read(cards, endpoints, nil, pwGraph{})
+	if len(readings) != 1 || readings[0].card != device {
+		t.Fatalf("the reading carries %+v, want the open device", readings[0].card)
+	}
+	if len(device.controls) == 0 {
+		t.Skip("card 0 declares no writable control")
+	}
+	if _, err := device.readElement(device.controls[0]); err != nil {
+		t.Errorf("the card was closed before the pass could write through it: %v", err)
+	}
+}
+
+// A level write that did not land is tried again on the next pass. A
+// node recorded as written while the write failed would keep its
+// level until PipeWire built it again.
+func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	control.setLevel = func(context.Context, pwNode, levelWrite) error {
+		return errors.New("pw-cli set-param: no such object")
+	}
+
+	// The first pass finds no analog node, so the node the second
+	// pass finds is one PipeWire built after the start.
+	graph := turnedDownGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	quiet := graph.Nodes[address]
+	delete(graph.Nodes, address)
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
+	graph.Nodes[address] = quiet
+
+	// This pass reports the failed write, which is what the reconcile
+	// loop logs and carries on from.
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err == nil {
+		t.Fatal("a failed write reported nothing")
+	}
+
+	control.setLevel = func(_ context.Context, node pwNode, level levelWrite) error {
+		record.node, record.level = &node, level
+		return nil
+	}
+	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
+		t.Fatalf("the write was not tried again: %+v", record)
+	}
+}
+
+// suspendedGraph is the lab graph with the analog jack's node idle:
+// it stands and runs no stream, so it reports no levels.
+func suspendedGraph() pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	idle := graph.Nodes[address]
+	idle.Volumes = nil
+	graph.Nodes[address] = idle
+	return graph
+}
+
+// An operator that starts again finds an idle node it cannot read,
+// under a declaration it may have written before the restart. The
+// start writes nothing to it, and a person's later change of the
+// declaration still reaches it.
+func TestAStartWritesNothingToASuspendedNodeUntilTheDeclarationChanges(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(40)},
+	}
+	ctx := context.Background()
+
+	for range 2 {
+		if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if record.node != nil {
+		t.Fatalf("a start wrote %+v to a suspended node", record.level)
+	}
+
+	api.sinks[testAnalogName].Spec.Volume = pointerTo(25)
+	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
+		t.Fatalf("a changed declaration reached the suspended node as %+v", record)
+	}
+}
+
+// The compare that a start skips on an idle node runs once the node
+// runs and reports its level, so a level that drifted while the
+// operator was down is still corrected.
+func TestASuspendedNodeIsComparedOnceItRuns(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(25)},
+	}
+	ctx := context.Background()
+
+	if err := control.pass(ctx, labEndpoints(), nil, suspendedGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.pass(ctx, labEndpoints(), nil, turnedDownGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 {
+		t.Fatalf("the running node at 40 percent was written %+v", record)
+	}
+}
+
+// A running node that matches the declaration is judged to hold it,
+// so the node takes no write when it goes idle and stops reporting
+// its level.
+func TestARunningNodeThatMatchesTakesNoWriteWhenItGoesIdle(t *testing.T) {
+	api := newEndpointAPI()
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: pointerTo(40)},
+	}
+	ctx := context.Background()
+
+	for _, graph := range []pwGraph{turnedDownGraph(), suspendedGraph()} {
+		if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if record.node != nil {
+		t.Errorf("a node that matched the declaration was written %+v when it went idle", record.level)
+	}
+}

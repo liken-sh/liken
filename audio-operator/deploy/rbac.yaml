@@ -1,0 +1,81 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It writes one ResourceSlice, owns the Sinks and Sources of
+# its node's endpoints, reads the claims the kubelet asks it to
+# prepare, and reads its own Node.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audio-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audio-operator
+rules:
+  # The device inventory (slices.go): this node's ResourceSlice under
+  # audio.liken.sh. The verbs cover the collection, because RBAC
+  # cannot say "only the slice named for your node": resourceNames
+  # cannot be templated per pod. The program only ever writes its own,
+  # whose name it builds from NODE_NAME. There is no delete, because
+  # the operator never retracts its slice. The Node owns it, and a
+  # slice that left with the pod would strand every prepared consumer.
+  # No list and no watch either: the name is deterministic, and
+  # reading anyone else's inventory is the scheduler's job.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, create, update]
+  # The DRA plugin (dra.go): when the kubelet asks this driver to
+  # prepare a claim, the request names the claim and nothing more. The
+  # allocation is on the claim's status, so the driver reads it
+  # back. This is read-only across every namespace, because claims
+  # belong to workloads and the driver serves whichever namespace
+  # claims an output. Still no list and no watch: prepare calls arrive
+  # with exact names.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
+  # The endpoints' own resources (sinks.go, sinkcontrol.go). The operator creates
+  # one Sink or Source for every endpoint it publishes and writes the
+  # whole of its status. The list and the watch are here because a
+  # spec a person edited is what the operator reconciles, and because
+  # an endpoint that left the node is found by listing the resources
+  # this node holds. Both select status.node, so a machine reads only
+  # its own resources. No delete: a Sink keeps its declared spec while
+  # a USB card or a speaker is away, and reports the absence.
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks, sources]
+    verbs: [get, list, watch, create, update]
+  - apiGroups: [audio.liken.sh]
+    resources: [sinks/status, sources/status]
+    verbs: [get, update]
+  # This node, read once at startup for the UID that the slice's owner
+  # reference needs. The Node owns the slice, so a Node that leaves
+  # the cluster takes the slice with it. The garbage collector does
+  # that removal, so the operator runs no cleanup code at exit.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+  # The capture container answers audio-api and nothing else, and it
+  # proves the caller with a TokenReview, which is a create on a
+  # review object rather than a read. The audience on that token is
+  # what keeps an ordinary pod's API-server token out of the capture
+  # port. The container never authorizes, so there is no
+  # SubjectAccessReview here: audio-api holds that grant through
+  # system:auth-delegator in api.yaml.
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audio-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: audio-operator
+subjects:
+  - kind: ServiceAccount
+    name: audio-operator
+    namespace: liken-system

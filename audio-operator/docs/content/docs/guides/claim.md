@@ -1,0 +1,286 @@
+---
+title: Play sound to an output
+weight: 20
+description: "Play one workload's sound through one physical output with a ResourceClaim and a Deployment. Use when a pod needs a speaker, the analog jack, a Bluetooth speaker with a chosen codec, or a microphone to record from."
+---
+
+# Play sound to an output
+
+This guide plays one workload's sound through one physical output,
+from a `Deployment`: an internet radio player on the kitchen
+monitor's speakers. It works the same for the analog jack. You need
+the operator [installed](/docs/guides/install/) on your
+[`liken`](https://liken.sh/docs/) cluster.
+
+The flow is
+[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
+end to end. A
+[`ResourceClaim`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-claim-v1/)
+names the output. The scheduler allocates one matching device and
+places the pod on that device's machine. The container receives the
+PipeWire socket and the name of the sink its streams must reach.
+
+## 1. Pick the output
+
+List what a node offers:
+
+    kubectl get resourceslice <node>-audio.liken.sh -o yaml
+
+Each device is one PCM device of the card, with the attached
+monitor's facts as attributes. A playback endpoint has the
+`sink` attribute. Write a CEL selector against them. If the Dynamic
+Resource Allocation (DRA) objects are new to you, read
+[How the pieces fit](/docs/guides/#how-the-pieces-fit) first. Four
+useful forms:
+
+    # by name, the same name kubectl get sinks shows
+    device.attributes["audio.liken.sh"].sink == "kitchen-pci-0000-00-1f-3-hdmi-0"
+
+    # the analog jack
+    has(device.attributes["audio.liken.sh"].connectionType) &&
+    device.attributes["audio.liken.sh"].connectionType == "analog"
+
+    # by monitor, so the claim survives a re-cabling
+    has(device.attributes["monitor.liken.sh"].id) &&
+    device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
+
+    # one Bluetooth speaker, by the address on its label
+    has(device.attributes["audio.liken.sh"].address) &&
+    device.attributes["audio.liken.sh"].address == "A0:AB:51:33:B7:12"
+
+On a machine where the pod claimed a media bus from the radio, a
+device is also one paired Bluetooth speaker. A speaker publishes
+its address, the name BlueZ reports, its connection state, and its
+codec. A claim selects it the same way it selects an output.
+
+Guard `connectionType` and `monitor.liken.sh/id` with `has()`, as
+above. On an HDMI or DisplayPort output both come from the monitor,
+so an output with no monitor publishes neither. A selector that
+reads a missing attribute fails the whole allocation. `sink` needs
+no guard inside the `audio-sink` class, because every device the
+class selects publishes it. Guard `address` the same way: only a
+Bluetooth speaker publishes it, so an unguarded read fails the
+allocation on every one of the card's outputs.
+[Devices](/docs/reference/devices/) lists every attribute, and
+explains why the pairing attribute reads under its own domain,
+`monitor.liken.sh`.
+
+## 2. Write the claim
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-speakers
+      namespace: media
+    spec:
+      devices:
+        requests:
+          - name: output
+            exactly:
+              deviceClassName: audio-sink
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["audio.liken.sh"].sink == "kitchen-pci-0000-00-1f-3-hdmi-0"
+              tolerations:
+                - key: audio.liken.sh/disconnected
+                  operator: Exists
+                  effect: NoExecute
+                  tolerationSeconds: 30
+
+Tolerate `audio.liken.sh/disconnected` and nothing else. Its effect
+is `NoExecute`, and `tolerationSeconds` says how long your pod may
+hold a silent output before the eviction controller ends it. Thirty
+seconds means a reseated cable costs nothing, and it also keeps the
+pod through a restart of the operator itself. Leave
+`audio.liken.sh/no-monitor` and `audio.liken.sh/no-sink`
+untolerated: they hold a new pod `Pending` until the output can
+play, and the pod starts on its own when it can.
+
+## 3. Reference the claim from a `Deployment`
+
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: kitchen-radio
+      namespace: media
+    spec:
+      replicas: 1
+      strategy:
+        type: Recreate
+      selector:
+        matchLabels:
+          app: kitchen-radio
+      template:
+        metadata:
+          labels:
+            app: kitchen-radio
+        spec:
+          resourceClaims:
+            - name: output
+              resourceClaimName: kitchen-speakers
+          containers:
+            - name: player
+              image: <your mpv image>
+              args:
+                - --no-video
+                - --ao=pipewire
+                - https://radio.example.com/stream
+              resources:
+                claims:
+                  - name: output
+
+One line makes this work: `resources.claims` gives the container
+the claim. That is what places the pod and delivers the socket. No
+flag names the sink, because PipeWire's client library reads the
+two delivered environment variables itself:
+`PIPEWIRE_REMOTE` names the socket, and `PIPEWIRE_NODE` sets
+`target.object` on every stream the client creates.
+
+The image is yours, with two requirements:
+
+* The player must use PipeWire's stream API, as `mpv`'s
+  `--ao=pipewire` does. A client on the PulseAudio protocol or the
+  ALSA compatibility plugin selects its sink another way, which the
+  delivered variables do not set.
+* The image must contain PipeWire's client configuration. `libpipewire`
+  does not open a client context without
+  `/usr/share/pipewire/client.conf`. Debian ships that file in
+  `pipewire-bin`, the daemon package, not in the library package
+  `libpipewire-0.3-0`. An image that installs the library alone
+  fails before it reaches the socket, with `can't load config
+  client.conf: No such file or directory`.
+
+`strategy: Recreate` matters. Pods that share one `ResourceClaim`
+share its output, and PipeWire mixes streams. During a rolling
+update, the old and the new pod would both play through the one
+sink. `Recreate` ends the old pod first.
+
+## 4. What the container receives
+
+A mount and two environment variables. No device node: the
+container does not open a PCM device. It connects to PipeWire, which
+holds every PCM device on the card.
+
+| What | Value |
+|---|---|
+| mount | `/var/run/audio.liken.sh`, read-only, the directory that holds PipeWire's socket |
+| `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
+| `PIPEWIRE_NODE` | the allocated output's node name, such as `liken.audio.card0-pcm3` |
+
+The mount is read-only because connecting to a Unix socket needs
+write permission on the socket itself, not on the directory that
+holds it.
+
+**One container holds at most one output.** `PIPEWIRE_REMOTE` and
+`PIPEWIRE_NODE` each hold one value, so the second of two
+allocations delivered to one container overwrites the first. A pod
+that plays into two outputs runs two containers, each naming its own
+request in the claim.
+
+## Choose the codec on a Bluetooth speaker
+
+A speaker's `codecs` attribute lists the A2DP codecs it offers,
+and a claim can state which one to play. The driver switches the
+transport before your pod starts. This matters on a busy radio:
+aptX holds its bitrate and chops, and SBC lowers its bitrate and
+holds together.
+
+    spec:
+      devices:
+        config:
+          - opaque:
+              driver: audio.liken.sh
+              parameters:
+                codec: sbc
+        requests:
+          - name: speaker
+            exactly:
+              deviceClassName: audio-sink
+              selectors:
+                - cel:
+                    expression: |
+                      has(device.attributes["audio.liken.sh"].address) &&
+                      device.attributes["audio.liken.sh"].address == "A0:AB:51:33:B7:12"
+
+Read the list the speaker offers before you name one:
+
+    kubectl get resourceslice <node>-audio.liken.sh \
+      -o jsonpath='{.spec.devices[?(@.name=="a0-ab-51-33-b7-12")].attributes.codecs}'
+
+A codec the speaker does not offer holds the pod in
+`ContainerCreating`, and the claim's events name the offered list.
+A codec stated for one of the card's own outputs fails the same
+way, because only a Bluetooth transport has a codec to choose.
+
+A config block with no `requests` list applies to every request
+in the claim, and a `requests` list narrows it. `codec` is the only
+parameter this driver reads. A key it does not read fails the
+prepare, rather than starting a pod under a setting the driver
+ignored.
+
+A `DeviceClass` can hold the same opaque block, which makes a
+codec cluster policy for every claim that allocates through that
+class. A claim that states its own codec overrides the class's.
+Write the block in the claim when one workload needs a codec, and
+in the class when every workload through it does.
+
+The switch takes a second or two, and the pod's start waits for
+it. The speaker's sink arrives at unity volume on every prepare, so
+set loudness in your player's own stream volume. The level the
+speaker itself rests at is declared on its `Sink`, which
+[Set endpoint volume and controls](/docs/guides/rest/) shows. A codec
+declared there is the resting choice, and a claim's own parameter
+overrides it.
+
+## Record from a source
+
+A capture endpoint is claimed the same way through the
+`audio-source` class, and the container receives the same socket
+with `PIPEWIRE_NODE` naming the capture node:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-microphone
+      namespace: media
+    spec:
+      devices:
+        requests:
+          - name: microphone
+            exactly:
+              deviceClassName: audio-source
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["audio.liken.sh"].source == "kitchen-usb-0573-1573-a34004801402-usb-audio-capture"
+
+A recorder on PipeWire's stream API, such as `pw-record`, reads the
+two variables and captures from that node with no flag. The
+`Source`'s `spec.mute` is the switch that closes the microphone for
+everyone, whether a claim holds it or not.
+
+## Unplugged monitors, restarts, and a second claim
+
+**A monitor unplugged.** The device keeps its place in the slice and
+gains the `disconnected` taint. After your `tolerationSeconds`, the
+eviction controller ends the pod. A cable reseated within the
+toleration costs nothing. A claim that selects by
+`monitor.liken.sh/id` instead of by `sink` follows the monitor to
+whichever output its cable lands on next.
+
+**A PipeWire restart ends every client's audio.** The socket belongs
+to the PipeWire container, so its restart takes the socket away. A
+client that reconnects finds the new socket at the same path. A
+client that does not must restart. The operator's own restart
+takes nothing away, because the daemons run in their own containers
+and keep playing through it.
+
+**A second claim on the same output parks.** Every device this
+operator publishes is exclusive, so the second pod waits `Pending`
+until the first releases the output.
+[Every published sink is exclusive, though PipeWire can share one](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md)
+records that decision.
+
+To put sound and picture on one monitor, continue with
+[Pair sound with its screen](/docs/guides/pair/).

@@ -1,0 +1,23 @@
+# This is the coverage gate, enforced in CI (see
+# .github/workflows/ci.yaml).
+#
+# The thresholds only rise over time. Each one is set just under what
+# the tests measure today. So a change that loses coverage fails the
+# check, and a change that gains coverage should raise the number
+# here to keep the gain.
+#
+# The gate measures on a pinned toolchain. The Makefile says why.
+#
+# The number is what CI measures, not what a developer's machine
+# measures. The mixer and control-event tests read a real card where
+# one answers, and CI has none, so a machine with a sound card
+# measures about four points higher. To measure what CI measures,
+# skip the three tests that read card 0:
+#
+#   go test -skip 'TestWatchControlsOnTheLocalCard|TestMixerReadsTheLocalCard|TestTheCardStaysOpenForTheLengthOfAPass' -coverprofile=coverage.out ./...
+
+profile: coverage.out
+
+threshold:
+  # The total spans every package, so it is the whole gate.
+  total: 75

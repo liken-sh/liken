@@ -1,0 +1,45 @@
+# These checks run before every commit, through pre-commit or prek,
+# its drop-in replacement. Each language's gate runs only when a file
+# of that language is in the commit, so a docs change does not wait
+# on a Go build. The gates are the same `make` targets CI runs, so
+# a commit that passes here passes there.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # Kubernetes manifests are multi-document streams.
+        args: [--allow-multiple-documents]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
+  # works on a machine with no shellcheck installed.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: go mod tidy
+        # -diff reports what a tidy would change, without changing
+        # it, so a stale go.mod fails the commit instead of changing
+        # under it.
+        entry: bash -c 'go mod tidy -diff'
+        language: system
+        files: \.go$|^go\.(mod|sum)$
+        pass_filenames: false
+      - id: test-go
+        name: go checks and coverage gate
+        entry: make test-go
+        language: system
+        files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$|^Makefile$
+        pass_filenames: false
+      - id: test-docs
+        name: docs links and build
+        entry: make test-docs
+        language: system
+        files: ^docs/|^deploy/
+        pass_filenames: false

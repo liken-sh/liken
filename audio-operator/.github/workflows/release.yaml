@@ -1,0 +1,429 @@
+# Every image this repository publishes goes through this workflow.
+# A pushed tag cuts a release: the tag names a version in liken's
+# calendar scheme, 2026.09.03-007, and the images ship under that
+# tag and :latest. A push to main cuts a development build: the
+# version is the most recent release tag plus a suffix,
+# 2026.09.03-007-dev-003-abcdef01, where 003 counts the commits since
+# that release and abcdef01 is this commit. The suffix sorts after
+# its release and before the next one, so a registry listing reads
+# in order. A development build never moves :latest, so a cluster
+# that pulls a release keeps pulling releases.
+#
+# ci.yaml holds the tests, the coverage floors, and the other checks.
+# This workflow builds the images beside that run and pushes nothing
+# until the run passes, so a development build that failed its tests
+# never leaves a cluster one image pin away from a failed build.
+#
+# The tag is also what a consumer pins to when it references the
+# kustomize base in deploy/, so a release tag names both an image in
+# the registry and the manifests that deploy it, at one commit.
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["**"]
+
+permissions:
+  contents: read
+  packages: write
+  # actions: read lets the gate step in the release job read the state
+  # of the ci run for this commit through the workflow's own token.
+  actions: read
+
+# One release at a time. Two runs that pushed :latest at once would
+# leave whichever finished second, which is not always the newer one.
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The version comes from the event. A tag names it, and a tag of
+      # any other shape stops the run before a build spends anything,
+      # so no image ships under a name no machine can order against
+      # the others. A push to main derives it: git describe finds the
+      # most recent release tag and counts the commits since it, and
+      # the first eight characters of the commit sha make the build
+      # traceable. The checkout fetches the whole history, because
+      # describe needs the tags.
+      - name: Name the version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+              echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.20-001"
+              exit 1
+            }
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+            echo "RELEASE=true" >> "$GITHUB_ENV"
+          else
+            described=$(git describe --tags --long --match '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-[0-9][0-9][0-9]')
+            release=${described%-*-g*}
+            count=${described#"$release"-}
+            count=${count%-g*}
+            echo "VERSION=$(printf '%s-dev-%03d-%s' "$release" "$count" "${GITHUB_SHA:0:8}")" >> "$GITHUB_ENV"
+            echo "RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      # A development build has no tag, so a kustomization that pins
+      # its manifests needs the full commit sha: a git fetch by sha
+      # wants all forty characters, and the eight in the version are
+      # not enough. The run's summary prints the two lines to paste,
+      # so a roll is a copy.
+      - name: Write the roll lines
+        run: |
+          {
+            echo '```yaml'
+            echo "resources:"
+            echo "  - https://github.com/$GITHUB_REPOSITORY//deploy?ref=$GITHUB_SHA"
+            echo "images:"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY"
+            echo "    newTag: $VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The image builds here and pushes nothing yet. The daemons
+      # have to start before anything reaches ghcr.io, and a push that
+      # happened first would leave a broken :latest behind when the
+      # start failed.
+      #
+      # The builds read and write the same :buildcache tags ci.yaml
+      # uses.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          build-args: VERSION=${{ env.VERSION }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/audio-operator:${{ env.VERSION }}
+            ghcr.io/liken-sh/audio-operator:latest
+
+      # The gate that makes a missing runtime load impossible to
+      # ship. PipeWire and WirePlumber open every module by file name,
+      # so ldd reports none of them and go test covers none of them
+      # either. This step starts both daemons, reads what the running
+      # processes mapped, and fails the release on any mapped file the
+      # image does not contain.
+      #
+      # The runner has no sound card and needs none. A cardless
+      # PipeWire still loads every module its configuration names, and
+      # that is the set this image exists to ship. libspa-alsa.so is
+      # the one load no cardless run reaches, so the check asserts it
+      # by name instead.
+      #
+      # The bluez5 plugin, its SBC codec, and its quirks database
+      # are asserted by name for the same reason. This run's
+      # WirePlumber has no Bluetooth fragment and no media bus, so
+      # it opens none of them, and a pod that has both opens all
+      # three.
+      #
+      # pw-top, pw-cli, and pw-metadata are asserted by name too.
+      # No daemon maps them, because a person runs each one with
+      # kubectl exec during a debugging session, so the map check
+      # reports nothing when one drops out of the closure.
+      #
+      # pw-record, flac, opusenc, and libstdbuf.so are asserted by
+      # name for the same reason: the capture container runs each one
+      # per tap, no daemon in this step maps any of them, and
+      # libstdbuf.so arrives through LD_PRELOAD rather than through
+      # any library graph ldd walks.
+      #
+      # The two daemons run as separate containers sharing one volume,
+      # the same shape the pod uses. The image has no shell, so every
+      # container names a binary directly.
+      - name: Prove the closure
+        run: |
+          set -eu
+          export LC_ALL=C
+          image="ghcr.io/liken-sh/audio-operator:$VERSION"
+          runtime=/var/run/audio.liken.sh
+
+          # Every path in the image, as the paths a process sees.
+          container=$(docker create "$image")
+          docker export "$container" | tar -t | sed 's|^|/|; s|/$||' | sort -u > image-files.txt
+          docker rm "$container" > /dev/null
+
+          for path in \
+            /usr/bin/pipewire \
+            /usr/bin/wireplumber \
+            /usr/bin/pw-dump \
+            /usr/bin/wpctl \
+            /usr/bin/pw-top \
+            /usr/bin/pw-cli \
+            /usr/bin/pw-metadata \
+            /usr/bin/pw-cat \
+            /usr/bin/pw-record \
+            /usr/bin/flac \
+            /usr/bin/opusenc \
+            /usr/libexec/coreutils/libstdbuf.so \
+            /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so \
+            /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-bluez5.so \
+            /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so \
+            /usr/share/spa-0.2/bluez5/bluez-hardware.conf
+          do
+            grep -qx "$path" image-files.txt \
+              || { echo "the image has no $path"; exit 1; }
+          done
+
+          docker volume create audio-release > /dev/null
+          # A container of this image, named for the binary it runs.
+          start() {
+            name=$1
+            shift
+            docker run -d --name "$name" -v "audio-release:$runtime" \
+              -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
+              --entrypoint "$1" "$image" "${@:2}" > /dev/null
+          }
+          # One client run, to completion, under a bound. A client that never
+          # returns is the failure this step exists to catch, so the wait for
+          # it cannot be unbounded.
+          probe() {
+            docker rm -f probe > /dev/null 2>&1 || true
+            start probe "$@"
+            code=$(timeout 20 docker wait probe || echo unfinished)
+            docker rm -f probe > /dev/null
+            [ "$code" = 0 ]
+          }
+          # One pw-dump into a file, for the checks that read the graph
+          # rather than an exit status.
+          graph() {
+            docker rm -f probe > /dev/null 2>&1 || true
+            start probe /usr/bin/pw-dump
+            timeout 20 docker wait probe > /dev/null || true
+            docker logs probe > "$1" 2> /dev/null || true
+            docker rm -f probe > /dev/null
+          }
+          # The probe the pod's startupProbe runs. A socket nobody can reach
+          # is a broken image.
+          answers() {
+            for attempt in $(seq 10); do
+              probe "$@" && return 0
+              sleep 2
+            done
+            return 1
+          }
+
+          start pipewire /usr/bin/pipewire
+          answers /usr/bin/pw-dump \
+            || { docker logs pipewire; echo "pw-dump never connected"; exit 1; }
+          start wireplumber /usr/bin/wireplumber --profile=main-embedded
+          answers /usr/bin/wpctl status \
+            || { docker logs wireplumber; echo "wpctl never connected"; exit 1; }
+
+          # Each of the three runs once against the live graph. The
+          # listing above proves the binary is in the image, and
+          # this proves every library it opens is there too: pw-top
+          # needs libncursesw and libtinfo, and pw-cli needs
+          # libreadline over the same libtinfo. pw-top's -b writes
+          # plain lines and calls no terminfo routine, so it runs
+          # with no terminal and no TERM, and -n 1 stops it after
+          # one reading.
+          probe /usr/bin/pw-top -b -n 1 \
+            || { echo "pw-top did not read the graph"; exit 1; }
+          probe /usr/bin/pw-cli info 0 \
+            || { echo "pw-cli did not read the core"; exit 1; }
+          probe /usr/bin/pw-metadata -n settings \
+            || { echo "pw-metadata did not read the settings"; exit 1; }
+
+          # A sink for the recorder below to tap. The runner has no
+          # sound card, so the graph has no sink at all and a capture
+          # stream with nowhere to link fails with "no target node
+          # available" before it ever settles into the graph. A null
+          # sink is a node the support plugin builds in software,
+          # needs no hardware, and carries monitor ports like any
+          # other sink, so the tap below is the tap the capture
+          # container makes. object.linger keeps the node after
+          # pw-cli exits.
+          probe /usr/bin/pw-cli create-node adapter \
+            '{ factory.name=support.null-audio-sink node.name=gate-sink media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' \
+            || { docker logs pipewire; echo "pw-cli did not create the null sink"; exit 1; }
+          for attempt in $(seq 10); do
+            graph graph.json
+            grep -q '"node.name": "gate-sink"' graph.json && break
+            sleep 1
+          done
+          grep -q '"node.name": "gate-sink"' graph.json || {
+            docker logs pipewire
+            echo "the null sink never appeared in the graph"
+            exit 1
+          }
+
+          # The listing above proves the files exist. This proves they
+          # load: pw-record opens libsndfile and the PipeWire client
+          # libraries, and each encoder opens its own codec library,
+          # so a run of each one against the live graph is what
+          # reports a library the closure lost. The loader's own
+          # complaint on stderr is one signal.
+          #
+          # The -P line is the one the capture container builds: a SPA
+          # JSON object carrying the name the confirmation matches on
+          # and, for a sink, PipeWire's own monitor key. A pw-cat that
+          # refused that object would leave every tap unconfirmed, and
+          # the graph is the only place that shows, so the graph is
+          # read while the recorder still runs and asked whether the
+          # node arrived under its name.
+          docker rm -f recorder > /dev/null 2>&1 || true
+          docker run -d --name recorder -v "audio-release:$runtime" \
+            -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
+            --entrypoint /usr/bin/pw-record "$image" \
+            -P '{ node.name = "audio-capture-release", stream.capture.sink = true }' \
+            --target gate-sink \
+            --raw --format s16 --rate 48000 --channels 2 - > /dev/null
+          found=no
+          for attempt in $(seq 10); do
+            sleep 1
+            graph graph.json
+            if grep -q '"node.name": "audio-capture-release"' graph.json; then
+              found=yes
+              break
+            fi
+          done
+          docker logs recorder > /dev/null 2> pw-record.err || true
+          docker rm -f recorder > /dev/null
+          if grep -qi 'error while loading shared libraries' pw-record.err; then
+            cat pw-record.err
+            echo "pw-record is missing a library"
+            exit 1
+          fi
+          [ "$found" = yes ] || {
+            cat pw-record.err
+            echo "pw-record did not take the properties object the capture container builds"
+            exit 1
+          }
+          for encoder in \
+            "/usr/bin/flac --force-raw-format --endian=little --sign=signed --bps=16 --channels=2 --sample-rate=48000 --stdout -" \
+            "/usr/bin/opusenc --raw --raw-bits 16 --raw-rate 48000 --raw-chan 2 - -"
+          do
+            # shellcheck disable=SC2086
+            set -- $encoder
+            head -c 19200 /dev/zero | docker run --rm -i \
+              -e LD_PRELOAD=/usr/libexec/coreutils/libstdbuf.so -e _STDBUF_O=0 \
+              --entrypoint "$1" "$image" "${@:2}" > /dev/null \
+              || { echo "$1 did not encode"; exit 1; }
+          done
+
+          # wpctl connects to PipeWire, not to WirePlumber, so it
+          # answers even when the session manager has left. Both
+          # daemons must still be up before their maps mean anything.
+          for name in pipewire wireplumber; do
+            docker inspect -f '{{.State.Running}}' "$name" | grep -qx true \
+              || { docker logs "$name"; echo "$name is not running"; exit 1; }
+          done
+
+          # What the two live processes mapped. The kernel writes the paths as
+          # the process sees them, so they compare against the listing above.
+          # The volume and the kernel's own filesystems are not the image.
+          missing=0
+          for name in pipewire wireplumber; do
+            pid=$(docker inspect -f '{{.State.Pid}}' "$name")
+            sudo awk '$6 ~ /^\// { print $6 }' "/proc/$pid/maps" \
+              | grep -v '^/memfd:' \
+              | grep -Ev "^/(dev|proc|sys)/|^$runtime/" \
+              | sort -u > "maps-$name.txt"
+            echo "$name mapped $(wc -l < "maps-$name.txt") files"
+            [ -s "maps-$name.txt" ] || { echo "$name mapped nothing"; exit 1; }
+            if comm -23 "maps-$name.txt" image-files.txt | grep .; then
+              echo "$name mapped files the image does not contain"
+              missing=1
+            fi
+          done
+          docker rm -f pipewire wireplumber > /dev/null
+          docker volume rm audio-release > /dev/null
+          exit "$missing"
+
+      # ci.yaml runs beside this workflow on a push to main and holds
+      # the coverage floors and the other checks. This step waits for
+      # that run and lets nothing push from a red gate. The images built
+      # while the checks ran, so the wait is normally over before this
+      # step starts. A tag's ci run finished when its commit landed on
+      # main, so a tag never waits; a tag on a commit older than the run
+      # retention finds no run and fails, and the answer is to re-run ci
+      # on that commit and push the tag again. GITHUB_SHA names the tag
+      # object for an annotated tag, and the ci run is keyed by the
+      # commit, so the lookup resolves the commit first.
+      - name: require the gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          for _ in $(seq 1 40); do
+            state=$(gh run list --workflow ci.yaml --commit "$commit" --event push \
+              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$state" in
+              "completed success")
+                exit 0 ;;
+              "completed "*)
+                echo "the ci run for $commit ended with ${state#completed }; no image ships from a red gate" >&2
+                exit 1 ;;
+              "")
+                if [ "$GITHUB_REF_TYPE" = tag ]; then
+                  echo "no ci run exists for $commit; re-run ci on that commit, then push the tag again" >&2
+                  exit 1
+                fi
+                echo "no ci run for $commit yet" ;;
+              *)
+                echo "the ci run for $commit is $state" ;;
+            esac
+            sleep 15
+          done
+          echo "the ci run for $commit did not finish within ten minutes" >&2
+          exit 1
+
+      # :latest marks the newest release and nothing else. A
+      # development build pushes its own tag only.
+      - name: Push the image
+        run: |
+          docker push "ghcr.io/liken-sh/audio-operator:$VERSION"
+          if [ "$RELEASE" = true ]; then
+            docker push "ghcr.io/liken-sh/audio-operator:latest"
+          fi
+
+      # The -cli image carries the same version as the operator,
+      # so the base binary pulls a CLI that never drifts from the
+      # operator it faces. :latest follows the operator's own rule: a
+      # release moves it and a development build does not.
+      - name: Name the CLI image tags
+        run: |
+          image=ghcr.io/liken-sh/audio-operator-cli
+          {
+            echo "CLI_TAGS<<EOF"
+            echo "$image:$VERSION"
+            if [ "$RELEASE" = true ]; then
+              echo "$image:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      # The -cli image is built for both architectures and
+      # pushed after the gate, so nothing ships from a red gate. A
+      # multi-architecture build cannot load into the daemon, so this
+      # step pushes what it builds. The build reads and writes its own
+      # :buildcache tag, beside the operator's.
+      - name: Build and push the CLI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cli
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache,mode=max
+          tags: ${{ env.CLI_TAGS }}
