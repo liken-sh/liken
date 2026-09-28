@@ -279,3 +279,47 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 		}
 	}
 }
+
+// arrivingStore is a store whose informer takes one object just after
+// the first read of its keys, the way the watch event of a create
+// lands while a pass lists.
+type arrivingStore struct {
+	cache.Store
+	arriving *unstructured.Unstructured
+}
+
+func (s *arrivingStore) ListKeys() []string {
+	keys := s.Store.ListKeys()
+	if s.arriving != nil {
+		_ = s.Store.Add(s.arriving)
+		s.arriving = nil
+	}
+	return keys
+}
+
+// A list from a whole store answers an Adapter the operator created,
+// even when the watch event of the create reaches the store during the
+// list. The inventory pass reads the list to decide whether its radio's
+// Adapter exists, and a list that left it out would make the pass
+// create the Adapter again.
+func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
+	fixture := newAPIFixture()
+	client := testClient(t, fixture.handler(t))
+	created := asObject(t, Adapter{Metadata: ObjectMeta{Name: testAdapterName, ResourceVersion: "5"}})
+	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}
+	versions := newVersionMemo()
+	versions.note(testAdapterName, "5")
+	view := storeView{store: store, synced: func() bool { return true }, whole: true}
+
+	list, err := currentList[Adapter](client, heldObjects{view: view, versions: versions}, adapterPath)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Errorf("the list holds %d Adapters, want 1", len(list))
+	}
+	if reads := sent(fixture, http.MethodGet); len(reads) != 0 {
+		t.Errorf("the list sent %d reads, want none: %v", len(reads), reads)
+	}
+}
