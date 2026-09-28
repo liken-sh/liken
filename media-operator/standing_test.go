@@ -88,6 +88,24 @@ func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 	}
 }
 
+// A changed resource setting changes the pod's hash, so a cluster owner's
+// patch recreates each standing pod once with the new values.
+func TestTemplateHashFollowsTheResourceSettings(t *testing.T) {
+	player := standingIdlePlayer()
+	claim := buildIdleClaim(player, "display-draw")
+	defaults, err := templateHash(resourceSettings(nil).apply(
+		plainIdlePod(player, claim, testBusAddress, testTopicBase, "")).Spec)
+	mustSucceed(t, err)
+
+	patched, err := templateHash(customSettings().apply(
+		plainIdlePod(player, claim, testBusAddress, testTopicBase, "")).Spec)
+	mustSucceed(t, err)
+
+	if patched == defaults {
+		t.Errorf("the settings changed and the hash stayed %q", patched)
+	}
+}
+
 // An edit to the Remote's device selector changes the claim hash, which
 // is what replaces the immutable claim and the pod that holds it.
 func TestTemplateHashFollowsTheClaimSelector(t *testing.T) {
@@ -111,8 +129,8 @@ func TestReconcileStandingKeepsAMatchingPair(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	remote := standingRemote()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim,
-		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
+	seedStanding(t, cluster, claim, media.resources.apply(
+		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase)))
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 

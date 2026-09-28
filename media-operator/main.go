@@ -5,14 +5,20 @@
 // on the hardware operators' devices, the pods that perform the work,
 // and the statuses a person reads.
 //
-// One binary, six roles, the way the audio operator's one image runs
+// One program, six roles, the way the audio operator's one image runs
 // in several roles: the operator, `player`, `remote`, `command`,
 // `serve-blocks`, and `api`. The `api` role is the public HTTP face
-// of a Player, and it is a role of this binary rather than a program
+// of a Player, and it is a role of this program rather than a program
 // of its own because it reads the same Player types, shares the API
 // client and the metrics base, and derives its own version the way
 // every other role does. Only its image differs, because the mux it
 // runs needs ffmpeg.
+//
+// The program has two builds. The pod build, with the build tag pod,
+// runs every role other than the operator, in the pods the operator
+// creates and in the api's pod, and leaves out client-go's leader
+// election, which only the operator role needs.
+// leader_pod.go says why.
 //
 // With no argument it is the operator: a Deployment
 // that watches Plays, Remotes, Players, and Keymaps, creates claims and
@@ -42,6 +48,16 @@
 package main
 
 import "os"
+
+// The two builds the operator image holds. The operator runs from the
+// full build. Every container the operator creates that runs this
+// program runs the pod build, which leaves out client-go's leader
+// election; leader_pod.go says why. The player image and the api image
+// hold the pod build alone.
+const (
+	operatorBinary = "/media-operator"
+	podBinary      = "/media-operator-pod"
+)
 
 // The arguments that select the pod roles. The operator writes each
 // into a container's command, over the image's entrypoint. The operator

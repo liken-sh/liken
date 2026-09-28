@@ -27,15 +27,24 @@ metadata:
     # matching -cli image.
     cli.liken.sh/plugin: media
 spec:
+  # One replica is enough, because the kubelet restarts a crashed
+  # operator. Two are safe: the Lease in leader.go lets one copy act, and
+  # the other waits and takes over when the first stops.
   replicas: 1
   selector:
     matchLabels:
       app: media-operator
-  # Recreate, so two copies never reconcile at once. Two operators
-  # would agree on every derived status, but each pod create they
-  # raced would surface as a conflict for one of them to report.
+  # A rollout starts the new pod beside the old one, and stops the old
+  # one only when the new one runs. The new pod waits for the Lease while
+  # the old one leads. On SIGTERM the old pod finishes its pass, ends its
+  # bus session, and releases the Lease, and the new pod takes it on its
+  # next read, within about 11 seconds. So the image pull happens while
+  # the old pod still leads.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -47,7 +56,10 @@ spec:
           image: ghcr.io/liken-sh/media-operator:latest
           env:
             # The operator reads its own pod to learn its image, and
-            # derives every companion image from it at the same tag.
+            # derives every companion image from it at the same tag. The
+            # two values also name the Lease the operator holds and the
+            # identity it holds it under, so the operator exits when
+            # either is unset.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -71,14 +83,36 @@ spec:
           ports:
             - name: metrics
               containerPort: 9200
+          # The cpu and memory settings of the containers this operator
+          # builds, read once at start. The kustomization generates the
+          # ConfigMap from container-resources.yaml.
+          volumeMounts:
+            - name: container-resources
+              mountPath: /etc/media-operator
+              readOnly: true
           securityContext:
             capabilities:
               drop: ["ALL"]
             privileged: false
             allowPrivilegeEscalation: false
+          # Measured on a home cluster over eight days, the operator's
+          # working set was 15Mi at the 99th percentile and 17Mi at most,
+          # and its cpu 9m at the 99th percentile. That build had no
+          # client-go. The build with client-go's leader election starts
+          # about 12MB higher on a laptop, so its working set is likely
+          # near 30Mi, and the limit leaves about twice that. A drill
+          # measures the new build. No cpu limit, because a throttled
+          # pass delays every status.
           resources:
             requests:
               cpu: 10m
               memory: 32Mi
             limits:
               memory: 64Mi
+      volumes:
+        # Optional, so a pod applied without the kustomization still
+        # starts, with every default.
+        - name: container-resources
+          configMap:
+            name: media-operator-resources
+            optional: true

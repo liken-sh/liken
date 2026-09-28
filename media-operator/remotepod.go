@@ -86,7 +86,7 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 	container := Container{
 		Name:    remoteReaderContainer,
 		Image:   sidecarImage,
-		Command: []string{"/media-operator", remoteMode},
+		Command: []string{podBinary, remoteMode},
 		Env: []EnvVar{
 			{Name: remoteNamespaceVariable, Value: remote.Metadata.Namespace},
 			{Name: remoteNameVariable, Value: remote.Metadata.Name},
@@ -140,6 +140,6 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 // the pod whenever the template changes.
 func (o *operator) reconcileRemote(remote *Remote, known claimRead) error {
 	claim := buildRemoteClaim(remote)
-	pod := buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase)
+	pod := o.resources.apply(buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase))
 	return o.reconcileStanding(standingPair("remote "+remote.Metadata.Namespace+"/"+remote.Metadata.Name, claim, pod), known)
 }

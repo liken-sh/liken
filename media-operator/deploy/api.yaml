@@ -34,7 +34,8 @@ spec:
           # one ffmpeg mux, and the operator's image is a static
           # binary on scratch with no ffmpeg in it.
           image: ghcr.io/liken-sh/media-operator-api:latest
-          # api is one more role of the same binary the operator runs.
+          # api is one more role of the program the operator runs, from
+          # its pod build.
           args: [api]
           env:
             # The HTTPS listener. The API serves TLS because a Bearer
@@ -105,7 +106,10 @@ spec:
           # which every liken machine runs, one ffmpeg over the
           # container limit kills the whole container cgroup, so one
           # oversized composition would restart the API and end every
-          # composition with it.
+          # composition with it. Measured on a home cluster over eight
+          # days, the API's working set was 14Mi at the 99th percentile
+          # and 16Mi at most, and its cpu 7m at the 99th percentile. No
+          # cpu limit, because a throttled mux delays the stream.
           resources:
             requests:
               cpu: 10m

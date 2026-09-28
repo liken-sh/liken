@@ -103,7 +103,7 @@ func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
 	}
 
 	container := pod.Spec.Containers[0]
-	command := []string{"/media-operator", remoteMode}
+	command := []string{"/media-operator-pod", remoteMode}
 	if !reflect.DeepEqual(container.Command, command) {
 		t.Errorf("command = %v, want %v", container.Command, command)
 	}

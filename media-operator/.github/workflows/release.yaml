@@ -195,9 +195,10 @@ jobs:
             ghcr.io/liken-sh/media-operator-api:latest
 
       # The sidecar image is the operator image under a second name.
-      # Every sidecar container runs the operator binary in one of its
-      # modes, so a second build would spend a build to produce the same
-      # bytes. The two names carry two jobs: a repository that needs
+      # The operator image holds the program's pod build beside the
+      # operator's full build, and every sidecar container runs the pod
+      # build in one of its modes, so a second image would spend a build
+      # to produce the same bytes. The two names carry two jobs: a repository that needs
       # only the sidecar pins a name that promises nothing about the
       # controller.
       - name: Name the sidecar image
@@ -239,8 +240,8 @@ jobs:
           image="ghcr.io/liken-sh/media-operator-player:$VERSION"
           docker run --rm --entrypoint /usr/bin/mpv "$image" --version
           container=$(docker create "$image")
-          docker export "$container" | tar -t | grep -qx 'media-operator' \
-            || { echo "the player image has no /media-operator"; exit 1; }
+          docker export "$container" | tar -t | grep -qx 'media-operator-pod' \
+            || { echo "the player image has no /media-operator-pod"; exit 1; }
           docker rm "$container" > /dev/null
 
       # The api gate proves ffmpeg is in the image and runs. The

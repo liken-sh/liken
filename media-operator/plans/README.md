@@ -39,6 +39,31 @@ These plans are designed. Each keeps its number and moves to
 
 ## Completed
 
+* [37, One operator holds the Lease](completed/37-one-operator-holds-the-lease.md).
+  Built on 2026-09-27. The operator runs client-go's leader election
+  with a `LeaseLock` on the `Lease` named `media-operator`, so only the
+  copy that holds it opens a bus session and reconciles. A lost `Lease`
+  ends the process. On `SIGTERM` the leader stops its bus session and
+  releases the `Lease`, and the `Deployment` rolls with `RollingUpdate`,
+  so a new pod waits beside the old one and takes over within about 11
+  seconds of the release. client-go makes the operator's build 28MB
+  stripped. The command sidecar, the reader, the player shim, and the
+  api run a second build with the tag `pod`, which leaves client-go out and stays
+  at 12MB. It closes the open problem "two operators can run at once".
+  The drill on `liken-1` is owed.
+* [36, Container resources are
+  settings](completed/36-container-resources-are-settings.md). Built
+  on 2026-09-27. Every container the operator builds states a cpu
+  request, a memory request, and a memory limit, and no container states
+  a cpu limit. The requests are near the steady use of a 1920x1080
+  screen, measured on a home cluster, so a playback pod and the idle pod
+  together request about 684Mi and schedule on a 1GB machine. The
+  limits are above the highest use measured on a 3840x2160 screen, with
+  headroom. The values come from a `ConfigMap` that the base generates
+  from `deploy/container-resources.yaml`, so a cluster owner changes one
+  with a kustomize merge, and a missing or bad value takes its default
+  with one log line. It closes the open problem "no container states
+  resource requests". The drill on `liken-1` is owed.
 * [34, The player over HTTP](completed/34-the-player-over-http.md).
   Built on 2026-09-16, and drilled on `liken-1` on 2026-09-17 in
   three passes. A `media-api` Deployment answers HTTP for a `Player`:
@@ -347,20 +372,11 @@ has decided yet what work they become.
   MQTT was chosen for Home Assistant, but nothing publishes the
   discovery configs that make a `Player` a `media_player`. It also
   gives each `Player` its own retained status.
-* [Two operators can run at once](open-problems/two-operators-can-run-at-once.md).
-  The operator is a cluster singleton, but `replicas: 1` does not
-  enforce one instance across a rollout or a partition. A `Lease` in
-  `coordination.k8s.io` makes it a true singleton, and opens a
-  quasi-HA path.
 * [The bus has no per-topic access control](open-problems/the-bus-authorizes-nothing.md).
   Any client that reaches the broker can publish or subscribe to any
   topic, so the trust boundary is the whole cluster. Acceptable for one
   home the owner controls, and it owes broker ACLs once a cluster runs
   a workload the owner does not trust.
-* [No container states resource requests](open-problems/no-container-states-resource-requests.md).
-  No container this operator builds states cpu or memory, so every pod
-  is `BestEffort`. A third container with a Vulkan closure on a 1GB
-  machine is the reason to decide it once, for every pod.
 
 ## Rejected
 

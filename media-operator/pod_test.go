@@ -294,7 +294,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	want := Container{
 		Name:    commandContainer,
 		Image:   testSidecarImage,
-		Command: []string{"/media-operator", "command"},
+		Command: []string{"/media-operator-pod", "command"},
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: "house"},
 			{Name: playNameVariable, Value: "movie"},

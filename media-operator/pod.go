@@ -323,7 +323,7 @@ func commandSidecar(
 	return Container{
 		Name:    commandContainer,
 		Image:   sidecarImage,
-		Command: []string{"/media-operator", commandMode},
+		Command: []string{podBinary, commandMode},
 		Env:     env,
 		Ports:   []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
 		// The command sidecar reads mpv's socket on the IPC volume, which is

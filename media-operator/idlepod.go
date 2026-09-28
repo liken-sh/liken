@@ -443,7 +443,7 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 			if _, _, matched := o.matchReceiver(player); matched {
 				powerTopic = playerPowerTopic(o.topicBase, namespace, name)
 			}
-			screen.pod = buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle, remotes, powerTopic)
+			screen.pod = o.resources.apply(buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle, remotes, powerTopic))
 		}
 	}
 	if err := o.reconcileStanding(screen, claimRead{}); err != nil {

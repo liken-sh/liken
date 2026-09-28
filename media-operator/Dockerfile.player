@@ -1,6 +1,7 @@
 # The player image: the display operator's mpv image, the brand's fonts,
-# and the same binary the operator image carries. In this image the binary
-# runs as the player shim alone; every sidecar mode runs on the sidecar
+# and the pod build of the program, the same /media-operator-pod the
+# operator image carries. In this image the binary runs as the player
+# shim alone; every sidecar mode runs on the sidecar
 # image. The operator's own image cannot serve here, because it is one
 # static binary on scratch and mpv needs a video and audio stack under it.
 
@@ -10,8 +11,9 @@
 # operator, and a workstation sets the argument to a base it built.
 ARG MPV_BASE=ghcr.io/liken-sh/mpv:2026.09.11-002
 
-# The build stage repeats the operator image's, so every image that
-# carries the binary carries the same one, built from the same source.
+# The build stage repeats the operator image's pod build, so every image
+# that carries the pod build carries the same one, built from the same
+# source.
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
@@ -27,9 +29,10 @@ COPY openapi.json ./
 COPY edl/ ./edl/
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. Static
-# even though this image has a libc, because the same artifact then
-# serves both images.
-RUN CGO_ENABLED=0 go build -trimpath -o /media-operator .
+# even though this image has a libc, because the same build then
+# serves both images. The build tag pod leaves out client-go's leader
+# election, which only the operator needs.
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
 
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, so a CJK title or subtitle track name renders instead of a blank box.
@@ -53,7 +56,7 @@ FROM ${MPV_BASE}
 
 COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
 
-COPY --from=build /media-operator /media-operator
+COPY --from=build /media-operator-pod /media-operator-pod
 
 # The brand's upright and italic faces, as files fontconfig finds when it
 # scans /usr/share/fonts, so libass resolves the family with no cache step
@@ -69,4 +72,4 @@ COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
 # wraps mpv, and the kubelet
 # drives mpv directly: the kubelet sends the signal, reaps the
 # children, and carries mpv's exit code out as the pod's outcome.
-ENTRYPOINT ["/media-operator", "player"]
+ENTRYPOINT ["/media-operator-pod", "player"]

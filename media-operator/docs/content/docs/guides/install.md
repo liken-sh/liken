@@ -106,24 +106,91 @@ The install runs two `Deployments` in `liken-system`, and they are
 separate on purpose:
 
 * `media-operator` watches the five resources and reconciles them
-  into claims and pods. It holds no volume and serves no HTTP. On
+  into claims and pods. It keeps no state on a volume and serves no
+  HTTP. On
   every pass it re-derives everything from the API server, and it
-  reads each playback pod's report from the bus.
+  reads each playback pod's report from the bus. Only the copy that
+  holds the `Lease` named `media-operator` in `liken-system`
+  reconciles, so a second copy from a rollout or a larger replica
+  count waits and changes nothing.
 * `bus` is one [Mosquitto](https://mosquitto.org/) broker, with a
   `Service` at `bus.liken-system.svc:1883`. The broker is not inside
   the operator's pod, so the operator restarts without dropping a
   message, and a button press reaches `mpv` while the operator is
   down.
 
+## Container resources
+
+Every container the operator builds states a cpu request, a memory
+request, and a memory limit, and none states a cpu limit. The defaults
+fit a 1GB machine that drives a 1920x1080 screen. The requests are near
+the steady use measured on a home cluster at 1920x1080, and each memory
+limit is above the highest use measured at 3840x2160, with about half
+again as headroom.
+
+| Container | Pod | cpu request | memory request | memory limit |
+|---|---|---|---|---|
+| `player` | playback | 80m | 432Mi | 1Gi |
+| `display` | playback | 10m | 144Mi | 640Mi |
+| `command` | playback | 10m | 12Mi | 32Mi |
+| `idle` | idle | 5m | 96Mi | 256Mi |
+| `reader` | a `Remote`'s pod | 1m | 4Mi | 16Mi |
+
+The values come from the `ConfigMap` `media-operator-resources`, which
+the base generates from
+[`deploy/container-resources.yaml`](https://github.com/liken-sh/media-operator/blob/main/deploy/container-resources.yaml).
+The operator reads it once at start. The generator adds a hash of the
+content to the `ConfigMap`'s name, so a changed value restarts the
+operator, and the pods it creates after that carry the new value. The
+idle pod and each `Remote`'s pod are recreated once with it. A playback
+pod keeps its values until its film ends.
+
+To change a value, copy `deploy/container-resources.yaml` into your
+overlay, change the value, and merge the file into the base's
+`ConfigMap`. The file's key must be `resources.yaml`. This overlay
+raises the player's memory limit for a machine that plays large films:
+
+    # kustomization.yaml
+    resources:
+      - https://github.com/liken-sh/media-operator//deploy?ref=<tag>
+    configMapGenerator:
+      - name: media-operator-resources
+        behavior: merge
+        files:
+          - resources.yaml=container-resources.yaml
+
+    # container-resources.yaml, copied from the base, with one change
+    player:
+      requests: {cpu: 80m, memory: 432Mi}
+      limits: {memory: 1536Mi}
+    ...
+
+A value that your file leaves out, or that is not a Kubernetes
+quantity, takes the operator's default, and the operator logs one line
+for it at start:
+
+    media.liken.sh: container resources: player: limits.memory is unset; using the default 1Gi
+
+A `limits.cpu` is ignored with one line of its own. A memory request
+above its limit takes the defaults for both, because the API server
+refuses such a pod.
+
 ## Watch it start
 
     kubectl -n liken-system get pods
 
-Both pods report `Running`. The operator's first log line counts
-what it found:
+Both pods report `Running`. The operator's log names the `Lease` it
+holds, and then counts what it found. client-go's leader election
+writes lines of its own beside these:
 
     kubectl -n liken-system logs deploy/media-operator
+    media.liken.sh: holding lease liken-system/media-operator as media-operator-7d9f8b6c5d-x2k4p_1a2b3c4d
     media.liken.sh: operating 0 plays and 0 remotes over bus.liken-system.svc:1883
+
+A copy that logs `waiting for lease liken-system/media-operator`
+instead is a second copy. It takes over within about 11 seconds when
+the holder shuts down, and 30 to 41 seconds after the holder's last
+renewal when the holder stops without a shutdown.
 
 From here, the work is declaring resources. The
 [reference](/docs/reference/) describes each one, and

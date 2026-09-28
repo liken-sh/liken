@@ -41,11 +41,19 @@ COVERAGE_TOOLCHAIN := go1.26.7
 # lists such packages, and test-go fails on the first one.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
+# The pod build is the program the sidecar containers, the player shim,
+# and the api run, built with the tag pod (leader_pod.go says why). The check
+# vets it and fails when anything in it links client-go, so a new import
+# cannot bring client-go into every playback pod and every Remote's pod.
+POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep '^k8s.io/client-go'
+
 .PHONY: test-go
 test-go:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	go vet ./...
+	go vet -tags pod .
+	test -z "$$($(POD_BUILD_CLIENT_GO))" || { echo 'the pod build links client-go:'; $(POD_BUILD_CLIENT_GO); exit 1; }
 	go test -race ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml

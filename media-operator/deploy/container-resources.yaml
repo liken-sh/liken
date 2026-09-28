@@ -1,0 +1,38 @@
+# The cpu and memory settings of every container media-operator builds.
+# The kustomization generates the ConfigMap media-operator-resources from
+# this file, and the operator reads it once at start. A changed value
+# changes the ConfigMap's name, so the operator's pod restarts with it.
+#
+# Each entry follows a container's resources block. The operator states
+# no cpu limit on any container, so a limits.cpu here is ignored. A value
+# that is missing or is not a Kubernetes quantity takes the operator's
+# built-in default, which is the value below, and the operator logs one
+# line for it.
+#
+# The requests are near the steady use of a 1920x1080 screen, measured on
+# a home cluster, so a playback pod and an idle pod together request
+# about 684Mi and schedule on a 1GB machine. The memory limits are above
+# the highest use measured on a 3840x2160 screen, with about half again
+# as headroom, so a film on that screen is not killed at these values.
+# containerresources.go gives the measurement behind each value.
+
+# The playback pod: mpv, the on-screen display, and the command sidecar.
+player:
+  requests: {cpu: 80m, memory: 432Mi}
+  limits: {memory: 1Gi}
+display:
+  requests: {cpu: 10m, memory: 144Mi}
+  limits: {memory: 640Mi}
+command:
+  requests: {cpu: 10m, memory: 12Mi}
+  limits: {memory: 32Mi}
+
+# The idle pod, which draws the idle screen while nothing plays.
+idle:
+  requests: {cpu: 5m, memory: 96Mi}
+  limits: {memory: 256Mi}
+
+# The pod of each Remote, which reads a controller's input.
+reader:
+  requests: {cpu: 1m, memory: 4Mi}
+  limits: {memory: 16Mi}

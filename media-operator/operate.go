@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -35,8 +37,8 @@ const (
 	// client this release ships.
 	idleImageVariable = "IDLE_IMAGE"
 
-	// SIDECAR_IMAGE names the image that carries this binary alone,
-	// which every sidecar container runs. It holds none of the player
+	// SIDECAR_IMAGE names the image that carries this program alone,
+	// whose pod build every sidecar container runs. It holds none of the player
 	// image's mpv, drivers, or fonts, because a sidecar decodes
 	// nothing.
 	sidecarImageVariable = "SIDECAR_IMAGE"
@@ -138,7 +140,7 @@ type operator struct {
 	// in the environment beside the player image.
 	idleImage string
 	// sidecarImage is the image every sidecar container runs, the
-	// binary alone. It is a release decision, so it arrives in the
+	// program's two builds alone. It is a release decision, so it arrives in the
 	// environment beside the player image.
 	sidecarImage string
 	// displayImage is the image the display container runs. It arrives the
@@ -156,8 +158,12 @@ type operator struct {
 	// every playback pod it creates, so `kubectl set env` on the
 	// Deployment turns mpv's full output on for the pods that follow.
 	playerVerbose string
-	bus           *Bus
-	reports       *reports
+	// resources holds the cpu and memory settings of each container the
+	// operator builds, read once at start. containerresources.go gives
+	// the defaults and the file they come from.
+	resources resourceSettings
+	bus       *Bus
+	reports   *reports
 	// focus is the desk for the retained focus mark, built on the same
 	// wake as the report desk: a cycle request on the bus wakes the pass
 	// that arbitrates it.
@@ -348,6 +354,14 @@ func operate() {
 	metrics := newMediaMetrics(operatorVersion(client))
 	metrics.serve(metricsAddress)
 
+	// Only the process that holds the Lease goes past this line, so a
+	// second copy opens no bus session and reconciles nothing. leader.go
+	// says why. The signal ends the wait here, or ends the loop below
+	// after its pass, and the release follows the last pass.
+	stop, cancelSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancelSignals()
+	leader := lead(stop)
+
 	// One wake channel serves the two watches and the bus handler,
 	// because a wake carries no information beyond "read the collection
 	// again".
@@ -366,6 +380,7 @@ func operate() {
 		topicBase:        topicBase,
 		idleDisplayClass: idleDisplayClass,
 		playerVerbose:    playerVerbose,
+		resources:        loadResourceSettings(containerResourcesPath, func(line string) { fmt.Println(line) }),
 		reports:          desk,
 		focus:            focusDesk,
 		ensure:           newEnsureDesk(),
@@ -404,7 +419,15 @@ func operate() {
 	for _, filter := range busFilters(topicBase) {
 		media.bus.Subscribe(filter)
 	}
-	go media.bus.Run(context.Background())
+	// The bus session ends before the Lease is released, because a
+	// press or a report that arrives on it can write to the API. Run
+	// returns only after its reader, which runs the handler, returns.
+	busContext, stopBus := context.WithCancel(context.Background())
+	busDone := make(chan struct{})
+	go func() {
+		media.bus.Run(busContext)
+		close(busDone)
+	}()
 
 	// The first lists do two jobs: they prove the operator can read the
 	// collections, and their resourceVersions are where the watches
@@ -465,6 +488,17 @@ func operate() {
 		select {
 		case <-wake:
 		case <-ticker.C:
+		case <-stop.Done():
+			leader.stepDown(func() bool {
+				stopBus()
+				select {
+				case <-busDone:
+					return true
+				case <-time.After(5 * time.Second):
+					return false
+				}
+			})
+			return
 		}
 	}
 }
@@ -1649,8 +1683,8 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 // pod first.
 func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.displayImage,
-		o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose))
+	created, err := CreatePod(o.client, o.resources.apply(buildPod(play, claim, resolved, o.image, o.sidecarImage,
+		o.displayImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

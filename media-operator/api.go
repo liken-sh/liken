@@ -1018,8 +1018,13 @@ type ContainerPort struct {
 
 // resources.claims is how a container holds one of the pod's
 // claims, and request narrows it to one role inside that claim.
+// resources.requests is the cpu and memory the scheduler reserves for
+// the container, and resources.limits is the memory the kernel lets it
+// use. containerresources.go gives each value.
 type ResourceRequirements struct {
-	Claims []ContainerClaim `json:"claims,omitempty"`
+	Requests ResourceList     `json:"requests,omitempty"`
+	Limits   ResourceList     `json:"limits,omitempty"`
+	Claims   []ContainerClaim `json:"claims,omitempty"`
 }
 
 type ContainerClaim struct {

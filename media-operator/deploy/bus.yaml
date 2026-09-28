@@ -66,7 +66,11 @@ spec:
             privileged: false
             allowPrivilegeEscalation: false
           # The broker's runtime memory is a few megabytes, so its cost
-          # on a one-gigabyte machine is noise beside k3s.
+          # on a one-gigabyte machine is noise beside k3s. Measured on a
+          # home cluster over eight days, its working set was 4.9Mi at
+          # the 99th percentile and 5.5Mi at most, and its cpu less than
+          # 1m. The limit is about six times that maximum. No cpu limit,
+          # because a throttled broker delays every press.
           resources:
             requests:
               cpu: 10m
