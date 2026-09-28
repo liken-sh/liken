@@ -75,14 +75,14 @@ func TestTheDiscardIsAClockAndNotAByteCount(t *testing.T) {
 	// clock has not moved, so nothing is delivered.
 	waitFor(t, func() bool { return pump.discarded() > 5*48000*2*2 })
 	select {
-	case <-readOne(body):
+	case <-readByte(body):
 		t.Fatal("the body began before the clock reached begin")
 	case <-time.After(50 * time.Millisecond):
 	}
 
 	now.Store(at.Add(6 * time.Second).UnixNano())
 	select {
-	case err := <-readOne(body):
+	case err := <-readByte(body):
 		if err != nil {
 			t.Fatalf("the body did not begin at begin: %v", err)
 		}
@@ -130,7 +130,7 @@ func TestAnOpenSpanDeliversUntilTheClientCloses(t *testing.T) {
 	}
 }
 
-func readOne(from io.Reader) <-chan error {
+func readByte(from io.Reader) <-chan error {
 	done := make(chan error, 1)
 	go func() {
 		_, err := from.Read(make([]byte, 1))

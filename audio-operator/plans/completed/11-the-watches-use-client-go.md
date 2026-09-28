@@ -125,7 +125,7 @@ follows a refused streaming list is not a restart.
 
 The `Sink` and `Source` stores hold every resource whose `status.node`
 is this machine, which is the same selection the pass listed. The
-pass now reads from them (`endpointcache.go`):
+pass now reads from them (`objectcache.go` and `endpointreads.go`):
 
 * Each endpoint's `Sink` or `Source` comes from the store. A resource
   the store does not hold is read from the API server: a new endpoint
@@ -182,7 +182,46 @@ A pass that writes a status from a current copy sends one `PUT`, where
 it sent a `GET` and a `PUT`. A pass that runs before the watch
 delivered its own last write works from an older copy, and for each
 status it writes it sends a `PUT` that is refused with `409`, a `GET`,
-and a second `PUT`.
+and a second `PUT`. The section below replaces that last case.
+
+### A memo of the operator's own writes
+
+The organization chose one way to read from a store for every
+operator, the way `bluetooth-operator` and `display-operator` already
+read. This operator now follows it, with the same types and functions
+in `objectcache.go`.
+
+The `409` covers a write from an older copy, and it does not cover a
+write that the older copy hides. A pass writes a status only where it
+differs from the copy it read. When a claim is released after the pass
+wrote it, the status the pass composes matches the store's copy from
+before the write, so the pass wrote nothing, and the `Sink` kept the
+claim until the next event. So the operator remembers the
+`resourceVersion` of each `Sink`'s and `Source`'s newest copy that it
+wrote or read (`versionMemo`), and reads a resource from the API
+server when the store's copy has another version. Once the watch
+delivers the write, the versions match and the store answers again.
+The sweep's list replaces each such copy the same way (`currentList`).
+
+Requests to the API server, counted in the test's fixture:
+
+| Pass | Store reads, 409 handling only | Store reads with the memo |
+|---|---|---|
+| Settled, two card endpoints and one speaker | 0 | 0 |
+| The speaker left, so the pass sweeps | 0 | 0 |
+| A claim released before the watch delivered the claim's write | 0, and the release is not written | 1 `GET` and 1 `PUT` |
+| The sweep writes an absence before the watch delivered the operator's last write | `PUT` (409), `GET`, `PUT` | 1 `GET` and 1 `PUT` |
+| The first pass after the watch delivered another writer's change, such as a spec edit | 0 | 1 `GET` for each changed object |
+| A status write from a copy that another writer changed and the watch has not delivered | `PUT` (409), `GET`, `PUT` | the same |
+
+The memo compares versions only for equality, so a copy that another
+writer made differs from the version the operator noted, and the
+first pass after it reads that object once. Then the memo notes the
+new version, and the store answers again.
+`TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` covers the released
+claim, and fails without the memo. `TestTheSweepReplacesACopyOlderThanItsOwnWrite`
+and `TestTheSweepLeavesOutASinkTheAPIServerNoLongerHolds` cover the
+sweep's list.
 
 ### The reconcile loop
 
@@ -266,6 +305,8 @@ that answers a streaming list the way the API server does.
 | A reconcile's status write from an older copy reads the resource again and lands | `TestAReconcileFromAnOlderCopyReadsAgainAndLands` |
 | The sweep leaves a `Sink` that another machine took since the store's copy | `TestTheSweepLeavesASinkAnotherMachineTook` |
 | A `Sink` deleted since the store's copy is created again | `TestASinkDeletedSinceTheStoresCopyIsCreatedAgain` |
+| A status that matches a copy older than the operator's own write is still written | `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite` |
+| The sweep reads a copy older than the operator's own write again, and leaves out a `Sink` that is gone | `TestTheSweepReplacesACopyOlderThanItsOwnWrite`, `TestTheSweepLeavesOutASinkTheAPIServerNoLongerHolds` |
 | Through the reflector: the pod watch selects by label, and adds, changes, and deletes move the index | `TestThePodWatchFollowsThePodsIntoTheIndex` |
 | Through the reflector: a pod gone from the read after a `410` leaves the index | `TestAPodGoneFromANewReadLeavesTheIndex` |
 | A pod removed while the watch was down is forgotten, with or without a copy | `TestAPodRemovedWhileTheWatchWasDownIsForgotten` |

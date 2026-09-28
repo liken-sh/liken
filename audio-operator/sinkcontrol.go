@@ -40,9 +40,9 @@ type endpointControl struct {
 	client  *Client
 	machine string
 
-	// cache is the two watches' stores, which the pass reads in place
-	// of the API server (endpointcache.go).
-	cache endpointCache
+	// cache is the two watches' stores and memos, which the pass reads
+	// in place of the API server (objectcache.go).
+	cache objectCache
 
 	claims *preparedClaims
 	now    func() time.Time
@@ -93,7 +93,7 @@ type endpointControl struct {
 
 // newEndpointControl builds the controller. Every seam takes its real
 // implementation here and a stand-in only in a test.
-func newEndpointControl(client *Client, cached endpointCache, machine string, claims *preparedClaims,
+func newEndpointControl(client *Client, cached objectCache, machine string, claims *preparedClaims,
 	feed *graphFeed, readings *metrics) *endpointControl {
 	return &endpointControl{
 		client:      client,
@@ -332,9 +332,9 @@ func (e *endpointControl) reconcile(ctx context.Context, reading endpoint) error
 }
 
 func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) error {
-	sink, err := e.readSink(reading.facts.Name)
+	sink, err := readOne[Sink](e.client, e.cache.sinks, reading.facts.Name, sinkPath(reading.facts.Name))
 	if errors.Is(err, ErrNotFound) {
-		sink, err = createSink(e.client, reading.facts.Name)
+		sink, err = e.createSink(reading.facts.Name)
 	}
 	if err != nil {
 		return err
@@ -349,7 +349,7 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 	err = e.settleSinkStatus(sink, want)
 	if errors.Is(err, ErrNotFound) {
 		// The store held a copy of a resource somebody deleted since.
-		if sink, err = createSink(e.client, reading.facts.Name); err == nil {
+		if sink, err = e.createSink(reading.facts.Name); err == nil {
 			err = e.settleSinkStatus(sink, want)
 		}
 	}
@@ -357,9 +357,9 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 }
 
 func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint) error {
-	source, err := e.readSource(reading.facts.Name)
+	source, err := readOne[Source](e.client, e.cache.sources, reading.facts.Name, sourcePath(reading.facts.Name))
 	if errors.Is(err, ErrNotFound) {
-		source, err = createSource(e.client, reading.facts.Name)
+		source, err = e.createSource(reading.facts.Name)
 	}
 	if err != nil {
 		return err
@@ -374,7 +374,7 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 	err = e.settleSourceStatus(source, want)
 	if errors.Is(err, ErrNotFound) {
 		// The store held a copy of a resource somebody deleted since.
-		if source, err = createSource(e.client, reading.facts.Name); err == nil {
+		if source, err = e.createSource(reading.facts.Name); err == nil {
 			err = e.settleSourceStatus(source, want)
 		}
 	}

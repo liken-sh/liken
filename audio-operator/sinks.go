@@ -262,10 +262,13 @@ func condition(kind string, met bool, reason, message string, now time.Time) End
 	}
 }
 
-func getSink(c *Client, name string) (*Sink, error) { return get[Sink](c, SinksPath+"/"+name) }
+func sinkPath(name string) string   { return SinksPath + "/" + name }
+func sourcePath(name string) string { return SourcesPath + "/" + name }
+
+func getSink(c *Client, name string) (*Sink, error) { return get[Sink](c, sinkPath(name)) }
 
 func getSource(c *Client, name string) (*Source, error) {
-	return get[Source](c, SourcesPath+"/"+name)
+	return get[Source](c, sourcePath(name))
 }
 
 // machineSelector is the field selector that takes the resources whose
@@ -314,20 +317,19 @@ func createSource(c *Client, name string) (*Source, error) {
 	})
 }
 
-// The status write goes to the status subresource, so a spec a person
-// edited between the read and the write is not overwritten.
-func writeSinkStatus(c *Client, sink *Sink, status EndpointStatus) (*Sink, error) {
-	written := *sink
-	written.APIVersion, written.Kind = EndpointAPIVersion, SinkKind
-	written.Status = status
-	return put(c, SinksPath+"/"+sink.Metadata.Name+"/status", &written)
-}
-
-func writeSourceStatus(c *Client, source *Source, status EndpointStatus) (*Source, error) {
-	written := *source
-	written.APIVersion, written.Kind = EndpointAPIVersion, SourceKind
-	written.Status = status
-	return put(c, SourcesPath+"/"+source.Metadata.Name+"/status", &written)
+// replaceStatus writes one object's status to the status
+// subresource, so a spec a person edited between the read and the
+// write is not overwritten. The caller states the object's apiVersion
+// and kind. The API server's copy replaces the caller's, because a
+// write produces a new resourceVersion, and the next write must state
+// it.
+func replaceStatus[T any](c *Client, path string, object *T) error {
+	stored, err := put(c, path+"/status", object)
+	if err != nil {
+		return err
+	}
+	*object = *stored
+	return nil
 }
 
 // post creates one object and answers with what the API server

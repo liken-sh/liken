@@ -47,26 +47,24 @@ import (
 
 // watchEndpoints turns an edit to one of this machine's resources, on
 // both collections, into one wake. The two watches run until the
-// context ends. It answers the two stores, which the pass reads in
-// place of the API server.
-func watchEndpoints(ctx context.Context, client dynamic.Interface, machine string, wake func(), readings *metrics) endpointCache {
-	watch := func(kind string, resource dynamic.ResourceInterface, handler cache.ResourceEventHandler) (cache.Store, func() bool) {
-		return collectionWatch{
+// context ends. It answers the two stores with a memo each, which the
+// pass reads in place of the API server (objectcache.go).
+func watchEndpoints(ctx context.Context, client dynamic.Interface, machine string, wake func(), readings *metrics) objectCache {
+	watch := func(kind string, resource dynamic.ResourceInterface, handler cache.ResourceEventHandler) heldObjects {
+		store, synced := collectionWatch{
 			collection:    resource,
 			fieldSelector: machineSelector(machine),
 			handler:       handler,
 			synced:        wake,
 			reopened:      func() { readings.watchRestarted(kind) },
 		}.start(ctx)
+		return heldObjects{view: storeView{store: store, synced: synced}, versions: newVersionMemo()}
 	}
-	sinks, sinksSynced := watch(SinkKind, client.Resource(sinkResource),
-		editHandler[Sink]{what: "the Sinks of " + machine, wake: wake}.handler())
-	sources, sourcesSynced := watch(SourceKind, client.Resource(sourceResource),
-		editHandler[Source]{what: "the Sources of " + machine, wake: wake}.handler())
-	return endpointCache{
-		sinks:   sinks,
-		sources: sources,
-		synced:  func() bool { return sinksSynced() && sourcesSynced() },
+	return objectCache{
+		sinks: watch(SinkKind, client.Resource(sinkResource),
+			editHandler[Sink]{what: "the Sinks of " + machine, wake: wake}.handler()),
+		sources: watch(SourceKind, client.Resource(sourceResource),
+			editHandler[Source]{what: "the Sources of " + machine, wake: wake}.handler()),
 	}
 }
 

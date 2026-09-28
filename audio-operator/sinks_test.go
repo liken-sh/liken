@@ -183,12 +183,12 @@ func TestStatusWritesGoToTheSubresource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	written, err := writeSinkStatus(client, sink, EndpointStatus{Node: "liken-1"})
-	if err != nil {
+	sink.Status = EndpointStatus{Node: "liken-1"}
+	if err := replaceStatus(client, sinkPath(testSinkName), sink); err != nil {
 		t.Fatal(err)
 	}
-	if written.Status.Node != "liken-1" {
-		t.Errorf("status = %+v", written.Status)
+	if sink.Status.Node != "liken-1" {
+		t.Errorf("status = %+v", sink.Status)
 	}
 	want := "PUT " + SinksPath + "/" + testSinkName + "/status"
 	if got := api.requests[len(api.requests)-1]; got != want {

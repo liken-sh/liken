@@ -264,7 +264,7 @@ func TestObservationInvalidLeavesTheEndpointGaugesAtTheirLastValue(t *testing.T)
 	graph := staticGraph(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}))
 	operator := testReconciler(t, slice, graph, "pcmC0D0p")
 	operator.readings = readings
-	operator.control = newEndpointControl(testClient(t, endpointAPI.handler(t)), endpointCache{}, "liken-1",
+	operator.control = newEndpointControl(testClient(t, endpointAPI.handler(t)), objectCache{}, "liken-1",
 		&preparedClaims{}, &graphFeed{poll: operator.graph}, readings)
 	operator.control.now = func() time.Time { return factsTime }
 	operator.control.openCard = func(int) (*mixer, error) {
