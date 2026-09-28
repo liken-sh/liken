@@ -1,0 +1,159 @@
+# The MediaPreferences API. One cluster-scoped resource holds the
+# cluster's default for audio and subtitle languages, the lowest of the
+# three tiers a Play resolves.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mediapreferences.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: MediaPreferences
+    listKind: MediaPreferencesList
+    plural: mediapreferences
+    singular: mediapreferences
+    categories: [media]
+  # A MediaPreferences is cluster-scoped because the default belongs
+  # to the whole cluster, not one namespace, the same reason a Keymap
+  # is cluster-scoped.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # A MediaPreferences is a table a person writes and nothing reports
+      # on, so there is no status subresource and the listing shows its age.
+      additionalPrinterColumns:
+        - name: Subtitles
+          type: string
+          jsonPath: .spec.subtitles
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            The cluster's defaults: the preferred audio and subtitle
+            languages, the time zone its displays show, and what an
+            idle display does. A Player or a Play overrides the
+            language fields field by field; the time zone has no
+            override.
+          # The name is fixed at default, because a second default is a
+          # contradiction. A MediaPreferences under any other name is
+          # rejected at apply, so the mistake shows at once instead of
+          # adding a silent second object.
+          x-kubernetes-validations:
+            - rule: self.metadata.name == 'default'
+              message: the only MediaPreferences is named default
+          properties:
+            spec:
+              type: object
+              description: >-
+                The default language and subtitle fields, each read
+                only when no more specific tier states it.
+              properties:
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    Ordered audio language codes, most wanted
+                    first; mpv takes the first audio track that
+                    matches. Codes are IETF language tags, and mpv
+                    treats the ISO 639-1 form en and the ISO 639-2
+                    form eng as the same language.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    Ordered subtitle language codes, separate from
+                    the audio list, so one viewer takes foreign audio with
+                    native subtitles.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitles:
+                  type: string
+                  enum: ["on", "off", "auto"]
+                  description: >-
+                    When subtitles show; on always, off never, auto
+                    only when the audio that played is not the first choice.
+                timeZone:
+                  type: string
+                  # An IANA zone name, for example America/New_York. The display
+                  # clock reads it. One per cluster, with no Play or Player override.
+                  description: >-
+                    The time zone, as an IANA name like
+                    America/New_York. The player pod reads it as TZ,
+                    so the display clock shows local time instead of
+                    UTC. One per cluster: no Play or Player
+                    overrides it.
+                idle:
+                  type: object
+                  description: >-
+                    The cluster's default for what a display does
+                    while nothing plays, read for each field a
+                    Player's own block leaves unset.
+                  properties:
+                    controller:
+                      type: string
+                      pattern: '^[a-z0-9.-]+/[a-z0-9-]+$'
+                      description: >-
+                        The operator that draws every idle screen
+                        the household does not override, as a
+                        domain-qualified name. Two names belong to the
+                        media operator: media.liken.sh/idle-screen, the
+                        default, which draws the idle screen this
+                        operator ships, and media.liken.sh/none, under
+                        which nothing draws an idle screen and no claim
+                        exists. Any other name hands each screen to the
+                        operator that handles it, which reads a
+                        Player's status.idle for the claim to reference,
+                        the requests it carries, the two windows, and the
+                        bus it joins.
+                    image:
+                      type: string
+                      description: >-
+                        The container image that draws every idle
+                        screen. The image starts with its own entrypoint
+                        and reads each unit's state from the bus. It
+                        implements the fade and off windows, the focus
+                        gate, the shade, the volume step, and the panel
+                        desire in its own process. Unset, every screen the
+                        household does not override runs the idle client
+                        the media operator ships.
+                    fadeAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before an idle screen fades to
+                        black. Zero disables the automatic fade; unset,
+                        every screen fades after 600.
+                    offAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before an idle panel
+                        goes dark, at least fadeAfterSeconds. Zero or
+                        unset means panels never go dark on their own.
+                        A panel goes dark only where the cluster runs
+                        a display-operator that publishes a Display
+                        for the screen.
+                    offMode:
+                      type: string
+                      enum: [backlight, power]
+                      description: >-
+                        Which override the off window applies to the
+                        screen's Display. The default, backlight,
+                        holds the panel at brightness zero, which
+                        still answers DDC. Power off stops some
+                        panels from answering DDC at all; state it
+                        only for a panel that woke from it in a
+                        drill.

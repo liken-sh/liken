@@ -1,0 +1,1106 @@
+package main
+
+// The wire types are hand-written, the way liken and the sibling
+// operators write theirs. The Kubernetes API is HTTPS that serves
+// JSON, and importing client-go for a dozen structs brings informers,
+// work queues, and a release cadence this program does not use. Each
+// type carries only the fields this operator reads or writes; the
+// API server fills in the rest.
+
+import (
+	"encoding/json"
+	"slices"
+)
+
+// The group this operator serves, and the two Kubernetes groups it
+// writes into: claims live under resource.k8s.io and pods under the
+// core group, because the objects a Play becomes are ordinary
+// Kubernetes objects any tool can read.
+const (
+	mediaAPIVersion = "media.liken.sh/v1alpha1"
+	claimAPIVersion = "resource.k8s.io/v1"
+	podAPIVersion   = "v1"
+)
+
+// ObjectMeta contains what this operator reads or writes: name and
+// namespace for the URL, resourceVersion for the conditional write, uid
+// with ownerReferences for garbage collection, and labels so a watch
+// selects the operator's own playback pods.
+//
+// Annotations contain the template hash the operator stamps on a persistent
+// claim and a standing pod, which is how a pass tells a live object from
+// the object it would build now. deletionTimestamp is set by the API
+// server on an object that is on its way out, and a standing pair with
+// one set is left alone until the delete completes.
+//
+// creationTimestamp is the API server's own stamp. The operator reads it
+// to tell the newest Play on a Player from an older one.
+type ObjectMeta struct {
+	Name            string `json:"name,omitempty"`
+	Namespace       string `json:"namespace,omitempty"`
+	UID             string `json:"uid,omitempty"`
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+	// Generation is the API server's count of the spec's revisions. A
+	// condition reports the generation it was derived from, so a reader
+	// can tell a condition on the current spec from a stale one.
+	Generation        int64             `json:"generation,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
+	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
+	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
+	// Finalizers is the list the API server waits on before it removes the
+	// object. This operator holds playFinalizer in it.
+	Finalizers []string `json:"finalizers,omitempty"`
+}
+
+// deleting reports whether the API server has stamped this object for
+// deletion, so a pass tears it down instead of reconciling it.
+func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
+
+// holds reports whether this object has the named finalizer.
+func (m ObjectMeta) holds(finalizer string) bool {
+	return slices.Contains(m.Finalizers, finalizer)
+}
+
+// with adds the finalizer to the list, and without removes it. Both return
+// a new slice, so a patch that fails leaves
+// the caller's copy of the object alone. Every other finalizer on the
+// object, another operator's included, is carried through unchanged.
+func (m ObjectMeta) with(finalizer string) []string {
+	return append(slices.Clone(m.Finalizers), finalizer)
+}
+
+func (m ObjectMeta) without(finalizer string) []string {
+	kept := []string{}
+	for _, held := range m.Finalizers {
+		if held != finalizer {
+			kept = append(kept, held)
+		}
+	}
+	return kept
+}
+
+// An ownerReference ties an object's life to its owner's: the
+// garbage collector deletes the owned object when the owner goes,
+// which is this operator's whole teardown. Controller is true
+// because exactly one thing manages each pod and claim; there is no
+// blockOwnerDeletion, because nothing here needs the owner to wait.
+type OwnerReference struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	UID        string `json:"uid"`
+	Controller bool   `json:"controller"`
+}
+
+// A Player is equipment, not a running thing. It holds no claims of
+// its own. The operator reads the spec and writes the status: the
+// spec is the equipment a person declared, and the status is what
+// plays on it now.
+type Player struct {
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       PlayerSpec   `json:"spec"`
+	Status     PlayerStatus `json:"status"`
+}
+
+// The status the operator writes onto a Player: whether it plays
+// anything now, and the name of the Play that does. Both are
+// omitempty, so an idle Player with no activity word yet shows blank
+// rather than a zero.
+type PlayerStatus struct {
+	Activity string `json:"activity,omitempty"`
+	Play     string `json:"play,omitempty"`
+
+	// Panel is what the screen's Display last observed. It is empty
+	// until a Display reports an observation.
+	Panel string `json:"panel,omitempty"`
+
+	// Receiver is the equipment this unit's cable lands on and the input
+	// it lands on. It is absent for a unit that plays straight into its
+	// panel.
+	Receiver *PlayerReceiverStatus `json:"receiver,omitempty"`
+
+	// Idle is the resolved idle screen controller and, where a
+	// controller draws, the persistent claim a delegate references and the
+	// requests in that claim. It is nil for a Player that drives no
+	// screen and for a cluster that names no display-draw class.
+	Idle *PlayerIdleStatus `json:"idle,omitempty"`
+
+	// Screen is the last screen the idle claim resolved to: the machine
+	// that publishes the draw device and the monitor id, which is the
+	// name of its Display. It is kept when the claim deallocates, so a
+	// unit whose panel is away can still identify which Display to read.
+	Screen *PlayerScreenStatus `json:"screen,omitempty"`
+
+	// Sinks is the sink memory: the Sink each spec.sinks selection
+	// resolved to, in spec order. It is memory the way Screen is. The
+	// idle claim holds the draw device alone, so a sink is allocated
+	// only while a Play runs; the operator writes the list from an
+	// allocated playback claim and keeps it after the Play retires.
+	// The list names the Sinks; it does not open them. A tap through
+	// media-api still needs a running Play, because a remembered Sink
+	// that another unit is using is never tapped through this one.
+	Sinks []PlayerSinkStatus `json:"sinks,omitempty"`
+
+	// Conditions carries the Screen condition, which reads the
+	// remembered Display's Connected condition for the unit. It is
+	// empty until the claim has resolved once.
+	Conditions []PlayerCondition `json:"conditions,omitempty"`
+}
+
+// PlayerSinkStatus is one resolved sink. Request is the claim request
+// that asked for it, audio0 for the first spec.sinks entry, so a
+// person reading the claim finds the row. Name is the Sink object the
+// scheduler allocated, which is the audio operator's own device name
+// for that endpoint, so a client can call the audio API with it.
+type PlayerSinkStatus struct {
+	Request string `json:"request,omitempty"`
+	Name    string `json:"name,omitempty"`
+}
+
+// PlayerScreenStatus is the screen memory: the node the draw device
+// is published from and the monitor id that names its Display.
+type PlayerScreenStatus struct {
+	Node    string `json:"node,omitempty"`
+	Monitor string `json:"monitor,omitempty"`
+}
+
+// PlayerCondition is one condition in the standard Kubernetes shape.
+// The transition time moves only when the status does, so a reader
+// can tell how long the unit has waited.
+type PlayerCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason,omitempty"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
+}
+
+// PlayerReceiverStatus names the Receiver and the input matched from
+// the unit's machine and monitor id, and folds that Receiver's
+// Reachable condition into one word. The word is empty until the
+// equipment operator reports one.
+type PlayerReceiverStatus struct {
+	Name      string `json:"name,omitempty"`
+	Input     string `json:"input,omitempty"`
+	Reachable string `json:"reachable,omitempty"`
+}
+
+// PlayerIdleStatus is what a delegate wires its client from. Controller
+// is the resolved name, always set. Claim is the standing claim in the
+// Player's namespace, which the delegate's pod references by name.
+// Requests are the claim's request names in claim order, one per
+// resources.claims entry the delegate's container states.
+// FadeAfterSeconds and OffAfterSeconds are the resolved windows, always
+// written, because zero is a policy and an absent field is not one.
+// Under media.liken.sh/none the block carries the controller alone.
+// standing claim in the Player's namespace, which the delegate's pod
+// references by name. Requests are the claim's request names in claim
+// order, one per resources.claims entry the delegate's container states.
+// FadeAfterSeconds and OffAfterSeconds are the two resolved windows, and
+// both are always written, because zero is a policy and an absent field
+// is not one. Under media.liken.sh/none the block carries the controller
+// alone.
+type PlayerIdleStatus struct {
+	Controller string   `json:"controller"`
+	Claim      string   `json:"claim,omitempty"`
+	Requests   []string `json:"requests,omitempty"`
+
+	// The two windows the operator resolved, in seconds. Zero on the
+	// fade means the screen never fades on its own, and zero on the off
+	// window leaves the panel lit. Neither has omitempty, so a client
+	// reads a number for each.
+	FadeAfterSeconds int64 `json:"fadeAfterSeconds"`
+	OffAfterSeconds  int64 `json:"offAfterSeconds"`
+
+	// Bus is what a delegate's client reads to join the unit on the
+	// bus. It is present under every controller but
+	// media.liken.sh/none.
+	Bus *PlayerIdleBus `json:"bus,omitempty"`
+}
+
+// PlayerIdleBus names the broker and every topic a delegate's client
+// reads or writes. The broker and the topic base are this operator's
+// configuration, so the status carries the built topics and a client
+// derives none. VolumeTopic is empty for a unit with no sinks, which is
+// the speaker gate: the client subscribes to no level, draws none, and
+// publishes none. Remotes has one entry per spec.remotes entry, in spec
+// order, because that position is the index a focus moment carries.
+type PlayerIdleBus struct {
+	Address     string `json:"address"`
+	StatusTopic string `json:"statusTopic"`
+	VolumeTopic string `json:"volumeTopic,omitempty"`
+
+	// VolumeOwnerTopic carries the owner mark for the level, and it is
+	// present whenever VolumeTopic is. A non-empty payload means equipment
+	// owns the level. The client then draws no level of its own and
+	// applies none.
+	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
+
+	// PowerTopic is the topic a power press on this unit publishes a
+	// toggle on, present only when the unit's screen is wired through a
+	// Receiver. A unit with none carries no topic, and its client keeps
+	// the shade on a power press exactly as it has it today.
+	PowerTopic string `json:"powerTopic,omitempty"`
+
+	CommandsTopic string             `json:"commandsTopic"`
+	PanelTopic    string             `json:"panelTopic"`
+	Remotes       []PlayerIdleRemote `json:"remotes,omitempty"`
+}
+
+// PlayerIdleRemote is one of the unit's controllers as a client reads
+// it: the topic its presses arrive on and the topic its focus mark is
+// on. The client gates every press on the mark naming this Player, and
+// the cycle topic is the focus topic plus /cycle.
+type PlayerIdleRemote struct {
+	Events string `json:"events"`
+	Focus  string `json:"focus"`
+}
+
+// The three panel states, each folded from the Display's
+// observed values and not from what the media layer asked for.
+const (
+	panelOn           = "On"
+	panelBacklightOff = "BacklightOff"
+	panelOff          = "Off"
+)
+
+// A Player's activity is the coarse state a person scans for: it
+// plays a Play now, a Play is starting on it, or it is free. The
+// Play name beside it says which run, so the two columns together
+// read as one sentence.
+const (
+	playerPlaying  = "Playing"
+	playerStarting = "Starting"
+	playerIdle     = "Idle"
+)
+
+// The three device roles. Display and render are single because one
+// pod drives one screen through one GPU; sinks is a list because a
+// unit plays through however many outputs it has. The CRD requires a
+// display or at least one sink.
+//
+// Remotes names the controllers the unit owns. Each entry names a
+// Remote in the same namespace, and the Play's command sidecar reads
+// the events topic of each one, so a unit's controllers belong to its
+// spec beside its display and its sinks.
+type PlayerSpec struct {
+	Zone string `json:"zone,omitempty"`
+
+	// The human name of this unit, the one the idle screen and later
+	// ambient surfaces show in place of the object name. It is the
+	// household's word for the unit, such as Studio Lab. Unset, the idle
+	// screen falls back to the Player's object name.
+	DisplayName string `json:"displayName,omitempty"`
+
+	Display *PlayerDevice  `json:"display,omitempty"`
+	Sinks   []PlayerDevice `json:"sinks,omitempty"`
+	Render  *PlayerDevice  `json:"render,omitempty"`
+	Remotes []PlayerRemote `json:"remotes,omitempty"`
+
+	// The per-Player override of the audio and subtitle language preferences.
+	// A nil list, or an empty Subtitles, means this Player states nothing, so
+	// resolution reads the default MediaPreferences instead.
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// Idle is this unit's idle screen policy. Resolution reads it field
+	// by field over the default MediaPreferences, so a Player states
+	// only what differs from the household.
+	Idle *IdlePolicy `json:"idle,omitempty"`
+}
+
+// IdlePolicy is what the idle screen does while nothing plays. The same
+// block is the override on a Player and the default on the household's
+// MediaPreferences, so the two tiers resolve field by field.
+type IdlePolicy struct {
+	// Image is the container image the idle screen runs. The image
+	// starts with its own entrypoint and reads the unit's state off the
+	// bus. Empty defers to the next tier.
+	// A tier that states none runs the idle client at the operator's
+	// own version.
+	Image string `json:"image,omitempty"`
+
+	// FadeAfterSeconds is the quiet stretch before the idle screen
+	// fades to black. Zero disables the automatic fade. A pointer,
+	// because zero and absent differ: absent defers to the next tier.
+	FadeAfterSeconds *int64 `json:"fadeAfterSeconds,omitempty"`
+
+	// OffAfterSeconds is the quiet stretch before the panel itself
+	// goes dark. Zero or absent means it never does. A pointer for the
+	// same reason the fade window is one.
+	OffAfterSeconds *int64 `json:"offAfterSeconds,omitempty"`
+
+	// OffMode is which override the operator applies at the off
+	// window, the backlight or the panel's power. Empty defers to the
+	// next tier.
+	OffMode string `json:"offMode,omitempty"`
+
+	// Controller names the operator that draws this unit's idle
+	// screen, a domain-qualified name the way a GatewayClass names its
+	// controllerName. Empty defers to the next tier, and where no tier
+	// states one the built-in is media.liken.sh/idle-screen, this
+	// operator's own name.
+	Controller string `json:"controller,omitempty"`
+}
+
+// The two ways a panel goes dark, and the two override blocks they
+// become. A backlight at zero still answers DDC. Power off stops
+// some panels from answering DDC at all, so a Player states it only
+// for a panel the drill proved wakes.
+const (
+	offModeBacklight = "backlight"
+	offModePower     = "power"
+)
+
+// One controller the Player owns. Name is the Remote in the same
+// namespace. A controller maps one way on every unit, as a device
+// does under hwdb, so the entry carries no Keymap of its own.
+type PlayerRemote struct {
+	Name string `json:"name"`
+
+	// The human name of this controller, the one the idle screen shows in
+	// its parts list, such as Studio Dualsense Controller. Unset, the idle
+	// screen falls back to Name, the Remote this entry references.
+	DisplayName string `json:"displayName,omitempty"`
+}
+
+// One device selection. The three fields become a DeviceClass name,
+// a CEL selector, and an opaque config block on the claim.
+type PlayerDevice struct {
+	Class string `json:"class"`
+
+	// The human name of this selection, the one the idle screen shows in
+	// its parts list, such as Portable Screen or Built-in Speakers. Unset,
+	// the idle screen falls back to the DeviceClass name, which says what
+	// the selection is.
+	DisplayName string `json:"displayName,omitempty"`
+
+	Selector   string            `json:"selector,omitempty"`
+	Parameters *DeviceParameters `json:"parameters,omitempty"`
+}
+
+// Values is raw JSON because the driver defines the parameters and
+// this operator carries them onto the claim unread.
+type DeviceParameters struct {
+	Driver string          `json:"driver"`
+	Values json.RawMessage `json:"values,omitempty"`
+}
+
+// A Play is one run of media on a Player, with a lifecycle analogous
+// to a Job: it runs once to completion, and it stays for its status
+// until its ttlSecondsAfterFinished passes or a person deletes it.
+type Play struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       PlaySpec   `json:"spec"`
+	Status     PlayStatus `json:"status"`
+}
+
+// A Play names the players it runs on and the items to play in order,
+// and Start is where in the first item the run begins. Players is a
+// list of one today, because the carriage layer will let one Play
+// reach several players in sync, and a list that grows a second
+// element changes no field name when it does.
+type PlaySpec struct {
+	Players []string   `json:"players"`
+	Items   []PlayItem `json:"items"`
+	Start   string     `json:"start,omitempty"`
+	// The seconds one trickplay tile covers, as a Go duration like 10s.
+	// Jellyfin writes no manifest beside the sheets, and the last sheet is
+	// padded, so the tile count cannot be read back. The Play declares the
+	// interval, and it defaults to 10s when this is empty.
+	TrickplayInterval string `json:"trickplayInterval,omitempty"`
+
+	// How long a Finished Play remains before the operator deletes it, in
+	// seconds. The field is a pointer because zero and absent mean
+	// different things: zero deletes the Play on the pass that sees it
+	// finished, and absent takes defaultTTLSecondsAfterFinished. A plain
+	// int64 would read an unset field as zero and delete every Play at
+	// once.
+	//
+	// The window is the Play's own affair and not operator configuration,
+	// because the program that creates a Play chooses how long the record is worth
+	// keeping: a library app sets the window its continue-watching feature
+	// reads, and two apps on one cluster choose differently.
+	TTLSecondsAfterFinished *int64 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// The per-Play override of the language preferences, the most specific tier.
+	// A nil list, or an empty Subtitles, means this Play states nothing, so
+	// resolution reads the Player next.
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// Next is the work that follows this run. The display offers it on the
+	// scrubber, and the program that wrote the Play starts it when a person
+	// takes the offer.
+	Next *PlayNext `json:"next,omitempty"`
+
+	// The level this run starts at. The operator writes it through to
+	// the unit's volume topic before it creates the pod, so the
+	// override becomes the Player's state and everything after it is
+	// the ordinary path. Absent, the run starts at whatever the topic
+	// already holds.
+	Volume *PlayVolume `json:"volume,omitempty"`
+}
+
+// PlayNext is the offer: three lines of text the display draws as given,
+// an art reference the operator resolves the way it resolves an item's
+// art, and a request the operator never reads and copies to the bus
+// when a person takes the offer.
+type PlayNext struct {
+	Reason string `json:"reason,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Art    string `json:"art,omitempty"`
+
+	// Request is raw JSON because the writer of the Play defines its shape,
+	// and this operator carries it back unread.
+	Request json.RawMessage `json:"request,omitempty"`
+}
+
+// PlayVolume contains a Play's starting level, its muted flag, or both.
+// Each field is a pointer because absent and zero differ: an absent
+// level contains no request and leaves the unit unchanged, and a
+// level of zero is silence the Play asked for.
+type PlayVolume struct {
+	Level *int  `json:"level,omitempty"`
+	Muted *bool `json:"muted,omitempty"`
+}
+
+// A PlayItem is one entry in the list: the media URI and an optional
+// Presentation. The block is optional because a loose file needs only
+// its URI, and the display falls back to what mpv reads from the file.
+type PlayItem struct {
+	URI          string        `json:"uri"`
+	Presentation *Presentation `json:"presentation,omitempty"`
+}
+
+// A Presentation declares what mpv cannot read from the file, so the
+// display renders an item the way the library that fed liken describes
+// it, not the way a container's tags happen to read.
+//
+// It carries the text fields and two art references, the logo and the
+// trickplay directory. The resolver rewrites each the way it rewrites the
+// media URI, so an nfs reference or a claim reference shares the media's
+// mount and an https reference stays a URL.
+type Presentation struct {
+	Type string `json:"type,omitempty"`
+	Hint string `json:"hint,omitempty"`
+
+	// Role is the item's part in the work: `trailer`, or empty for the
+	// work itself. The display marks a trailer on the line under the
+	// title.
+	Role string `json:"role,omitempty"`
+
+	Title        string `json:"title,omitempty"`
+	Series       string `json:"series,omitempty"`
+	Season       int    `json:"season,omitempty"`
+	Episode      int    `json:"episode,omitempty"`
+	EpisodeTitle string `json:"episodeTitle,omitempty"`
+	Year         int    `json:"year,omitempty"`
+	Date         string `json:"date,omitempty"`
+	Logo         string `json:"logo,omitempty"`
+
+	// The two music text fields. An album states them so the display draws
+	// the words the Play resolved, and the display reads no tags of its
+	// own.
+	Artist string `json:"artist,omitempty"`
+	Album  string `json:"album,omitempty"`
+
+	// A reference to the item's cover image, resolved the way the logo is.
+	// It is the first tier of the art the music layout draws, and the
+	// picture inside the file and a cover beside it follow.
+	Art string `json:"art,omitempty"`
+
+	// A reference to the item's X.trickplay directory, resolved the way the
+	// logo is. The display shows a tile from its sprite sheets on the scrub
+	// cursor.
+	Trickplay string `json:"trickplay,omitempty"`
+
+	// The spans in the file where the intro, the recap, the credits, the
+	// scene after the credits, and the preview are. A community database
+	// can return several candidate spans for one kind, from different
+	// submissions or release versions, and the library forwards every one.
+	// The operator passes them to the display unread, and the display
+	// merges the candidates and acts on the result, so one rule reads them.
+	Marks []PlayMark `json:"marks,omitempty"`
+}
+
+// PlayMark is one candidate span of one kind. Start and End are pointers
+// because an absent value differs from zero: an absent start is the start
+// of the file, and an absent end is the end of the file, which the display
+// reads from the duration mpv reports.
+type PlayMark struct {
+	// Kind is `intro`, `recap`, `credits`, `post-credits`, or `preview`.
+	// `post-credits` is the scene after the credits. The display
+	// ignores a kind it does not know, so a library can send a new kind
+	// before the display acts on it.
+	Kind  string   `json:"kind"`
+	Start *float64 `json:"start,omitempty"`
+	End   *float64 `json:"end,omitempty"`
+
+	// Source names the database the span came from, such as `theintrodb`.
+	// The display does not read it.
+	Source string `json:"source,omitempty"`
+}
+
+// The status the operator alone writes: the phase, the activity
+// word, the paused flag, the item counting from 1, the playhead, the
+// pod's name, and the message that says why when a word is not
+// enough. Every field is omitempty so a column with nothing to say
+// shows blank in kubectl rather than a zero.
+type PlayStatus struct {
+	Phase    string `json:"phase,omitempty"`
+	Activity string `json:"activity,omitempty"`
+	Paused   bool   `json:"paused,omitempty"`
+	Item     int    `json:"item,omitempty"`
+	Position string `json:"position,omitempty"`
+	Duration string `json:"duration,omitempty"`
+	Pod      string `json:"pod,omitempty"`
+	Message  string `json:"message,omitempty"`
+
+	// When the operator first read this run's phase as Finished, in RFC
+	// 3339. The time-to-live after finishing counts from here and not from
+	// the Play's creation, so the window measures the end of the film. It
+	// lives on the status rather than in the operator's memory, so an
+	// operator that restarts reads the clock back from the API server.
+	FinishedAt string `json:"finishedAt,omitempty"`
+
+	// The preferences this run resolved, the console-parity record of what the
+	// three tiers settled on.
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// The language of the audio track and the subtitle track mpv selected, so a
+	// code that matched no track shows plainly.
+	AudioLanguage    string `json:"audioLanguage,omitempty"`
+	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
+
+	// The run's conditions. Each one reports a part of the pod the phase
+	// alone does not, because the phase follows the pod's phase and a
+	// native sidecar restarts under a pod that stays Running.
+	Conditions []PlayCondition `json:"conditions,omitempty"`
+}
+
+// PlayCondition is one condition on a run, in the same shape a Player's
+// conditions take.
+type PlayCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason,omitempty"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
+	// ObservedGeneration is the Play's metadata.generation the condition
+	// was derived from.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// The four phases, in the words Jobs and Pods use so nobody learns a
+// new vocabulary. Finished and Failed are terminal: a phase moves
+// forward only.
+const (
+	phasePending  = "Pending"
+	phaseRunning  = "Running"
+	phaseFinished = "Finished"
+	phaseFailed   = "Failed"
+)
+
+// The activity is the one word a person reads to know what the Play
+// is doing right now. The phase is the lifecycle, which never goes
+// backward; the activity folds the paused flag into that lifecycle,
+// so a paused run reads Paused where the phase still reads Running.
+const (
+	activityStarting = "Starting"
+	activityPlaying  = "Playing"
+	activityPaused   = "Paused"
+	activityFinished = "Finished"
+	activityFailed   = "Failed"
+)
+
+// playActivity is the phase and the paused flag folded into one
+// word. A Play with no phase yet has no activity either, so an
+// unwritten status stays blank.
+func playActivity(phase string, paused bool) string {
+	switch phase {
+	case phasePending:
+		return activityStarting
+	case phaseRunning:
+		if paused {
+			return activityPaused
+		}
+		return activityPlaying
+	case phaseFinished:
+		return activityFinished
+	case phaseFailed:
+		return activityFailed
+	}
+	return ""
+}
+
+// A Play in a terminal phase gets no further reconcile. Its pod and
+// claim stay for reading until the Play is deleted, and the garbage
+// collector tears them down then.
+func terminalPhase(phase string) bool {
+	return phase == phaseFinished || phase == phaseFailed
+}
+
+// finishedPhase reports the one terminal phase the pass acts on. Only a
+// Finished Play is done, so the pass skips it. A Failed Play resumes, so the
+// pass reconciles it. terminalPhase still counts both, for the focus rule
+// that a crashed run holds no controller.
+func finishedPhase(phase string) bool {
+	return phase == phaseFinished
+}
+
+// The three subtitle modes a preference tier may state.
+const (
+	subtitlesOn   = "on"
+	subtitlesOff  = "off"
+	subtitlesAuto = "auto"
+)
+
+// mediaPreferencesName is the one name a MediaPreferences may take. The CRD
+// pins it with a CEL rule, so a second default is rejected at apply, and this
+// operator reads the singleton by this name.
+const mediaPreferencesName = "default"
+
+// MediaPreferences is the cluster-scoped household default for audio and
+// subtitle languages, the lowest of the three tiers a Play resolves.
+type MediaPreferences struct {
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   ObjectMeta           `json:"metadata"`
+	Spec       MediaPreferencesSpec `json:"spec"`
+}
+
+// MediaPreferencesSpec holds the default language fields. Resolution reads
+// each field only when no more specific tier states it.
+type MediaPreferencesSpec struct {
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// The household wall-clock zone, an IANA name like America/New_York. One
+	// per cluster, with no per-Play or per-Player override. The player pod
+	// reads it as TZ, so the display clock shows local time.
+	TimeZone string `json:"timeZone,omitempty"`
+
+	// Idle is the household default idle screen policy, read for each
+	// field a Player's own block leaves unset.
+	Idle *IdlePolicy `json:"idle,omitempty"`
+}
+
+// A Remote is one physical controller: its device and, where
+// its model needs one, the Keymap for its model. The operator reads the
+// spec to build the standing pod and to hand each Play's command
+// sidecar its topics, and writes the status to report which unit the
+// controller drives now.
+type Remote struct {
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       RemoteSpec   `json:"spec"`
+	Status     RemoteStatus `json:"status"`
+}
+
+// RemoteStatus is what the operator reports on a Remote. Player is the
+// Player the controller's retained focus mark names, so kubectl answers
+// which unit a press reaches without a read of the bus. It is empty while
+// no Player in the namespace lists the Remote.
+//
+// Unbound is the gap: every code the controller declares that its
+// Keymap does not bind. It is empty when the Keymap binds every
+// declared code, and absent while no standing pod has reported.
+//
+// Peripheral names the bluetooth-operator's Peripheral for the device
+// this Remote's standing claim allocated. The name is the device's
+// address in the lowercase dashed form, which is the device name the
+// allocation result carries. It is empty while the claim carries no
+// allocation, and for a controller some other driver publishes. The
+// Peripheral is where a person reads the controller's link and its
+// charge.
+type RemoteStatus struct {
+	Player     string        `json:"player,omitempty"`
+	Peripheral string        `json:"peripheral,omitempty"`
+	Unbound    []UnboundCode `json:"unbound,omitempty"`
+}
+
+// UnboundCode is one code the controller declares and the Keymap
+// leaves unbound: the raw evdev code, its name where the kernel gives
+// it one, and which event type carries it.
+type UnboundCode struct {
+	Code uint16 `json:"code"`
+	Name string `json:"name,omitempty"`
+	Type string `json:"type"`
+}
+
+// A Remote holds its device selector and the Keymap for its model,
+// and it names no player. A Player names the Remotes it owns through
+// spec.remotes, so the unit that owns a controller is the one that
+// lists it.
+//
+// Discovery is the teaching mode: the standing pod keeps every node
+// the claim delivered and logs each event the way a Keymap names it.
+// Turning it on or off replaces the standing pod.
+type RemoteSpec struct {
+	Device    RemoteDevice `json:"device"`
+	Keymap    string       `json:"keymap,omitempty"`
+	Discovery bool         `json:"discovery,omitempty"`
+}
+
+// The controller is selected the way a Player's display is, by a
+// DeviceClass and a CEL expression, and it carries the same opaque
+// parameters block. A Remote uses the block to name the classes of
+// input the driver delivers, in the driver's own vocabulary.
+type RemoteDevice struct {
+	Class      string            `json:"class"`
+	Selector   string            `json:"selector,omitempty"`
+	Parameters *DeviceParameters `json:"parameters,omitempty"`
+}
+
+// A Keymap is one controller model's table from its odd controls to
+// the kernel key names they should report, written once per model and
+// shared by every Remote of that model. A model whose kernel names are
+// already right needs no Keymap at all.
+type Keymap struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       KeymapSpec `json:"spec"`
+}
+
+// Buttons and axes are separate lists because they bind differently:
+// a button is a press, and an axis entry names a direction as well.
+// The CRD requires at least one entry across the two.
+type KeymapSpec struct {
+	Buttons []KeymapButton `json:"buttons,omitempty"`
+	Axes    []KeymapAxis   `json:"axes,omitempty"`
+}
+
+// A KeymapRepeat makes a row repeat while the control is held. The
+// remote pod publishes the press, waits the delay, then
+// publishes value 2 every interval until the release. The delay and
+// the interval are durations, like 400ms or 1s, and each takes a
+// default when it is empty. A control with no block reports only what
+// the kernel reports.
+type KeymapRepeat struct {
+	Delay    string `json:"delay,omitempty"`
+	Interval string `json:"interval,omitempty"`
+}
+
+// Press is the control, an evdev key name out of buttonCodes. Key is
+// the KEY_* name the controller reports instead, or none to drop the
+// control. Both sides are the kernel's names, the way an hwdb entry is
+// written.
+type KeymapButton struct {
+	Press  string        `json:"press"`
+	Key    string        `json:"key"`
+	Repeat *KeymapRepeat `json:"repeat,omitempty"`
+}
+
+// An axis entry adds the value, because a hat axis reports -1 and 1
+// as its two presses and 0 as the release: one axis is two rows.
+type KeymapAxis struct {
+	Axis   string        `json:"axis"`
+	Value  int           `json:"value"`
+	Key    string        `json:"key"`
+	Repeat *KeymapRepeat `json:"repeat,omitempty"`
+}
+
+// A ResourceClaim is the request for hardware. The operator
+// writes only the spec. The scheduler writes the allocation into the
+// status, and the pass reads it for one question: which screen the
+// idle pod's draw request took.
+type ResourceClaim struct {
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   ObjectMeta           `json:"metadata"`
+	Spec       ResourceClaimSpec    `json:"spec"`
+	Status     *ResourceClaimStatus `json:"status,omitempty"`
+}
+
+type ResourceClaimSpec struct {
+	Devices DeviceClaim `json:"devices"`
+}
+
+// Requests name the devices by role and config carries driver
+// parameters for them. Both are claim-level, so one claim covers the
+// whole player.
+type DeviceClaim struct {
+	Requests []DeviceRequest            `json:"requests,omitempty"`
+	Config   []DeviceClaimConfiguration `json:"config,omitempty"`
+
+	// Constraints tie named requests to one another, so two requests
+	// allocate against the same piece of equipment.
+	Constraints []DeviceConstraint `json:"constraints,omitempty"`
+}
+
+// One constraint: the requests it covers, and the attribute whose
+// value every one of those devices must share.
+type DeviceConstraint struct {
+	Requests       []string `json:"requests,omitempty"`
+	MatchAttribute string   `json:"matchAttribute,omitempty"`
+}
+
+// The request name is the role the pod refers to, and exactly is
+// DRA's one-of that holds a plain request.
+type DeviceRequest struct {
+	Name    string              `json:"name"`
+	Exactly *ExactDeviceRequest `json:"exactly,omitempty"`
+}
+
+// ExactCount with count 1 asks for one device, no more offered and
+// no fewer accepted. The selector list is omitted when the class
+// alone chooses the device.
+type ExactDeviceRequest struct {
+	DeviceClassName string             `json:"deviceClassName"`
+	AllocationMode  string             `json:"allocationMode,omitempty"`
+	Count           int                `json:"count,omitempty"`
+	Selectors       []DeviceSelector   `json:"selectors,omitempty"`
+	Tolerations     []DeviceToleration `json:"tolerations,omitempty"`
+}
+
+// A selector is a CEL expression over device.attributes, the same
+// expression a hand-written claim would carry.
+type DeviceSelector struct {
+	CEL *CELDeviceSelector `json:"cel,omitempty"`
+}
+
+type CELDeviceSelector struct {
+	Expression string `json:"expression"`
+}
+
+// A device taint evicts the pod that holds the device. A toleration
+// with tolerationSeconds is how long the play survives an unplugged
+// cable.
+type DeviceToleration struct {
+	Key               string `json:"key,omitempty"`
+	Operator          string `json:"operator,omitempty"`
+	Effect            string `json:"effect,omitempty"`
+	TolerationSeconds *int64 `json:"tolerationSeconds,omitempty"`
+}
+
+// An opaque config block reaches the driver unread by the scheduler,
+// and requests names which of the claim's requests it applies to.
+type DeviceClaimConfiguration struct {
+	Requests []string                   `json:"requests,omitempty"`
+	Opaque   *OpaqueDeviceConfiguration `json:"opaque,omitempty"`
+}
+
+type OpaqueDeviceConfiguration struct {
+	Driver     string          `json:"driver"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+// The playback pod. The operator writes its spec once and reads its
+// status every pass, because the pod's phase is where the Play's
+// phase comes from.
+type Pod struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       PodSpec    `json:"spec"`
+	Status     PodStatus  `json:"status"`
+}
+
+// The pod spec's few fields: restartPolicy Never because the pod's
+// end is the play's end, and the short grace period because mpv
+// exits promptly on SIGTERM.
+//
+// initContainers is where a native sidecar goes: an init container
+// with restartPolicy Always starts before the ordinary containers,
+// runs beside them, and restarts alone, without ending the pod.
+type PodSpec struct {
+	RestartPolicy string `json:"restartPolicy,omitempty"`
+	// AutomountServiceAccountToken set to false keeps the namespace's default
+	// ServiceAccount token out of the pod. Every pod this operator builds
+	// sets it.
+	AutomountServiceAccountToken  *bool              `json:"automountServiceAccountToken,omitempty"`
+	TerminationGracePeriodSeconds *int64             `json:"terminationGracePeriodSeconds,omitempty"`
+	ResourceClaims                []PodResourceClaim `json:"resourceClaims,omitempty"`
+	InitContainers                []Container        `json:"initContainers,omitempty"`
+	Containers                    []Container        `json:"containers"`
+	Volumes                       []Volume           `json:"volumes,omitempty"`
+	Tolerations                   []Toleration       `json:"tolerations,omitempty"`
+}
+
+// A node taint keeps pods off a machine, and a toleration is how one
+// pod asks to land there. This is not the DeviceToleration above: that
+// one answers a taint on a device, and this one answers a taint on the
+// node the pod runs on.
+type Toleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Effect   string `json:"effect,omitempty"`
+}
+
+// A pod names a claim once, and its containers refer to that name
+// request by request, which is what keeps a device out of a
+// container that must not hold it.
+type PodResourceClaim struct {
+	Name              string `json:"name"`
+	ResourceClaimName string `json:"resourceClaimName,omitempty"`
+}
+
+// Command replaces the image's entrypoint, which is how one image
+// runs the playback pod's two roles. RestartPolicy is set only on an
+// init container, where Always is what makes it a sidecar.
+type Container struct {
+	Name          string               `json:"name"`
+	Image         string               `json:"image"`
+	Command       []string             `json:"command,omitempty"`
+	Args          []string             `json:"args,omitempty"`
+	Env           []EnvVar             `json:"env,omitempty"`
+	Ports         []ContainerPort      `json:"ports,omitempty"`
+	Resources     ResourceRequirements `json:"resources"`
+	VolumeMounts  []VolumeMount        `json:"volumeMounts,omitempty"`
+	RestartPolicy string               `json:"restartPolicy,omitempty"`
+}
+
+// ContainerPort names one port a container answers on. Milestone 65 is
+// the one caller: a PodMonitor selects a scrape target by this name, not
+// by the number, so a port moves without a second edit anywhere that
+// reads it.
+type ContainerPort struct {
+	Name          string `json:"name"`
+	ContainerPort int32  `json:"containerPort"`
+}
+
+// resources.claims is how a container holds one of the pod's
+// claims, and request narrows it to one role inside that claim.
+// resources.requests is the cpu and memory the scheduler reserves for
+// the container, and resources.limits is the memory the kernel lets it
+// use. containerresources.go gives each value.
+type ResourceRequirements struct {
+	Requests ResourceList     `json:"requests,omitempty"`
+	Limits   ResourceList     `json:"limits,omitempty"`
+	Claims   []ContainerClaim `json:"claims,omitempty"`
+}
+
+type ContainerClaim struct {
+	Name    string `json:"name"`
+	Request string `json:"request,omitempty"`
+}
+
+type EnvVar struct {
+	Name      string        `json:"name"`
+	Value     string        `json:"value,omitempty"`
+	ValueFrom *EnvVarSource `json:"valueFrom,omitempty"`
+}
+
+// EnvVarSource is the downward API's half of a variable: the kubelet
+// fills the value from the pod's own object when the container starts.
+// A pod learns its UID only this way, because the API server assigns the
+// UID after the operator sends the pod.
+type EnvVarSource struct {
+	FieldRef *ObjectFieldSelector `json:"fieldRef,omitempty"`
+}
+
+type ObjectFieldSelector struct {
+	FieldPath string `json:"fieldPath"`
+}
+
+type VolumeMount struct {
+	Name      string `json:"name"`
+	MountPath string `json:"mountPath"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
+}
+
+// An inline NFS volume needs no PersistentVolume and no CSI driver.
+// The kubelet mounts it with the kernel's NFS client, through the
+// mount helper liken's image carries.
+type Volume struct {
+	Name                  string                             `json:"name"`
+	NFS                   *NFSVolumeSource                   `json:"nfs,omitempty"`
+	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
+	EmptyDir              *EmptyDirVolumeSource              `json:"emptyDir,omitempty"`
+}
+
+type NFSVolumeSource struct {
+	Server   string `json:"server"`
+	Path     string `json:"path"`
+	ReadOnly bool   `json:"readOnly,omitempty"`
+}
+
+// A claim volume names a PersistentVolumeClaim in the pod's namespace.
+// The kubelet resolves the claim when it starts the pod, so the operator
+// reads no claim and no PersistentVolume, and its RBAC gains no rule.
+// Read-only here and on the mount, because a player never writes to a
+// library.
+type PersistentVolumeClaimVolumeSource struct {
+	ClaimName string `json:"claimName"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
+}
+
+// An emptyDir is a directory the kubelet creates with the pod and
+// deletes with it, which is all two containers need to share one
+// socket.
+type EmptyDirVolumeSource struct{}
+
+// The pod status fields the phase derivation reads. The container's
+// terminated state is the specific half of a failure message,
+// because it carries the exit code.
+//
+// The kubelet reports a native sidecar, the command sidecar and the
+// display, under initContainerStatuses, because a native sidecar is an
+// init container with restartPolicy Always.
+type PodStatus struct {
+	Phase                 string            `json:"phase,omitempty"`
+	Reason                string            `json:"reason,omitempty"`
+	Message               string            `json:"message,omitempty"`
+	Conditions            []PodCondition    `json:"conditions,omitempty"`
+	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
+	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
+}
+
+// The scheduler explains a pod it cannot place on the PodScheduled
+// condition, not in the pod's message, so a hold like a claim that
+// does not exist is only readable here.
+type PodCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// restartCount and lastState are the fields a restarting sidecar
+// reports about its exits, because its current state says nothing
+// about the exit.
+type ContainerStatus struct {
+	Name         string         `json:"name"`
+	State        ContainerState `json:"state"`
+	LastState    ContainerState `json:"lastState"`
+	RestartCount int            `json:"restartCount,omitempty"`
+}
+
+type ContainerState struct {
+	Running    *ContainerStateRunning    `json:"running,omitempty"`
+	Terminated *ContainerStateTerminated `json:"terminated,omitempty"`
+}
+
+// ContainerStateRunning has no fields, because the presence of the
+// block is the whole fact this operator reads.
+type ContainerStateRunning struct{}
+
+type ContainerStateTerminated struct {
+	ExitCode int    `json:"exitCode"`
+	Reason   string `json:"reason,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+// The pod phases Kubernetes reports, named here so the derivation
+// reads as the mapping it is.
+const (
+	podPending   = "Pending"
+	podRunning   = "Running"
+	podSucceeded = "Succeeded"
+	podFailed    = "Failed"
+)

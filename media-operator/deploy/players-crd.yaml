@@ -1,0 +1,664 @@
+# The Player API, declared to Kubernetes.
+#
+# A Player is one named unit of equipment: a lone speaker, a TV with
+# its built-in speakers, a TV with a receiver. The spec selects the
+# unit's devices out of what the hardware operators publish, with the
+# same CEL selectors a hand-written ResourceClaim would use. The
+# media operator holds a claim on the unit's display between runs,
+# for the idle screen, and it claims the other devices only while a
+# Play runs.
+#
+# The resource is namespaced, unlike liken's own Machine, because
+# everything a Player becomes is namespaced: the claims, the playback
+# pod, and the Play that names it all live in one namespace, and RBAC
+# on that namespace covers the set.
+#
+# The device entry repeats inline under display, sinks, and render,
+# because a CRD's structural schema allows no $ref. Each entry names
+# a DeviceClass, an optional CEL selector, and optional opaque
+# parameters for the driver that prepares the device.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: players.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: Player
+    listKind: PlayerList
+    plural: players
+    singular: player
+    # `kubectl get media` shows the whole layer at once: every
+    # player and every play, the way `kubectl get liken` shows the
+    # OS layer.
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status. The API server enforces the split.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Zone
+          type: string
+          jsonPath: .spec.zone
+        - name: Activity
+          type: string
+          jsonPath: .status.activity
+        - name: Play
+          type: string
+          jsonPath: .status.play
+        - name: Idle
+          type: string
+          jsonPath: .status.idle.controller
+        - name: Screen
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Screen")].reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Player is one named unit of equipment. A Play names a
+            Player to run media on it. The media operator retains the
+            display claim between playback runs for the idle screen and
+            claims the other devices only while a Play runs.
+          properties:
+            spec:
+              type: object
+              description: >-
+                The devices that form the unit, each selected from
+                what a hardware operator publishes. All of a Player's
+                devices must be reachable from one machine, because a
+                Play becomes one pod and the scheduler places that
+                pod on the machine that owns every claimed device. A
+                Player whose devices span machines produces Plays
+                that stay Pending. The spec must select a display or
+                at least one sink; render alone plays nothing.
+              # A Player with no display and no sinks plays nothing
+              # anywhere, so the spec must select at least one of the
+              # two. Render alone is not a Player.
+              x-kubernetes-validations:
+                - rule: >-
+                    has(self.display) ||
+                    (has(self.sinks) && size(self.sinks) > 0)
+                  message: >-
+                    a Player needs a display or at least one sink;
+                    render alone plays nothing
+              properties:
+                zone:
+                  type: string
+                  description: >-
+                    The area this Player is in, such as living-room.
+                    A word for grouping and display; nothing acts on
+                    it yet.
+                displayName:
+                  type: string
+                  description: >-
+                    The human name of this unit, the one the idle
+                    screen and later ambient surfaces show in place of
+                    the object name, such as Studio Lab. Omit it, and
+                    the idle screen falls back to the object name.
+                display:
+                  type: object
+                  required: [class]
+                  description: >-
+                    The display this Player shows video on. Omit it
+                    for an audio-only Player.
+                  properties:
+                    class:
+                      type: string
+                      description: >-
+                        The DeviceClass the claim allocates through.
+                        Consumer classes are the cluster owner's
+                        vocabulary; each hardware operator's manual
+                        gives the YAML for its class.
+                    displayName:
+                      type: string
+                      description: >-
+                        The human name of this selection, the one the
+                        idle screen shows in its parts list, such as
+                        Portable Screen. Omit it, and the idle screen
+                        falls back to the DeviceClass name.
+                    selector:
+                      type: string
+                      description: >-
+                        A CEL expression over device.attributes, the
+                        same expression a hand-written claim would
+                        carry. Omitted, the class alone chooses,
+                        which fits a class that already names one
+                        kind of device.
+                    parameters:
+                      type: object
+                      required: [driver]
+                      description: >-
+                        Opaque configuration for the driver that
+                        prepares the device, carried onto the claim
+                        unread. The display operator's manual
+                        documents its parameters, such as mode and
+                        brightness.
+                      properties:
+                        driver:
+                          type: string
+                          description: >-
+                            The driver the parameters are for, such
+                            as display.liken.sh.
+                        values:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          description: >-
+                            The parameters themselves. The driver
+                            defines them, and this operator copies them
+                            to the claim.
+                sinks:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: >-
+                    The audio outputs this Player plays sound
+                    through.
+                  items:
+                    type: object
+                    required: [class]
+                    properties:
+                      class:
+                        type: string
+                        description: >-
+                          The DeviceClass the claim allocates
+                          through. Consumer classes are the cluster
+                          owner's vocabulary; each hardware
+                          operator's manual gives the YAML for its
+                          class.
+                      displayName:
+                        type: string
+                        description: >-
+                          The human name of this selection, the one
+                          the idle screen shows in its parts list,
+                          such as Built-in Speakers. Omit it, and the
+                          idle screen falls back to the DeviceClass
+                          name.
+                      selector:
+                        type: string
+                        description: >-
+                          A CEL expression over device.attributes,
+                          the same expression a hand-written claim
+                          would carry.
+                      parameters:
+                        type: object
+                        required: [driver]
+                        description: >-
+                          Opaque configuration for the driver that
+                          prepares the device, carried onto the
+                          claim unread. The audio operator's manual
+                          documents its parameters, such as codec.
+                        properties:
+                          driver:
+                            type: string
+                            description: >-
+                              The driver the parameters are for,
+                              such as audio.liken.sh.
+                          values:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: >-
+                              The parameters themselves. The driver
+                              defines them; this operator carries
+                              them.
+                render:
+                  type: object
+                  required: [class]
+                  description: >-
+                    The GPU render node the player program decodes
+                    and draws with. Omit it only for an audio-only
+                    Player; mpv needs a GPU to put video on a
+                    display.
+                  properties:
+                    class:
+                      type: string
+                      description: >-
+                        The DeviceClass the claim allocates through.
+                        A render class usually needs no selector,
+                        because it already names one kind of device.
+                    displayName:
+                      type: string
+                      description: >-
+                        The human name of this selection, the one the
+                        idle screen shows in its parts list. Omit it,
+                        and the idle screen falls back to the
+                        DeviceClass name.
+                    selector:
+                      type: string
+                      description: >-
+                        A CEL expression over device.attributes, for
+                        a machine with more than one GPU.
+                remotes:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  # A Player may name several controllers, and a Remote
+                  # may be named by several Players, so the relation is
+                  # many to many. One controller then drives a Play in
+                  # each unit that names it, and focus decides which one a
+                  # press reaches.
+                  description: >-
+                    The controllers this unit owns, each naming a
+                    Remote in the same namespace. Each Remote runs a
+                    standing pod of its own, and the Play's command
+                    sidecar reads the events every entry publishes.
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The Remote this unit owns, by name, in this
+                          namespace.
+                      displayName:
+                        type: string
+                        description: >-
+                          The human name of this controller, the one
+                          the idle screen shows in its parts list,
+                          such as Studio Dualsense Controller. Omit
+                          it, and the idle screen falls back to name.
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Player override of the audio language
+                    order; omit it to inherit the default MediaPreferences.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Player override of the subtitle language
+                    order; omit it to inherit the default MediaPreferences.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitles:
+                  type: string
+                  enum: ["on", "off", "auto"]
+                  description: >-
+                    A per-Player override of when subtitles show;
+                    omit it to inherit the default MediaPreferences.
+                idle:
+                  type: object
+                  description: >-
+                    This unit's idle screen policy. Each field overrides
+                    the default MediaPreferences on its own.
+                  properties:
+                    controller:
+                      type: string
+                      pattern: '^[a-z0-9.-]+/[a-z0-9-]+$'
+                      description: >-
+                        The operator that draws this unit's idle
+                        screen, as a domain-qualified name. Two names
+                        belong to the media operator: media.liken.sh/idle-screen,
+                        which is the default and draws the idle screen
+                        this operator ships, and media.liken.sh/none,
+                        under which nothing draws an idle screen on this
+                        unit and no claim exists. Any other name hands
+                        the screen to the operator that handles it,
+                        which reads status.idle for the claim to
+                        reference, the requests it carries, the two
+                        windows, and the bus it joins; image has
+                        no effect under such a name, because that
+                        operator brings its own pod. Omit it to inherit
+                        the default MediaPreferences.
+                    image:
+                      type: string
+                      description: >-
+                        The container image that draws this unit's idle
+                        screen. The image starts with its own entrypoint
+                        and reads the unit's state from the bus. It
+                        implements the fade and off windows, the focus
+                        gate, the shade, the volume step, and the panel
+                        desire in its own process. Omit it to inherit the
+                        default from MediaPreferences. Where no tier
+                        names an image, the screen runs the idle client
+                        the media operator ships.
+                    fadeAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before the idle screen fades to
+                        black. Zero disables the automatic fade; omit it
+                        to inherit the default MediaPreferences.
+                    offAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before the panel
+                        itself goes dark, at least fadeAfterSeconds.
+                        Zero or unset means the panel never goes dark
+                        on its own. The panel goes dark only where the
+                        cluster runs a display-operator that publishes
+                        a Display for the screen.
+                    offMode:
+                      type: string
+                      enum: [backlight, power]
+                      description: >-
+                        Which override the off window applies to the
+                        screen's Display. The default, backlight,
+                        holds the panel at brightness zero, which
+                        still answers DDC. Power off stops some
+                        panels from answering DDC at all; state it
+                        only for a panel that woke from it in a
+                        drill.
+            status:
+              type: object
+              description: >-
+                What plays on this Player now, written only by the
+                media operator. It is derived from the Plays that
+                name the Player, so it is empty until one does.
+              properties:
+                activity:
+                  type: string
+                  enum: [Playing, Starting, Idle]
+                  description: >-
+                    Whether the Player performs a run now. Playing
+                    is a Play running on it, Starting is a Play whose
+                    pod has not begun, and Idle is no Play at all.
+                play:
+                  type: string
+                  description: >-
+                    The name of the Play on this Player, in the same
+                    namespace. Empty while the Player is Idle.
+                panel:
+                  type: string
+                  description: >-
+                    What the screen's Display last observed:
+                    On, BacklightOff, or Off. Empty until a Display
+                    reports an observation for the unit's screen.
+                receiver:
+                  type: object
+                  description: >-
+                    The equipment this unit's cable lands on, matched
+                    from the machine the unit draws on and the monitor
+                    id of its screen. Absent for a unit that plays
+                    straight into its panel.
+                  properties:
+                    name:
+                      type: string
+                      description: The name of the matched Receiver.
+                    input:
+                      type: string
+                      description: >-
+                        The input of that Receiver this unit's cable
+                        lands on.
+                    reachable:
+                      type: string
+                      description: >-
+                        The status of the Receiver's Reachable
+                        condition, empty until it carries one.
+                screen:
+                  type: object
+                  description: >-
+                    The last screen the idle claim resolved to. The
+                    operator keeps it while the panel is away, so it
+                    can still read the screen's Display and say why
+                    the idle pod waits. Absent until the claim has
+                    resolved once.
+                  properties:
+                    node:
+                      type: string
+                      description: >-
+                        The machine that publishes the screen's draw
+                        device.
+                    monitor:
+                      type: string
+                      description: >-
+                        The monitor id of the screen, which is the name
+                        of its Display.
+                sinks:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  # The list is memory for the same reason status.screen
+                  # is: the idle claim holds the draw device alone, so a
+                  # sink is allocated only while a Play runs, and a client
+                  # that asks between runs would otherwise find nothing.
+                  # The memory names the Sinks and does not open them. A
+                  # remembered Sink that another unit is using is never
+                  # tapped through this Player, so the media API still
+                  # requires a running Play for audio.
+                  description: >-
+                    The Sink each spec.sinks selection resolved to, in
+                    spec order. The operator writes the list from an
+                    allocated playback claim and keeps it after the
+                    Play retires, the way it keeps status.screen. A tap
+                    through these names still needs a running Play.
+                  items:
+                    type: object
+                    properties:
+                      request:
+                        type: string
+                        description: >-
+                          The claim's request name, audio0 for the
+                          first sink the spec states.
+                      name:
+                        type: string
+                        description: >-
+                          The name of the Sink object, which is the
+                          audio operator's own device name for that
+                          endpoint.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  description: >-
+                    The unit's conditions. There is one, Screen, and it
+                    is absent until the idle claim has resolved once.
+                    True with reason Present means the screen's Display
+                    reports a panel on its connector. False with reason
+                    PanelAway means the Display reports no panel there:
+                    the monitor shows another input, the idle claim has
+                    deallocated, and the idle pod parks Pending until
+                    the panel returns. That park is by design, and an
+                    alert on Pending pods can read this reason to stay
+                    quiet for it. False with any other reason carries
+                    the Display's own reason through. Unknown with
+                    reason NoDisplay means no Display carries the
+                    remembered monitor id, and Unknown with reason
+                    NotReported means the Display carries no Connected
+                    condition. The message is the Display's own, and
+                    lastTransitionTime moves only when the status does.
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        description: The condition's name, Screen.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: The condition's status.
+                      reason:
+                        type: string
+                        description: >-
+                          One word for the status: Present, PanelAway,
+                          NoDisplay, NotReported, or the Display's own
+                          reason.
+                      message:
+                        type: string
+                        description: >-
+                          The Display's message for the condition, which
+                          names the connector.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the status last changed, so a reader can
+                          tell how long the unit has waited.
+                idle:
+                  type: object
+                  description: >-
+                    What draws this unit's idle screen, and everything
+                    the operator that draws it needs. A delegate wires
+                    its client from this block alone, and it sets
+                    MEDIA_PLAYER_NAME on that client to the Player's
+                    metadata.name, the value every focus mark holds. The
+                    block is absent for a Player that drives no screen
+                    and where the cluster names no display-draw class. A
+                    delegate reads this block and never the spec,
+                    because the spec may inherit its controller from the
+                    default MediaPreferences, and only the media
+                    operator resolves the tiers.
+                  properties:
+                    controller:
+                      type: string
+                      description: >-
+                        The resolved controller name, after
+                        spec.idle.controller, the default
+                        MediaPreferences, and the built-in
+                        media.liken.sh/idle-screen resolve in that order.
+                    claim:
+                      type: string
+                      description: >-
+                        The standing ResourceClaim on this unit's
+                        screen, in the Player's namespace. The pod that
+                        draws references it by name in its
+                        resourceClaims. Empty under
+                        media.liken.sh/none, where no claim exists.
+                    requests:
+                      type: array
+                      x-kubernetes-list-type: atomic
+                      maxItems: 2
+                      description: >-
+                        The claim's request names, in claim order:
+                        draw, and render where the Player states a render
+                        node. The container that draws states one
+                        resources.claims entry per name. Empty under
+                        media.liken.sh/none.
+                      items:
+                        type: string
+                    fadeAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: |-
+                        The resolved seconds of quiet before the screen
+                        fades to black. Zero means the screen never
+                        fades on its own. The client that draws holds
+                        this timer, so the field is always written: zero
+                        is a policy, and an absent field is not one.
+                    offAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: |-
+                        The resolved seconds of quiet before the panel
+                        goes dark, at least fadeAfterSeconds. Zero means
+                        the panel never goes dark on its own. It is
+                        always written, for the reason fadeAfterSeconds
+                        is.
+                    bus:
+                      type: object
+                      description: |-
+                        The bus facts a delegate's client reads. With
+                        the two windows above, this block is the whole
+                        contract a delegate wires its client from. It is
+                        present under every controller but
+                        media.liken.sh/none.
+                      properties:
+                        address:
+                          type: string
+                          description: |-
+                            The broker, as host:port. It is the address the
+                            operator itself connects to.
+                        statusTopic:
+                          type: string
+                          description: |-
+                            The retained topic that carries the unit's
+                            presentable state: its name, its activity,
+                            the Play it runs, and its parts. A client
+                            reads it on subscribe and asks for nothing.
+                        volumeTopic:
+                          type: string
+                          description: |-
+                            The retained topic that carries the unit's
+                            level and its muted flag. Empty means the
+                            unit has no sinks: the client subscribes to
+                            no level, draws none, and publishes none.
+                        volumeOwnerTopic:
+                          type: string
+                          description: |-
+                            The retained topic that carries the owner mark for the
+                            unit's level, present whenever volumeTopic is. A
+                            non-empty payload means equipment owns the level, and
+                            the client then draws no level of its own and applies
+                            none. An empty payload means no owner holds it.
+                        commandsTopic:
+                          type: string
+                          description: |-
+                            The topic the playback pod publishes
+                            play-next on when a person takes the up-next
+                            offer on the scrubber. The client that wrote
+                            the Play reads that ask and starts the next
+                            work. When a Play ends, the client's own
+                            surface is on the screen again and the
+                            retained status is the cue, so nothing is
+                            published here for it. The pod also publishes
+                            home when a person presses home during a
+                            film, just before the Play ends, and the
+                            client reads that ask as a press of the home
+                            key.
+                        panelTopic:
+                          type: string
+                          description: |-
+                            The retained topic a client states its panel
+                            desire on, as on or off. The client holds no
+                            API credentials, so the operator reads the
+                            desire here and overrides the screen's
+                            Display.
+                        powerTopic:
+                          type: string
+                          description: |-
+                            The topic a power press on this unit publishes
+                            a toggle on, present only when the unit's
+                            screen is wired through a Receiver. The
+                            equipment operator answers it by flipping the
+                            receiver's power. A unit with none carries no
+                            topic, and its client keeps the shade on a
+                            power press exactly as it has it today.
+                        remotes:
+                          type: array
+                          x-kubernetes-list-type: atomic
+                          description: |-
+                            The unit's controllers, one entry each, in
+                            spec.remotes order. That position is the
+                            index a focus moment carries, and it is the
+                            order the status topic lists the parts in. A
+                            unit with no controllers lists none.
+                          items:
+                            type: object
+                            properties:
+                              events:
+                                type: string
+                                description: |-
+                                  The topic this controller's key events
+                                  arrive on, each under the kernel's
+                                  name for the key. The client gates
+                                  every press on the mark below.
+                              focus:
+                                type: string
+                                description: |-
+                                  The retained topic that carries this
+                                  controller's focus mark, the name of
+                                  the Player it drives now. The client
+                                  acts on a press only while the mark
+                                  names this Player. The cycle topic is
+                                  this one plus /cycle.

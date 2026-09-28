@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# local/music opens the liken music layout over a real album on this
+# workstation, so the centered cover, the chapter scrubber, and the header
+# can be seen and felt without a cluster.
+#
+# local/video runs the harness. This screen hands it the album's
+# timeline, the album's presentation block, and the two mpv flags that
+# blank the video, so the cover has the frame to itself.
+#
+# An album plays as one piece of media: local/edl reads the directory's
+# tags and writes one mpv EDL timeline, each track a segment with its
+# title, so mpv exposes one duration and one chapter per track. The film's
+# chapter stop then steps the tracks. A single file plays as a one-track
+# album the same way.
+#
+# It takes one audio file or a directory of audio files. The repository
+# names no media of its own.
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: local/music <audio-file-or-album-dir>" >&2
+  exit 2
+fi
+target="$1"
+if [ ! -e "$target" ]; then
+  echo "local/music: not a file or directory: $target" >&2
+  exit 1
+fi
+
+# The Go source sits in the repository above this file, so its path resolves
+# from this script's own directory and needs no absolute path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+
+# Clean up the timeline on exit. The handler is installed before the file
+# exists, so a failure in the steps below leaks nothing. The name is empty
+# until its step sets it, and the handler reads an empty name as nothing to
+# remove.
+EDL=""
+cleanup() {
+  [ -n "$EDL" ] && rm -f "$EDL" || true
+}
+trap cleanup EXIT
+
+# A directory is an album. local/edl reads its tags twice: once for the EDL
+# timeline mpv plays, and once for the block the display reads. go -C runs
+# it from the repository root, where a relative album path names another
+# file, so the path is made absolute first. The block carries the album's
+# artist, album, and year; the track names travel as chapter titles inside
+# the EDL.
+#
+# A file is a standalone track. It plays as itself, its block declares only
+# the music type, and the header reads the artist and the album from the
+# tags mpv exposes, the way a single-track Play item does.
+if [ -d "$target" ]; then
+  album="$(realpath "$target")"
+  EDL="$(mktemp --tmpdir local-music.XXXXXX.edl)"
+  go -C "$root" run ./local/edl "$album" >"$EDL"
+  BLOCK="$(go -C "$root" run ./local/edl -block "$album" || true)"
+  [ -n "$BLOCK" ] || BLOCK='{"type":"music"}'
+  MEDIA="$EDL"
+else
+  BLOCK='{"type":"music"}'
+  MEDIA="$target"
+fi
+PRESENTATIONS="[$BLOCK]"
+
+# --vid=no blanks mpv's video, so an embedded cover never frames and the
+# display owns the whole frame. --force-window holds the window open over the
+# blanked video.
+MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  "$here/video" "$MEDIA" 0 -- --vid=no --force-window=yes

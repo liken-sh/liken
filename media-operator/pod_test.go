@@ -1,0 +1,686 @@
+package main
+
+// These tests cover what a Play becomes at run time: one pod that runs
+// mpv on the resolved list, holds the claim's every role, and carries
+// the command sidecar that owns the mpv socket and reads every
+// controller the unit owns.
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+// initContainer finds one of the pod's init containers by name.
+func initContainer(t *testing.T, pod *Pod, name string) Container {
+	t.Helper()
+	for _, container := range pod.Spec.InitContainers {
+		if container.Name == name {
+			return container
+		}
+	}
+	t.Fatalf("the pod has no init container named %q: %+v", name, pod.Spec.InitContainers)
+	return Container{}
+}
+
+// envValue reads one environment variable off a container.
+func envValue(container Container, name string) string {
+	for _, variable := range container.Env {
+		if variable.Name == name {
+			return variable.Value
+		}
+	}
+	return ""
+}
+
+// mountsIPC reports whether a container mounts the shared IPC volume.
+func mountsIPC(container Container) bool {
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == ipcVolumeName {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	testPlayerImage = "ghcr.io/liken-sh/media-operator-player:test"
+	// The image every sidecar container runs. It is a different name
+	// from the player image, so a pod that confuses the two fails a
+	// test.
+	testSidecarImage = "ghcr.io/liken-sh/media-operator-sidecar:test"
+	// The image the display container runs. It is a different name from
+	// the player image, so a pod that confuses the two fails a test.
+	testDisplayImage = "ghcr.io/liken-sh/media-operator-display:test"
+	testBusAddress   = "bus.media.svc:1883"
+	testTopicBase    = "liken/media"
+)
+
+// One playlist that costs a volume, so the pod under test carries a
+// mount as well as arguments.
+func testResolution(t *testing.T) resolution {
+	t.Helper()
+	resolved, err := resolvePlay(mediaItems(
+		"https://films.example/trailer.mkv",
+		"nfs://nas.example/export/films/film.mkv",
+	), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
+func testPod(t *testing.T) *Pod {
+	t.Helper()
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+}
+
+// The same pod, with two controllers bound to the player.
+func testPodWithRemotes(t *testing.T) *Pod {
+	t.Helper()
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{}, "")
+}
+
+// restartPolicy is Never, because a finished film is not a failure to
+// restart, and the Play owns the pod so deleting the Play takes it
+// away.
+func TestBuildPodNamesThePodForThePlayThatOwnsIt(t *testing.T) {
+	pod := testPod(t)
+
+	if pod.APIVersion != podAPIVersion || pod.Kind != "Pod" {
+		t.Errorf("apiVersion = %q, kind = %q", pod.APIVersion, pod.Kind)
+	}
+	if pod.Metadata.Name != "movie-playback" {
+		t.Errorf("name = %q, want movie-playback", pod.Metadata.Name)
+	}
+	if pod.Metadata.Namespace != "house" {
+		t.Errorf("namespace = %q, want house", pod.Metadata.Namespace)
+	}
+	if pod.Spec.RestartPolicy != "Never" {
+		t.Errorf("restartPolicy = %q, want Never", pod.Spec.RestartPolicy)
+	}
+	if pod.Spec.TerminationGracePeriodSeconds == nil {
+		t.Fatal("the pod states no termination grace period")
+	}
+	if got := *pod.Spec.TerminationGracePeriodSeconds; got != 5 {
+		t.Errorf("terminationGracePeriodSeconds = %d, want 5", got)
+	}
+	owners := []OwnerReference{{
+		APIVersion: mediaAPIVersion,
+		Kind:       "Play",
+		Name:       "movie",
+		UID:        "play-1",
+		Controller: true,
+	}}
+	if !reflect.DeepEqual(pod.Metadata.OwnerReferences, owners) {
+		t.Errorf("ownerReferences = %+v, want %+v", pod.Metadata.OwnerReferences, owners)
+	}
+}
+
+// mpv is the pod's own process, so the player container carries only
+// the resolved list and, with no declared start, no environment.
+func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
+	pod := testPod(t)
+
+	if len(pod.Spec.Containers) != 1 {
+		t.Fatalf("containers = %+v, want one", pod.Spec.Containers)
+	}
+	container := pod.Spec.Containers[0]
+	if container.Name != "player" {
+		t.Errorf("name = %q, want player", container.Name)
+	}
+	if container.Image != testPlayerImage {
+		t.Errorf("image = %q, want %q", container.Image, testPlayerImage)
+	}
+	args := []string{"https://films.example/trailer.mkv", "/media/1/film.mkv"}
+	if !reflect.DeepEqual(container.Args, args) {
+		t.Errorf("args = %v, want %v", container.Args, args)
+	}
+	// The blocks travel on the player container because the shim reads them
+	// to expand a music album, so every run carries them.
+	env := []EnvVar{{Name: presentationsVariable, Value: "[{}]"}}
+	if !reflect.DeepEqual(container.Env, env) {
+		t.Errorf("env = %+v, want %+v", container.Env, env)
+	}
+}
+
+// A declared start reaches the player container as one variable, beside the
+// blocks every run carries.
+func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
+	play := testPlay()
+	play.Spec.Start = "0:10:00"
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	env := pod.Spec.Containers[0].Env
+	want := []EnvVar{
+		{Name: presentationsVariable, Value: "[{}]"},
+		{Name: playStartVariable, Value: "0:10:00"},
+	}
+	if !reflect.DeepEqual(env, want) {
+		t.Errorf("env = %+v, want %+v", env, want)
+	}
+}
+
+// The operator carries MEDIA_PLAYER_VERBOSE onto the player container,
+// so one `kubectl set env` on the Deployment turns mpv's full output on
+// for every new playback pod.
+func TestBuildPodPassesTheVerboseSwitchToThePlayer(t *testing.T) {
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "1")
+
+	if got := envValue(pod.Spec.Containers[0], playerVerboseVariable); got != "1" {
+		t.Errorf("%s = %q, want 1", playerVerboseVariable, got)
+	}
+}
+
+// An operator with no MEDIA_PLAYER_VERBOSE creates a pod that carries
+// none, so the player keeps mpv quiet.
+func TestBuildPodCarriesNoVerboseSwitchWhenTheOperatorStatesNone(t *testing.T) {
+	pod := testPod(t)
+
+	for _, entry := range pod.Spec.Containers[0].Env {
+		if entry.Name == playerVerboseVariable {
+			t.Errorf("the player container carries %s", playerVerboseVariable)
+		}
+	}
+}
+
+// A playback pod arms no window watchdog. A Play on an
+// audio-only unit expects no window at all, and an exit there would
+// kill a run that is playing sound correctly.
+func TestBuildPodArmsNoWindowWatchdog(t *testing.T) {
+	pod := testPod(t)
+
+	for _, entry := range pod.Spec.Containers[0].Env {
+		if entry.Name == idleWindowGraceVariable {
+			t.Errorf("the player container carries %s", idleWindowGraceVariable)
+		}
+	}
+}
+
+// The pod names the claim once and the player container repeats that
+// name for each role, because the playback claim holds the player's
+// roles alone.
+func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
+	pod := testPod(t)
+
+	claims := []PodResourceClaim{{Name: "devices", ResourceClaimName: "movie-devices"}}
+	if !reflect.DeepEqual(pod.Spec.ResourceClaims, claims) {
+		t.Errorf("resourceClaims = %+v, want %+v", pod.Spec.ResourceClaims, claims)
+	}
+	held := []ContainerClaim{
+		{Name: "devices", Request: "screen"},
+		{Name: "devices", Request: "audio0"},
+		{Name: "devices", Request: "audio1"},
+		{Name: "devices", Request: "render"},
+	}
+	if got := pod.Spec.Containers[0].Resources.Claims; !reflect.DeepEqual(got, held) {
+		t.Errorf("resources.claims = %+v, want %+v", got, held)
+	}
+}
+
+// A cluster owner taints the machine that drives one screen, so scan
+// jobs and other unrelated work stay off a small box. The playback pod
+// holds that machine's display, so it tolerates the taint. It tolerates
+// that key alone, and for scheduling alone, so a NoExecute taint still
+// moves it away.
+func TestBuildPodToleratesThePlayerNodeTaint(t *testing.T) {
+	pod := testPod(t)
+
+	want := []Toleration{{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"}}
+	if !reflect.DeepEqual(pod.Spec.Tolerations, want) {
+		t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, want)
+	}
+}
+
+// The volume belongs to the pod and the mount belongs to the
+// container, so the resolution splits across the two. The IPC volume
+// follows the media in both lists.
+func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
+	resolved := testResolution(t)
+	play := testPlay()
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	volumes := append(append([]Volume{}, resolved.Volumes...),
+		Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}})
+	if !reflect.DeepEqual(pod.Spec.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", pod.Spec.Volumes, volumes)
+	}
+	mounts := append(append([]VolumeMount{}, resolved.Mounts...),
+		VolumeMount{Name: "ipc", MountPath: "/ipc"})
+	if got := pod.Spec.Containers[0].VolumeMounts; !reflect.DeepEqual(got, mounts) {
+		t.Errorf("volumeMounts = %+v, want %+v", got, mounts)
+	}
+	// The resolution keeps what it resolved; the pod builder appends
+	// into a copy.
+	if len(resolved.Mounts) != 1 || len(resolved.Volumes) != 1 {
+		t.Errorf("the builder wrote into the resolution: %+v", resolved)
+	}
+}
+
+// A pod with no remotes still carries the IPC volume, because mpv serves
+// its socket at one path either way.
+func TestBuildPodWithNoRemotesCarriesTheIPCVolume(t *testing.T) {
+	pod := testPod(t)
+
+	last := pod.Spec.Volumes[len(pod.Spec.Volumes)-1]
+	want := Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}}
+	if !reflect.DeepEqual(last, want) {
+		t.Fatalf("volume = %+v, want %+v", last, want)
+	}
+	written, err := json.Marshal(last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != `{"name":"ipc","emptyDir":{}}` {
+		t.Errorf("volume = %s", written)
+	}
+}
+
+// The command sidecar is the sidecar image in its command mode. It
+// holds no device claim, and it mounts the IPC socket alone, because it
+// drives mpv and opens no media of its own. It carries the play's
+// identity, its own pod's UID, the bus, and the base.
+func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
+	pod := testPod(t)
+
+	command := initContainer(t, pod, commandContainer)
+	want := Container{
+		Name:    commandContainer,
+		Image:   testSidecarImage,
+		Command: []string{"/media-operator-pod", "command"},
+		Env: []EnvVar{
+			{Name: playNamespaceVariable, Value: "house"},
+			{Name: playNameVariable, Value: "movie"},
+			{Name: podUIDVariable, ValueFrom: &EnvVarSource{
+				FieldRef: &ObjectFieldSelector{FieldPath: "metadata.uid"},
+			}},
+			{Name: busAddressVariable, Value: testBusAddress},
+			{Name: topicBaseVariable, Value: testTopicBase},
+			{Name: presentationsVariable, Value: "[{}]"},
+			{Name: playerNameVariable, Value: "theater"},
+			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
+			{Name: playerVolumeOwnerTopicVariable, Value: playerVolumeOwnerTopic(testTopicBase, "house", "theater")},
+			{Name: metricsAddressVariable, Value: "0.0.0.0:9200"},
+			{Name: mediaVersionVariable, Value: "test"},
+		},
+		Ports:         []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
+		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
+		RestartPolicy: "Always",
+	}
+	if !reflect.DeepEqual(command, want) {
+		t.Errorf("command = %+v, want %+v", command, want)
+	}
+	if len(command.Resources.Claims) != 0 {
+		t.Errorf("the command sidecar holds a device claim: %+v", command.Resources.Claims)
+	}
+}
+
+// The command sidecar carries every item's presentation block as one JSON
+// array in item order. An item with no presentation is an empty object, and
+// an item with a presentation is its block, so the sidecar forwards index i
+// for playlist-pos i.
+func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
+	play := testPlay()
+	play.Spec.Items = []PlayItem{
+		{URI: "https://films.example/loose.mkv"},
+		{
+			URI: "nfs://nas.example/export/shows/ep.mkv",
+			Presentation: &Presentation{
+				Type:         "video",
+				Hint:         "series",
+				Role:         "trailer",
+				Series:       "The Show",
+				Season:       2,
+				Episode:      5,
+				EpisodeTitle: "The Pilot",
+			},
+		},
+	}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	command := initContainer(t, pod, commandContainer)
+	got := envValue(command, presentationsVariable)
+	want := `[{},{"type":"video","hint":"series","role":"trailer","series":"The Show","season":2,"episode":5,"episodeTitle":"The Pilot"}]`
+	if got != want {
+		t.Errorf("%s = %s, want %s", presentationsVariable, got, want)
+	}
+}
+
+// The marks reach the display as the library wrote them: every candidate
+// in order, an absent start or end still absent, and a kind the display
+// does not know still present, because the display interprets the marks
+// and the operator only carries them.
+func TestBuildPodBakesTheMarksAsWritten(t *testing.T) {
+	end, start, later := 107.0, 7.007, 3316.0
+	play := testPlay()
+	play.Spec.Items = []PlayItem{{
+		URI: "nfs://nas.example/export/shows/ep.mkv",
+		Presentation: &Presentation{Marks: []PlayMark{
+			{Kind: "intro", End: &end, Source: "theintrodb"},
+			{Kind: "intro", Start: &start, End: &end},
+			{Kind: "credits", Start: &start, End: &later},
+			{Kind: "cold-open"},
+		}},
+	}}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	got := envValue(initContainer(t, pod, commandContainer), presentationsVariable)
+	want := `[{"marks":[{"kind":"intro","end":107,"source":"theintrodb"},{"kind":"intro","start":7.007,"end":107},{"kind":"credits","start":7.007,"end":3316},{"kind":"cold-open"}]}]`
+	if got != want {
+		t.Errorf("%s = %s, want %s", presentationsVariable, got, want)
+	}
+}
+
+// The command sidecar names every controller the unit owns: their events
+// topics and their focus topics, aligned.
+func TestBuildPodGivesTheCommandSidecarEveryRemote(t *testing.T) {
+	pod := testPodWithRemotes(t)
+
+	command := initContainer(t, pod, commandContainer)
+	mustMatch(t, envValue(command, playerNameVariable), "theater")
+	mustMatch(t, envValue(command, remoteEventsTopicsVariable),
+		"liken/media/remotes/house/armchair/events\nliken/media/remotes/house/sofa/events")
+	mustMatch(t, envValue(command, remoteFocusTopicsVariable),
+		"liken/media/remotes/house/armchair/focus\nliken/media/remotes/house/sofa/focus")
+}
+
+// A Play on a Player that names no controller carries neither list, so
+// its sidecar subscribes to no controller at all.
+func TestBuildPodCarriesNoRemoteListsWithoutRemotes(t *testing.T) {
+	command := initContainer(t, testPod(t), commandContainer)
+	mustMatch(t, envValue(command, remoteEventsTopicsVariable), "")
+	mustMatch(t, envValue(command, remoteFocusTopicsVariable), "")
+}
+
+// The resolved preferences map to mpv flags. A flag rides only for a field that
+// resolved, and --subs-match-os-language=no rides when any other flag does.
+func TestMpvPreferenceOptions(t *testing.T) {
+	cases := []struct {
+		name  string
+		prefs resolvedPreferences
+		want  []string
+	}{
+		{
+			name:  "no preference passes nothing",
+			prefs: resolvedPreferences{},
+			want:  nil,
+		},
+		{
+			name:  "audio languages become --alang",
+			prefs: resolvedPreferences{AudioLanguages: []string{"en", "ja"}},
+			want:  []string{"--alang=en,ja", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitle languages become --slang",
+			prefs: resolvedPreferences{SubtitleLanguages: []string{"en"}},
+			want:  []string{"--slang=en", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitles on shows them over matching audio",
+			prefs: resolvedPreferences{Subtitles: subtitlesOn},
+			want:  []string{"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitles off loads no subtitle track",
+			prefs: resolvedPreferences{Subtitles: subtitlesOff},
+			want:  []string{"--sid=no", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitles auto shows them only over other-language audio",
+			prefs: resolvedPreferences{Subtitles: subtitlesAuto},
+			want:  []string{"--subs-with-matching-audio=no", "--subs-match-os-language=no"},
+		},
+		{
+			name: "every field together maps to every flag",
+			prefs: resolvedPreferences{
+				AudioLanguages:    []string{"ja"},
+				SubtitleLanguages: []string{"en"},
+				Subtitles:         subtitlesOn,
+			},
+			want: []string{
+				"--alang=ja", "--slang=en",
+				"--sub-visibility=yes", "--subs-with-matching-audio=yes",
+				"--subs-match-os-language=no",
+			},
+		},
+		{
+			name:  "a stated empty list passes no flag for that field",
+			prefs: resolvedPreferences{AudioLanguages: []string{}},
+			want:  nil,
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			got := mpvPreferenceOptions(one.prefs)
+			if !reflect.DeepEqual(got, one.want) {
+				t.Errorf("options = %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
+// The resolved options reach the player container as one newline-joined
+// variable, which the shim splits back into mpv's argv.
+func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	prefs := resolvedPreferences{AudioLanguages: []string{"en", "ja"}, Subtitles: subtitlesAuto}
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, prefs, "")
+
+	got := envValue(pod.Spec.Containers[0], playerOptionsVariable)
+	want := "--alang=en,ja\n--subs-with-matching-audio=no\n--subs-match-os-language=no"
+	if got != want {
+		t.Errorf("%s = %q, want %q", playerOptionsVariable, got, want)
+	}
+}
+
+// A run with no preferences carries no options variable, so an ordinary pod is
+// unchanged.
+func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
+	pod := testPod(t)
+	if got := envValue(pod.Spec.Containers[0], playerOptionsVariable); got != "" {
+		t.Errorf("%s = %q, want none", playerOptionsVariable, got)
+	}
+}
+
+// The level the operator resolved reaches mpv on its command line,
+// so the film starts at the level the unit already holds instead of at
+// unity. The subscription is the live authority from there.
+func TestBuildPodStartsMpvAtTheUnitsLevel(t *testing.T) {
+	play := testPlay()
+	play.Spec.Volume = &PlayVolume{Level: level(35), Muted: muted(true)}
+	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	mustMatch(t, envValue(pod.Spec.Containers[0], playerOptionsVariable), "--volume=35\n--mute=yes")
+}
+
+// A unit nothing has answered for carries no level onto the pod, so
+// mpv keeps its own default and the subscription sets the level a moment
+// later.
+func TestBuildPodWithNoLevelCarriesNoVolumeOption(t *testing.T) {
+	mustMatch(t, envValue(testPod(t).Spec.Containers[0], playerOptionsVariable), "")
+}
+
+// The volume topic reaches the command sidecar only for a unit that
+// has speakers. The claim answers that: it holds a sink request only for a
+// Player that states sinks.
+func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
+	speakerless := &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Spec:     PlayerSpec{Display: &PlayerDevice{Class: "display-output"}},
+	}
+	play := testPlay()
+	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeTopicVariable), "")
+	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeTopicVariable),
+		playerVolumeTopic(testTopicBase, "house", "theater"))
+}
+
+// The owner mark travels with the level and nowhere else. Its topic is
+// the volume topic plus the owner suffix, so a sidecar with speakers
+// reads both and a sidecar without speakers reads neither.
+func TestTheCommandSidecarCarriesTheOwnerTopicWithTheVolumeTopic(t *testing.T) {
+	speakerless := &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Spec:     PlayerSpec{Display: &PlayerDevice{Class: "display-output"}},
+	}
+	play := testPlay()
+	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeOwnerTopicVariable), "")
+	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeOwnerTopicVariable),
+		playerVolumeTopic(testTopicBase, "house", "theater")+"/owner")
+}
+
+// A Play with a next block passes the whole block to both containers in
+// one variable, with the art at the in-pod path the resolver rewrote it
+// to.
+func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
+	play := testPlay()
+	play.Spec.Next = &PlayNext{
+		Reason:  "Next in Harbor Lights",
+		Title:   "E05",
+		Detail:  "45 min",
+		Art:     "claim://library/shows/next.jpg",
+		Request: json.RawMessage(`{"library":"living-room/shows"}`),
+	}
+	resolved, err := resolvePlay(play.Spec.Items, play.Spec.Next)
+	mustSucceed(t, err)
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved,
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+
+	want := `{"reason":"Next in Harbor Lights","title":"E05","detail":"45 min","art":"/media/1/shows/next.jpg","request":{"library":"living-room/shows"}}`
+	mustMatch(t, envValue(pod.Spec.Containers[0], nextVariable), want)
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), want)
+}
+
+// A Play with no next block sets the variable on neither container, so
+// the pod offers nothing.
+func TestBuildPodSetsNoNextBlockWhereThePlayCarriesNone(t *testing.T) {
+	pod := testPod(t)
+
+	mustMatch(t, envValue(pod.Spec.Containers[0], nextVariable), "")
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), "")
+}
+
+// initContainerNames lists the pod's init containers in order.
+func initContainerNames(pod *Pod) []string {
+	names := make([]string, 0, len(pod.Spec.InitContainers))
+	for _, container := range pod.Spec.InitContainers {
+		names = append(names, container.Name)
+	}
+	return names
+}
+
+// The same pod, with the household's resolved preferences.
+func testPodWithPreferences(t *testing.T, prefs resolvedPreferences) *Pod {
+	t.Helper()
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	return buildPod(play, claim, testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
+		nil, prefs, "")
+}
+
+func TestThePlaybackPodMountsNoServiceAccountToken(t *testing.T) {
+	pod := testPod(t)
+
+	mustMatch(t, pod.Spec.AutomountServiceAccountToken != nil, true)
+	mustMatch(t, *pod.Spec.AutomountServiceAccountToken, false)
+}
+
+func TestBuildPodRunsThePlayerTheCommandSidecarAndTheDisplay(t *testing.T) {
+	pod := testPod(t)
+
+	mustMatch(t, len(pod.Spec.Containers), 1)
+	mustMatchAll(t, initContainerNames(pod), []string{commandContainer, displayContainer})
+
+	display := initContainer(t, pod, displayContainer)
+	mustMatch(t, display.Image, testDisplayImage)
+	mustMatch(t, display.RestartPolicy, sidecarRestartPolicy)
+	mustMatchAll(t, display.Command, nil)
+}
+
+func TestAPlayerWithNoDisplayGetsNoDisplayContainer(t *testing.T) {
+	play := testPlay()
+	player := testPlayer()
+	player.Spec.Display = nil
+	pod := buildPod(play, buildClaim(play, player), testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
+		nil, resolvedPreferences{}, "")
+
+	mustMatch(t, len(pod.Spec.Containers), 1)
+	mustMatchAll(t, initContainerNames(pod), []string{commandContainer})
+}
+
+func TestTheDisplayContainerHoldsThePlayersRequests(t *testing.T) {
+	pod := testPod(t)
+
+	display := initContainer(t, pod, displayContainer)
+	mustMatchAll(t, display.Resources.Claims, pod.Spec.Containers[0].Resources.Claims)
+}
+
+// The display container mounts the IPC socket and the same media mounts the
+// player holds, because it decodes its own art and a logo, a cover, and a
+// trickplay sheet sit in the film's own folder. The media mounts are
+// read-only, the way the resolution wrote them.
+func TestTheDisplayContainerMountsTheIPCVolumeAndTheMedia(t *testing.T) {
+	display := initContainer(t, testPod(t), displayContainer)
+
+	mustMatchAll(t, display.VolumeMounts,
+		append(testResolution(t).Mounts, VolumeMount{Name: "ipc", MountPath: "/ipc"}))
+	for _, mount := range display.VolumeMounts[:len(display.VolumeMounts)-1] {
+		mustMatch(t, mount.ReadOnly, true)
+	}
+}
+
+// The trickplay interval is the display's own now, because the display crops
+// the tile. A Play that states none takes Jellyfin's default.
+func TestTheDisplayContainerCarriesTheTrickplayInterval(t *testing.T) {
+	display := initContainer(t, testPod(t), displayContainer)
+	mustMatchAll(t, display.Env,
+		[]EnvVar{{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval}})
+
+	play := testPlay()
+	play.Spec.TrickplayInterval = "5s"
+	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
+		nil, resolvedPreferences{}, "")
+	mustMatchAll(t, initContainer(t, pod, displayContainer).Env,
+		[]EnvVar{{Name: trickplayIntervalVariable, Value: "5s"}})
+}
+
+// A resolved timezone reaches the display container as TZ, so the display clock
+// reads the household's wall-clock zone.
+func TestTheDisplayContainerCarriesTheResolvedTimeZone(t *testing.T) {
+	pod := testPodWithPreferences(t, resolvedPreferences{TimeZone: "America/New_York"})
+
+	display := initContainer(t, pod, displayContainer)
+	mustMatchAll(t, display.Env, []EnvVar{
+		{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
+		{Name: timeZoneVariable, Value: "America/New_York"},
+	})
+}
+
+// A run with no timezone carries no TZ variable, so an ordinary pod is
+// unchanged.
+func TestTheDisplayContainerWithNoTimeZoneCarriesNoTZ(t *testing.T) {
+	display := initContainer(t, testPod(t), displayContainer)
+
+	mustMatchAll(t, display.Env,
+		[]EnvVar{{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval}})
+}

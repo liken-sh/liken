@@ -1,0 +1,484 @@
+package main
+
+// The playback pod is the whole of what a Play becomes at run time.
+// The trust split shows in what the pod does not get: it decodes media
+// from the network, so it carries no ServiceAccount and no API
+// credentials. mpv is the pod's own process, and the kubelet sends it
+// the grace-period signal and reads its exit code. One native sidecar
+// is the pod's bus client, and everything the pod says goes over the
+// bus, which the operator alone reads onto a Play's status.
+
+import (
+	"encoding/json"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// The container names, and the claim's pod-local name the container's
+// resources.claims entries repeat.
+const (
+	playerContainer  = "player"
+	commandContainer = "command"
+	displayContainer = "display"
+	podClaimName     = "devices"
+)
+
+// Every pod this operator builds carries this label, and the value
+// names which part of a unit the pod is. Two readers select on it. The
+// operator's pod watch asks for the three values, so it reads the
+// operator's own pods and nothing else in the cluster. A Layout in
+// display-operator gives each drawing value, playback and idle, a
+// region of the screen, so the Layout alone places both surfaces and
+// neither client states a position. A Remote's reader pod draws
+// nothing, so no Layout names its value.
+const (
+	playbackLabelKey   = "media.liken.sh/component"
+	playbackLabelValue = "playback"
+	idleLabelValue     = "idle"
+	remoteLabelValue   = "remote"
+)
+
+// A playback pod carries this label from the moment its run reports the
+// ending, while mpv is still drawing the film. What reads it is a
+// Layout in display-operator whose film region excludes the label: the
+// pod stops matching that region at once, so the compositor fades the
+// film's surface out while the pod still draws it. The word is this
+// operator's own, the way media.liken.sh/component is, and
+// display-operator only matches on what the Layout names.
+const (
+	endingLabelKey   = "media.liken.sh/ending"
+	endingLabelValue = "true"
+)
+
+// playerNodeTaint marks a machine that exists to drive one screen. A
+// cluster owner taints such a machine so scan jobs and other unrelated
+// work stay off a small box.
+const playerNodeTaint = "media.liken.sh/player"
+
+// playerNodeTolerations is what every pod this operator pins to a
+// screen machine carries. A pod that holds that machine's display or
+// its controller has nowhere else to run, so the taint must not keep it
+// out.
+//
+// The toleration names the key, so the pod still refuses every other
+// taint. It names NoSchedule alone, so the node's NoExecute taints,
+// unreachable and disk pressure among them, still move the pod away.
+func playerNodeTolerations() []Toleration {
+	return []Toleration{{
+		Key:      playerNodeTaint,
+		Operator: "Exists",
+		Effect:   "NoSchedule",
+	}}
+}
+
+// An init container with restartPolicy Always is what Kubernetes calls a
+// native sidecar: the kubelet starts it before the player, keeps it
+// beside the player, and restarts it alone when it exits. An ordinary
+// container would not do, because the pod's restart policy is Never and a
+// sidecar that exited would stay down; and the pod must still end when
+// the player ends, which a second ordinary container would also prevent.
+const sidecarRestartPolicy = "Always"
+
+// playbackGracePeriod is five seconds because mpv exits on the SIGTERM
+// the kubelet sends, measured near one second, and nothing here has
+// state to flush.
+const playbackGracePeriod = 5
+
+// Every pod this operator builds turns the ServiceAccount token mount
+// off. Kubernetes would otherwise mount the namespace's default account's
+// token into a pod that decodes media from the network, and no pod here
+// reads the API.
+func noServiceAccountToken() *bool {
+	off := false
+	return &off
+}
+
+func podName(play string) string {
+	return play + "-playback"
+}
+
+// buildPod writes the pod a person wrote by hand before this operator
+// existed. restartPolicy is Never because the pod's end is the play's
+// end: a finished film is not a failure to restart. The player image's
+// entrypoint shim execs mpv, so the arguments are nothing but the
+// resolved playlist in spec order.
+func buildPod(
+	play *Play, claim *ResourceClaim, resolved resolution,
+	image, sidecarImage, displayImage, busAddress, topicBase string,
+	remotes []boundRemote, prefs resolvedPreferences, playerVerbose string,
+) *Pod {
+	grace := int64(playbackGracePeriod)
+	// The IPC volume is unconditional, so mpv serves its socket at one
+	// path whether or not this pod binds a remote. The mount list is
+	// built fresh rather than appended to resolved.Mounts, so the
+	// resolution's own slice is never written through.
+	mounts := make([]VolumeMount, 0, len(resolved.Mounts)+1)
+	mounts = append(mounts, resolved.Mounts...)
+	mounts = append(mounts, ipcMount())
+
+	blocks := presentationBlocks(play.Spec.Items, resolved.Logos, resolved.Trickplays, resolved.Arts)
+	next := nextBlock(play.Spec.Next, resolved.Next)
+
+	container := Container{
+		Name:  playerContainer,
+		Image: image,
+		// The image's entrypoint shim runs mpv, so the pod supplies
+		// only what to play.
+		Args:         resolved.Items,
+		VolumeMounts: mounts,
+		// The shim reads the same blocks the command sidecar reads: the block
+		// declares an item's shape, and the shim expands a music album into
+		// one timeline before mpv sees any argument.
+		Env: []EnvVar{{Name: presentationsVariable, Value: blocks}},
+	}
+	// The block goes to both containers, the way the presentation blocks
+	// do, so nothing in the pod reads a second source for what follows this
+	// run.
+	if next != "" {
+		container.Env = append(container.Env, EnvVar{Name: nextVariable, Value: next})
+	}
+	// The start is added only when the spec declares one, so an
+	// ordinary run's pod carries nothing extra. The shim reads it and
+	// turns it into mpv's --start.
+	if play.Spec.Start != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: playStartVariable, Value: play.Spec.Start})
+	}
+	// Pass the resolved preference flags to the shim. Nothing is passed when no
+	// tier stated a preference, so mpv keeps its own default and the feature adds
+	// no behavior.
+	//
+	// The unit's level joins the same list, so mpv starts at the
+	// level the unit already holds rather than at unity, and nothing
+	// drops a moment later when the subscription catches up. The
+	// subscription is the live authority from there.
+	options := append(mpvPreferenceOptions(prefs), mpvVolumeOptions(play.Spec.Volume)...)
+	if len(options) > 0 {
+		container.Env = append(container.Env,
+			EnvVar{Name: playerOptionsVariable, Value: strings.Join(options, "\n")})
+	}
+	// The one switch that turns mpv's full output back on. The operator
+	// read it from its own environment at startup, so a change on the
+	// Deployment reaches every playback pod created after it. A pod
+	// already running keeps the setting it was created with.
+	if playerVerbose != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: playerVerboseVariable, Value: playerVerbose})
+	}
+	// The player container holds every request the claim asks for,
+	// because the playback claim holds the player's roles alone.
+	container.Resources.Claims = claimEntries(claim)
+
+	volumes := make([]Volume, 0, len(resolved.Volumes)+1)
+	volumes = append(volumes, resolved.Volumes...)
+	volumes = append(volumes, Volume{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
+
+	// The command sidecar owns the mpv socket and reads every controller
+	// the unit names, and the operator reads its events-topic list back
+	// off the pod to tell whether a Player reshaped this pod.
+	initContainers := []Container{
+		commandSidecar(play, claim, blocks, next, sidecarImage, busAddress, topicBase, remotes),
+	}
+	// The display container travels only for a unit that has a screen, and
+	// the claim answers that. An audio-only Player's pod would otherwise
+	// carry a display that finds no compositor socket, waits out its grace
+	// period, and restarts for the life of the run.
+	if claimHasScreen(claim) {
+		initContainers = append(initContainers,
+			displaySidecar(play, claim, mounts, displayImage, prefs))
+	}
+
+	return &Pod{
+		APIVersion: podAPIVersion,
+		Kind:       "Pod",
+		Metadata: ObjectMeta{
+			Name:            podName(play.Metadata.Name),
+			Namespace:       play.Metadata.Namespace,
+			Labels:          map[string]string{playbackLabelKey: playbackLabelValue},
+			OwnerReferences: []OwnerReference{playOwner(play)},
+		},
+		Spec: PodSpec{
+			RestartPolicy:                 "Never",
+			AutomountServiceAccountToken:  noServiceAccountToken(),
+			TerminationGracePeriodSeconds: &grace,
+			ResourceClaims: []PodResourceClaim{{
+				Name:              podClaimName,
+				ResourceClaimName: claim.Metadata.Name,
+			}},
+			InitContainers: initContainers,
+			Containers:     []Container{container},
+			Volumes:        volumes,
+			Tolerations:    playerNodeTolerations(),
+		},
+	}
+}
+
+// mpvPreferenceOptions maps the resolved preferences to mpv flags. It passes a
+// flag only for a field that resolved, and adds --subs-match-os-language=no
+// only when the feature is otherwise active.
+func mpvPreferenceOptions(prefs resolvedPreferences) []string {
+	var options []string
+	if len(prefs.AudioLanguages) > 0 {
+		options = append(options, "--alang="+strings.Join(prefs.AudioLanguages, ","))
+	}
+	if len(prefs.SubtitleLanguages) > 0 {
+		options = append(options, "--slang="+strings.Join(prefs.SubtitleLanguages, ","))
+	}
+	switch prefs.Subtitles {
+	case subtitlesOn:
+		options = append(options, "--sub-visibility=yes", "--subs-with-matching-audio=yes")
+	case subtitlesOff:
+		options = append(options, "--sid=no")
+	case subtitlesAuto:
+		options = append(options, "--subs-with-matching-audio=no")
+	}
+	if len(options) == 0 {
+		return nil
+	}
+	return append(options, "--subs-match-os-language=no")
+}
+
+// mpvVolumeOptions turns the level the pod starts at into mpv's own
+// flags. The operator fills the block with the unit's current state
+// before it creates the pod, so what reaches mpv here is a snapshot,
+// and the volume topic stays the authority.
+func mpvVolumeOptions(volume *PlayVolume) []string {
+	if volume == nil {
+		return nil
+	}
+	var options []string
+	if volume.Level != nil {
+		options = append(options, "--volume="+strconv.Itoa(*volume.Level))
+	}
+	if volume.Muted != nil {
+		options = append(options, "--mute="+mpvYesNo(*volume.Muted))
+	}
+	return options
+}
+
+// commandSidecar is the playback pod's owner of the mpv IPC socket:
+// the sidecar image in its command mode, holding no device claim. It
+// subscribes to the Play's commands topic, drives mpv through the
+// shared socket, and publishes the Play's status. It mounts the IPC
+// volume, because it is the one container besides mpv that reaches the
+// socket.
+func commandSidecar(
+	play *Play, claim *ResourceClaim, blocks, next string,
+	sidecarImage, busAddress, topicBase string, remotes []boundRemote,
+) Container {
+	env := []EnvVar{
+		{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
+		{Name: playNameVariable, Value: play.Metadata.Name},
+		// The kubelet fills the pod's own UID, which the sidecar stamps on
+		// every report. wire.go says why the operator reads it.
+		{Name: podUIDVariable, ValueFrom: &EnvVarSource{
+			FieldRef: &ObjectFieldSelector{FieldPath: "metadata.uid"},
+		}},
+		{Name: busAddressVariable, Value: busAddress},
+		{Name: topicBaseVariable, Value: topicBase},
+		{Name: presentationsVariable, Value: blocks},
+	}
+	if next != "" {
+		env = append(env, EnvVar{Name: nextVariable, Value: next})
+	}
+	// The Player this Play runs on, which is the value a focus mark must
+	// hold for a controller's press to reach this film, and the two
+	// index-aligned topic lists of the unit's controllers. A Play on a
+	// Player that names no Remote carries neither list, so its sidecar
+	// subscribes to no controller at all.
+	env = append(env, EnvVar{Name: playerNameVariable, Value: playerName(play)})
+	if len(remotes) > 0 {
+		focuses := make([]string, len(remotes))
+		for index, remote := range remotes {
+			focuses[index] = remote.FocusTopic
+		}
+		env = append(env,
+			EnvVar{
+				Name:  remoteEventsTopicsVariable,
+				Value: strings.Join(remoteEventsTopics(remotes), "\n"),
+			},
+			EnvVar{Name: remoteFocusTopicsVariable, Value: strings.Join(focuses, "\n")})
+	}
+	// The volume topic travels only for a unit that has speakers, and
+	// the claim answers that: it holds a sink request only for a
+	// Player that states sinks. A unit with nothing to hear names no
+	// topic, and its sidecar answers no volume press.
+	if claimHasSink(claim) {
+		// The owner mark travels with the level. The sidecar reads the two
+		// together to decide whether it applies a level to mpv at all.
+		env = append(env,
+			EnvVar{
+				Name:  playerVolumeTopicVariable,
+				Value: playerVolumeTopic(topicBase, play.Metadata.Namespace, playerName(play)),
+			},
+			EnvVar{
+				Name:  playerVolumeOwnerTopicVariable,
+				Value: playerVolumeOwnerTopic(topicBase, play.Metadata.Namespace, playerName(play)),
+			})
+	}
+	// The sidecar serves its own /metrics, milestone 65's port 9200,
+	// and reports the version its own image's tag carries: the same tag
+	// the operator resolved to name this container's image, so plan
+	// 26's decode series read the release a person sees the pod itself
+	// running under.
+	env = append(env,
+		EnvVar{Name: metricsAddressVariable, Value: "0.0.0.0:" + strconv.Itoa(commandMetricsPort)})
+	if _, tag, tagged := splitReference(sidecarImage); tagged {
+		env = append(env, EnvVar{Name: mediaVersionVariable, Value: tag})
+	}
+	return Container{
+		Name:    commandContainer,
+		Image:   sidecarImage,
+		Command: []string{podBinary, commandMode},
+		Env:     env,
+		Ports:   []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},
+		// The command sidecar reads mpv's socket on the IPC volume, which is
+		// the one volume it needs: it drives mpv and reports the run, and it
+		// opens no media of its own.
+		VolumeMounts:  []VolumeMount{ipcMount()},
+		RestartPolicy: sidecarRestartPolicy,
+	}
+}
+
+// displaySidecar is a native sidecar rather than an ordinary container,
+// because the pod's restart policy is Never and the pod must still end
+// when the player ends, which a second ordinary container would
+// prevent.
+//
+// The display draws the on-screen display on its own surface above
+// mpv's. It holds every request the player container holds, because it
+// needs the same screen to open a surface on and the same render device
+// to draw with. It mounts the IPC volume to read mpv and the sidecar's
+// messages, and the player's media mounts, because it decodes its own art
+// and a logo, a cover, and a trickplay sheet sit in the film's own folder.
+// The mounts are the resolution's own, which are read-only, and a logo the
+// Play names by https URL is a fetch the pod's network already allows.
+func displaySidecar(
+	play *Play, claim *ResourceClaim, mounts []VolumeMount,
+	displayImage string, prefs resolvedPreferences,
+) Container {
+	interval := play.Spec.TrickplayInterval
+	if interval == "" {
+		interval = defaultTrickplayInterval
+	}
+	container := Container{
+		Name: displayContainer,
+		// The image's entrypoint is the whole of how the display
+		// starts, so the container names no command.
+		Image:         displayImage,
+		Env:           []EnvVar{{Name: trickplayIntervalVariable, Value: interval}},
+		VolumeMounts:  mounts,
+		RestartPolicy: sidecarRestartPolicy,
+	}
+	// The display clock reads TZ against the image's tz database. Set it only
+	// when the household stated a zone, so an unset zone leaves the pod
+	// unchanged and the clock stays on UTC.
+	if prefs.TimeZone != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: timeZoneVariable, Value: prefs.TimeZone})
+	}
+	container.Resources.Claims = claimEntries(claim)
+	return container
+}
+
+// presentationBlocks bakes every item's block into one JSON array in
+// spec order, so playlist position i indexes item i's block. An item
+// with no presentation becomes an empty object, so every position has a
+// definite value the sidecar forwards as it is.
+//
+// Each block carries the resolved logo for its item, so the display reads an
+// nfs or claim logo by an in-pod path and fetches an https logo by its URL.
+// The cover art resolves the same way.
+func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) string {
+	blocks := make([]json.RawMessage, len(items))
+	for index, item := range items {
+		if item.Presentation == nil {
+			blocks[index] = json.RawMessage(emptyPresentation)
+			continue
+		}
+		block := *item.Presentation
+		if index < len(logos) {
+			block.Logo = logos[index]
+		}
+		if index < len(trickplays) {
+			block.Trickplay = trickplays[index]
+		}
+		if index < len(arts) {
+			block.Art = arts[index]
+		}
+		encoded, err := json.Marshal(block)
+		if err != nil {
+			blocks[index] = json.RawMessage(emptyPresentation)
+			continue
+		}
+		blocks[index] = encoded
+	}
+	array, err := json.Marshal(blocks)
+	if err != nil {
+		return "[]"
+	}
+	return string(array)
+}
+
+// nextBlock encodes the Play's next block for the pod as JSON, with the
+// art at the path the resolver rewrote it to, the way a presentation
+// block carries its item's resolved art. A Play with no next block, or a
+// block that does not marshal, gives an empty string.
+func nextBlock(next *PlayNext, art string) string {
+	if next == nil {
+		return ""
+	}
+	block := *next
+	block.Art = art
+	encoded, err := json.Marshal(block)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+func ipcMount() VolumeMount {
+	return VolumeMount{Name: ipcVolumeName, MountPath: ipcMountPath}
+}
+
+// sameRemoteSet reports whether a running pod carries the controllers a
+// Play's bound remotes name, by the events topics the command sidecar
+// subscribes to. It reads no keymap, so a Keymap edit is bus state and
+// not a shape change and recreates no pod. Only what the Player
+// controls, the claim and the set of controllers, reshapes a running
+// film.
+func sameRemoteSet(current *Pod, remotes []boundRemote) bool {
+	return slices.Equal(podRemoteTopics(current), remoteEventsTopics(remotes))
+}
+
+// remoteEventsTopics lists the events topics in the order the command
+// sidecar's own list carries them, so the comparison above and the
+// container's environment read one rule.
+func remoteEventsTopics(remotes []boundRemote) []string {
+	if len(remotes) == 0 {
+		return nil
+	}
+	topics := make([]string, len(remotes))
+	for index, remote := range remotes {
+		topics[index] = remote.EventsTopic
+	}
+	return topics
+}
+
+// podRemoteTopics reads the events topics the command sidecar
+// subscribes to, in order, off its environment. Adding or removing a
+// controller changes this list, and the recreate follows.
+func podRemoteTopics(pod *Pod) []string {
+	for _, container := range pod.Spec.InitContainers {
+		if container.Name != commandContainer {
+			continue
+		}
+		for _, variable := range container.Env {
+			if variable.Name == remoteEventsTopicsVariable {
+				return splitTopicLines(variable.Value)
+			}
+		}
+	}
+	return nil
+}

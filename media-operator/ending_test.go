@@ -1,0 +1,242 @@
+package main
+
+// What an ending report reaches: the label the pass patches onto the
+// playback pod, and the unit's Idle status. The status goes out twice
+// over, once from the fold with no read at all and once from the pass
+// ahead of every read the status does not depend on, and the cases here
+// prove both. They run against the same small API server the other pass
+// tests run on, and its request log is what proves a read was made or
+// was not.
+
+import (
+	"encoding/json"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// The ending report is what labels the pod, and the label is what the
+// compositor fades on. The pass patches it once: the second pass reads
+// the same ending and writes nothing, because a pod that carries the
+// label needs no second patch.
+func TestAFoldedEndingLabelsThePlaybackPodOnce(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	cluster.pods["movie-playback"] = housePlaybackPod()
+	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer())
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "1:58:03", Ended: true})
+	media.pass()
+	media.pass()
+
+	mustMatch(t, cluster.pods["movie-playback"].Metadata.Labels[endingLabelKey], endingLabelValue)
+	mustMatch(t, podPatches(cluster, "movie-playback"), 1)
+}
+
+// A film that is still playing is no ending, so the pod carries no
+// label and the pass sends no patch. Only the mark on the report labels
+// a pod.
+func TestAReportThatIsNoEndingLabelsNothing(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	cluster.pods["movie-playback"] = housePlaybackPod()
+	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer())
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:20:00"})
+	media.pass()
+
+	_, labeled := cluster.pods["movie-playback"].Metadata.Labels[endingLabelKey]
+	mustMatch(t, labeled, false)
+	mustMatch(t, podPatches(cluster, "movie-playback"), 0)
+}
+
+// A patch the API server refuses leaves the pod unlabeled, so the next
+// pass patches it again. The memo records a pod that carries the label,
+// never a write that failed.
+func TestAnEndingLabelThatFailsIsPatchedAgain(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	cluster.pods["movie-playback"] = housePlaybackPod()
+	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer())
+	cluster.podPatchFails = true
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "1:58:03", Ended: true})
+	media.pass()
+	media.pass()
+
+	_, labeled := cluster.pods["movie-playback"].Metadata.Labels[endingLabelKey]
+	mustMatch(t, labeled, false)
+	mustMatch(t, podPatches(cluster, "movie-playback"), 2)
+}
+
+// The browser's return and the room's lights key on the unit reading
+// Idle, so a pass publishes that state before it sends anything the
+// state does not come from. Each case holds one such request until the
+// status has reached the broker. A pass that published the state at the
+// end of its work would never reach the publish, and the case would fail
+// on the wait rather than pass late.
+func TestAnEndingPublishesIdleBeforeTheRestOfThePass(t *testing.T) {
+	cases := []struct {
+		name    string
+		request string
+		phase   string
+	}{
+		{
+			name:    "before the pass writes the running Play",
+			request: http.MethodPatch + " " + playPath("house", "movie"),
+			phase:   phaseRunning,
+		},
+		{
+			name:    "before the pass deletes the finished run's pod",
+			request: http.MethodDelete + " /api/v1/namespaces/house/pods/movie-playback",
+			phase:   phaseFinished,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			cluster := runningCluster(housePlayer())
+			cluster.plays["movie"].Status.Phase = test.phase
+			release := cluster.hold(test.request)
+			defer release()
+			media, broker := busOperator(t, cluster)
+			media.reports.fold("house", "movie", playReport{Item: 1, Position: "1:58:03", Ended: true})
+
+			passed := make(chan struct{})
+			go func() {
+				defer close(passed)
+				media.pass()
+			}()
+			status := mustPublishPlayerStatus(t, broker, "house", "theater")
+			release()
+			<-passed
+
+			mustMatch(t, status.Activity, playerIdle)
+			mustMatch(t, status.Play == nil, true)
+			// The held request is on the pass's path, so the publish above
+			// happened before it and not in place of it.
+			if !slices.Contains(cluster.requests, test.request) {
+				t.Errorf("requests = %v, want the pass to reach %q", cluster.requests, test.request)
+			}
+		})
+	}
+}
+
+// The ending answers from the last pass's lists, so it reaches the bus
+// with no API read at all. The request log is the proof: it is empty at
+// the moment the idle status is read, so no list read stood between the
+// report and the screen.
+func TestAnEndingAnswersFromTheLastPassWithNoRead(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	media, broker := busOperator(t, cluster)
+	warmSnapshot(media, cluster)
+
+	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"), endingReport(t))
+
+	status := mustPublishPlayerStatus(t, broker, "house", "theater")
+	mustMatch(t, status.Activity, playerIdle)
+	mustMatch(t, status.Play == nil, true)
+	mustMatchAll(t, cluster.requests, nil)
+}
+
+// An operator that has finished no pass holds no lists to answer from,
+// so the fold publishes nothing and the pass answers the ending. A
+// restarted operator reads its first ending in this state.
+func TestAnEndingWithNoSnapshotIsLeftToThePass(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	media, broker := busOperator(t, cluster)
+
+	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"), endingReport(t))
+
+	mustPublishNothingYet(t, broker, media.bus)
+	mustMatchAll(t, cluster.requests, nil)
+
+	media.pass()
+
+	status := mustPublishPlayerStatus(t, broker, "house", "theater")
+	mustMatch(t, status.Activity, playerIdle)
+}
+
+// The sidecar keeps the mark set in every report after the ending, so
+// the same run reports it over and over. Only the report the ending
+// began on publishes: the mark on the desk says the rest are repeats.
+func TestASecondEndingReportPublishesNothing(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	media, broker := busOperator(t, cluster)
+	warmSnapshot(media, cluster)
+	topic := playStatusTopic(defaultTopicBase, "house", "movie")
+
+	media.handleBusMessage(topic, endingReport(t))
+	mustMatch(t, mustPublishPlayerStatus(t, broker, "house", "theater").Activity, playerIdle)
+
+	media.handleBusMessage(topic, endingReport(t))
+
+	mustPublishNothingYet(t, broker, media.bus)
+}
+
+// warmSnapshot fills the operator's memory the way a finished pass
+// leaves it, and it makes none of the reads a pass makes, so a test
+// proves the ending answered from that memory and from nothing else.
+func warmSnapshot(media *operator, cluster *fakeCluster) {
+	media.snapshot.recordPlays([]Play{*cluster.plays["movie"]})
+	media.snapshot.recordPlayers([]Player{*cluster.players["theater"]})
+}
+
+// endingReport is the message the command sidecar publishes on a run's
+// status topic once the film is over.
+func endingReport(t *testing.T) []byte {
+	t.Helper()
+	payload, err := json.Marshal(playReport{Item: 1, Position: "1:58:03", Ended: true})
+	mustSucceed(t, err)
+	return payload
+}
+
+// mustPublishNothingYet proves the operator has published nothing the
+// test has not already read. The Bus writes one connection through one
+// queue in order, so a mark the test publishes itself arrives behind
+// anything the operator queued before it, and reading the mark first
+// proves the queue held nothing.
+func mustPublishNothingYet(t *testing.T, broker *fakeBroker, bus *Bus) {
+	t.Helper()
+	const mark = "liken/media/test/nothing-yet"
+	bus.Publish(mark, []byte("read me"), false)
+	if got := waitForPublish(t, broker.pubs); got.topic != mark {
+		t.Errorf("the operator published %q, want nothing", got.topic)
+	}
+}
+
+// mustPublishPlayerStatus reads publishes until one unit's status arrives,
+// and answers the state it carried. A pass publishes several topics, so a
+// test that waits for a unit reads past the rest.
+func mustPublishPlayerStatus(t *testing.T, broker *fakeBroker, namespace, name string) playerBusStatus {
+	t.Helper()
+	topic := playerStatusTopic(defaultTopicBase, namespace, name)
+	for {
+		published := waitForPublish(t, broker.pubs)
+		if published.topic != topic {
+			continue
+		}
+		var status playerBusStatus
+		mustSucceed(t, json.Unmarshal(published.payload, &status))
+		return status
+	}
+}
+
+// podPatches counts the patches the passes sent to one pod, which is how
+// the tests above read what the operator wrote and how often.
+func podPatches(cluster *fakeCluster, pod string) int {
+	patches := 0
+	for _, request := range cluster.requests {
+		if strings.HasPrefix(request, http.MethodPatch+" ") &&
+			strings.HasSuffix(request, "/pods/"+pod) {
+			patches++
+		}
+	}
+	return patches
+}

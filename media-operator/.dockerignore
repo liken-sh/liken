@@ -1,0 +1,26 @@
+# What never belongs in an image build context. All five images take the
+# repository root as their context, so one file covers them.
+#
+# cargo writes one target tree at the workspace root on a workstation,
+# and it holds gigabytes that no build inside an image reads: the image
+# compiles the crates again on its own pinned toolchain.
+target/
+
+# The documentation site and its theme. The idle image reads the crate and the
+# two brand files its Dockerfile names, and nothing in any image serves a page.
+docs/public/
+docs/resources/
+docs/themes/brand/.git
+
+# The Go coverage profile the gate writes on every run.
+coverage.out
+
+# cargo writes a target tree in the brand submodule's crate too, when a
+# workstation builds that crate in place, and it grows to gigabytes the
+# idle image never reads.
+docs/themes/brand/iced/target/
+
+# Build outputs at the root: the operator binary a workstation build
+# writes, and the rendered documentation site.
+/media-operator
+docs/dist/

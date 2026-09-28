@@ -1,0 +1,24 @@
+# The built operator binary.
+/media-operator
+
+# Hugo's build output. The workflow and a workstation both write the
+# site here, and the lock file guards a single hugo process against a
+# second one in the same source tree.
+/docs/dist/
+/docs/.hugo_build.lock
+/docs/public/
+
+# The coverage data the gates measure, and the page `make
+# coverage-report` draws from it. CI writes them on every run and
+# reads them once; they never belong to the tree.
+/coverage.out
+/coverage-media-screen.xml
+/coverage-idle-screen.xml
+/coverage-display.xml
+/coverage.html
+
+# The Rust build tree. The two crates are one cargo workspace, so cargo
+# writes one target tree at the root and rebuilds anything it needs. It
+# never belongs to the tree.
+/target/
+/cli/dist/

@@ -1,0 +1,64 @@
+# The kustomize base for the media operator.
+#
+# This base is for the cluster owner to take. liken does not apply it
+# and does not name it. Take it through your own GitOps with patches
+# of your own, or read it and write your own manifests.
+#
+# The base ships no DeviceClass. This operator claims nothing for
+# itself, and the classes a Player names are the cluster owner's
+# vocabulary, the same classes a hand-written claim would use; each
+# hardware operator's manual gives the YAML for its class.
+#
+# The namespace below is set with a transformer rather than with the
+# top-level namespace field, because unsetOnly is what keeps the one
+# object that names its own namespace where it belongs: the RoleBinding
+# in kube-system that lets media-api read the cluster's client
+# certificate authority. The top-level field overwrites a stated
+# namespace, and that binding in any other namespace names a Role that
+# is not there. Every other object here states no namespace, and the
+# transformer sets liken-system on each of them.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: liken-system
+      namespace: liken-system
+    unsetOnly: true
+
+resources:
+  - players-crd.yaml
+  - plays-crd.yaml
+  - keymaps-crd.yaml
+  - remotes-crd.yaml
+  - mediapreferences-crd.yaml
+  - rbac.yaml
+  - operator.yaml
+  - api.yaml
+  - bus.yaml
+
+# The cpu and memory settings of the containers the operator builds. A
+# generated ConfigMap's name carries a hash of its content, and kustomize
+# rewrites the Deployment's volume to that name, so a changed value rolls
+# the operator and the operator reads no ConfigMap through the API. An
+# overlay changes a value with a configMapGenerator of the same name and
+# namespace and behavior: merge; the install guide shows the patch.
+configMapGenerator:
+  - name: media-operator-resources
+    files:
+      - resources.yaml=container-resources.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: media-operator
+      app.kubernetes.io/part-of: liken
+
+images:
+  - name: ghcr.io/liken-sh/media-operator
+    newTag: latest
+  - name: ghcr.io/liken-sh/media-operator-api
+    newTag: latest

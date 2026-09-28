@@ -1,0 +1,576 @@
+# The Play API, declared to Kubernetes.
+#
+# A Play is one run of media on a Player, with a lifecycle analogous
+# to a Job: it runs once to completion, and it stays for its status
+# until ttlSecondsAfterFinished passes or a person deletes it. The
+# media operator reconciles a Play into one playback pod and the claims
+# that pod needs, all owned by the Play, so deleting the Play is the
+# whole teardown: the garbage collector takes the pod and the claims
+# with it.
+#
+# A Finished run leaves nothing running. The operator deletes the
+# playback pod and its claim as soon as the run finishes, and the Play
+# itself when its window passes.
+#
+# The spec is immutable, like a Job's template. A Play whose player
+# or media changed mid-run would describe a different run; delete the
+# Play and create another.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: plays.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: Play
+    listKind: PlayList
+    plural: plays
+    singular: play
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status. The API server enforces the split.
+      subresources:
+        status: {}
+      # `kubectl get plays` is the house's now-playing listing, so
+      # the columns show the run itself: where it plays, what state
+      # it is in, and how far along it is.
+      additionalPrinterColumns:
+        - name: Player
+          type: string
+          jsonPath: .spec.players[0]
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Activity
+          type: string
+          jsonPath: .status.activity
+        - name: Display
+          type: string
+          jsonPath: .status.conditions[?(@.type=="DisplayAlive")].reason
+        - name: Item
+          type: integer
+          jsonPath: .status.item
+        - name: Position
+          type: string
+          jsonPath: .status.position
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Play is one run of media on a Player: a film, an album,
+            or a season of episodes, played in order. Create a Play
+            to start it; delete the Play to stop it early.
+          properties:
+            spec:
+              type: object
+              required: [players, items]
+              description: >-
+                What to play and where. The spec is immutable: a
+                different film or a different player is a different
+                Play.
+              x-kubernetes-validations:
+                - rule: self == oldSelf
+                  message: >-
+                    a Play's spec is immutable; delete the Play and
+                    create another
+              properties:
+                players:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  # One player for now. The carriage layer will let
+                  # one Play reach several players in sync, and a
+                  # list that grows a second element changes no
+                  # field name when it does.
+                  maxItems: 1
+                  items:
+                    type: string
+                    minLength: 1
+                  description: >-
+                    The Players this Play runs on, by name, in this
+                    namespace. One entry today.
+                items:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  description: >-
+                    The media to play in order. Each entry is a URI and
+                    an optional presentation that declares how the
+                    display should render it.
+                  items:
+                    type: object
+                    required: [uri]
+                    description: >-
+                      One entry in the playlist: the URI to play and,
+                      optionally, how it should look.
+                    properties:
+                      uri:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The operator resolves https:// to a stream the
+                          player reads directly, and nfs://host/export/path
+                          and claim://claim/path to a mount on the playback
+                          pod. A URI whose scheme the operator does not know
+                          fails the Play before any pod exists.
+                      presentation:
+                        type: object
+                        description: >-
+                          How the item should look, for the fields the
+                          display cannot read from the file. The library
+                          that fed the item supplies these, and the
+                          display prefers them over the container's tags.
+                          Omit the block for a loose file, and the
+                          display falls back to the file's own tags.
+                        properties:
+                          type:
+                            type: string
+                            enum: [video, music, image]
+                            description: >-
+                              The media type the display tunes its layout
+                              by. mpv cannot infer this, and the display
+                              does not read it from the file name.
+                          hint:
+                            type: string
+                            enum: [movie, series, album]
+                            description: >-
+                              The finer kind within the type. A video is a
+                              movie or a series, and music is an album. It
+                              selects the layout the display draws. An album
+                              also declares that the item's URI names a
+                              directory, which the playback pod expands into
+                              one timeline of the audio files it holds. The
+                              directory must hold at least one audio file, or
+                              the run fails.
+                          role:
+                            type: string
+                            enum: [trailer]
+                            description: >-
+                              The item's part in the work. The one value is
+                              trailer, and the display marks a trailer on the
+                              line under the title. Omit it for the work
+                              itself.
+                          title:
+                            type: string
+                            description: >-
+                              The item's name, which overrides the file's
+                              own tag. Set it when the tag is wrong or
+                              absent.
+                          series:
+                            type: string
+                            description: The series this episode belongs to.
+                          season:
+                            type: integer
+                            minimum: 0
+                            description: The season number of the episode.
+                          episode:
+                            type: integer
+                            minimum: 0
+                            description: The episode number within its season.
+                          episodeTitle:
+                            type: string
+                            description: The title of the episode.
+                          year:
+                            type: integer
+                            minimum: 0
+                            description: The release year, shown under a movie's title.
+                          date:
+                            type: string
+                            description: >-
+                              The air date of an episode, shown on its line.
+                              Give it as an ISO date like 2017-03-05, and the
+                              display formats it.
+                          artist:
+                            type: string
+                            description: >-
+                              The artist of a music item, shown in the header
+                              under the title. For an album this field is the
+                              one source; a standalone track can also leave it
+                              unset and let its own tags supply it.
+                          album:
+                            type: string
+                            description: >-
+                              The record a music item belongs to, shown in the
+                              header beside the year. It fills in the same way
+                              the artist does.
+                          art:
+                            type: string
+                            description: >-
+                              The cover art URI, claim://, nfs:// or https://,
+                              resolved the way the media URI is. It is the first place
+                              the cover is looked for; a picture embedded in
+                              the file and a cover.jpg beside it follow, and
+                              the pod reads both of those itself.
+                          logo:
+                            type: string
+                            description: >-
+                              The logo art URI, claim://, nfs:// or https://,
+                              resolved the way the media URI is. The display
+                              shows it in the header in place of the title.
+                          trickplay:
+                            type: string
+                            description: >-
+                              The X.trickplay directory URI, claim://, nfs:// or
+                              https://, resolved the way the media URI is. The
+                              display shows a tile from it on the scrub cursor.
+                          marks:
+                            type: array
+                            x-kubernetes-list-type: atomic
+                            description: >-
+                              The spans in the file where the intro, the
+                              recap, the credits, the scene after the
+                              credits, and the preview are. A database can
+                              give several candidate spans for one kind, and
+                              the list carries every one. The display merges
+                              the candidates that overlap into one span, from
+                              the median start and the median end. It offers
+                              a skip control while the playhead is inside an
+                              intro or a recap. The credits count when they
+                              start in the second half of the item. A scene
+                              after them is a post-credits span, or the gap
+                              between two credits spans. Inside the credits
+                              before a scene, the display offers a skip to the
+                              scene. The up-next card rises at the start of
+                              the credits, or, when a scene follows them, at
+                              the later of the start of the last credits span
+                              and the end of the last scene. A card after a
+                              scene never rises later than it would with no
+                              marks, when three percent of the item or three
+                              minutes remain, whichever is less. An item with
+                              no marks plays with no skip control, and its
+                              card rises by the time that remains.
+                            items:
+                              type: object
+                              required: [kind]
+                              properties:
+                                kind:
+                                  type: string
+                                  description: >-
+                                    What the span holds: intro, recap,
+                                    credits, post-credits, or preview.
+                                    post-credits is the scene after the
+                                    credits. The display ignores a kind it
+                                    does not know.
+                                start:
+                                  type: number
+                                  minimum: 0
+                                  description: >-
+                                    Where the span starts, in seconds from
+                                    the start of the file. Omit it for a span
+                                    that starts with the file.
+                                end:
+                                  type: number
+                                  minimum: 0
+                                  description: >-
+                                    Where the span ends, in seconds from the
+                                    start of the file. Omit it for a span
+                                    that ends with the file.
+                                source:
+                                  type: string
+                                  description: >-
+                                    The database the span came from, such as
+                                    theintrodb. The display does not read it.
+                start:
+                  type: string
+                  description: >-
+                    Where in the first item the run begins, as a
+                    time the player accepts, such as 0:10:00 or
+                    600. Omitted, the run begins at the start. Later
+                    items always begin at their own start. This is
+                    also how a run resumes: a new Play with the
+                    position a finished or deleted one reported.
+                next:
+                  type: object
+                  description: >-
+                    The work that follows this run. The display offers
+                    it on the scrubber as a chip, and as a card near the
+                    end of the run. When the item's marks place credits
+                    in its second half, the card rises at the start of the
+                    credits, or after the scene that follows them, as the
+                    marks field describes. Otherwise it rises when three
+                    percent of the item or three minutes remain, whichever
+                    is less. A select on the offer
+                    publishes the request below on the Player's commands
+                    topic, where the program that wrote the Play reads
+                    it back and creates the next Play. A Play with no
+                    next block offers nothing.
+                  properties:
+                    reason:
+                      type: string
+                      description: >-
+                        The first line of the card, which says why this
+                        work follows: "Next in The Saga", for one. The
+                        display draws it as given, in uppercase.
+                    title:
+                      type: string
+                      description: >-
+                        The second line of the card, the name of the
+                        work that follows. The chip draws this line
+                        alone.
+                    detail:
+                      type: string
+                      description: >-
+                        The third line of the card, under the title:
+                        the series and the season, or the year and the
+                        runtime. The display draws it as given.
+                    art:
+                      type: string
+                      description: >-
+                        The art of the work that follows, as a claim://,
+                        nfs://, or https:// URI, resolved the way an
+                        item's art is. The display fits it inside the
+                        card's box and keeps its ratio, so a poster is
+                        letterboxed.
+                    request:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      description: >-
+                        An object the operator never reads. When a
+                        person takes the offer, it is published byte for
+                        byte on the Player's commands topic, so the
+                        program that wrote the Play gets its own words
+                        back and needs no other record of what it
+                        offered.
+                trickplayInterval:
+                  type: string
+                  description: >-
+                    The seconds one trickplay tile covers, as a Go
+                    duration like 10s. Jellyfin writes no manifest beside
+                    the sheets, so the Play declares it. Omitted, it
+                    defaults to 10s, the Jellyfin default.
+                ttlSecondsAfterFinished:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: >-
+                    How long this Play remains after it finishes, in
+                    seconds, the meaning a Job gives the name. While it
+                    remains, kubectl get plays still shows what just
+                    played and where it stopped; deleting the Play
+                    deletes that record. Omitted, it is 300 seconds.
+                    Zero deletes the Play as soon as it finishes. The
+                    playback pod does not wait for this window: it is
+                    deleted as soon as the run finishes.
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Play override of the audio language order,
+                    the most specific tier; omit it to inherit the Player.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Play override of the subtitle language
+                    order, the most specific tier; omit it to inherit the
+                    Player.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitles:
+                  type: string
+                  enum: ["on", "off", "auto"]
+                  description: >-
+                    A per-Play override of when subtitles show, the
+                    most specific tier; omit it to inherit the Player.
+                volume:
+                  type: object
+                  description: >-
+                    The level this run starts at. The operator writes it
+                    to the Player's volume topic before it creates the
+                    pod, so the value becomes the unit's state and stays
+                    after the film ends. Omitted, the run starts at
+                    whatever the unit already holds.
+                  properties:
+                    level:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                      description: >-
+                        The listening level, 0 to 100. 100 is unity, the
+                        player's own default, and the cap: a software
+                        gain above unity only distorts. Omitted, the
+                        level the unit already holds stays.
+                    muted:
+                      type: boolean
+                      description: >-
+                        Whether the run starts muted. Omitted, the muted
+                        state the unit already holds stays.
+            status:
+              type: object
+              description: >-
+                What the playback pod reports, written only by the
+                media operator. The playback pod itself holds no API
+                credentials; it reports to the operator, and the
+                operator writes here.
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Running, Finished, Failed]
+                  description: >-
+                    Where the run is in its life, in the words Jobs
+                    and Pods use. Pending is declared but not yet
+                    performing, Running is the pod performing the
+                    play, paused or not, and Finished and Failed are
+                    the two ends. The word is Running rather than
+                    Playing because a phase moves forward only, and
+                    a paused film would force Playing to flap; the
+                    paused field beside this one says the rest.
+                activity:
+                  type: string
+                  enum: [Starting, Playing, Paused, Finished, Failed]
+                  description: >-
+                    The one word for what the Play does right now,
+                    the phase and the paused flag folded together.
+                    Starting is Pending, Playing and Paused both
+                    mean Running, and Finished and Failed match the
+                    phase. The phase is the lifecycle; the
+                    activity is what a person reads at a glance.
+                paused:
+                  type: boolean
+                  description: >-
+                    True while the player holds the current item
+                    still. The phase stays Running, because a
+                    pause does not advance the lifecycle.
+                item:
+                  type: integer
+                  description: >-
+                    Which URI plays now, counting from 1 in spec
+                    order. The third of five episodes shows 3.
+                position:
+                  type: string
+                  description: >-
+                    The playhead inside the current item, as
+                    H:MM:SS.
+                duration:
+                  type: string
+                  description: >-
+                    The length of the current item, as H:MM:SS, once
+                    the player has read it.
+                pod:
+                  type: string
+                  description: >-
+                    The playback pod's name, for kubectl describe
+                    and logs. The pod is owned by this Play and is
+                    deleted with it.
+                message:
+                  type: string
+                  description: >-
+                    The reason for the phase, as one line of
+                    text: the resolver refused a URI, the Player
+                    does not exist, the pod failed.
+                finishedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the operator first read this run's phase as
+                    Finished. The time-to-live after finishing counts
+                    from here and not from the Play's creation, so the
+                    window measures the end of the film. It is written
+                    here rather than held in the operator, so an
+                    operator that restarts reads the clock back.
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: string
+                  description: >-
+                    The resolved audio language order this run
+                    applied, the record of what the three tiers
+                    settled on.
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: string
+                  description: >-
+                    The resolved subtitle language order this run
+                    applied.
+                subtitles:
+                  type: string
+                  description: >-
+                    The resolved subtitle setting this run applied,
+                    one of on, off, or auto.
+                audioLanguage:
+                  type: string
+                  description: >-
+                    The language of the audio track mpv chose, so
+                    you can see when a code matched no track. The
+                    value is the track's own tag as the file
+                    contains it, for Matroska the three-letter ISO
+                    639-2 code, whatever form the preference used.
+                subtitleLanguage:
+                  type: string
+                  description: >-
+                    The language of the subtitle track mpv chose;
+                    empty when none plays. The value is the track's
+                    own tag as the file contains it, the way
+                    audioLanguage reports its track.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  description: >-
+                    The run's conditions. There is one, DisplayAlive,
+                    and it reports the playback pod's display container,
+                    the native sidecar that draws the on-screen display.
+                    It is True with reason Running while the container
+                    runs, at any restart count, and False with reason
+                    Restarting only while the container is down after
+                    an exit the kubelet recorded. The message states
+                    the restart count with the reason and exit code of
+                    the last termination, and a display that has never
+                    restarted has no message. More than two restarts in one run set the phase
+                    to Finished with the same message, and the run
+                    retires the way a finished film does. The condition
+                    is absent while the pod reports no display container
+                    or the container has not started yet.
+                    lastTransitionTime moves only when the status does.
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        description: The condition's name, DisplayAlive.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: The condition's status.
+                      reason:
+                        type: string
+                        description: "One word for the status: Running or Restarting."
+                      message:
+                        type: string
+                        description: >-
+                          The restart count, with the reason and exit
+                          code of the last termination the kubelet
+                          recorded.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the status last changed, so a reader can
+                          tell how long the display has been down or up.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        description: >-
+                          The Play's metadata.generation the condition
+                          was derived from, so a reader can tell a
+                          condition on the current spec from a stale
+                          one.

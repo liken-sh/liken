@@ -1,0 +1,25 @@
+# The API's own pod. app: media-api is the Deployment's selector
+# label, left alone by the base's common-labels transformer because
+# includeSelectors: false keeps kustomize from rewriting a selector
+# field, so it is the label the running Pod carries and the one this
+# PodMonitor must match. The pod serves /metrics on the port named
+# metrics in deploy/api.yaml. No namespaceSelector is needed: the
+# Deployment always lands in liken-system, the namespace this
+# PodMonitor names below.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: media-api
+  namespace: liken-system
+spec:
+  selector:
+    matchLabels:
+      app: media-api
+  podMetricsEndpoints:
+    - port: metrics
+      # The dashboard selects series by node, and a Pod's own labels
+      # never carry the node it landed on, so the scrape relabels it
+      # in from Prometheus's own discovery metadata.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

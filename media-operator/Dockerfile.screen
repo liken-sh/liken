@@ -1,0 +1,191 @@
+# syntax=docker/dockerfile:1
+
+# This file builds both screen images, the idle screen and the display,
+# as two targets over one dependency stage. The two crates share a
+# workspace, a toolchain, and every dependency, so one file builds the
+# dependencies once and each target adds its own crate. Every build names
+# a target, idle or display.
+
+# The runtime base of the last stage. An argument a FROM line reads has
+# to be declared before the first stage, so it is here and not beside
+# the stage that uses it.
+ARG VULKAN_BASE=ghcr.io/liken-sh/vulkan:2026.09.08-001
+
+FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS deps
+WORKDIR /src
+
+# The three Rust crates are one cargo workspace, so the build copies the
+# workspace manifest, the lock file, and the toolchain pin, then every member
+# manifest. liken-iced is a path dependency in the brand submodule, and the
+# stub build below needs only its manifest, so the manifest and its lock file
+# arrive here and the crate's sources arrive after that layer. A source edit
+# or a submodule bump then reuses the cached dependency layer.
+#
+# The dependencies are almost all of the build, and they change only when the
+# lock file changes.
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY idle/Cargo.toml idle/
+COPY media-screen/Cargo.toml media-screen/
+COPY display/Cargo.toml display/
+COPY docs/themes/brand/iced/Cargo.toml docs/themes/brand/iced/Cargo.lock docs/themes/brand/iced/
+
+# A stub library and a stub binary for each workspace member, and a stub
+# library for liken-iced, give cargo something to compile the dependencies
+# against. That build is the layer the image cache keeps.
+RUN mkdir idle/src media-screen/src display/src docs/themes/brand/iced/src \
+    && echo 'fn main() {}' > idle/src/main.rs \
+    && : > idle/src/lib.rs \
+    && : > media-screen/src/lib.rs \
+    && echo 'fn main() {}' > display/src/main.rs \
+    && : > display/src/lib.rs \
+    && : > docs/themes/brand/iced/src/lib.rs
+
+# The cache mounts hold the crate registry and the git checkouts between
+# builds, so a rebuild on a workstation downloads no crate a second time.
+# --locked builds the versions the lock file names and never rewrites it.
+#
+# --no-default-features drops the idle screen's `measure` feature, which is the
+# frame capture and the measurements. No pod reaches either one: the operator
+# sets no command on the idle container, so the entrypoint below takes no flag.
+# Without the feature the binary carries no PNG codec and collects no per-frame
+# sample.
+#
+# This is a narrower configuration than the crate's own gates measure, because
+# `make test-rust` runs the default build with the feature on. The idle target
+# below runs the binary it produced, so the configuration the image ships is
+# proven to start rather than assumed to.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release --locked --no-default-features -p idle-screen \
+    && cargo build --release --locked -p media-display
+
+# liken-iced's sources land here, over the stub, with the two brand files it
+# parses and the two font files it embeds. All four are inputs of the real
+# build alone; the stub compiles without them.
+COPY docs/themes/brand/iced/src/ docs/themes/brand/iced/src/
+COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css docs/themes/brand/
+COPY docs/themes/brand/fonts/ docs/themes/brand/fonts/
+
+FROM deps AS build-idle
+COPY media-screen/src/ media-screen/src/
+COPY idle/src/ idle/src/
+# The touch marks all three crates' own sources newer than the stub build, so
+# cargo compiles them again and leaves the dependencies as they are.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    touch idle/src/main.rs idle/src/lib.rs media-screen/src/lib.rs \
+        docs/themes/brand/iced/src/*.rs \
+    && cargo build --release --locked --no-default-features -p idle-screen
+
+FROM deps AS build-display
+COPY display/src/ display/src/
+# The touch marks both crates' own sources newer than the stub build, so
+# cargo compiles them again and leaves the dependencies as they are.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    touch display/src/main.rs display/src/lib.rs docs/themes/brand/iced/src/*.rs \
+    && cargo build --release --locked -p media-display
+
+# fonts-droid-fallback is one small file that draws Chinese, Japanese, and
+# Korean, for the reason the player image installs it: the text on both screens
+# is text a household writes, Source Sans 3 carries none of those characters,
+# and a face with no CJK draws a blank box for each one. The runtime below has
+# no package manager, so the file comes out of a Debian stage on the suite the
+# base is built from.
+FROM debian:trixie-slim AS fonts
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-droid-fallback \
+    && rm -rf /var/lib/apt/lists/*
+
+# The idle image: the Rust client that draws the idle screen, and the
+# Wayland and Vulkan libraries it opens by name on a real machine. It is
+# an image of its own, because this client shares no code with the Go
+# binary and needs a graphics stack the operator's scratch image has
+# none of.
+#
+# The build context is the repository root, the way every other image takes
+# it, so the build reaches every crate and the brand submodule the client
+# reads its mark and its palette from.
+#
+# The runtime is liken's Vulkan base: the loader, the Intel and AMD
+# drivers, and the Wayland and keyboard libraries winit opens by name, on
+# scratch. The display operator builds it beside the compositor, so the
+# screen and the compositor run one Mesa, and a node that runs both holds
+# the drivers once. The base carries the zoneinfo database too, because
+# Rust's standard library has no time zones and the clock reads the zone
+# TZ names.
+#
+# The image installs no font package for the screen's own family. The
+# binary carries the brand's two faces and loads them into the toolkit
+# before the first frame. The toolkit scans /usr/share/fonts for the rest,
+# which is where the fallback face lands.
+#
+# The tag pins the base to one release of the display operator. The
+# argument is declared at the top of the file, and a workstation may set
+# it to a base it built itself.
+FROM ${VULKAN_BASE} AS idle
+
+COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
+
+COPY --from=build-idle /src/target/release/idle-screen /idle-screen
+
+# The binary runs here, in the image that ships it. --help opens no window
+# and reaches no compositor, and the toolkit opens its Wayland and Vulkan
+# libraries by name at run time, so what this proves is that the linked
+# closure resolves and the process starts and exits 0, not that the
+# graphics stack loads. The exec form, because the image has no shell to
+# run the other form through.
+RUN ["/idle-screen", "--help"]
+
+# The binary is the container's own process, so the kubelet sends it the
+# signal and carries its exit code out as the pod's outcome. The operator
+# names this image on an idle container and sets no command, so the entrypoint
+# is the whole of how the client starts.
+ENTRYPOINT ["/idle-screen"]
+
+# The display image: the Rust client that draws the on-screen display over
+# the film, and the Wayland and Vulkan libraries it opens by name on a real
+# machine. It is an image of its own, because this client shares no code with
+# the Go binary and needs a graphics stack the operator's scratch image has
+# none of.
+#
+# The build context is the repository root, the way every other image takes
+# it, so the build reaches every crate and the brand submodule the client
+# reads its palette and its faces from.
+#
+# The runtime is liken's Vulkan base: the loader, the Intel and AMD
+# drivers, and the Wayland and keyboard libraries winit opens by name, on
+# scratch. The display operator builds it beside the compositor, so the
+# display and the compositor run one Mesa, and a node that runs both holds
+# the drivers once. The base carries the zoneinfo database too, because
+# Rust's standard library has no time zones and the clock reads the zone
+# TZ names.
+#
+# The tag pins the base to one release of the display operator. The
+# argument is declared at the top of the file, and a workstation may set
+# it to a base it built itself.
+FROM ${VULKAN_BASE} AS display
+
+COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droid
+
+# The brand's upright and italic faces, as files the toolkit finds when it
+# scans /usr/share/fonts. The binary carries the same two faces and loads them
+# into the toolkit before the first frame, so the family resolves either way.
+COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
+     docs/themes/brand/fonts/SourceSans3-It.otf \
+     docs/themes/brand/fonts/LICENSE.md \
+     /usr/share/fonts/opentype/source-sans-3/
+
+COPY --from=build-display /src/target/release/media-display /media-display
+
+# The closure gate on the display binary. The binary takes no flag that
+# prints and exits, so the loader in --list mode resolves the whole
+# closure and exits non-zero when a library is missing. A library the
+# toolkit opens by name at run time is not covered by this.
+RUN ["/lib64/ld-linux-x86-64.so.2", "--list", "/media-display"]
+
+# The binary is the container's own process, so the kubelet sends it the
+# signal and carries its exit code out as the pod's outcome. The operator
+# names this image on a display container and sets no command, so the
+# entrypoint is the whole of how the display starts.
+ENTRYPOINT ["/media-display"]

@@ -1,0 +1,219 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It reads plays and players, writes play statuses, and creates
+# the claims and pods a play becomes. It deletes a pod or a claim only
+# to replace a stale one: a running Play's pod after its Player reshaped
+# it, and a standing pod or claim that no longer matches the template
+# the current pass builds, and it deletes a finished run's pod and claim
+# because the run is over. Otherwise the teardown is the garbage
+# collector's, through the ownerReference every claim and pod carries,
+# and deleting the Play, the Player, or the Remote is the whole stop.
+# The one object a person created that it deletes is a Play that
+# finished and outlived its own window.
+#
+# Three writes stand beyond those, and each is one field of one object's
+# metadata. The finalizer media.liken.sh/bus-topics goes onto every
+# Play, and comes off again once the run's retained bus topics are
+# cleared. The label media.liken.sh/ending goes onto a playback pod when
+# its run reports the ending, so the compositor fades the film out while
+# the pod still draws it. The label media.liken.sh/component goes onto a
+# Remote's reader pod that an older release created without it, so the
+# operator's pod watch selects the pod.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: media-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: media-operator
+rules:
+  # The plays, across every namespace, because a household runs its
+  # media in whatever namespace it likes and the operator is one
+  # Deployment for the cluster. The watch is the wake signal, and every
+  # pass reads the whole collection from the watch's memory.
+  #
+  # The delete verb is the one place this operator deletes an object a
+  # person created, and it uses it in one state only: a Play that
+  # finished and whose ttlSecondsAfterFinished has passed. The window is
+  # the Play's own, so the record of what played stands for as long as
+  # whoever created the Play asked, and the list does not grow one entry
+  # per film forever.
+  #
+  # The patch verb writes one thing only: the finalizer
+  # media.liken.sh/bus-topics on a Play's metadata, which is what keeps a
+  # Play until the operator has cleared the run's retained bus topics. The
+  # spec is still beyond this operator, because a merge patch of
+  # metadata.finalizers names no other field.
+  - apiGroups: [media.liken.sh]
+    resources: [plays]
+    verbs: [get, list, watch, patch, delete]
+  # Only the status half. The API server's subresource split is what
+  # keeps this operator from ever rewriting a spec a person declared.
+  - apiGroups: [media.liken.sh]
+    resources: [plays/status]
+    verbs: [update]
+  # Players are watched, so the pass reads each one from memory and an
+  # edited Player wakes the pass. The get verb reads a Player again when
+  # a status write meets a conflict.
+  - apiGroups: [media.liken.sh]
+    resources: [players]
+    verbs: [get, list, watch]
+  # Only the status half, the same subresource split the plays use:
+  # the operator writes what plays on a player, never the equipment
+  # a person declared.
+  - apiGroups: [media.liken.sh]
+    resources: [players/status]
+    verbs: [update]
+  # The remotes bound to a player. A Remote is watched like a Play,
+  # because each Remote reconciles into one standing pod, and the watch
+  # is the wake signal for that pod. The get verb reads a Remote again
+  # when a status write meets a conflict.
+  - apiGroups: [media.liken.sh]
+    resources: [remotes]
+    verbs: [get, list, watch]
+  # Only the status half, the same subresource split the plays and the
+  # players use. The operator writes which unit a controller drives now,
+  # never the device selector a person declared.
+  - apiGroups: [media.liken.sh]
+    resources: [remotes/status]
+    verbs: [update]
+  # The keymaps, cluster-scoped now. The operator watches them to compile
+  # every Keymap and publish its table to the bus retained on each pass,
+  # and the watch is the wake signal for a keymap edit. Read-only,
+  # because a person writes these and the operator only reads them.
+  - apiGroups: [media.liken.sh]
+    resources: [keymaps]
+    verbs: [get, list, watch]
+  # The household default preferences, cluster-scoped. The operator
+  # watches them, reads the default by name from the watch each pass to
+  # resolve a run's languages, and the watch is the wake signal for an
+  # edit.
+  # Read-only, because a person writes it and the operator only reads it.
+  - apiGroups: [media.liken.sh]
+    resources: [mediapreferences]
+    verbs: [get, list, watch]
+  # The claims a play becomes, and the standing claim behind each
+  # Player's idle pod and each Remote's reader pod. Created once, read
+  # on every pass from the watch, and deleted only to rebuild a claim
+  # that no longer matches what the pass builds: one a Player reshaped,
+  # or one whose template hash differs. The owning Play, Player, or
+  # Remote still owns them, so deleting that object is the ordinary
+  # teardown. The list and watch verbs are cluster-scoped, because a
+  # claim carries no label of this operator's, and the operator creates
+  # it in the namespace of its Play, Player, or Remote. The get verb reads a
+  # claim again before the operator creates or deletes one.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get, list, watch, create, delete]
+  # The drivers' published inventory. The operator watches it to read
+  # the attributes of the devices its own claims hold, which is how
+  # an allocated screen names its Display. Read-only.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [list, watch]
+  # The bluetooth-operator's bonded devices, cluster-scoped. The
+  # operator watches them to read whether a controller's link is
+  # up and what charge it reports, and folds both into the unit's status
+  # on the bus. The watch is the wake signal, so a controller that
+  # connects or disconnects reaches the screen within one pass.
+  # Read-only, because the bluetooth-operator writes them.
+  - apiGroups: [bluetooth.liken.sh]
+    resources: [peripherals]
+    verbs: [get, list, watch]
+  # The display-operator's panels. The operator watches the Displays and
+  # reads a screen's Display to fold what the panel last showed into the
+  # Player status, and patches spec.override under its own field manager
+  # when the idle screen states the panel should go dark. Server-side
+  # apply keeps the write to that one block, so the cluster owner's
+  # resting fields stay the cluster owner's.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get, list, watch, patch]
+  # The equipment operator's receivers, cluster-scoped. The operator
+  # watches them to find the input a unit's cable lands on, and folds the
+  # match into the Player status. It applies status.session under its
+  # own field manager while the unit matches an input, because a status
+  # write changes no metadata.generation. The patch on the receiver
+  # itself releases a spec.session this manager wrote there. Server-side
+  # apply keeps each write to this manager's own fields, so the inputs a
+  # person declared stay the person's.
+  - apiGroups: [equipment.liken.sh]
+    resources: [receivers]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [equipment.liken.sh]
+    resources: [receivers/status]
+    verbs: [get, patch]
+  # The playback pods and the standing pods, on the same terms as the
+  # claims: created once, and deleted to replace a stale one, a playback
+  # pod at the film's place or a standing pod on a template that
+  # changed. The list and watch verbs are cluster-scoped, because a Play
+  # lives in any namespace and the pod watch wakes the loop when
+  # Kubernetes removes a playback pod anywhere. The watch selects the
+  # operator's own pods by their media.liken.sh/component label.
+  #
+  # The patch verb also puts that label on a reader pod an older release
+  # created without it, so the watch selects the pod.
+  #
+  # the delete verb also deletes pods this operator did not
+  # create. A display claim names every pod that holds it in
+  # status.reservedFor, and an allocated claim stays Terminating until
+  # every holder is gone, so each of those pods goes before the claim is
+  # replaced. Under a delegated idle screen one of those holders is the
+  # delegate's own pod.
+  #
+  # The patch verb writes one label, media.liken.sh/ending, onto a
+  # playback pod whose run has reported the ending. A merge patch of
+  # metadata.labels names no other field, so nothing this operator sends
+  # reaches the spec of a pod the kubelet is running.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: media-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: media-operator
+subjects:
+  - kind: ServiceAccount
+    name: media-operator
+    namespace: liken-system
+---
+# The Lease that elects the one copy of the operator that acts
+# (leader.go). client-go's election reads the Lease with a get, takes
+# and renews it with an update, and releases it with an update. A
+# namespaced Role, because the Lease is in the operator's own namespace
+# and every kubelet's heartbeat is a Lease in kube-node-lease that this
+# operator has no reason to read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: media-operator-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [media-operator]
+    verbs: [get, update]
+  # create carries no resourceNames, because RBAC cannot read a name off
+  # a create. The first copy to start creates the Lease.
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: media-operator-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: media-operator-lease
+subjects:
+  - kind: ServiceAccount
+    name: media-operator
+    namespace: liken-system

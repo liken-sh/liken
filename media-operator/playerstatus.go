@@ -1,0 +1,489 @@
+package main
+
+// A Player's status is relational: it comes from the Plays that name
+// the Player, not from the Player itself. So the operator writes it
+// on the same pass that reconciles the Plays, from the same list it
+// already read. A Player that no Play names is idle, and one that a
+// Play runs on is playing.
+
+import (
+	"encoding/json"
+	"sync"
+)
+
+// publishedStatuses records the payload the operator last published on
+// each Player's retained status topic, and it serializes those publishes.
+// The topic is retained, so a republished payload the broker already
+// holds is churn no subscriber needs, and this is what tells the operator
+// to skip it.
+//
+// Two goroutines publish here: the pass, and the bus reader when it
+// answers an ending from memory. So one mutex covers the derivation, the
+// compare, the publish, and the record together. The derivation reads
+// the report desk, and the bus reader sets a run's ending mark on the
+// desk before it publishes. A pass that derived a unit's state outside
+// the mutex could derive Playing, lose the mutex to the bus reader's
+// Idle, and then publish its Playing over that Idle. Inside the mutex,
+// the later publish always reads the desk at least as new as the
+// earlier one. A mutex over the map alone would also let the two
+// publish in one order and record in the other, and the broker would
+// then hold a payload the map does not name.
+//
+// The zero value records nothing and publishes everything, which is
+// correct for a fresh operator, so the map is built on the first publish
+// and there is nothing to construct.
+type publishedStatuses struct {
+	mutex    sync.Mutex
+	payloads map[string]string
+
+	// The activity each unit last published, kept apart from the payloads
+	// because a fresh broker session resets those and a unit's activity
+	// does not change with the broker.
+	activities map[string]string
+}
+
+// publishDerived derives one unit's payload and its activity, and
+// publishes the payload to its topic, retained, unless the last payload
+// on that topic was the same one. It answers the activity the unit had
+// before and whether the activity moved. A unit this operator has not
+// published before did not move, so a restart reports no unit. A
+// derivation that fails publishes nothing and answers its error.
+func (p *publishedStatuses) publishDerived(bus *Bus, topic string,
+	derive func() (payload []byte, activity string, err error)) (string, bool, error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	payload, activity, err := derive()
+	if err != nil {
+		return "", false, err
+	}
+	if p.payloads[topic] != string(payload) {
+		bus.Publish(topic, payload, true)
+		if p.payloads == nil {
+			p.payloads = map[string]string{}
+		}
+		p.payloads[topic] = string(payload)
+	}
+	was, known := p.activities[topic]
+	if p.activities == nil {
+		p.activities = map[string]string{}
+	}
+	p.activities[topic] = activity
+	return was, known && was != activity, nil
+}
+
+// payloadFor answers the payload the operator last published on one
+// topic, or the empty string when it published none.
+func (p *publishedStatuses) payloadFor(topic string) string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.payloads[topic]
+}
+
+// reset drops every record, so the pass that follows writes each topic
+// again. A fresh broker session holds none of the retained state the
+// operator owns, and this is how the operator restores it.
+func (p *publishedStatuses) reset() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.payloads = nil
+}
+
+// clear empties the retained value of every topic outside the set the
+// caller still owns, so a deleted Player leaves no unit on the bus for a
+// subscriber to draw.
+func (p *publishedStatuses) clear(bus *Bus, owned map[string]bool) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	for topic := range p.payloads {
+		if !owned[topic] {
+			bus.Publish(topic, nil, true)
+			delete(p.payloads, topic)
+		}
+	}
+}
+
+// derivePlayerStatus reads the whole pass's Plays and returns what
+// this Player is doing. A Play running on the Player wins over one
+// still starting, because a person wants the run in progress named
+// first; among equals, the earliest name is chosen, so the answer is
+// the same on every pass. A Play in a terminal phase is over and
+// names nothing.
+//
+// A deleting Play names nothing either. Its phase still reads Running
+// until its finalizer comes off, but the pass that reads the deletion
+// mark deletes its pod, so the run is over from the mark. The release
+// also forgets the run's ending mark on the pass that clears its topics,
+// and that pass still holds the Play in its list. If the deletion mark
+// did not end the run, that pass would publish the unit Playing again,
+// between the Idle the ending published and the Idle of the pass after
+// the Play is gone.
+//
+// A Play whose sidecar reported the ending names nothing either, though
+// its pod still runs and its phase still reads Running. The pod takes
+// seconds to terminate, and the film is over for every one of them, so
+// the unit is idle from the mark and the idle screen returns in bus
+// time. The desk is a parameter, so the derivation stays a function of
+// its arguments the way the rest of this operator's derivations are.
+func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatus {
+	var running, starting string
+	for index := range plays {
+		play := &plays[index]
+		if play.Metadata.Namespace != player.Metadata.Namespace {
+			continue
+		}
+		if playerName(play) != player.Metadata.Name {
+			continue
+		}
+		if play.Metadata.deleting() || desk.endedFor(play.Metadata.Namespace, play.Metadata.Name) {
+			continue
+		}
+		switch play.Status.Phase {
+		case phaseRunning:
+			if running == "" || play.Metadata.Name < running {
+				running = play.Metadata.Name
+			}
+		case phasePending:
+			if starting == "" || play.Metadata.Name < starting {
+				starting = play.Metadata.Name
+			}
+		}
+	}
+	if running != "" {
+		return PlayerStatus{Activity: playerPlaying, Play: running}
+	}
+	if starting != "" {
+		return PlayerStatus{Activity: playerStarting, Play: starting}
+	}
+	return PlayerStatus{Activity: playerIdle}
+}
+
+// playerMetricState folds a unit's derived activity into the three words
+// media_players reports. A unit with nothing running or a Play still
+// starting reads as idle for the gauge, because neither has begun
+// playback yet; only a Play in the Running phase can be playing or
+// paused, and its own status.Activity already carries that fold, so
+// this reads the same field the Play's own status was built from
+// instead of re-deriving it from the report desk a second time.
+func playerMetricState(namespace string, status PlayerStatus, plays []Play) string {
+	if status.Activity != playerPlaying {
+		return playerMetricIdle
+	}
+	for index := range plays {
+		play := &plays[index]
+		if play.Metadata.Namespace == namespace && play.Metadata.Name == status.Play {
+			if play.Status.Activity == activityPaused {
+				return playerMetricPaused
+			}
+			break
+		}
+	}
+	return playerMetricPlaying
+}
+
+// publishPlayerStatuses publishes each unit's presentable state from the
+// two things that state comes from: the Plays the pass listed and the
+// report desk. The pass calls this before it reconciles anything,
+// because an ending report has to reach the screen in bus time, and
+// nothing else the pass reads changes the answer.
+//
+// This publishes and writes nothing else. The Kubernetes status, the
+// screen, the panel, and the idle pod are settled later in the pass by
+// reconcilePlayers, which publishes this same state again and skips a
+// payload the broker already holds.
+func (o *operator) publishPlayerStatuses(players []Player, plays []Play) {
+	for index := range players {
+		player := &players[index]
+		o.publishPlayerStatus(player, plays)
+	}
+}
+
+// deriveIdleStatus reports what a delegate wires its client from: the
+// resolved controller, the standing claim in the Player's namespace,
+// that claim's request names in claim order, the two resolved windows,
+// and the bus the client joins. A delegate acts on the status and never
+// on the spec, because the spec may inherit its controller from
+// MediaPreferences and only this operator resolves the tiers.
+//
+// A nil claim is a Player that drives no screen, or a cluster that
+// names no display-draw class, and such a unit reports no idle block at
+// all. Under media.liken.sh/none nothing draws and no claim stands, so
+// the block carries the controller alone.
+//
+// The bus block goes with the claim, under every controller but
+// media.liken.sh/none. The broker and the topic base are this
+// operator's configuration, so the status is where a delegate's client
+// learns both. The remotes list is in spec.remotes order, because that
+// position is the index a focus moment carries and the order the status
+// topic lists the parts in.
+func deriveIdleStatus(
+	player *Player, controller, busAddress, topicBase string,
+	claim *ResourceClaim, idle resolvedIdle, remotes []idleRemoteTopics,
+	receiver bool,
+) *PlayerIdleStatus {
+	if claim == nil {
+		return nil
+	}
+	if controller == idleControllerNone {
+		return &PlayerIdleStatus{Controller: controller}
+	}
+	namespace, name := player.Metadata.Namespace, player.Metadata.Name
+	bus := &PlayerIdleBus{
+		Address:       busAddress,
+		StatusTopic:   playerStatusTopic(topicBase, namespace, name),
+		VolumeTopic:   idleVolumeTopic(player, topicBase),
+		CommandsTopic: playerCommandsTopic(topicBase, namespace, name),
+		PanelTopic:    playerPanelTopic(topicBase, namespace, name),
+		Remotes:       idleBusRemotes(remotes),
+	}
+	// The owner mark travels with the level, the way it does to the
+	// command sidecar. A unit with no sinks names neither topic.
+	if bus.VolumeTopic != "" {
+		bus.VolumeOwnerTopic = playerVolumeOwnerTopic(topicBase, namespace, name)
+	}
+	// A power press turns the equipment only when the unit's screen is
+	// wired through a Receiver, so the bus carries the power topic for
+	// such a unit and nothing for one that is not. That is the gate the
+	// client reads: no topic, and the power key keeps its shade.
+	if receiver {
+		bus.PowerTopic = playerPowerTopic(topicBase, namespace, name)
+	}
+	return &PlayerIdleStatus{
+		Controller:       controller,
+		Claim:            claim.Metadata.Name,
+		Requests:         claimRequests(claim),
+		FadeAfterSeconds: idle.FadeAfterSeconds,
+		OffAfterSeconds:  idle.OffAfterSeconds,
+		Bus:              bus,
+	}
+}
+
+// idleBusRemotes turns the topics the pod carries into the list the
+// status carries, one entry per controller, in the same spec.remotes
+// order. A unit with no controllers reports no list.
+func idleBusRemotes(remotes []idleRemoteTopics) []PlayerIdleRemote {
+	if len(remotes) == 0 {
+		return nil
+	}
+	list := make([]PlayerIdleRemote, len(remotes))
+	for index, remote := range remotes {
+		list[index] = PlayerIdleRemote{Events: remote.Events, Focus: remote.Focus}
+	}
+	return list
+}
+
+// playerBusStatus is the presentable state of one unit, the whole of what
+// the operator says to the idle screen. The Kubernetes status stays the
+// record of what the Player is doing; this is the same fact plus the words
+// a screen draws, so the display formats one message and resolves nothing.
+//
+// The Player it belongs to is named by the topic, not by the body, the way
+// a Play's report is.
+type playerBusStatus struct {
+	DisplayName string               `json:"displayName"`
+	Activity    string               `json:"activity"`
+	Play        *playerBusPlay       `json:"play,omitempty"`
+	Components  []playerBusComponent `json:"components,omitempty"`
+}
+
+// playerBusPlay names the Play that runs or starts on the unit. Name is
+// the object a person finds with kubectl, and Title is the one line the
+// screen draws.
+//
+// DisplayAlive is the run's own condition, included here so a client
+// reads a crashed display off the bus and sends no request to the API
+// server.
+type playerBusPlay struct {
+	Name         string              `json:"name"`
+	Title        string              `json:"title"`
+	DisplayAlive *playerBusCondition `json:"displayAlive,omitempty"`
+}
+
+// playerBusCondition is one condition in the shape the bus publishes.
+// The condition's type is the key the block arrives under, so the body
+// holds the status, the reason, and the message alone.
+type playerBusCondition struct {
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// busDisplayAlive returns the run's DisplayAlive condition in the bus
+// shape, or nil where the run reports none.
+func busDisplayAlive(play *Play) *playerBusCondition {
+	for _, condition := range play.Status.Conditions {
+		if condition.Type != displayAliveCondition {
+			continue
+		}
+		return &playerBusCondition{
+			Status:  condition.Status,
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		}
+	}
+	return nil
+}
+
+// playerBusComponent is one part of the unit: its friendly name, its kind,
+// its link when the part has one, the charge it reports when it runs on a
+// battery, and, for a remote, whether the focus mark names this unit.
+// Connected is a pointer so a part with no live state carries no key at
+// all, and the display draws it at full brightness always. Focused is a
+// pointer for the same reason: it appears only on the remote whose mark
+// names this Player, so exactly one unit draws the marker for a controller
+// that several units list. Battery is a pointer because a device that
+// reports no level must not read as an empty one.
+type playerBusComponent struct {
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Connected *bool  `json:"connected,omitempty"`
+	Battery   *int   `json:"battery,omitempty"`
+	Focused   *bool  `json:"focused,omitempty"`
+}
+
+// The three kinds of part the idle screen draws. The kind is the display's
+// whole vocabulary for a part, so it says what to draw and not which
+// DeviceClass the part came from.
+const (
+	displayComponent = "display"
+	sinkComponent    = "sink"
+	remoteComponent  = "remote"
+)
+
+// derivePlayerBusStatus builds the message the idle screen reads from
+// the Player, the activity the same pass derived, the Peripherals the
+// desk holds, and the marks the focus desk holds. The parts come from
+// the spec in the order the screen shows them: the display first, then
+// each sink, then each remote. Only a remote carries a link, a charge,
+// and focus, because a wired screen and its speakers report none of
+// them, and a controller a person carries comes and goes and drives one
+// unit at a time. A remote whose standing claim named no Peripheral
+// carries neither a link nor a charge, and its focus is unchanged,
+// because the mark comes from the focus desk.
+func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, peripherals *peripheralDesk, focus *focusDesk) playerBusStatus {
+	status := playerBusStatus{
+		DisplayName: idlePlayerName(player),
+		Activity:    activity.Activity,
+	}
+	if play := findPlay(plays, player.Metadata.Namespace, activity.Play); play != nil {
+		status.Play = &playerBusPlay{
+			Name:         play.Metadata.Name,
+			Title:        playTitle(play),
+			DisplayAlive: busDisplayAlive(play),
+		}
+	}
+	if player.Spec.Display != nil {
+		status.Components = append(status.Components, playerBusComponent{
+			Name: deviceDisplayName(*player.Spec.Display),
+			Kind: displayComponent,
+		})
+	}
+	for _, sink := range player.Spec.Sinks {
+		status.Components = append(status.Components, playerBusComponent{
+			Name: deviceDisplayName(sink),
+			Kind: sinkComponent,
+		})
+	}
+	for _, remote := range player.Spec.Remotes {
+		key := controllerKey(player.Metadata.Namespace, remote.Name)
+		component := playerBusComponent{
+			Name: remoteDisplayName(remote),
+			Kind: remoteComponent,
+		}
+		if name := peripherals.peripheralFor(key); name != "" {
+			if connected, held := peripherals.connectedFor(name); held {
+				component.Connected = &connected
+			}
+			component.Battery = peripherals.batteryFor(name)
+		}
+		if focus.markFor(key) == player.Metadata.Name {
+			focused := true
+			component.Focused = &focused
+		}
+		status.Components = append(status.Components, component)
+	}
+	return status
+}
+
+// findPlay returns the Play the activity names, or nil when the activity
+// names none. An idle Player names no Play, so its status carries no play
+// block and the screen draws the clock alone.
+func findPlay(plays []Play, namespace, name string) *Play {
+	if name == "" {
+		return nil
+	}
+	for index := range plays {
+		play := &plays[index]
+		if play.Metadata.Namespace == namespace && play.Metadata.Name == name {
+			return play
+		}
+	}
+	return nil
+}
+
+// playTitle resolves the one line the idle screen draws for a Play. The
+// first item's Presentation is what the library that fed liken said the
+// item is, so a Series names the show a person put on, a Title names a
+// film, an Album names a record, and a Play whose first item declares none
+// of them falls back to the Play's own name. The operator resolves it here
+// so the display formats one string and reads no Presentation of its own.
+func playTitle(play *Play) string {
+	if len(play.Spec.Items) > 0 && play.Spec.Items[0].Presentation != nil {
+		presentation := play.Spec.Items[0].Presentation
+		if presentation.Series != "" {
+			return presentation.Series
+		}
+		if presentation.Title != "" {
+			return presentation.Title
+		}
+		if presentation.Album != "" {
+			return presentation.Album
+		}
+	}
+	return play.Metadata.Name
+}
+
+// writePlayerStatus follows the same two rules as the Play's status
+// writer: an unchanged status is not written, and a conflict earns
+// one retry. The Players watch wakes the pass on every change, this
+// operator's own status writes included, so a needless write would run
+// one more pass, and the skip also spares the API server a write per
+// settled Player every pass.
+//
+// versions is the memo of the Player store (objectcache.go), which notes
+// each copy the API server answers, so the next pass composes the
+// remembered screen and Sinks from a copy at least as new as this write.
+// A nil memo notes nothing.
+func writePlayerStatus(c *Client, versions *versionMemo, player *Player, desired PlayerStatus) error {
+	var compared error
+	_, err := settleStatus(c, versions, playerPath(player.Metadata.Namespace, player.Metadata.Name), player,
+		func(held *Player) bool {
+			same, err := samePlayerStatus(held.Status, desired)
+			if err != nil {
+				compared = err
+				return false
+			}
+			if same {
+				return false
+			}
+			held.Status = desired
+			return true
+		})
+	if compared != nil {
+		return compared
+	}
+	return err
+}
+
+// samePlayerStatus compares the marshaled form, because that is what
+// the API server stores and what omitempty decides.
+func samePlayerStatus(current, desired PlayerStatus) (bool, error) {
+	was, err := json.Marshal(current)
+	if err != nil {
+		return false, err
+	}
+	wants, err := json.Marshal(desired)
+	if err != nil {
+		return false, err
+	}
+	return string(was) == string(wants), nil
+}

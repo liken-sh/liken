@@ -1,0 +1,162 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
+	mpv := useMPV(t)
+	useSocket(t, "/tmp/test-mpv.sock")
+
+	cases := []struct {
+		name    string
+		start   string
+		verbose string
+		items   []string
+		blocks  []json.RawMessage
+		want    []string
+	}{
+		{
+			name:  "a remote film and a local one",
+			items: []string{"https://media.example.net/one.mkv", "/media/0/two.mkv"},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--input-conf=memory://CLOSE_WIN quit 7",
+				"--quiet",
+				"--", "https://media.example.net/one.mkv", "/media/0/two.mkv",
+			},
+		},
+		{
+			// A run of nothing but music blanks mpv's video, so the display
+			// composes the whole frame instead of annotating a framed cover.
+			// The window is forced open over the blanked video, because mpv
+			// opens none for a run with no video track.
+			name:  "an album and a track, both music",
+			items: []string{"/ipc/album-1.edl", "/media/1/track.flac"},
+			blocks: []json.RawMessage{
+				json.RawMessage(`{"type":"music","hint":"album"}`),
+				json.RawMessage(`{"type":"music"}`),
+			},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--input-conf=memory://CLOSE_WIN quit 7",
+				"--quiet",
+				"--vid=no", "--force-window=yes",
+				"--", "/ipc/album-1.edl", "/media/1/track.flac",
+			},
+		},
+		{
+			// One film in the list keeps video on for the whole run.
+			name:  "a film beside an album",
+			items: []string{"/media/1/film.mkv", "/ipc/album-2.edl"},
+			blocks: []json.RawMessage{
+				json.RawMessage(`{"type":"video","hint":"movie"}`),
+				json.RawMessage(`{"type":"music","hint":"album"}`),
+			},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--input-conf=memory://CLOSE_WIN quit 7",
+				"--quiet",
+				"--", "/media/1/film.mkv", "/ipc/album-2.edl",
+			},
+		},
+		{
+			// The declared start becomes --start ahead of the items, so
+			// the first file begins where the spec says.
+			name:  "the spec declares a start",
+			start: "0:10:00",
+			items: []string{"/media/0/film.mkv"},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--input-conf=memory://CLOSE_WIN quit 7",
+				"--quiet",
+				"--start=0:10:00",
+				"--", "/media/0/film.mkv",
+			},
+		},
+		{
+			// MEDIA_PLAYER_VERBOSE drops --quiet from the list, so mpv prints
+			// its status line into the pod log, and the shim adds no -v.
+			name:    "the operator asks for mpv's full output",
+			verbose: "1",
+			items:   []string{"/media/0/film.mkv"},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--osc=no",
+				"--load-console=no",
+				"--osd-font=Source Sans 3",
+				"--input-conf=memory://CLOSE_WIN quit 7",
+				"--", "/media/0/film.mkv",
+			},
+		},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			t.Setenv(playStartVariable, each.start)
+			t.Setenv(playerVerboseVariable, each.verbose)
+			argv, err := playerArgv(each.items, each.blocks)
+			mustSucceed(t, err)
+			// argv[0] is the resolved binary, so the want list is the
+			// mpv path followed by the arguments the shim built.
+			mustMatchAll(t, argv, append([]string{mpv}, each.want...))
+		})
+	}
+}
+
+func TestPlayerArgvFailsWhenTheImageCarriesNoMPV(t *testing.T) {
+	was := mpvBinary
+	t.Cleanup(func() { mpvBinary = was })
+	mpvBinary = "definitely-not-a-real-mpv-binary"
+
+	_, err := playerArgv([]string{"/media/0/film.mkv"}, nil)
+	mustFail(t, err)
+}
+
+// useMPV writes a stand-in mpv the shim can resolve, points mpvBinary
+// at it, and returns its path. The stand-in never runs; playerArgv only
+// resolves the path, so the file's contents do not matter, only that it
+// is executable.
+func useMPV(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-mpv")
+	mustSucceed(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755))
+	was := mpvBinary
+	t.Cleanup(func() { mpvBinary = was })
+	mpvBinary = path
+	return path
+}
+
+// useSocket moves the mpv IPC socket path for the length of one test,
+// so the shim writes the --input-ipc-server flag the test expects.
+func useSocket(t *testing.T, path string) {
+	t.Helper()
+	was := mpvSocketPath
+	t.Cleanup(func() { mpvSocketPath = was })
+	mpvSocketPath = path
+}

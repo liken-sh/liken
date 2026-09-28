@@ -1,0 +1,144 @@
+---
+name: mapping-a-controller
+description: "Declare a Remote, find the codes a controller emits with discovery, and write a Keymap row for each button the base mapping gets wrong. Use when adding a paired controller to a Player, or when a controller's button does the wrong thing or nothing."
+---
+
+This skill is the guide at https://media.liken.sh/docs/guides/mapping-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+
+# Map a new controller
+
+A controller works before it has a `Keymap`. The standing pod passes
+every `KEY_*` code through under the kernel's own name, and turns the
+hat axes into the arrows. It reads a gamepad's south and east buttons
+as enter and back. This guide finds the codes a controller emits and
+writes a `Keymap` row only for a control the base gets wrong or
+leaves out. At the end, every button the controller has does what its
+label says.
+
+You need:
+
+* The operator and its bus, from the
+  [install](https://media.liken.sh/docs/guides/install/).
+* The [`bluetooth-operator`](https://bluetooth.liken.sh), with the
+  controller paired to a machine. An infrared or CEC remote has no
+  device to claim, because no hardware operator publishes one.
+* `kubectl` access to the namespace.
+
+The controller keeps working while you map it. Discovery changes
+what the pod logs and leaves what it publishes the same, so a
+controller in discovery still drives its unit.
+
+## Declare the Remote
+
+A `Remote` needs no `Keymap` to work. Declare it with the device
+alone, using your cluster's class for controllers. The arrows, OK,
+back, the volume keys, and every other control the controller reports
+under a kernel name already work:
+
+    kubectl apply -f - <<EOF
+    apiVersion: media.liken.sh/v1alpha1
+    kind: Remote
+    metadata:
+      name: den-remote
+      namespace: house
+    spec:
+      device:
+        class: bluetooth-input
+    EOF
+
+## Turn on discovery
+
+    kubectl patch remote den-remote --type=merge \
+      -p '{"spec":{"discovery":true}}'
+
+The patch replaces the controller pod, which drops controller input
+for a few seconds. The new pod stays `Pending` until the controller
+connects for the first time, so press a button to wake it.
+
+## Press every button
+
+Follow the pod's log and press each button in turn:
+
+    kubectl logs -f den-remote-remote
+
+The pod logs one verdict line per input node, then the node
+connecting, then each press:
+
+    remote: event3 "Handheld Remote" keep: 58 key codes, no hat axes
+    remote: controller connected on event3 "Handheld Remote": 58 key codes, no hat axes
+    remote: event3 "Handheld Remote" EV_KEY (1) BTN_SOUTH (304) press (1)
+    remote:   - press: BTN_SOUTH   # code 304
+    remote:     key: <a KEY_* name, or none>
+    remote: event3 "Handheld Remote": BTN_SOUTH (304) pressed, published KEY_ENTER to liken/media/remotes/house/den-remote/events
+
+The two indented lines are a `Keymap` row. Paste it under
+`spec.buttons`, or under `spec.axes` for a hat direction. Then
+replace the key line with the kernel name the control should report,
+or with `none` to drop the control. The last line names what the pod
+published for the press, so check it before you paste the row: it
+already publishes `KEY_ENTER` for `BTN_SOUTH` above, the base
+mapping's own answer for a gamepad's south button, so that row is not
+needed. Only a press earns this last line. A release or a repeat logs
+the raw line above it instead, naming the code and saying a Keymap
+binds the press alone.
+
+If the controller has modes, press every button in every mode. A
+combined remote can emit different codes for one button per mode. An
+air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode, and
+`KEY_ENTER` in keys mode. `KEY_ENTER` passes on its own. `BTN_LEFT`
+is a mouse button and means nothing to a screen, so it needs a row
+that makes it `KEY_ENTER`.
+
+## Read the codes you did not press
+
+    kubectl get remote den-remote -o yaml
+
+`status.unbound` lists every declared control that the base and the
+`Keymap` together map to nothing. It includes a hat axis with no row,
+a control whose row sets `none`, and a code the kernel gives no name.
+A declared `KEY_*` code passes as itself, so it never appears in the
+list. A keyboard remote starts with an empty list. Each entry has the
+code, its evdev name, and its event type.
+
+## Write the Keymap
+
+Collect the rows into a `Keymap` for the model and apply it. This one
+renames the air-mouse click and gives the shell's escape key nothing
+to do:
+
+    kubectl apply -f - <<EOF
+    apiVersion: media.liken.sh/v1alpha1
+    kind: Keymap
+    metadata:
+      name: handheld-remote
+    spec:
+      buttons:
+        - press: BTN_LEFT
+          key: KEY_ENTER
+        - press: KEY_ESC
+          key: none
+    EOF
+
+Once the table reaches the pod, a press of the escape key logs what it
+drops instead of what it would otherwise pass through:
+
+    remote: event3 "Handheld Remote": KEY_ESC (1) pressed, published nothing, because the key table maps it to none
+
+A row on a gamepad button that a person holds, a bumper that seeks
+for example, adds a `repeat` block, because a gamepad never
+autorepeats in the kernel:
+
+    - press: BTN_TR
+      key: KEY_FASTFORWARD
+      repeat:
+        delay: 400ms
+        interval: 250ms
+
+Then name it on the `Remote` and turn discovery off:
+
+    kubectl patch remote den-remote --type=merge \
+      -p '{"spec":{"keymap":"handheld-remote","discovery":false}}'
+
+`status.unbound` remains after discovery ends, so it continues to show
+which controller controls do nothing. On a keyboard remote, it lists
+only the controls you dropped with `none`.

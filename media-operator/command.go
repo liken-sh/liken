@@ -1,0 +1,963 @@
+package main
+
+// The command sidecar is the playback pod's one owner of mpv's IPC
+// socket, a native sidecar beside mpv. It subscribes to the Play's
+// commands topic, writes each named command to mpv through the JSON IPC
+// socket on the emptyDir the two containers share, and reads mpv's
+// property changes back off the same socket to publish the status and
+// availability. It holds no API credentials and reaches the control
+// plane only through the operator's subscription to the bus.
+//
+// The sidecar reads two kinds of input. It reads the events topic of
+// each controller the unit names, gated on the focus mark, and binds
+// the kernel's key names itself in keybindings.go. And it reads the
+// commands topic, which stays the surface any other program publishes
+// to, so it serves a phone or a Home Assistant integration the same
+// way it serves a gamepad. The report contains no API object: the Play
+// it belongs to is named by the topic, not by the body.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// reportInterval is the ceiling on how often the command sidecar
+// publishes a position while it advances. mpv sends a time-pos event
+// several times a second, and one report is a small QoS 0 message, so
+// the command sidecar publishes the current position to the bus once
+// a second. The Play resource updates less often: the operator wakes its reconcile
+// loop only on a pause or an item change, and a bare position advance
+// waits for the operator's tick. So the bus is the live plane and the
+// resource is the throttled one, and a consumer that wants a smooth
+// position reads the bus.
+var reportInterval = 1 * time.Second
+
+// busFlushGrace is how long the command sidecar holds the bus open
+// after it publishes the two closing messages, so the writer goroutine
+// drains them before the process exits. The messages are QoS 0 and
+// carry no ack, so this window is the only signal the sidecar has that
+// they left. The empty status is the one that needs the window: the
+// Last Will publishes offline on an unclean exit, but nothing except
+// this publish clears the retained report a finished Play would
+// otherwise leave.
+var busFlushGrace = 500 * time.Millisecond
+
+// exitGrace is how long the sidecar holds mpv alive between the ending
+// it publishes and the quit it sends, so the compositor has a live
+// surface to fade out. The label the operator patches onto the pod
+// reaches display-operator through the API server and its pod watch in
+// well under 200 ms, and a 250 ms exit fade fits in what is left of the
+// 500 ms. mpv draws the film through the whole window, which is what a
+// fade over the browser needs under it.
+//
+// It is a constant and not a Player setting, because a person never
+// tunes it: it is the compositor's time to act. The commander holds it
+// in a field so a test proves the order without waiting out the whole
+// window.
+const exitGrace = 500 * time.Millisecond
+
+// commander holds the command sidecar's two sides: the connection to
+// mpv that both the reporter and the command handler write, and the
+// last-known report the connect callback re-publishes on a reconnect.
+// Two goroutines write mpv's socket, so mpvMutex serializes them: a
+// command and an observe request must not interleave their bytes. One
+// goroutine reads the last report and another writes it, so reportMutex
+// covers that pair.
+type commander struct {
+	statusTopic       string
+	availabilityTopic string
+	commandsTopic     string
+
+	// The Player's commands topic, where the sidecar publishes the ask a
+	// select on the up-next offer makes. It is empty for a pod that read no
+	// Player, and that pod publishes no ask.
+	playerCommandsTopic string
+
+	// The Play's next block as the operator wrote it into the pod, empty for
+	// a Play that carries none. The display draws the offer from it, and the
+	// ask carries its request back.
+	next json.RawMessage
+
+	// The unit's volume topic, empty for a Player with no sinks.
+	// Empty is the speaker gate: the sidecar subscribes to no level,
+	// applies none, and answers no volume press.
+	volumeTopic string
+
+	// The topic the owner mark stands on, set whenever the volume topic
+	// is.
+	volumeOwnerTopic string
+
+	// The unit's controllers, keyed by the events topic each one
+	// publishes on, and the Player this Play runs on, which is the value
+	// a mark must hold for a press to act. A pod for a Play whose Player
+	// names no Remote holds none of this and answers no press.
+	remotes    map[string]playRemote
+	playerName string
+
+	// The last mark each controller's focus topic delivered, keyed by
+	// that controller's events topic. It takes a lock of its own,
+	// because a press reads it while the bus reader writes it.
+	focusMu sync.Mutex
+	marks   map[string]string
+
+	bus *Bus
+
+	// The items' presentation blocks in playlist order, baked into the
+	// pod. Index i is item i's block text, which the sidecar forwards to
+	// the display as the playlist reaches each item.
+	presentations []json.RawMessage
+
+	mpvMutex sync.Mutex
+	mpv      net.Conn
+
+	// The request ids the sidecar gave the commands a person caused, and
+	// the line each one waits to log on mpv's answer. They sit under
+	// mpvMutex, because the id is given as the command is written.
+	requestSeq int
+	requests   map[int]*mpvRequest
+
+	// Where the sidecar writes one line per operation a person caused. It
+	// is a field so a test reads what the pod would print.
+	log io.Writer
+
+	// The repeats each held control has acted on, keyed by its events topic
+	// and its key name. A repeat writes no line of its own, so the release
+	// writes one line for the whole hold. It sits under focusMu, which the
+	// press path already takes.
+	holds map[string]int
+
+	// podUID is this pod's own UID, stamped on every report and on the
+	// availability. The operator takes a message only from the run's
+	// current pod, and the UID is how it tells that pod from an older one
+	// under the same name.
+	podUID string
+
+	reportMutex sync.Mutex
+	lastReport  playReport
+	haveReport  bool
+
+	// The last state the volume topic delivered, and whether one
+	// arrived at all. A press computes from this and never from what
+	// mpv reports, which keeps a held button from becoming its own
+	// echo. The bus reader writes it and a press reads it, so it
+	// takes a lock of its own.
+	volumeMutex sync.Mutex
+	volume      volumeState
+	haveVolume  bool
+
+	// volumeOwned is the owner mark: equipment controls the level, so a state
+	// the topic delivers is recorded and never written to mpv. volumeOwner is
+	// the owner the mark names, for the lines that say where a level went.
+	volumeOwned bool
+	volumeOwner string
+
+	// volumeCaughtUp marks that this bus session has already
+	// delivered a level. The first message of a session is the
+	// broker's retained catch-up, a restore and not a press, so it
+	// applies silently and the display draws no indicator at pod
+	// start. Every message after it signals the display.
+	volumeCaughtUp bool
+
+	// ended is set once any of the three endings has happened. It is held
+	// rather than sent and forgotten, so every later report of this run
+	// carries the mark too and a reconnect re-publishes it. It sits under
+	// reportMutex because the ending arrives on the message goroutine or
+	// on the run's own goroutine, and the reporter reads it on each send.
+	ended bool
+
+	// grace is how long exit holds mpv alive between the ending and the
+	// quit. Every playback pod sets it from exitGrace, which says why the
+	// window exists. A zero grace quits at once, which is what the block
+	// server and a test that asserts nothing about the fade run with.
+	grace time.Duration
+
+	// item is the playlist position that plays now, which the resend answers
+	// with and the offer is sent after. It sits under itemMutex, because the
+	// reporter goroutine writes it while the message goroutine reads it.
+	itemMutex sync.Mutex
+	item      int
+
+	// metrics is nil for the block server and for a test that has no use
+	// for it, so drive and runReporter guard every call through it. A
+	// deployed playback pod always sets it: runCommand builds one on
+	// every start, the way it builds a bus connection on every start.
+	metrics *commandMetrics
+}
+
+// runCommand connects to the bus, drives mpv's IPC socket, and reports
+// the run. It returns when mpv's socket closes or the kubelet's grace
+// signal arrives, and exits zero: the command sidecar is a native
+// sidecar, and mpv's own exit code is the pod's outcome.
+func runCommand() {
+	namespace := os.Getenv(playNamespaceVariable)
+	name := os.Getenv(playNameVariable)
+	busAddress := os.Getenv(busAddressVariable)
+	base := os.Getenv(topicBaseVariable)
+	if base == "" {
+		base = defaultTopicBase
+	}
+
+	// The kernel runs no default action for a signal sent to PID 1, and
+	// the command sidecar is its container's PID 1.
+	//
+	// The pod's termination signal runs the exit path, so the ending
+	// reaches the bus and mpv quits before the grace period runs out. mpv
+	// gets the same signal from the kubelet in its own container, because
+	// the player image's shim execs mpv, and mpv installs a SIGTERM handler
+	// of its own.
+	runCtx, stopRun := context.WithCancel(context.Background())
+	defer stopRun()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(signals)
+
+	// The sidecar's own metrics: layer 1 alone, on the port
+	// deploy/monitoring/podmonitor-screens.yaml scrapes across every
+	// namespace a Player lives in. The operator sets both variables on
+	// the command container the way it sets every other pod setting, so
+	// an unset address here answers a workstation harness with no
+	// listener rather than a default port nothing chose.
+	metrics := newCommandMetrics(os.Getenv(mediaVersionVariable))
+	metrics.serve(os.Getenv(metricsAddressVariable))
+
+	cmd := &commander{
+		statusTopic:       playStatusTopic(base, namespace, name),
+		podUID:            os.Getenv(podUIDVariable),
+		metrics:           metrics,
+		availabilityTopic: playAvailabilityTopic(base, namespace, name),
+		commandsTopic:     playCommandsTopic(base, namespace, name),
+		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
+		volumeOwnerTopic:  os.Getenv(playerVolumeOwnerTopicVariable),
+		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
+		next:              parseNext(os.Getenv(nextVariable)),
+		grace:             exitGrace,
+		playerName:        os.Getenv(playerNameVariable),
+		remotes: playRemoteMap(
+			os.Getenv(remoteEventsTopicsVariable),
+			os.Getenv(remoteFocusTopicsVariable)),
+		marks: map[string]string{},
+		log:   os.Stdout,
+	}
+	// The ask goes on the Player's own topic. The sidecar builds it from
+	// the base, the namespace, and the unit it plays on, the way it builds
+	// its own status topic. A pod that read no unit builds none and
+	// publishes no ask.
+	if cmd.playerName != "" {
+		cmd.playerCommandsTopic = playerCommandsTopic(base, namespace, cmd.playerName)
+	}
+
+	// The bus runs on its own context, not the signal context, so the
+	// two closing publishes still have a live connection to leave on
+	// after the grace signal ends the report side.
+	busCtx, stopBus := context.WithCancel(context.Background())
+	cmd.bus = newBus(busAddress, "play-"+namespace+"-"+name, cmd.will(), cmd.onConnect, cmd.handle)
+	// The subscription is made once. The Bus remembers the filter and
+	// re-sends it on every reconnect, so a broker restart does not need
+	// the command sidecar to subscribe again.
+	cmd.bus.Subscribe(cmd.commandsTopic)
+	// The volume topic is retained, so the broker delivers the
+	// unit's current level on this subscribe and the level reaches
+	// mpv with no request of its own. A Player with no sinks names no
+	// topic, so this pod subscribes to no level at all.
+	if cmd.volumeTopic != "" {
+		cmd.bus.Subscribe(cmd.volumeTopic)
+	}
+	// The mark is retained too, and it arrives in either order against the
+	// level, so each handler answers for both orders.
+	if cmd.volumeOwnerTopic != "" {
+		cmd.bus.Subscribe(cmd.volumeOwnerTopic)
+	}
+	// The controllers' own topics, two per Remote the unit names.
+	cmd.subscribeRemotes(cmd.bus)
+	go cmd.bus.Run(busCtx)
+
+	// The handler runs beside the report side, because the exit path
+	// publishes on the bus connection the report side keeps open.
+	go cmd.exitOnSignal(runCtx, signals, stopRun)
+
+	cmd.report(runCtx)
+
+	// The run is over: mpv ended or the kubelet is terminating the pod.
+	// report published the ending report first, so a subscriber that is
+	// listening has already read the mark. Clear the retained status so a
+	// finished Play leaves no report that reads as still playing, mark the
+	// availability offline, and hold the bus open long enough to send both
+	// before the connection ends.
+	cmd.bus.Publish(cmd.statusTopic, nil, true)
+	cmd.bus.Publish(cmd.availabilityTopic, playAvailability(availabilityOffline, cmd.podUID), true)
+	time.Sleep(busFlushGrace)
+	stopBus()
+}
+
+// will is the Last Will the broker publishes when this pod's session dies
+// without a clean disconnect: offline, retained, with the pod's UID.
+func (c *commander) will() *busWill {
+	return &busWill{
+		Topic:    c.availabilityTopic,
+		Payload:  playAvailability(availabilityOffline, c.podUID),
+		Retained: true,
+	}
+}
+
+// onConnect refills the broker the moment a session reaches a CONNACK.
+// It publishes online, and re-publishes the last-known report, because
+// the broker drops its retained set on a restart and a reconnect must
+// leave the current status behind again.
+//
+// It re-publishes the level too, once the topic delivered one. The pod
+// holds the level the room hears, and after a broker restart the
+// broker holds none, so the operator would seed unity and the film
+// would jump to full volume. A first session holds no level yet and
+// publishes none, so a pod that starts writes nothing it did not read.
+func (c *commander) onConnect(bus *Bus) {
+	// A fresh session redelivers the retained level, so that message
+	// is a catch-up again and applies silently again.
+	c.volumeMutex.Lock()
+	c.volumeCaughtUp = false
+	held, state := c.haveVolume, c.volume
+	c.volumeMutex.Unlock()
+	bus.Publish(c.availabilityTopic, playAvailability(availabilityOnline, c.podUID), true)
+	if held && c.volumeTopic != "" {
+		if payload, err := marshalVolumeState(state); err == nil {
+			bus.Publish(c.volumeTopic, payload, true)
+		}
+	}
+	c.reportMutex.Lock()
+	payload, have := c.marshalLastReport()
+	c.reportMutex.Unlock()
+	if have {
+		bus.Publish(c.statusTopic, payload, true)
+	}
+}
+
+// marshalLastReport encodes the last-known report, and reports whether
+// there is one. The caller holds reportMutex, so the payload and the
+// state it came from cannot diverge. A report that will not marshal is
+// logged and treated as no report at all, because there is nothing to put
+// on the bus in its place.
+func (c *commander) marshalLastReport() ([]byte, bool) {
+	if !c.haveReport {
+		return nil, false
+	}
+	payload, err := json.Marshal(c.lastReport)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "command: report: %v\n", err)
+		return nil, false
+	}
+	return payload, true
+}
+
+// handle sorts one inbound message by its topic. The volume topic and
+// the controllers' topics carry payloads that are not the command
+// vocabulary, so each is read before it. A payload that does not
+// decode, or an action this build has no command for, writes nothing,
+// so a newer program's command degrades to no effect rather than a
+// crash.
+func (c *commander) handle(topic string, payload []byte) {
+	if c.volumeOwnerTopic != "" && topic == c.volumeOwnerTopic {
+		c.applyVolumeOwner(payload)
+		return
+	}
+	if c.volumeTopic != "" && topic == c.volumeTopic {
+		c.applyVolume(payload)
+		return
+	}
+	if c.handleRemote(topic, payload) {
+		return
+	}
+	trigger := "a message on " + topic
+	var command mediaCommand
+	if err := json.Unmarshal(payload, &command); err != nil {
+		logLine(c.log, "command: %s ignored, because it does not decode: %v", trigger, err)
+		return
+	}
+	c.apply(trigger, command, false)
+}
+
+// apply is the one path from a command to mpv, for a press this pod
+// read off a controller and for a command another program published
+// alike. A volume step and a mute leave without reaching mpv: they
+// publish the unit's next state, and the subscription applies it, so
+// the pod that pressed and every pod that only listened run one apply
+// path. A seek and a chapter jump send a second command, because they
+// carry no-osd and the sidecar summons the display to draw the new
+// position.
+//
+// trigger names what asked, for the line the command earns. A quiet
+// command is a repeat of a held control: it acts the same and writes no
+// line, because the press already wrote one and the release writes the
+// count.
+func (c *commander) apply(trigger string, command mediaCommand, quiet bool) {
+	if isVolumeAction(command.Action) {
+		c.pressVolume(trigger, command, quiet)
+		return
+	}
+	// A home command publishes the ask on the Player's commands topic
+	// and then runs the ending path.
+	if command.Action == actionHome {
+		c.home(trigger)
+		return
+	}
+	mpv := commandFor(command)
+	if mpv == nil {
+		logLine(c.log, "command: %s ignored, because this build has no command for the action %q", trigger, command.Action)
+		return
+	}
+	if quiet {
+		c.command(repeatOf(command, mpv))
+	} else {
+		c.request(fmt.Sprintf("command: %s: %s", trigger, describeCommand(command)), mpv)
+	}
+	if feedback := feedbackFor(command); feedback != nil {
+		c.command(feedback)
+	}
+}
+
+// repeatWord marks a navigation word that a held key repeated. The
+// display acts on it the same as on the press, and it logs the press
+// alone, so a held arrow is one line on each side of the socket.
+const repeatWord = "repeat"
+
+// repeatOf marks the repeat of a navigation word for the display. Every
+// other command mpv runs itself, and mpv takes no extra word.
+func repeatOf(command mediaCommand, mpv []any) []any {
+	if isNavigation(command.Action) {
+		return append(mpv, repeatWord)
+	}
+	return mpv
+}
+
+// isNavigation names the six words the display answers.
+func isNavigation(action string) bool {
+	switch action {
+	case actionUp, actionDown, actionLeft, actionRight, actionSelect, actionBack:
+		return true
+	}
+	return false
+}
+
+// report is the reporting side of the run. It dials mpv, observes the
+// four properties the status is made of, and turns each change into a
+// report on the bus. It ends when mpv's socket closes, which is how mpv
+// says the run is over, or when the context ends on the grace signal.
+func (c *commander) report(ctx context.Context) {
+	conn, err := dialMPV(ctx, mpvSocketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "command: no reports for this run: %v\n", err)
+		return
+	}
+	defer conn.Close()
+	// The read blocks until mpv writes, which can be minutes apart in a
+	// paused film, so closing the socket is what ends the read when the
+	// context ends. A running mpv ends the read by closing its own end.
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
+
+	c.drive(ctx, conn, c.send)
+	// An exit this sidecar sent closes the socket too, and that run has
+	// its line already.
+	if ctx.Err() == nil && !c.runEnded() {
+		logLine(c.log, "command: mpv closed its socket, so the run ends")
+	}
+
+	// drive returns for one of two reasons, and each is an ending: mpv
+	// reached the end of the last item and closed its socket, or the
+	// kubelet's SIGTERM ended the context. Both take the exit path, so the
+	// mark goes out here with the position the last report carried, before
+	// runCommand clears the retained status and marks the pod offline. A
+	// run that already published its ending waits no second grace, and
+	// drive drops the mpv connection as it returns, so the quit reaches
+	// nothing here, which is the right answer for a run mpv has already
+	// left.
+	c.exit()
+}
+
+// drive is the socket loop the reporter and the standalone block server share.
+// It observes the properties, reads the events, folds each into a report
+// through send, and forwards the current item's block. The reporter passes its
+// bus-backed send. The block server passes a send that reports nothing, so the
+// same forwarding code runs with or without a bus.
+func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender) {
+	// observeProperties writes the socket, and so does the commands
+	// handler, so the observe runs under the same mutex the handler
+	// takes. The connection is set first, so a command that arrives
+	// mid-observe waits on the mutex rather than reaching a nil socket.
+	if err := c.attach(conn); err != nil {
+		fmt.Fprintf(os.Stderr, "command: no reports for this run: %v\n", err)
+		return
+	}
+	logLine(c.log, "command: connected to mpv's socket")
+	defer c.detach()
+	// The decode series describe this connection's mpv alone, so they
+	// clear the moment it drops, the same instant runCommand marks the
+	// Play offline. A run that reconnects starts the two series over
+	// from mpv's fresh observe, exactly as it starts the frame baseline
+	// over.
+	if c.metrics != nil {
+		defer c.metrics.clearDecode()
+	}
+	// The socket is live now, so the state the bus already delivered
+	// reaches mpv here. Every message before this point found no
+	// socket and wrote nothing.
+	c.applyHeldVolume()
+
+	changes := make(chan propertyChange, 16)
+	messages := make(chan clientMessage, 16)
+	replies := make(chan mpvReply, 16)
+	reading := make(chan struct{})
+	go func() {
+		defer close(reading)
+		defer close(changes)
+		defer close(messages)
+		defer close(replies)
+		if err := readEvents(ctx, conn, changes, messages, replies); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "command: mpv's socket: %v\n", err)
+		}
+	}()
+
+	// The message goroutine answers the display's exit press and its block
+	// requests off the same socket the reporter reads. It ends when the
+	// socket closes and the reader closes the messages channel.
+	go c.serveMessages(messages)
+	go c.serveReplies(replies)
+
+	runReporter(ctx, changes, send, c.present, c.metrics, c.log)
+	<-reading
+}
+
+// serveMessages answers the three things the display broadcasts: the exit
+// press, its select on the offer, and its request for the current block. It
+// runs beside the reporter, so an answer never holds up the position reports.
+func (c *commander) serveMessages(messages <-chan clientMessage) {
+	for message := range messages {
+		c.serveMessage(message.Args)
+	}
+}
+
+// serveMessage answers one broadcast.
+func (c *commander) serveMessage(args []string) {
+	if isExitMessage(args) {
+		logLine(c.log, "command: the display asked to end the run, because back was pressed at the bare film")
+		c.exit()
+		return
+	}
+	if isNextRequest(args) {
+		c.publishNext()
+		return
+	}
+	if isPresentationRequest(args) {
+		c.resendPresentation()
+	}
+}
+
+// resendPresentation answers the display's request with the block for the
+// item that is playing. It sends nothing before the first item, because the
+// reporter presents that item as soon as mpv says which one plays, so a
+// block is on its way already.
+func (c *commander) resendPresentation() {
+	c.itemMutex.Lock()
+	item := c.item
+	c.itemMutex.Unlock()
+	if item < 1 {
+		return
+	}
+	c.command(presentationCommand(c.blockForItem(item)))
+	// The offer replays with the presentation, because the display asks
+	// for both with one request when its script loads.
+	c.sendNext()
+}
+
+// attach sets the mpv connection and observes the properties under one
+// lock, so the first writes to the socket cannot interleave with a
+// command the handler sends the moment the connection is live.
+func (c *commander) attach(conn net.Conn) error {
+	c.mpvMutex.Lock()
+	defer c.mpvMutex.Unlock()
+	c.mpv = conn
+	return observeProperties(conn, observedProperties)
+}
+
+// detach forgets the connection when the run ends, so a late command
+// writes nothing rather than a closed socket. A line that still waits
+// for mpv's answer is logged now, because the answer will not come.
+func (c *commander) detach() {
+	c.mpvMutex.Lock()
+	c.mpv = nil
+	c.abandonRequests()
+	c.mpvMutex.Unlock()
+}
+
+// command writes one mpv command under the mutex. A command that
+// arrives before mpv is dialed, or after the run ends, finds a nil
+// connection and writes nothing.
+func (c *commander) command(command []any) {
+	c.mpvMutex.Lock()
+	defer c.mpvMutex.Unlock()
+	if c.mpv == nil {
+		return
+	}
+	if err := sendCommand(c.mpv, command); err != nil {
+		fmt.Fprintf(os.Stderr, "command: mpv command: %v\n", err)
+	}
+}
+
+// parsePresentations reads the baked array into an indexed slice. An
+// unset or malformed value leaves no blocks, so every item forwards the
+// empty object and the display falls back to the file.
+func parsePresentations(value string) []json.RawMessage {
+	if value == "" {
+		return nil
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal([]byte(value), &blocks); err != nil {
+		return nil
+	}
+	return blocks
+}
+
+// present hands the current item's block to the display over the mpv
+// socket.
+func (c *commander) present(item int) {
+	first := c.reachItem(item)
+	c.command(presentationCommand(c.blockForItem(item)))
+	// One offer serves the whole run, so it is sent once, after the first
+	// item's presentation.
+	if first {
+		c.sendNext()
+	}
+}
+
+// reachItem records the playlist position that plays now, so a resend answers
+// with that item's block.
+//
+// The return value says whether the run reached its first item, which is
+// the moment the offer is sent.
+func (c *commander) reachItem(item int) bool {
+	c.itemMutex.Lock()
+	defer c.itemMutex.Unlock()
+	if item == c.item {
+		return false
+	}
+	first := c.item == 0
+	c.item = item
+	return first
+}
+
+// blockForItem returns one item's block, or the empty object when the
+// item falls outside the baked list. The item counts from one, so its
+// index is one less.
+func (c *commander) blockForItem(item int) json.RawMessage {
+	index := item - 1
+	if index < 0 || index >= len(c.presentations) {
+		return json.RawMessage(emptyPresentation)
+	}
+	return c.presentations[index]
+}
+
+// send publishes one report to the status topic, retained, and holds it
+// as the last known report. A restarted operator reads the retained
+// report back from the broker, and a reconnect re-publishes the held
+// report through onConnect, so neither loses a running Play's place.
+func (c *commander) send(report playReport) error {
+	c.reportMutex.Lock()
+	// The reporter processes mpv's property changes without setting the
+	// ending flag. Set it here so every report after playback ends includes
+	// the flag, whichever report a subscriber receives.
+	if c.ended {
+		report.Ended = true
+	}
+	// The held report carries the UID too, so the ending that endRun
+	// builds from it names this pod.
+	report.Pod = c.podUID
+	payload, err := json.Marshal(report)
+	if err == nil {
+		c.lastReport = report
+		c.haveReport = true
+	}
+	c.reportMutex.Unlock()
+	if err != nil {
+		return err
+	}
+	c.bus.Publish(c.statusTopic, payload, true)
+	return nil
+}
+
+// endRun marks the run over and publishes the mark at once, retained,
+// beside the numbers the last report carried. Every ending calls it: the
+// exit press, mpv reaching the end of the last item, and the kubelet's
+// SIGTERM.
+//
+// The operator turns the mark into the Player's idle status, which is
+// what the idle screen client draws its return from. The pod takes
+// seconds to terminate, and an ending read from the pod's own death
+// would leave a dead film on the screen for every one of them.
+//
+// A run that never reported publishes nothing, the same rule the reporter
+// follows: mpv has not said which item plays, so there are no numbers to
+// carry, and the pod's own death is what ends such a run. The block server
+// runs this same code with no bus, and it publishes nothing either.
+//
+// The answer is whether this call is the one that marked the run over. A
+// second ending of the same run publishes the mark again, which is the
+// value the topic already holds, and exit reads the answer to know that
+// the grace is spent.
+func (c *commander) endRun() bool {
+	if c.bus == nil {
+		return false
+	}
+	c.reportMutex.Lock()
+	first := !c.ended
+	c.ended = true
+	c.lastReport.Ended = true
+	last := c.lastReport
+	payload, have := c.marshalLastReport()
+	c.reportMutex.Unlock()
+	if have {
+		c.bus.Publish(c.statusTopic, payload, true)
+		if first {
+			logLine(c.log, "command: run ended at item %d, %s, published the ending to %s",
+				last.Item, last.Position, c.statusTopic)
+		}
+	}
+	return first
+}
+
+// runEnded reports whether an ending has marked this run over.
+func (c *commander) runEnded() bool {
+	c.reportMutex.Lock()
+	defer c.reportMutex.Unlock()
+	return c.ended
+}
+
+// exit ends one run: it publishes the ending, waits out the grace, and
+// then sends mpv the quit. Every ending takes this path, so every ending
+// fades the same way: the display's exit press, the natural end of the
+// last item, and the kubelet's termination signal.
+//
+// The order is the whole point. The ending reaches the bus first, so the
+// operator patches the ending label onto the pod while the film is still
+// on the screen, and the compositor fades a surface that still draws.
+// The sidecar answers the display's exit message here rather than
+// letting the display quit mpv itself, because the sidecar is the one
+// that publishes the ending, so it is the only one that can put the
+// ending first.
+//
+// The exit code is zero, so the pod ends Completed, the outcome a film
+// that ran to its end gives, and not Error.
+func (c *commander) exit() {
+	// The grace is one window per run, because it is the compositor's time
+	// to act on one ending. So only the ending that marked the run over
+	// waits it out, and a later call on the same run sends its quit at
+	// once: the label is long since on the pod, and the fade has had the
+	// whole window already.
+	if c.endRun() {
+		time.Sleep(c.grace)
+	}
+	c.command(exitCommand())
+}
+
+// exitOnSignal runs the exit path on the pod's termination signal: the
+// ending reaches the bus, mpv quits, and the run's context ends, so the
+// sidecar clears the retained topics the way every other ending does. A
+// run that ends first ends this handler with nothing to do.
+func (c *commander) exitOnSignal(ctx context.Context, signals <-chan os.Signal, stop context.CancelFunc) {
+	select {
+	case <-ctx.Done():
+	case <-signals:
+		logLine(c.log, "command: the kubelet asked the pod to stop, so the run ends")
+		c.exit()
+		stop()
+	}
+}
+
+// playbackState is the run at one moment, as the command sidecar holds
+// it. The fields are the report's fields, held between events, because
+// each event carries one property and a report carries all of them.
+type playbackState struct {
+	paused   bool
+	item     int
+	position string
+	duration string
+
+	// The language of the audio track and the subtitle track mpv chose. Each stays
+	// set once mpv reports it.
+	audioLanguage    string
+	subtitleLanguage string
+}
+
+// reportable holds reports back until mpv has said which item plays.
+// mpv's playlist-pos counts from zero and reads -1 before anything
+// loads; the API counts from one, the way a person counts tracks, so an
+// item below one describes no playback at all.
+func (s playbackState) reportable() bool {
+	return s.item >= 1
+}
+
+func (s playbackState) report() playReport {
+	return playReport{
+		Paused:           s.paused,
+		Item:             s.item,
+		Position:         s.position,
+		Duration:         s.duration,
+		AudioLanguage:    s.audioLanguage,
+		SubtitleLanguage: s.subtitleLanguage,
+	}
+}
+
+// apply folds one property change into the state, and its return value
+// says whether the change earns a report at once. A pause and an item
+// change are the two things a person watching kubectl is waiting to
+// see, and both are rare. A position that advances is neither rare nor
+// surprising, so it waits for the interval.
+func (s *playbackState) apply(change propertyChange) bool {
+	if !change.known() {
+		return false
+	}
+	switch change.Name {
+	case "pause":
+		var paused bool
+		if err := json.Unmarshal(change.Data, &paused); err != nil {
+			return false
+		}
+		changed := paused != s.paused
+		s.paused = paused
+		return changed
+	case "playlist-pos":
+		var position int
+		if err := json.Unmarshal(change.Data, &position); err != nil || position < 0 {
+			return false
+		}
+		item := position + 1
+		changed := item != s.item
+		s.item = item
+		return changed
+	case "time-pos":
+		var seconds float64
+		if err := json.Unmarshal(change.Data, &seconds); err != nil {
+			return false
+		}
+		s.position = formatPosition(seconds)
+		return false
+	case "duration":
+		var seconds float64
+		if err := json.Unmarshal(change.Data, &seconds); err != nil {
+			return false
+		}
+		s.duration = formatPosition(seconds)
+		return false
+	case audioLanguageProperty:
+		var lang string
+		if err := json.Unmarshal(change.Data, &lang); err != nil {
+			return false
+		}
+		changed := lang != s.audioLanguage
+		s.audioLanguage = lang
+		return changed
+	case subtitleLanguageProperty:
+		var lang string
+		if err := json.Unmarshal(change.Data, &lang); err != nil {
+			return false
+		}
+		changed := lang != s.subtitleLanguage
+		s.subtitleLanguage = lang
+		return changed
+	}
+	return false
+}
+
+// formatPosition writes seconds as H:MM:SS, because the value's one job
+// is to be read in kubectl get output. The seconds are floored, not
+// rounded: a position that reads 0:00:01 while the first second still
+// plays is wrong in the direction a person notices.
+func formatPosition(seconds float64) string {
+	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 {
+		seconds = 0
+	}
+	whole := int(math.Floor(seconds))
+	return fmt.Sprintf("%d:%02d:%02d", whole/3600, whole%3600/60, whole%60)
+}
+
+// reportSender is how a report leaves the command sidecar. The loop
+// takes a function rather than the bus so a test catches the reports
+// with no broker at all.
+type reportSender func(playReport) error
+
+// itemPresenter is how a forwarded block leaves the loop, a function
+// like reportSender, so a test catches the forward with no mpv socket.
+type itemPresenter func(item int)
+
+// runReporter is the whole reporting rule in one loop: fold the change,
+// send it now when it is one of the two that matter, and otherwise send
+// no more than one report per interval. A send that fails is logged and
+// the run goes on, because the loss is the operator's view of the film
+// and not a reason to stop playing.
+//
+// metrics is nil for the block server and for a test with no use for it;
+// every call through it is guarded. It observes the four decode
+// properties that play no part in the report at all, alongside the
+// ones that do, because mpv delivers every property change on the
+// one channel.
+//
+// log takes one line for each change a person sees on the screen: the
+// film paused or resumed, a new item, a new audio or subtitle language.
+// Those are the answers to a person's press, whoever sent it: this
+// sidecar, the display, or mpv reaching the next item on its own. The
+// position and the decode properties write none.
+func runReporter(
+	ctx context.Context, changes <-chan propertyChange, send reportSender,
+	present itemPresenter, metrics *commandMetrics, log io.Writer,
+) {
+	var state playbackState
+	var sent time.Time
+	var presented int
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case change, open := <-changes:
+			if !open {
+				return
+			}
+			if metrics != nil {
+				metrics.observe(change)
+			}
+			before := state
+			atOnce := state.apply(change)
+			if !state.reportable() {
+				continue
+			}
+			if line := describeChange(before, state); line != "" {
+				logLine(log, "command: mpv reports %s", line)
+			}
+			// Forward the block on the first item and on every advance,
+			// keyed on the item and not the throttled position, so the
+			// display swaps its presentation the moment the playlist
+			// reaches a new item. The same advance ends the file mpv had
+			// open, so it clears the decode series the way a dropped
+			// connection does; the properties the new file's observe
+			// delivers next republish them.
+			if state.item != presented {
+				presented = state.item
+				present(state.item)
+				if metrics != nil {
+					metrics.clearDecode()
+				}
+			}
+			if !atOnce && time.Since(sent) < reportInterval {
+				continue
+			}
+			sent = time.Now()
+			if err := send(state.report()); err != nil {
+				fmt.Fprintf(os.Stderr, "command: report: %v\n", err)
+			}
+		}
+	}
+}

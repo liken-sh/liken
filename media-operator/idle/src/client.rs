@@ -1,0 +1,564 @@
+// The client the idle pod runs. It reads the unit's state off the bus, holds
+// it, and draws the idle screen.
+//
+// The screen draws the ground and nothing over it. What the client holds is
+// `Unit`, and every element reads its facts and its seconds from there.
+
+use std::convert::Infallible;
+
+use iced_wgpu::Renderer;
+use iced_widget::Canvas;
+use iced_winit::core::{Color, Element, Length, Theme};
+
+use media_screen::status::Activity;
+use media_screen::{Bus, Moment, Reader, reader};
+
+use crate::harness::Screen;
+use crate::idle::Idle;
+use crate::idle::preview::Keys;
+use crate::look;
+use crate::unit::{Arrival, Unit};
+use crate::wiring::Wiring;
+
+/// The name this client connects to the broker under, before the machine's
+/// own name is appended. A broker closes the older connection when two arrive
+/// under one identifier, so no two clients on one machine may share it.
+///
+/// It is also this client's `component` label on `liken_build_info`: the
+/// broker and a Prometheus both read the same one word for what this
+/// process is.
+pub const CLIENT: &str = "idle-screen";
+
+#[derive(Debug)]
+pub struct Client {
+    unit: Unit,
+    /// The subscription, or nothing when the operator named no broker. A run on
+    /// a workstation draws the seeds alone.
+    ///
+    /// It is the trait and not the reader itself, so a test folds real
+    /// moments and reads a real request for the shade with no socket
+    /// under it.
+    bus: Option<Box<dyn Bus>>,
+    /// The preview keys, on a run that binds them. They stand in for the bus
+    /// on a workstation, and the legend draws where they are bound.
+    keys: Option<Keys>,
+    /// The second of the frame being drawn. The view is a function of it, so
+    /// the tick records it and every element reads it.
+    at: f64,
+    /// How far the wall clock is into its minute. The clock reads it to name
+    /// the second its reading turns. It is a field so a test states the wall
+    /// clock instead of reading the real one.
+    wall: fn() -> f64,
+}
+
+impl Client {
+    /// The client one wiring describes. The binary reads the environment once
+    /// and hands the whole of it here, so this file names no variable. The
+    /// seeds name the unit before the broker answers, so the first frame is
+    /// never blank.
+    pub fn open(wiring: Wiring) -> Self {
+        let client_id = reader::client_id(CLIENT, &reader::hostname());
+        let keys = wiring
+            .preview
+            .then(|| Keys::seeded(wiring.player_name.clone(), wiring.components.clone()));
+        // The stock idle screen owns no topic and keeps no retained state
+        // of its own, so it names none.
+        let bus = Reader::open(&wiring.screen, &client_id, &[]);
+        Self {
+            unit: Unit::seeded(wiring.player_name, wiring.components),
+            bus: bus.map(|reader| Box::new(reader) as Box<dyn Bus>),
+            keys,
+            at: 0.0,
+            wall: crate::clock::into_minute,
+        }
+    }
+
+    /// The unit as the screen holds it.
+    pub fn unit(&self) -> &Unit {
+        &self.unit
+    }
+
+    /// The screen the client draws, at the second the clock last read. The
+    /// view and the schedule read one screen, so what the harness sleeps
+    /// toward is what the next frame draws.
+    fn screen(&self) -> Idle<'_> {
+        Idle {
+            unit: &self.unit,
+            at: self.at,
+            preview: self.keys.is_some(),
+            into_minute: (self.wall)(),
+        }
+    }
+
+    /// Fold one message in, at `at` seconds on the screen's clock. Every
+    /// message reaches the unit.
+    ///
+    /// The status's move to `Idle` is the arrival: the `Play` on the unit is
+    /// over, and the mark's return starts from that second. The move is
+    /// what marks it, and never the activity the status carries, so a
+    /// repeated `Idle` from a pass over an unchanged `Player` starts no
+    /// second return. The mark records the activity the unit left, because
+    /// an arrival from under a film owes the mark a new ramp and an arrival
+    /// from a `Play` that never played does not.
+    ///
+    /// The status topic is retained, so a client that connects after a
+    /// `Play` ended reads the move it missed.
+    pub fn receive(&mut self, moment: Moment, at: f64) {
+        // Every key the crate does not own reaches this client. The stock
+        // idle screen draws no list, so every key but back reaches
+        // nothing, and back is the shade. The client decides this and not
+        // the crate, because a client with levels sleeps at its top level
+        // alone, and only the client reads its levels.
+        if let Moment::Press(key) = &moment
+            && media_screen::screen::keys::back(key)
+            && let Some(bus) = &self.bus
+        {
+            bus.sleep();
+        }
+        let was = self.unit.activity;
+        self.unit.fold(moment, at);
+        if self.unit.activity == Activity::Idle && was != Activity::Idle {
+            self.unit.arrived = Some(Arrival { at, from: was });
+        }
+    }
+}
+
+impl Screen for Client {
+    // Nothing on the screen emits a message yet, and the type says so.
+    type Message = Infallible;
+
+    fn background(&self) -> Color {
+        look::BACKGROUND
+    }
+
+    /// One key press. A run with no preview keys bound takes none, so a
+    /// keyboard attached to a pod changes nothing on a screen in a house.
+    ///
+    /// A bound key builds the messages the bus would carry and folds them
+    /// through the call the bus reader's messages take, so the press exercises
+    /// the handlers a cluster exercises.
+    fn key(&mut self, name: &str) {
+        let Some(keys) = &mut self.keys else {
+            return;
+        };
+        let messages = keys.press(name);
+        let at = self.at;
+        for message in messages {
+            self.receive(message, at);
+        }
+    }
+
+    fn tick(&mut self, at: f64) {
+        self.at = at;
+    }
+
+    /// Hand the loop's waker to the reader, so a press on a controller shows
+    /// on the next frame rather than on the harness's next backstop wake.
+    fn wake_by(&mut self, wake: media_screen::Waker) {
+        if let Some(bus) = &self.bus {
+            bus.wake_on_delivery(wake);
+        }
+    }
+
+    /// Drain the reader and fold in what arrived. The harness calls this on
+    /// every wake of the loop rather than on a frame, because a covered
+    /// client draws no frame, and the status that says a film ended arrives
+    /// exactly while the client is covered.
+    fn pump(&mut self, at: f64) -> bool {
+        let Some(bus) = &self.bus else {
+            return false;
+        };
+        let messages = bus.drain();
+        let folded = !messages.is_empty();
+        for message in messages {
+            self.receive(message, at);
+        }
+        folded
+    }
+
+    fn view(&self) -> Element<'_, Self::Message, Theme, Renderer> {
+        Canvas::new(self.screen())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// The second the screen next changes. The elements answer it, and the
+    /// bus does not: a delivery wakes the loop itself through the waker, and
+    /// the reader drains in `pump` on every wake. The harness bounds every
+    /// wait by its backstop, so the broker is still read at least once a
+    /// second if the wake ever fails, and a settled screen still draws only
+    /// when the clock's minute turns.
+    fn next_frame(&self, at: f64) -> Option<f64> {
+        self.screen().next_frame(at)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+
+    use super::*;
+    use crate::idle::{activity, energy};
+    use media_screen::status::{Activity, Status};
+
+    /// A bus over a plain channel, standing in for the reader's threads, so a
+    /// test folds real moments and reads the client's own request for the
+    /// shade with no broker under it. The count of those requests is shared,
+    /// because the client owns the bus once it takes it.
+    #[derive(Debug)]
+    struct Channel {
+        moments: mpsc::Receiver<Moment>,
+        slept: Arc<AtomicUsize>,
+    }
+
+    impl Bus for Channel {
+        fn drain(&self) -> Vec<Moment> {
+            self.moments.try_iter().collect()
+        }
+
+        fn sleep(&self) {
+            self.slept.fetch_add(1, Ordering::SeqCst);
+        }
+
+        // The idle screen has no topic of its own, so it publishes
+        // nothing and this stands in for a call no client of this crate
+        // makes here.
+        fn publish(&self, _topic: &str, _payload: Vec<u8>, _retained: bool) {}
+
+        fn wake_on_delivery(&self, _wake: media_screen::Waker) {}
+    }
+
+    /// A client whose bus is that channel, and the two ends a test reads: what
+    /// it sends the client, and how often the client asked for the shade.
+    fn on_a_channel(client: &mut Client) -> (mpsc::Sender<Moment>, Arc<AtomicUsize>) {
+        let (sender, moments) = mpsc::channel();
+        let slept = Arc::new(AtomicUsize::new(0));
+        client.bus = Some(Box::new(Channel {
+            moments,
+            slept: Arc::clone(&slept),
+        }));
+        (sender, slept)
+    }
+
+    fn seeded() -> Client {
+        Client::open(Wiring {
+            player_name: "The Den".into(),
+            components: vec!["The screen".into()],
+            ..Wiring::default()
+        })
+    }
+
+    #[test]
+    fn the_client_draws_on_the_theme_ground() {
+        assert_eq!(seeded().background(), look::BACKGROUND);
+    }
+
+    #[test]
+    fn a_client_with_no_broker_draws_the_seeds() {
+        let mut client = seeded();
+        assert_eq!(client.unit().name, "The Den");
+        assert_eq!(client.unit().parts.len(), 1);
+
+        // The clock advances with no reader, and nothing changes.
+        client.tick(1.0);
+        assert_eq!(client.unit().name, "The Den");
+    }
+
+    #[test]
+    fn a_settled_client_asks_for_a_frame_when_the_minute_turns() {
+        let mut client = seeded();
+        client.wall = || 50.0;
+        client.tick(7.25);
+
+        // The clock names the turn of the wall clock's minute, ten seconds
+        // on, and nothing else on a settled screen names a second before it.
+        assert_eq!(client.next_frame(7.25), Some(17.25));
+    }
+
+    #[test]
+    fn the_pump_folds_what_the_bus_delivered_and_says_so() {
+        let mut client = seeded();
+        let (sender, _slept) = on_a_channel(&mut client);
+
+        assert!(!client.pump(1.0));
+
+        sender
+            .send(Moment::Status(Status {
+                activity: Activity::Playing,
+                ..Status::default()
+            }))
+            .expect("the channel is open");
+
+        assert!(client.pump(2.0));
+        assert_eq!(client.unit().activity, Activity::Playing);
+    }
+
+    #[test]
+    fn a_back_press_asks_the_bus_for_the_shade() {
+        let mut client = seeded();
+        let (_sender, slept) = on_a_channel(&mut client);
+
+        for key in media_screen::screen::keys::BACK {
+            client.receive(Moment::Press(key.into()), 1.0);
+        }
+        // The arrows and select reach nothing, because this screen draws no
+        // list to move through.
+        client.receive(Moment::Press("KEY_UP".into()), 2.0);
+        client.receive(Moment::Press("KEY_ENTER".into()), 2.0);
+
+        assert_eq!(
+            slept.load(Ordering::SeqCst),
+            media_screen::screen::keys::BACK.len()
+        );
+    }
+
+    #[test]
+    fn a_client_with_no_bus_asks_no_one_for_the_shade() {
+        let mut client = seeded();
+
+        client.receive(Moment::Press("KEY_BACK".into()), 1.0);
+
+        assert!(client.bus.is_none());
+    }
+
+    #[test]
+    fn the_clock_moves_without_the_bus() {
+        let mut client = seeded();
+        client.wall = || 59.0;
+        client.tick(3.5);
+        assert_eq!(client.next_frame(3.5), Some(4.5));
+    }
+
+    #[test]
+    fn a_status_reaches_the_unit() {
+        let mut client = seeded();
+        client.receive(
+            Moment::Status(Status {
+                activity: Activity::Playing,
+                ..Status::default()
+            }),
+            2.0,
+        );
+        assert_eq!(client.unit().activity, Activity::Playing);
+    }
+
+    #[test]
+    fn the_status_move_to_idle_marks_the_arrival() {
+        let mut client = seeded();
+        client.receive(
+            Moment::Status(Status {
+                activity: Activity::Playing,
+                ..Status::default()
+            }),
+            2.0,
+        );
+        assert_eq!(client.unit().arrived, None);
+
+        client.receive(
+            Moment::Status(Status {
+                activity: Activity::Idle,
+                ..Status::default()
+            }),
+            9.0,
+        );
+        assert_eq!(
+            client.unit().arrived,
+            Some(Arrival {
+                at: 9.0,
+                from: Activity::Playing
+            })
+        );
+    }
+
+    /// The second the lifecycle table below reads its first status at.
+    const FIRST: f64 = 1.0;
+
+    /// The second most of its rows read the second status at. It is past the
+    /// ramp up's own 1200 ms, so the energy there is the level the first
+    /// status settled at.
+    const SETTLED: f64 = 5.0;
+
+    /// The second one row reads the second status at, halfway up that ramp.
+    /// It is the frame a `Play` that fails early ends on.
+    const MID_RAMP: f64 = 1.6;
+
+    /// Two readings of one curve, compared the way `energy`'s own tests
+    /// compare them. A difference this small is the arithmetic of the seconds
+    /// above and not the motion.
+    #[track_caller]
+    fn assert_close(measured: f64, expected: f64, row: &str) {
+        assert!(
+            (measured - expected).abs() < 1e-9,
+            "the energy on {row} is {measured}, not {expected}"
+        );
+    }
+
+    /// One activity as it arrives on the status topic.
+    fn saying(activity: Activity) -> Moment {
+        Moment::Status(Status {
+            activity,
+            ..Status::default()
+        })
+    }
+
+    /// A client that read one status at [`FIRST`] and a second at `at`. Both
+    /// go through `receive`, which is the whole path a status takes:
+    /// `Unit::fold` reads the activity, and this file reads the move to
+    /// `Idle`.
+    fn moved(from: Activity, to: Activity, at: f64) -> Client {
+        let mut client = seeded();
+        client.receive(saying(from), FIRST);
+        client.receive(saying(to), at);
+        client
+    }
+
+    /// Every move of the activity, and the four things a move settles: the
+    /// arrival mark, whether the energy's ramp starts over, the energy the
+    /// mark holds at the second of the move, and the alpha the activity line
+    /// draws at.
+    ///
+    /// The rule is the media browser's, so the two screens answer one set of
+    /// events. A `Play` a person asks for reaches `Starting`, and the mark
+    /// starts moving there rather than waiting for the film. `Playing` stops
+    /// it, because the film's surface covers this one. A move to `Idle` from
+    /// any other activity marks the arrival once, and the mark and the line
+    /// leave together over the ramp down. A repeated status carries the
+    /// activity the unit already holds and settles neither the mark nor a new
+    /// ramp, so a `Player` the operator passes over again leaves the screen
+    /// alone.
+    ///
+    /// The last two rows are the same move at two seconds, and they are why
+    /// the arrival records the activity it came from. The mark returns at full
+    /// swing from under a film alone. A `Play` that ends halfway up the ramp
+    /// reads 0.5 in the frame it ended on, the level the mark already stood
+    /// at, and the line reads full in that frame the way it did in the one
+    /// before.
+    #[test]
+    fn each_move_of_the_activity_settles_the_mark_and_the_line() {
+        use Activity::{Idle, Playing, Starting};
+
+        // from, to, the second of the move, the activity the arrival names,
+        // a ramp that starts over, the energy, the line's alpha
+        let table = [
+            (Idle, Starting, SETTLED, None, true, 0.0, 1.0),
+            (Starting, Playing, SETTLED, None, true, 0.0, 1.0),
+            (Playing, Idle, SETTLED, Some(Playing), true, 1.0, 1.0),
+            (Starting, Starting, SETTLED, None, false, 1.0, 1.0),
+            (Idle, Idle, SETTLED, None, false, 0.0, 0.0),
+            (Starting, Idle, SETTLED, Some(Starting), true, 1.0, 1.0),
+            (Starting, Idle, MID_RAMP, Some(Starting), true, 0.5, 1.0),
+        ];
+
+        for (from, to, at, arrived, ramped, energy, alpha) in table {
+            let client = moved(from, to, at);
+            let unit = client.unit();
+            let row = format!("{from:?} to {to:?} at {at}");
+
+            let mark = arrived.map(|from| Arrival { at, from });
+            assert_eq!(unit.arrived, mark, "the arrival on {row}");
+            assert_eq!(unit.ramp.since == at, ramped, "the ramp on {row}");
+            assert_close(energy::level(unit, at), energy, &row);
+            assert_eq!(activity::opacity(unit, at), alpha, "the line on {row}");
+        }
+    }
+
+    fn previewing() -> Client {
+        Client::open(Wiring {
+            player_name: "Studio Lab".into(),
+            components: vec!["Portable Screen".into(), "Studio Dualsense".into()],
+            preview: true,
+            ..Wiring::default()
+        })
+    }
+
+    #[test]
+    fn a_run_with_no_preview_keys_takes_no_key() {
+        let mut client = seeded();
+        let before = client.unit().clone();
+
+        client.key("p");
+
+        assert_eq!(client.unit(), &before);
+    }
+
+    #[test]
+    fn a_preview_key_reaches_the_unit_through_the_bus_path() {
+        let mut client = previewing();
+        client.tick(2.0);
+
+        client.key("p");
+
+        assert_eq!(client.unit().activity, Activity::Starting);
+        assert_eq!(client.unit().title.as_deref(), Some("Sailing"));
+    }
+
+    #[test]
+    fn the_film_end_key_returns_the_status_and_marks_the_arrival() {
+        let mut client = previewing();
+        client.tick(4.0);
+        client.key("o");
+
+        client.key("i");
+
+        assert_eq!(client.unit().activity, Activity::Idle);
+        assert_eq!(
+            client.unit().arrived,
+            Some(Arrival {
+                at: 4.0,
+                from: Activity::Playing
+            })
+        );
+    }
+
+    #[test]
+    fn the_presence_key_disconnects_the_last_part() {
+        let mut client = previewing();
+        client.tick(1.0);
+
+        client.key("d");
+
+        assert_eq!(client.unit().parts[1].connected, Some(false));
+    }
+
+    #[test]
+    fn the_focus_key_marks_the_remote_at_the_second_of_the_press() {
+        let mut client = previewing();
+        client.tick(5.0);
+
+        client.key("f");
+        assert!(client.unit().parts[1].focused);
+        assert_eq!(client.unit().parts[1].marked, Some(5.0));
+
+        client.key("g");
+        assert!(!client.unit().parts[1].focused);
+    }
+
+    #[test]
+    fn the_sleep_key_draws_the_shade_down_and_then_up() {
+        let mut client = previewing();
+        client.tick(6.0);
+
+        client.key("s");
+        assert_eq!(client.unit().shade.map(|shade| shade.down), Some(true));
+
+        client.key("s");
+        assert_eq!(client.unit().shade.map(|shade| shade.down), Some(false));
+    }
+
+    #[test]
+    fn a_volume_key_shows_the_indicator_the_way_a_press_shows_it() {
+        let mut client = previewing();
+        client.tick(7.0);
+
+        client.key("9");
+
+        assert_eq!(client.unit().volume.level, 95);
+        assert_eq!(client.unit().pressed, Some(7.0));
+
+        client.key("m");
+        assert!(client.unit().volume.muted);
+    }
+}

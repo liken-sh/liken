@@ -1,0 +1,109 @@
+[package]
+name = "idle-screen"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the parsers and the
+# measurements have unit tests that open no window.
+[lib]
+name = "idle_screen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "idle-screen"
+path = "src/main.rs"
+
+# The `measure` feature is the frame capture and the measurements: the
+# `--capture`, `--capture-at`, and `--stats` flags, the PNG encoder behind the
+# first two, and the frame times and resident-set samples the third writes. It
+# is on by default, so a workstation and every gate in the Makefile build the
+# whole harness.
+#
+# The image builds with the feature off, because no pod reaches any of it. The
+# operator sets no command on the idle container and the image's entrypoint
+# takes no flag, so a pod passes none of the three.
+[features]
+default = ["measure"]
+measure = ["dep:image"]
+
+# The client drives its own winit loop, so it takes the iced pieces directly
+# instead of the `iced` facade. That is what gives the harness a wgpu surface it
+# can read a frame back from.
+#
+# Every iced crate here turns its default features off where the default would
+# pull X11 or the software renderer in. The target is a Wayland kiosk, so winit
+# builds with Wayland alone.
+#
+# Every version is exact, so a build from this manifest resolves the same
+# crates the lock file names.
+[dependencies]
+iced_winit = { version = "=0.14.0", default-features = false, features = [
+    "wayland",
+] }
+# The brand states every color and alpha as encoded sRGB, and every
+# translucent surface was judged by eye against a blend on those values,
+# so the blend runs on them and not in linear light.
+# Without `web-colors`, `iced_wgpu` converts every colour to linear light
+# before the shader sees it, and the blend runs in linear light. With the
+# feature on, the colours reach the shader as they were written, and
+# `graphics::open` takes a surface format that stores them unconverted.
+iced_wgpu = { version = "=0.14.0", features = [
+    "geometry",
+    "image",
+    "web-colors",
+] }
+iced_widget = { version = "=0.14.2", default-features = false, features = [
+    "canvas",
+    "image",
+    "wgpu",
+] }
+# liken-iced carries the mark and the palette. It parses them out of
+# liken.svg and liken.css, so the mark on this screen and the mark on a page
+# are one drawing and cannot drift. The crate is in the brand repository, which
+# this one already takes as a submodule for the documentation theme, and the
+# image build context is the repository root, so one checkout serves both.
+liken-iced = { path = "../docs/themes/brand/iced" }
+# image writes the captured frames. They are PNGs and nothing else, and only a
+# build with the `measure` feature writes any, so the dependency is optional.
+# iced_graphics takes the same crate for its own image pipeline, with no format
+# behind it. The line below is what turns image's `png` feature on and brings
+# the `png` crate in, so a build without `measure` carries no PNG codec.
+image = { version = "=0.25.10", default-features = false, features = [
+    "png",
+], optional = true }
+# media-screen is the bus half of this client: the timers, the focus
+# gate, the shade, the volume step, the cycle request, and the panel
+# desire. It is a crate of its own because the library layer's media
+# browser draws a different screen on the same rules, and takes this
+# crate from a release tag of this repository.
+media-screen = { path = "../media-screen" }
+# serde derives the readers this client holds of its own, and serde_json
+# writes the measurements file.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# jiff reads the wall clock in the zone TZ names. Its tzdb-zoneinfo feature
+# reads the image's own /usr/share/zoneinfo, and the bundled databases stay
+# out of the binary, so the clock and the rest of the image name the same
+# zone rules.
+jiff = { version = "=0.2.35", default-features = false, features = [
+    "std",
+    "tz-system",
+    "tzdb-zoneinfo",
+] }
+# The facade this client reports the two gauges media-screen sets through,
+# plus this client's own build identity.
+metrics = { workspace = true }
+# The exporter that turns the facade into a `/metrics` a Prometheus scrapes.
+# Only the listener feature: this client never pushes to a gateway and needs
+# no protobuf exposition, so the build carries neither.
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false, features = [
+    "http-listener",
+] }
+# process_* under the same recorder. `Collector::describe` registers the help
+# text once, and a thread this client starts calls `collect` on the interval
+# metrics.rs states, the pattern the crate's own docs give because the
+# exporter has no scrape hook of its own to call it from.
+metrics-process = "=2.4.3"
+
+[dev-dependencies]
+metrics-util = { version = "=0.20.4", default-features = false, features = ["debugging"] }
