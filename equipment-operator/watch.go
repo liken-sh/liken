@@ -88,7 +88,8 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 //
 // held, when it is not nil, holds the informer's store while the
 // informer runs, so a pass reads the collection from it
-// (objectcache.go).
+// (objectcache.go), and tells a caller that waits for a change when
+// the store takes one.
 //
 // fieldSelector, when it is not empty, narrows the list and the watch
 // to the objects it selects.
@@ -117,6 +118,9 @@ func watchCollection(ctx context.Context, client *Client, resource schema.GroupV
 			}
 			return collection.Watch(ctx, options)
 		},
+	}
+	if held != nil {
+		handler = bothHandlers(handler, held.announcer())
 	}
 	store, informer := cache.NewInformerWithOptions(cache.InformerOptions{
 		ListerWatcher: source,

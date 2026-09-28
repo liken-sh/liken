@@ -248,6 +248,70 @@ fake API servers:
 A pass that runs before a watch delivers the process's own write reads
 that object once, with a `GET`.
 
+### A power press waits on the `Deployment`'s watch
+
+`awaitPowerRead` opened a `Television` watch of its own on each power
+press, beside the watch the `CECBus` loop already runs. Each press
+then cost the API server one streaming list of every `Television`,
+and the process held a second copy of the collection while it waited.
+The press now waits on the `CECBus` loop's watch:
+
+* `watchStore.changed` answers a channel that closes at the next
+  change the informer takes into the store. `watchCollection` adds
+  `watchStore.announcer` to each watch's handler. client-go calls a
+  handler after the store takes the change, so a waiter that reads
+  after its channel closes finds the change.
+* `awaitPowerRead` takes the channel before each read, so an answer
+  that lands during the read closes the channel it waits on. It reads
+  one `Television` with `readOne`, and waits for the channel, for
+  `cecPowerReadWait`, or for the writer's stop.
+
+The result on each path is the same as before: the answer, a decision
+from `status.power` after `cecPowerReadWait`, or no answer at a stop.
+One case differs. When no `Television` watch runs, such as before the
+`CECBus` loop's first pass opens it, the press finds the answer only
+in its first read or when the watch opens during the wait. Otherwise
+it decides from `status.power` after `cecPowerReadWait`. The press's
+`Television` is `Reachable` only after a pass derived it, and that
+pass opens the watch first, so the case is a press in the moments
+after the operator starts.
+
+Requests for one press, counted in the tests' fake API server:
+
+| | Before | After |
+|---|---|---|
+| Watches opened | 1 | 0 |
+| Lists of the `Television` objects | 1 | 0 |
+| Reads of one `Television` | 0 | 2 |
+
+The two reads follow the memo: one after the press's own write of
+`powerReadAt`, before the watch delivers it, and one after the node
+workload's write of `status.powerRead`, because the memo holds the
+press's own version. `TestAPowerPressOpensNoWatch` fails when a press
+opens a watch.
+
+### A create that lands during a list
+
+In one full-suite run, `TestTheNodeLogsTheBusItCreatesAndDeletes`
+logged "created CECBus node-1" twice. The code sent the apply twice;
+the log was correct. `currentList` read the store's keys first, and
+then the keys the memo noted that the store did not hold. The watch
+event of the create could reach the store between the two reads. The
+first read then did not have the key, and the second skipped it
+because the store held it. The list left out the `CECBus`, and the
+node workload's next pass applied it again. The apply changed
+nothing on the API server, but the node workload sent a second
+request and logged a second create. The `Deployment`'s discovery of
+a `Television` uses the same list, so it could send a second create
+of a `Television` the same way. The API server refuses that create
+with a 409, which `CreateDiscoveredTelevision` treats as success, so
+the log also says the `Television` was created twice.
+
+`currentList` now reads the memo's keys first. The key is then in one
+read or in both. `TestAListAnswersACreateThatArrivesDuringTheList`
+adds the object to the store just after its keys are read, and fails
+with the old order.
+
 ### The node workload watches the `Display`s of its machine
 
 `display-operator`'s `Display` CRD declares `status.node` as a

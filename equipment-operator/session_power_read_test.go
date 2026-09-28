@@ -42,10 +42,14 @@ func answeringAs(api *cecAPI, stale string, reachable Condition) {
 }
 
 // theaterRoom is the link a session of Player theater on input GAME
-// uses to reach the lounge Television.
+// uses to reach the lounge Television. The writer reads the Televisions
+// from a running watch's store, the way the Deployment's writer reads
+// the CECBus loop's.
 func theaterRoom(t *testing.T, api *cecAPI, h *sessionHarness) roomEvents {
 	t.Helper()
 	sessions := newTelevisionSessions(api.client)
+	sessions.televisions = &watchStore{}
+	runHeldWatch(t, api.client, watchTelevisions, nil, sessions.televisions)
 	t.Cleanup(sessions.stop)
 	sessions.markLive()
 	return sessions.room(h.lines, "theater", "GAME", func(input string) string {
@@ -115,4 +119,41 @@ func TestAPowerPressWithNoReadDecidesFromTheStatus(t *testing.T) {
 	mustMatch(t, session.PowerReadAt, "")
 	mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
 		"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby")
+}
+
+// A press waits on the Television watch the Deployment already runs,
+// so the presses open no watch of their own. Each press still decides
+// from its fresh read: the TV's status.power is empty, so a press that
+// got no answer would decide from the receiver's power instead, and the
+// second press finds the standby the first one sent.
+func TestAPowerPressOpensNoWatch(t *testing.T) {
+	fastPower(t)
+	wire := roomWithTV(televisionTV(cec.PowerOn))
+	api := controlling(t, wire, lounge(""))
+	api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+	answeringAs(api, "", noPower)
+	h := newSessionHarness(t)
+	h.powerTopic = testPowerTopic
+	h.room = theaterRoom(t, api, h)
+	api.waitUntil(t, "the writer's Television watch to open", func() bool { return api.watchesOf(televisionsPath) == 2 })
+	h.beginIdle(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+	api.waitUntil(t, "the TV to take Standby", func() bool { return sentOf(wire, cec.OpStandby) == 1 })
+	broker.push(testPowerTopic, []byte(`{"action":"toggle"}`))
+
+	mustDeepEqual(t, waitForLines(t, h.log, "asked Television lounge to", 2), []string{
+		"Receiver theater: the power topic asks toggle, and Television lounge reports power On; asked Television lounge to go to standby",
+		"Receiver theater: the power topic asks toggle, and Television lounge reports power Standby; asked Television lounge to wake and show Display acm-0001-receiver",
+	})
+	mustMatch(t, api.watchesOf(televisionsPath), 2)
+}
+
+// watchesOf counts the watches opened on one collection.
+func (a *cecAPI) watchesOf(path string) int {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.watches[path]
 }

@@ -335,32 +335,29 @@ func readable(television *Television) bool {
 
 // awaitPowerRead waits until a Television's status.powerRead answers
 // the request at, and answers the power it states. It reads the
-// Televisions once, and again on each event of a watch on them, so it
-// waits on the API server's events and not on a timer. The watch's
-// first read wakes it too, so an answer written before the watch
-// opened is not lost. It answers false when cecPowerReadWait ends
-// first.
+// Television once, and again at each change the Deployment's
+// Television watch takes into its store, so it waits on the API
+// server's events and not on a timer, and a press opens no watch of
+// its own. It takes the store's change channel before each read, so an
+// answer that lands during the read is not lost. It answers false when
+// cecPowerReadWait ends first. With no Television watch running, such
+// as in the moment before the CECBus loop opens it, only the first
+// read and a watch that opens during the wait can find the answer.
 func (t *televisionSessions) awaitPowerRead(name, at string) (string, bool) {
 	ctx, cancel := context.WithTimeout(t.ctx, cecPowerReadWait)
-	var watching sync.WaitGroup
-	defer watching.Wait()
 	defer cancel()
-	wake := make(chan struct{}, 1)
-	held := &watchStore{}
-	watching.Go(func() { watchTelevisions(ctx, t.client, wake, nil, held) })
 	for {
-		if list, err := readTelevisions(t.client, held); err == nil {
-			for _, television := range list.Items {
-				read := television.Status.PowerRead
-				if television.Metadata.Name == name && read != nil && read.At == at {
-					return read.Power, true
-				}
+		changed := t.televisions.changed()
+		held := heldObjects{view: t.televisions.view(), versions: t.client.versions.televisions}
+		if television, err := readOne[Television](t.client, held, name, televisionPath(name)); err == nil {
+			if read := television.Status.PowerRead; read != nil && read.At == at {
+				return read.Power, true
 			}
 		}
 		select {
 		case <-ctx.Done():
 			return "", false
-		case <-wake:
+		case <-changed:
 		}
 	}
 }

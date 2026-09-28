@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/tools/cache"
 )
 
 // snapshot is a synced store that holds one collection of the fake as
@@ -100,4 +101,41 @@ func TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError(t *testing.T) {
 	mustMatch(t, refused != nil, true)
 	mustSucceed(t, answered)
 	mustMatch(t, list.Items[0].Status.Session.Player, "den")
+}
+
+// arrivingStore is a store whose informer takes one object just after
+// the first read of its keys, the way the watch event of a create
+// lands while a pass lists.
+type arrivingStore struct {
+	cache.Store
+	arriving *unstructured.Unstructured
+}
+
+func (s *arrivingStore) ListKeys() []string {
+	keys := s.Store.ListKeys()
+	if s.arriving != nil {
+		_ = s.Store.Add(s.arriving)
+		s.arriving = nil
+	}
+	return keys
+}
+
+// A list from a whole store answers an object the operator created,
+// even when the watch event of the create reaches the store during the
+// list. The node workload's pass reads the list to decide whether its
+// discovered CECBus exists, and a list that left it out would make the
+// pass create the CECBus again.
+func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
+	api := startCECAPI(t)
+	created := asObject(t, CECBus{Metadata: ObjectMeta{Name: "node-1", ResourceVersion: "5"}})
+	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: created}
+	versions := newVersionMemo()
+	versions.note("node-1", "5")
+	view := storeView{store: store, synced: func() bool { return true }, whole: true}
+
+	list, err := currentList[CECBus](api.client, heldObjects{view: view, versions: versions}, cecBusPath)
+
+	mustSucceed(t, err)
+	mustMatch(t, len(list), 1)
+	mustMatch(t, api.reads[cecBusPath("node-1")], 0)
 }
