@@ -1,6 +1,6 @@
 # Working on the library operator
 
-This repository is the media library layer of a
+This directory holds the media library layer of a
 [`liken`](https://liken.sh/) cluster. It
 declares libraries as Kubernetes resources, keeps a catalog of what they
 hold, and puts a media browser on the screens that
@@ -10,7 +10,7 @@ documentation, and the comments teach how the system works.
 
 @docs/themes/brand/voice.md
 
-The voice rules in that file govern all prose in this repository,
+The voice rules in that file govern all prose in this directory,
 comments included. They arrive with the brand theme submodule at
 `docs/themes/brand`.
 
@@ -33,33 +33,12 @@ catalog id through `opaqueID` or `log::opaque`.
 
 ## Releases and development builds
 
-A pushed tag is a release. The tag names a version in `liken`'s calendar
-scheme, for example `2026.09.03-007`. `release.yaml` builds every image
-in the repository beside the `ci.yaml` run of the same commit, waits for
-that run to pass, and pushes the images under the version tag and under
-`:latest`.
+Releases from this directory are paused while the components move into
+one repository, under plan 69 in `plans/` at the repository root.
+`.github/workflows/ci.yaml` at the root runs this directory's tests,
+docs checks, and image builds, and it publishes nothing. Do not push a
+tag. Step 2 of plan 69 brings back the releases and the development
+builds for every component.
 
-A push to `main` is a development build. `release.yaml` builds the
-images the same way and pushes them under a version from `git describe`:
-the most recent release tag, the number of commits since it, and the
-first eight characters of the commit. For example,
-`2026.09.03-007-dev-003-abcdef01` is three commits past
-`2026.09.03-007`, at commit `abcdef01`. A development build never moves
-`:latest`, so a cluster that pulls a release keeps pulling releases.
-The suffix sorts after its release and before the next one, and the tag
-check in `release.yaml` does not accept it as a release version.
-
-To run a development build, pin the manifests to the full commit sha
-and the image to the build's version:
-
-    resources:
-      - https://github.com/liken-sh/library-operator//deploy?ref=<full 40-character sha>
-    images:
-      - name: ghcr.io/liken-sh/library-operator
-        newTag: 2026.09.03-007-dev-003-abcdef01
-
-Use all forty characters of the commit sha in `ref=`. A `git fetch` by
-sha requires all forty, and the eight characters inside the version are
-not enough. The CI run's step summary prints these lines for the commit.
 The operator derives its companion images from its own pod's image, so
 no other image name needs a version.

@@ -3,8 +3,8 @@
 This directory holds a Kubernetes DRA driver for the audio outputs of a
 [`liken`](https://liken.sh/) machine. It publishes each physical output as a device under
 the class `audio.liken.sh`, and it runs the sound server that the system
-image does not contain. The Go files, the manifests, and the workflows
-are the documentation, and the comments teach how the system works.
+image does not contain. The Go files and the manifests are the
+documentation, and the comments teach how the system works.
 
 @docs/themes/brand/voice.md
 

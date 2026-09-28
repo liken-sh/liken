@@ -43,6 +43,14 @@ jobs:
       liken: ${{ steps.diff.outputs.liken }}
       audio-operator: ${{ steps.diff.outputs.audio-operator }}
       bluetooth-operator: ${{ steps.diff.outputs.bluetooth-operator }}
+      display-operator: ${{ steps.diff.outputs.display-operator }}
+      equipment-operator: ${{ steps.diff.outputs.equipment-operator }}
+      media-operator: ${{ steps.diff.outputs.media-operator }}
+      library-operator: ${{ steps.diff.outputs.library-operator }}
+      people-operator: ${{ steps.diff.outputs.people-operator }}
+      git-csi-driver: ${{ steps.diff.outputs.git-csi-driver }}
+      per-node-csi-driver: ${{ steps.diff.outputs.per-node-csi-driver }}
+      brand: ${{ steps.diff.outputs.brand }}
     steps:
       # The diff needs the commit it starts from, and a shallow
       # checkout has only the one commit it builds.
@@ -71,7 +79,10 @@ jobs:
           else
             changed="*"
           fi
-          for component in liken audio-operator bluetooth-operator; do
+          for component in liken audio-operator bluetooth-operator \
+            display-operator equipment-operator media-operator \
+            library-operator people-operator git-csi-driver \
+            per-node-csi-driver brand; do
             if [ "$changed" = "*" ] \
               || grep -qE "^($component/|\.github/|\.gitmodules$)" <<<"$changed"; then
               echo "$component=true"
@@ -92,7 +103,19 @@ jobs:
       - uses: j178/prek-action@v2
         with:
           prek-version: 0.5.2
-          extra-args: --all-files --skip liken/ --skip audio-operator/ --skip bluetooth-operator/
+          extra-args: >-
+            --all-files
+            --skip liken/
+            --skip audio-operator/
+            --skip bluetooth-operator/
+            --skip display-operator/
+            --skip equipment-operator/
+            --skip media-operator/
+            --skip library-operator/
+            --skip people-operator/
+            --skip git-csi-driver/
+            --skip per-node-csi-driver/
+            --skip brand/
 
   # The OS's quality checks are the hooks in liken/.pre-commit-config.yaml,
   # the same config that runs at commit time on a workstation, so CI and
@@ -383,3 +406,704 @@ jobs:
           file: bluetooth-operator/${{ matrix.file }}
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  display-operator-go:
+    name: display-operator / go
+    needs: changes
+    if: needs.changes.outputs.display-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: display-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: display-operator/go.mod
+          cache-dependency-path: display-operator/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  display-operator-docs:
+    name: display-operator / docs
+    needs: changes
+    if: needs.changes.outputs.display-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: display-operator
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: display-operator/docs/go.mod
+          cache-dependency-path: display-operator/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: display-operator-docs-build-${{ runner.os }}-${{ hashFiles('display-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  # The base images (vulkan, vaapi, ffmpeg, mpv, and weston) are stages
+  # in display-operator's Dockerfile. Step 5 of plan 69 makes each one
+  # a component of its own.
+  display-operator-images:
+    name: display-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.display-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: vulkan
+            file: Dockerfile
+            target: vulkan
+          - image: vaapi
+            file: Dockerfile
+            target: vaapi
+          - image: ffmpeg
+            file: Dockerfile
+            target: ffmpeg
+          - image: mpv
+            file: Dockerfile
+            target: mpv
+          - image: weston
+            file: Dockerfile
+            target: weston
+          - image: display-operator
+            file: Dockerfile
+            target: display-operator
+          - image: display-capture
+            file: Dockerfile
+            target: display-capture
+          - image: display-api
+            file: Dockerfile
+            target: display-api
+          - image: display-operator-cli
+            file: Dockerfile.cli
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: display-operator
+          file: display-operator/${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  equipment-operator-go:
+    name: equipment-operator / go
+    needs: changes
+    if: needs.changes.outputs.equipment-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: equipment-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: equipment-operator/go.mod
+          cache-dependency-path: equipment-operator/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  equipment-operator-docs:
+    name: equipment-operator / docs
+    needs: changes
+    if: needs.changes.outputs.equipment-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: equipment-operator
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: equipment-operator/docs/go.mod
+          cache-dependency-path: equipment-operator/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: equipment-operator-docs-build-${{ runner.os }}-${{ hashFiles('equipment-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: equipment-operator-docs-build-${{ runner.os }}-${{ hashFiles('equipment-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  equipment-operator-images:
+    name: equipment-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.equipment-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: equipment-operator
+            file: Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: equipment-operator
+          file: equipment-operator/${{ matrix.file }}
+          push: false
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  media-operator-go:
+    name: media-operator / go
+    needs: changes
+    if: needs.changes.outputs.media-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: media-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: media-operator/go.mod
+          cache-dependency-path: media-operator/go.sum
+
+      # The tests that cut media run the real ffmpeg.
+      - name: install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  media-operator-docs:
+    name: media-operator / docs
+    needs: changes
+    if: needs.changes.outputs.media-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: media-operator
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: media-operator/docs/go.mod
+          cache-dependency-path: media-operator/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: media-operator-docs-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: media-operator-docs-build-${{ runner.os }}-${{ hashFiles('media-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  # The Rust workspace (idle, display, media-screen) builds against the
+  # liken-iced crate in the brand theme submodule.
+  media-operator-rust:
+    name: media-operator / rust
+    needs: changes
+    if: needs.changes.outputs.media-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: media-operator
+    env:
+      CARGO_INCREMENTAL: 0
+      WLR_RENDERER: pixman
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The screen tests run the programs under cage, a headless
+      # Wayland compositor, on Mesa's software Vulkan driver.
+      - name: install the headless graphics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
+            libwayland-client0 libxkbcommon0
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: media-operator
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test-rust
+
+  # Dockerfile.screen and Dockerfile.player copy the brand crate and fonts
+  # from the theme submodule, so the checkout takes it.
+  media-operator-images:
+    name: media-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.media-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: media-operator
+            file: Dockerfile
+          - image: media-operator-player
+            file: Dockerfile.player
+          - image: media-operator-idle
+            file: Dockerfile.screen
+            target: idle
+          - image: media-operator-display
+            file: Dockerfile.screen
+            target: display
+          - image: media-operator-api
+            file: Dockerfile.api
+          - image: media-operator-cli
+            file: Dockerfile.cli
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: media-operator
+          file: media-operator/${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  library-operator-go:
+    name: library-operator / go
+    needs: changes
+    if: needs.changes.outputs.library-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: library-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: library-operator/go.mod
+          cache-dependency-path: library-operator/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  library-operator-docs:
+    name: library-operator / docs
+    needs: changes
+    if: needs.changes.outputs.library-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: library-operator
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: library-operator/docs/go.mod
+          cache-dependency-path: library-operator/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: library-operator-docs-build-${{ runner.os }}-${{ hashFiles('library-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: library-operator-docs-build-${{ runner.os }}-${{ hashFiles('library-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  # The media browser is its own Cargo workspace, and it builds against
+  # the liken-iced crate in the brand submodule at media-browser/brand.
+  library-operator-rust:
+    name: library-operator / rust
+    needs: changes
+    if: needs.changes.outputs.library-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: library-operator/media-browser
+    env:
+      CARGO_INCREMENTAL: 0
+      WLR_RENDERER: pixman
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The screen tests run the programs under cage, a headless
+      # Wayland compositor, on Mesa's software Vulkan driver.
+      - name: install the headless graphics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
+            libwayland-client0 libxkbcommon0
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: library-operator/media-browser
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test
+
+  # Each image names its own build context inside library-operator/.
+  library-operator-images:
+    name: library-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.library-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: library-operator
+            context: .
+            file: Dockerfile
+          - image: library-operator-ffmpeg
+            context: .
+            file: Dockerfile.ffmpeg
+          - image: library-operator-media-browser
+            context: media-browser
+            file: media-browser/Dockerfile
+          - image: library-operator-corrosion
+            context: corrosion
+            file: corrosion/Dockerfile
+          - image: library-operator-cli
+            context: .
+            file: Dockerfile.cli
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: library-operator/${{ matrix.context }}
+          file: library-operator/${{ matrix.file }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  people-operator-go:
+    name: people-operator / go
+    needs: changes
+    if: needs.changes.outputs.people-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: people-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: people-operator/go.mod
+          cache-dependency-path: people-operator/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  people-operator-docs:
+    name: people-operator / docs
+    needs: changes
+    if: needs.changes.outputs.people-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: people-operator
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: people-operator/docs/go.mod
+          cache-dependency-path: people-operator/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: people-operator-docs-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: people-operator-docs-build-${{ runner.os }}-${{ hashFiles('people-operator/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  people-operator-images:
+    name: people-operator / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.people-operator == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: people-operator
+            file: Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: people-operator
+          file: people-operator/${{ matrix.file }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  git-csi-driver-go:
+    name: git-csi-driver / go
+    needs: changes
+    if: needs.changes.outputs.git-csi-driver == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: git-csi-driver
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: git-csi-driver/go.mod
+          cache-dependency-path: git-csi-driver/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  git-csi-driver-docs:
+    name: git-csi-driver / docs
+    needs: changes
+    if: needs.changes.outputs.git-csi-driver == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: git-csi-driver
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: git-csi-driver/docs/go.mod
+          cache-dependency-path: git-csi-driver/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: git-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('git-csi-driver/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: git-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('git-csi-driver/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  git-csi-driver-images:
+    name: git-csi-driver / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.git-csi-driver == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: git-csi-driver
+            file: Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: git-csi-driver
+          file: git-csi-driver/${{ matrix.file }}
+          push: false
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  per-node-csi-driver-go:
+    name: per-node-csi-driver / go
+    needs: changes
+    if: needs.changes.outputs.per-node-csi-driver == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: per-node-csi-driver
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: per-node-csi-driver/go.mod
+          cache-dependency-path: per-node-csi-driver/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  per-node-csi-driver-docs:
+    name: per-node-csi-driver / docs
+    needs: changes
+    if: needs.changes.outputs.per-node-csi-driver == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: per-node-csi-driver
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: per-node-csi-driver/docs/go.mod
+          cache-dependency-path: per-node-csi-driver/docs/go.sum
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: per-node-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('per-node-csi-driver/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: per-node-csi-driver-docs-build-${{ runner.os }}-${{ hashFiles('per-node-csi-driver/docs/go.sum') }}-
+
+      - run: make test-docs
+
+  per-node-csi-driver-images:
+    name: per-node-csi-driver / ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.per-node-csi-driver == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: per-node-csi-driver
+            file: Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: per-node-csi-driver
+          file: per-node-csi-driver/${{ matrix.file }}
+          push: false
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  brand-go:
+    name: brand / go
+    needs: changes
+    if: needs.changes.outputs.brand == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: brand
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: brand/go.mod
+          cache-dependency-path: brand/go.sum
+
+      # gofmt, vet, the race tests, and the coverage gate on its pinned
+      # toolchain.
+      - run: make test-go
+
+  # liken-iced is the crate that the screens of media-operator and
+  # library-operator draw with.
+  brand-rust:
+    name: brand / rust
+    needs: changes
+    if: needs.changes.outputs.brand == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: brand/iced
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brand/iced
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test

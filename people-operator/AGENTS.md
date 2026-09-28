@@ -1,6 +1,6 @@
 # Working on people-operator
 
-This repository defines the `Person` resource for a
+This directory defines the `Person` resource for a
 [`liken`](https://liken.sh/) cluster: one cluster-scoped CRD and no
 controller. The manifests and the tests are the documentation.
 

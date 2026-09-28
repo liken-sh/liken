@@ -28,9 +28,8 @@ theme: brand
 params:
   repository: https://github.com/liken-sh/media-operator
 
-  # The site serves the test coverage report at /coverage.html, built
-  # from the same commit as the rest of the site. This makes the
-  # theme's footer link it.
+  # The site serves the test coverage report at /coverage.html. This
+  # parameter puts the footer link to it on every page.
   coverage: true
 
 # No taxonomies and no feeds: the site is a manual, not a blog. The

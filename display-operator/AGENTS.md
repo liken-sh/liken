@@ -1,10 +1,9 @@
 # Working on display-operator
 
-This repository is a Kubernetes DRA driver for `liken` clusters. It runs
+This directory holds a Kubernetes DRA driver for `liken` clusters. It runs
 the Weston compositor and publishes a graphics card's monitor outputs as
-devices under `display.liken.sh`. The Go files, the manifests, and the
-workflows are the documentation, and the comments teach how the system
-works.
+devices under `display.liken.sh`. The Go files and the manifests are
+the documentation, and the comments teach how the system works.
 
 @docs/themes/brand/voice.md
 
@@ -21,31 +20,9 @@ reads the cause from the log or the status without opening a shell.
 
 ## Releases and development builds
 
-A pushed tag is a release. The tag names a version in `liken`'s calendar
-scheme, for example `2026.09.03-007`. `release.yaml` builds every image
-in the repository beside the `ci.yaml` run of the same commit, waits for
-that run to pass, and pushes the images under the version tag and under
-`:latest`.
-
-A push to `main` is a development build. `release.yaml` builds the
-images the same way and pushes them under a version from `git describe`:
-the most recent release tag, the number of commits since it, and the
-first eight characters of the commit. For example,
-`2026.09.03-007-dev-003-abcdef01` is three commits past
-`2026.09.03-007`, at commit `abcdef01`. A development build never moves
-`:latest`, so a cluster that pulls a release keeps pulling releases.
-The suffix sorts after its release and before the next one, and the tag
-check in `release.yaml` does not accept it as a release version.
-
-To run a development build, pin the manifests to the full commit sha
-and the image to the build's version:
-
-    resources:
-      - https://github.com/liken-sh/display-operator//deploy?ref=<full 40-character sha>
-    images:
-      - name: ghcr.io/liken-sh/display-operator
-        newTag: 2026.09.03-007-dev-003-abcdef01
-
-Use all forty characters of the commit sha in `ref=`. A `git fetch` by
-sha requires all forty, and the eight characters inside the version are
-not enough. The CI run's step summary prints these lines for the commit.
+Releases from this directory are paused while the components move into
+one repository, under plan 69 in `plans/` at the repository root.
+`.github/workflows/ci.yaml` at the root runs this directory's tests,
+docs checks, and image builds, and it publishes nothing. Do not push a
+tag. Step 2 of plan 69 brings back the releases and the development
+builds for every component.

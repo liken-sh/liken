@@ -1,6 +1,6 @@
 # Working on equipment-operator
 
-This repository holds the `Receiver` resource and the operator that
+This directory holds the `Receiver` resource and the operator that
 drives it: A/V equipment at the far end of a `liken` machine's cable,
 reached over the network for volume, power, and input. It also holds
 the `CECBus` and `Television` resources, which reach the same

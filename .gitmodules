@@ -1,9 +1,33 @@
-[submodule "liken/docs/themes/brand"]
-	path = liken/docs/themes/brand
-	url = https://github.com/liken-sh/brand
 [submodule "audio-operator/docs/themes/brand"]
 	path = audio-operator/docs/themes/brand
 	url = https://github.com/liken-sh/brand
 [submodule "bluetooth-operator/docs/themes/brand"]
 	path = bluetooth-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "display-operator/docs/themes/brand"]
+	path = display-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "equipment-operator/docs/themes/brand"]
+	path = equipment-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "git-csi-driver/docs/themes/brand"]
+	path = git-csi-driver/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "library-operator/docs/themes/brand"]
+	path = library-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "library-operator/media-browser/brand"]
+	path = library-operator/media-browser/brand
+	url = https://github.com/liken-sh/brand
+[submodule "liken/docs/themes/brand"]
+	path = liken/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "media-operator/docs/themes/brand"]
+	path = media-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "people-operator/docs/themes/brand"]
+	path = people-operator/docs/themes/brand
+	url = https://github.com/liken-sh/brand
+[submodule "per-node-csi-driver/docs/themes/brand"]
+	path = per-node-csi-driver/docs/themes/brand
 	url = https://github.com/liken-sh/brand

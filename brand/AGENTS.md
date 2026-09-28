@@ -1,8 +1,8 @@
 # Working on brand
 
-This repository is the brand domain of [`liken`](https://liken.sh/): the
+This directory holds the brand domain of [`liken`](https://liken.sh/): the
 mark, the stylesheet, the Hugo theme, the voice rules, and the Go and
-Rust programs that other repositories run to build their sites.
+Rust programs that the other components run to build their sites.
 `README.md` explains each part and the consumers that read it.
 
 Every other `liken` repository takes this one as a git submodule. A
