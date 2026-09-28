@@ -162,7 +162,10 @@ The operator runs as a `DaemonSet`, so a pod lands on every node and
 no manifest names the machine with the speakers. Each pod claims
 every audio controller on its own node. On a node with no sound
 card, the claim finds no device and the pod parks `Pending`, which
-costs nothing.
+costs nothing. A node labeled `audio.liken.sh/sound-card: none` gets
+no pod, as
+[Keep the pods off nodes with no sound card](#keep-the-pods-off-nodes-with-no-sound-card)
+describes.
 
     kubectl -n liken-system get pods -o wide
 
@@ -227,6 +230,54 @@ output with no monitor does.
 
 Now [play sound to an output](/docs/guides/claim/), or
 [set what an endpoint rests at](/docs/guides/rest/).
+
+## Keep the pods off nodes with no sound card
+
+The `DaemonSet` makes a pod on every node. On a node with no
+sound card, the claim matches no device, and the pod stays `Pending`. To make no
+pod on such a node, label the node `audio.liken.sh/sound-card: none`.
+
+The `DaemonSet` in the base carries this node affinity, so no patch is
+needed:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: audio.liken.sh/sound-card
+              operator: NotIn
+              values: ["none"]
+```
+
+`NotIn` matches a node whose label has a different value, and also a
+node that has no such label. The Kubernetes page on
+[set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
+gives this rule. So with no label the `DaemonSet` makes a pod on every
+node, and a node labeled `none` gets no pod. When a label changes, the
+[`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
+controller deletes the pod from a node that no longer matches, and
+adds one to a node that matches again.
+
+Label the node with `kubectl`:
+
+    kubectl label node node-1 audio.liken.sh/sound-card=none
+
+On `liken`, the label stays on the node across reboots, and `liken`
+leaves it in place, because `liken` removes only the labels that a
+`Machine` declared. The label goes with the Node object: a machine
+that is demoted or installed again registers a new Node, and you
+label it again. A `Machine` cannot declare this label: its
+`spec.nodeLabels` refuses every key in `liken.sh` and its subdomains.
+
+To run the pod on that node again, remove the label:
+
+    kubectl label node node-1 audio.liken.sh/sound-card-
+
+A patch of your own that sets a node affinity on this `DaemonSet`
+replaces the list of terms in the base, and the `none` term with it.
+Copy the `none` requirement into each term of your patch.
 
 ## Running a development build
 

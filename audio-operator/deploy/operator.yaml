@@ -68,6 +68,22 @@ spec:
       # it starts, and the devices have to publish before anything
       # can claim them.
       priorityClassName: system-node-critical
+      # A node labeled audio.liken.sh/sound-card: none gets no pod. The
+      # claim alone leaves a pod on a node with no sound card Pending
+      # for good, so a person marks such a node with that one label.
+      # NotIn also matches a node with no such label, so with no
+      # label the DaemonSet makes a pod on every node, and the claim
+      # decides where it can start. A patch that sets its own node
+      # affinity replaces this list of terms, because the list is
+      # atomic.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: audio.liken.sh/sound-card
+                    operator: NotIn
+                    values: ["none"]
       tolerations:
         - operator: Exists
       # Five containers, one image, and the kubelet orders them. The

@@ -37,7 +37,9 @@ wrong, so the choice is right for PipeWire. The plugin detects the
 loss, closes the connection, and emits a `disconnected` event.
 `spa/plugins/bluez5/bluez5-dbus.c` registers no listener for that
 event, so nothing reconnects and nothing re-registers. Both facts are
-upstream, and neither is configurable.
+upstream, and neither is configurable. They hold in PipeWire 1.4.2,
+the version Debian trixie ships in the image, and on PipeWire's
+`master` branch as read on 2026-09-28.
 
 The repair is therefore the one systemd would perform: end the
 process and start it again. WirePlumber is a native sidecar, so the
