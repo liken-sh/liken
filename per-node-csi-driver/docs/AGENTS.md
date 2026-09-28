@@ -1,10 +1,10 @@
 # Authoring this docs domain
 
-@themes/brand/voice.md
+@../../brand/voice.md
 
 This directory is the source of https://per-node.liken.sh/, the per-node
-CSI driver's manual. Hugo builds it with the shared brand theme, taken as
-a git submodule at `themes/brand`.
+CSI driver's manual. Hugo builds it with the shared brand theme, `brand/`
+at the top of the repository.
 
 Write all site prose in Simplified Technical English (ASD-STE100): short
 sentences, active voice, one instruction per sentence. The voice rules in

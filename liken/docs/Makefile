@@ -6,10 +6,10 @@
 #
 # The build has three inputs: the hand-written content here, the CRD
 # schemas in machine/ and cluster/ (which crdref turns into the
-# reference pages), and the brand theme, the git submodule at
-# themes/brand that supplies the shared page shell, stylesheet, and
+# reference pages), and the brand theme, brand/ at the top of the
+# repository, which supplies the shared page shell, stylesheet, and
 # public brand files. Hugo assembles them into dist/site/, the tree
-# that CI publishes to GitHub Pages as liken.sh.
+# that GitHub Pages serves as liken.sh.
 #
 # Hugo itself is a pinned tool dependency of this domain's own Go
 # module (go.mod explains why the module is nested), so `go tool
@@ -45,12 +45,11 @@ content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref
 generate: $(GENERATED)
 
 # The built site. The find covers every content, layout, and theme
-# file, so an edit to any page, and a bump of the theme submodule,
-# rebuilds. go.mod is a prerequisite because it pins Hugo itself.
+# file, so an edit to any page or to the brand theme rebuilds. go.mod is a prerequisite because it pins Hugo itself.
 # release.txt is the deploy marker: CI checks the served copy against
 # the commit it shipped. It is in the output tree, never in
 # content/, because it is not a page.
-dist/site/index.html: hugo.yaml go.mod go.sum $(GENERATED) $(shell find content layouts themes -type f)
+dist/site/index.html: hugo.yaml go.mod go.sum $(GENERATED) $(shell find content layouts ../../brand/layouts ../../brand/assets ../../brand/static ../../brand/data -type f)
 	$(HUGO) build --cleanDestinationDir --destination dist/site
 	git rev-parse HEAD > dist/site/release.txt
 

@@ -16,10 +16,12 @@ WORKDIR /src
 
 # The three Rust crates are one cargo workspace, so the build copies the
 # workspace manifest, the lock file, and the toolchain pin, then every member
-# manifest. liken-iced is a path dependency in the brand submodule, and the
-# stub build below needs only its manifest, so the manifest and its lock file
-# arrive here and the crate's sources arrive after that layer. A source edit
-# or a submodule bump then reuses the cached dependency layer.
+# manifest. liken-iced is a path dependency in brand/, which the build takes
+# as a second build context named brand and copies to /brand, the same place
+# relative to /src that brand/ has relative to this component. The stub build
+# below needs only its manifest, so the manifest and its lock file arrive
+# here and the crate's sources arrive after that layer. A source edit in
+# either one then reuses the cached dependency layer.
 #
 # The dependencies are almost all of the build, and they change only when the
 # lock file changes.
@@ -27,18 +29,18 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY idle/Cargo.toml idle/
 COPY media-screen/Cargo.toml media-screen/
 COPY display/Cargo.toml display/
-COPY docs/themes/brand/iced/Cargo.toml docs/themes/brand/iced/Cargo.lock docs/themes/brand/iced/
+COPY --from=brand iced/Cargo.toml iced/Cargo.lock /brand/iced/
 
 # A stub library and a stub binary for each workspace member, and a stub
 # library for liken-iced, give cargo something to compile the dependencies
 # against. That build is the layer the image cache keeps.
-RUN mkdir idle/src media-screen/src display/src docs/themes/brand/iced/src \
+RUN mkdir -p idle/src media-screen/src display/src /brand/iced/src \
     && echo 'fn main() {}' > idle/src/main.rs \
     && : > idle/src/lib.rs \
     && : > media-screen/src/lib.rs \
     && echo 'fn main() {}' > display/src/main.rs \
     && : > display/src/lib.rs \
-    && : > docs/themes/brand/iced/src/lib.rs
+    && : > /brand/iced/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
@@ -62,9 +64,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # liken-iced's sources land here, over the stub, with the two brand files it
 # parses and the two font files it embeds. All four are inputs of the real
 # build alone; the stub compiles without them.
-COPY docs/themes/brand/iced/src/ docs/themes/brand/iced/src/
-COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css docs/themes/brand/
-COPY docs/themes/brand/fonts/ docs/themes/brand/fonts/
+COPY --from=brand iced/src/ /brand/iced/src/
+COPY --from=brand liken.svg liken.css /brand/
+COPY --from=brand fonts/ /brand/fonts/
 
 FROM deps AS build-idle
 COPY media-screen/src/ media-screen/src/
@@ -74,7 +76,7 @@ COPY idle/src/ idle/src/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch idle/src/main.rs idle/src/lib.rs media-screen/src/lib.rs \
-        docs/themes/brand/iced/src/*.rs \
+        /brand/iced/src/*.rs \
     && cargo build --release --locked --no-default-features -p idle-screen
 
 FROM deps AS build-display
@@ -83,7 +85,7 @@ COPY display/src/ display/src/
 # cargo compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch display/src/main.rs display/src/lib.rs docs/themes/brand/iced/src/*.rs \
+    touch display/src/main.rs display/src/lib.rs /brand/iced/src/*.rs \
     && cargo build --release --locked -p media-display
 
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
@@ -103,9 +105,9 @@ RUN apt-get update \
 # binary and needs a graphics stack the operator's scratch image has
 # none of.
 #
-# The build context is the repository root, the way every other image takes
-# it, so the build reaches every crate and the brand submodule the client
-# reads its mark and its palette from.
+# The build context is media-operator/, the way every other image takes it,
+# so the build reaches every crate. The brand context brings brand/, which
+# the client reads its mark and its palette from.
 #
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD
 # drivers, and the Wayland and keyboard libraries winit opens by name, on
@@ -149,9 +151,9 @@ ENTRYPOINT ["/idle-screen"]
 # the Go binary and needs a graphics stack the operator's scratch image has
 # none of.
 #
-# The build context is the repository root, the way every other image takes
-# it, so the build reaches every crate and the brand submodule the client
-# reads its palette and its faces from.
+# The build context is media-operator/, the way every other image takes it,
+# so the build reaches every crate. The brand context brings brand/, which
+# the client reads its palette and its faces from.
 #
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD
 # drivers, and the Wayland and keyboard libraries winit opens by name, on
@@ -171,9 +173,9 @@ COPY --from=fonts /usr/share/fonts/truetype/droid /usr/share/fonts/truetype/droi
 # The brand's upright and italic faces, as files the toolkit finds when it
 # scans /usr/share/fonts. The binary carries the same two faces and loads them
 # into the toolkit before the first frame, so the family resolves either way.
-COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
-     docs/themes/brand/fonts/SourceSans3-It.otf \
-     docs/themes/brand/fonts/LICENSE.md \
+COPY --from=brand fonts/SourceSans3-Regular.otf \
+     fonts/SourceSans3-It.otf \
+     fonts/LICENSE.md \
      /usr/share/fonts/opentype/source-sans-3/
 
 COPY --from=build-display /src/target/release/media-display /media-display

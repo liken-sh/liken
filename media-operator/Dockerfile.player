@@ -60,10 +60,11 @@ COPY --from=build /media-operator-pod /media-operator-pod
 
 # The brand's upright and italic faces, as files fontconfig finds when it
 # scans /usr/share/fonts, so libass resolves the family with no cache step
-# and no font package.
-COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
-     docs/themes/brand/fonts/SourceSans3-It.otf \
-     docs/themes/brand/fonts/LICENSE.md \
+# and no font package. They come from the build context named brand, which
+# the build sets to brand/ in the repository.
+COPY --from=brand fonts/SourceSans3-Regular.otf \
+     fonts/SourceSans3-It.otf \
+     fonts/LICENSE.md \
      /usr/share/fonts/opentype/source-sans-3/
 
 # The entrypoint is the player shim, and mpv is the container's own

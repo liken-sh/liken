@@ -3,9 +3,9 @@ name = "liken-iced"
 version = "0.1.0"
 edition = "2024"
 
-# The crate reads liken.svg and liken.css from this repository, so a consumer
-# takes the whole repository as a git submodule and names the crate as a path
-# dependency inside it.
+# The crate reads liken.svg and liken.css from brand/, one directory up, so a
+# consumer names the crate as a path dependency and has the whole of brand/
+# beside it: in the tree, and at /brand in an image build.
 #
 # iced_widget carries the canvas the mark draws into, and it re-exports
 # iced_core and iced_graphics, so this is the only dependency the crate needs.

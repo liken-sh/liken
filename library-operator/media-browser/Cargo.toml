@@ -35,12 +35,10 @@ iced_widget = { version = "=0.14.2", default-features = false, features = [
 ] }
 # liken-iced carries the mark and the palette. It parses them out of
 # liken.svg and liken.css, so the mark on this screen and the mark on a page
-# are one drawing and cannot drift. The crate is in the brand repository,
-# which this directory takes as a submodule because the image build context is
-# this directory alone. The repository holds a second checkout of the same
-# repository at docs/themes/brand for the documentation theme, and the two
-# pins move together.
-liken-iced = { path = "brand/iced" }
+# are one drawing and cannot drift. The crate is in brand/, beside this
+# component, and the image build takes brand/ as a second build context
+# and puts it at /brand, so this path holds in the image too.
+liken-iced = { path = "../../brand/iced" }
 # image writes the captured frames as PNG and decodes the posters,
 # which are JPEG and PNG on the volumes, so no other decoder builds.
 image = { version = "=0.25.10", default-features = false, features = [

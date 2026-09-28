@@ -1,10 +1,10 @@
-@themes/brand/voice.md
+@../../brand/voice.md
 
 # Authoring this docs domain
 
 This directory is the source of https://equipment.liken.sh/,
-equipment-operator's manual. Hugo builds it with the shared brand theme,
-taken as a git submodule at `themes/brand`.
+equipment-operator's manual. Hugo builds it with the shared brand theme, `brand/`
+at the top of the repository.
 
 Write all site prose in Simplified Technical English (ASD-STE100):
 short sentences, active voice, one instruction per sentence. The voice

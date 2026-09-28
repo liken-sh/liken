@@ -1,5 +1,5 @@
 # The site's configuration. The look is not configured here: the
-# brand theme, a git submodule at themes/brand, provides the page
+# brand theme, brand/ at the top of the repository, provides the page
 # shell, the nav, and the stylesheet that every liken site shares, so
 # this site reads as one place with the manual at liken.sh. The site
 # is named for the operator's DRA driver, bluetooth.liken.sh, because
@@ -16,6 +16,10 @@ markup:
     renderer:
       unsafe: true
 title: bluetooth.liken.sh
+# Hugo looks for a theme by name under themesDir, and the repository
+# root holds brand/, so the site and the theme it builds with are
+# always the same commit.
+themesDir: ../..
 theme: brand
 
 # No taxonomies and no feeds: the site is a manual, not a blog. The
@@ -38,7 +42,7 @@ params:
 # by side, so the Markdown twin of / is /index.md. The theme provides
 # the templates for the twin, but a theme cannot declare an output
 # format, so each consuming site declares this block itself
-# (themes/brand/README.md). Without it, the site builds, but only as
+# (brand/README.md). Without it, the site builds, but only as
 # HTML.
 outputFormats:
   markdown:

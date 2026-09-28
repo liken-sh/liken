@@ -8,13 +8,17 @@
 # manual in one file.
 baseURL: https://liken.sh/
 title: liken
-# The presentation is the brand theme, the git submodule at
-# themes/brand (github.com/liken-sh/brand). It supplies the page
+# The presentation is the brand theme, brand/ at the top of the
+# repository. It supplies the page
 # shell, the shared stylesheet, the nav, and the public brand files,
 # so every liken site has the same presentation. The only layouts
 # kept in this site are the two llms.txt templates, because their
 # prose is about this manual; Hugo gives a site's layouts/ precedence
 # over the theme's.
+# Hugo looks for a theme by name under themesDir, and the repository
+# root holds brand/, so the site and the theme it builds with are
+# always the same commit.
+themesDir: ../..
 theme: brand
 # The repository this site documents. The theme's nav links its
 # "repository" entry to this URL, and the sidebar heading on every

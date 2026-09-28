@@ -19,20 +19,22 @@ WORKDIR /src
 # lock file changes.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 
-# liken-iced is a path dependency on the brand repository, a submodule inside
-# this build context. The stub build below needs only its manifest, so the
-# manifest and its lock file arrive here and the crate's sources arrive after
-# that layer. A submodule bump then recompiles this crate alone and leaves the
-# third-party dependency layer cached.
-COPY brand/iced/Cargo.toml brand/iced/Cargo.lock ./brand/iced/
+# liken-iced is a path dependency in brand/, which the build takes as a
+# second build context named brand and copies to /brand, the same place
+# relative to /src that brand/ has relative to this directory. The stub
+# build below needs only its manifest, so the manifest and its lock file
+# arrive here and the crate's sources arrive after that layer. A change to
+# the brand then recompiles this crate alone and leaves the third-party
+# dependency layer cached.
+COPY --from=brand iced/Cargo.toml iced/Cargo.lock /brand/iced/
 
 # A stub library and a stub binary for this crate, and a stub library for
 # liken-iced, give cargo something to compile the dependencies against. That
 # build is the layer the image cache keeps.
-RUN mkdir src brand/iced/src \
+RUN mkdir -p src /brand/iced/src \
     && echo 'fn main() {}' > src/main.rs \
     && : > src/lib.rs \
-    && : > brand/iced/src/lib.rs
+    && : > /brand/iced/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
@@ -47,9 +49,9 @@ COPY assets/ ./assets/
 # liken-iced's sources land here, over the stub, with the two brand files it
 # parses and the two font files it embeds. All four are inputs of the real
 # build alone; the stub compiles without them.
-COPY brand/iced/src/ ./brand/iced/src/
-COPY brand/liken.svg brand/liken.css ./brand/
-COPY brand/fonts/ ./brand/fonts/
+COPY --from=brand iced/src/ /brand/iced/src/
+COPY --from=brand liken.svg liken.css /brand/
+COPY --from=brand fonts/ /brand/fonts/
 
 # The release this build makes, for the `liken_build_info` gauge milestone
 # 65 puts on every process. release.yaml names a version for the image tag
@@ -67,7 +69,7 @@ ARG VERSION=dev
 # compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch src/main.rs src/lib.rs brand/iced/src/*.rs \
+    touch src/main.rs src/lib.rs /brand/iced/src/*.rs \
     && MEDIA_BROWSER_VERSION="$VERSION" cargo build --release --locked
 
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD

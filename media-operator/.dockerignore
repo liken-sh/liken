@@ -15,11 +15,6 @@ docs/themes/brand/.git
 # The Go coverage profile the gate writes on every run.
 coverage.out
 
-# cargo writes a target tree in the brand submodule's crate too, when a
-# workstation builds that crate in place, and it grows to gigabytes the
-# idle image never reads.
-docs/themes/brand/iced/target/
-
 # Build outputs at the root: the operator binary a workstation build
 # writes, and the rendered documentation site.
 /media-operator

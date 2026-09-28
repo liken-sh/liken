@@ -7,10 +7,6 @@
 [workspace]
 resolver = "3"
 members = ["display", "idle", "media-screen"]
-# liken-iced is a path dependency inside this directory, so cargo would
-# make it a member on its own. It is a submodule with its own gates and
-# its own lock file, so it is excluded and stays a plain dependency.
-exclude = ["docs/themes/brand/iced"]
 
 # The three crates the members take. The versions are exact and stated
 # once here, so the client and the library that reads the bus for it

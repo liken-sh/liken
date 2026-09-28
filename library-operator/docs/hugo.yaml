@@ -4,8 +4,8 @@
 # devices, so the hostname names what it operates instead: the
 # media libraries of a cluster.
 #
-# The theme is the shared brand repository, taken as a git submodule
-# at themes/brand. It provides the page shell, the top nav, the mark,
+# The theme is brand/, the brand component at the top of this
+# repository. It provides the page shell, the top nav, the mark,
 # and the stylesheet that every liken site uses, so this site reads
 # as part of the same family as liken.sh.
 baseURL: https://library.liken.sh/
@@ -20,6 +20,10 @@ markup:
     renderer:
       unsafe: true
 title: library.liken.sh
+# Hugo looks for a theme by name under themesDir, and the repository
+# root holds brand/, so the site and the theme it builds with are
+# always the same commit.
+themesDir: ../..
 theme: brand
 
 # The theme's nav renders a repository entry from this, and the
@@ -39,7 +43,7 @@ disableKinds: [taxonomy, term, rss]
 # authored Markdown for agents and scripts. The two files land side
 # by side, so the Markdown twin of / is /index.md. The theme renders
 # the twin, but only when the site declares this format; without it,
-# the site builds as HTML alone (themes/brand/README.md).
+# the site builds as HTML alone (brand/README.md).
 outputFormats:
   markdown:
     # text/markdown is a media type Hugo already has, with the md

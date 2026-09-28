@@ -2,12 +2,12 @@
 // Go programs that build pages.
 //
 // The brand domain owns the mark and the stylesheet, and two kinds of
-// consumer read them. The Hugo sites take this repository as a git
-// submodule and use it as their theme. The theme's assets/ and
+// consumer read them. The Hugo sites read this directory from the
+// tree and use it as their theme. The theme's assets/ and
 // static/ trees hold the files under the URLs the pages link to. A
 // Go program that builds pages outside Hugo, such as the release
 // channel's index builder, imports this package instead, because a Go
-// program can only embed files from its own module. One repository
+// program can only embed files from its own module. One directory
 // holds the originals, and the Makefile rebuilds every derived copy
 // from them.
 package brand

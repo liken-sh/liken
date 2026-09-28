@@ -7,11 +7,11 @@ pushes for the application that writes it. The Go files and the
 manifests are the documentation, and the comments teach how the system
 works.
 
-@docs/themes/brand/voice.md
+@../brand/voice.md
 
 The voice rules in that file govern all prose in this directory,
-comments included. They arrive with the brand theme submodule at
-`docs/themes/brand`.
+comments included. The file is in `brand/`, the brand component
+at the top of the repository.
 
 `plans/00-design.md` is the design, and `plans/README.md` indexes the
 plans that build it. Code exists only where a plan calls for it. A plan

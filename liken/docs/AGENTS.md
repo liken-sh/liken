@@ -1,6 +1,6 @@
 # Authoring this docs domain
 
-@themes/brand/voice.md
+@../../brand/voice.md
 
 Everything this domain publishes follows the voice rules in that file and
 ASD-STE100: short sentences, one instruction per sentence, no metaphor.

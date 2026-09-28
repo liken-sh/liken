@@ -1,5 +1,5 @@
-# The site's configuration. The shell comes from the brand theme, the
-# git submodule at themes/brand that every liken site shares: the
+# The site's configuration. The shell comes from the brand theme,
+# brand/ at the top of the repository, which every liken site shares: the
 # layouts, the nav, and the stylesheet arrive with it, so this file
 # only has to say what is particular to this site. The site's name is
 # the driver's DRA name, display.liken.sh, so the address a claim
@@ -15,6 +15,10 @@ markup:
     renderer:
       unsafe: true
 title: display.liken.sh
+# Hugo looks for a theme by name under themesDir, and the repository
+# root holds brand/, so the site and the theme it builds with are
+# always the same commit.
+themesDir: ../..
 theme: brand
 
 # The theme reads this for the nav's repository entry and for the
@@ -33,7 +37,7 @@ disableKinds: [taxonomy, term, rss]
 # land side by side, so the Markdown twin of / is /index.md. The
 # theme provides the templates, but a theme cannot declare output
 # formats, so this block is the site's part of the contract
-# (themes/brand/README.md states it).
+# (brand/README.md states it).
 outputFormats:
   markdown:
     # text/markdown is a media type Hugo already has, with the md

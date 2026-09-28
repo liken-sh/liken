@@ -12,10 +12,10 @@ comments that give instruction, explanation, and commentary. A reader who
 reads the repository from top to bottom should learn how a Linux system
 boots and how Kubernetes takes control after that.
 
-The voice rules for everything the project publishes are in the brand
-repository and arrive with the theme submodule:
+The voice rules for everything the project publishes are in `brand/`,
+the brand component at the top of the repository:
 
-@docs/themes/brand/voice.md
+@../brand/voice.md
 
 The comment rules there say to teach the domain, not the syntax. In this
 repository, the domain is how a system boots. Do not explain what

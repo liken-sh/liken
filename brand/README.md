@@ -9,26 +9,30 @@ voice rules. The main manual at
 shell, navigation, and stylesheet, so their pages share the same
 presentation.
 
-Three kinds of consumer read this repository:
+Three kinds of consumer read this directory, and each reads it from
+the tree of the same repository:
 
-* **Hugo sites** take it as a git submodule at `themes/brand` and set
-  `theme: brand`. The theme is the page shell (`layouts/`), the
+* **Hugo sites** set `themesDir: ../..` and `theme: brand` in
+  `docs/hugo.yaml`, so Hugo finds this directory at the repository
+  root. The theme is the page shell (`layouts/`), the
   public files every site serves (`static/`), and the nav entries
   (`data/nav.yaml`).
 * **Go programs** that build pages outside Hugo import it as the
-  module `github.com/liken-sh/brand`. The package embeds the
+  module `github.com/liken-sh/brand`, with a `replace` directive to
+  this directory. The package embeds the
   stylesheet and the mark, so a page builder such as `liken`'s
   release channel inlines them with no file to copy.
-* **Rust programs** that draw with the `iced` toolkit take it as a
-  git submodule and name `iced/` as a path dependency. The crate
+* **Rust programs** that draw with the `iced` toolkit name `iced/` as
+  a path dependency, and their image builds take this directory as a
+  second build context named `brand`. The crate
   parses the mark and the palette out of the two originals, so a
   screen and a page draw the same shape in the same colors.
 
 `voice.md` states the voice and tone rules for every word the
 project publishes, on the sites and in the source files' comments.
-It needs no other file. A consuming repo references it from its
-`docs/AGENTS.md` with the import line `@themes/brand/voice.md`, so
-the writing rules arrive in the same submodule as the theme.
+It needs no other file. The root `AGENTS.md` imports it with the line
+`@brand/voice.md`, and each component's `AGENTS.md` imports it by its
+path from that component.
 
 [`editing-prompt.md`](editing-prompt.md) is a reusable assignment
 template for reviewing repository prose. It keeps factual review and
@@ -36,16 +40,11 @@ source-boundary checks with the writing rules.
 
 ## Using the theme
 
-Add the theme to a site:
-
-```sh
-git submodule add https://github.com/liken-sh/brand themes/brand
-```
-
-Then declare it in the site's `hugo.yaml`, together with the Markdown
-output format:
+Declare the theme in the site's `hugo.yaml`, together with the
+Markdown output format:
 
 ```yaml
+themesDir: ../..
 theme: brand
 
 params:
@@ -83,7 +82,7 @@ section below gives.
 `data/nav.yaml` lists the entries of the top nav, in order. Every
 site renders the same labels from this file. "liken" and "releases"
 have absolute URLs, the same from every site, so a change to those
-links is one commit here and a submodule bump in each site.
+links is one commit here.
 "repository" is site-scoped: it links to the URL the site sets in
 `params.repository`. If a site does not set `params.repository`,
 the nav omits the entry, because there is no URL to link.
@@ -353,8 +352,8 @@ the tests under a line coverage floor. It needs the compiler
 `liken.svg` is the original file; every other image in this list
 comes from it. `make` derives the other files, and the repository
 also commits them. Because of this, anyone can get a favicon or an
-avatar without installing a rasterizer. A site that takes the
-theme as a submodule serves them with no build step:
+avatar without installing a rasterizer, and a site that uses the
+theme serves them with no build step:
 
 * `liken.svg`: the original file, for any use at any size.
 * `favicon.ico`: a 16, 32, and 48 pixel raster image, for the browser

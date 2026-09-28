@@ -6,9 +6,10 @@
 #
 # The jobs for a component run only when the push changes a file in
 # that component's directory. The filter is the whole directory, so a
-# new file in a component is always inside it. A change to .github/ or
-# to .gitmodules runs every job, because those files change how every
-# component builds. The changes job below computes the filter once, so
+# new file in a component is always inside it. A change to .github/ runs
+# every job, because it changes how every component builds, and so does
+# a change to brand/, because every site, every screen, and the OS's
+# release pages build from it. The changes job below computes the filter once, so
 # the rule is in this file and not in a third-party action.
 #
 # The graph is written by hand while the components move into the
@@ -84,7 +85,7 @@ jobs:
             library-operator people-operator git-csi-driver \
             per-node-csi-driver brand; do
             if [ "$changed" = "*" ] \
-              || grep -qE "^($component/|\.github/|\.gitmodules$)" <<<"$changed"; then
+              || grep -qE "^($component/|\.github/|brand/)" <<<"$changed"; then
               echo "$component=true"
             else
               echo "$component=false"
@@ -157,11 +158,7 @@ jobs:
       run:
         working-directory: liken
     steps:
-      # The submodule is the brand theme; the site cannot build
-      # without it.
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       # Hugo is a tool dependency of the docs module, so `go tool hugo`
       # compiles it from the module cache, and the cache paths cover
@@ -280,11 +277,7 @@ jobs:
       run:
         working-directory: audio-operator
     steps:
-      # The theme is the brand repository, a submodule at
-      # audio-operator/docs/themes/brand.
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       # The docs domain is its own Go module, and Hugo is a tool
       # directive in it, so the Go toolchain is the only build
@@ -363,8 +356,6 @@ jobs:
         working-directory: bluetooth-operator
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -439,8 +430,6 @@ jobs:
         working-directory: display-operator
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -537,8 +526,6 @@ jobs:
         working-directory: equipment-operator
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -615,8 +602,6 @@ jobs:
         working-directory: media-operator
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -632,7 +617,7 @@ jobs:
       - run: make test-docs
 
   # The Rust workspace (idle, display, media-screen) builds against the
-  # liken-iced crate in the brand theme submodule.
+  # liken-iced crate in brand/iced.
   media-operator-rust:
     name: media-operator / rust
     needs: changes
@@ -647,8 +632,6 @@ jobs:
       WLR_RENDERER: pixman
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       # The screen tests run the programs under cage, a headless
       # Wayland compositor, on Mesa's software Vulkan driver.
@@ -675,7 +658,7 @@ jobs:
       - run: make test-rust
 
   # Dockerfile.screen and Dockerfile.player copy the brand crate and fonts
-  # from the theme submodule, so the checkout takes it.
+  # from a second build context named brand, which is brand/.
   media-operator-images:
     name: media-operator / ${{ matrix.image }}
     needs: changes
@@ -702,8 +685,6 @@ jobs:
             file: Dockerfile.cli
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -711,6 +692,7 @@ jobs:
           file: media-operator/${{ matrix.file }}
           target: ${{ matrix.target }}
           push: false
+          build-contexts: brand=brand
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
 
   library-operator-go:
@@ -745,8 +727,6 @@ jobs:
         working-directory: library-operator
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -762,7 +742,7 @@ jobs:
       - run: make test-docs
 
   # The media browser is its own Cargo workspace, and it builds against
-  # the liken-iced crate in the brand submodule at media-browser/brand.
+  # the liken-iced crate in brand/iced.
   library-operator-rust:
     name: library-operator / rust
     needs: changes
@@ -777,8 +757,6 @@ jobs:
       WLR_RENDERER: pixman
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       # The screen tests run the programs under cage, a headless
       # Wayland compositor, on Mesa's software Vulkan driver.
@@ -804,7 +782,9 @@ jobs:
 
       - run: make test
 
-  # Each image names its own build context inside library-operator/.
+  # Each image names its own build context inside library-operator/. The
+  # media browser also copies the brand crate and fonts from a second
+  # build context named brand, which is brand/.
   library-operator-images:
     name: library-operator / ${{ matrix.image }}
     needs: changes
@@ -832,14 +812,13 @@ jobs:
             file: Dockerfile.cli
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: library-operator/${{ matrix.context }}
           file: library-operator/${{ matrix.file }}
           push: false
+          build-contexts: brand=brand
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
 
   people-operator-go:
@@ -874,8 +853,6 @@ jobs:
         working-directory: people-operator
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -944,8 +921,6 @@ jobs:
         working-directory: git-csi-driver
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -1016,8 +991,6 @@ jobs:
         working-directory: per-node-csi-driver
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:

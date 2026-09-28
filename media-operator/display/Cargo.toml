@@ -49,11 +49,10 @@ iced = { version = "=0.14.0", default-features = false, features = [
 ] }
 # liken-iced carries the palette and the brand's two faces. It parses the
 # palette out of liken.css, so a colour on this screen and a colour on a
-# page are one value and cannot drift. The crate is in the brand
-# repository, which this one already takes as a submodule for the
-# documentation theme, and the image build context is the repository
-# root, so one checkout serves both.
-liken-iced = { path = "../docs/themes/brand/iced" }
+# page are one value and cannot drift. The crate is in brand/, beside this
+# component, and the image build takes brand/ as a second build context
+# and puts it at /brand, so this path holds in the image too.
+liken-iced = { path = "../../brand/iced" }
 # jiff reads the wall clock in the zone TZ names. Its tzdb-zoneinfo feature
 # reads the image's own /usr/share/zoneinfo, and the bundled databases stay
 # out of the binary, so the clock and the rest of the image name the same

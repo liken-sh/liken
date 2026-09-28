@@ -60,8 +60,8 @@ the pin; build the site after a bump before trusting it, because a
 Hugo release can change the template lookup rules the layouts depend
 on.
 
-The presentation is the brand theme, the git submodule at
-`themes/brand` (<https://github.com/liken-sh/brand>). The theme
+The presentation is the brand theme, `brand/` at the top of the
+repository. `hugo.yaml` points `themesDir` at the repository root. The theme
 supplies the page shell, the shared stylesheet that every page
 inlines, the nav that every liken site renders from its
 `data/nav.yaml`, and the public brand files: `/favicon.ico`,
@@ -70,10 +70,8 @@ the voice rules for everything the sites publish; `AGENTS.md` here
 imports it. The built tree contains no JavaScript. The only layouts
 kept in this site are the two llms.txt templates, because their
 prose is about this manual, and Hugo gives a site's `layouts/`
-precedence over the theme's. A fresh checkout needs
-`git submodule update --init` before the site builds. To bump the
-theme, check out the new commit inside `themes/brand` and commit the
-moved submodule pointer.
+precedence over the theme's. A change to the theme reaches this site
+in the same commit.
 
     make -C docs build     build the site into dist/site/
     make -C docs serve     the authoring loop, with live reload

@@ -5,10 +5,11 @@ the Weston compositor and publishes a graphics card's monitor outputs as
 devices under `display.liken.sh`. The Go files and the manifests are
 the documentation, and the comments teach how the system works.
 
-@docs/themes/brand/voice.md
+@../brand/voice.md
 
 The voice rules in that file govern all prose here, comments included.
-They arrive with the brand theme submodule at `docs/themes/brand`.
+The file is in `brand/`, the brand component
+at the top of the repository.
 
 ## Errors include their source's text
 

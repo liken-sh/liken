@@ -6,11 +6,11 @@ name `bluetooth.liken.sh`, and its pod runs bluetoothd, so the system
 image needs none. The source files are the documentation, and the
 comments teach how the system works.
 
-@docs/themes/brand/voice.md
+@../brand/voice.md
 
 The voice rules in that file govern all prose in this repository,
-comments included. They arrive with the brand theme submodule at
-`docs/themes/brand`.
+comments included. The file is in `brand/`, the brand component
+at the top of the repository.
 
 ## Errors include their source's text
 

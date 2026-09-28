@@ -133,3 +133,7 @@ tool (
 	github.com/vladopajic/go-test-coverage/v2
 	honnef.co/go/tools/cmd/staticcheck
 )
+
+// brand is a component in this repository, so every consumer builds
+// against the tree beside it and never against a published version.
+replace github.com/liken-sh/brand => ../brand

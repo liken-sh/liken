@@ -4,9 +4,9 @@
 # comes from liken.svg, and every file under static/ and assets/ is a
 # copy of one of the originals.
 #
-# Every derived file is committed. A site consumes this repository as
-# a git submodule and runs nothing inside it, so the checkout itself
-# must already hold everything the theme serves. The default target
+# Every derived file is committed. A site reads this directory as its
+# theme and runs nothing inside it, so the tree itself must already
+# hold everything the theme serves. The default target
 # is for a person who changes the mark or the stylesheet: edit an
 # original, run `make`, and commit the files that change. CI runs the
 # check targets below, `test-go` and `test-rust`, and none of the

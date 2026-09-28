@@ -5,8 +5,8 @@ mark, the stylesheet, the Hugo theme, the voice rules, and the Go and
 Rust programs that the other components run to build their sites.
 `README.md` explains each part and the consumers that read it.
 
-Every other `liken` repository takes this one as a git submodule. A
-change here reaches a site only when that site bumps its submodule.
+Every other component reads this directory from the tree, so a change
+here reaches every site and screen in the same commit.
 
 `voice.md` is the voice for every word the project publishes. Read it
 before you write prose here.
