@@ -7,19 +7,31 @@ import (
 	"time"
 )
 
-// waitForRemoteSubject waits until the remote's main carries a commit
-// with the subject, or fails on the deadline.
-func waitForRemoteSubject(t *testing.T, remote, subject string, within time.Duration) {
+// waitForPushed waits until the volume reports a push, or fails on the
+// deadline. The remote's ref moves before git push returns, because the
+// remote's receive-pack runs its maintenance after the ref update, and
+// the maintenance writes a lock file in the remote's objects directory.
+// A test that ends when the ref moves races that write, and the removal
+// of the test's temporary directories fails. The volume reports the push
+// only after git push returns, so the push writes nothing in the remote
+// when this wait ends.
+func waitForPushed(t *testing.T, held *volume, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
-		if strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")) == subject {
+		if _, last, _ := held.pushing(); !last.IsZero() {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("the remote's main is at %q within %s, want %q", strings.TrimSpace(
-		git(t, remote, "log", "--format=%s", "-1", "main")), within, subject)
+	_, report := held.report()
+	t.Fatalf("the volume reports no push within %s: %s", within, report)
+}
+
+// remoteSubject is the subject of the commit the remote's main holds.
+func remoteSubject(t *testing.T, remote string) string {
+	t.Helper()
+	return strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main"))
 }
 
 // A write made while the driver was down sends no inotify event, so the
@@ -57,7 +69,10 @@ func TestAWriteMadeWhileTheDriverWasDownIsCommittedAfterTheClassQuiesce(t *testi
 			again.sweep = time.Hour
 			again.resume(t.Context())
 
-			waitForRemoteSubject(t, remote, "Update 1 paths", 20*time.Second)
+			waitForPushed(t, resumedVolume(again, "config"), 20*time.Second)
+			if got := remoteSubject(t, remote); got != "Update 1 paths" {
+				t.Errorf("the remote's main is at %q, want %q", got, "Update 1 paths")
+			}
 		})
 	}
 }
@@ -80,5 +95,8 @@ func TestAWatchThatStartsOnAnArmedTreeCommitsAWriteThatSentNoEvent(t *testing.T)
 	answering.watch(held)
 	answering.mu.Unlock()
 
-	waitForRemoteSubject(t, remote, "Update 1 paths", 20*time.Second)
+	waitForPushed(t, held, 20*time.Second)
+	if got := remoteSubject(t, remote); got != "Update 1 paths" {
+		t.Errorf("the remote's main is at %q, want %q", got, "Update 1 paths")
+	}
 }

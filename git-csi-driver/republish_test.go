@@ -435,12 +435,9 @@ func TestAResumedWriteableVolumePushesAtTheRepublish(t *testing.T) {
 	if _, err := again.NodePublishVolume(t.Context(), request); err != nil {
 		t.Fatalf("the republish: %v", err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && strings.TrimSpace(git(t, remote, "rev-parse", "main")) != committed {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForPushed(t, resumed, 10*time.Second)
 	if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != committed {
-		t.Errorf("the remote holds %s within 10s of the republish, want %s", got, committed)
+		t.Errorf("the remote holds %s after the republish, want %s", got, committed)
 	}
 	waitForCondition(t, resumed, "main at")
 }

@@ -93,11 +93,8 @@ func TestARotatedCredentialPushesAtOnce(t *testing.T) {
 	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
 		t.Fatalf("the republish: %v", err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && strings.TrimSpace(git(t, remote, "rev-parse", "main")) != committed {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForPushed(t, held, 10*time.Second)
 	if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != committed {
-		t.Errorf("the remote holds %s within 10s of the rotation, want %s", got, committed)
+		t.Errorf("the remote holds %s after the rotation, want %s", got, committed)
 	}
 }

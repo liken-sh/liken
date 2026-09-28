@@ -269,15 +269,10 @@ func TestTheTreeIsCommittedAndPushedOnTheTimer(t *testing.T) {
 
 	// The sweep reads the tree while the quiesce is still long, so the
 	// commit lands before the timer does.
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")) == "Update 1 paths" {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	waitForPushed(t, held, 30*time.Second)
+	if got := remoteSubject(t, remote); got != "Update 1 paths" {
+		t.Errorf("the remote's main is at %q, want the driver's commit", got)
 	}
-	t.Fatalf("the remote's main is at %q within 30s, want the driver's commit",
-		strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")))
 }
 
 func TestTheSweepCommitsNothingWhileTheTreeIsWritten(t *testing.T) {

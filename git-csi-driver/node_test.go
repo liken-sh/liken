@@ -38,6 +38,19 @@ func testNode(t testing.TB, logs io.Writer) (*node, *recordedMounts) {
 		slog.New(slog.NewTextHandler(logs, nil)),
 	)
 	answering.mounts = calls
+	// The watch loops run on the test's context. Go cancels that context
+	// before the cleanups run, but does not wait for the loops to end. A
+	// loop that still runs git in the store while the store's directory
+	// is removed makes the removal fail. The store's directory was made
+	// above, so this cleanup runs before its removal and waits for every
+	// watch to end.
+	t.Cleanup(func() {
+		answering.mu.Lock()
+		defer answering.mu.Unlock()
+		for _, seeing := range answering.watchers {
+			answering.unwatch(seeing.volume)
+		}
+	})
 	answering.quiesce = 20 * time.Millisecond
 	answering.sweep = 100 * time.Millisecond
 	answering.arms.retry = 20 * time.Millisecond
